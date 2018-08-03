@@ -45,7 +45,6 @@
 #include "mozilla/GuardObjects.h"
 #include "mozilla/LinkedList.h"
 #include "nsWrapperCacheInlines.h"
-#include "nsIIdleObserver.h"
 #include "nsIDocument.h"
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/WindowBinding.h"
@@ -61,6 +60,7 @@ class nsIBaseWindow;
 class nsIContent;
 class nsICSSDeclaration;
 class nsIDocShellTreeOwner;
+class nsIDOMWindowUtils;
 class nsIScrollableFrame;
 class nsIControllers;
 class nsIJSID;
@@ -245,8 +245,6 @@ public:
     return GetWrapperPreserveColor();
   }
 
-  void TraceGlobalJSObject(JSTracer* aTrc);
-
   virtual nsresult EnsureScriptEnvironment() override;
 
   virtual nsIScriptContext *GetScriptContext() override;
@@ -345,8 +343,6 @@ public:
   virtual bool CanClose() override;
   virtual void ForceClose() override;
 
-  virtual void MaybeUpdateTouchState() override;
-
   // Outer windows only.
   virtual bool DispatchCustomEvent(const nsAString& aEventName) override;
   bool DispatchResizeEvent(const mozilla::CSSIntSize& aSize);
@@ -362,11 +358,6 @@ public:
   bool SetWidgetFullscreen(FullscreenReason aReason, bool aIsFullscreen,
                            nsIWidget* aWidget, nsIScreen* aScreen);
   bool FullScreen() const;
-
-  using EventTarget::EventListenerAdded;
-  virtual void EventListenerAdded(nsAtom* aType) override;
-  using EventTarget::EventListenerRemoved;
-  virtual void EventListenerRemoved(nsAtom* aType) override;
 
   // nsIInterfaceRequestor
   NS_DECL_NSIINTERFACEREQUESTOR
@@ -491,6 +482,10 @@ public:
                         const nsAString& aPopupWindowName,
                         const nsAString& aPopupWindowFeatures) override;
 
+  virtual void
+  NotifyContentBlockingState(unsigned aState,
+                             nsIChannel* aChannel) override;
+
   virtual uint32_t GetSerial() override {
     return mSerial;
   }
@@ -502,9 +497,6 @@ public:
     mAllowScriptsToClose = true;
   }
 
-  // Update the VR displays for this window
-  bool UpdateVRDisplays(nsTArray<RefPtr<mozilla::dom::VRDisplay>>& aDisplays);
-
   // Outer windows only.
   uint32_t GetAutoActivateVRDisplayID();
   // Outer windows only.
@@ -514,14 +506,13 @@ public:
   mozilla::dom::EventHandlerNonNull* GetOn##name_()                           \
   {                                                                           \
     mozilla::EventListenerManager* elm = GetExistingListenerManager();        \
-    return elm ? elm->GetEventHandler(nsGkAtoms::on##name_, EmptyString())    \
-               : nullptr;                                                     \
+    return elm ? elm->GetEventHandler(nsGkAtoms::on##name_) : nullptr;        \
   }                                                                           \
   void SetOn##name_(mozilla::dom::EventHandlerNonNull* handler)               \
   {                                                                           \
     mozilla::EventListenerManager* elm = GetOrCreateListenerManager();        \
     if (elm) {                                                                \
-      elm->SetEventHandler(nsGkAtoms::on##name_, EmptyString(), handler);     \
+      elm->SetEventHandler(nsGkAtoms::on##name_, handler);                    \
     }                                                                         \
   }
 #define ERROR_EVENT(name_, id_, type_, struct_)                               \
@@ -671,9 +662,6 @@ public:
   bool GetFullScreen() override;
   void SetFullScreenOuter(bool aFullScreen, mozilla::ErrorResult& aError);
   nsresult SetFullScreen(bool aFullScreen) override;
-  void BackOuter(mozilla::ErrorResult& aError);
-  void ForwardOuter(mozilla::ErrorResult& aError);
-  void HomeOuter(nsIPrincipal& aSubjectPrincipal, mozilla::ErrorResult& aError);
   bool FindOuter(const nsAString& aString, bool aCaseSensitive, bool aBackwards,
                  bool aWrapAround, bool aWholeWord, bool aSearchInFrames,
                  bool aShowDialog, mozilla::ErrorResult& aError);
@@ -736,6 +724,8 @@ public:
                       mozilla::ErrorResult& aError);
 
   already_AddRefed<nsWindowRoot> GetWindowRootOuter();
+
+  nsIDOMWindowUtils* WindowUtils();
 
   virtual bool IsInSyncOperation() override
   {
@@ -901,13 +891,15 @@ private:
                         bool aForceNoOpener,
                         nsPIDOMWindowOuter **aReturn);
 
+  // Checks that the channel was loaded by the URI currently loaded in aDoc
+  static bool SameLoadingURI(nsIDocument *aDoc, nsIChannel *aChannel);
+
 public:
   // Helper Functions
   already_AddRefed<nsIDocShellTreeOwner> GetTreeOwner();
   already_AddRefed<nsIBaseWindow> GetTreeOwnerWindow();
   already_AddRefed<nsIWebBrowserChrome> GetWebBrowserChrome();
   nsresult SecurityCheckURL(const char *aURL, nsIURI** aURI);
-  bool IsPrivateBrowsing();
 
   bool PopupWhitelisted();
   PopupControlState RevisePopupAbuseLevel(PopupControlState);
@@ -1110,8 +1102,6 @@ protected:
   RefPtr<mozilla::dom::Storage> mLocalStorage;
 
   nsCOMPtr<nsIPrincipal> mDocumentPrincipal;
-  // mTabChild is only ever populated in the content process.
-  nsCOMPtr<nsITabChild>  mTabChild;
 
   uint32_t mSerial;
 

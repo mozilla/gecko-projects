@@ -94,7 +94,6 @@ chrome/toolkit/skin/classic/global/dropmarker.css
 chrome/toolkit/skin/classic/global/global.css
 chrome/toolkit/skin/classic/global/groupbox.css
 chrome/toolkit/skin/classic/global/icons/close-win7.png
-chrome/toolkit/skin/classic/global/listbox.css
 chrome/toolkit/skin/classic/global/menu.css
 chrome/toolkit/skin/classic/global/menulist.css
 chrome/toolkit/skin/classic/global/numberbox.css
@@ -151,7 +150,7 @@ browser/features/formautofill@mozilla.org/chrome/content/autofillEditForms.js
 browser/chrome/browser/res/payments/formautofill/autofillEditForms.js
 # Bug 1451050 - Remote settings empty dumps (will be populated with data eventually)
 browser/defaults/settings/pinning/pins.json
-browser/defaults/settings/main/tippytop.json
+browser/defaults/settings/main/example.json
 # Bug 1463748 - Fork and pref-off the new error pages
 browser/chrome/browser/content/browser/aboutNetError-new.xhtml
 browser/chrome/browser/content/browser/aboutNetError.xhtml

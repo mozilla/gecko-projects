@@ -11,8 +11,10 @@
 
 #include <inttypes.h>
 
-#include "gfxFontConstants.h"
 #include "X11UndefineNone.h"
+
+#include "gfxFontConstants.h"
+#include "mozilla/ServoStyleConsts.h"
 
 // XXX fold this into ComputedStyle and group by nsStyleXXX struct
 
@@ -77,13 +79,24 @@ enum class StyleClear : uint8_t {
   None = 0,
   Left,
   Right,
-  InlineStart,
-  InlineEnd,
   Both,
   // StyleClear::Line can be added to one of the other values in layout
   // so it needs to use a bit value that none of the other values can have.
+  //
+  // FIXME(emilio): Doesn't look like we do that anymore, so probably can be
+  // made a single value instead, and Max removed.
   Line = 8,
   Max = 13  // Max = (Both | Line)
+};
+
+enum class StyleColumnFill : uint8_t {
+  Balance,
+  Auto,
+};
+
+enum class StyleColumnSpan : uint8_t {
+  None,
+  All,
 };
 
 // Counters and generated content.
@@ -144,8 +157,6 @@ enum class StyleFloat : uint8_t {
   None,
   Left,
   Right,
-  InlineStart,
-  InlineEnd
 };
 
 // float-edge
@@ -308,6 +319,11 @@ enum class StyleImageLayerRepeat : uint8_t {
   Round
 };
 
+enum class StylePrefersReducedMotion : uint8_t {
+  NoPreference,
+  Reduce,
+};
+
 
 // See nsStyleImageLayers
 #define NS_STYLE_IMAGELAYER_SIZE_CONTAIN             0
@@ -427,55 +443,6 @@ enum class StyleContent : uint8_t {
 #define NS_STYLE_WRITING_MODE_SIDEWAYS_LR         \
           (NS_STYLE_WRITING_MODE_VERTICAL_LR |    \
            NS_STYLE_WRITING_MODE_SIDEWAYS_MASK)
-
-// See nsStyleDisplay
-//
-// NOTE: Order is important! If you change it, make sure to take a look at
-// the FrameConstructionDataByDisplay stuff (both the XUL and non-XUL version),
-// and ensure it's still correct!
-enum class StyleDisplay : uint8_t {
-  None = 0,
-  Block,
-  FlowRoot,
-  Inline,
-  InlineBlock,
-  ListItem,
-  Table,
-  InlineTable,
-  TableRowGroup,
-  TableColumn,
-  TableColumnGroup,
-  TableHeaderGroup,
-  TableFooterGroup,
-  TableRow,
-  TableCell,
-  TableCaption,
-  Flex,
-  InlineFlex,
-  Grid,
-  InlineGrid,
-  Ruby,
-  RubyBase,
-  RubyBaseContainer,
-  RubyText,
-  RubyTextContainer,
-  Contents,
-  WebkitBox,
-  WebkitInlineBox,
-  MozBox,
-  MozInlineBox,
-#ifdef MOZ_XUL
-  MozGrid,
-  MozInlineGrid,
-  MozGridGroup,
-  MozGridLine,
-  MozStack,
-  MozInlineStack,
-  MozDeck,
-  MozGroupbox,
-  MozPopup,
-#endif
-};
 
 // See nsStyleDisplay
 // If these are re-ordered, nsComputedDOMStyle::DoGetContain() must be updated.
@@ -979,16 +946,6 @@ enum class StyleWhiteSpace : uint8_t {
 #define NS_STYLE_PAGE_BREAK_AVOID               2
 #define NS_STYLE_PAGE_BREAK_LEFT                3
 #define NS_STYLE_PAGE_BREAK_RIGHT               4
-
-// See nsStyleColumn
-#define NS_STYLE_COLUMN_COUNT_AUTO              0
-#define NS_STYLE_COLUMN_COUNT_UNLIMITED         (-1)
-
-#define NS_STYLE_COLUMN_FILL_AUTO               0
-#define NS_STYLE_COLUMN_FILL_BALANCE            1
-
-#define NS_STYLE_COLUMN_SPAN_NONE               0
-#define NS_STYLE_COLUMN_SPAN_ALL                1
 
 // See nsStyleUIReset
 #define NS_STYLE_IME_MODE_AUTO                  0

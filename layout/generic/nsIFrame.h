@@ -1690,12 +1690,13 @@ public:
     return IsThemed(StyleDisplay(), aTransparencyState);
   }
   bool IsThemed(const nsStyleDisplay* aDisp,
-                  nsITheme::Transparency* aTransparencyState = nullptr) const {
-    nsIFrame* mutable_this = const_cast<nsIFrame*>(this);
-    if (!aDisp->mAppearance)
+                nsITheme::Transparency* aTransparencyState = nullptr) const {
+    if (!aDisp->HasAppearance()) {
       return false;
+    }
+    nsIFrame* mutable_this = const_cast<nsIFrame*>(this);
     nsPresContext* pc = PresContext();
-    nsITheme *theme = pc->GetTheme();
+    nsITheme* theme = pc->GetTheme();
     if(!theme ||
        !theme->ThemeSupportsWidget(pc, mutable_this, aDisp->mAppearance))
       return false;
@@ -2190,7 +2191,7 @@ public:
     const nsLineList_iterator* mLine;
 
     // The line container. Private, to ensure we always use SetLineContainer
-    // to update it (so that we have a chance to store the mLineContainerWM).
+    // to update it.
     //
     // Note that nsContainerFrame::DoInlineIntrinsicISize will clear the
     // |mLine| and |mLineContainer| fields when following a next-in-flow link,
@@ -2203,9 +2204,6 @@ public:
     void SetLineContainer(nsIFrame* aLineContainer)
     {
       mLineContainer = aLineContainer;
-      if (mLineContainer) {
-        mLineContainerWM = mLineContainer->GetWritingMode();
-      }
     }
     nsIFrame* LineContainer() const { return mLineContainer; }
 
@@ -2225,10 +2223,6 @@ public:
     // should be true at the beginning of a block, after hard breaks
     // and when the last text ended with whitespace.
     bool mSkipWhitespace;
-
-    // Writing mode of the line container (stored here so that we don't
-    // lose track of it if the mLineContainer field is reset).
-    mozilla::WritingMode mLineContainerWM;
 
     // Floats encountered in the lines.
     class FloatInfo {

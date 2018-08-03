@@ -32,7 +32,7 @@ class ContextMenusClickPropHandler {
       // No need for runSafe or anything because we are already being run inside
       // an event handler -- the event is just being forwarded to the actual
       // handler.
-      onclick(info, tab);
+      withHandlingUserInput(this.context.contentWindow, () => onclick(info, tab));
     }
   }
 
@@ -124,8 +124,14 @@ this.menusInternal = class extends ExtensionAPI {
               onClickedProp.setListener(createProperties.id, onclick);
             }
             if (callback) {
-              callback();
+              context.runSafeWithoutClone(callback);
             }
+          }).catch(error => {
+            context.withLastError(error, null, () => {
+              if (callback) {
+                context.runSafeWithoutClone(callback);
+              }
+            });
           });
           return createProperties.id;
         },

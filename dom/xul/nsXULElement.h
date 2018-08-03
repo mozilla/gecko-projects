@@ -362,11 +362,10 @@ public:
     virtual nsresult PreHandleEvent(
                        mozilla::EventChainVisitor& aVisitor) override;
     // nsIContent
-    virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                                nsIContent* aBindingParent,
-                                bool aCompileEventHandlers) override;
+    virtual nsresult BindToTree(nsIDocument* aDocument,
+                                nsIContent* aParent,
+                                nsIContent* aBindingParent) override;
     virtual void UnbindFromTree(bool aDeep, bool aNullParent) override;
-    virtual void RemoveChildNode(nsIContent* aKid, bool aNotify) override;
     virtual void DestroyContent() override;
 
 #ifdef DEBUG
@@ -618,14 +617,6 @@ public:
     already_AddRefed<mozilla::dom::BoxObject> GetBoxObject(mozilla::ErrorResult& rv);
     void Click(mozilla::dom::CallerType aCallerType);
     void DoCommand();
-    already_AddRefed<nsINodeList>
-      GetElementsByAttribute(const nsAString& aAttribute,
-                             const nsAString& aValue);
-    already_AddRefed<nsINodeList>
-      GetElementsByAttributeNS(const nsAString& aNamespaceURI,
-                               const nsAString& aAttribute,
-                               const nsAString& aValue,
-                               mozilla::ErrorResult& rv);
     // Style() inherited from nsStyledElement
 
     nsINode* GetScopeChainParent() const override
@@ -643,9 +634,6 @@ protected:
 
     // Implementation methods
     nsresult EnsureContentsGenerated(void) const;
-
-    // Helper routine that crawls a parent chain looking for a tree element.
-    NS_IMETHOD GetParentTree(nsIDOMXULMultiSelectControlElement** aTreeElement);
 
     nsresult AddPopupListener(nsAtom* aName);
 
@@ -684,8 +672,7 @@ protected:
     /**
      * Add a listener for the specified attribute, if appropriate.
      */
-    void AddListenerFor(const nsAttrName& aName,
-                        bool aCompileEventHandlers);
+    void AddListenerFor(const nsAttrName& aName);
     void MaybeAddPopupListener(nsAtom* aLocalName);
 
     nsIWidget* GetWindowWidget();

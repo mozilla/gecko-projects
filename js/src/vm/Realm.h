@@ -18,12 +18,12 @@
 
 #include <stddef.h>
 
+#include "builtin/Array.h"
 #include "gc/Barrier.h"
 #include "gc/Zone.h"
 #include "js/UniquePtr.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/Compartment.h"
-#include "vm/GlobalObject.h"
 #include "vm/ReceiverGuard.h"
 #include "vm/RegExpShared.h"
 #include "vm/SavedStacks.h"
@@ -410,6 +410,7 @@ class JS::Realm : public JS::shadow::Realm
     js::DtoaCache dtoaCache;
     js::NewProxyCache newProxyCache;
     js::ArraySpeciesLookup arraySpeciesLookup;
+    js::PromiseLookup promiseLookup;
 
     js::PerformanceGroupHolder performanceMonitoring;
 
@@ -812,7 +813,8 @@ class JS::Realm : public JS::shadow::Realm
     // Initializes randomNumberGenerator if needed.
     mozilla::non_crypto::XorShift128PlusRNG& getOrCreateRandomNumberGenerator();
 
-    const void* addressOfRandomNumberGenerator() const {
+    const mozilla::non_crypto::XorShift128PlusRNG*
+    addressOfRandomNumberGenerator() const {
         return randomNumberGenerator_.ptr();
     }
 

@@ -2695,11 +2695,10 @@ GetPCCountJSON(JSContext* cx, const ScriptAndCounts& sac, StringBuffer& buf)
         return false;
     bool comma = false;
 
-    SrcNoteLineScanner scanner(script->notes(), script->lineno());
     uint64_t hits = 0;
 
-    jsbytecode* end = script->codeEnd();
-    for (jsbytecode* pc = script->code(); pc < end; pc = GetNextPc(pc)) {
+    for (BytecodeRangeWithPosition range(cx, script); !range.empty(); range.popFront()) {
+        jsbytecode *pc = range.frontPC();
         size_t offset = script->pcToOffset(pc);
         JSOp op = JSOp(*pc);
 
@@ -2721,11 +2720,9 @@ GetPCCountJSON(JSContext* cx, const ScriptAndCounts& sac, StringBuffer& buf)
         if (!NumberValueToStringBuffer(cx, Int32Value(offset), buf))
             return false;
 
-        scanner.advanceTo(offset);
-
         if (!AppendJSONProperty(buf, "line"))
             return false;
-        if (!NumberValueToStringBuffer(cx, Int32Value(scanner.getLine()), buf))
+        if (!NumberValueToStringBuffer(cx, Int32Value(range.frontLineNumber()), buf))
             return false;
 
         {
@@ -2991,4 +2988,56 @@ js::GetCodeCoverageSummary(JSContext* cx, size_t* length)
     if (length)
         *length = len;
     return res;
+}
+
+bool
+js::GetSuccessorBytecodes(jsbytecode* pc, PcVector& successors)
+{
+    JSOp op = (JSOp)*pc;
+    if (FlowsIntoNext(op)) {
+        if (!successors.append(GetNextPc(pc)))
+            return false;
+    }
+
+    if (CodeSpec[op].type() == JOF_JUMP) {
+        if (!successors.append(pc + GET_JUMP_OFFSET(pc)))
+            return false;
+    } else if (op == JSOP_TABLESWITCH) {
+        if (!successors.append(pc + GET_JUMP_OFFSET(pc)))
+            return false;
+        jsbytecode* npc = pc + JUMP_OFFSET_LEN;
+
+        int32_t low = GET_JUMP_OFFSET(npc);
+        npc += JUMP_OFFSET_LEN;
+        int ncases = GET_JUMP_OFFSET(npc) - low + 1;
+        npc += JUMP_OFFSET_LEN;
+
+        for (int i = 0; i < ncases; i++) {
+            if (!successors.append(pc + GET_JUMP_OFFSET(npc)))
+                return false;
+            npc += JUMP_OFFSET_LEN;
+        }
+    }
+
+    return true;
+}
+
+bool
+js::GetPredecessorBytecodes(JSScript* script, jsbytecode* pc, PcVector& predecessors)
+{
+    jsbytecode* end = script->code() + script->length();
+    MOZ_ASSERT(pc >= script->code() && pc < end);
+    for (jsbytecode* npc = script->code(); npc < end; npc = GetNextPc(npc)) {
+        PcVector successors;
+        if (!GetSuccessorBytecodes(npc, successors))
+            return false;
+        for (size_t i = 0; i < successors.length(); i++) {
+            if (successors[i] == pc) {
+                if (!predecessors.append(npc))
+                    return false;
+                break;
+            }
+        }
+    }
+    return true;
 }

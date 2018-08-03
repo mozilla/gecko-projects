@@ -50,7 +50,6 @@ struct DefaultJitOptions
     bool disableInlineBacktracking;
     bool disableAma;
     bool disableEaa;
-    bool disableEagerSimdUnbox;
     bool disableEdgeCaseAnalysis;
     bool disableGvn;
     bool disableInlining;
@@ -63,6 +62,7 @@ struct DefaultJitOptions
     bool disableRecoverIns;
     bool disableScalarReplacement;
     bool disableCacheIR;
+    bool disableCacheIRBinaryArith;
     bool disableSharedStubs;
     bool disableSincos;
     bool disableSink;

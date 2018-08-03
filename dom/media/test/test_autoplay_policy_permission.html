@@ -15,7 +15,7 @@
 
         // Tests that origins with "autoplay-media" permission can autoplay.
 
-        gTestPrefs.push(["media.autoplay.enabled", false],
+        gTestPrefs.push(["media.autoplay.default", SpecialPowers.Ci.nsIAutoplay.BLOCKED],
           ["media.autoplay.enabled.user-gestures-needed", true],
           // Note: permission prompt disabled, as we want immediate
           // notification in this test that an origin is blocked.
@@ -34,7 +34,8 @@
           child.postMessage("play-audible", testCase.origin);
           // Wait for the window to tell us whether it could play video.
           let result = await nextWindowMessage();
-          is(result.data.played, testCase.shouldPlay, testCase.message);
+          is(result.data.allowedToPlay, testCase.shouldPlay, "allowedToPlay - " + testCase.message);
+          is(result.data.played, testCase.shouldPlay, "played - " + testCase.message);
           child.close();
         }
 

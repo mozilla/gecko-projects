@@ -8,7 +8,6 @@ var EXPORTED_SYMBOLS = ["HiddenFrame"];
 
 ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const XUL_PAGE = "chrome://global/content/win.xul";
 
@@ -60,8 +59,7 @@ HiddenFrame.prototype = {
    */
   getWindow() {
     this.get();
-    this._browser.QueryInterface(Ci.nsIInterfaceRequestor);
-    return this._browser.getInterface(Ci.nsIDOMWindow);
+    return this._browser.document.ownerGlobal;
   },
 
 

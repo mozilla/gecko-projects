@@ -12,6 +12,7 @@
 #include "jit/BaselineFrame.h"
 #include "jit/JitcodeMap.h"
 #include "jit/JitRealm.h"
+#include "jit/shared/CodeGenerator-shared.h"
 #include "vm/Debugger.h"
 #include "vm/JSContext.h"
 #include "vm/Opcodes.h"
@@ -227,8 +228,12 @@ InterpreterFrame::prologue(JSContext* cx)
             lexicalEnv = &cx->global()->lexicalEnvironment();
             varObjRoot = cx->global();
         }
-        if (!CheckGlobalDeclarationConflicts(cx, script, lexicalEnv, varObjRoot))
+        if (!CheckGlobalDeclarationConflicts(cx, script, lexicalEnv, varObjRoot)) {
+            // Treat this as a script entry, for consistency with Ion.
+            if (script->trackRecordReplayProgress())
+                mozilla::recordreplay::AdvanceExecutionProgressCounter();
             return false;
+        }
         return probes::EnterScript(cx, script, nullptr, this);
     }
 
@@ -1579,7 +1584,7 @@ jit::JitActivation::JitActivation(JSContext* cx)
     packedExitFP_(nullptr),
     encodedWasmExitReason_(0),
     prevJitActivation_(cx->jitActivation),
-    rematerializedFrames_(nullptr),
+    rematerializedFrames_(),
     ionRecovery_(cx),
     bailoutData_(nullptr),
     lastProfilingFrame_(nullptr),
@@ -1606,7 +1611,6 @@ jit::JitActivation::~JitActivation()
     MOZ_ASSERT(!isWasmTrapping());
 
     clearRematerializedFrames();
-    js_delete(rematerializedFrames_);
 }
 
 void
@@ -1655,11 +1659,11 @@ jit::JitActivation::getRematerializedFrame(JSContext* cx, const JSJitFrameIter& 
     MOZ_ASSERT(iter.isIonScripted());
 
     if (!rematerializedFrames_) {
-        rematerializedFrames_ = cx->new_<RematerializedFrameTable>(cx);
+        rematerializedFrames_ = cx->make_unique<RematerializedFrameTable>(cx);
         if (!rematerializedFrames_)
             return nullptr;
         if (!rematerializedFrames_->init()) {
-            rematerializedFrames_ = nullptr;
+            rematerializedFrames_.reset();
             ReportOutOfMemory(cx);
             return nullptr;
         }
@@ -1719,6 +1723,8 @@ jit::JitActivation::removeRematerializedFramesFromDebugger(JSContext* cx, uint8_
     if (RematerializedFrameTable::Ptr p = rematerializedFrames_->lookup(top)) {
         for (uint32_t i = 0; i < p->value().length(); i++)
             Debugger::handleUnrecoverableIonBailoutError(cx, p->value()[i]);
+        RematerializedFrame::FreeInVector(p->value());
+        rematerializedFrames_->remove(p);
     }
 }
 

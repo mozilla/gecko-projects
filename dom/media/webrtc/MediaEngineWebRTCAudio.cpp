@@ -788,6 +788,8 @@ MediaEngineWebRTCMicrophoneSource::Pull(const RefPtr<const AllocationHandle>& aH
                                         StreamTime aDesiredTime,
                                         const PrincipalHandle& aPrincipalHandle)
 {
+  TRACE_AUDIO_CALLBACK_COMMENT("SourceMediaStream %p track %i",
+                               aStream.get(), aTrackID);
   StreamTime delta;
 
   {
@@ -803,6 +805,12 @@ MediaEngineWebRTCMicrophoneSource::Pull(const RefPtr<const AllocationHandle>& aH
     // allocation was removed and the track non-existant. An assert will fail.
     delta = aDesiredTime - aStream->GetEndOfAppendedData(aTrackID);
 
+    if (delta < 0) {
+      LOG_FRAMES(("Not appending silence for allocation %p; %" PRId64 " frames already buffered",
+                  mAllocations[i].mHandle.get(), -delta));
+      return;
+    }
+
     if (!mAllocations[i].mLiveFramesAppended ||
         !mAllocations[i].mLiveSilenceAppended) {
       // These are the iterations after starting or resuming audio capture.
@@ -811,12 +819,6 @@ MediaEngineWebRTCMicrophoneSource::Pull(const RefPtr<const AllocationHandle>& aH
       // audio callbacks have started, to cover the case where audio callbacks
       // start appending data immediately and there is no extra data buffered.
       delta += WEBAUDIO_BLOCK_SIZE;
-    }
-
-    if (delta < 0) {
-      LOG_FRAMES(("Not appending silence for allocation %p; %" PRId64 " frames already buffered",
-                  mAllocations[i].mHandle.get(), -delta));
-      return;
     }
 
     LOG_FRAMES(("Pulling %" PRId64 " frames of silence for allocation %p",

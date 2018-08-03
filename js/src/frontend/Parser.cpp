@@ -22,6 +22,8 @@
 #include "mozilla/Range.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/TypeTraits.h"
+#include "mozilla/Unused.h"
+#include "mozilla/Utf8.h"
 
 #include <memory>
 #include <new>
@@ -58,6 +60,8 @@ using mozilla::Nothing;
 using mozilla::PodCopy;
 using mozilla::PodZero;
 using mozilla::Some;
+using mozilla::Unused;
+using mozilla::Utf8Unit;
 
 using JS::AutoGCRooter;
 
@@ -512,7 +516,10 @@ FunctionBox::initFromLazyFunction()
         setDerivedClassConstructor();
     if (fun->lazyScript()->needsHomeObject())
         setNeedsHomeObject();
-    enclosingScope_ = fun->lazyScript()->enclosingScope();
+    if (fun->lazyScript()->hasEnclosingScope())
+        enclosingScope_ = fun->lazyScript()->enclosingScope();
+    else
+        enclosingScope_ = nullptr;
     initWithEnclosingScope(enclosingScope_);
 }
 
@@ -592,6 +599,27 @@ FunctionBox::initWithEnclosingScope(Scope* enclosingScope)
     }
 
     computeInWith(enclosingScope);
+}
+
+void
+FunctionBox::setEnclosingScopeForInnerLazyFunction(Scope* enclosingScope)
+{
+    MOZ_ASSERT(isLazyFunctionWithoutEnclosingScope());
+
+    // For lazy functions inside a function which is being compiled, we cache
+    // the incomplete scope object while compiling, and store it to the
+    // LazyScript once the enclosing script successfully finishes compilation
+    // in FunctionBox::finish.
+    enclosingScope_ = enclosingScope;
+}
+
+void
+FunctionBox::finish()
+{
+    if (!isLazyFunctionWithoutEnclosingScope())
+        return;
+    MOZ_ASSERT(enclosingScope_);
+    function()->lazyScript()->setEnclosingScope(enclosingScope_);
 }
 
 template <class ParseHandler, typename CharT>
@@ -1834,7 +1862,7 @@ NewGlobalScopeData(JSContext* context, ParseContext::Scope& scope, LifoAlloc& al
         cursor = FreshlyInitializeBindings(cursor, lets);
 
         bindings->constStart = cursor - start;
-        cursor = FreshlyInitializeBindings(cursor, consts);
+        Unused << FreshlyInitializeBindings(cursor, consts);
 
         bindings->length = numBindings;
     }
@@ -1904,7 +1932,7 @@ NewModuleScopeData(JSContext* context, ParseContext::Scope& scope, LifoAlloc& al
         cursor = FreshlyInitializeBindings(cursor, lets);
 
         bindings->constStart = cursor - start;
-        cursor = FreshlyInitializeBindings(cursor, consts);
+        Unused << FreshlyInitializeBindings(cursor, consts);
 
         bindings->length = numBindings;
     }
@@ -1944,7 +1972,7 @@ NewEvalScopeData(JSContext* context, ParseContext::Scope& scope, LifoAlloc& allo
         BindingName* start = bindings->trailingNames.start();
         BindingName* cursor = start;
 
-        cursor = FreshlyInitializeBindings(cursor, vars);
+        Unused << FreshlyInitializeBindings(cursor, vars);
 
         bindings->length = numBindings;
     }
@@ -2043,7 +2071,7 @@ NewFunctionScopeData(JSContext* context, ParseContext::Scope& scope, bool hasPar
         cursor = FreshlyInitializeBindings(cursor, formals);
 
         bindings->varStart = cursor - start;
-        cursor = FreshlyInitializeBindings(cursor, vars);
+        Unused << FreshlyInitializeBindings(cursor, vars);
 
         bindings->length = numBindings;
     }
@@ -2084,7 +2112,7 @@ NewVarScopeData(JSContext* context, ParseContext::Scope& scope, LifoAlloc& alloc
         BindingName* start = bindings->trailingNames.start();
         BindingName* cursor = start;
 
-        cursor = FreshlyInitializeBindings(cursor, vars);
+        Unused << FreshlyInitializeBindings(cursor, vars);
 
         bindings->length = numBindings;
     }
@@ -2141,7 +2169,7 @@ NewLexicalScopeData(JSContext* context, ParseContext::Scope& scope, LifoAlloc& a
         cursor = FreshlyInitializeBindings(cursor, lets);
 
         bindings->constStart = cursor - start;
-        cursor = FreshlyInitializeBindings(cursor, consts);
+        Unused << FreshlyInitializeBindings(cursor, consts);
 
         bindings->length = numBindings;
     }
@@ -4088,9 +4116,9 @@ Parser<SyntaxParseHandler, CharT>::asmJS(Node list)
     return false;
 }
 
-template <typename CharT>
+template <>
 bool
-Parser<FullParseHandler, CharT>::asmJS(Node list)
+Parser<FullParseHandler, char16_t>::asmJS(Node list)
 {
     // Disable syntax parsing in anything nested inside the asm.js module.
     disableSyntaxParser();
@@ -4123,6 +4151,16 @@ Parser<FullParseHandler, CharT>::asmJS(Node list)
         return false;
     }
 
+    return true;
+}
+
+template <>
+bool
+Parser<FullParseHandler, Utf8Unit>::asmJS(Node list)
+{
+    // Just succeed without setting the asm.js directive flag.  Given Web
+    // Assembly's rapid advance, it's probably not worth the trouble to really
+    // support UTF-8 asm.js.
     return true;
 }
 
@@ -6727,7 +6765,7 @@ GeneralParser<ParseHandler, CharT>::switchStatement(YieldHandling yieldHandling)
 
     handler.setEndPosition(caseList, pos().end);
 
-    return handler.newSwitchStatement(begin, discriminant, caseList);
+    return handler.newSwitchStatement(begin, discriminant, caseList, seenDefault);
 }
 
 template <class ParseHandler, typename CharT>
@@ -9093,9 +9131,6 @@ Parser<FullParseHandler, CharT>::newRegExp()
 {
     MOZ_ASSERT(!options().selfHostingMode);
 
-    static_assert(mozilla::IsSame<CharT, char16_t>::value,
-                  "code below will need changing for UTF-8 handling");
-
     // Create the regexp and check its syntax.
     const auto& chars = tokenStream.getCharBuffer();
     RegExpFlag flags = anyChars.currentToken().regExpFlags();
@@ -9115,14 +9150,11 @@ Parser<SyntaxParseHandler, CharT>::newRegExp()
 {
     MOZ_ASSERT(!options().selfHostingMode);
 
-    static_assert(mozilla::IsSame<CharT, char16_t>::value,
-                  "code below will need changing for UTF-8 handling");
-
     // Only check the regexp's syntax, but don't create a regexp object.
     const auto& chars = tokenStream.getCharBuffer();
     RegExpFlag flags = anyChars.currentToken().regExpFlags();
 
-    mozilla::Range<const CharT> source(chars.begin(), chars.length());
+    mozilla::Range<const char16_t> source(chars.begin(), chars.length());
     if (!js::irregexp::ParsePatternSyntax(anyChars, alloc, source, flags & UnicodeFlag))
         return null();
 

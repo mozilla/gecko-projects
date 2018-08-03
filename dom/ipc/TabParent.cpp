@@ -59,6 +59,7 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsILoadInfo.h"
 #include "nsIPromptFactory.h"
+#include "nsITransportSecurityInfo.h"
 #include "nsIURI.h"
 #include "nsIWindowWatcher.h"
 #include "nsIWebBrowserChrome.h"
@@ -95,10 +96,10 @@
 #include "ImageOps.h"
 #include "UnitTransforms.h"
 #include <algorithm>
+#include "mozilla/NullPrincipal.h"
 #include "mozilla/WebBrowserPersistDocumentParent.h"
 #include "ProcessPriorityManager.h"
 #include "nsString.h"
-#include "NullPrincipal.h"
 
 #ifdef XP_WIN
 #include "mozilla/plugins/PluginWidgetParent.h"
@@ -168,13 +169,14 @@ TabParent::TabParent(nsIContentParent* aManager,
 #ifdef DEBUG
   , mActiveSupressDisplayportCount(0)
 #endif
-  , mLayerTreeEpoch(1)
+  , mLayerTreeEpoch{1}
   , mPreserveLayers(false)
   , mRenderLayers(true)
   , mHasLayers(false)
   , mHasPresented(false)
   , mHasBeforeUnload(false)
   , mIsMouseEnterIntoWidgetEventSuppressed(false)
+  , mIsActiveRecordReplayTab(false)
 {
   MOZ_ASSERT(aManager);
   // When the input event queue is disabled, we don't need to handle the case
@@ -374,6 +376,8 @@ TabParent::DestroyInternal()
        iter.Get()->GetKey())->ParentDestroy();
   }
 #endif
+
+  SetIsActiveRecordReplayTab(false);
 }
 
 void
@@ -887,6 +891,15 @@ TabParent::GetState(uint32_t *aState)
   NS_ENSURE_ARG(aState);
   NS_WARNING("SecurityState not valid here");
   *aState = 0;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+TabParent::GetSecInfo(nsITransportSecurityInfo** _result)
+{
+  NS_ENSURE_ARG_POINTER(_result);
+  NS_WARNING("TransportSecurityInfo not valid here");
+  *_result = nullptr;
   return NS_OK;
 }
 
@@ -2478,21 +2491,6 @@ TabParent::RecvSetInputContext(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult
-TabParent::RecvIsParentWindowMainWidgetVisible(bool* aIsVisible)
-{
-  nsCOMPtr<nsIContent> frame = do_QueryInterface(mFrameElement);
-  if (!frame)
-    return IPC_OK();
-  nsCOMPtr<nsIDOMWindowUtils> windowUtils =
-    do_QueryInterface(frame->OwnerDoc()->GetWindow());
-  nsresult rv = windowUtils->GetIsParentWindowMainWidgetVisible(aIsVisible);
-  if (NS_FAILED(rv)) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  return IPC_OK();
-}
-
 already_AddRefed<nsIWidget>
 TabParent::GetTopLevelWidget()
 {
@@ -2874,6 +2872,11 @@ TabParent::SetDocShellIsActive(bool isActive)
   // changing of the process priority.
   ProcessPriorityManager::TabActivityChanged(this, isActive);
 
+  // Keep track of how many active recording/replaying tabs there are.
+  if (Manager()->AsContentParent()->IsRecordingOrReplaying()) {
+    SetIsActiveRecordReplayTab(isActive);
+  }
+
   return NS_OK;
 }
 
@@ -2894,7 +2897,7 @@ TabParent::SetRenderLayers(bool aEnabled)
       // event will not naturally arrive, which can confuse the front-end
       // layer. So we fire the event here.
       RefPtr<TabParent> self = this;
-      uint64_t epoch = mLayerTreeEpoch;
+      LayersObserverEpoch epoch = mLayerTreeEpoch;
       NS_DispatchToMainThread(NS_NewRunnableFunction(
         "dom::TabParent::RenderLayers",
         [self, epoch] () {
@@ -2945,7 +2948,7 @@ TabParent::SetRenderLayersInternal(bool aEnabled, bool aForceRepaint)
 {
   // Increment the epoch so that layer tree updates from previous
   // RenderLayers requests are ignored.
-  mLayerTreeEpoch++;
+  mLayerTreeEpoch = mLayerTreeEpoch.Next();
 
   Unused << SendRenderLayers(aEnabled, aForceRepaint, mLayerTreeEpoch);
 
@@ -2962,6 +2965,17 @@ TabParent::PreserveLayers(bool aPreserveLayers)
 {
   mPreserveLayers = aPreserveLayers;
   return NS_OK;
+}
+
+NS_IMETHODIMP
+TabParent::SaveRecording(const nsAString& aFilename, bool* aRetval)
+{
+  nsCOMPtr<nsIFile> file;
+  nsresult rv = NS_NewLocalFile(aFilename, false, getter_AddRefs(file));
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  return Manager()->AsContentParent()->SaveRecording(file, aRetval);
 }
 
 NS_IMETHODIMP
@@ -3045,7 +3059,7 @@ TabParent::GetHasBeforeUnload(bool* aResult)
 }
 
 void
-TabParent::LayerTreeUpdate(uint64_t aEpoch, bool aActive)
+TabParent::LayerTreeUpdate(const LayersObserverEpoch& aEpoch, bool aActive)
 {
   // Ignore updates from old epochs. They might tell us that layers are
   // available when we've already sent a message to clear them. We can't trust
@@ -3075,12 +3089,12 @@ TabParent::LayerTreeUpdate(uint64_t aEpoch, bool aActive)
 }
 
 mozilla::ipc::IPCResult
-TabParent::RecvPaintWhileInterruptingJSNoOp(const uint64_t& aLayerObserverEpoch)
+TabParent::RecvPaintWhileInterruptingJSNoOp(const LayersObserverEpoch& aEpoch)
 {
   // We sent a PaintWhileInterruptingJS message when layers were already visible. In this
   // case, we should act as if an update occurred even though we already have
   // the layers.
-  LayerTreeUpdate(aLayerObserverEpoch, true);
+  LayerTreeUpdate(aEpoch, true);
   return IPC_OK();
 }
 
@@ -3402,7 +3416,7 @@ TabParent::AddInitialDnDDataTo(DataTransfer* aDataTransfer,
           variant->SetAsISupports(imageContainer);
         } else {
           Shmem data = item.data().get_Shmem();
-          variant->SetAsACString(nsDependentCString(data.get<char>(), data.Size<char>()));
+          variant->SetAsACString(nsDependentCSubstring(data.get<char>(), data.Size<char>()));
         }
 
         mozilla::Unused << DeallocShmem(item.data().get_Shmem());
@@ -3533,22 +3547,6 @@ TabParent::GetShowInfo()
 }
 
 mozilla::ipc::IPCResult
-TabParent::RecvGetTabCount(uint32_t* aValue)
-{
-  *aValue = 0;
-
-  nsCOMPtr<nsIXULBrowserWindow> xulBrowserWindow = GetXULBrowserWindow();
-  NS_ENSURE_TRUE(xulBrowserWindow, IPC_OK());
-
-  uint32_t tabCount;
-  nsresult rv = xulBrowserWindow->GetTabCount(&tabCount);
-  NS_ENSURE_SUCCESS(rv, IPC_OK());
-
-  *aValue = tabCount;
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
 TabParent::RecvLookUpDictionary(const nsString& aText,
                                 nsTArray<FontRange>&& aFontRangeArray,
                                 const bool& aIsVertical,
@@ -3595,6 +3593,17 @@ void
 TabParent::LiveResizeStopped()
 {
   SuppressDisplayport(false);
+}
+
+/* static */ size_t TabParent::gNumActiveRecordReplayTabs;
+
+void
+TabParent::SetIsActiveRecordReplayTab(bool aIsActive)
+{
+  if (aIsActive != mIsActiveRecordReplayTab) {
+    gNumActiveRecordReplayTabs += aIsActive ? 1 : -1;
+    mIsActiveRecordReplayTab = aIsActive;
+  }
 }
 
 NS_IMETHODIMP

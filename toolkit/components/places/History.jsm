@@ -37,6 +37,8 @@
  *     passed as argument to a function of this API will be ignored.
  *  - visits: (Array<VisitInfo>)
  *     All the visits for this page, if any.
+ *  - annotations: (Map)
+ *     A map containing key/value pairs of the annotations for this page, if any.
  *
  * See the documentation of individual methods to find out which properties
  * are required for `PageInfo` arguments or returned for `PageInfo` results.
@@ -123,6 +125,8 @@ var History = Object.freeze({
    *           By default, `visits` is undefined inside the returned `PageInfo`.
    *        - `includeMeta` (boolean) set this to true to fetch page meta fields,
    *           i.e. `description` and `preview_image_url`.
+   *        - `includeAnnotations` (boolean) set this to true to fetch any
+   *           annotations that are associated with the page.
    *
    * @return (Promise)
    *      A promise resolved once the operation is complete.
@@ -154,6 +158,11 @@ var History = Object.freeze({
     let hasIncludeMeta = "includeMeta" in options;
     if (hasIncludeMeta && typeof options.includeMeta !== "boolean") {
       throw new TypeError("includeMeta should be a boolean if exists");
+    }
+
+    let hasIncludeAnnotations = "includeAnnotations" in options;
+    if (hasIncludeAnnotations && typeof options.includeAnnotations !== "boolean") {
+      throw new TypeError("includeAnnotations should be a boolean if exists");
     }
 
     return PlacesUtils.promiseDBConnection()
@@ -599,7 +608,7 @@ var History = Object.freeze({
    /**
    * Update information for a page.
    *
-   * Currently, it supports updating the description and the preview image URL
+   * Currently, it supports updating the description, preview image URL and annotations
    * for a page, any other fields will be ignored.
    *
    * Note that this function will ignore the update if the target page has not
@@ -625,6 +634,14 @@ var History = Object.freeze({
    *      2). It throws if its length is greater than DB_URL_LENGTH_MAX
    *          defined in PlacesUtils.jsm.
    *
+   *      If a property `annotations` is provided, the annotations will be
+   *      updated. Note that:
+   *      1). It should be a Map containing key/value pairs to be updated.
+   *      2). If the value is falsy, the annotation will be removed.
+   *      3). If the value is non-falsy, the annotation will be added or updated.
+   *      For `annotations` the keys must all be strings, the values should be
+   *      Boolean, Number or Strings. null and undefined are supported as falsy values.
+   *
    * @return (Promise)
    *      A promise resolved once the update is complete.
    * @rejects (Error)
@@ -643,8 +660,9 @@ var History = Object.freeze({
   update(pageInfo) {
     let info = PlacesUtils.validatePageInfo(pageInfo, false);
 
-    if (info.description === undefined && info.previewImageURL === undefined) {
-      throw new TypeError("pageInfo object must at least have either a description or a previewImageURL property");
+    if (info.description === undefined && info.previewImageURL === undefined &&
+        info.annotations === undefined) {
+      throw new TypeError("pageInfo object must at least have either a description, previewImageURL or annotations property.");
     }
 
     return PlacesUtils.withConnectionWrapper("History.jsm: update", db => update(db, info));
@@ -792,19 +810,15 @@ var clear = async function(db) {
                               EXCEPT
                               SELECT icon_id FROM moz_icons_to_pages
                             )`);
+    await db.executeCached(`DELETE FROM moz_icons
+                            WHERE root = 1
+                              AND get_host_and_port(icon_url) NOT IN (SELECT host FROM moz_origins)
+                              AND fixup_url(get_host_and_port(icon_url)) NOT IN (SELECT host FROM moz_origins)`);
 
     // Expire annotations.
-    await db.execute(`DELETE FROM moz_items_annos WHERE expiration = :expire_session`,
-                     { expire_session: Ci.nsIAnnotationService.EXPIRE_SESSION });
-    await db.execute(`DELETE FROM moz_annos WHERE id in (
-                        SELECT a.id FROM moz_annos a
-                        LEFT JOIN moz_places h ON a.place_id = h.id
-                        WHERE h.id IS NULL
-                           OR expiration = :expire_session
-                           OR (expiration = :expire_with_history
-                               AND h.last_visit_date ISNULL)
-                      )`, { expire_session: Ci.nsIAnnotationService.EXPIRE_SESSION,
-                            expire_with_history: Ci.nsIAnnotationService.EXPIRE_WITH_HISTORY });
+    await db.execute(`DELETE FROM moz_annos WHERE NOT EXISTS (
+                        SELECT 1 FROM moz_places WHERE id = place_id
+                      )`);
 
     // Expire inputhistory.
     await db.execute(`DELETE FROM moz_inputhistory WHERE place_id IN (
@@ -885,6 +899,10 @@ var cleanupPages = async function(db, pages) {
                             EXCEPT
                             SELECT icon_id FROM moz_icons_to_pages
                           )`);
+  await db.executeCached(`DELETE FROM moz_icons
+                          WHERE root = 1
+                            AND get_host_and_port(icon_url) NOT IN (SELECT host FROM moz_origins)
+                            AND fixup_url(get_host_and_port(icon_url)) NOT IN (SELECT host FROM moz_origins)`);
 
   await db.execute(`DELETE FROM moz_annos
                     WHERE place_id IN ( ${ idsList } )`);
@@ -1001,6 +1019,7 @@ var fetch = async function(db, guidOrURL, options) {
                ${whereClauseFragment}
                ${visitOrderFragment}`;
   let pageInfo = null;
+  let placeId = null;
   await db.executeCached(
     query,
     params,
@@ -1013,6 +1032,7 @@ var fetch = async function(db, guidOrURL, options) {
           frecency: row.getResultByName("frecency"),
           title: row.getResultByName("title") || ""
         };
+        placeId = row.getResultByName("id");
       }
       if (options.includeMeta) {
         pageInfo.description = row.getResultByName("description") || "";
@@ -1031,6 +1051,19 @@ var fetch = async function(db, guidOrURL, options) {
         pageInfo.visits.push({ date, transition });
       }
     });
+
+  // Only try to get annotations if requested, and if there's an actual page found.
+  if (pageInfo && options.includeAnnotations) {
+    let rows = await db.executeCached(`
+      SELECT n.name, a.content FROM moz_anno_attributes n
+      JOIN moz_annos a ON n.id = a.anno_attribute_id
+      WHERE a.place_id = :placeId
+    `, {placeId});
+
+    pageInfo.annotations = new Map(rows.map(
+      row => [row.getResultByName("name"), row.getResultByName("content")]
+    ));
+  }
   return pageInfo;
 };
 
@@ -1409,15 +1442,16 @@ var insertMany = function(db, pageInfos, onResult, onError) {
 var update = async function(db, pageInfo) {
   let updateFragments = [];
   let whereClauseFragment = "";
+  let baseParams = {};
   let params = {};
 
   // Prefer GUID over url if it's present
   if (typeof pageInfo.guid === "string") {
     whereClauseFragment = "guid = :guid";
-    params.guid = pageInfo.guid;
+    baseParams.guid = pageInfo.guid;
   } else {
     whereClauseFragment = "url_hash = hash(:url) AND url = :url";
-    params.url = pageInfo.url.href;
+    baseParams.url = pageInfo.url.href;
   }
 
   if (pageInfo.description || pageInfo.description === null) {
@@ -1428,12 +1462,74 @@ var update = async function(db, pageInfo) {
     updateFragments.push("preview_image_url");
     params.preview_image_url = pageInfo.previewImageURL ? pageInfo.previewImageURL.href : null;
   }
-  // Since this data may be written at every visit and is textual, avoid
-  // overwriting the existing record if it didn't change.
-  await db.execute(`
-    UPDATE moz_places
-    SET ${updateFragments.map(v => `${v} = :${v}`).join(", ")}
-    WHERE ${whereClauseFragment}
-      AND (${updateFragments.map(v => `IFNULL(${v}, "") <> IFNULL(:${v}, "")`).join(" OR ")})
-  `, params);
+  if (updateFragments.length > 0) {
+    // Since this data may be written at every visit and is textual, avoid
+    // overwriting the existing record if it didn't change.
+    await db.execute(`
+      UPDATE moz_places
+      SET ${updateFragments.map(v => `${v} = :${v}`).join(", ")}
+      WHERE ${whereClauseFragment}
+        AND (${updateFragments.map(v => `IFNULL(${v}, "") <> IFNULL(:${v}, "")`).join(" OR ")})
+    `, {...baseParams, ...params});
+  }
+
+  if (pageInfo.annotations) {
+    let annosToRemove = [];
+    let annosToUpdate = [];
+
+    for (let anno of pageInfo.annotations) {
+      anno[1] ? annosToUpdate.push(anno[0]) : annosToRemove.push(anno[0]);
+    }
+
+    await db.executeTransaction(async function() {
+      if (annosToUpdate.length) {
+        await db.execute(`
+          INSERT OR IGNORE INTO moz_anno_attributes (name)
+          VALUES ${Array.from(annosToUpdate.keys()).map(k => `(:${k})`).join(", ")}
+        `, Object.assign({}, annosToUpdate));
+
+        for (let anno of annosToUpdate) {
+          let content = pageInfo.annotations.get(anno);
+          // TODO: We only really need to save the type whilst we still support
+          // accessing page annotations via the annotation service.
+          let type = typeof content == "string" ? Ci.nsIAnnotationService.TYPE_STRING :
+            Ci.nsIAnnotationService.TYPE_INT64;
+          let date = PlacesUtils.toPRTime(new Date());
+
+          // This will replace the id every time an annotation is updated. This is
+          // not currently an issue as we're not joining on the id field.
+          await db.execute(`
+            INSERT OR REPLACE INTO moz_annos
+              (place_id, anno_attribute_id, content, flags,
+               expiration, type, dateAdded, lastModified)
+            VALUES ((SELECT id FROM moz_places WHERE ${whereClauseFragment}),
+                    (SELECT id FROM moz_anno_attributes WHERE name = :anno_name),
+                    :content, 0, :expiration, :type, :date_added,
+                    :last_modified)
+          `, {
+            ...baseParams,
+            anno_name: anno,
+            content,
+            expiration: PlacesUtils.annotations.EXPIRE_NEVER,
+            type,
+            // The date fields are unused, so we just set them both to the latest.
+            date_added: date,
+            last_modified: date,
+          });
+        }
+      }
+
+      for (let anno of annosToRemove) {
+        // We don't remove anything from the moz_anno_attributes table. If we
+        // delete the last item of a given name, that item really should go away.
+        // It will be cleaned up by expiration.
+        await db.execute(`
+          DELETE FROM moz_annos
+          WHERE place_id = (SELECT id FROM moz_places WHERE ${whereClauseFragment})
+          AND anno_attribute_id =
+            (SELECT id FROM moz_anno_attributes WHERE name = :anno_name)
+        `, { ...baseParams, anno_name: anno });
+      }
+    });
+  }
 };

@@ -889,8 +889,16 @@ case "$target" in
         if test "$AS_BIN"; then
             AS="$(basename "$AS_BIN")"
         fi
-        AR='lib'
-        AR_FLAGS='-NOLOGO -OUT:$@'
+        case "$LINKER" in
+        *lld*)
+            AR='llvm-lib'
+            AR_FLAGS='-llvmlibthin -out:$@'
+            ;;
+        *)
+            AR='lib'
+            AR_FLAGS='-NOLOGO -OUT:$@'
+            ;;
+        esac
         AR_EXTRACT=
         RANLIB='echo not_ranlib'
         STRIP='echo not_strip'
@@ -1022,6 +1030,9 @@ case "$target" in
             # warning insists on complaining about the latter case, which
             # is annoying, and rather noisy.
             CXXFLAGS="$CXXFLAGS -Wno-used-but-marked-unused"
+            # Work around until bug 1472254 is fixed.
+            CFLAGS="$CFLAGS -Wno-pragma-pack"
+            CXXFLAGS="$CXXFLAGS -Wno-pragma-pack"
         fi
         # make 'foo == bar;' error out
         CFLAGS="$CFLAGS -we4553"
@@ -1030,7 +1041,12 @@ case "$target" in
         CXXFLAGS="$CXXFLAGS -D_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING"
         LIBS="$LIBS kernel32.lib user32.lib gdi32.lib winmm.lib wsock32.lib advapi32.lib secur32.lib"
         MOZ_DEBUG_LDFLAGS='-DEBUG -DEBUGTYPE:CV'
-        WARNINGS_AS_ERRORS='-WX'
+        # -Werror is disabled on clang-cl until bug 1090497 cleans up the noise.
+        if test -n "$CLANG_CL"; then
+            WARNINGS_AS_ERRORS=''
+        else
+            WARNINGS_AS_ERRORS='-WX'
+        fi
         # Use a higher optimization level for clang-cl, so we can come closer
         # to MSVC's performance numbers (see bug 1443590).
         if test -n "$CLANG_CL"; then
@@ -2049,7 +2065,7 @@ dnl ========================================================
 
 case "$MOZ_BUILD_APP" in
 mobile/android)
-    MOZ_ANDROID_SDK(26, 23, 26.0.2)
+    MOZ_ANDROID_SDK(26, 26, 27.0.3)
     ;;
 esac
 
@@ -4287,6 +4303,9 @@ AC_SUBST(MOZ_APP_UA_NAME)
 AC_DEFINE_UNQUOTED(MOZ_APP_UA_VERSION, "$MOZ_APP_VERSION")
 AC_SUBST(MOZ_APP_VERSION)
 AC_SUBST(MOZ_APP_VERSION_DISPLAY)
+AC_DEFINE_UNQUOTED(BROWSER_CHROME_URL, $BROWSER_CHROME_URL)
+AC_DEFINE_UNQUOTED(BROWSER_CHROME_URL_QUOTED, "$BROWSER_CHROME_URL")
+
 AC_SUBST(MOZ_APP_MAXVERSION)
 AC_DEFINE_UNQUOTED(FIREFOX_VERSION,$FIREFOX_VERSION)
 AC_SUBST(FIREFOX_VERSION)
@@ -4642,6 +4661,7 @@ export MOZ_APP_NAME
 export MOZ_APP_REMOTINGNAME
 export MOZ_DEV_EDITION
 export RUSTC
+export CARGO
 export MOZILLA_CENTRAL_PATH=$_topsrcdir
 export STLPORT_CPPFLAGS
 export STLPORT_LIBS

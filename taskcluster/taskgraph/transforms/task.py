@@ -298,6 +298,9 @@ task_description_schema = Schema({
         # the exit status code(s) that indicates the caches used by the task
         # should be purged
         Optional('purge-caches-exit-status'): [int],
+
+        # Wether any artifacts are assigned to this worker
+        Optional('skip-artifacts'): bool,
     }, {
         Required('implementation'): 'generic-worker',
         Required('os'): Any('windows', 'macosx'),
@@ -376,6 +379,9 @@ task_description_schema = Schema({
         # optional features
         Required('chain-of-trust'): bool,
         Optional('taskcluster-proxy'): bool,
+
+        # Wether any artifacts are assigned to this worker
+        Optional('skip-artifacts'): bool,
     }, {
         Required('implementation'): 'native-engine',
         Required('os'): Any('macosx', 'linux'),
@@ -409,6 +415,8 @@ task_description_schema = Schema({
             # type=directory)
             Required('name'): basestring,
         }],
+        # Wether any artifacts are assigned to this worker
+        Optional('skip-artifacts'): bool,
     }, {
         Required('implementation'): 'script-engine-autophone',
         Required('os'): Any('macosx', 'linux'),
@@ -608,6 +616,7 @@ task_description_schema = Schema({
         Required('bump'): bool,
         Optional('bump-files'): [basestring],
         Optional('repo-param-prefix'): basestring,
+        Optional('dontbuild'): bool,
         Required('force-dry-run', default=True): bool,
         Required('push', default=False): bool
     }),
@@ -968,7 +977,7 @@ def build_generic_worker_payload(config, task, task_def):
 
     artifacts = []
 
-    for artifact in worker['artifacts']:
+    for artifact in worker.get('artifacts', []):
         a = {
             'path': artifact['path'],
             'type': artifact['type'],
@@ -1273,6 +1282,9 @@ def build_treescript_payload(config, task, task_def):
 
     if worker.get('force-dry-run'):
         task_def['payload']['dry_run'] = True
+
+    if worker.get('dontbuild'):
+        task_def['payload']['dont_build'] = True
 
 
 @payload_builder('invalid')

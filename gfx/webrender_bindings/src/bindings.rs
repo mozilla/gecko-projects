@@ -15,7 +15,7 @@ use webrender::{ApiRecordingReceiver, BinaryRecorder};
 use webrender::{AsyncPropertySampler, PipelineInfo, SceneBuilderHooks};
 use webrender::{UploadMethod, VertexUsageHint};
 use thread_profiler::register_thread_with_profiler;
-use moz2d_renderer::Moz2dImageRenderer;
+use moz2d_renderer::Moz2dBlobImageHandler;
 use program_cache::{WrProgramCache, remove_disk_cache};
 use app_units::Au;
 use rayon;
@@ -930,7 +930,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         enable_aa: true,
         enable_subpixel_aa: true,
         recorder: recorder,
-        blob_image_renderer: Some(Box::new(Moz2dImageRenderer::new(workers.clone()))),
+        blob_image_handler: Some(Box::new(Moz2dBlobImageHandler::new(workers.clone()))),
         workers: Some(workers.clone()),
         thread_listener: Some(Box::new(GeckoProfilerThreadListener::new())),
         enable_render_on_scroll: false,
@@ -950,6 +950,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         scene_builder_hooks: Some(Box::new(APZCallbacks::new(window_id))),
         sampler: Some(Box::new(SamplerCallback::new(window_id))),
         max_texture_size: Some(8192), // Moz2D doesn't like textures bigger than this
+        clear_color: Some(ColorF::new(0.0, 0.0, 0.0, 0.0)),
         ..Default::default()
     };
 
@@ -1278,6 +1279,15 @@ pub extern "C" fn wr_resource_updates_update_image(
         ImageData::new(bytes.flush_into_vec()),
         None
     );
+}
+
+#[no_mangle]
+pub extern "C" fn wr_resource_updates_set_image_visible_area(
+    txn: &mut Transaction,
+    key: WrImageKey,
+    area: &NormalizedRect,
+) {
+    txn.set_image_visible_area(key, *area);
 }
 
 #[no_mangle]
@@ -1656,7 +1666,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
 
     let clip_node_id_ref = unsafe { clip_node_id.as_ref() };
     let clip_node_id = match clip_node_id_ref {
-        Some(clip_node_id) => Some(ClipId::Clip(*clip_node_id, state.pipeline_id)),
+        Some(clip_node_id) => Some(unpack_clip_id(*clip_node_id, state.pipeline_id)),
         None => None,
     };
 
@@ -1710,13 +1720,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
         let ref_frame_id = state.frame_builder
             .dl_builder
             .push_reference_frame(&prim_info, transform_binding, perspective);
-        match ref_frame_id {
-            ClipId::Clip(id, pipeline_id) => {
-                assert!(pipeline_id == state.pipeline_id);
-                *out_reference_frame_id = id;
-            },
-            _ => panic!("Pushing a reference frame must produce a ClipId::Clip"),
-        }
+        *out_reference_frame_id = pack_clip_id(ref_frame_id);
 
         prim_info.rect.origin = LayoutPoint::zero();
         prim_info.clip_rect.origin = LayoutPoint::zero();
@@ -1755,7 +1759,11 @@ pub extern "C" fn wr_dp_define_clipchain(state: &mut WrState,
                                          -> u64 {
     debug_assert!(unsafe { is_in_main_thread() });
     let parent = unsafe { parent_clipchain_id.as_ref() }.map(|id| ClipChainId(*id, state.pipeline_id));
-    let clips_slice : Vec<ClipId> = make_slice(clips, clips_count).iter().map(|id| ClipId::Clip(*id, state.pipeline_id)).collect();
+    let clips_slice : Vec<ClipId> = make_slice(clips, clips_count)
+        .iter()
+        .map(|id| unpack_clip_id(*id, state.pipeline_id))
+        .collect();
+
     let clipchain_id = state.frame_builder.dl_builder.define_clip_chain(parent, clips_slice);
     assert!(clipchain_id.1 == state.pipeline_id);
     clipchain_id.0
@@ -1778,26 +1786,19 @@ pub extern "C" fn wr_dp_define_clip(state: &mut WrState,
 
     let clip_id = if let Some(&pid) = parent_id {
         state.frame_builder.dl_builder.define_clip_with_parent(
-            ClipId::Clip(pid, state.pipeline_id),
+            unpack_clip_id(pid, state.pipeline_id),
             clip_rect, complex_iter, mask)
     } else {
         state.frame_builder.dl_builder.define_clip(clip_rect, complex_iter, mask)
     };
-    // return the usize id value from inside the ClipId::Clip(..)
-    match clip_id {
-        ClipId::Clip(id, pipeline_id) => {
-            assert!(pipeline_id == state.pipeline_id);
-            id
-        },
-        _ => panic!("Got unexpected clip id type"),
-    }
+    pack_clip_id(clip_id)
 }
 
 #[no_mangle]
 pub extern "C" fn wr_dp_push_clip(state: &mut WrState,
                                   clip_id: usize) {
     debug_assert!(unsafe { is_in_main_thread() });
-    state.frame_builder.dl_builder.push_clip_id(ClipId::Clip(clip_id, state.pipeline_id));
+    state.frame_builder.dl_builder.push_clip_id(unpack_clip_id(clip_id, state.pipeline_id));
 }
 
 #[no_mangle]
@@ -1826,13 +1827,7 @@ pub extern "C" fn wr_dp_define_sticky_frame(state: &mut WrState,
             unsafe { left_margin.as_ref() }.cloned()
         ),
         vertical_bounds, horizontal_bounds, applied_offset);
-    match clip_id {
-        ClipId::Clip(id, pipeline_id) => {
-            assert!(pipeline_id == state.pipeline_id);
-            id
-        },
-        _ => panic!("Got unexpected clip id type"),
-    }
+    pack_clip_id(clip_id)
 }
 
 #[no_mangle]
@@ -1848,7 +1843,7 @@ pub extern "C" fn wr_dp_define_scroll_layer(state: &mut WrState,
 
     let new_id = if let Some(&pid) = parent_id {
         state.frame_builder.dl_builder.define_scroll_frame_with_parent(
-            ClipId::Clip(pid, state.pipeline_id),
+            unpack_clip_id(pid, state.pipeline_id),
             Some(ExternalScrollId(scroll_id, state.pipeline_id)),
             content_rect,
             clip_rect,
@@ -1867,20 +1862,14 @@ pub extern "C" fn wr_dp_define_scroll_layer(state: &mut WrState,
         )
     };
 
-    match new_id {
-        ClipId::Clip(id, pipeline_id) => {
-            assert!(pipeline_id == state.pipeline_id);
-            id
-        },
-        _ => panic!("Got unexpected clip id type"),
-    }
+    pack_clip_id(new_id)
 }
 
 #[no_mangle]
 pub extern "C" fn wr_dp_push_scroll_layer(state: &mut WrState,
                                           scroll_id: usize) {
     debug_assert!(unsafe { is_in_main_thread() });
-    let clip_id = ClipId::Clip(scroll_id, state.pipeline_id);
+    let clip_id = unpack_clip_id(scroll_id, state.pipeline_id);
     state.frame_builder.dl_builder.push_clip_id(clip_id);
 }
 
@@ -1899,11 +1888,10 @@ pub extern "C" fn wr_dp_push_clip_and_scroll_info(state: &mut WrState,
     let clip_chain_id = unsafe { clip_chain_id.as_ref() };
     let info = if let Some(&ccid) = clip_chain_id {
         ClipAndScrollInfo::new(
-            ClipId::Clip(scroll_id, state.pipeline_id),
+            unpack_clip_id(scroll_id, state.pipeline_id),
             ClipId::ClipChain(ClipChainId(ccid, state.pipeline_id)))
     } else {
-        ClipAndScrollInfo::simple(
-            ClipId::Clip(scroll_id, state.pipeline_id))
+        ClipAndScrollInfo::simple(unpack_clip_id(scroll_id, state.pipeline_id))
     };
     state.frame_builder.dl_builder.push_clip_and_scroll_info(info);
 }
@@ -2376,10 +2364,15 @@ pub extern "C" fn wr_dp_push_box_shadow(state: &mut WrState,
 }
 
 #[no_mangle]
-pub extern "C" fn wr_dump_display_list(state: &mut WrState) {
+pub extern "C" fn wr_dump_display_list(state: &mut WrState,
+                                       indent: usize,
+                                       start: *const usize,
+                                       end: *const usize) -> usize {
+    let start = unsafe { start.as_ref().cloned() };
+    let end = unsafe { end.as_ref().cloned() };
     state.frame_builder
          .dl_builder
-         .print_display_list();
+         .print_display_list(indent, start, end)
 }
 
 #[no_mangle]
@@ -2463,8 +2456,27 @@ extern "C" {
 pub extern "C" fn wr_root_scroll_node_id() -> usize {
     // The PipelineId doesn't matter here, since we just want the numeric part of the id
     // produced for any given root reference frame.
-    match ClipId::root_scroll_node(PipelineId(0, 0)) {
-        ClipId::Clip(id, _) => id,
-        _ => unreachable!("Got a non Clip ClipId for root reference frame."),
+    pack_clip_id(ClipId::root_scroll_node(PipelineId(0, 0)))
+}
+
+fn pack_clip_id(id: ClipId) -> usize {
+    let (id, type_value) = match id {
+        ClipId::Spatial(id, _) => (id, 0),
+        ClipId::Clip(id, _) => (id, 1),
+        ClipId::ClipChain(..) => unreachable!("Tried to pack a clip chain id"),
+    };
+
+    assert!(id <= usize::max_value() >> 1);
+    return (id << 1) + type_value;
+}
+
+fn unpack_clip_id(id: usize, pipeline_id: PipelineId) -> ClipId {
+    let type_value = id & 0b01;
+    let id = id >> 1;
+
+    match type_value {
+        0 => ClipId::Spatial(id, pipeline_id),
+        1 => ClipId::Clip(id, pipeline_id),
+        _ => unreachable!("Got a bizarre value for the clip type"),
     }
 }

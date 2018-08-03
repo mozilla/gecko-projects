@@ -62,7 +62,6 @@ load 360599.html
 load 363448.html
 load 363722-1.html
 load 363722-2.html
-load 363848-1.xhtml
 load 364220.html
 load 364407-1.html
 load 364686-1.xhtml
@@ -342,7 +341,6 @@ load 472617-1.xhtml
 load 472774-1.html
 load 472776-1.html
 load 472950-1.html
-load 472957.xhtml
 load 473278-1.xhtml
 load 473894-1.html
 load 476241-1.html
@@ -364,7 +362,6 @@ load 493118-1.html
 load 493649.html
 load 494283-1.xhtml
 load 494283-2.html
-load 494300-1.xul
 load 494332-1.html
 load 495875-1.html
 load 495875-2.html
@@ -411,7 +408,6 @@ load 541714-1.html
 load 541714-2.html
 load 542136-1.html
 load 545571-1.html
-load 547338.xul
 load 547843-1.xhtml
 load 551635-1.html
 load 553504-1.xhtml
@@ -656,16 +652,16 @@ load 1233607.html
 load 1234701-1.html
 load 1234701-2.html
 load 1271765.html
-asserts(2) asserts-if(Android,1) load 1272983-1.html # bug 586628
-asserts(2) asserts-if(Android,1) load 1272983-2.html # bug 586628
+pref(layout.css.xul-box-display-values.content.enabled,true) asserts(2) asserts-if(Android,1) load 1272983-1.html # bug 586628
+pref(layout.css.xul-box-display-values.content.enabled,true) asserts(2) asserts-if(Android,1) load 1272983-2.html # bug 586628
 load 1275059.html
 load 1278007.html
 load 1278080.html
 load 1279814.html
-skip-if(webrender) load large-border-radius-dashed.html # see bug 1409243, not handled by webrender
-skip-if(webrender) load large-border-radius-dashed2.html # see bug 1409243, not handled by webrender
-skip-if(webrender) load large-border-radius-dotted.html # see bug 1409243, not handled by webrender
-skip-if(webrender) load large-border-radius-dotted2.html # see bug 1409243, not handled by webrender
+load large-border-radius-dashed.html
+load large-border-radius-dashed2.html
+load large-border-radius-dotted.html
+load large-border-radius-dotted2.html
 load 1278461-1.html
 load 1278461-2.html
 load 1281102.html
@@ -704,3 +700,5 @@ load 1460158-3.html
 load 1461039.html
 load 1461979-1.html
 load 1467239.html
+load 1472403.html
+load 1474768.html

@@ -203,7 +203,6 @@ nsXBLBinding::BindAnonymousContent(nsIContent* aAnonParent,
   // (2) The children's parent back pointer should not be to this synthetic root
   // but should instead point to the enclosing parent element.
   nsIDocument* doc = aElement->GetUncomposedDoc();
-  bool allowScripts = AllowScripts();
 
   nsAutoScriptBlocker scriptBlocker;
   for (nsIContent* child = aAnonParent->GetFirstChild();
@@ -216,7 +215,7 @@ nsXBLBinding::BindAnonymousContent(nsIContent* aAnonParent,
     }
     child->SetFlags(NODE_IS_ANONYMOUS_ROOT);
     nsresult rv =
-      child->BindToTree(doc, aElement, mBoundElement, allowScripts);
+      child->BindToTree(doc, aElement, mBoundElement);
     if (NS_FAILED(rv)) {
       // Oh, well... Just give up.
       // XXXbz This really shouldn't be a void method!
@@ -892,7 +891,8 @@ GetOrCreateMapEntryForPrototype(JSContext *cx, JS::Handle<JSObject*> proto)
   // Now, enter the XBL scope, since that's where we need to operate, and wrap
   // the proto accordingly. We hang the map off of the content XBL scope for
   // content, and the Window for chrome (whether add-ons are involved or not).
-  JS::Rooted<JSObject*> scope(cx, xpc::GetXBLScopeOrGlobal(cx, proto));
+  JS::Rooted<JSObject*> scope(cx,
+    xpc::GetXBLScopeOrGlobal(cx, JS::CurrentGlobalOrNull(cx)));
   NS_ENSURE_TRUE(scope, nullptr);
   MOZ_ASSERT(JS_IsGlobalObject(scope));
 
@@ -958,7 +958,10 @@ nsXBLBinding::DoInitJSClass(JSContext *cx,
   // and defining it as a property on the XBL scope's global. This works fine,
   // but we need to make sure never to assume that the the reflector and
   // prototype are same-compartment with the bound document.
-  JS::Rooted<JSObject*> global(cx, js::GetGlobalForObjectCrossCompartment(obj));
+  JS::Rooted<JSObject*> global(cx, JS::GetNonCCWObjectGlobal(obj));
+
+  // We must be in obj's realm.
+  MOZ_ASSERT(JS::CurrentGlobalOrNull(cx) == global);
 
   // We never store class objects in add-on scopes.
   JS::Rooted<JSObject*> xblScope(cx, xpc::GetXBLScopeOrGlobal(cx, global));
@@ -993,7 +996,7 @@ nsXBLBinding::DoInitJSClass(JSContext *cx,
     return NS_ERROR_FAILURE;
   }
   js::AssertSameCompartment(holder, xblScope);
-  JSAutoRealm ar(cx, holder);
+  JSAutoRealmAllowCCW ar(cx, holder);
 
   // Look up the class on the property holder. The only properties on the
   // holder should be class objects. If we don't find the class object, we need
@@ -1028,11 +1031,12 @@ nsXBLBinding::DoInitJSClass(JSContext *cx,
     nsXBLDocumentInfo* docInfo = aProtoBinding->XBLDocumentInfo();
     ::JS_SetPrivate(proto, docInfo);
     NS_ADDREF(docInfo);
+    RecordReplayRegisterDeferredFinalize(docInfo);
     JS_SetReservedSlot(proto, 0, JS::PrivateValue(aProtoBinding));
 
     // Next, enter the realm of the property holder, wrap the proto, and
     // stick it on.
-    JSAutoRealm ar3(cx, holder);
+    JSAutoRealmAllowCCW ar3(cx, holder);
     if (!JS_WrapObject(cx, &proto) ||
         !JS_DefineUCProperty(cx, holder, aClassName.get(), -1, proto,
                              JSPROP_READONLY | JSPROP_PERMANENT))
@@ -1114,7 +1118,7 @@ nsXBLBinding::LookupMember(JSContext* aCx, JS::Handle<jsid> aId,
   // This code is only called for content XBL, so we don't have to worry about
   // add-on scopes here.
   JS::Rooted<JSObject*> boundScope(aCx,
-    js::GetGlobalForObjectCrossCompartment(mBoundElement->GetWrapper()));
+    JS::GetNonCCWObjectGlobal(mBoundElement->GetWrapper()));
   MOZ_RELEASE_ASSERT(!xpc::IsInContentXBLScope(boundScope));
   JS::Rooted<JSObject*> xblScope(aCx, xpc::GetXBLScope(aCx, boundScope));
   NS_ENSURE_TRUE(xblScope, false);

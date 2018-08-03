@@ -23,10 +23,6 @@
   fill: currentColor;
 }
 
-.menulist-icon {
-  margin: 0 !important;
-}
-
 /**** expanders ****/
 
 .expander-up,
@@ -41,10 +37,6 @@
 
 .expander-down {
   -moz-appearance: -moz-mac-disclosure-button-closed;
-}
-
-#editBookmarkPanelContent {
-  min-width: 23em;
 }
 
 #editBMPanel_folderTree {

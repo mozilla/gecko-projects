@@ -309,7 +309,7 @@ bool JSXrayTraits::getOwnPropertyFromTargetIfSafe(JSContext* cx,
 
     // Disallow accessor properties.
     if (desc.hasGetterOrSetter()) {
-        JSAutoRealm ar(cx, wrapper);
+        JSAutoRealmAllowCCW ar(cx, wrapper);
         JS_MarkCrossZoneId(cx, id);
         return ReportWrapperDenial(cx, id, WrapperDenialForXray, "property has accessor");
     }
@@ -321,7 +321,7 @@ bool JSXrayTraits::getOwnPropertyFromTargetIfSafe(JSContext* cx,
 
         // Disallow non-subsumed objects.
         if (!AccessCheck::subsumes(target, propObj)) {
-            JSAutoRealm ar(cx, wrapper);
+            JSAutoRealmAllowCCW ar(cx, wrapper);
             JS_MarkCrossZoneId(cx, id);
             return ReportWrapperDenial(cx, id, WrapperDenialForXray, "value not same-origin with target");
         }
@@ -329,14 +329,14 @@ bool JSXrayTraits::getOwnPropertyFromTargetIfSafe(JSContext* cx,
         // Disallow non-Xrayable objects.
         XrayType xrayType = GetXrayType(propObj);
         if (xrayType == NotXray || xrayType == XrayForOpaqueObject) {
-            JSAutoRealm ar(cx, wrapper);
+            JSAutoRealmAllowCCW ar(cx, wrapper);
             JS_MarkCrossZoneId(cx, id);
             return ReportWrapperDenial(cx, id, WrapperDenialForXray, "value not Xrayable");
         }
 
         // Disallow callables.
         if (JS::IsCallable(propObj)) {
-            JSAutoRealm ar(cx, wrapper);
+            JSAutoRealmAllowCCW ar(cx, wrapper);
             JS_MarkCrossZoneId(cx, id);
             return ReportWrapperDenial(cx, id, WrapperDenialForXray, "value is callable");
         }
@@ -344,7 +344,7 @@ bool JSXrayTraits::getOwnPropertyFromTargetIfSafe(JSContext* cx,
 
     // Disallow any property that shadows something on its (Xrayed)
     // prototype chain.
-    JSAutoRealm ar2(cx, wrapper);
+    JSAutoRealmAllowCCW ar2(cx, wrapper);
     JS_MarkCrossZoneId(cx, id);
     RootedObject proto(cx);
     bool foundOnProto = false;
@@ -1008,15 +1008,14 @@ GetXrayTraits(JSObject* obj)
  * them. They are private to the origin that placed them.
  */
 
-// Certain globals do not share expandos with other globals. Xrays in these
-// globals cache expandos on the wrapper's holder, as there is only one such
-// wrapper which can create or access the expando. This allows for faster
-// access to the expando, including through JIT inline caches.
+// Certain compartments do not share expandos with other compartments. Xrays in
+// these compartments cache expandos on the wrapper's holder, as there is only
+// one such wrapper which can create or access the expando. This allows for
+// faster access to the expando, including through JIT inline caches.
 static inline bool
-GlobalHasExclusiveExpandos(JSObject* obj)
+CompartmentHasExclusiveExpandos(JSObject* obj)
 {
-    MOZ_ASSERT(JS_IsGlobalObject(obj));
-    return !strcmp(js::GetObjectJSClass(obj)->name, "Sandbox");
+    return IsInSandboxCompartment(obj);
 }
 
 static inline JSObject*
@@ -1135,8 +1134,7 @@ XrayTraits::getExpandoObject(JSContext* cx, HandleObject target, HandleObject co
     if (!chain)
         return true;
 
-    JSObject* consumerGlobal = js::GetGlobalForObjectCrossCompartment(consumer);
-    bool isExclusive = GlobalHasExclusiveExpandos(consumerGlobal);
+    bool isExclusive = CompartmentHasExclusiveExpandos(consumer);
     return getExpandoObjectInternal(cx, chain, isExclusive ? consumer : nullptr,
                                     ObjectPrincipal(consumer), expandoObject);
 }
@@ -1195,7 +1193,7 @@ XrayTraits::attachExpandoObject(JSContext* cx, HandleObject target,
     // Note the exclusive wrapper, if there is one.
     RootedObject wrapperHolder(cx);
     if (exclusiveWrapper) {
-        JSAutoRealm ar(cx, exclusiveWrapper);
+        JSAutoRealmAllowCCW ar(cx, exclusiveWrapper);
         wrapperHolder = JS_NewObjectWithGivenProto(cx, &gWrapperHolderClass, nullptr);
         if (!wrapperHolder)
             return nullptr;
@@ -1209,7 +1207,7 @@ XrayTraits::attachExpandoObject(JSContext* cx, HandleObject target,
     // Store it on the exclusive wrapper, if there is one.
     if (exclusiveWrapper) {
         RootedObject cachedExpandoObject(cx, expandoObject);
-        JSAutoRealm ar(cx, exclusiveWrapper);
+        JSAutoRealmAllowCCW ar(cx, exclusiveWrapper);
         if (!JS_WrapObject(cx, &cachedExpandoObject))
             return nullptr;
         JSObject* holder = ensureHolder(cx, exclusiveWrapper);
@@ -1242,8 +1240,7 @@ XrayTraits::ensureExpandoObject(JSContext* cx, HandleObject wrapper,
     if (!getExpandoObject(cx, target, wrapper, &expandoObject))
         return nullptr;
     if (!expandoObject) {
-        JSObject* consumerGlobal = js::GetGlobalForObjectCrossCompartment(wrapper);
-        bool isExclusive = GlobalHasExclusiveExpandos(consumerGlobal);
+        bool isExclusive = CompartmentHasExclusiveExpandos(wrapper);
         expandoObject = attachExpandoObject(cx, target, isExclusive ? wrapper : nullptr,
                                             ObjectPrincipal(wrapper));
     }
@@ -2269,7 +2266,7 @@ IsCrossCompartmentXrayCallback(const js::BaseProxyHandler* handler)
 
 js::XrayJitInfo gXrayJitInfo = {
     IsCrossCompartmentXrayCallback,
-    GlobalHasExclusiveExpandos,
+    CompartmentHasExclusiveExpandos,
     JSSLOT_XRAY_HOLDER,
     XrayTraits::HOLDER_SLOT_EXPANDO,
     JSSLOT_EXPANDO_PROTOTYPE

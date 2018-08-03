@@ -169,11 +169,6 @@ whitelist = new Set(whitelist.filter(item =>
 ).map(item => item.file));
 
 const ignorableWhitelist = new Set([
-  // These 2 files are unreferenced only when building without the crash
-  // reporter (eg. Linux x64 asan builds on treeherder)
-  "chrome://global/locale/crashes.dtd",
-  "chrome://global/locale/crashes.properties",
-
   // The following files are outside of the omni.ja file, so we only catch them
   // when testing on a non-packaged build.
 
@@ -200,6 +195,10 @@ if (!isDevtools) {
     whitelist.add("resource://services-sync/engines/" + module);
   }
 
+}
+
+if (AppConstants.MOZ_CODE_COVERAGE) {
+  whitelist.add("chrome://marionette/content/PerTestCoverageUtils.jsm");
 }
 
 const gInterestingCategories = new Set([
@@ -576,7 +575,7 @@ add_task(async function checkAllTheFiles() {
 
   if (isDevtools) {
     // chrome://devtools/skin/devtools-browser.css is included from browser.xul
-    gReferencesFromCode.set("chrome://browser/content/browser.xul", null);
+    gReferencesFromCode.set(AppConstants.BROWSER_CHROME_URL, null);
     // devtools' css is currently included from browser.css, see bug 1204810.
     gReferencesFromCode.set("chrome://browser/skin/browser.css", null);
   }

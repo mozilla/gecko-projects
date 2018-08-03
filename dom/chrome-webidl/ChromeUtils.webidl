@@ -347,7 +347,7 @@ partial namespace ChromeUtils {
   /**
    * Request performance metrics to the current process & all content processes.
    */
-  [Throws]
+  [Throws, Func="DOMPrefs::SchedulerTimingEnabled"]
   Promise<sequence<PerformanceInfoDictionary>> requestPerformanceMetrics();
 
   /**
@@ -372,6 +372,7 @@ dictionary PerformanceInfoDictionary {
   unsigned long pid = 0;
   unsigned long long windowId = 0;
   unsigned long long duration = 0;
+  unsigned long long counterId = 0;
   boolean isWorker = false;
   boolean isTopLevel = false;
   sequence<CategoryDispatchDictionary> items = [];

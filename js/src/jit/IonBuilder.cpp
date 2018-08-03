@@ -1016,6 +1016,14 @@ IonBuilder::buildInline(IonBuilder* callerBuilder, MResumePoint* callerResumePoi
 
     insertRecompileCheck();
 
+    // Insert an interrupt check when recording or replaying, which will bump
+    // the record/replay system's progress counter.
+    if (script()->trackRecordReplayProgress()) {
+        MInterruptCheck* check = MInterruptCheck::New(alloc());
+        check->setTrackRecordReplayProgress();
+        current->add(check);
+    }
+
     // Initialize the env chain now that all resume points operands are
     // initialized.
     MOZ_TRY(initEnvironmentChain(callInfo.fun()));
@@ -1749,8 +1757,17 @@ IonBuilder::jsop_loopentry()
 {
     MOZ_ASSERT(*pc == JSOP_LOOPENTRY);
 
-    current->add(MInterruptCheck::New(alloc()));
+    MInterruptCheck* check = MInterruptCheck::New(alloc());
+    current->add(check);
     insertRecompileCheck();
+
+    if (script()->trackRecordReplayProgress()) {
+        check->setTrackRecordReplayProgress();
+
+        // When recording/replaying, MInterruptCheck is effectful and should
+        // not reexecute after bailing out.
+        MOZ_TRY(resumeAfter(check));
+    }
 
     return Ok();
 }
@@ -2436,6 +2453,7 @@ IonBuilder::inspectOpcode(JSOp op)
       case JSOP_RESUME:
       case JSOP_DEBUGAFTERYIELD:
       case JSOP_AWAIT:
+      case JSOP_TRYSKIPAWAIT:
       case JSOP_GENERATOR:
 
       // Misc
@@ -2457,7 +2475,6 @@ IonBuilder::inspectOpcode(JSOp op)
 
       case JSOP_UNUSED126:
       case JSOP_UNUSED206:
-      case JSOP_UNUSED223:
       case JSOP_LIMIT:
         break;
     }
@@ -3276,7 +3293,7 @@ IonBuilder::jsop_bitnot()
             return Ok();
     }
 
-    MOZ_TRY(arithTrySharedStub(&emitted, JSOP_BITNOT, nullptr, input));
+    MOZ_TRY(arithTryBinaryStub(&emitted, JSOP_BITNOT, nullptr, input));
     if (emitted)
         return Ok();
 
@@ -3527,21 +3544,20 @@ IonBuilder::binaryArithTrySpecializedOnBaselineInspector(bool* emitted, JSOp op,
 }
 
 AbortReasonOr<Ok>
-IonBuilder::arithTrySharedStub(bool* emitted, JSOp op,
+IonBuilder::arithTryBinaryStub(bool* emitted, JSOp op,
                                MDefinition* left, MDefinition* right)
 {
     MOZ_ASSERT(*emitted == false);
     JSOp actualOp = JSOp(*pc);
 
-    // Try to emit a shared stub cache.
-
-    if (JitOptions.disableSharedStubs)
+    // Try to emit a binary arith stub cache.
+    if (JitOptions.disableCacheIRBinaryArith)
         return Ok();
 
     // The actual jsop 'jsop_pos' is not supported yet.
-    if (actualOp == JSOP_POS)
+    // There's no IC support for JSOP_POW either.
+    if (actualOp == JSOP_POS || actualOp == JSOP_POW)
         return Ok();
-
 
     MInstruction* stub = nullptr;
     switch (actualOp) {
@@ -3557,8 +3573,7 @@ IonBuilder::arithTrySharedStub(bool* emitted, JSOp op,
       case JSOP_MUL:
       case JSOP_DIV:
       case JSOP_MOD:
-      case JSOP_POW:
-        stub = MBinarySharedStub::New(alloc(), left, right);
+        stub = MBinaryCache::New(alloc(), left, right);
         break;
       default:
         MOZ_CRASH("unsupported arith");
@@ -3601,7 +3616,7 @@ IonBuilder::jsop_binary_arith(JSOp op, MDefinition* left, MDefinition* right)
             return Ok();
     }
 
-    MOZ_TRY(arithTrySharedStub(&emitted, op, left, right));
+    MOZ_TRY(arithTryBinaryStub(&emitted, op, left, right));
     if (emitted)
         return Ok();
 
@@ -3646,7 +3661,7 @@ IonBuilder::jsop_pow()
             return Ok();
     }
 
-    MOZ_TRY(arithTrySharedStub(&emitted, JSOP_POW, base, exponent));
+    MOZ_TRY(arithTryBinaryStub(&emitted, JSOP_POW, base, exponent));
     if (emitted)
         return Ok();
 
@@ -5752,10 +5767,13 @@ IonBuilder::jsop_eval(uint32_t argc)
 
         // Try to pattern match 'eval(v + "()")'. In this case v is likely a
         // name on the env chain and the eval is performing a call on that
-        // value. Use an env chain lookup rather than a full eval.
+        // value. Use an env chain lookup rather than a full eval. Avoid this
+        // optimization if we're tracking script progress, as this will not
+        // execute the script and give an inconsistent progress count.
         if (string->isConcat() &&
             string->getOperand(1)->type() == MIRType::String &&
-            string->getOperand(1)->maybeConstantValue())
+            string->getOperand(1)->maybeConstantValue() &&
+            !script()->trackRecordReplayProgress())
         {
             JSAtom* atom = &string->getOperand(1)->maybeConstantValue()->toString()->asAtom();
 
@@ -7876,11 +7894,6 @@ IonBuilder::getElemTryTypedObject(bool* emitted, MDefinition* obj, MDefinition* 
         return Ok();
 
     switch (elemPrediction.kind()) {
-      case type::Simd:
-        // FIXME (bug 894105): load into a MIRType::float32x4 etc
-        trackOptimizationOutcome(TrackedOutcome::GenericFailure);
-        return Ok();
-
       case type::Struct:
       case type::Array:
         return getElemTryComplexElemOfTypedObject(emitted,
@@ -8938,11 +8951,6 @@ IonBuilder::setElemTryTypedObject(bool* emitted, MDefinition* obj,
         return Ok();
 
     switch (elemPrediction.kind()) {
-      case type::Simd:
-        // FIXME (bug 894105): store a MIRType::float32x4 etc
-        trackOptimizationOutcome(TrackedOutcome::GenericFailure);
-        return Ok();
-
       case type::Reference:
         return setElemTryReferenceElemOfTypedObject(emitted, obj, index,
                                                     objPrediction, value, elemPrediction);
@@ -10570,10 +10578,6 @@ IonBuilder::getPropTryTypedObject(bool* emitted,
         return Ok();
 
     switch (fieldPrediction.kind()) {
-      case type::Simd:
-        // FIXME (bug 894104): load into a MIRType::float32x4 etc
-        return Ok();
-
       case type::Struct:
       case type::Array:
         return getPropTryComplexPropOfTypedObject(emitted,
@@ -11716,10 +11720,6 @@ IonBuilder::setPropTryTypedObject(bool* emitted, MDefinition* obj,
         return Ok();
 
     switch (fieldPrediction.kind()) {
-      case type::Simd:
-        // FIXME (bug 894104): store into a MIRType::float32x4 etc
-        return Ok();
-
       case type::Reference:
         return setPropTryReferencePropOfTypedObject(emitted, obj, fieldOffset,
                                                     value, fieldPrediction, name);

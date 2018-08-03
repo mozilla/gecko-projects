@@ -3,6 +3,8 @@ linux64/opt:
     index:
         product: firefox
         job-name: linux64-opt
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux64/opt
         symbol: B
@@ -25,6 +27,7 @@ linux64/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-plain/opt:
     description: "Linux64 Opt Plain"
@@ -53,6 +56,7 @@ linux64-plain/opt:
         - linux64-clang
         - linux64-gcc
         - linux64-rust
+        - linux64-node
 
 linux64-dmd/opt:
     description: "Linux64 DMD Opt"
@@ -85,12 +89,15 @@ linux64-dmd/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64/pgo:
     description: "Linux64 PGO"
     index:
         product: firefox
         job-name: linux64-pgo
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux64/pgo
         symbol: B
@@ -114,6 +121,7 @@ linux64/pgo:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-fuzzing/debug:
     description: "Linux64 Fuzzing Debug"
@@ -145,12 +153,15 @@ linux64-fuzzing/debug:
         - linux64-sccache
         - linux64-rust
         - linux64-rust-size
+        - linux64-node
 
 linux64/debug:
     description: "Linux64 Debug"
     index:
         product: firefox
         job-name: linux64-debug
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux64/debug
         symbol: B
@@ -174,6 +185,7 @@ linux64/debug:
         - linux64-sccache
         - linux64-rust
         - linux64-rust-size
+        - linux64-node
 
 linux64-plain/debug:
     description: "Linux64 Debug Plain"
@@ -202,11 +214,13 @@ linux64-plain/debug:
         - linux64-clang
         - linux64-gcc
         - linux64-rust
+        - linux64-node
 
 linux64-devedition-nightly/opt:
     description: "Linux64 devedition Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: build
     shipping-product: devedition
     index:
@@ -238,6 +252,7 @@ linux64-devedition-nightly/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-base-toolchains/opt:
     description: "Linux64 base toolchains Opt"
@@ -267,6 +282,7 @@ linux64-base-toolchains/opt:
         - linux64-gcc-6
         - linux64-rust-1.27
         - linux64-sccache
+        - linux64-node
 
 linux64-base-toolchains/debug:
     description: "Linux64 base toolchains Debug"
@@ -297,12 +313,15 @@ linux64-base-toolchains/debug:
         - linux64-gcc-6
         - linux64-rust-1.27
         - linux64-sccache
+        - linux64-node
 
 linux/opt:
     description: "Linux32 Opt"
     index:
         product: firefox
         job-name: linux-opt
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux32/opt
         symbol: B
@@ -326,12 +345,15 @@ linux/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux/debug:
     description: "Linux32 Debug"
     index:
         product: firefox
         job-name: linux-debug
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux32/debug
         symbol: B
@@ -356,12 +378,15 @@ linux/debug:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux/pgo:
     description: "Linux32 PGO"
     index:
         product: firefox
         job-name: linux-pgo
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux32/pgo
         symbol: B
@@ -386,6 +411,7 @@ linux/pgo:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux-rusttests/opt:
     description: "Linux32 Rust tests Opt"
@@ -420,6 +446,7 @@ linux-rusttests/opt:
         - linux64-gcc
         - linux64-rust
         - linux64-sccache
+        - linux64-node
 
 linux-rusttests/debug:
     description: "Linux32 Rust tests Debug"
@@ -454,11 +481,13 @@ linux-rusttests/debug:
         - linux64-gcc
         - linux64-rust
         - linux64-sccache
+        - linux64-node
 
 linux-devedition-nightly/opt:
     description: "Linux32 devedition Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: build
     shipping-product: devedition
     index:
@@ -491,11 +520,13 @@ linux-devedition-nightly/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux-nightly/opt:
     description: "Linux32 Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: build
     shipping-product: firefox
     index:
@@ -526,7 +557,7 @@ linux-nightly/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
-
+        - linux64-node
 
 linux64-asan/opt:
     description: "Linux64 Opt ASAN"
@@ -558,6 +589,7 @@ linux64-asan/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-asan-fuzzing/opt:
     description: "Linux64 Fuzzing Opt ASAN"
@@ -589,6 +621,7 @@ linux64-asan-fuzzing/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-asan-fuzzing-ccov/opt:
     description: "Linux64 Fuzzing Opt ASAN w/ Coverage"
@@ -621,6 +654,7 @@ linux64-asan-fuzzing-ccov/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-asan-reporter-nightly/opt:
     description: "Linux64 Opt ASAN Reporter Nightly"
@@ -656,6 +690,7 @@ linux64-asan-reporter-nightly/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-asan/debug:
     description: "Linux64 Debug ASAN"
@@ -687,6 +722,7 @@ linux64-asan/debug:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-lto/opt:
     description: "Linux64 Opt LTO"
@@ -719,6 +755,7 @@ linux64-lto/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-lto/debug:
     description: "Linux64 Debug LTO"
@@ -751,11 +788,13 @@ linux64-lto/debug:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-nightly/opt:
     description: "Linux64 Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: build
     shipping-product: firefox
     index:
@@ -785,6 +824,7 @@ linux64-nightly/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-noopt/debug:
     description: "Linux64 No-optimize Debug"
@@ -817,6 +857,7 @@ linux64-noopt/debug:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-rusttests/opt:
     description: "Linux64 Rust tests Opt"
@@ -850,6 +891,7 @@ linux64-rusttests/opt:
         - linux64-gcc
         - linux64-rust
         - linux64-sccache
+        - linux64-node
 
 linux64-rusttests/debug:
     description: "Linux64 Rust tests Debug"
@@ -883,6 +925,7 @@ linux64-rusttests/debug:
         - linux64-gcc
         - linux64-rust
         - linux64-sccache
+        - linux64-node
 
 linux64-tup/opt:
     description: "Linux64 Tup"
@@ -915,6 +958,7 @@ linux64-tup/opt:
         - linux64-rust-nightly
         - linux64-sccache
         - linux64-tup
+        - linux64-node
 
 linux64-jsdcov/opt:
     description: "Linux64-JSDCov Opt"
@@ -944,6 +988,7 @@ linux64-jsdcov/opt:
         - linux64-gcc
         - linux64-rust
         - linux64-sccache
+        - linux64-node
 
 linux64-ccov/debug:
     description: "Linux64-CCov Debug"
@@ -970,9 +1015,11 @@ linux64-ccov/debug:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
-        - linux64-clang
-        - linux64-rust
+        - linux64-clang-7
+        - linux64-rust-nightly
         - linux64-gcc
+        - linux64-sccache
+        - linux64-node
 
 linux64-ccov/opt:
     description: "Linux64-CCov Opt"
@@ -999,9 +1046,11 @@ linux64-ccov/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
-        - linux64-clang
+        - linux64-clang-7
         - linux64-rust
         - linux64-gcc
+        - linux64-sccache
+        - linux64-node
 
 linux64-add-on-devel/opt:
     description: "Linux64 add-on-devel"
@@ -1033,3 +1082,4 @@ linux64-add-on-devel/opt:
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node

@@ -10,7 +10,9 @@ var _assert = require("../../utils/assert");
 
 var _assert2 = _interopRequireDefault(_assert);
 
-var _breakpoints = require("../breakpoints");
+var _telemetry = require("../../utils/telemetry");
+
+var _breakpoints = require("../breakpoints/index");
 
 var _ast = require("../ast");
 
@@ -102,6 +104,10 @@ function togglePrettyPrint(sourceId) {
       return {};
     }
 
+    if (!source.isPrettyPrinted) {
+      (0, _telemetry.recordEvent)("pretty_print");
+    }
+
     if (!(0, _source.isLoaded)(source)) {
       await dispatch((0, _loadSourceText.loadSourceText)(source));
     }
@@ -128,8 +134,9 @@ function togglePrettyPrint(sourceId) {
     await dispatch((0, _pause.mapFrames)());
     await dispatch((0, _ast.setPausePoints)(newPrettySource.id));
     await dispatch((0, _ast.setSymbols)(newPrettySource.id));
-    return dispatch((0, _sources.selectLocation)({ ...options.location,
+    dispatch((0, _sources.selectLocation)({ ...options.location,
       sourceId: newPrettySource.id
     }));
+    return newPrettySource;
   };
 }

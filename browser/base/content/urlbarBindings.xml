@@ -30,6 +30,10 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                   class="textbox-input-box urlbar-input-box"
                   flex="1" xbl:inherits="tooltiptext=inputtooltiptext">
           <children/>
+          <html:input anonid="scheme"
+                      class="urlbar-scheme textbox-input"
+                      required="required"
+                      xbl:inherits="textoverflow,focused"/>
           <html:input anonid="input"
                       class="autocomplete-textbox urlbar-input textbox-input"
                       allowevents="true"
@@ -88,6 +92,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         this.inputField.addEventListener("mouseout", this);
         this.inputField.addEventListener("overflow", this);
         this.inputField.addEventListener("underflow", this);
+        this.inputField.addEventListener("scrollend", this);
 
         var textBox = document.getAnonymousElementByAttribute(this,
                                                 "anonid", "textbox-input-box");
@@ -110,7 +115,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                insertLocation.getAttribute("cmd") != "cmd_paste")
           insertLocation = insertLocation.nextSibling;
         if (insertLocation) {
-          pasteAndGo = document.createElement("menuitem");
+          pasteAndGo = document.createXULElement("menuitem");
           let label = Services.strings.createBundle("chrome://browser/locale/browser.properties").
                                    GetStringFromName("pasteAndGo.label");
           pasteAndGo.setAttribute("label", label);
@@ -151,6 +156,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         this.inputField.removeEventListener("mouseout", this);
         this.inputField.removeEventListener("overflow", this);
         this.inputField.removeEventListener("underflow", this);
+        this.inputField.removeEventListener("scrollend", this);
 
         if (this._deferredKeyEventTimeout) {
           clearTimeout(this._deferredKeyEventTimeout);
@@ -163,6 +169,14 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         this.popup.oneOffSearchButtons.popup = null;
         this.popup.oneOffSearchButtons.textbox = null;
       ]]></destructor>
+
+      <field name="DOMWindowUtils">
+        window.windowUtils;
+      </field>
+
+      <field name="scheme" readonly="true">
+        document.getAnonymousElementByAttribute(this, "anonid", "scheme");
+      </field>
 
       <field name="goButton">
         document.getAnonymousElementByAttribute(this, "anonid", "urlbar-go-button");
@@ -502,22 +516,32 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <field name="_formattingEnabled">true</field>
       <method name="formatValue">
         <body><![CDATA[
-          if (!this._formattingEnabled || !this.editor)
+          // Used to avoid re-entrance in async callbacks.
+          let instance = this._formattingInstance = {};
+
+          if (!this.editor)
             return;
 
-          let controller = this.editor.selectionController;
-          let strikeOut = controller.getSelection(controller.SELECTION_URLSTRIKEOUT);
-          strikeOut.removeAllRanges();
-
-          let selection = controller.getSelection(controller.SELECTION_URLSECONDARY);
-          selection.removeAllRanges();
-
-          if (this.focused)
-            return;
+          // Cleanup previously set styles.
+          this.scheme.value = "";
+          let controller, strikeOut, selection;
+          if (this._formattingEnabled) {
+            controller = this.editor.selectionController;
+            strikeOut = controller.getSelection(controller.SELECTION_URLSTRIKEOUT);
+            strikeOut.removeAllRanges();
+            selection = controller.getSelection(controller.SELECTION_URLSECONDARY);
+            selection.removeAllRanges();
+            this.formatScheme(controller.SELECTION_URLSTRIKEOUT, true);
+            this.formatScheme(controller.SELECTION_URLSECONDARY, true);
+            this.inputField.style.setProperty("--urlbar-scheme-size", "0px");
+          }
 
           let textNode = this.editor.rootElement.firstChild;
           let value = textNode.textContent;
           if (!value)
+            return;
+
+          if (this.focused)
             return;
 
           // Get the URL from the fixup service:
@@ -547,9 +571,40 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             trimmedLength = "http://".length;
           }
 
-          let matchedURL = value.match(/^((?:[a-z]+:\/\/)(?:[^\/#?]+@)?)(\S+?)(?::\d+)?\s*(?:[\/#?]|$)/);
+          let matchedURL = value.match(/^(([a-z]+:\/\/)(?:[^\/#?]+@)?)(\S+?)(?::\d+)?\s*(?:[\/#?]|$)/);
           if (!matchedURL)
             return;
+
+          let [, preDomain, schemeWSlashes, domain] = matchedURL;
+          // We strip http, so we should not show the scheme box for it.
+          if (!this._mayTrimURLs || schemeWSlashes != "http://") {
+            this.scheme.value = schemeWSlashes;
+            this.inputField.style.setProperty("--urlbar-scheme-size",
+                                              schemeWSlashes.length + "ch");
+          }
+
+          // Make sure the host is always visible. Since it is aligned on
+          // the first strong directional character, we set the overflow
+          // appropriately.
+          this.selectionStart = this.selectionEnd = 0;
+          window.requestAnimationFrame(() => {
+            // Check for re-entrance. On focus change this formatting code is
+            // invoked regardless, thus this should be enough.
+            if (this._formattingInstance != instance)
+              return;
+            let isDomainRTL = this.DOMWindowUtils.getDirectionFromText(domain);
+            // In the future, for example in bug 525831, we may add a forceRTL
+            // char just after the domain, and in such a case we should not
+            // scroll to the left.
+            if (isDomainRTL && value[preDomain.length + domain.length] != "\u200E") {
+              this.inputField.scrollLeft = this.inputField.scrollLeftMax;
+            }
+          });
+
+          if (!this._formattingEnabled)
+            return;
+
+          this.formatScheme(controller.SELECTION_URLSECONDARY);
 
           // Strike out the "https" part if mixed active content is loaded.
           if (this.getAttribute("pageproxystate") == "valid" &&
@@ -560,9 +615,9 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             range.setStart(textNode, 0);
             range.setEnd(textNode, 5);
             strikeOut.addRange(range);
+            this.formatScheme(controller.SELECTION_URLSTRIKEOUT);
           }
 
-          let [, preDomain, domain] = matchedURL;
           let baseDomain = domain;
           let subDomain = "";
           try {
@@ -592,6 +647,25 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             range.setStart(textNode, startRest);
             range.setEnd(textNode, value.length - trimmedLength);
             selection.addRange(range);
+          }
+        ]]></body>
+      </method>
+
+      <method name="formatScheme">
+        <parameter name="selectionType"/>
+        <parameter name="clear"/>
+        <body><![CDATA[
+          let editor = this.scheme.editor;
+          let controller = editor.selectionController;
+          let textNode = editor.rootElement.firstChild;
+          let selection = controller.getSelection(selectionType);
+          if (clear) {
+            selection.removeAllRanges();
+          } else {
+            let r = document.createRange();
+            r.setStart(textNode, 0);
+            r.setEnd(textNode, textNode.textContent.length);
+            selection.addRange(r);
           }
         ]]></body>
       </method>
@@ -890,11 +964,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             if (ex.result != Cr.NS_ERROR_LOAD_SHOWED_ERRORPAGE) {
               this.handleRevert();
             }
-          }
-
-          if (openUILinkWhere == "current") {
-            // Ensure the start of the URL is visible for usability reasons.
-            this.selectionStart = this.selectionEnd = 0;
           }
         ]]></body>
       </method>
@@ -1335,11 +1404,16 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                 // anonymous div containing the placeholder text; bail out.
                 break;
               }
-              this.setAttribute("textoverflow", "true");
+              this._inOverflow = true;
+              this.updateTextOverflow();
               break;
             case "underflow":
-              this.removeAttribute("textoverflow");
+              this._inOverflow = false;
+              this.updateTextOverflow();
               this._hideURLTooltip();
+              break;
+            case "scrollend":
+              this.updateTextOverflow();
               break;
             case "TabSelect":
               // The autocomplete controller uses heuristic on some internal caches
@@ -1351,8 +1425,26 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         ]]></body>
       </method>
 
+      <method name="updateTextOverflow">
+        <body><![CDATA[
+          if (this._inOverflow) {
+            window.promiseDocumentFlushed(() => {
+              // Check overflow again to ensure it didn't change in the meanwhile.
+              let input = this.inputField;
+              if (input && this._inOverflow) {
+                let side = input.scrollLeft &&
+                           input.scrollLeft == input.scrollLeftMax ? "start" : "end";
+                this.setAttribute("textoverflow", side);
+              }
+            });
+          } else {
+            this.removeAttribute("textoverflow");
+          }
+        ]]></body>
+      </method>
+
       <!--
-        onBeforeTextValueSet is called by the base-binding's .textValue getter.
+        onBeforeTextValueGet is called by the base-binding's .textValue getter.
         It should return the value that the getter should use.
       -->
       <method name="onBeforeTextValueGet">
@@ -1729,9 +1821,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                .supportsSelectionClipboard())
           return;
 
-        if (!window.QueryInterface(Ci.nsIInterfaceRequestor)
-                   .getInterface(Ci.nsIDOMWindowUtils)
-                   .isHandlingUserInput)
+        if (!window.windowUtils.isHandlingUserInput)
           return;
 
         var val = this._getSelectedValueForClipboard();
@@ -1801,8 +1891,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <field name="textRunsMaxLen">255</field>
 
       <field name="DOMWindowUtils">
-        window.QueryInterface(Ci.nsIInterfaceRequestor)
-              .getInterface(Ci.nsIDOMWindowUtils);
+        window.windowUtils;
       </field>
 
       <field name="_maxResults">0</field>
@@ -1821,6 +1910,10 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
       <field name="footer" readonly="true">
         document.getAnonymousElementByAttribute(this, "anonid", "footer");
+      </field>
+
+      <field name="shrinkDelay" readonly="true">
+        250
       </field>
 
       <field name="oneOffSearchButtons" readonly="true">
@@ -2105,6 +2198,83 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             }
           }
         ]]></body>
+      </method>
+
+      <method name="adjustHeight">
+        <body>
+          <![CDATA[
+          // If we were going to shrink later, cancel that for now:
+          if (this._shrinkTimeout) {
+            clearTimeout(this._shrinkTimeout);
+            this._shrinkTimeout = null;
+          }
+          let lastRowCount = this._lastRowCount;
+          // Figure out how many rows to show
+          let rows = this.richlistbox.childNodes;
+          this._lastRowCount = rows.length;
+          let numRows = Math.min(this.matchCount, this.maxRows, rows.length);
+
+          // If we're going from 0 to non-0 rows, we might need to remove
+          // the height attribute to allow the popup to size. The attribute
+          // is set from XUL popup management code.
+          if (!lastRowCount && rows.length) {
+            this.removeAttribute("height");
+          }
+
+          // Default the height to 0 if we have no rows to show
+          let height = 0;
+          if (numRows) {
+            if (!this._rowHeight) {
+              window.promiseDocumentFlushed(() => {
+                if (window.closed) {
+                  return;
+                }
+                this._rowHeight = rows[0].getBoundingClientRect().height;
+                let style = window.getComputedStyle(this.richlistbox);
+
+                let paddingTop = parseInt(style.paddingTop) || 0;
+                let paddingBottom = parseInt(style.paddingBottom) || 0;
+                this._rlbPadding = paddingTop + paddingBottom;
+                // Then re-run - but don't dirty layout from inside this callback.
+                window.requestAnimationFrame(() => this.adjustHeight());
+              });
+              return;
+            }
+
+            // Calculate the height to have the first row to last row shown
+            height = (this._rowHeight * numRows) + this._rlbPadding;
+          }
+
+          let animate = this.getAttribute("dontanimate") != "true";
+          let currentHeight =
+            parseFloat(this.richlistbox.getAttribute("height"), 10) ||
+            parseFloat(this.richlistbox.style.height, 10) ||
+            0; // It's possible we get here when we haven't set height on the richlistbox
+               // yet, which means parseFloat will return NaN. It should return 0 instead.
+          if (height > currentHeight) {
+            // Grow immediately.
+            if (animate) {
+              this.richlistbox.removeAttribute("height");
+              this.richlistbox.style.height = height + "px";
+            } else {
+              this.richlistbox.style.removeProperty("height");
+              this.richlistbox.height = height;
+            }
+          } else if (height < currentHeight) { // Don't shrink if height matches exactly
+            // Delay shrinking to avoid flicker.
+            this._shrinkTimeout = setTimeout(() => {
+              this._collapseUnusedItems();
+              if (animate) {
+                this.richlistbox.removeAttribute("height");
+                this.richlistbox.style.height = height + "px";
+              } else {
+                this.richlistbox.style.removeProperty("height");
+                this.richlistbox.height = height;
+              }
+            }, this.shrinkDelay);
+          }
+          ]]>
+        </body>
       </method>
 
       <method name="_showSearchSuggestionsNotification">

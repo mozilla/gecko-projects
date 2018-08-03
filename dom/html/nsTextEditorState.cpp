@@ -50,6 +50,15 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
+inline nsresult
+SetEditorFlagsIfNecessary(EditorBase& aEditorBase, uint32_t aFlags)
+{
+  if (aEditorBase.Flags() == aFlags) {
+    return NS_OK;
+  }
+  return aEditorBase.SetFlags(aFlags);
+}
+
 class MOZ_STACK_CLASS ValueSetter
 {
 public:
@@ -139,19 +148,24 @@ public:
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     MOZ_ASSERT(mTextEditor);
 
+    // EditorBase::SetFlags() is a virtual method.  Even though it does nothing
+    // if new flags and current flags are same, the calling cost causes
+    // appearing the method in profile.  So, this class should check if it's
+    // necessary to call.
     uint32_t flags = mSavedFlags;
     flags &= ~(nsIPlaintextEditor::eEditorDisabledMask);
     flags &= ~(nsIPlaintextEditor::eEditorReadonlyMask);
     flags |= nsIPlaintextEditor::eEditorDontEchoPassword;
-    mTextEditor->SetFlags(flags);
-
+    if (mSavedFlags != flags) {
+      mTextEditor->SetFlags(flags);
+    }
     mTextEditor->SetMaxTextLength(-1);
   }
 
   ~AutoRestoreEditorState()
   {
      mTextEditor->SetMaxTextLength(mSavedMaxLength);
-     mTextEditor->SetFlags(mSavedFlags);
+     SetEditorFlagsIfNecessary(*mTextEditor, mSavedFlags);
   }
 
 private:
@@ -1482,7 +1496,7 @@ nsTextEditorState::PrepareEditor(const nsAString *aValue)
       mSelCon->SetDisplaySelection(nsISelectionController::SELECTION_OFF);
     }
 
-    newTextEditor->SetFlags(editorFlags);
+    SetEditorFlagsIfNecessary(*newTextEditor, editorFlags);
   }
 
   if (shouldInitializeEditor) {
@@ -1496,8 +1510,10 @@ nsTextEditorState::PrepareEditor(const nsAString *aValue)
   // editor for us.
 
   if (!defaultValue.IsEmpty()) {
-    rv = newTextEditor->SetFlags(editorFlags);
-    NS_ENSURE_SUCCESS(rv, rv);
+    rv = SetEditorFlagsIfNecessary(*newTextEditor, editorFlags);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
 
     // Now call SetValue() which will make the necessary editor calls to set
     // the default value.  Make sure to turn off undo before setting the default
@@ -1509,8 +1525,10 @@ nsTextEditorState::PrepareEditor(const nsAString *aValue)
     NS_ENSURE_TRUE(success, NS_ERROR_OUT_OF_MEMORY);
 
     // Now restore the original editor flags.
-    rv = newTextEditor->SetFlags(editorFlags);
-    NS_ENSURE_SUCCESS(rv, rv);
+    rv = SetEditorFlagsIfNecessary(*newTextEditor, editorFlags);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
   }
 
   if (IsPasswordTextControl()) {
@@ -2221,8 +2239,8 @@ nsTextEditorState::GetValue(nsAString& aValue, bool aIgnoreWrap) const
     { /* Scope for AutoNoJSAPI. */
       AutoNoJSAPI nojsapi;
 
-      mTextEditor->OutputToString(NS_LITERAL_STRING("text/plain"), flags,
-                                  aValue);
+      DebugOnly<nsresult> rv = mTextEditor->ComputeTextValue(flags, aValue);
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to get value");
     }
     // Only when the result doesn't include line breaks caused by hard-wrap,
     // mCacheValue should cache the value.
@@ -2407,10 +2425,24 @@ nsTextEditorState::SetValue(const nsAString& aValue, const nsAString* aOldValue,
           bool notifyValueChanged = !!(aFlags & eSetValue_Notify);
           mTextListener->SetValueChanged(notifyValueChanged);
 
-          // We preserve the undo history if we are explicitly setting the
-          // value for the user's input, or if we are setting the value for a
-          // XUL text control.
-          if (aFlags & (eSetValue_BySetUserInput | eSetValue_ForXUL)) {
+          if (aFlags & eSetValue_BySetUserInput) {
+            // If the caller inserts text as part of user input, for example,
+            // autocomplete, we need to replace the text as "insert string"
+            // because undo should cancel only this operation (i.e., previous
+            // transactions typed by user shouldn't be merged with this).
+            DebugOnly<nsresult> rv = textEditor->ReplaceTextAsAction(newValue);
+            NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+              "Failed to set the new value");
+          } else if (aFlags & eSetValue_ForXUL) {
+            // On XUL <textbox> element, we need to preserve existing undo
+            // transactions.
+            // XXX Do we really need to do such complicated optimization?
+            //     This was landed for web pages which set <textarea> value
+            //     per line (bug 518122).  For example:
+            //       for (;;) {
+            //         textarea.value += oneLineText + "\n";
+            //       }
+            //     However, this path won't be used in web content anymore.
             nsCOMPtr<nsISelectionController> kungFuDeathGrip = mSelCon.get();
             uint32_t currentLength = currentValue.Length();
             uint32_t newlength = newValue.Length();
@@ -2439,6 +2471,9 @@ nsTextEditorState::SetValue(const nsAString& aValue, const nsAString* aOldValue,
                 "Failed to insert the new value");
             }
           } else {
+            // On <input> or <textarea>, we shouldn't preserve existing undo
+            // transactions because other browsers do not preserve them too
+            // and not preserving transactions makes setting value faster.
             AutoDisableUndo disableUndo(textEditor);
             if (selection) {
               // Since we don't use undo transaction, we don't need to store
@@ -2543,7 +2578,7 @@ nsTextEditorState::HasNonEmptyValue()
   if (mTextEditor && mBoundFrame && mEditorInitialized &&
       !mIsCommittingComposition) {
     bool empty;
-    nsresult rv = mTextEditor->DocumentIsEmpty(&empty);
+    nsresult rv = mTextEditor->IsEmpty(&empty);
     if (NS_SUCCEEDED(rv)) {
       return !empty;
     }

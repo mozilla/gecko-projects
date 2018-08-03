@@ -71,6 +71,7 @@ class HTMLEditor final : public TextEditor
                        , public nsIHTMLInlineTableEditor
                        , public nsIEditorStyleSheets
                        , public nsStubMutationObserver
+                       , public nsIEditorMailSupport
 {
 public:
   /****************************************************************************
@@ -155,6 +156,16 @@ public:
                                          nsINode *aNode) override;
   virtual bool IsAcceptableInputEvent(WidgetGUIEvent* aGUIEvent) override;
   virtual nsresult GetPreferredIMEState(widget::IMEState* aState) override;
+
+  /**
+   * PasteAsQuotationAsAction() pastes content in clipboard with newly created
+   * blockquote element.  If the editor is in plaintext mode, will paste the
+   * content with appending ">" to start of each line.
+   *
+   * @param aClipboardType      nsIClipboard::kGlobalClipboard or
+   *                            nsIClipboard::kSelectionClipboard.
+   */
+  virtual nsresult PasteAsQuotationAsAction(int32_t aClipboardType) override;
 
   /**
    * Can we paste |aTransferable| or, if |aTransferable| is null, will a call
@@ -287,7 +298,7 @@ public:
     * Get an active editor's editing host in DOM window.  If this editor isn't
     * active in the DOM window, this returns NULL.
     */
-  Element* GetActiveEditingHost();
+  Element* GetActiveEditingHost() const;
 
 protected: // May be called by friends.
   /****************************************************************************
@@ -369,7 +380,7 @@ protected: // May be called by friends.
    */
   nsresult RemoveBlockContainerWithTransaction(Element& aElement);
 
-  virtual Element* GetEditorRoot() override;
+  virtual Element* GetEditorRoot() const override;
   using EditorBase::IsEditable;
   virtual nsresult RemoveAttributeOrEquivalent(
                      Element* aElement,
@@ -782,6 +793,17 @@ protected: // Shouldn't be used by friend classes
   nsresult InsertBrElementAtSelectionWithTransaction();
 
   nsresult LoadHTML(const nsAString& aInputString);
+
+  /**
+   * ReplaceHeadContentsWithSourceWithTransaction() replaces all children of
+   * <head> element with given source code.  This is undoable.
+   *
+   * @param aSourceToInsert     HTML source fragment to replace the children
+   *                            of <head> element.
+   */
+  nsresult
+  ReplaceHeadContentsWithSourceWithTransaction(
+    const nsAString& aSourceToInsert);
 
   nsresult GetCSSBackgroundColorState(bool* aMixed, nsAString& aOutColor,
                                       bool aBlockLevel);

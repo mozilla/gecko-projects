@@ -120,7 +120,7 @@
       <menuitem id="context_openTabInWindow" label="&moveToNewWindow.label;"
                 accesskey="&moveToNewWindow.accesskey;"
                 tbattr="tabbrowser-multiple"
-                oncommand="gBrowser.replaceTabWithWindow(TabContextMenu.contextTab);"/>
+                oncommand="gBrowser.replaceTabsWithWindow(TabContextMenu.contextTab);"/>
       <menuseparator id="context_sendTabToDevice_separator" class="sync-ui-item"/>
       <menu id="context_sendTabToDevice" label="&sendTabToDevice.label;"
             class="sync-ui-item"
@@ -132,6 +132,11 @@
       <menuitem id="context_reloadAllTabs" label="&reloadAllTabs.label;" accesskey="&reloadAllTabs.accesskey;"
                 tbattr="tabbrowser-multiple-visible"
                 oncommand="gBrowser.reloadAllTabs();"/>
+       <menuitem id="context_bookmarkSelectedTabs"
+                hidden="true"
+                label="&bookmarkSelectedTabs.label;"
+                accesskey="&bookmarkSelectedTabs.accesskey;"
+                oncommand="PlacesCommandHook.bookmarkPages(PlacesCommandHook.uniqueSelectedPages);"/>
       <menuitem id="context_bookmarkAllTabs"
                 label="&bookmarkAllTabs.label;"
                 accesskey="&bookmarkAllTabs.accesskey;"
@@ -227,7 +232,6 @@
            ignorekeys="true"
            hidden="true"
            tabspecific="true"
-           onpopupshown="StarUI.panelShown(event);"
            aria-labelledby="editBookmarkPanelTitle">
       <box class="panel-header">
         <label id="editBookmarkPanelTitle"/>
@@ -237,13 +241,15 @@
       </html:div>
       <box id="editBookmarkPanelImage"/>
 #include ../../components/places/content/editBookmarkPanel.inc.xul
-      <vbox id="editBookmarkPanelBottomContent" flex="1">
+      <vbox id="editBookmarkPanelBottomContent"
+            flex="1">
         <checkbox id="editBookmarkPanel_showForNewBookmarks"
                   label="&editBookmark.showForNewBookmarks.label;"
                   accesskey="&editBookmark.showForNewBookmarks.accesskey;"
                   oncommand="StarUI.onShowForNewBookmarksCheckboxCommand();"/>
       </vbox>
-      <hbox id="editBookmarkPanelBottomButtons" pack="end">
+      <hbox id="editBookmarkPanelBottomButtons"
+            style="min-width: &editBookmark.panel.width;;">
 #ifndef XP_UNIX
         <button id="editBookmarkPanelDoneButton"
                 class="editBookmarkPanelBottomButton"
@@ -404,10 +410,22 @@
     <menupopup id="blockedPopupOptions"
                onpopupshowing="gPopupBlockerObserver.fillPopupList(event);"
                onpopuphiding="gPopupBlockerObserver.onPopupHiding(event);">
-      <menuitem observes="blockedPopupAllowSite"/>
-      <menuitem observes="blockedPopupEditSettings"/>
-      <menuitem observes="blockedPopupDontShowMessage"/>
-      <menuseparator observes="blockedPopupsSeparator"/>
+      <menuitem id="blockedPopupAllowSite"
+                accesskey="&allowPopups.accesskey;"
+                oncommand="gPopupBlockerObserver.toggleAllowPopupsForSite(event);"/>
+      <menuitem
+#ifdef XP_WIN
+                label="&editPopupSettings.label;"
+#else
+                label="&editPopupSettingsUnix.label;"
+#endif
+                accesskey="&editPopupSettings.accesskey;"
+                oncommand="gPopupBlockerObserver.editPopupSettings();"/>
+      <menuitem id="blockedPopupDontShowMessage"
+                accesskey="&dontShowMessage.accesskey;"
+                type="checkbox"
+                oncommand="gPopupBlockerObserver.dontShowMessage();"/>
+      <menuseparator id="blockedPopupsSeparator"/>
     </menupopup>
 
     <menupopup id="autohide-context"
@@ -457,7 +475,8 @@
            emailLink-title="&emailPageCmd.label;"
            sendToDevice-title="&pageAction.sendTabToDevice.label;"
            sendToDevice-notReadyTitle="&sendToDevice.syncNotReady.label;"
-           shareURL-title="&pageAction.shareUrl.label;">
+           shareURL-title="&pageAction.shareUrl.label;"
+           shareMore-label="&pageAction.shareMore.label;">
       <panelmultiview id="pageActionPanelMultiView"
                       mainViewId="pageActionPanelMainView"
                       viewCacheId="appMenu-viewCache">
@@ -780,7 +799,6 @@
                      autocompletesearchparam="enable-actions"
                      autocompletepopup="PopupAutoCompleteRichResult"
                      completeselectedindex="true"
-                     shrinkdelay="250"
                      tabscrolling="true"
                      newlines="stripsurroundingwhitespace"
                      ontextentered="this.handleCommand(param);"
@@ -1223,8 +1241,7 @@
         <tabbox id="tabbrowser-tabbox"
                 flex="1" eventnode="document" tabcontainer="tabbrowser-tabs">
           <tabpanels id="tabbrowser-tabpanels"
-                     flex="1" class="plain" selectedIndex="0"
-                     onselect="if (event.target == this) gBrowser.updateCurrentBrowser();">
+                     flex="1" class="plain" selectedIndex="0">
             <notificationbox flex="1" notificationside="top">
               <!-- Set large flex to allow the devtools toolbox to set a flex attribute.
                    We don't want the toolbox to actually take up free space, but we do want it to collapse when the window shrinks, and with flex=0 it can't.

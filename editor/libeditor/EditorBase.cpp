@@ -713,7 +713,7 @@ EditorBase::GetSelection(Selection** aSelection)
 
 nsresult
 EditorBase::GetSelection(SelectionType aSelectionType,
-                         Selection** aSelection)
+                         Selection** aSelection) const
 {
   NS_ENSURE_TRUE(aSelection, NS_ERROR_NULL_POINTER);
   *aSelection = nullptr;
@@ -1000,13 +1000,7 @@ EditorBase::SetShouldTxnSetSelection(bool aShould)
 NS_IMETHODIMP
 EditorBase::GetDocumentIsEmpty(bool* aDocumentIsEmpty)
 {
-  *aDocumentIsEmpty = true;
-
-  dom::Element* root = GetRoot();
-  NS_ENSURE_TRUE(root, NS_ERROR_NULL_POINTER);
-
-  *aDocumentIsEmpty = !root->HasChildren();
-  return NS_OK;
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 // XXX: The rule system should tell us which node to select all on (ie, the
@@ -1138,13 +1132,19 @@ EditorBase::GetDocumentModified(bool* outDocModified)
 }
 
 NS_IMETHODIMP
-EditorBase::GetDocumentCharacterSet(nsACString& characterSet)
+EditorBase::GetDocumentCharacterSet(nsACString& aCharset)
+{
+  return GetDocumentCharsetInternal(aCharset);
+}
+
+nsresult
+EditorBase::GetDocumentCharsetInternal(nsACString& aCharset) const
 {
   nsCOMPtr<nsIDocument> document = GetDocument();
   if (NS_WARN_IF(!document)) {
     return NS_ERROR_UNEXPECTED;
   }
-  document->GetDocumentCharacterSet()->Name(characterSet);
+  document->GetDocumentCharacterSet()->Name(aCharset);
   return NS_OK;
 }
 
@@ -3750,39 +3750,49 @@ EditorBase::TagCanContainTag(nsAtom& aParentTag,
 }
 
 bool
-EditorBase::IsRoot(nsINode* inNode)
+EditorBase::IsRoot(nsINode* inNode) const
 {
-  NS_ENSURE_TRUE(inNode, false);
-
-  nsCOMPtr<nsINode> rootNode = GetRoot();
-
+  if (NS_WARN_IF(!inNode)) {
+    return false;
+  }
+  nsINode* rootNode = GetRoot();
   return inNode == rootNode;
 }
 
 bool
-EditorBase::IsEditorRoot(nsINode* aNode)
+EditorBase::IsEditorRoot(nsINode* aNode) const
 {
-  NS_ENSURE_TRUE(aNode, false);
-  nsCOMPtr<nsINode> rootNode = GetEditorRoot();
+  if (NS_WARN_IF(!aNode)) {
+    return false;
+  }
+  nsINode* rootNode = GetEditorRoot();
   return aNode == rootNode;
 }
 
 bool
-EditorBase::IsDescendantOfRoot(nsINode* inNode)
+EditorBase::IsDescendantOfRoot(nsINode* inNode) const
 {
-  NS_ENSURE_TRUE(inNode, false);
-  nsCOMPtr<nsIContent> root = GetRoot();
-  NS_ENSURE_TRUE(root, false);
+  if (NS_WARN_IF(!inNode)) {
+    return false;
+  }
+  nsIContent* root = GetRoot();
+  if (NS_WARN_IF(!root)) {
+    return false;
+  }
 
   return nsContentUtils::ContentIsDescendantOf(inNode, root);
 }
 
 bool
-EditorBase::IsDescendantOfEditorRoot(nsINode* aNode)
+EditorBase::IsDescendantOfEditorRoot(nsINode* aNode) const
 {
-  NS_ENSURE_TRUE(aNode, false);
-  nsCOMPtr<nsIContent> root = GetEditorRoot();
-  NS_ENSURE_TRUE(root, false);
+  if (NS_WARN_IF(!aNode)) {
+    return false;
+  }
+  nsIContent* root = GetEditorRoot();
+  if (NS_WARN_IF(!root)) {
+    return false;
+  }
 
   return nsContentUtils::ContentIsDescendantOf(aNode, root);
 }
@@ -4821,13 +4831,13 @@ EditorBase::ReinitializeSelection(Element& aElement)
 }
 
 Element*
-EditorBase::GetEditorRoot()
+EditorBase::GetEditorRoot() const
 {
   return GetRoot();
 }
 
 Element*
-EditorBase::GetExposedRoot()
+EditorBase::GetExposedRoot() const
 {
   Element* rootElement = GetRoot();
 

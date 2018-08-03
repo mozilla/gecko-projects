@@ -62,13 +62,8 @@ var StarUI = {
       case "popuphidden": {
         clearTimeout(this._autoCloseTimer);
         if (aEvent.originalTarget == this.panel) {
-          let selectedFolderGuid;
-
-          if (!this._element("editBookmarkPanelContent").hidden) {
-            // Get the folder first, before we uninit the overlay.
-            selectedFolderGuid = gEditItemOverlay.selectedFolderGuid;
-            this.quitEditMode();
-          }
+          let selectedFolderGuid = gEditItemOverlay.selectedFolderGuid;
+          gEditItemOverlay.uninitPanel(true);
 
           this._anchorElement.removeAttribute("open");
           this._anchorElement = null;
@@ -205,9 +200,6 @@ var StarUI = {
     this._element("editBookmarkPanel_showForNewBookmarks").checked =
       this.showForNewBookmarks;
 
-    this._element("editBookmarkPanelBottomButtons").hidden = false;
-    this._element("editBookmarkPanelContent").hidden = false;
-
     this._itemGuids = [];
     await PlacesUtils.bookmarks.fetch({url: aUrl},
       bookmark => this._itemGuids.push(bookmark.guid));
@@ -271,23 +263,6 @@ var StarUI = {
     let canvas = PageThumbs.createCanvas(window);
     PageThumbs.captureToCanvas(gBrowser.selectedBrowser, canvas);
     document.mozSetImageElement("editBookmarkPanelImageCanvas", canvas);
-  },
-
-  panelShown:
-  function SU_panelShown(aEvent) {
-    if (aEvent.target == this.panel) {
-      if (this._element("editBookmarkPanelContent").hidden) {
-        // Note this isn't actually used anymore, we should remove this
-        // once we decide not to bring back the page bookmarked notification
-        this.panel.focus();
-      }
-    }
-  },
-
-  quitEditMode: function SU_quitEditMode() {
-    this._element("editBookmarkPanelContent").hidden = true;
-    this._element("editBookmarkPanelBottomButtons").hidden = true;
-    gEditItemOverlay.uninitPanel(true);
   },
 
   removeBookmarkButtonCommand: function SU_removeBookmarkButtonCommand() {
@@ -424,9 +399,8 @@ var PlacesCommandHook = {
 
       info.guid = await PlacesTransactions.NewBookmark(info).transact();
 
-      // Set the character-set
-      if (charset && !PrivateBrowsingUtils.isBrowserPrivate(browser)) {
-        PlacesUtils.setCharsetForURI(makeURI(url.href), charset);
+      if (charset) {
+        PlacesUIUtils.setCharsetForPage(url, charset, window).catch(Cu.reportError);
       }
     }
 
@@ -473,20 +447,19 @@ var PlacesCommandHook = {
   },
 
   /**
-   * List of nsIURI objects characterizing the tabs currently open in the
-   * browser, modulo pinned tabs.  The URIs will be in the order in which their
-   * corresponding tabs appeared and duplicates are discarded.
-   */
-  get uniqueCurrentPages() {
+   * List of nsIURI objects characterizing tabs given in param.
+   * Duplicates are discarded.
+  */
+  getUniquePages(tabs) {
     let uniquePages = {};
     let URIs = [];
 
-    gBrowser.visibleTabs.forEach(tab => {
+    tabs.forEach(tab => {
       let browser = tab.linkedBrowser;
       let uri = browser.currentURI;
       let title = browser.contentTitle || tab.label;
       let spec = uri.spec;
-      if (!tab.pinned && !(spec in uniquePages)) {
+      if (!(spec in uniquePages)) {
         uniquePages[spec] = null;
         URIs.push({ uri, title });
       }
@@ -495,16 +468,33 @@ var PlacesCommandHook = {
   },
 
   /**
-   * Adds a folder with bookmarks to all of the currently open tabs in this
-   * window.
+   * List of nsIURI objects characterizing the tabs currently open in the
+   * browser, modulo pinned tabs. The URIs will be in the order in which their
+   * corresponding tabs appeared and duplicates are discarded.
    */
-  bookmarkCurrentPages: function PCH_bookmarkCurrentPages() {
-    let pages = this.uniqueCurrentPages;
-    if (pages.length > 1) {
-    PlacesUIUtils.showBookmarkDialog({ action: "add",
-                                       type: "folder",
-                                       URIList: pages
-                                     }, window);
+  get uniqueCurrentPages() {
+    let visibleUnpinnedTabs = gBrowser.visibleTabs
+                                      .filter(tab => !tab.pinned);
+    return this.getUniquePages(visibleUnpinnedTabs);
+  },
+
+   /**
+   * List of nsIURI objects characterizing the tabs currently
+   * selected in the window. Duplicates are discarded.
+   */
+  get uniqueSelectedPages() {
+    return this.getUniquePages(gBrowser.selectedTabs);
+  },
+
+  /**
+   * Adds a folder with bookmarks to URIList given in param.
+   */
+  bookmarkPages(URIList) {
+    if (URIList.length > 1) {
+      PlacesUIUtils.showBookmarkDialog({ action: "add",
+                                         type: "folder",
+                                         URIList,
+                                       }, window);
     }
   },
 
@@ -514,7 +504,7 @@ var PlacesCommandHook = {
   updateBookmarkAllTabsCommand:
   function PCH_updateBookmarkAllTabsCommand() {
     // There's nothing to do in non-browser windows.
-    if (window.location.href != getBrowserURL())
+    if (window.location.href != AppConstants.BROWSER_CHROME_URL)
       return;
 
     // Disable "Bookmark All Tabs" if there are less than two
@@ -618,7 +608,8 @@ HistoryMenu.prototype = {
   },
 
   toggleHiddenTabs() {
-    if (gBrowser.visibleTabs.length < gBrowser.tabs.length) {
+    if (window.gBrowser &&
+        gBrowser.visibleTabs.length < gBrowser.tabs.length) {
       this.hiddenTabsMenu.removeAttribute("hidden");
     } else {
       this.hiddenTabsMenu.setAttribute("hidden", "true");
@@ -1144,7 +1135,7 @@ var LibraryUI = {
     let animatableBox = document.getElementById("library-animatable-box");
     let navBar = document.getElementById("nav-bar");
     let libraryIcon = document.getAnonymousElementByAttribute(libraryButton, "class", "toolbarbutton-icon");
-    let dwu = window.getInterface(Ci.nsIDOMWindowUtils);
+    let dwu = window.windowUtils;
     let iconBounds = dwu.getBoundsWithoutFlushing(libraryIcon);
     let libraryBounds = dwu.getBoundsWithoutFlushing(libraryButton);
     let toolboxBounds = dwu.getBoundsWithoutFlushing(gNavToolbox);
@@ -1207,8 +1198,7 @@ var LibraryUI = {
 
       let animatableBox = document.getElementById("library-animatable-box");
       let libraryIcon = document.getAnonymousElementByAttribute(libraryButton, "class", "toolbarbutton-icon");
-      let dwu = window.getInterface(Ci.nsIDOMWindowUtils);
-      let iconBounds = dwu.getBoundsWithoutFlushing(libraryIcon);
+      let iconBounds = window.windowUtils.getBoundsWithoutFlushing(libraryIcon);
 
       // Resizing the window will only have the ability to change the X offset of the
       // library button.

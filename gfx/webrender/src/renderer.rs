@@ -9,7 +9,7 @@
 //!
 //! [renderer]: struct.Renderer.html
 
-use api::{BlobImageRenderer, ColorF, DeviceIntPoint, DeviceIntRect, DeviceIntSize};
+use api::{BlobImageHandler, ColorF, DeviceIntPoint, DeviceIntRect, DeviceIntSize};
 use api::{DeviceUintPoint, DeviceUintRect, DeviceUintSize, DocumentId, Epoch, ExternalImageId};
 use api::{ExternalImageType, FontRenderMode, FrameMsg, ImageFormat, PipelineId};
 use api::{RenderApiSender, RenderNotifier, TexelRect, TextureTarget};
@@ -1306,6 +1306,7 @@ struct TargetSelector {
 #[cfg(feature = "debug_renderer")]
 struct LazyInitializedDebugRenderer {
     debug_renderer: Option<DebugRenderer>,
+    failed: bool,
 }
 
 #[cfg(feature = "debug_renderer")]
@@ -1313,11 +1314,25 @@ impl LazyInitializedDebugRenderer {
     pub fn new() -> Self {
         Self {
             debug_renderer: None,
+            failed: false,
         }
     }
 
-    pub fn get_mut<'a>(&'a mut self, device: &mut Device) -> &'a mut DebugRenderer {
-        self.debug_renderer.get_or_insert_with(|| DebugRenderer::new(device))
+    pub fn get_mut<'a>(&'a mut self, device: &mut Device) -> Option<&'a mut DebugRenderer> {
+        if self.failed {
+            return None;
+        }
+        if self.debug_renderer.is_none() {
+            match DebugRenderer::new(device) {
+                Ok(renderer) => { self.debug_renderer = Some(renderer); }
+                Err(_) => {
+                    // The shader compilation code already logs errors.
+                    self.failed = true;
+                }
+            }
+        }
+
+        self.debug_renderer.as_mut()
     }
 
     pub fn deinit(self, device: &mut Device) {
@@ -1693,7 +1708,7 @@ impl Renderer {
         let sampler = options.sampler;
         let enable_render_on_scroll = options.enable_render_on_scroll;
 
-        let blob_image_renderer = options.blob_image_renderer.take();
+        let blob_image_handler = options.blob_image_handler.take();
         let thread_listener_for_render_backend = thread_listener.clone();
         let thread_listener_for_scene_builder = thread_listener.clone();
         let scene_builder_hooks = options.scene_builder_hooks;
@@ -1729,7 +1744,7 @@ impl Renderer {
             let resource_cache = ResourceCache::new(
                 texture_cache,
                 glyph_rasterizer,
-                blob_image_renderer,
+                blob_image_handler,
             );
 
             let mut backend = RenderBackend::new(
@@ -1752,7 +1767,8 @@ impl Renderer {
             }
         })?;
 
-        let gpu_profile = GpuProfiler::new(Rc::clone(device.rc_gl()));
+        let ext_debug_marker = device.supports_extension("GL_EXT_debug_marker");
+        let gpu_profile = GpuProfiler::new(Rc::clone(device.rc_gl()), ext_debug_marker);
         #[cfg(feature = "capture")]
         let read_fbo = device.create_fbo_for_external_texture(0);
 
@@ -2361,8 +2377,10 @@ impl Renderer {
         });
 
         let current_time = precise_time_ns();
-        let ns = current_time - self.last_time;
-        self.profile_counters.frame_time.set(ns);
+        if framebuffer_size.is_some() {
+            let ns = current_time - self.last_time;
+            self.profile_counters.frame_time.set(ns);
+        }
 
         if self.max_recorded_profiles > 0 {
             while self.cpu_profiles.len() >= self.max_recorded_profiles {
@@ -2382,35 +2400,41 @@ impl Renderer {
             if self.debug_flags.contains(DebugFlags::PROFILER_DBG) {
                 if let Some(framebuffer_size) = framebuffer_size {
                     //TODO: take device/pixel ratio into equation?
-                    let screen_fraction = 1.0 / framebuffer_size.to_f32().area();
-                    self.profiler.draw_profile(
-                        &frame_profiles,
-                        &self.backend_profile_counters,
-                        &self.profile_counters,
-                        &mut profile_timers,
-                        &profile_samplers,
-                        screen_fraction,
-                        self.debug.get_mut(&mut self.device),
-                        self.debug_flags.contains(DebugFlags::COMPACT_PROFILER),
-                    );
+                    if let Some(debug_renderer) = self.debug.get_mut(&mut self.device) {
+                        let screen_fraction = 1.0 / framebuffer_size.to_f32().area();
+                        self.profiler.draw_profile(
+                            &frame_profiles,
+                            &self.backend_profile_counters,
+                            &self.profile_counters,
+                            &mut profile_timers,
+                            &profile_samplers,
+                            screen_fraction,
+                            debug_renderer,
+                            self.debug_flags.contains(DebugFlags::COMPACT_PROFILER),
+                        );
+                    }
                 }
             }
 
             if self.debug_flags.contains(DebugFlags::NEW_FRAME_INDICATOR) {
-                self.new_frame_indicator.changed();
-                self.new_frame_indicator.draw(
-                    0.0, 0.0,
-                    ColorU::new(0, 110, 220, 255),
-                    self.debug.get_mut(&mut self.device)
-                );
+                if let Some(debug_renderer) = self.debug.get_mut(&mut self.device) {
+                    self.new_frame_indicator.changed();
+                    self.new_frame_indicator.draw(
+                        0.0, 0.0,
+                        ColorU::new(0, 110, 220, 255),
+                        debug_renderer,
+                    );
+                }
             }
 
             if self.debug_flags.contains(DebugFlags::NEW_SCENE_INDICATOR) {
-                self.new_scene_indicator.draw(
-                    160.0, 0.0,
-                    ColorU::new(220, 30, 10, 255),
-                    self.debug.get_mut(&mut self.device)
-                );
+                if let Some(debug_renderer) = self.debug.get_mut(&mut self.device) {
+                    self.new_scene_indicator.draw(
+                        160.0, 0.0,
+                        ColorU::new(220, 30, 10, 255),
+                        debug_renderer,
+                    );
+                }
             }
         }
 
@@ -2427,12 +2451,15 @@ impl Renderer {
             self.gpu_profile.end_frame();
             #[cfg(feature = "debug_renderer")]
             {
-                self.debug.get_mut(&mut self.device)
-                          .render(&mut self.device, framebuffer_size);
+                if let Some(debug_renderer) = self.debug.get_mut(&mut self.device) {
+                    debug_renderer.render(&mut self.device, framebuffer_size);
+                }
             }
             self.device.end_frame();
         });
-        self.last_time = current_time;
+        if framebuffer_size.is_some() {
+            self.last_time = current_time;
+        }
 
         if self.renderer_errors.is_empty() {
             Ok(stats)
@@ -3751,7 +3778,7 @@ impl Renderer {
     }
 
     #[cfg(feature = "debug_renderer")]
-    pub fn debug_renderer<'b>(&'b mut self) -> &'b mut DebugRenderer {
+    pub fn debug_renderer<'b>(&'b mut self) -> Option<&'b mut DebugRenderer> {
         self.debug.get_mut(&mut self.device)
     }
 
@@ -3889,7 +3916,10 @@ impl Renderer {
             return;
         }
 
-        let debug_renderer = self.debug.get_mut(&mut self.device);
+        let debug_renderer = match self.debug.get_mut(&mut self.device) {
+            Some(render) => render,
+            None => { return; }
+        };
 
         let dy = debug_renderer.line_height();
         let x0: f32 = 30.0;
@@ -4091,7 +4121,7 @@ pub struct RendererOptions {
     pub scatter_gpu_cache_updates: bool,
     pub upload_method: UploadMethod,
     pub workers: Option<Arc<ThreadPool>>,
-    pub blob_image_renderer: Option<Box<BlobImageRenderer>>,
+    pub blob_image_handler: Option<Box<BlobImageHandler>>,
     pub recorder: Option<Box<ApiRecordingReceiver>>,
     pub thread_listener: Option<Box<ThreadListener + Send + Sync>>,
     pub enable_render_on_scroll: bool,
@@ -4126,7 +4156,7 @@ impl Default for RendererOptions {
             // but we are unable to make this decision here, so picking the reasonable medium.
             upload_method: UploadMethod::PixelBuffer(VertexUsageHint::Stream),
             workers: None,
-            blob_image_renderer: None,
+            blob_image_handler: None,
             recorder: None,
             thread_listener: None,
             enable_render_on_scroll: true,

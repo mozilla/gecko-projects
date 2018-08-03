@@ -677,8 +677,16 @@ case "$target" in
         if test "$AS_BIN"; then
             AS="$(basename "$AS_BIN")"
         fi
-        AR='lib'
-        AR_FLAGS='-NOLOGO -OUT:$@'
+        case "$LINKER" in
+        *lld*)
+            AR='llvm-lib'
+            AR_FLAGS='-llvmlibthin -out:$@'
+            ;;
+        *)
+            AR='lib'
+            AR_FLAGS='-NOLOGO -OUT:$@'
+            ;;
+        esac
         AR_EXTRACT=
         RANLIB='echo not_ranlib'
         STRIP='echo not_strip'
@@ -1810,6 +1818,8 @@ AC_SUBST(HOST_RANLIB)
 AC_SUBST(HOST_BIN_SUFFIX)
 
 AC_SUBST(TARGET_XPCOM_ABI)
+
+AC_SUBST(GCC_USE_GNU_LD)
 
 AC_SUBST(MKSHLIB)
 AC_SUBST(MKCSHLIB)

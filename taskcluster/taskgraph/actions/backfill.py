@@ -12,7 +12,7 @@ import requests
 from requests.exceptions import HTTPError
 
 from .registry import register_callback_action
-from .util import find_decision_task, create_tasks
+from .util import find_decision_task, create_tasks, combine_task_graph_files
 from taskgraph.util.taskcluster import get_artifact_from_index
 from taskgraph.taskgraph import TaskGraph
 
@@ -89,6 +89,7 @@ def backfill_action(parameters, graph_config, input, task_group_id, task_id, tas
             break
 
     pushes = sorted(pushes)[-depth:]
+    backfill_pushes = []
 
     for push in pushes:
         try:
@@ -118,16 +119,17 @@ def backfill_action(parameters, graph_config, input, task_group_id, task_id, tas
 
                 if input.get('testPath', ''):
                     tp = input.get('testPath', '')
-                    gpu_required = False
-                    # TODO: this has a high chance of getting out of date
-                    if 'gpu' in task.task['metadata']['name'] or \
-                       'webgl' in task.task['metadata']['name'] or \
-                       'canvas' in tp or \
-                       'gfx/tests' in tp or \
-                       ('reftest' in tp and 'jsreftest' not in tp):
-                        gpu_required = True
                     is_wpttest = 'web-platform' in task.task['metadata']['name']
                     is_android = 'android' in task.task['metadata']['name']
+                    gpu_required = False
+                    # TODO: this has a high chance of getting out of date
+                    if (not is_wpttest) and \
+                       ('gpu' in task.task['metadata']['name'] or
+                        'webgl' in task.task['metadata']['name'] or
+                        'canvas' in tp or
+                        'gfx/tests' in tp or
+                        ('reftest' in tp and 'jsreftest' not in tp)):
+                        gpu_required = True
 
                     # Create new cmd that runs a test-verify type job
                     preamble_length = 3
@@ -180,8 +182,10 @@ def backfill_action(parameters, graph_config, input, task_group_id, task_id, tas
 
             create_tasks([label], full_task_graph, label_to_taskid,
                          push_params, push_decision_task_id, push, modifier=modifier)
+            backfill_pushes.append(push)
         else:
             logging.info('Could not find {} on {}. Skipping.'.format(label, push))
+    combine_task_graph_files(backfill_pushes)
 
 
 def remove_args_from_command(cmd_parts, preamble_length=0, args_to_ignore=[]):

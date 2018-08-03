@@ -70,6 +70,7 @@
 #include "Principal.h"
 #include "SharedWorker.h"
 #include "WorkerDebuggerManager.h"
+#include "WorkerError.h"
 #include "WorkerLoadInfo.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
@@ -575,6 +576,13 @@ InterruptCallback(JSContext* aCx)
   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
   MOZ_ASSERT(worker);
 
+  // As with the main thread, the interrupt callback is triggered
+  // non-deterministically when recording/replaying, so return early to avoid
+  // performing any recorded events.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return true;
+  }
+
   // Now is a good time to turn on profiling if it's pending.
   PROFILER_JS_INTERRUPT_CALLBACK();
 
@@ -586,17 +594,20 @@ class LogViolationDetailsRunnable final : public WorkerMainThreadRunnable
   nsString mFileName;
   uint32_t mLineNum;
   uint32_t mColumnNum;
+  nsString mScriptSample;
 
 public:
   LogViolationDetailsRunnable(WorkerPrivate* aWorker,
                               const nsString& aFileName,
                               uint32_t aLineNum,
-                              uint32_t aColumnNum)
+                              uint32_t aColumnNum,
+                              const nsAString& aScriptSample)
     : WorkerMainThreadRunnable(aWorker,
                                NS_LITERAL_CSTRING("RuntimeService :: LogViolationDetails"))
     , mFileName(aFileName)
     , mLineNum(aLineNum)
     , mColumnNum(aColumnNum)
+    , mScriptSample(aScriptSample)
   {
     MOZ_ASSERT(aWorker);
   }
@@ -608,12 +619,24 @@ private:
 };
 
 bool
-ContentSecurityPolicyAllows(JSContext* aCx)
+ContentSecurityPolicyAllows(JSContext* aCx, JS::HandleValue aValue)
 {
   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
   worker->AssertIsOnWorkerThread();
 
   if (worker->GetReportCSPViolations()) {
+    JS::Rooted<JSString*> jsString(aCx, JS::ToString(aCx, aValue));
+    if (NS_WARN_IF(!jsString)) {
+      JS_ClearPendingException(aCx);
+      return false;
+    }
+
+    nsAutoJSString scriptSample;
+    if (NS_WARN_IF(!scriptSample.init(aCx, jsString))) {
+      JS_ClearPendingException(aCx);
+      return false;
+    }
+
     nsString fileName;
     uint32_t lineNum = 0;
     uint32_t columnNum = 0;
@@ -626,7 +649,8 @@ ContentSecurityPolicyAllows(JSContext* aCx)
     }
 
     RefPtr<LogViolationDetailsRunnable> runnable =
-        new LogViolationDetailsRunnable(worker, fileName, lineNum, columnNum);
+        new LogViolationDetailsRunnable(worker, fileName, lineNum, columnNum,
+                                        scriptSample);
 
     ErrorResult rv;
     runnable->Dispatch(Killing, rv);
@@ -1102,6 +1126,7 @@ public:
       microTaskQueue = &GetDebuggerMicroTaskQueue();
     }
 
+    JS::JobQueueMayNotBeEmpty(cx);
     microTaskQueue->push(runnable.forget());
   }
 
@@ -2638,12 +2663,10 @@ LogViolationDetailsRunnable::MainThreadRun()
 
   nsIContentSecurityPolicy* csp = mWorkerPrivate->GetCSP();
   if (csp) {
-    NS_NAMED_LITERAL_STRING(scriptSample,
-        "Call to eval() or related function blocked by CSP.");
     if (mWorkerPrivate->GetReportCSPViolations()) {
       csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_EVAL,
                                nullptr, // triggering element
-                               mFileName, scriptSample, mLineNum, mColumnNum,
+                               mFileName, mScriptSample, mLineNum, mColumnNum,
                                EmptyString(), EmptyString());
     }
   }
@@ -2662,10 +2685,10 @@ WorkerThreadPrimaryRunnable::Run()
   // Note: GetOrCreateForCurrentThread() must be called prior to
   //       mWorkerPrivate->SetThread() in order to avoid accidentally consuming
   //       worker messages here.
+  bool ipcReady = true;
   if (NS_WARN_IF(!BackgroundChild::GetOrCreateForCurrentThread())) {
-    // XXX need to fire an error at parent.
-    // Failed in creating BackgroundChild: probably in shutdown. Continue to run
-    // without BackgroundChild created.
+    // Let's report the error only after SetThread().
+    ipcReady = false;
   }
 
   class MOZ_STACK_CLASS SetThreadHelper final
@@ -2704,6 +2727,11 @@ WorkerThreadPrimaryRunnable::Run()
 
   mWorkerPrivate->AssertIsOnWorkerThread();
 
+  if (!ipcReady) {
+    WorkerErrorReport::CreateAndDispatchGenericErrorRunnableToParent(mWorkerPrivate);
+    return NS_ERROR_FAILURE;
+  }
+
   {
     nsCycleCollector_startup();
 
@@ -2716,8 +2744,7 @@ WorkerThreadPrimaryRunnable::Run()
     JSContext* cx = context->Context();
 
     if (!InitJSContextForWorker(mWorkerPrivate, cx)) {
-      // XXX need to fire an error at parent.
-      NS_ERROR("Failed to create context!");
+      WorkerErrorReport::CreateAndDispatchGenericErrorRunnableToParent(mWorkerPrivate);
       return NS_ERROR_FAILURE;
     }
 

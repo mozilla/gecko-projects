@@ -6,6 +6,7 @@
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "gXulStore",
                                    "@mozilla.org/xul/xulstore;1",
                                    "nsIXULStore");
@@ -19,7 +20,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 });
 
 const PREF_LOGLEVEL           = "browser.policies.loglevel";
-const BROWSER_DOCUMENT_URL    = "chrome://browser/content/browser.xul";
+const BROWSER_DOCUMENT_URL    = AppConstants.BROWSER_CHROME_URL;
 
 XPCOMUtils.defineLazyGetter(this, "log", () => {
   let { ConsoleAPI } = ChromeUtils.import("resource://gre/modules/Console.jsm", {});
@@ -61,6 +62,12 @@ var EXPORTED_SYMBOLS = ["Policies"];
  * The callbacks will be bound to their parent policy object.
  */
 var Policies = {
+  "AppUpdateURL": {
+    onBeforeAddons(manager, param) {
+      setDefaultPref("app.update.url", param.href);
+    }
+  },
+
   "Authentication": {
     onBeforeAddons(manager, param) {
       if ("SPNEGO" in param) {
@@ -94,7 +101,7 @@ var Policies = {
   "BlockAboutConfig": {
     onBeforeUIStartup(manager, param) {
       if (param) {
-        blockAboutPage(manager, "about:config", true);
+        blockAboutPage(manager, "about:config");
         setAndLockPref("devtools.chrome.enabled", false);
       }
     }
@@ -103,7 +110,7 @@ var Policies = {
   "BlockAboutProfiles": {
     onBeforeUIStartup(manager, param) {
       if (param) {
-        blockAboutPage(manager, "about:profiles", true);
+        blockAboutPage(manager, "about:profiles");
       }
     }
   },
@@ -111,7 +118,7 @@ var Policies = {
   "BlockAboutSupport": {
     onBeforeUIStartup(manager, param) {
       if (param) {
-        blockAboutPage(manager, "about:support", true);
+        blockAboutPage(manager, "about:support");
       }
     }
   },
@@ -332,7 +339,7 @@ var Policies = {
   "DisableSetDesktopBackground": {
     onBeforeUIStartup(manager, param) {
       if (param) {
-        manager.disallowFeature("setDesktopBackground", true);
+        manager.disallowFeature("setDesktopBackground");
       }
     }
   },
@@ -704,7 +711,7 @@ var Policies = {
             for (let newEngine of param.Add) {
               let newEngineParameters = {
                 template:    newEngine.URLTemplate,
-                iconURL:     newEngine.IconURL,
+                iconURL:     newEngine.IconURL ? newEngine.IconURL.href : null,
                 alias:       newEngine.Alias,
                 description: newEngine.Description,
                 method:      newEngine.Method,
@@ -952,7 +959,7 @@ let ChromeURLBlockPolicy = {
     if (contentLocation.scheme == "chrome" &&
         contentType == Ci.nsIContentPolicy.TYPE_DOCUMENT &&
         loadInfo.loadingContext &&
-        loadInfo.loadingContext.baseURI == "chrome://browser/content/browser.xul" &&
+        loadInfo.loadingContext.baseURI == AppConstants.BROWSER_CHROME_URL &&
         contentLocation.host != "mochitests") {
       return Ci.nsIContentPolicy.REJECT_REQUEST;
     }

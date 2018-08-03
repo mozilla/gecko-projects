@@ -521,6 +521,9 @@ RenderThread::UnregisterExternalImage(uint64_t aExternalImageId)
   }
   auto it = mRenderTextures.find(aExternalImageId);
   MOZ_ASSERT(it != mRenderTextures.end());
+  if (it == mRenderTextures.end()) {
+    return;
+  }
   if (!IsInRenderThread()) {
     // The RenderTextureHost should be released in render thread. So, post the
     // deletion task here.
@@ -538,6 +541,38 @@ RenderThread::UnregisterExternalImage(uint64_t aExternalImageId)
     ));
   } else {
     mRenderTextures.erase(it);
+  }
+}
+
+void
+RenderThread::UpdateRenderTextureHost(uint64_t aSrcExternalImageId, uint64_t aWrappedExternalImageId)
+{
+  MOZ_ASSERT(aSrcExternalImageId != aWrappedExternalImageId);
+
+  MutexAutoLock lock(mRenderTextureMapLock);
+  if (mHasShutdown) {
+    return;
+  }
+  auto src = mRenderTextures.find(aSrcExternalImageId);
+  auto wrapped = mRenderTextures.find(aWrappedExternalImageId);
+  if (src == mRenderTextures.end() || wrapped == mRenderTextures.end()) {
+    return;
+  }
+  MOZ_ASSERT(src->second->AsRenderTextureHostWrapper());
+  MOZ_ASSERT(!wrapped->second->AsRenderTextureHostWrapper());
+  RenderTextureHostWrapper* wrapper = src->second->AsRenderTextureHostWrapper();
+  if (!wrapper) {
+    MOZ_ASSERT_UNREACHABLE("unexpected to happen");
+    return;
+  }
+  if (!wrapper->IsInited()) {
+    wrapper->UpdateRenderTextureHost(wrapped->second);
+    MOZ_ASSERT(wrapper->IsInited());
+  } else {
+    Loop()->PostTask(NewRunnableMethod<RenderTextureHost*>(
+      "RenderTextureHostWrapper::UpdateRenderTextureHost",
+      wrapper, &RenderTextureHostWrapper::UpdateRenderTextureHost, wrapped->second
+    ));
   }
 }
 

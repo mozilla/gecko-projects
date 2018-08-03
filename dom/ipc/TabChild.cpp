@@ -411,6 +411,7 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mHasValidInnerSize(false)
   , mDestroyed(false)
   , mUniqueId(aTabId)
+  , mHasSiblings(false)
   , mIsTransparent(false)
   , mIPCOpen(false)
   , mParentIsActive(false)
@@ -418,7 +419,7 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mDidLoadURLInit(false)
   , mAwaitingLA(false)
   , mSkipKeyPress(false)
-  , mLayerObserverEpoch(1)
+  , mLayersObserverEpoch{1}
 #if defined(XP_WIN) && defined(ACCESSIBILITY)
   , mNativeWindowHandle(0)
 #endif
@@ -429,7 +430,7 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mPendingDocShellReceivedMessage(false)
   , mPendingRenderLayers(false)
   , mPendingRenderLayersReceivedMessage(false)
-  , mPendingLayerObserverEpoch(0)
+  , mPendingLayersObserverEpoch{0}
   , mPendingDocShellBlockers(0)
   , mWidgetNativeData(0)
 {
@@ -531,7 +532,7 @@ TabChild::DoUpdateZoomConstraints(const uint32_t& aPresShellId,
                                   const ViewID& aViewId,
                                   const Maybe<ZoomConstraints>& aConstraints)
 {
-  if (!mApzcTreeManager) {
+  if (!mApzcTreeManager || mDestroyed) {
     return false;
   }
 
@@ -646,6 +647,12 @@ TabChild::Init()
   mAPZEventState = new APZEventState(mPuppetWidget, std::move(callback));
 
   mIPCOpen = true;
+
+  // Recording/replaying processes use their own compositor.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    mPuppetWidget->CreateCompositor();
+  }
+
   return NS_OK;
 }
 
@@ -1284,7 +1291,9 @@ TabChild::RecvInitRendering(const TextureFactoryIdentifier& aTextureFactoryIdent
 mozilla::ipc::IPCResult
 TabChild::RecvUpdateDimensions(const DimensionInfo& aDimensionInfo)
 {
-    if (!mRemoteFrame) {
+    // When recording/replaying we need to make sure the dimensions are up to
+    // date on the compositor used in this process.
+    if (!mRemoteFrame && !recordreplay::IsRecordingOrReplaying()) {
         return IPC_OK();
     }
 
@@ -2542,7 +2551,7 @@ TabChild::RemovePendingDocShellBlocker()
     mPendingRenderLayersReceivedMessage = false;
     RecvRenderLayers(mPendingRenderLayers,
                      false /* aForceRepaint */,
-                     mPendingLayerObserverEpoch);
+                     mPendingLayersObserverEpoch);
   }
 }
 
@@ -2573,12 +2582,12 @@ TabChild::RecvSetDocShellIsActive(const bool& aIsActive)
 }
 
 mozilla::ipc::IPCResult
-TabChild::RecvRenderLayers(const bool& aEnabled, const bool& aForceRepaint, const uint64_t& aLayerObserverEpoch)
+TabChild::RecvRenderLayers(const bool& aEnabled, const bool& aForceRepaint, const layers::LayersObserverEpoch& aEpoch)
 {
   if (mPendingDocShellBlockers > 0) {
     mPendingRenderLayersReceivedMessage = true;
     mPendingRenderLayers = aEnabled;
-    mPendingLayerObserverEpoch = aLayerObserverEpoch;
+    mPendingLayersObserverEpoch = aEpoch;
     return IPC_OK();
   }
 
@@ -2586,10 +2595,10 @@ TabChild::RecvRenderLayers(const bool& aEnabled, const bool& aForceRepaint, cons
   // monitor channel and the PContent channel, we have an ordering problem. This
   // code ensures that we respect the order in which the requests were made and
   // ignore stale requests.
-  if (mLayerObserverEpoch >= aLayerObserverEpoch) {
+  if (mLayersObserverEpoch >= aEpoch) {
     return IPC_OK();
   }
-  mLayerObserverEpoch = aLayerObserverEpoch;
+  mLayersObserverEpoch = aEpoch;
 
   auto clearPaintWhileInterruptingJS = MakeScopeExit([&] {
     // We might force a paint, or we might already have painted and this is a
@@ -2598,7 +2607,7 @@ TabChild::RecvRenderLayers(const bool& aEnabled, const bool& aForceRepaint, cons
     // been a request to force paint. This is so that the BackgroundHangMonitor
     // for force painting can be made to wait again.
     if (aEnabled) {
-      ProcessHangMonitor::ClearPaintWhileInterruptingJS(mLayerObserverEpoch);
+      ProcessHangMonitor::ClearPaintWhileInterruptingJS(mLayersObserverEpoch);
     }
   });
 
@@ -2614,7 +2623,7 @@ TabChild::RecvRenderLayers(const bool& aEnabled, const bool& aForceRepaint, cons
     // We send the current layer observer epoch to the compositor so that
     // TabParent knows whether a layer update notification corresponds to the
     // latest RecvRenderLayers request that was made.
-    lm->SetLayerObserverEpoch(mLayerObserverEpoch);
+    lm->SetLayersObserverEpoch(mLayersObserverEpoch);
   }
 
   if (aEnabled) {
@@ -2623,7 +2632,7 @@ TabChild::RecvRenderLayers(const bool& aEnabled, const bool& aForceRepaint, cons
       // notification to fire in the parent (so that it knows that the child has
       // updated its epoch). PaintWhileInterruptingJSNoOp does that.
       if (IPCOpen()) {
-        Unused << SendPaintWhileInterruptingJSNoOp(mLayerObserverEpoch);
+        Unused << SendPaintWhileInterruptingJSNoOp(mLayersObserverEpoch);
         return IPC_OK();
       }
     }
@@ -2829,7 +2838,7 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
       InitAPZState();
       RefPtr<LayerManager> lm = mPuppetWidget->GetLayerManager();
       MOZ_ASSERT(lm);
-      lm->SetLayerObserverEpoch(mLayerObserverEpoch);
+      lm->SetLayersObserverEpoch(mLayersObserverEpoch);
     } else {
       NS_WARNING("Fallback to BasicLayerManager");
       mLayersConnected = Some(false);
@@ -2919,7 +2928,10 @@ void
 TabChild::NotifyPainted()
 {
     if (!mNotified) {
-        mRemoteFrame->SendNotifyCompositorTransaction();
+        // Recording/replaying processes have a compositor but not a remote frame.
+        if (!recordreplay::IsRecordingOrReplaying()) {
+            mRemoteFrame->SendNotifyCompositorTransaction();
+        }
         mNotified = true;
     }
 }
@@ -3009,12 +3021,6 @@ TabChild::SendRequestFocus(bool aCanFocus)
 }
 
 void
-TabChild::SendGetTabCount(uint32_t* tabCount)
-{
-  PBrowserChild::SendGetTabCount(tabCount);
-}
-
-void
 TabChild::EnableDisableCommands(const nsAString& aAction,
                                 nsTArray<nsCString>& aEnabledCommands,
                                 nsTArray<nsCString>& aDisabledCommands)
@@ -3053,8 +3059,11 @@ TabChild::DoSendBlockingMessage(JSContext* aCx,
     return false;
   }
   InfallibleTArray<CpowEntry> cpows;
-  if (aCpows && !Manager()->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
-    return false;
+  if (aCpows) {
+    jsipc::CPOWManager* mgr = Manager()->GetCPOWManager();
+    if (!mgr || !mgr->Wrap(aCx, aCpows, &cpows)) {
+      return false;
+    }
   }
   if (aIsSync) {
     return SendSyncMessage(PromiseFlatString(aMessage), data, cpows,
@@ -3077,8 +3086,11 @@ TabChild::DoSendAsyncMessage(JSContext* aCx,
     return NS_ERROR_DOM_DATA_CLONE_ERR;
   }
   InfallibleTArray<CpowEntry> cpows;
-  if (aCpows && !Manager()->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
-    return NS_ERROR_UNEXPECTED;
+  if (aCpows) {
+    jsipc::CPOWManager* mgr = Manager()->GetCPOWManager();
+    if (!mgr || !mgr->Wrap(aCx, aCpows, &cpows)) {
+      return NS_ERROR_UNEXPECTED;
+    }
   }
   if (!SendAsyncMessage(PromiseFlatString(aMessage), cpows,
                         Principal(aPrincipal), data)) {
@@ -3221,7 +3233,7 @@ TabChild::ReinitRendering()
   InitAPZState();
   RefPtr<LayerManager> lm = mPuppetWidget->GetLayerManager();
   MOZ_ASSERT(lm);
-  lm->SetLayerObserverEpoch(mLayerObserverEpoch);
+  lm->SetLayersObserverEpoch(mLayersObserverEpoch);
 
   nsCOMPtr<nsIDocument> doc(GetDocument());
   doc->NotifyLayerManagerRecreated();
@@ -3454,7 +3466,7 @@ TabChild::GetOuterRect()
 }
 
 void
-TabChild::PaintWhileInterruptingJS(uint64_t aLayerObserverEpoch,
+TabChild::PaintWhileInterruptingJS(const layers::LayersObserverEpoch& aEpoch,
                                    bool aForceRepaint)
 {
   if (!IPCOpen() || !mPuppetWidget || !mPuppetWidget->HasLayerManager()) {
@@ -3464,7 +3476,7 @@ TabChild::PaintWhileInterruptingJS(uint64_t aLayerObserverEpoch,
   }
 
   nsAutoScriptBlocker scriptBlocker;
-  RecvRenderLayers(true /* aEnabled */, aForceRepaint, aLayerObserverEpoch);
+  RecvRenderLayers(true /* aEnabled */, aForceRepaint, aEpoch);
 }
 
 void
@@ -3495,6 +3507,20 @@ mozilla::dom::TabGroup*
 TabChild::TabGroup()
 {
   return mTabGroup;
+}
+
+nsresult
+TabChild::GetHasSiblings(bool* aHasSiblings)
+{
+  *aHasSiblings = mHasSiblings;
+  return NS_OK;
+}
+
+nsresult
+TabChild::SetHasSiblings(bool aHasSiblings)
+{
+  mHasSiblings = aHasSiblings;
+  return NS_OK;
 }
 
 TabChildGlobal::TabChildGlobal(TabChild* aTabChild)

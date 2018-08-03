@@ -55,6 +55,9 @@
 #include "mozilla/Compiler.h"
 #include "mozilla/Types.h"
 #include "mozilla/UniquePtr.h"
+#ifdef XP_WIN
+#include "mozilla/WinHeaderOnlyUtils.h"
+#endif // XP_WIN
 
 // Amount of the progress bar to use in each of the 3 update stages,
 // should total 100.0.
@@ -508,7 +511,6 @@ get_quoted_path(const NS_tchar *path)
   NS_tstrcat(c, kQuote);
   c += lenQuote;
   *c = NS_T('\0');
-  c++;
   return s;
 }
 
@@ -2103,7 +2105,7 @@ LaunchCallbackApp(const NS_tchar *workingDir,
       // Keep the current process around until the callback process has created
       // its message queue, to avoid the launched process's windows being forced
       // into the background.
-      WaitForInputIdle(hProcess, kWaitForInputIdleTimeoutMS);
+      mozilla::WaitForInputIdle(hProcess);
       CloseHandle(hProcess);
     }
   }

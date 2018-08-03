@@ -47,6 +47,7 @@
 [@AB_CD@]
 @RESPATH@/dictionaries/*
 @RESPATH@/browser/localization/*
+@RESPATH@/localization/*
 #if defined(XP_WIN) || defined(XP_LINUX)
 @RESPATH@/fonts/*
 #endif
@@ -367,6 +368,14 @@
 @RESPATH@/components/extensions-toolkit.manifest
 @RESPATH@/components/extension-process-script.js
 @RESPATH@/browser/components/extensions-browser.manifest
+
+; [Normandy]
+@RESPATH@/components/shield.manifest
+@RESPATH@/components/shield-content-process.js
+
+; [PDF Viewer]
+@RESPATH@/browser/components/pdfjs.manifest
+@RESPATH@/browser/components/pdfjs.js
 
 ; Modules
 @RESPATH@/browser/modules/*

@@ -174,7 +174,8 @@ public:
    * 3. normal iframe
    */
   static already_AddRefed<ContentParent>
-  GetNewOrUsedBrowserProcess(const nsAString& aRemoteType,
+  GetNewOrUsedBrowserProcess(Element* aFrameElement,
+                             const nsAString& aRemoteType,
                              hal::ProcessPriority aPriority =
                              hal::ProcessPriority::PROCESS_PRIORITY_FOREGROUND,
                              ContentParent* aOpener = nullptr,
@@ -302,6 +303,11 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvBridgeToChildProcess(const ContentParentId& aCpId,
                                                            Endpoint<PContentBridgeParent>* aEndpoint) override;
+
+  virtual mozilla::ipc::IPCResult RecvOpenRecordReplayChannel(const uint32_t& channelId,
+                                                              FileDescriptor* connection) override;
+  virtual mozilla::ipc::IPCResult RecvCreateReplayingProcess(const uint32_t& aChannelId) override;
+  virtual mozilla::ipc::IPCResult RecvTerminateReplayingProcess(const uint32_t& aChannelId) override;
 
   virtual mozilla::ipc::IPCResult RecvCreateGMPService() override;
 
@@ -647,7 +653,9 @@ public:
                     nsTArray<nsCString>* aResults) override;
 
   // Use the PHangMonitor channel to ask the child to repaint a tab.
-  void PaintTabWhileInterruptingJS(TabParent* aTabParent, bool aForceRepaint, uint64_t aLayerObserverEpoch);
+  void PaintTabWhileInterruptingJS(TabParent* aTabParent,
+                                   bool aForceRepaint,
+                                   const layers::LayersObserverEpoch& aEpoch);
 
   // This function is called when we are about to load a document from an
   // HTTP(S), FTP or wyciwyg channel for a content process.  It is a useful
@@ -675,6 +683,15 @@ public:
   }
 
   static bool IsInputEventQueueSupported();
+
+  virtual mozilla::ipc::IPCResult RecvAttachBrowsingContext(
+    const BrowsingContextId& aParentContextId,
+    const BrowsingContextId& aContextId,
+    const nsString& aName) override;
+
+  virtual mozilla::ipc::IPCResult RecvDetachBrowsingContext(
+    const BrowsingContextId& aContextId,
+    const bool& aMoveToBFCache) override;
 
 protected:
   void OnChannelConnected(int32_t pid) override;
@@ -736,22 +753,35 @@ private:
                      nsresult& aResult,
                      nsCOMPtr<nsITabParent>& aNewTabParent,
                      bool* aWindowIsNew,
+                     int32_t& aOpenLocation,
                      nsIPrincipal* aTriggeringPrincipal,
                      uint32_t aReferrerPolicy,
                      bool aLoadUri);
 
   FORWARD_SHMEM_ALLOCATOR_TO(PContentParent)
 
+  enum RecordReplayState
+  {
+    eNotRecordingOrReplaying,
+    eRecording,
+    eReplaying
+  };
+
   explicit ContentParent(int32_t aPluginID)
-    : ContentParent(nullptr, EmptyString(), aPluginID)
+    : ContentParent(nullptr, EmptyString(), eNotRecordingOrReplaying, EmptyString(), aPluginID)
   {}
   ContentParent(ContentParent* aOpener,
-                const nsAString& aRemoteType)
-    : ContentParent(aOpener, aRemoteType, nsFakePluginTag::NOT_JSPLUGIN)
+                const nsAString& aRemoteType,
+                RecordReplayState aRecordReplayState = eNotRecordingOrReplaying,
+                const nsAString& aRecordingFile = EmptyString())
+    : ContentParent(aOpener, aRemoteType, aRecordReplayState, aRecordingFile,
+                    nsFakePluginTag::NOT_JSPLUGIN)
   {}
 
   ContentParent(ContentParent* aOpener,
                 const nsAString& aRemoteType,
+                RecordReplayState aRecordReplayState,
+                const nsAString& aRecordingFile,
                 int32_t aPluginID);
 
   // Launch the subprocess and associated initialization.
@@ -1125,6 +1155,8 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvGraphicsError(const nsCString& aError) override;
 
+  virtual mozilla::ipc::IPCResult RecvRecordReplayFatalError(const nsCString& aError) override;
+
   virtual mozilla::ipc::IPCResult
   RecvBeginDriverCrashGuard(const uint32_t& aGuardType,
                             bool* aOutCrashed) override;
@@ -1227,7 +1259,8 @@ public:
   virtual mozilla::ipc::IPCResult
   RecvFirstPartyStorageAccessGrantedForOrigin(const Principal& aParentPrincipal,
                                               const nsCString& aTrackingOrigin,
-                                              const nsCString& aGrantedOrigin) override;
+                                              const nsCString& aGrantedOrigin,
+                                              FirstPartyStorageAccessGrantedForOriginResolver&& aResolver) override;
 
   // Notify the ContentChild to enable the input event prioritization when
   // initializing.
@@ -1243,6 +1276,12 @@ public:
                                const MaybeFileDesc& aDMDFile) override;
 
   bool CanCommunicateWith(ContentParentId aOtherProcess);
+
+  nsresult SaveRecording(nsIFile* aFile, bool* aRetval);
+
+  bool IsRecordingOrReplaying() const {
+    return mRecordReplayState != eNotRecordingOrReplaying;
+  }
 
 private:
 
@@ -1286,6 +1325,16 @@ private:
   bool mIsAlive;
 
   bool mIsForBrowser;
+
+  // Whether this process is recording or replaying its execution, and any
+  // associated recording file.
+  RecordReplayState mRecordReplayState;
+  nsString mRecordingFile;
+
+  // When recording or replaying, the child process is a middleman. This vector
+  // stores any replaying children we have spawned on behalf of that middleman,
+  // indexed by their record/replay channel ID.
+  Vector<mozilla::ipc::GeckoChildProcessHost*> mReplayingChildren;
 
   // These variables track whether we've called Close() and KillHard() on our
   // channel.

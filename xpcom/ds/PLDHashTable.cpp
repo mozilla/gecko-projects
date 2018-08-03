@@ -193,12 +193,12 @@ PLDHashTable::HashShift(uint32_t aEntrySize, uint32_t aLength)
   }
 
   // Compute the hashShift value.
-  return kHashBits - log2;
+  return kPLDHashNumberBits - log2;
 }
 
 PLDHashTable::PLDHashTable(const PLDHashTableOps* aOps, uint32_t aEntrySize,
                            uint32_t aLength)
-  : mOps(aOps)
+  : mOps(recordreplay::GeneratePLDHashTableCallbacks(aOps))
   , mEntryStore()
   , mGeneration(0)
   , mHashShift(HashShift(aEntrySize, aLength))
@@ -227,13 +227,16 @@ PLDHashTable::operator=(PLDHashTable&& aOther)
   // |mOps| and |mEntrySize| are required to stay the same, they're
   // conceptually part of the type -- indeed, if PLDHashTable was a templated
   // type like nsTHashtable, they *would* be part of the type -- so it only
-  // makes sense to assign in cases where they match.
-  MOZ_RELEASE_ASSERT(mOps == aOther.mOps);
-  MOZ_RELEASE_ASSERT(mEntrySize == aOther.mEntrySize);
+  // makes sense to assign in cases where they match. An exception is when we
+  // are recording or replaying the execution, in which case custom ops are
+  // generated for each table.
+  MOZ_RELEASE_ASSERT(mOps == aOther.mOps || !mOps || recordreplay::IsRecordingOrReplaying());
+  MOZ_RELEASE_ASSERT(mEntrySize == aOther.mEntrySize || !mEntrySize);
 
   // Reconstruct |this|.
+  const PLDHashTableOps* ops = recordreplay::UnwrapPLDHashTableCallbacks(aOther.mOps);
   this->~PLDHashTable();
-  new (KnownNotNull, this) PLDHashTable(aOther.mOps, aOther.mEntrySize, 0);
+  new (KnownNotNull, this) PLDHashTable(ops, aOther.mEntrySize, 0);
 
   // Move non-const pieces over.
   mHashShift = std::move(aOther.mHashShift);
@@ -244,11 +247,15 @@ PLDHashTable::operator=(PLDHashTable&& aOther)
   mChecker = std::move(aOther.mChecker);
 #endif
 
-  // Clear up |aOther| so its destruction will be a no-op.
+  recordreplay::MovePLDHashTableContents(aOther.mOps, mOps);
+
+  // Clear up |aOther| so its destruction will be a no-op and it reports being
+  // empty.
   {
 #ifdef DEBUG
     AutoDestructorOp op(mChecker);
 #endif
+    aOther.mEntryCount = 0;
     aOther.mEntryStore.Set(nullptr, &aOther.mGeneration);
   }
 
@@ -265,7 +272,7 @@ void
 PLDHashTable::Hash2(PLDHashNumber aHash0,
                     uint32_t& aHash2Out, uint32_t& aSizeMaskOut) const
 {
-  uint32_t sizeLog2 = kHashBits - mHashShift;
+  uint32_t sizeLog2 = kPLDHashNumberBits - mHashShift;
   uint32_t sizeMask = (PLDHashNumber(1) << sizeLog2) - 1;
   aSizeMaskOut = sizeMask;
 
@@ -315,6 +322,7 @@ PLDHashTable::~PLDHashTable()
 #endif
 
   if (!mEntryStore.Get()) {
+    recordreplay::DestroyPLDHashTableCallbacks(mOps);
     return;
   }
 
@@ -329,6 +337,8 @@ PLDHashTable::~PLDHashTable()
     entryAddr += mEntrySize;
   }
 
+  recordreplay::DestroyPLDHashTableCallbacks(mOps);
+
   // Entry storage is freed last, by ~EntryStore().
 }
 
@@ -336,7 +346,7 @@ void
 PLDHashTable::ClearAndPrepareForLength(uint32_t aLength)
 {
   // Get these values before the destructor clobbers them.
-  const PLDHashTableOps* ops = mOps;
+  const PLDHashTableOps* ops = recordreplay::UnwrapPLDHashTableCallbacks(mOps);
   uint32_t entrySize = mEntrySize;
 
   this->~PLDHashTable();
@@ -353,9 +363,10 @@ PLDHashTable::Clear()
 // a previously-removed entry. If |Reason| is |ForSearchOrRemove|, the return
 // value is null on a miss, and will never be a previously-removed entry on a
 // hit. This distinction is a bit grotty but this function is hot enough that
-// these differences are worthwhile.
+// these differences are worthwhile. (It's also hot enough that
+// MOZ_ALWAYS_INLINE makes a significant difference.)
 template <PLDHashTable::SearchReason Reason>
-PLDHashEntryHdr* NS_FASTCALL
+MOZ_ALWAYS_INLINE PLDHashEntryHdr*
 PLDHashTable::SearchTable(const void* aKey, PLDHashNumber aKeyHash) const
 {
   MOZ_ASSERT(mEntryStore.Get());
@@ -466,7 +477,7 @@ PLDHashTable::ChangeTable(int32_t aDeltaLog2)
   MOZ_ASSERT(mEntryStore.Get());
 
   // Look, but don't touch, until we succeed in getting new entry store.
-  int32_t oldLog2 = kHashBits - mHashShift;
+  int32_t oldLog2 = kPLDHashNumberBits - mHashShift;
   int32_t newLog2 = oldLog2 + aDeltaLog2;
   uint32_t newCapacity = 1u << newLog2;
   if (newCapacity > kMaxCapacity) {
@@ -484,7 +495,7 @@ PLDHashTable::ChangeTable(int32_t aDeltaLog2)
   }
 
   // We can't fail from here on, so update table parameters.
-  mHashShift = kHashBits - newLog2;
+  mHashShift = kPLDHashNumberBits - newLog2;
   mRemovedCount = 0;
 
   // Assign the new entry store to table.
@@ -499,11 +510,11 @@ PLDHashTable::ChangeTable(int32_t aDeltaLog2)
   for (uint32_t i = 0; i < oldCapacity; ++i) {
     PLDHashEntryHdr* oldEntry = (PLDHashEntryHdr*)oldEntryAddr;
     if (EntryIsLive(oldEntry)) {
-      oldEntry->mKeyHash &= ~kCollisionFlag;
-      PLDHashEntryHdr* newEntry = FindFreeEntry(oldEntry->mKeyHash);
+      const PLDHashNumber key = oldEntry->mKeyHash & ~kCollisionFlag;
+      PLDHashEntryHdr* newEntry = FindFreeEntry(key);
       NS_ASSERTION(EntryIsFree(newEntry), "EntryIsFree(newEntry)");
       moveEntry(this, oldEntry, newEntry);
-      newEntry->mKeyHash = oldEntry->mKeyHash;
+      newEntry->mKeyHash = key;
     }
     oldEntryAddr += mEntrySize;
   }
@@ -517,8 +528,7 @@ PLDHashTable::ComputeKeyHash(const void* aKey) const
 {
   MOZ_ASSERT(mEntryStore.Get());
 
-  PLDHashNumber keyHash = mOps->hashKey(aKey);
-  keyHash *= kGoldenRatio;
+  PLDHashNumber keyHash = mozilla::ScrambleHashCode(mOps->hashKey(aKey));
 
   // Avoid 0 and 1 hash codes, they indicate free and removed entries.
   if (keyHash < 2) {
@@ -688,7 +698,7 @@ PLDHashTable::ShrinkIfAppropriate()
     uint32_t log2;
     BestCapacity(mEntryCount, &capacity, &log2);
 
-    int32_t deltaLog2 = log2 - (kHashBits - mHashShift);
+    int32_t deltaLog2 = log2 - (kPLDHashNumberBits - mHashShift);
     MOZ_ASSERT(deltaLog2 <= 0);
 
     (void) ChangeTable(deltaLog2);

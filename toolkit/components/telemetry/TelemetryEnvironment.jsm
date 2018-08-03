@@ -10,12 +10,10 @@ var EXPORTED_SYMBOLS = [
 
 const myScope = this;
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
 ChromeUtils.import("resource://gre/modules/Log.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryUtils.jsm", this);
 ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm");
-ChromeUtils.import("resource://gre/modules/TelemetryController.jsm", this);
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 const Utils = TelemetryUtils;
@@ -187,7 +185,6 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["accessibility.force_disabled", {what:  RECORD_PREF_VALUE}],
   ["app.shield.optoutstudies.enabled", {what: RECORD_PREF_VALUE}],
   ["app.update.auto", {what: RECORD_PREF_VALUE}],
-  ["app.update.enabled", {what: RECORD_PREF_VALUE}],
   ["app.update.interval", {what: RECORD_PREF_VALUE}],
   ["app.update.service.enabled", {what: RECORD_PREF_VALUE}],
   ["app.update.silent", {what: RECORD_PREF_VALUE}],
@@ -268,7 +265,6 @@ const PREF_DISTRIBUTOR = "app.distributor";
 const PREF_DISTRIBUTOR_CHANNEL = "app.distributor.channel";
 const PREF_APP_PARTNER_BRANCH = "app.partner.";
 const PREF_PARTNER_ID = "mozilla.partner.id";
-const PREF_UPDATE_ENABLED = "app.update.enabled";
 const PREF_UPDATE_AUTODOWNLOAD = "app.update.auto";
 const PREF_SEARCH_COHORT = "browser.search.cohort";
 
@@ -1126,11 +1122,7 @@ EnvironmentCache.prototype = {
   _startWatchingPrefs() {
     this._log.trace("_startWatchingPrefs - " + this._watchedPrefs);
 
-    for (let [pref, options] of this._watchedPrefs) {
-      if (!("requiresRestart" in options) || !options.requiresRestart) {
-        Services.prefs.addObserver(pref, this, true);
-      }
-    }
+    Services.prefs.addObserver("", this, true);
   },
 
   _onPrefChanged(aData) {
@@ -1146,11 +1138,7 @@ EnvironmentCache.prototype = {
   _stopWatchingPrefs() {
     this._log.trace("_stopWatchingPrefs");
 
-    for (let [pref, options] of this._watchedPrefs) {
-      if (!("requiresRestart" in options) || !options.requiresRestart) {
-        Services.prefs.removeObserver(pref, this);
-      }
-    }
+    Services.prefs.removeObserver("", this);
   },
 
   _addObservers() {
@@ -1222,7 +1210,8 @@ EnvironmentCache.prototype = {
         this._updateDefaultBrowser();
         break;
       case PREF_CHANGED_TOPIC:
-        if (this._watchedPrefs.has(aData)) {
+        let options = this._watchedPrefs.get(aData);
+        if (options && !options.requiresRestart) {
           this._onPrefChanged(aData);
         }
         break;
@@ -1420,7 +1409,7 @@ EnvironmentCache.prototype = {
       locale: getBrowserLocale(),
       update: {
         channel: updateChannel,
-        enabled: Services.prefs.getBoolPref(PREF_UPDATE_ENABLED, true),
+        enabled: !Services.policies || Services.policies.isAllowed("appUpdate"),
         autoDownload: Services.prefs.getBoolPref(PREF_UPDATE_AUTODOWNLOAD, true),
       },
       userPrefs: this._getPrefData(),

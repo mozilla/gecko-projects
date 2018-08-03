@@ -89,7 +89,7 @@ var contentScripts = new DefaultWeakMap(matcher => {
 });
 
 function getMessageManager(window) {
-  let docShell = window.document.docShell.QueryInterface(Ci.nsIInterfaceRequestor);
+  let docShell = window.docShell.QueryInterface(Ci.nsIInterfaceRequestor);
   try {
     return docShell.getInterface(Ci.nsIContentFrameMessageManager);
   } catch (e) {
@@ -195,8 +195,8 @@ DocumentManager = {
     });
   },
 
-  initExtension(extension) {
-    this.injectExtensionScripts(extension);
+  initExtension(policy) {
+    this.injectExtensionScripts(policy);
   },
 
   // Listeners
@@ -209,11 +209,11 @@ DocumentManager = {
 
   // Script loading
 
-  injectExtensionScripts(extension) {
+  injectExtensionScripts(policy) {
     for (let window of this.enumerateWindows()) {
       let runAt = {document_start: [], document_end: [], document_idle: []};
 
-      for (let script of extension.contentScripts) {
+      for (let script of policy.contentScripts) {
         if (script.matchesWindow(window)) {
           runAt[script.runAt].push(script);
         }
@@ -283,8 +283,8 @@ DocumentManager = {
       let enum_ = docShell.getDocShellEnumerator(docShell.typeContent,
                                                  docShell.ENUMERATE_FORWARDS);
 
-      for (let docShell of XPCOMUtils.IterSimpleEnumerator(enum_, Ci.nsIInterfaceRequestor)) {
-        yield docShell.getInterface(Ci.nsIDOMWindow);
+      for (let docShell of XPCOMUtils.IterSimpleEnumerator(enum_, Ci.nsIDocShell)) {
+        yield docShell.domWindow;
       }
     } else {
       for (let global of this.globals.keys()) {
@@ -296,7 +296,7 @@ DocumentManager = {
 
 ExtensionManager = {
   // WeakMap<WebExtensionPolicy, Map<string, WebExtensionContentScript>>
-  registeredContentScripts: new DefaultWeakMap((extension) => new Map()),
+  registeredContentScripts: new DefaultWeakMap((policy) => new Map()),
 
   init() {
     MessageChannel.setupMessageManagers([Services.cpmm]);

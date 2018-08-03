@@ -167,8 +167,8 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
     }
 
     // Module breakpad identifier
-    JS::Rooted<JSString*> id(cx, JS_NewStringCopyZ(cx, module.mBreakpadId.c_str()));
-    if (!id || !JS_DefineElement(cx, moduleInfoArray, index++, id, JSPROP_ENUMERATE)) {
+    JS::Rooted<JSString*> id(cx, JS_NewStringCopyZ(cx, module.mBreakpadId.get()));
+    if (!id || !JS_DefineElement(cx, moduleInfoArray, index, id, JSPROP_ENUMERATE)) {
       return nullptr;
     }
   }

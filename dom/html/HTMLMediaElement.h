@@ -154,8 +154,7 @@ public:
                               nsAttrValue& aResult) override;
 
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                              nsIContent* aBindingParent,
-                              bool aCompileEventHandlers) override;
+                              nsIContent* aBindingParent) override;
   virtual void UnbindFromTree(bool aDeep = true,
                               bool aNullParent = true) override;
   virtual void DoneCreatingElement() override;
@@ -640,6 +639,12 @@ public:
   {
     mIsCasting = aShow;
   }
+
+  // Returns whether a call to Play() would be rejected with NotAllowedError.
+  // This assumes "worst case" for unknowns. So if prompting for permission is
+  // enabled and no permission is stored, this behaves as if the user would
+  // opt to block.
+  bool AllowedToPlay() const;
 
   already_AddRefed<MediaSource> GetMozMediaSourceObject() const;
   // Returns a string describing the state of the media player internal
@@ -1780,6 +1785,8 @@ public:
 private:
 
   already_AddRefed<PlayPromise> CreatePlayPromise(ErrorResult& aRv) const;
+
+  void UpdateHadAudibleAutoplayState() const;
 
   /**
    * This function is called by AfterSetAttr and OnAttrSetButNotChanged.

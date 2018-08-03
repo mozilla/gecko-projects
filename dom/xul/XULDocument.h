@@ -132,12 +132,6 @@ public:
 
     NS_IMETHOD OnScriptCompileComplete(JSScript* aScript, nsresult aStatus) override;
 
-    static bool
-    MatchAttribute(Element* aContent,
-                   int32_t aNameSpaceID,
-                   nsAtom* aAttrName,
-                   void* aData);
-
     NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(XULDocument, XMLDocument)
 
     void TraceProtos(JSTracer* aTrc);
@@ -153,21 +147,10 @@ public:
     {
         return mCommandDispatcher;
     }
-    already_AddRefed<nsINodeList>
-      GetElementsByAttribute(const nsAString& aAttribute,
-                             const nsAString& aValue);
-    already_AddRefed<nsINodeList>
-      GetElementsByAttributeNS(const nsAString& aNamespaceURI,
-                               const nsAString& aAttribute,
-                               const nsAString& aValue,
-                               ErrorResult& aRv);
     void AddBroadcastListenerFor(Element& aBroadcaster, Element& aListener,
                                  const nsAString& aAttr, ErrorResult& aRv);
     void RemoveBroadcastListenerFor(Element& aBroadcaster, Element& aListener,
                                     const nsAString& aAttr);
-    void Persist(const nsAString& aId, const nsAString& aAttr,
-                 ErrorResult& aRv);
-    using nsDocument::GetBoxObjectFor;
 
 protected:
     virtual ~XULDocument();
@@ -209,25 +192,17 @@ protected:
 
     already_AddRefed<nsPIWindowRoot> GetWindowRoot();
 
-    static void DirectionChanged(const char* aPrefName, void* aData);
+    static void DirectionChanged(const char* aPrefName, XULDocument* aData);
 
     // pseudo constants
     static int32_t gRefCnt;
 
     static LazyLogModule gXULLog;
 
-    nsresult
+    void
     Persist(mozilla::dom::Element* aElement,
             int32_t aNameSpaceID,
             nsAtom* aAttribute);
-    // Just like Persist but ignores the return value so we can use it
-    // as a runnable method.
-    void DoPersist(mozilla::dom::Element* aElement,
-                   int32_t aNameSpaceID,
-                   nsAtom* aAttribute)
-    {
-        Persist(aElement, aNameSpaceID, aAttribute);
-    }
 
     virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 

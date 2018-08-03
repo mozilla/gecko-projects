@@ -61,7 +61,6 @@ public:
 
   wr::PipelineId PipelineId() { return mPipelineId; }
   already_AddRefed<wr::WebRenderAPI> GetWebRenderAPI() { return do_AddRef(mApi); }
-  wr::Epoch WrEpoch() const { return mWrEpoch; }
   AsyncImagePipelineManager* AsyncImageManager() { return mAsyncImageManager; }
   CompositorVsyncScheduler* CompositorScheduler() { return mCompositorScheduler.get(); }
 
@@ -107,7 +106,7 @@ public:
   mozilla::ipc::IPCResult RecvParentCommands(nsTArray<WebRenderParentCommand>&& commands) override;
   mozilla::ipc::IPCResult RecvGetSnapshot(PTextureParent* aTexture) override;
 
-  mozilla::ipc::IPCResult RecvSetLayerObserverEpoch(const uint64_t& aLayerObserverEpoch) override;
+  mozilla::ipc::IPCResult RecvSetLayersObserverEpoch(const LayersObserverEpoch& aChildEpoch) override;
 
   mozilla::ipc::IPCResult RecvClearCachedResources() override;
   mozilla::ipc::IPCResult RecvScheduleComposite() override;
@@ -119,11 +118,8 @@ public:
 
   mozilla::ipc::IPCResult RecvSetTestSampleTime(const TimeStamp& aTime) override;
   mozilla::ipc::IPCResult RecvLeaveTestMode() override;
-  mozilla::ipc::IPCResult RecvGetAnimationOpacity(const uint64_t& aCompositorAnimationsId,
-                                                  float* aOpacity,
-                                                  bool* aHasAnimationOpacity) override;
-  mozilla::ipc::IPCResult RecvGetAnimationTransform(const uint64_t& aCompositorAnimationsId,
-                                                    MaybeTransform* aTransform) override;
+  mozilla::ipc::IPCResult RecvGetAnimationValue(const uint64_t& aCompositorAnimationsId,
+                                                OMTAValue* aValue) override;
   mozilla::ipc::IPCResult RecvSetAsyncScrollOffset(const FrameMetrics::ViewID& aScrollId,
                                                    const float& aX,
                                                    const float& aY) override;
@@ -158,7 +154,6 @@ public:
                                 const TimeStamp& aTxnStartTime,
                                 const TimeStamp& aFwdTime);
   TransactionId LastPendingTransactionId();
-  TransactionId FlushPendingTransactionIds();
   TransactionId FlushTransactionIdsForEpoch(const wr::Epoch& aEpoch, const TimeStamp& aEndTime);
 
   TextureFactoryIdentifier GetTextureFactoryIdentifier();
@@ -170,8 +165,7 @@ public:
     return mIdNamespace;
   }
 
-  void FlushRendering();
-  void FlushRenderingAsync();
+  void FlushRendering(bool aWaitForPresent = true);
 
   /**
    * Schedule generating WebRender frame definitely at next composite timing.
@@ -186,11 +180,11 @@ public:
    */
   void ScheduleGenerateFrame();
 
-  void UpdateWebRender(CompositorVsyncScheduler* aScheduler,
-                       wr::WebRenderAPI* aApi,
-                       AsyncImagePipelineManager* aImageMgr,
-                       CompositorAnimationStorage* aAnimStorage,
-                       const TextureFactoryIdentifier& aTextureFactoryIdentifier);
+  wr::Epoch UpdateWebRender(CompositorVsyncScheduler* aScheduler,
+                            wr::WebRenderAPI* aApi,
+                            AsyncImagePipelineManager* aImageMgr,
+                            CompositorAnimationStorage* aAnimStorage,
+                            const TextureFactoryIdentifier& aTextureFactoryIdentifier);
 
   void RemoveEpochDataPriorTo(const wr::Epoch& aRenderedEpoch);
 
@@ -221,7 +215,8 @@ private:
 
   void AddPipelineIdForCompositable(const wr::PipelineId& aPipelineIds,
                                     const CompositableHandle& aHandle,
-                                    const bool& aAsync);
+                                    const bool& aAsync,
+                                    wr::TransactionBuilder& aTxn);
   void RemovePipelineIdForCompositable(const wr::PipelineId& aPipelineId,
                                        wr::TransactionBuilder& aTxn);
 
@@ -233,7 +228,6 @@ private:
                                       wr::TransactionBuilder& aTxn);
 
   void ClearResources();
-  uint64_t GetChildLayerObserverEpoch() const { return mChildLayerObserverEpoch; }
   bool ShouldParentObserveEpoch();
   mozilla::ipc::IPCResult HandleShutdown();
 
@@ -306,11 +300,11 @@ private:
   TimeDuration mVsyncRate;
   TimeStamp mPreviousFrameTimeStamp;
   // These fields keep track of the latest layer observer epoch values in the child and the
-  // parent. mChildLayerObserverEpoch is the latest epoch value received from the child.
-  // mParentLayerObserverEpoch is the latest epoch value that we have told TabParent about
+  // parent. mChildLayersObserverEpoch is the latest epoch value received from the child.
+  // mParentLayersObserverEpoch is the latest epoch value that we have told TabParent about
   // (via ObserveLayerUpdate).
-  uint64_t mChildLayerObserverEpoch;
-  uint64_t mParentLayerObserverEpoch;
+  LayersObserverEpoch mChildLayersObserverEpoch;
+  LayersObserverEpoch mParentLayersObserverEpoch;
 
   std::queue<PendingTransactionId> mPendingTransactionIds;
   std::queue<CompositorAnimationIdsForEpoch> mCompositorAnimationsToDelete;

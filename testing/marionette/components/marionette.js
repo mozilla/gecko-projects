@@ -66,7 +66,8 @@ const RECOMMENDED_PREFS = new Map([
   //
   // This should also be set in the profile prior to starting Firefox,
   // as it is picked up at runtime.
-  ["app.update.enabled", false],
+  ["app.update.disabledForTesting", true],
+  ["security.turn_off_all_security_so_that_viruses_can_take_over_this_computer", true],
 
   // Increase the APZ content response timeout in tests to 1 minute.
   // This is to accommodate the fact that test environments tends to be
@@ -531,14 +532,8 @@ Marionette.prototype = {
   classID: Components.ID("{786a1369-dca5-4adc-8486-33d23c88010a}"),
   contractID: "@mozilla.org/remote/marionette;1",
 
-  /* eslint-disable camelcase */
+  /* eslint-disable-next-line camelcase */
   _xpcom_factory: MarionetteFactory,
-
-  _xpcom_categories: [
-    {category: "command-line-handler", entry: "b-marionette"},
-    {category: "profile-after-change", service: true},
-  ],
-  /* eslint-enable camelcase */
 
   helpInfo: "  --marionette       Enable remote control server.\n",
 };

@@ -17,8 +17,8 @@ ChromeUtils.defineModuleGetter(this, "DeferredTask",
 ChromeUtils.defineModuleGetter(this, "ExtensionSettingsStore",
                                   "resource://gre/modules/ExtensionSettingsStore.jsm");
 
-XPCOMUtils.defineLazyPreferenceGetter(this, "trackingprotectionUiEnabled",
-                                      "privacy.trackingprotection.ui.enabled");
+XPCOMUtils.defineLazyPreferenceGetter(this, "contentBlockingUiEnabled",
+                                      "browser.contentblocking.ui.enabled");
 
 const PREF_SETTING_TYPE = "prefs";
 const PROXY_KEY = "proxy.settings";
@@ -48,11 +48,12 @@ let extensionControlledContentIds = {
   "proxy.settings": "proxyExtensionContent",
   get "websites.trackingProtectionMode"() {
     return {
-      button: "trackingProtectionExtensionContentButton",
-      section:
-        trackingprotectionUiEnabled ?
-          "trackingProtectionExtensionContentLabel" :
-          "trackingProtectionPBMExtensionContentLabel",
+      button: contentBlockingUiEnabled ?
+        "contentBlockingTrackingProtectionExtensionContentButton" :
+        "trackingProtectionExtensionContentButton",
+      section: contentBlockingUiEnabled ?
+        "contentBlockingTrackingProtectionExtensionContentLabel" :
+        "trackingProtectionExtensionContentLabel",
     };
   }
 };

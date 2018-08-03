@@ -21,6 +21,7 @@
 #include "mozilla/LookAndFeel.h" // For LookAndFeel::GetInt
 #include "mozilla/KeyframeUtils.h"
 #include "mozilla/ServoBindings.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/TypeTraits.h"
 #include "Layers.h" // For Layer
 #include "nsComputedDOMStyle.h" // nsComputedDOMStyle::GetComputedStyle
@@ -28,7 +29,6 @@
 #include "nsCSSPropertyIDSet.h"
 #include "nsCSSProps.h" // For nsCSSProps::PropHasFlags
 #include "nsCSSPseudoElements.h" // For CSSPseudoElementType
-#include "nsDocument.h" // For nsDocument::IsWebAnimationsEnabled
 #include "nsIFrame.h"
 #include "nsIPresShell.h"
 #include "nsIScriptError.h"
@@ -88,23 +88,15 @@ KeyframeEffect::WrapObject(JSContext* aCx,
   return KeyframeEffect_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-IterationCompositeOperation KeyframeEffect::IterationComposite(
-  CallerType /*aCallerType*/) const
+IterationCompositeOperation KeyframeEffect::IterationComposite() const
 {
   return mEffectOptions.mIterationComposite;
 }
 
 void
 KeyframeEffect::SetIterationComposite(
-  const IterationCompositeOperation& aIterationComposite,
-  CallerType aCallerType)
+  const IterationCompositeOperation& aIterationComposite)
 {
-  // Ignore iterationComposite if the Web Animations API is not enabled,
-  // then the default value 'Replace' will be used.
-  if (!nsDocument::IsWebAnimationsEnabled(aCallerType)) {
-    return;
-  }
-
   if (mEffectOptions.mIterationComposite == aIterationComposite) {
     return;
   }
@@ -597,9 +589,9 @@ KeyframeEffectParamsFromUnion(const OptionsType& aOptions,
 {
   KeyframeEffectParams result;
   if (aOptions.IsUnrestrictedDouble() ||
-      // Ignore iterationComposite if the Web Animations API is not enabled,
-      // then the default value 'Replace' will be used.
-      !nsDocument::IsWebAnimationsEnabled(aCallerType)) {
+      // Ignore iterationComposite and composite if the corresponding pref is
+      // not set. The default value 'Replace' will be used instead.
+      !StaticPrefs::dom_animations_api_compositing_enabled()) {
     return result;
   }
 
@@ -826,7 +818,7 @@ void
 DumpAnimationProperties(nsTArray<AnimationProperty>& aAnimationProperties)
 {
   for (auto& p : aAnimationProperties) {
-    printf("%s\n", nsCSSProps::GetStringValue(p.mProperty).get());
+    printf("%s\n", nsCString(nsCSSProps::GetStringValue(p.mProperty)).get());
     for (auto& s : p.mSegments) {
       nsString fromValue, toValue;
       s.mFromValue.SerializeSpecifiedValue(p.mProperty, fromValue);
@@ -1354,7 +1346,7 @@ KeyframeEffect::CanThrottleOverflowChangesInScrollable(nsIFrame& aFrame) const
     return true;
   }
 
-  ScrollbarStyles ss = scrollable->GetScrollbarStyles();
+  ScrollStyles ss = scrollable->GetScrollStyles();
   if (ss.mVertical == NS_STYLE_OVERFLOW_HIDDEN &&
       ss.mHorizontal == NS_STYLE_OVERFLOW_HIDDEN &&
       scrollable->GetLogicalScrollPosition() == nsPoint(0, 0)) {
@@ -1617,12 +1609,10 @@ KeyframeEffect::CalculateCumulativeChangeHint(const ComputedStyle* aComputedStyl
         // segment that needs composing with the underlying value, we just add
         // all the change hints a transform animation is known to be able to
         // generate.
-        mCumulativeChangeHint |= nsChangeHint_AddOrRemoveTransform |
-                                 nsChangeHint_RepaintFrame |
-                                 nsChangeHint_UpdateContainingBlock |
-                                 nsChangeHint_UpdateOverflow |
-                                 nsChangeHint_UpdatePostTransformOverflow |
-                                 nsChangeHint_UpdateTransformLayer;
+        mCumulativeChangeHint |=
+          nsChangeHint_ComprehensiveAddOrRemoveTransform |
+          nsChangeHint_UpdatePostTransformOverflow |
+          nsChangeHint_UpdateTransformLayer;
         continue;
       }
 

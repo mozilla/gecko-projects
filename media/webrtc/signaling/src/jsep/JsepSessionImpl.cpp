@@ -30,6 +30,7 @@
 #include "signaling/src/sdp/SipccSdp.h"
 #include "signaling/src/sdp/SipccSdpParser.h"
 #include "mozilla/net/DataChannelProtocol.h"
+#include "signaling/src/sdp/ParsingResultComparer.h"
 
 namespace mozilla {
 
@@ -67,7 +68,10 @@ JsepSessionImpl::Init()
   SetupDefaultCodecs();
   SetupDefaultRtpExtensions();
 
-  mRunRustParser = Preferences::GetBool("media.webrtc.rsdparsa_enabled", false);
+  mRunRustParser = Preferences::GetBool("media.peerconnection.sdp.rust.enabled",
+                                        false);
+  mRunSdpComparer = Preferences::GetBool("media.peerconnection.sdp.rust.compare",
+                                         false);
 
   return NS_OK;
 }
@@ -281,9 +285,7 @@ JsepSessionImpl::CreateOfferMsection(const JsepOfferOptions& options,
     if (transceiver.IsAssociated()) {
       mid = transceiver.GetMid();
     } else {
-      std::ostringstream osMid;
-      osMid << "sdparta_" << msection->GetLevel();
-      mid = osMid.str();
+      mid = GetNewMid();
     }
 
     msection->GetAttributeList().SetAttribute(
@@ -498,14 +500,6 @@ JsepSessionImpl::AddExtmap(SdpMediaSection* msection)
   }
 }
 
-void
-JsepSessionImpl::AddMid(const std::string& mid,
-                        SdpMediaSection* msection) const
-{
-  msection->GetAttributeList().SetAttribute(new SdpStringAttribute(
-        SdpAttribute::kMidAttribute, mid));
-}
-
 std::vector<SdpExtmapAttributeList::Extmap>
 JsepSessionImpl::GetRtpExtensions(const SdpMediaSection& msection)
 {
@@ -537,6 +531,21 @@ JsepSessionImpl::GetRtpExtensions(const SdpMediaSection& msection)
     }
   }
   return result;
+}
+
+std::string
+JsepSessionImpl::GetNewMid()
+{
+  std::string mid;
+
+  do {
+    std::ostringstream osMid;
+    osMid << mMidCounter++;
+    mid = osMid.str();
+  } while (mUsedMids.count(mid));
+
+  mUsedMids.insert(mid);
+  return mid;
 }
 
 void
@@ -1286,14 +1295,23 @@ nsresult
 JsepSessionImpl::ParseSdp(const std::string& sdp, UniquePtr<Sdp>* parsedp)
 {
   UniquePtr<Sdp> parsed = mSipccParser.Parse(sdp);
-  if (mRunRustParser) {
-    UniquePtr<Sdp> rustParsed = mRsdparsaParser.Parse(sdp);
-  }
   if (!parsed) {
     std::string error = "Failed to parse SDP: ";
     mSdpHelper.appendSdpParseErrors(mSipccParser.GetParseErrors(), &error);
     JSEP_SET_ERROR(error);
     return NS_ERROR_INVALID_ARG;
+  }
+
+  if (mRunRustParser) {
+    UniquePtr<Sdp> rustParsed = mRsdparsaParser.Parse(sdp);
+    if (mRunSdpComparer) {
+      ParsingResultComparer comparer;
+      if (rustParsed) {
+        comparer.Compare(*rustParsed, *parsed, sdp);
+      } else {
+        comparer.TrackRustParsingFailed(mSipccParser.GetParseErrors().size());
+      }
+    }
   }
 
   // Verify that the JSEP rules for all SDP are followed
@@ -1515,6 +1533,11 @@ JsepSessionImpl::UpdateTransceiversFromRemoteDescription(const Sdp& remote)
 
     if (!mSdpHelper.MsectionIsDisabled(msection)) {
       transceiver->Associate(msection.GetAttributeList().GetMid());
+      if (!transceiver->IsAssociated()) {
+        transceiver->Associate(GetNewMid());
+      } else {
+        mUsedMids.insert(transceiver->GetMid());
+      }
     } else {
       transceiver->Disassociate();
       // This cannot be rolled back.

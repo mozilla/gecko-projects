@@ -631,7 +631,7 @@ public:
      */
     virtual mozilla::gfx::VsyncSource* GetHardwareVsync() {
       MOZ_ASSERT(mVsyncSource != nullptr);
-      MOZ_ASSERT(XRE_IsParentProcess());
+      MOZ_ASSERT(XRE_IsParentProcess() || mozilla::recordreplay::IsRecordingOrReplaying());
       return mVsyncSource;
     }
 
@@ -888,7 +888,6 @@ private:
 
     RefPtr<gfxASurface> mScreenReferenceSurface;
     nsCOMPtr<nsIObserver> mSRGBOverrideObserver;
-    nsCOMPtr<nsIObserver> mFontPrefsObserver;
     nsCOMPtr<nsIObserver> mMemoryPressureObserver;
 
     // The preferred draw target backend to use for canvas

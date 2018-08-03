@@ -34,12 +34,11 @@ function CallbackObject(id, callback, mediator) {
 }
 
 function RemoteMediator(window) {
-  window.QueryInterface(Ci.nsIInterfaceRequestor);
-  let utils = window.getInterface(Ci.nsIDOMWindowUtils);
+  let utils = window.windowUtils;
   this._windowID = utils.currentInnerWindowID;
 
   this.mm = window
-    .getInterface(Ci.nsIDocShell)
+    .docShell
     .QueryInterface(Ci.nsIInterfaceRequestor)
     .getInterface(Ci.nsIContentFrameMessageManager);
   this.mm.addWeakMessageListener(MSG_INSTALL_CALLBACK, this);
@@ -93,9 +92,7 @@ RemoteMediator.prototype = {
     }
 
     // Fall back to sending through the message manager
-    let messageManager = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIWebNavigation)
-                               .QueryInterface(Ci.nsIDocShell)
+    let messageManager = window.docShell
                                .QueryInterface(Ci.nsIInterfaceRequestor)
                                .getInterface(Ci.nsIContentFrameMessageManager);
 

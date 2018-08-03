@@ -3457,7 +3457,7 @@ static void ScrollToShowRect(nsIScrollableFrame*      aFrameAsScrollable,
       aHorizontal.mWhenToScroll == nsIPresShell::SCROLL_IF_NOT_VISIBLE) {
     lineSize = aFrameAsScrollable->GetLineScrollAmount();
   }
-  ScrollbarStyles ss = aFrameAsScrollable->GetScrollbarStyles();
+  ScrollStyles ss = aFrameAsScrollable->GetScrollStyles();
   nsRect allowedRange(scrollPt, nsSize(0, 0));
   bool needToScroll = false;
   uint32_t directions = aFrameAsScrollable->GetPerceivedScrollingDirections();
@@ -3514,7 +3514,7 @@ static void ScrollToShowRect(nsIScrollableFrame*      aFrameAsScrollable,
   // a current smooth scroll operation.
   if (needToScroll) {
     nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
-    bool autoBehaviorIsSmooth = (aFrameAsScrollable->GetScrollbarStyles().mScrollBehavior
+    bool autoBehaviorIsSmooth = (aFrameAsScrollable->GetScrollStyles().mScrollBehavior
                                   == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH);
     bool smoothScroll = (aFlags & nsIPresShell::SCROLL_SMOOTH) ||
                           ((aFlags & nsIPresShell::SCROLL_SMOOTH_AUTO) && autoBehaviorIsSmooth);
@@ -4256,6 +4256,8 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     // notified on,
     mDocument->FlushPendingNotifications(FlushType::ContentAndNotify);
 
+    mDocument->UpdateSVGUseElementShadowTrees();
+
     // Process pending restyles, since any flush of the presshell wants
     // up-to-date style data.
     if (!mIsDestroying) {
@@ -4559,6 +4561,27 @@ PresShell::NotifyCounterStylesAreDirty()
 {
   nsAutoCauseReflowNotifier reflowNotifier(this);
   mFrameConstructor->NotifyCounterStylesAreDirty();
+}
+
+bool
+nsIPresShell::FrameIsAncestorOfDirtyRoot(nsIFrame* aFrame) const
+{
+  MOZ_ASSERT(aFrame);
+
+  // Look for a path from any dirty roots to aFrame, following GetParent().
+  // This check mirrors what FrameNeedsReflow() would have done if the reflow
+  // root didn't get in the way.
+  for (nsIFrame* dirtyFrame : mDirtyRoots) {
+    while (dirtyFrame) {
+      if (dirtyFrame == aFrame) {
+        return true;
+      }
+
+      dirtyFrame = dirtyFrame->GetParent();
+    }
+  }
+
+  return false;
 }
 
 void

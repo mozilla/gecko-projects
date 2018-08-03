@@ -47,6 +47,7 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler
     bool makesGCCalls_;
 
     MOZ_MUST_USE bool callVM(MacroAssembler& masm, const VMFunction& fun);
+    MOZ_MUST_USE bool tailCallVM(MacroAssembler& masm, const VMFunction& fun);
 
     MOZ_MUST_USE bool callTypeUpdateIC(Register obj, ValueOperand val, Register scratch,
                                        LiveGeneralRegisterSet saveRegs);
@@ -155,6 +156,20 @@ BaselineCacheIRCompiler::callVM(MacroAssembler& masm, const VMFunction& fun)
     MOZ_ASSERT(engine_ == ICStubEngine::Baseline);
 
     EmitBaselineCallVM(code, masm);
+    return true;
+}
+
+bool
+BaselineCacheIRCompiler::tailCallVM(MacroAssembler& masm, const VMFunction& fun)
+{
+    MOZ_ASSERT(!inStubFrame_);
+
+    TrampolinePtr code = cx_->runtime()->jitRuntime()->getVMWrapper(fun);
+    MOZ_ASSERT(fun.expectTailCall == TailCall);
+    MOZ_ASSERT(engine_ == ICStubEngine::Baseline);
+    size_t argSize = fun.explicitStackSlots() * sizeof(void*);
+
+    EmitBaselineTailCallVM(code, masm, argSize);
     return true;
 }
 
@@ -469,34 +484,6 @@ BaselineCacheIRCompiler::emitGuardXrayExpandoShapeAndDefaultProto()
         masm.branchTestObject(Assembler::Equal, expandoAddress, failure->label());
         masm.bind(&done);
     }
-
-    return true;
-}
-
-bool
-BaselineCacheIRCompiler::emitGuardFunctionPrototype()
-{
-    Register obj = allocator.useRegister(masm, reader.objOperandId());
-    Register prototypeObject = allocator.useRegister(masm, reader.objOperandId());
-
-    // Allocate registers before the failure path to make sure they're registered
-    // by addFailurePath.
-    AutoScratchRegister scratch1(allocator, masm);
-    AutoScratchRegister scratch2(allocator, masm);
-
-    FailurePath* failure;
-    if (!addFailurePath(&failure))
-        return false;
-
-     // Guard on the .prototype object.
-    masm.loadPtr(Address(obj, NativeObject::offsetOfSlots()), scratch1);
-    masm.load32(Address(stubAddress(reader.stubOffset())), scratch2);
-    BaseValueIndex prototypeSlot(scratch1, scratch2);
-    masm.branchTestObject(Assembler::NotEqual, prototypeSlot, failure->label());
-    masm.unboxObject(prototypeSlot, scratch1);
-    masm.branchPtr(Assembler::NotEqual,
-                   prototypeObject,
-                   scratch1, failure->label());
 
     return true;
 }
@@ -2113,6 +2100,7 @@ BaselineCacheIRCompiler::init(CacheKind kind)
       case CacheKind::In:
       case CacheKind::HasOwn:
       case CacheKind::InstanceOf:
+      case CacheKind::BinaryArith:
         MOZ_ASSERT(numInputs == 2);
         allocator.initInputLocation(0, R0);
         allocator.initInputLocation(1, R1);
@@ -2393,4 +2381,53 @@ ICCacheIR_Updated::Clone(JSContext* cx, ICStubSpace* space, ICStub* firstMonitor
 
     stubInfo->copyStubData(&other, res);
     return res;
+}
+
+typedef JSString* (*ConcatStringsFn)(JSContext*, HandleString, HandleString);
+static const VMFunction ConcatStringsInfo =
+    FunctionInfo<ConcatStringsFn>(ConcatStrings<CanGC>, "ConcatStrings", NonTailCall);
+
+bool
+BaselineCacheIRCompiler::emitCallStringConcatResult()
+{
+    AutoOutputRegister output(*this);
+    Register lhs = allocator.useRegister(masm, reader.stringOperandId());
+    Register rhs = allocator.useRegister(masm, reader.stringOperandId());
+    AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
+
+    AutoStubFrame stubFrame(*this);
+    stubFrame.enter(masm, scratch);
+
+    masm.push(rhs);
+    masm.push(lhs);
+
+    if (!callVM(masm, ConcatStringsInfo))
+        return false;
+
+    masm.tagValue(JSVAL_TYPE_STRING, ReturnReg, output.valueReg());
+
+    stubFrame.leave(masm);
+    return true;
+}
+
+bool
+BaselineCacheIRCompiler::emitCallStringObjectConcatResult()
+{
+    ValueOperand lhs = allocator.useValueRegister(masm, reader.valOperandId());
+    ValueOperand rhs = allocator.useValueRegister(masm, reader.valOperandId());
+
+    allocator.discardStack(masm);
+
+    // For the expression decompiler
+    EmitRestoreTailCallReg(masm);
+    masm.pushValue(lhs);
+    masm.pushValue(rhs);
+
+    masm.pushValue(rhs);
+    masm.pushValue(lhs);
+
+    if (!tailCallVM(masm, DoConcatStringObjectInfo))
+        return false;
+
+    return true;
 }

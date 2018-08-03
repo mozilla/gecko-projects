@@ -37,8 +37,7 @@ function loadContentWindow(webNavigation, uri) {
         }
         let docShell = webNavigation.QueryInterface(Ci.nsIInterfaceRequestor)
                        .getInterface(Ci.nsIDocShell);
-        let contentWindow = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                            .getInterface(Ci.nsIDOMWindow);
+        let contentWindow = docShell.domWindow;
         webProgress.removeProgressListener(progressListener);
         progressListeners.delete(progressListener);
         contentWindow.addEventListener("load", (event) => {
@@ -166,8 +165,7 @@ add_task(async function test_mouse_drag() {
   let left = rect.left;
   let top = rect.top;
 
-  let utils = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDOMWindowUtils);
+  let utils = contentWindow.windowUtils;
   utils.sendMouseEvent("mousedown", left, top, 0, 1, 0, false, 0, 0);
   utils.sendMouseEvent("mousemove", left, top, 0, 1, 0, false, 0, 0);
   // Wait for a turn of the event loop since the synthetic mouse event

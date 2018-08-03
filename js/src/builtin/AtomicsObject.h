@@ -18,6 +18,7 @@
 namespace js {
 
 class GlobalObject;
+class SharedArrayRawBuffer;
 
 class AtomicsObject : public NativeObject
 {
@@ -136,7 +137,8 @@ public:
     // Shared futex lock for all runtimes.  We can perhaps do better,
     // but any lock will need to be per-domain (consider SharedWorker)
     // or coarser.
-    static mozilla::Atomic<js::Mutex*> lock_;
+    static mozilla::Atomic<js::Mutex*, mozilla::SequentiallyConsistent,
+                           mozilla::recordreplay::Behavior::DontPreserve> lock_;
 
     // A flag that controls whether waiting is allowed.
     ThreadData<bool> canWait_;

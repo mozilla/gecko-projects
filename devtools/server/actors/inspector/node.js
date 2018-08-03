@@ -24,6 +24,7 @@ loader.lazyRequireGetter(this, "isNativeAnonymous", "devtools/shared/layout/util
 loader.lazyRequireGetter(this, "isShadowAnonymous", "devtools/shared/layout/utils", true);
 loader.lazyRequireGetter(this, "isShadowHost", "devtools/shared/layout/utils", true);
 loader.lazyRequireGetter(this, "isShadowRoot", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "getShadowRootMode", "devtools/shared/layout/utils", true);
 loader.lazyRequireGetter(this, "isXBLAnonymous", "devtools/shared/layout/utils", true);
 
 loader.lazyRequireGetter(this, "InspectorActorUtils", "devtools/server/actors/inspector/utils");
@@ -125,6 +126,7 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       systemId: this.rawNode.systemId,
 
       attrs: this.writeAttrs(),
+      customElementLocation: this.getCustomElementLocation(),
       isBeforePseudoElement: isBeforePseudoElement(this.rawNode),
       isAfterPseudoElement: isAfterPseudoElement(this.rawNode),
       isAnonymous: isAnonymous(this.rawNode),
@@ -132,6 +134,7 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       isXBLAnonymous: isXBLAnonymous(this.rawNode),
       isShadowAnonymous: isShadowAnonymous(this.rawNode),
       isShadowRoot: shadowRoot,
+      shadowRootMode: getShadowRootMode(this.rawNode),
       isShadowHost: isShadowHost(this.rawNode),
       isDirectShadowHostChild: isDirectShadowHostChild(this.rawNode),
       pseudoClassLocks: this.writePseudoClassLocks(),
@@ -201,7 +204,8 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
 
     // Normal counting misses ::before/::after.  Also, some anonymous children
     // may ultimately be skipped, so we have to consult with the walker.
-    if (numChildren === 0 || hasAnonChildren || isShadowHost(this.rawNode)) {
+    if (numChildren === 0 || hasAnonChildren || isShadowHost(this.rawNode) ||
+      isShadowAnonymous(this.rawNode)) {
       numChildren = this.walker.countChildren(this);
     }
 
@@ -346,6 +350,36 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
     });
 
     return listenerArray;
+  },
+
+  /**
+   * Retrieve the script location of the custom element definition for this node, when
+   * relevant. To be linked to a custom element definition
+   */
+  getCustomElementLocation: function() {
+    // Get a reference to the custom element definition function.
+    const name = this.rawNode.localName;
+
+    const customElementsRegistry = this.rawNode.ownerGlobal.customElements;
+    const customElement = customElementsRegistry && customElementsRegistry.get(name);
+    if (!customElement) {
+      return undefined;
+    }
+    // Create debugger object for the customElement function.
+    const global = Cu.getGlobalForObject(customElement);
+    const dbg = this.parent().targetActor.makeDebugger();
+    const globalDO = dbg.addDebuggee(global);
+    const customElementDO = globalDO.makeDebuggeeValue(customElement);
+
+    // Return undefined if we can't find a script for the custom element definition.
+    if (!customElementDO.script) {
+      return undefined;
+    }
+
+    return {
+      url: customElementDO.script.url,
+      line: customElementDO.script.startLine,
+    };
   },
 
   /**
@@ -672,6 +706,19 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       current = current.parentNode;
     }
     return "rgba(255, 255, 255, 1)";
+  },
+
+  /**
+   * Returns an object with the width and height of the node's owner window.
+   *
+   * @return {Object}
+   */
+  getOwnerGlobalDimensions: function() {
+    const win = this.rawNode.ownerGlobal;
+    return {
+      innerWidth: win.innerWidth,
+      innerHeight: win.innerHeight,
+    };
   }
 });
 

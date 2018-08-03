@@ -172,6 +172,8 @@ js::InferSpewActive(SpewChannel channel)
     if (!checked) {
         checked = true;
         PodArrayZero(active);
+        if (mozilla::recordreplay::IsRecordingOrReplaying())
+            return false;
         const char* env = getenv("INFERFLAGS");
         if (!env)
             return false;
@@ -194,6 +196,8 @@ static bool InferSpewColorable()
     static bool checked = false;
     if (!checked) {
         checked = true;
+        if (mozilla::recordreplay::IsRecordingOrReplaying())
+            return false;
         const char* env = getenv("TERM");
         if (!env)
             return false;
@@ -4646,7 +4650,7 @@ Zone::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
     *regexpZone += regExps.sizeOfExcludingThis(mallocSizeOf);
     if (jitZone_)
         jitZone_->addSizeOfIncludingThis(mallocSizeOf, jitZone, baselineStubsOptimized, cachedCFG);
-    *uniqueIdMap += uniqueIds().sizeOfExcludingThis(mallocSizeOf);
+    *uniqueIdMap += uniqueIds().shallowSizeOfExcludingThis(mallocSizeOf);
     *shapeTables += baseShapes().sizeOfExcludingThis(mallocSizeOf)
                   + initialShapes().sizeOfExcludingThis(mallocSizeOf);
     *atomsMarkBitmaps += markedAtoms().sizeOfExcludingThis(mallocSizeOf);

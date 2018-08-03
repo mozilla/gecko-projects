@@ -1421,7 +1421,17 @@ inline void
 ClearWrapper(T* p, nsWrapperCache* cache, JSObject* obj)
 {
   JS::AutoAssertGCCallback inCallback;
-  cache->ClearWrapper(obj);
+
+  // Skip clearing the wrapper when replaying. This method is called during
+  // finalization of |obj|, and when replaying a strong reference is kept on
+  // the contents of the cache: since |obj| is being finalized, the cache
+  // cannot point to |obj|, and clearing here won't do anything.
+  // Additionally, the reference held on the cache may have already been
+  // released, if we are finalizing later than we did while recording, and the
+  // cache may have already been deleted.
+  if (!recordreplay::IsReplaying()) {
+    cache->ClearWrapper(obj);
+  }
 }
 
 template<class T>
@@ -1429,9 +1439,14 @@ inline void
 ClearWrapper(T* p, void*, JSObject* obj)
 {
   JS::AutoAssertGCCallback inCallback;
-  nsWrapperCache* cache;
-  CallQueryInterface(p, &cache);
-  ClearWrapper(p, cache, obj);
+
+  // Skip clearing the wrapper when replaying, for the same reason as in the
+  // overload above: |p| may have been deleted and we cannot QI it.
+  if (!recordreplay::IsReplaying()) {
+    nsWrapperCache* cache;
+    CallQueryInterface(p, &cache);
+    ClearWrapper(p, cache, obj);
+  }
 }
 
 template<class T>
@@ -2737,6 +2752,12 @@ BindingJSObjectMallocBytes(void *aNativePtr)
   return 0;
 }
 
+// Register a thing which DeferredFinalize might be called on during GC
+// finalization. See DeferredFinalize.h
+template<class T>
+static void
+RecordReplayRegisterDeferredFinalize(T* aObject);
+
 // The BindingJSObjectCreator class is supposed to be used by a caller that
 // wants to create and initialise a binding JSObject. After initialisation has
 // been successfully completed it should call ForgetObject().
@@ -2778,6 +2799,7 @@ public:
       js::SetProxyReservedSlot(aReflector, DOM_OBJECT_SLOT, JS::PrivateValue(aNative));
       mNative = aNative;
       mReflector = aReflector;
+      RecordReplayRegisterDeferredFinalize<T>(aNative);
     }
 
     if (size_t mallocBytes = BindingJSObjectMallocBytes(aNative)) {
@@ -2795,6 +2817,7 @@ public:
       js::SetReservedSlot(aReflector, DOM_OBJECT_SLOT, JS::PrivateValue(aNative));
       mNative = aNative;
       mReflector = aReflector;
+      RecordReplayRegisterDeferredFinalize<T>(aNative);
     }
 
     if (size_t mallocBytes = BindingJSObjectMallocBytes(aNative)) {
@@ -2908,6 +2931,15 @@ struct DeferredFinalizer
     DeferredFinalize(Impl::AppendDeferredFinalizePointer,
                      Impl::DeferredFinalize, aObject);
   }
+
+  static void
+  RecordReplayRegisterDeferredFinalize(T* aObject)
+  {
+    typedef DeferredFinalizerImpl<T> Impl;
+    RecordReplayRegisterDeferredFinalizeThing(Impl::AppendDeferredFinalizePointer,
+                                              Impl::DeferredFinalize,
+                                              aObject);
+  }
 };
 
 template<class T>
@@ -2918,6 +2950,12 @@ struct DeferredFinalizer<T, true>
   {
     DeferredFinalize(reinterpret_cast<nsISupports*>(aObject));
   }
+
+  static void
+  RecordReplayRegisterDeferredFinalize(T* aObject)
+  {
+    RecordReplayRegisterDeferredFinalizeThing(nullptr, nullptr, aObject);
+  }
 };
 
 template<class T>
@@ -2925,6 +2963,13 @@ static void
 AddForDeferredFinalization(T* aObject)
 {
   DeferredFinalizer<T>::AddForDeferredFinalization(aObject);
+}
+
+template<class T>
+static void
+RecordReplayRegisterDeferredFinalize(T* aObject)
+{
+  DeferredFinalizer<T>::RecordReplayRegisterDeferredFinalize(aObject);
 }
 
 // This returns T's CC participant if it participates in CC or null if it
@@ -3064,6 +3109,7 @@ CreateGlobal(JSContext* aCx, T* aNative, nsWrapperCache* aCache,
     NS_ADDREF(aNative);
 
     aCache->SetWrapper(aGlobal);
+    RecordReplayRegisterDeferredFinalize<T>(aNative);
 
     dom::AllocateProtoAndIfaceCache(aGlobal,
                                     CreateGlobalOptions<T>::ProtoAndIfaceCacheKind);
@@ -3230,46 +3276,6 @@ CallerSubsumes(JS::Handle<JS::Value> aValue)
   }
   return CallerSubsumes(&aValue.toObject());
 }
-
-template<class T>
-inline bool
-WrappedJSToDictionary(JSContext* aCx, nsISupports* aObject, T& aDictionary)
-{
-  nsCOMPtr<nsIXPConnectWrappedJS> wrappedObj = do_QueryInterface(aObject);
-  if (!wrappedObj) {
-    return false;
-  }
-
-  JS::Rooted<JSObject*> obj(aCx, wrappedObj->GetJSObject());
-  if (!obj) {
-    return false;
-  }
-
-  JSAutoRealm ar(aCx, obj);
-  JS::Rooted<JS::Value> v(aCx, JS::ObjectValue(*obj));
-  return aDictionary.Init(aCx, v);
-}
-
-template<class T>
-inline bool
-WrappedJSToDictionary(nsISupports* aObject, T& aDictionary)
-{
-  nsCOMPtr<nsIXPConnectWrappedJS> wrappedObj = do_QueryInterface(aObject);
-  NS_ENSURE_TRUE(wrappedObj, false);
-  JS::Rooted<JSObject*> obj(RootingCx(), wrappedObj->GetJSObject());
-  NS_ENSURE_TRUE(obj, false);
-
-  nsIGlobalObject* global = xpc::NativeGlobal(obj);
-  NS_ENSURE_TRUE(global, false);
-
-  // we need this AutoEntryScript here because the spec requires us to execute
-  // getters when parsing a dictionary
-  AutoEntryScript aes(global, "WebIDL dictionary creation");
-
-  JS::Rooted<JS::Value> v(aes.cx(), JS::ObjectValue(*obj));
-  return aDictionary.Init(aes.cx(), v);
-}
-
 
 template<class T, class S>
 inline RefPtr<T>

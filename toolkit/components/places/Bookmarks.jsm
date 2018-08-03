@@ -124,6 +124,12 @@ var Bookmarks = Object.freeze({
   DEFAULT_INDEX: -1,
 
   /**
+   * Maximum length of a tag.
+   * Any tag above this length is rejected.
+   */
+  MAX_TAG_LENGTH: 100,
+
+  /**
    * Bookmark change source constants, passed as optional properties and
    * forwarded to observers. See nsINavBookmarksService.idl for an explanation.
    */
@@ -774,15 +780,12 @@ var Bookmarks = Object.freeze({
           // If we're updating a tag, we must notify all the tagged bookmarks
           // about the change.
           if (isTagging) {
-            let URIs = PlacesUtils.tagging.getURIsForTag(updatedItem.title);
-            for (let uri of URIs) {
-              for (let entry of (await fetchBookmarksByURL({ url: new URL(uri.spec) }, true))) {
-                notify(observers, "onItemChanged", [ entry._id, "tags", false, "",
-                                                     PlacesUtils.toPRTime(entry.lastModified),
-                                                     entry.type, entry._parentId,
-                                                     entry.guid, entry.parentGuid,
-                                                     "", updatedItem.source ]);
-              }
+            for (let entry of (await fetchBookmarksByTags({ tags: [updatedItem.title] }, true))) {
+              notify(observers, "onItemChanged", [ entry._id, "tags", false, "",
+                                                    PlacesUtils.toPRTime(entry.lastModified),
+                                                    entry.type, entry._parentId,
+                                                    entry.guid, entry.parentGuid,
+                                                    "", updatedItem.source ]);
             }
           }
         }
@@ -1194,6 +1197,13 @@ var Bookmarks = Object.freeze({
    *      retrieves the most recent item with the specified guid prefix.
    *      To retrieve ALL of the bookmarks for that guid prefix, you must pass
    *      in an onResult callback, that will be invoked once for each bookmark.
+   *  - tags
+   *      Retrieves the most recent item with all the specified tags.
+   *      The tags are matched in a case-insensitive way.
+   *      To retrieve ALL of the bookmarks having these tags, pass in an
+   *      onResult callback, that will be invoked once for each bookmark.
+   *      Note, there can be multiple bookmarks for the same url, if you need
+   *      unique tagged urls you can filter duplicates by accumulating in a Set.
    *
    * @param guidOrInfo
    *        The globally unique identifier of the item to fetch, or an
@@ -1229,15 +1239,18 @@ var Bookmarks = Object.freeze({
       info = { guid: guidOrInfo };
     } else if (Object.keys(info).length == 1) {
       // Just a faster code path.
-      if (!["url", "guid", "parentGuid", "index", "guidPrefix"].includes(Object.keys(info)[0]))
+      if (!["url", "guid", "parentGuid",
+            "index", "guidPrefix", "tags"].includes(Object.keys(info)[0])) {
         throw new Error(`Unexpected number of conditions provided: 0`);
+      }
     } else {
       // Only one condition at a time can be provided.
       let conditionsCount = [
         v => v.hasOwnProperty("guid"),
         v => v.hasOwnProperty("parentGuid") && v.hasOwnProperty("index"),
         v => v.hasOwnProperty("url"),
-        v => v.hasOwnProperty("guidPrefix")
+        v => v.hasOwnProperty("guidPrefix"),
+        v => v.hasOwnProperty("tags")
       ].reduce((old, fn) => old + fn(info) | 0, 0);
       if (conditionsCount != 1)
         throw new Error(`Unexpected number of conditions provided: ${conditionsCount}`);
@@ -1268,6 +1281,9 @@ var Bookmarks = Object.freeze({
         results = await fetchBookmarkByPosition(fetchInfo, options && options.concurrent);
       else if (fetchInfo.hasOwnProperty("guidPrefix"))
         results = await fetchBookmarksByGUIDPrefix(fetchInfo, options && options.concurrent);
+      else if (fetchInfo.hasOwnProperty("tags")) {
+        results = await fetchBookmarksByTags(fetchInfo, options && options.concurrent);
+      }
 
       if (!results)
         return null;
@@ -1357,6 +1373,34 @@ var Bookmarks = Object.freeze({
   // PlacesUtils.promiseBookmarksTree()
   fetchTree(guid = "", options = {}) {
     throw new Error("Not yet implemented");
+  },
+
+  /**
+   * Fetch all the existing tags, sorted alphabetically.
+   * @return {Promise} resolves to an array of objects representing tags, when
+   *         fetching is complete.
+   *         Each object looks like {
+   *           name: the name of the tag,
+   *           count: number of bookmarks with this tag
+   *         }
+   */
+  async fetchTags() {
+    // TODO: Once the tagging API is implemented in Bookmarks.jsm, we can cache
+    // the list of tags, instead of querying every time.
+    let db = await PlacesUtils.promiseDBConnection();
+    let rows = await db.executeCached(`
+      SELECT b.title AS name, count(*) AS count
+      FROM moz_bookmarks b
+      JOIN moz_bookmarks p ON b.parent = p.id
+      JOIN moz_bookmarks c ON c.parent = b.id
+      WHERE p.guid = :tagsGuid
+      GROUP BY name
+      ORDER BY name COLLATE nocase ASC
+    `, { tagsGuid: this.tagsGuid });
+    return rows.map(r => ({
+      name: r.getResultByName("name"),
+      count: r.getResultByName("count")
+    }));
   },
 
   /**
@@ -1903,7 +1947,17 @@ async function handleBookmarkItemSpecialData(itemId, item) {
   }
   if ("charset" in item && item.charset) {
     try {
-      await PlacesUtils.setCharsetForURI(NetUtil.newURI(item.url), item.charset);
+      // UTF-8 is the default. If we are passed the value then set it to null,
+      // to ensure any charset is removed from the database.
+      let charset = item.charset;
+      if (item.charset.toLowerCase() == "utf-8") {
+        charset = null;
+      }
+
+      await PlacesUtils.history.update({
+        url: item.url,
+        annotations: new Map([[PlacesUtils.CHARSET_ANNO, charset]])
+      });
     } catch (ex) {
       Cu.reportError(`Failed to set charset "${item.charset}" for ${item.url}: ${ex}`);
     }
@@ -2017,6 +2071,42 @@ async function fetchBookmarkByPosition(info, concurrent) {
     return query(db);
   }
   return PlacesUtils.withConnectionWrapper("Bookmarks.jsm: fetchBookmarkByPosition",
+                                           query);
+}
+
+async function fetchBookmarksByTags(info, concurrent) {
+  let query = async function(db) {
+    let rows = await db.executeCached(
+      `SELECT b.guid, IFNULL(p.guid, "") AS parentGuid, b.position AS 'index',
+              b.dateAdded, b.lastModified, b.type, IFNULL(b.title, "") AS title,
+              h.url AS url, b.id AS _id, b.parent AS _parentId,
+              NULL AS _childCount,
+              p.parent AS _grandParentId, b.syncStatus AS _syncStatus
+       FROM moz_bookmarks b
+       JOIN moz_bookmarks p ON p.id = b.parent
+       JOIN moz_bookmarks g ON g.id = p.parent
+       JOIN moz_places h ON h.id = b.fk
+       WHERE g.guid <> ? AND b.fk IN (
+          SELECT b2.fk FROM moz_bookmarks b2
+          JOIN moz_bookmarks p2 ON p2.id = b2.parent
+          JOIN moz_bookmarks g2 ON g2.id = p2.parent
+          WHERE g2.guid = ?
+                AND lower(p2.title) IN (
+                  ${new Array(info.tags.length).fill("?").join(",")}
+                )
+          GROUP BY b2.fk HAVING count(*) = ${info.tags.length}
+       )
+       ORDER BY b.lastModified DESC
+      `, [Bookmarks.tagsGuid, Bookmarks.tagsGuid].concat(info.tags.map(t => t.toLowerCase())));
+
+    return rows.length ? rowsToItemsArray(rows) : null;
+  };
+
+  if (concurrent) {
+    let db = await PlacesUtils.promiseDBConnection();
+    return query(db);
+  }
+  return PlacesUtils.withConnectionWrapper("Bookmarks.jsm: fetchBookmarksByTags",
                                            query);
 }
 

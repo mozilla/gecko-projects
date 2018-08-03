@@ -62,7 +62,7 @@ use gecko_bindings::structs::nsChangeHint;
 use gecko_bindings::structs::nsIDocument_DocumentTheme as DocumentTheme;
 use gecko_bindings::structs::nsRestyleHint;
 use gecko_bindings::sugar::ownership::{HasArcFFI, HasSimpleFFI};
-use hash::FnvHashMap;
+use hash::FxHashMap;
 use logical_geometry::WritingMode;
 use media_queries::Device;
 use properties::{ComputedValues, LonghandId};
@@ -562,28 +562,15 @@ pub struct GeckoElement<'le>(pub &'le RawGeckoElement);
 
 impl<'le> fmt::Debug for GeckoElement<'le> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use nsstring::nsCString;
+
         write!(f, "<{}", self.local_name())?;
-        if let Some(id) = self.id() {
-            write!(f, " id={}", id)?;
+
+        let mut attrs = nsCString::new();
+        unsafe {
+            bindings::Gecko_Element_DebugListAttributes(self.0, &mut attrs);
         }
-
-        let mut first = true;
-        let mut any = false;
-        self.each_class(|c| {
-            if first {
-                first = false;
-                any = true;
-                let _ = f.write_str(" class=\"");
-            } else {
-                let _ = f.write_str(" ");
-            }
-            let _ = write!(f, "{}", c);
-        });
-
-        if any {
-            f.write_str("\"")?;
-        }
-
+        write!(f, "{}", attrs)?;
         write!(f, "> ({:#x})", self.as_node().opaque().0)
     }
 }
@@ -856,24 +843,23 @@ impl<'le> GeckoElement<'le> {
     /// Returns true if this node is the shadow root of an use-element shadow tree.
     #[inline]
     fn is_root_of_use_element_shadow_tree(&self) -> bool {
-        if !self.is_root_of_anonymous_subtree() {
+        if !self.as_node().is_in_shadow_tree() {
             return false;
         }
-        match self.parent_element() {
+        match self.containing_shadow_host() {
             Some(e) => {
-                e.local_name() == &*local_name!("use") &&
-                e.is_svg_element()
+                e.is_svg_element() && e.local_name() == &*local_name!("use")
             },
             None => false,
         }
     }
 
-    fn css_transitions_info(&self) -> FnvHashMap<LonghandId, Arc<AnimationValue>> {
+    fn css_transitions_info(&self) -> FxHashMap<LonghandId, Arc<AnimationValue>> {
         use gecko_bindings::bindings::Gecko_ElementTransitions_EndValueAt;
         use gecko_bindings::bindings::Gecko_ElementTransitions_Length;
 
         let collection_length = unsafe { Gecko_ElementTransitions_Length(self.0) } as usize;
-        let mut map = FnvHashMap::with_capacity_and_hasher(collection_length, Default::default());
+        let mut map = FxHashMap::with_capacity_and_hasher(collection_length, Default::default());
 
         for i in 0..collection_length {
             let raw_end_value = unsafe { Gecko_ElementTransitions_EndValueAt(self.0, i) };
@@ -882,6 +868,7 @@ impl<'le> GeckoElement<'le> {
                 .expect("AnimationValue not found in ElementTransitions");
 
             let property = end_value.id();
+            debug_assert!(!property.is_logical());
             map.insert(property, end_value.clone_arc());
         }
         map
@@ -893,9 +880,10 @@ impl<'le> GeckoElement<'le> {
         combined_duration: f32,
         before_change_style: &ComputedValues,
         after_change_style: &ComputedValues,
-        existing_transitions: &FnvHashMap<LonghandId, Arc<AnimationValue>>,
+        existing_transitions: &FxHashMap<LonghandId, Arc<AnimationValue>>,
     ) -> bool {
         use values::animated::{Animate, Procedure};
+        debug_assert!(!longhand_id.is_logical());
 
         // If there is an existing transition, update only if the end value
         // differs.
@@ -1587,25 +1575,24 @@ impl<'le> TElement for GeckoElement<'le> {
 
     fn might_need_transitions_update(
         &self,
-        old_values: Option<&ComputedValues>,
-        new_values: &ComputedValues,
+        old_style: Option<&ComputedValues>,
+        new_style: &ComputedValues,
     ) -> bool {
-        use properties::longhands::display::computed_value::T as Display;
-
-        let old_values = match old_values {
+        let old_style = match old_style {
             Some(v) => v,
             None => return false,
         };
 
-        let new_box_style = new_values.get_box();
-        let transition_not_running = !self.has_css_transitions() &&
-            new_box_style.transition_property_count() == 1 &&
-            new_box_style.transition_combined_duration_at(0) <= 0.0f32;
-        let new_display_style = new_box_style.clone_display();
-        let old_display_style = old_values.get_box().clone_display();
+        let new_box_style = new_style.get_box();
+        if !self.has_css_transitions() && !new_box_style.specifies_transitions() {
+            return false;
+        }
 
-        new_box_style.transition_property_count() > 0 && !transition_not_running &&
-            (new_display_style != Display::None && old_display_style != Display::None)
+        if new_box_style.clone_display().is_none() || old_style.clone_display().is_none() {
+            return false;
+        }
+
+        return true;
     }
 
     // Detect if there are any changes that require us to update transitions.
@@ -1657,6 +1644,8 @@ impl<'le> TElement for GeckoElement<'le> {
             let transition_property: TransitionProperty = property.into();
 
             let mut property_check_helper = |property: LonghandId| -> bool {
+                let property =
+                    property.to_physical(after_change_style.writing_mode);
                 transitions_to_keep.insert(property);
                 self.needs_transitions_update_per_property(
                     property,
@@ -2085,15 +2074,15 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
 
     #[inline]
     fn is_root(&self) -> bool {
-        let parent_node = match self.as_node().parent_node() {
-            Some(parent_node) => parent_node,
-            None => return false,
-        };
-
-        if !parent_node.is_document() {
+        if self.as_node().get_bool_flag(nsINode_BooleanFlag::ParentIsContent) {
             return false;
         }
 
+        if !self.as_node().is_in_document() {
+            return false;
+        }
+
+        debug_assert!(self.as_node().parent_node().map_or(false, |p| p.is_document()));
         unsafe { bindings::Gecko_IsRootElement(self.0) }
     }
 
@@ -2278,7 +2267,7 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
         // match the proper pseudo-element, given how we rulehash the stuff
         // based on the pseudo.
         match self.implemented_pseudo_element() {
-            Some(ref pseudo) => *pseudo == pseudo_element.canonical(),
+            Some(ref pseudo) => *pseudo == *pseudo_element,
             None => false,
         }
     }
@@ -2328,14 +2317,6 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
     #[inline]
     fn ignores_nth_child_selectors(&self) -> bool {
         self.is_root_of_anonymous_subtree()
-    }
-
-    #[inline]
-    fn blocks_ancestor_combinators(&self) -> bool {
-        // If this element is the shadow root of an use-element shadow tree,
-        // according to the spec, we should not match rules cross the shadow
-        // DOM boundary.
-        self.is_root_of_use_element_shadow_tree()
     }
 }
 

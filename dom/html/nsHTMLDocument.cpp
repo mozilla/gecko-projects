@@ -1162,6 +1162,11 @@ nsHTMLDocument::SetCookie(const nsAString& aCookie, ErrorResult& rv)
     return;
   }
 
+  if (nsContentUtils::StorageDisabledByAntiTracking(GetInnerWindow(), nullptr,
+                                                    nullptr)) {
+    return;
+  }
+
   // If the document is a cookie-averse Document... do nothing.
   if (IsCookieAverse()) {
     return;
@@ -3416,5 +3421,7 @@ nsHTMLDocument::GetFormsAndFormControls(nsContentList** aFormList,
 void
 nsHTMLDocument::UserInteractionForTesting()
 {
-  NotifyUserGestureActivation();
+  if (!UserHasInteracted()) {
+    SetUserHasInteracted(true);
+  }
 }

@@ -227,6 +227,9 @@ struct DocumentHandle;
 // Geometry in a stacking context's local coordinate space (logical pixels).
 struct LayoutPixel;
 
+// Coordinates in normalized space (between zero and one).
+struct NormalizedCoordinates;
+
 // The renderer is responsible for submitting to the GPU the work prepared by the
 // RenderBackend.
 struct Renderer;
@@ -401,14 +404,17 @@ struct BuiltDisplayListDescriptor {
   uint64_t builder_finish_time;
   // The third IPC time stamp: just before sending
   uint64_t send_start_time;
-  // The amount of clips ids assigned while building this display list.
-  uintptr_t total_clip_ids;
+  // The amount of clipping nodes created while building this display list.
+  uintptr_t total_clip_nodes;
+  // The amount of spatial nodes created while building this display list.
+  uintptr_t total_spatial_nodes;
 
   bool operator==(const BuiltDisplayListDescriptor& aOther) const {
     return builder_start_time == aOther.builder_start_time &&
            builder_finish_time == aOther.builder_finish_time &&
            send_start_time == aOther.send_start_time &&
-           total_clip_ids == aOther.total_clip_ids;
+           total_clip_nodes == aOther.total_clip_nodes &&
+           total_spatial_nodes == aOther.total_spatial_nodes;
   }
 };
 
@@ -915,10 +921,12 @@ struct FontInstanceOptions {
 
 #if defined(XP_WIN)
 struct FontInstancePlatformOptions {
-  uint32_t unused;
+  uint16_t gamma;
+  uint16_t contrast;
 
   bool operator==(const FontInstancePlatformOptions& aOther) const {
-    return unused == aOther.unused;
+    return gamma == aOther.gamma &&
+           contrast == aOther.contrast;
   }
 };
 #endif
@@ -944,6 +952,8 @@ struct FontInstancePlatformOptions {
   }
 };
 #endif
+
+using NormalizedRect = TypedRect<float, NormalizedCoordinates>;
 
 struct WrTransformProperty {
   uint64_t id;
@@ -1415,7 +1425,10 @@ void wr_dp_save(WrState *aState)
 WR_FUNC;
 
 WR_INLINE
-void wr_dump_display_list(WrState *aState)
+uintptr_t wr_dump_display_list(WrState *aState,
+                               uintptr_t aIndent,
+                               const uintptr_t *aStart,
+                               const uintptr_t *aEnd)
 WR_FUNC;
 
 extern bool wr_moz2d_render_cb(ByteSlice aBlob,
@@ -1564,6 +1577,12 @@ WR_FUNC;
 WR_INLINE
 void wr_resource_updates_delete_image(Transaction *aTxn,
                                       WrImageKey aKey)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_set_image_visible_area(Transaction *aTxn,
+                                                WrImageKey aKey,
+                                                const NormalizedRect *aArea)
 WR_FUNC;
 
 WR_INLINE

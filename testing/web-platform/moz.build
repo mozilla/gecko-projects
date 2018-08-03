@@ -14,13 +14,11 @@ TEST_HARNESS_FILES['web-platform'] += [
     'mach_test_package_commands.py',
     'outbound/**',
     'runtests.py',
-    'wptrunner.ini'
+    'wptrunner.ini',
 ]
 
-TEST_HARNESS_FILES['web-platform'].certs = [
-    'certs/cacert.pem',
-    'certs/web-platform.test.key',
-    'certs/web-platform.test.pem',
+TEST_HARNESS_FILES['web-platform'].prefs += [
+    '/build/sanitizers/lsan_suppressions.txt',
 ]
 
 with Files("**"):
@@ -88,9 +86,6 @@ with Files("mozilla/tests/wasm/**"):
     BUG_COMPONENT = ("Core", "JavaScript Engine: JIT")
 
 with Files("update/**"):
-    BUG_COMPONENT = ("Testing", "web-platform-tests")
-
-with Files("certs/**"):
     BUG_COMPONENT = ("Testing", "web-platform-tests")
 
 with Files("mach*"):
@@ -320,9 +315,6 @@ with Files("tests/hr-time/**"):
 with Files("tests/html/**"):
     BUG_COMPONENT = ("Core", "DOM")
 
-with Files("tests/html-imports/**"):
-    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
-
 with Files("tests/html-longdesc/**"):
     BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
@@ -440,7 +432,7 @@ with Files("tests/payment-method-id/**"):
     BUG_COMPONENT = ("Core", "DOM: Web Payments")
 
 with Files("tests/payment-request/**"):
-    BUG_COMPONENT = ("Core", "DOM")
+    BUG_COMPONENT = ("Core", "DOM: Web Payments")
 
 with Files("tests/performance-timeline/**"):
     BUG_COMPONENT = ("Core", "DOM")

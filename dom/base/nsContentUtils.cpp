@@ -158,6 +158,7 @@
 #include "nsIMIMEService.h"
 #include "nsINode.h"
 #include "mozilla/dom/NodeInfo.h"
+#include "mozilla/NullPrincipal.h"
 #include "nsIObjectLoadingContent.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
@@ -175,9 +176,11 @@
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIScrollable.h"
+#include "nsIStreamConverter.h"
 #include "nsIStreamConverterService.h"
 #include "nsIStringBundle.h"
 #include "nsIURI.h"
+#include "nsIURIWithSpecialOrigin.h"
 #include "nsIURL.h"
 #include "nsIWebNavigation.h"
 #include "nsIWindowMediator.h"
@@ -187,7 +190,6 @@
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsNodeInfoManager.h"
-#include "NullPrincipal.h"
 #include "nsParserCIID.h"
 #include "nsParserConstants.h"
 #include "nsPIDOMWindow.h"
@@ -326,7 +328,6 @@ nsContentUtils::sUserInteractionObserver = nullptr;
 uint32_t nsContentUtils::sHandlingInputTimeout = 1000;
 
 uint32_t nsContentUtils::sCookiesLifetimePolicy = nsICookieService::ACCEPT_NORMALLY;
-uint32_t nsContentUtils::sCookiesBehavior = nsICookieService::BEHAVIOR_ACCEPT;
 
 nsHtml5StringParser* nsContentUtils::sHTMLFragmentParser = nullptr;
 nsIParser* nsContentUtils::sXMLFragmentParser = nullptr;
@@ -688,10 +689,6 @@ nsContentUtils::Init()
   Preferences::AddUintVarCache(&sCookiesLifetimePolicy,
                                "network.cookie.lifetimePolicy",
                                nsICookieService::ACCEPT_NORMALLY);
-
-  Preferences::AddUintVarCache(&sCookiesBehavior,
-                               "network.cookie.cookieBehavior",
-                               nsICookieService::BEHAVIOR_ACCEPT);
 
   Preferences::AddBoolVarCache(&sDoNotTrackEnabled,
                                "privacy.donottrackheader.enabled", false);
@@ -2939,7 +2936,6 @@ nsContentUtils::GenerateStateKey(nsIContent* aContent,
       KeyAppendInt(control->ControlType(), aKey);
 
       // If in a form, add form name / index of form / index in form
-      int32_t index = -1;
       Element *formElement = control->GetFormElement();
       if (formElement) {
         if (IsAutocompleteOff(formElement)) {
@@ -2950,7 +2946,7 @@ nsContentUtils::GenerateStateKey(nsIContent* aContent,
         KeyAppendString(NS_LITERAL_CSTRING("f"), aKey);
 
         // Append the index of the form in the document
-        index = htmlForms->IndexOf(formElement, false);
+        int32_t index = htmlForms->IndexOf(formElement, false);
         if (index <= -1) {
           //
           // XXX HACK this uses some state that was dumped into the document
@@ -2991,7 +2987,7 @@ nsContentUtils::GenerateStateKey(nsIContent* aContent,
 
         // We have to flush sink notifications at this point to make
         // sure that htmlFormControls is up to date.
-        index = htmlFormControls->IndexOf(aContent, true);
+        int32_t index = htmlFormControls->IndexOf(aContent, true);
         if (index > -1) {
           KeyAppendInt(index, aKey);
           generatedUniqueKey = true;
@@ -4256,6 +4252,7 @@ nsContentUtils::IsEventAttributeName(nsAtom* aName, int32_t aType)
 EventMessage
 nsContentUtils::GetEventMessage(nsAtom* aName)
 {
+  MOZ_ASSERT(NS_IsMainThread(), "sAtomEventTable is not threadsafe");
   if (aName) {
     EventNameMapping mapping;
     if (sAtomEventTable->Get(aName, &mapping)) {
@@ -4282,6 +4279,7 @@ nsContentUtils::GetEventMessageAndAtom(const nsAString& aName,
                                        mozilla::EventClassID aEventClassID,
                                        EventMessage* aEventMessage)
 {
+  MOZ_ASSERT(NS_IsMainThread(), "Our hashtables are not threadsafe");
   EventNameMapping mapping;
   if (sStringEventTable->Get(aName, &mapping)) {
     *aEventMessage =
@@ -4323,6 +4321,8 @@ EventMessage
 nsContentUtils::GetEventMessageAndAtomForListener(const nsAString& aName,
                                                   nsAtom** aOnName)
 {
+  MOZ_ASSERT(NS_IsMainThread(), "Our hashtables are not threadsafe");
+
   // Because of SVG/SMIL sStringEventTable contains a subset of the event names
   // comparing to the sAtomEventTable. However, usually sStringEventTable
   // contains the information we need, so in order to reduce hashtable
@@ -6346,9 +6346,22 @@ nsresult
 nsContentUtils::GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin)
 {
   MOZ_ASSERT(aURI, "missing uri");
+  nsresult rv;
+
+#if defined(MOZ_THUNDERBIRD) || defined(MOZ_SUITE)
+  // Check if either URI has a special origin.
+  nsCOMPtr<nsIURIWithSpecialOrigin> uriWithSpecialOrigin = do_QueryInterface(aURI);
+  if (uriWithSpecialOrigin) {
+    nsCOMPtr<nsIURI> origin;
+    rv = uriWithSpecialOrigin->GetOrigin(getter_AddRefs(origin));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    return GetUTFOrigin(origin, aOrigin);
+  }
+#endif
 
   bool isBlobURL = false;
-  nsresult rv = aURI->SchemeIs(BLOBURI_SCHEME, &isBlobURL);
+  rv = aURI->SchemeIs(BLOBURI_SCHEME, &isBlobURL);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // For Blob URI, the path is the URL of the owning page.
@@ -6510,10 +6523,9 @@ nsContentUtils::WrapNative(JSContext *cx, nsISupports *native,
     MOZ_CRASH();
   }
 
-  nsresult rv = NS_OK;
   JS::Rooted<JSObject*> scope(cx, JS::CurrentGlobalOrNull(cx));
-  rv = sXPConnect->WrapNativeToJSVal(cx, scope, native, cache, aIID,
-                                     aAllowWrapping, vp);
+  nsresult rv = sXPConnect->WrapNativeToJSVal(cx, scope, native, cache, aIID,
+                                              aAllowWrapping, vp);
   return rv;
 }
 
@@ -6925,14 +6937,9 @@ nsContentUtils::AllowXULXBLForPrincipal(nsIPrincipal* aPrincipal)
 bool
 nsContentUtils::IsPDFJSEnabled()
 {
-   nsCOMPtr<nsIStreamConverterService> convServ =
-     do_GetService("@mozilla.org/streamConverters;1");
-   nsresult rv = NS_ERROR_FAILURE;
-   bool canConvert = false;
-   if (convServ) {
-     rv = convServ->CanConvert("application/pdf", "text/html", &canConvert);
-   }
-   return NS_SUCCEEDED(rv) && canConvert;
+   nsCOMPtr<nsIStreamConverter> conv = do_CreateInstance(
+      "@mozilla.org/streamconv;1?from=application/pdf&to=text/html");
+   return conv;
 }
 
 already_AddRefed<nsIDocumentLoaderFactory>
@@ -6952,8 +6959,7 @@ nsContentUtils::FindInternalContentViewer(const nsACString& aType,
 
   nsCString contractID;
   nsresult rv = catMan->GetCategoryEntry("Gecko-Content-Viewers",
-                                         PromiseFlatCString(aType).get(),
-                                         getter_Copies(contractID));
+                                         aType, contractID);
   if (NS_SUCCEEDED(rv)) {
     docFactory = do_GetService(contractID.get());
     if (docFactory && aLoaderType) {
@@ -7769,8 +7775,8 @@ nsContentUtils::IPCTransferableToTransferable(const IPCDataTransfer& aDataTransf
 
         // The buffer contains the terminating null.
         Shmem itemData = item.data().get_Shmem();
-        const nsDependentCString text(itemData.get<char>(),
-                                      itemData.Size<char>());
+        const nsDependentCSubstring text(itemData.get<char>(),
+                                         itemData.Size<char>());
         rv = dataWrapper->SetData(text);
         NS_ENSURE_SUCCESS(rv, rv);
 
@@ -7869,6 +7875,23 @@ nsContentUtils::IsFileImage(nsIFile* aFile, nsACString& aType)
 }
 
 nsresult
+nsContentUtils::CalculateBufferSizeForImage(const uint32_t& aStride,
+                                            const IntSize& aImageSize,
+                                            const SurfaceFormat& aFormat,
+                                            size_t* aMaxBufferSize,
+                                            size_t* aUsedBufferSize)
+{
+  CheckedInt32 requiredBytes =
+    CheckedInt32(aStride) * CheckedInt32(aImageSize.height);
+  if (!requiredBytes.isValid()) {
+    return NS_ERROR_FAILURE;
+  }
+  *aMaxBufferSize = requiredBytes.value();
+  *aUsedBufferSize = *aMaxBufferSize - aStride + (aImageSize.width * BytesPerPixel(aFormat));
+  return NS_OK;
+}
+
+nsresult
 nsContentUtils::DataTransferItemToImage(const IPCDataTransferItem& aItem,
                                         imgIContainer** aContainer)
 {
@@ -7882,6 +7905,21 @@ nsContentUtils::DataTransferItemToImage(const IPCDataTransferItem& aItem,
   }
 
   Shmem data = aItem.data().get_Shmem();
+
+  // Validate shared memory buffer size
+  size_t imageBufLen = 0;
+  size_t maxBufLen = 0;
+  nsresult rv = CalculateBufferSizeForImage(imageDetails.stride(),
+                                            size,
+                                            imageDetails.format(),
+                                            &maxBufLen,
+                                            &imageBufLen);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  if (imageBufLen > data.Size<uint8_t>()) {
+    return NS_ERROR_FAILURE;
+  }
 
   RefPtr<DataSourceSurface> image =
       CreateDataSourceSurfaceFromData(size,
@@ -7919,7 +7957,7 @@ ConvertToShmem(mozilla::dom::nsIContentChild* aChild,
            : static_cast<IShmemAllocator*>(aParent);
 
   Shmem result;
-  if (!allocator->AllocShmem(aInput.Length() + 1,
+  if (!allocator->AllocShmem(aInput.Length(),
                              SharedMemory::TYPE_BASIC,
                              &result)) {
     return result;
@@ -7927,7 +7965,7 @@ ConvertToShmem(mozilla::dom::nsIContentChild* aChild,
 
   memcpy(result.get<char>(),
          aInput.BeginReading(),
-         aInput.Length() + 1);
+         aInput.Length());
 
   return result;
 }
@@ -8233,20 +8271,17 @@ GetSurfaceDataImpl(mozilla::gfx::DataSourceSurface* aSurface,
     return GetSurfaceDataContext::NullValue();
   }
 
-  mozilla::gfx::IntSize size = aSurface->GetSize();
-  mozilla::CheckedInt32 requiredBytes =
-    mozilla::CheckedInt32(map.mStride) * mozilla::CheckedInt32(size.height);
-  if (!requiredBytes.isValid()) {
+  size_t bufLen = 0;
+  size_t maxBufLen = 0;
+  nsresult rv = nsContentUtils::CalculateBufferSizeForImage(map.mStride,
+                                                            aSurface->GetSize(),
+                                                            aSurface->GetFormat(),
+                                                            &maxBufLen,
+                                                            &bufLen);
+  if (NS_FAILED(rv)) {
     aSurface->Unmap();
     return GetSurfaceDataContext::NullValue();
   }
-
-  size_t maxBufLen = requiredBytes.value();
-  mozilla::gfx::SurfaceFormat format = aSurface->GetFormat();
-
-  // Surface data handling is totally nuts. This is the magic one needs to
-  // know to access the data.
-  size_t bufLen = maxBufLen - map.mStride + (size.width * BytesPerPixel(format));
 
   // nsDependentCString wants null-terminated string.
   typename GetSurfaceDataContext::ReturnType surfaceData = aContext.Allocate(maxBufLen + 1);
@@ -8753,7 +8788,7 @@ nsContentUtils::GetCookieBehaviorForPrincipal(nsIPrincipal* aPrincipal,
                                               uint32_t* aBehavior)
 {
   *aLifetimePolicy = sCookiesLifetimePolicy;
-  *aBehavior = sCookiesBehavior;
+  *aBehavior = StaticPrefs::network_cookie_cookieBehavior();
 
   // Any permissions set for the given principal will override our default
   // settings from preferences.
@@ -8855,22 +8890,33 @@ nsContentUtils::IsTrackingResourceWindow(nsPIDOMWindowInner* aWindow)
   return httpChannel->GetIsTrackingResource();
 }
 
-// static public
-bool
-nsContentUtils::StorageDisabledByAntiTracking(nsPIDOMWindowInner* aWindow,
-                                              nsIChannel* aChannel,
-                                              nsIURI* aURI)
+static bool
+StorageDisabledByAntiTrackingInternal(nsPIDOMWindowInner* aWindow,
+                                      nsIChannel* aChannel,
+                                      nsIURI* aURI)
 {
   if (!StaticPrefs::privacy_restrict3rdpartystorage_enabled()) {
     return false;
   }
 
   // Let's check if this is a 3rd party context.
-  if (!IsThirdPartyWindowOrChannel(aWindow, aChannel, aURI)) {
+  if (!nsContentUtils::IsThirdPartyWindowOrChannel(aWindow, aChannel, aURI)) {
     return false;
   }
 
   if (aWindow) {
+    nsGlobalWindowInner* innerWindow = nsGlobalWindowInner::Cast(aWindow);
+    nsGlobalWindowOuter* outerWindow =
+      nsGlobalWindowOuter::Cast(innerWindow->GetOuterWindow());
+    if (NS_WARN_IF(!outerWindow)) {
+      return false;
+    }
+
+    // We are a first party resource.
+    if (outerWindow->IsTopLevelWindow()) {
+      return false;
+    }
+
     nsIURI* documentURI = aURI ? aURI : aWindow->GetDocumentURI();
     if (documentURI &&
         AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(aWindow,
@@ -8902,6 +8948,33 @@ nsContentUtils::StorageDisabledByAntiTracking(nsPIDOMWindowInner* aWindow,
 
   return AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(httpChannel,
                                                                  uri);
+}
+
+// static public
+bool
+nsContentUtils::StorageDisabledByAntiTracking(nsPIDOMWindowInner* aWindow,
+                                              nsIChannel* aChannel,
+                                              nsIURI* aURI)
+{
+  bool disabled =
+    StorageDisabledByAntiTrackingInternal(aWindow, aChannel, aURI);
+  if (disabled &&
+      StaticPrefs::privacy_restrict3rdpartystorage_ui_enabled()) {
+    nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil = services::GetThirdPartyUtil();
+    if (!thirdPartyUtil) {
+      return false;
+    }
+
+    nsCOMPtr<mozIDOMWindowProxy> win;
+    nsresult rv = thirdPartyUtil->GetTopWindowForChannel(aChannel,
+                                                         getter_AddRefs(win));
+    NS_ENSURE_SUCCESS(rv, false);
+    auto* pwin = nsPIDOMWindowOuter::From(win);
+
+    pwin->NotifyContentBlockingState(
+      nsIWebProgressListener::STATE_BLOCKED_TRACKING_COOKIES, aChannel);
+  }
+  return disabled;
 }
 
 // static, private
@@ -10737,13 +10810,11 @@ nsContentUtils::IsLocalRefURL(const nsACString& aString)
   return ::IsLocalRefURL(aString);
 }
 
-// Tab ID is composed in a similar manner of Window ID.
-static uint64_t gNextTabId = 0;
-static const uint64_t kTabIdProcessBits = 32;
-static const uint64_t kTabIdTabBits = 64 - kTabIdProcessBits;
+static const uint64_t kIdProcessBits = 32;
+static const uint64_t kIdBits = 64 - kIdProcessBits;
 
 /* static */ uint64_t
-nsContentUtils::GenerateTabId()
+GenerateProcessSpecificId(uint64_t aId)
 {
   uint64_t processId = 0;
   if (XRE_IsContentProcess()) {
@@ -10751,14 +10822,32 @@ nsContentUtils::GenerateTabId()
     processId = cc->GetID();
   }
 
-  MOZ_RELEASE_ASSERT(processId < (uint64_t(1) << kTabIdProcessBits));
-  uint64_t processBits = processId & ((uint64_t(1) << kTabIdProcessBits) - 1);
+  MOZ_RELEASE_ASSERT(processId < (uint64_t(1) << kIdProcessBits));
+  uint64_t processBits = processId & ((uint64_t(1) << kIdProcessBits) - 1);
 
-  uint64_t tabId = ++gNextTabId;
-  MOZ_RELEASE_ASSERT(tabId < (uint64_t(1) << kTabIdTabBits));
-  uint64_t tabBits = tabId & ((uint64_t(1) << kTabIdTabBits) - 1);
+  uint64_t id = aId;
+  MOZ_RELEASE_ASSERT(id < (uint64_t(1) << kIdBits));
+  uint64_t bits = id & ((uint64_t(1) << kIdBits) - 1);
 
-  return (processBits << kTabIdTabBits) | tabBits;
+  return (processBits << kIdBits) | bits;
+}
+
+// Tab ID is composed in a similar manner of Window ID.
+static uint64_t gNextTabId = 0;
+
+/* static */ uint64_t
+nsContentUtils::GenerateTabId()
+{
+  return GenerateProcessSpecificId(++gNextTabId);
+}
+
+// Browsing context ID is composed in a similar manner of Window ID.
+static uint64_t gNextBrowsingContextId = 0;
+
+/* static */ uint64_t
+nsContentUtils::GenerateBrowsingContextId()
+{
+  return GenerateProcessSpecificId(++gNextBrowsingContextId);
 }
 
 /* static */ bool

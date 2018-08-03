@@ -240,7 +240,11 @@ nsXPCWrappedJSClass::CallQueryInterfaceOnJSObject(JSContext* cx,
         return nullptr;
     }
 
-    if ((id = xpc_NewIDObject(cx, jsobj, aIID))) {
+    // AutoScriptEvaluate entered jsobj's realm.
+    js::AssertSameCompartment(cx, jsobj);
+    RootedObject scope(cx, JS::CurrentGlobalOrNull(cx));
+
+    if ((id = xpc_NewIDObject(cx, scope, aIID))) {
         // Throwing NS_NOINTERFACE is the prescribed way to fail QI from JS. It
         // is not an exception that is ever worth reporting, but we don't want
         // to eat all exceptions either.
@@ -548,8 +552,8 @@ nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
     // We check both nativeGlobal and nativeGlobal->GetGlobalJSObject() even
     // though we have derived nativeGlobal from the JS global, because we know
     // there are cases where this can happen. See bug 1094953.
-    nsIGlobalObject* nativeGlobal =
-      NativeGlobal(js::GetGlobalForObjectCrossCompartment(self->GetJSObject()));
+    RootedObject obj(RootingCx(), self->GetJSObject());
+    nsIGlobalObject* nativeGlobal = NativeGlobal(js::UncheckedUnwrap(obj));
     NS_ENSURE_TRUE(nativeGlobal, NS_ERROR_FAILURE);
     NS_ENSURE_TRUE(nativeGlobal->GetGlobalJSObject(), NS_ERROR_FAILURE);
     AutoEntryScript aes(nativeGlobal, "XPCWrappedJS QueryInterface",
@@ -559,6 +563,12 @@ nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
         *aInstancePtr = nullptr;
         return NS_NOINTERFACE;
     }
+
+    // We passed the unwrapped object's global to AutoEntryScript so we now need
+    // to enter the (maybe wrapper) object's realm. We will have to revisit this
+    // later because CCWs are not associated with a single realm so this
+    // doesn't make much sense. See bug 1478359.
+    JSAutoRealmAllowCCW ar(aes.cx(), obj);
 
     // We support nsISupportsWeakReference iff the root wrapped JSObject
     // claims to support it in its QueryInterface implementation.
@@ -594,7 +604,6 @@ nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
     const nsXPTInterfaceInfo* info = nsXPTInterfaceInfo::ByIID(aIID);
     if (info && info->IsFunction()) {
         RefPtr<nsXPCWrappedJS> wrapper;
-        RootedObject obj(RootingCx(), self->GetJSObject());
         nsresult rv = nsXPCWrappedJS::GetNewOrUsed(obj, aIID, getter_AddRefs(wrapper));
 
         // Do the same thing we do for the "check for any existing wrapper" case above.
@@ -607,8 +616,7 @@ nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
     // else we do the more expensive stuff...
 
     // check if the JSObject claims to implement this interface
-    RootedObject jsobj(ccx, CallQueryInterfaceOnJSObject(ccx, self->GetJSObject(),
-                                                         aIID));
+    RootedObject jsobj(ccx, CallQueryInterfaceOnJSObject(ccx, obj, aIID));
     if (jsobj) {
         // We can't use XPConvert::JSObject2NativeInterface() here
         // since that can find a XPCWrappedNative directly on the
@@ -635,7 +643,6 @@ nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
     // If we're asked to QI to nsINamed, we pretend that this is possible. We'll
     // try to return a name that makes sense for the wrapped JS value.
     if (aIID.Equals(NS_GET_IID(nsINamed))) {
-        RootedObject obj(RootingCx(), self->GetJSObject());
         nsCString name = GetFunctionName(ccx, obj);
         RefPtr<WrappedJSNamed> named = new WrappedJSNamed(name);
         *aInstancePtr = named.forget().take();
@@ -668,7 +675,7 @@ nsXPCWrappedJSClass::GetArraySizeFromParam(const nsXPTMethodInfo* method,
                                            nsXPTCMiniVariant* nativeParams,
                                            uint32_t* result) const
 {
-    if (type.Tag() != nsXPTType::T_ARRAY &&
+    if (type.Tag() != nsXPTType::T_LEGACY_ARRAY &&
         type.Tag() != nsXPTType::T_PSTRING_SIZE_IS &&
         type.Tag() != nsXPTType::T_PWSTRING_SIZE_IS) {
         *result = 0;
@@ -745,25 +752,27 @@ nsXPCWrappedJSClass::CleanupOutparams(const nsXPTMethodInfo* info,
         if (!param.IsOut())
             continue;
 
-        // Extract the array length so we can use it in CleanupValue.
-        uint32_t arrayLen = 0;
-        if (!GetArraySizeFromParam(info, param.Type(), nativeParams, &arrayLen))
-            continue;
-
         MOZ_ASSERT(param.IsIndirect(), "Outparams are always indirect");
 
-        // The inOutOnly flag is necessary because full outparams may contain
-        // uninitialized junk before the call is made, and we don't want to try
-        // to clean up uninitialized junk.
-        if (!inOutOnly || param.IsIn()) {
+        // Call 'CleanupValue' on parameters which we know to be initialized:
+        //  1. Complex parameters (initialized by caller)
+        //  2. 'inout' parameters (initialized by caller)
+        //  3. 'out' parameters when 'inOutOnly' is 'false' (initialized by us)
+        //
+        // We skip non-complex 'out' parameters before the call, as they may
+        // contain random junk.
+        if (param.Type().IsComplex() || param.IsIn() || !inOutOnly) {
+            uint32_t arrayLen = 0;
+            if (!GetArraySizeFromParam(info, param.Type(), nativeParams, &arrayLen))
+                continue;
+
             xpc::CleanupValue(param.Type(), nativeParams[i].val.p, arrayLen);
         }
 
-        // Even if we didn't call CleanupValue, null out any pointers. This is
-        // just to protect C++ callers which may read garbage if they forget to
-        // check the error value.
-        if (param.Type().HasPointerRepr()) {
-            *(void**)nativeParams[i].val.p = nullptr;
+        // Ensure our parameters are in a clean state. Complex values are always
+        // handled by CleanupValue, and others have a valid null representation.
+        if (!param.Type().IsComplex()) {
+            param.Type().ZeroValue(nativeParams[i].val.p);
         }
     }
 }
@@ -940,8 +949,8 @@ nsXPCWrappedJSClass::CallMethod(nsXPCWrappedJS* wrapper, uint16_t methodIndex,
     // We're about to call into script via an XPCWrappedJS, so we need an
     // AutoEntryScript. This is probably Gecko-specific at this point, and
     // definitely will be when we turn off XPConnect for the web.
-    nsIGlobalObject* nativeGlobal =
-      NativeGlobal(js::GetGlobalForObjectCrossCompartment(wrapper->GetJSObject()));
+    RootedObject obj(RootingCx(), wrapper->GetJSObject());
+    nsIGlobalObject* nativeGlobal = NativeGlobal(js::UncheckedUnwrap(obj));
     AutoEntryScript aes(nativeGlobal, "XPCWrappedJS method call",
                         /* aIsMainThread = */ true);
     XPCCallContext ccx(aes.cx());
@@ -953,11 +962,17 @@ nsXPCWrappedJSClass::CallMethod(nsXPCWrappedJS* wrapper, uint16_t methodIndex,
     if (!cx || !IsReflectable(methodIndex))
         return NS_ERROR_FAILURE;
 
-    // [implicit_jscontext] and [optional_argc] have a different calling
-    // convention, which we don't support for JS-implemented components.
-    if (info->WantsOptArgc() || info->WantsContext()) {
-        const char* str = "IDL methods marked with [implicit_jscontext] "
-                          "or [optional_argc] may not be implemented in JS";
+    // We passed the unwrapped object's global to AutoEntryScript so we now need
+    // to enter the (maybe wrapper) object's realm. We will have to revisit this
+    // later because CCWs are not associated with a single realm so this
+    // doesn't make much sense. See bug 1478359.
+    JSAutoRealmAllowCCW ar(cx, obj);
+
+    // [optional_argc] has a different calling convention, which we don't
+    // support for JS-implemented components.
+    if (info->WantsOptArgc()) {
+        const char* str = "IDL methods marked with [optional_argc] may not "
+                          "be implemented in JS";
         // Throw and warn for good measure.
         JS_ReportErrorASCII(cx, "%s", str);
         NS_WARNING(str);
@@ -965,10 +980,7 @@ nsXPCWrappedJSClass::CallMethod(nsXPCWrappedJS* wrapper, uint16_t methodIndex,
     }
 
     RootedValue fval(cx);
-    RootedObject obj(cx, wrapper->GetJSObject());
     RootedObject thisObj(cx, obj);
-
-    JSAutoRealm ar(cx, obj);
 
     AutoValueVector args(cx);
     AutoScriptEvaluate scriptEval(cx);

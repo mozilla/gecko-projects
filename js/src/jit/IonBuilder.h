@@ -314,7 +314,7 @@ class IonBuilder
     AbortReasonOr<Ok> binaryArithTrySpecializedOnBaselineInspector(bool* emitted, JSOp op,
                                                                    MDefinition* left,
                                                                    MDefinition* right);
-    AbortReasonOr<Ok> arithTrySharedStub(bool* emitted, JSOp op, MDefinition* left,
+    AbortReasonOr<Ok> arithTryBinaryStub(bool* emitted, JSOp op, MDefinition* left,
                                          MDefinition* right);
 
     // jsop_bitnot helpers.
@@ -729,51 +729,6 @@ class IonBuilder
     InliningResult inlineObjectIsTypeDescr(CallInfo& callInfo);
     InliningResult inlineSetTypedObjectOffset(CallInfo& callInfo);
     InliningResult inlineConstructTypedObject(CallInfo& callInfo, TypeDescr* target);
-
-    // SIMD intrinsics and natives.
-    InliningResult inlineConstructSimdObject(CallInfo& callInfo, SimdTypeDescr* target);
-
-    // SIMD helpers.
-    bool canInlineSimd(CallInfo& callInfo, JSNative native, unsigned numArgs,
-                       InlineTypedObject** templateObj);
-    MDefinition* unboxSimd(MDefinition* ins, SimdType type);
-    InliningResult boxSimd(CallInfo& callInfo, MDefinition* ins, InlineTypedObject* templateObj);
-    MDefinition* convertToBooleanSimdLane(MDefinition* scalar);
-
-    InliningResult inlineSimd(CallInfo& callInfo, JSFunction* target, SimdType type);
-
-    InliningResult inlineSimdBinaryArith(CallInfo& callInfo, JSNative native,
-                                         MSimdBinaryArith::Operation op, SimdType type);
-    InliningResult inlineSimdBinaryBitwise(CallInfo& callInfo, JSNative native,
-                                           MSimdBinaryBitwise::Operation op, SimdType type);
-    InliningResult inlineSimdBinarySaturating(CallInfo& callInfo, JSNative native,
-                                              MSimdBinarySaturating::Operation op, SimdType type);
-    InliningResult inlineSimdShift(CallInfo& callInfo, JSNative native, MSimdShift::Operation op,
-                                   SimdType type);
-    InliningResult inlineSimdComp(CallInfo& callInfo, JSNative native,
-                                  MSimdBinaryComp::Operation op, SimdType type);
-    InliningResult inlineSimdUnary(CallInfo& callInfo, JSNative native,
-                                   MSimdUnaryArith::Operation op, SimdType type);
-    InliningResult inlineSimdExtractLane(CallInfo& callInfo, JSNative native, SimdType type);
-    InliningResult inlineSimdReplaceLane(CallInfo& callInfo, JSNative native, SimdType type);
-    InliningResult inlineSimdSplat(CallInfo& callInfo, JSNative native, SimdType type);
-    InliningResult inlineSimdShuffle(CallInfo& callInfo, JSNative native, SimdType type,
-                                     unsigned numVectors);
-    InliningResult inlineSimdCheck(CallInfo& callInfo, JSNative native, SimdType type);
-    InliningResult inlineSimdConvert(CallInfo& callInfo, JSNative native, bool isCast,
-                                     SimdType from, SimdType to);
-    InliningResult inlineSimdSelect(CallInfo& callInfo, JSNative native, SimdType type);
-
-    bool prepareForSimdLoadStore(CallInfo& callInfo, Scalar::Type simdType,
-                                 MInstruction** elements, MDefinition** index,
-                                 Scalar::Type* arrayType);
-    InliningResult inlineSimdLoad(CallInfo& callInfo, JSNative native, SimdType type,
-                                  unsigned numElems);
-    InliningResult inlineSimdStore(CallInfo& callInfo, JSNative native, SimdType type,
-                                   unsigned numElems);
-
-    InliningResult inlineSimdAnyAllTrue(CallInfo& callInfo, bool IsAllTrue, JSNative native,
-                                        SimdType type);
 
     // Utility intrinsics.
     InliningResult inlineIsCallable(CallInfo& callInfo);

@@ -251,6 +251,10 @@ choose-button =
     .label = Choose…
     .accesskey = o
 
+choose-browser-language-description = Choose the languages used to display menus, messages, and notifications from { -brand-short-name }.
+confirm-browser-language-change-description = Restart { -brand-short-name } to apply these changes
+confirm-browser-language-change-button = Apply and Restart
+
 translate-web-pages =
     .label = Translate web content
     .accesskey = T
@@ -785,6 +789,51 @@ addressbar-locbar-openpage-option =
 
 addressbar-suggestions-settings = Change preferences for search engine suggestions
 
+## Privacy Section - Content Blocking
+
+content-blocking-header = Content Blocking
+
+content-blocking-desc = Block third-party content, like ads or code, that can slow your browsing and track you around the web. Customize your settings for the best balance of protection and performance.
+
+content-blocking-learn-more = Learn More
+content-blocking-restore-defaults =
+  .label = Restore Defaults
+  .accesskey = R
+
+content-blocking-toggle-on =
+  .tooltiptext = Turn Off Content Blocking
+content-blocking-toggle-off =
+  .tooltiptext = Turn On Content Blocking
+
+content-blocking-toggle-label-on = ON
+  .accesskey = O
+content-blocking-toggle-label-off = OFF
+  .accesskey = O
+
+content-blocking-category-label = Choose what to block
+
+# "Slow" in this instance means "slow to load on the network".
+# FastBlock is a feature that blocks requests to tracking sites if they
+# have not finished loading after a certain threshold of seconds.
+content-blocking-fastblock-label = Slow Tracking Elements
+  .accesskey = S
+content-blocking-fastblock-description = Blocks third-party content that takes longer than 5 seconds to load.
+content-blocking-fastblock-option-enabled =
+  .label = Always block
+content-blocking-fastblock-option-disabled =
+  .label = Never block
+
+content-blocking-tracking-protection-label = Trackers
+  .accesskey = T
+content-blocking-tracking-protection-description = Blocks all known trackers (Note: may also prevent some pages from loading).
+content-blocking-tracking-protection-option-enabled =
+  .label = Always block
+content-blocking-tracking-protection-option-pbm =
+  .label = Block only in private windows
+content-blocking-tracking-protection-option-disabled =
+  .label = Never block
+content-blocking-tracking-protection-change-blocklist = Change Block List…
+
 ## Privacy Section - Tracking
 
 tracking-header = Tracking Protection
@@ -802,11 +851,6 @@ tracking-mode-private =
 tracking-mode-never =
     .label = Never
     .accesskey = N
-
-# This string is displayed if privacy.trackingprotection.ui.enabled is set to false.
-# This currently happens on the release and beta channel.
-tracking-pbm-label = Use Tracking Protection in Private Browsing to block known trackers
-    .accesskey = v
 
 tracking-exceptions =
     .label = Exceptions…
@@ -849,9 +893,18 @@ permissions-block-autoplay-media =
     .label = Block websites from automatically playing media with sound
     .accesskey = B
 
+permissions-block-autoplay-media-menu = For websites that autoplay sound
+
 permissions-block-autoplay-media-exceptions =
     .label = Exceptions…
     .accesskey = E
+
+autoplay-option-ask =
+    .label = Always Ask
+autoplay-option-allow =
+    .label = Allow Autoplay
+autoplay-option-dont =
+    .label = Don't Autoplay
 
 permissions-block-popups =
     .label = Block pop-up windows

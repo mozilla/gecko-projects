@@ -60,11 +60,11 @@
 // - If the declaration is "inline", then the method definition(s) would be in
 //   the "-inl.h" variant of the same file(s).
 //
-// The script check_macroassembler_style.py (check-masm target of the Makefile)
-// is used to verify that method definitions are matching the annotation added
-// to the method declarations.  If there is any difference, then you either
-// forgot to define the method in one of the macro assembler, or you forgot to
-// update the annotation of the macro assembler declaration.
+// The script check_macroassembler_style.py (which runs on every build) is
+// used to verify that method definitions match the annotation on the method
+// declarations.  If there is any difference, then you either forgot to define
+// the method in one of the macro assembler, or you forgot to update the
+// annotation of the macro assembler declaration.
 //
 // Some convenient short-cuts are used to avoid repeating the same list of
 // architectures on each method declaration, such as PER_ARCH and
@@ -79,7 +79,7 @@
 //   inline uint32_t framePushed() const OOL_IN_HEADER;
 //
 // Such functions should then be defined immediately after MacroAssembler's
-// definition, for example like so:
+// definition, for example:
 //
 //   //{{{ check_macroassembler_style
 //   inline uint32_t
@@ -100,10 +100,10 @@
 //
 // For each architecture, we have a macro named DEFINED_ON_arch.  This macro is
 // empty if this is not the current architecture.  Otherwise it must be either
-// set to "define" or "crash" (only use for the none target so-far).
+// set to "define" or "crash" (only used for the none target so far).
 //
-// The DEFINED_ON macro maps the list of architecture names given as argument to
-// a list of macro names.  For example,
+// The DEFINED_ON macro maps the list of architecture names given as arguments
+// to a list of macro names.  For example,
 //
 //   DEFINED_ON(arm, x86_shared)
 //
@@ -126,7 +126,7 @@
 // architecture if it is listed in the arguments of DEFINED_ON.
 //
 // This result is appended to DEFINED_ON_RESULT_ before expanding the macro,
-// which result is either no annotation, a MOZ_CRASH(), or a "= delete"
+// which results in either no annotation, a MOZ_CRASH(), or a "= delete"
 // annotation on the method declaration.
 
 # define DEFINED_ON_x86
@@ -823,6 +823,40 @@ class MacroAssembler : public MacroAssemblerSpecific
     // On ARM, the chip must have hardware division instructions.
     inline void remainder32(Register rhs, Register srcDest, bool isUnsigned) PER_SHARED_ARCH;
 
+    // Perform an integer division, returning the integer part rounded toward zero.
+    // rhs must not be zero, and the division must not overflow.
+    //
+    // This variant preserves registers, and doesn't require hardware division
+    // instructions on ARM (will call out to a runtime routine).
+    //
+    // rhs is preserved, srdDest is clobbered.
+    void flexibleRemainder32(Register rhs, Register srcDest, bool isUnsigned,
+                             const LiveRegisterSet& volatileLiveRegs)
+                             DEFINED_ON(mips_shared, arm, arm64, x86_shared);
+
+    // Perform an integer division, returning the integer part rounded toward zero.
+    // rhs must not be zero, and the division must not overflow.
+    //
+    // This variant preserves registers, and doesn't require hardware division
+    // instructions on ARM (will call out to a runtime routine).
+    //
+    // rhs is preserved, srdDest is clobbered.
+    void flexibleQuotient32(Register rhs, Register srcDest, bool isUnsigned,
+                            const LiveRegisterSet& volatileLiveRegs)
+                            DEFINED_ON(mips_shared, arm, arm64, x86_shared);
+
+    // Perform an integer division, returning the integer part rounded toward zero.
+    // rhs must not be zero, and the division must not overflow. The remainder
+    // is stored into the third argument register here.
+    //
+    // This variant preserves registers, and doesn't require hardware division
+    // instructions on ARM (will call out to a runtime routine).
+    //
+    // rhs is preserved, srdDest and remOutput are clobbered.
+    void flexibleDivMod32(Register rhs, Register srcDest, Register remOutput,
+                          bool isUnsigned, const LiveRegisterSet& volatileLiveRegs)
+                          DEFINED_ON(mips_shared, arm, arm64, x86_shared);
+
     inline void divFloat32(FloatRegister src, FloatRegister dest) PER_SHARED_ARCH;
     inline void divDouble(FloatRegister src, FloatRegister dest) PER_SHARED_ARCH;
 
@@ -878,6 +912,11 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void lshift32(Register shift, Register srcDest) PER_SHARED_ARCH;
     inline void rshift32(Register shift, Register srcDest) PER_SHARED_ARCH;
     inline void rshift32Arithmetic(Register shift, Register srcDest) PER_SHARED_ARCH;
+
+    // These variants may use the stack, but do not have the above constraint.
+    inline void flexibleLshift32(Register shift, Register srcDest) PER_SHARED_ARCH;
+    inline void flexibleRshift32(Register shift, Register srcDest) PER_SHARED_ARCH;
+    inline void flexibleRshift32Arithmetic(Register shift, Register srcDest) PER_SHARED_ARCH;
 
     inline void lshift64(Register shift, Register64 srcDest) PER_ARCH;
     inline void rshift64(Register shift, Register64 srcDest) PER_ARCH;
@@ -1052,6 +1091,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void branchAdd32(Condition cond, T src, Register dest, Label* label) PER_SHARED_ARCH;
     template <typename T>
     inline void branchSub32(Condition cond, T src, Register dest, Label* label) PER_SHARED_ARCH;
+    template <typename T>
+    inline void branchMul32(Condition cond, T src, Register dest, Label* label) PER_SHARED_ARCH;
 
     inline void decBranchPtr(Condition cond, Register lhs, Imm32 rhs, Label* label) PER_SHARED_ARCH;
 
@@ -1155,8 +1196,6 @@ class MacroAssembler : public MacroAssemblerSpecific
     void branchIfNonNativeObj(Register obj, Register scratch, Label* label);
 
     void branchIfInlineTypedObject(Register obj, Register scratch, Label* label);
-
-    void branchIfNotSimdObject(Register obj, Register scratch, SimdType simdType, Label* label);
 
     inline void branchTestClassIsProxy(bool proxy, Register clasp, Label* label);
 
@@ -1373,9 +1412,6 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     inline void canonicalizeFloat(FloatRegister reg);
     inline void canonicalizeFloatIfDeterministic(FloatRegister reg);
-
-    inline void canonicalizeFloat32x4(FloatRegister reg, FloatRegister scratch)
-        DEFINED_ON(x86_shared);
 
   public:
     // ========================================================================
@@ -2151,7 +2187,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     template<typename T>
     void loadFromTypedArray(Scalar::Type arrayType, const T& src, AnyRegister dest, Register temp, Label* fail,
-                            bool canonicalizeDoubles = true, unsigned numElems = 0);
+                            bool canonicalizeDoubles = true);
 
     template<typename T>
     void loadFromTypedArray(Scalar::Type arrayType, const T& src, const ValueOperand& dest, bool allowDouble,
@@ -2178,10 +2214,8 @@ class MacroAssembler : public MacroAssemblerSpecific
         }
     }
 
-    void storeToTypedFloatArray(Scalar::Type arrayType, FloatRegister value, const BaseIndex& dest,
-                                unsigned numElems = 0);
-    void storeToTypedFloatArray(Scalar::Type arrayType, FloatRegister value, const Address& dest,
-                                unsigned numElems = 0);
+    void storeToTypedFloatArray(Scalar::Type arrayType, FloatRegister value, const BaseIndex& dest);
+    void storeToTypedFloatArray(Scalar::Type arrayType, FloatRegister value, const Address& dest);
 
     void memoryBarrierBefore(const Synchronization& sync);
     void memoryBarrierAfter(const Synchronization& sync);
@@ -2245,6 +2279,10 @@ class MacroAssembler : public MacroAssemblerSpecific
     bool shouldNurseryAllocate(gc::AllocKind allocKind, gc::InitialHeap initialHeap);
     void nurseryAllocateObject(Register result, Register temp, gc::AllocKind allocKind,
                                size_t nDynamicSlots, Label* fail);
+    void bumpPointerAllocate(Register result, Register temp, Label* fail,
+        void* posAddr, const void* curEddAddr,
+        uint32_t totalSize, uint32_t size);
+
     void freeListAllocate(Register result, Register temp, gc::AllocKind allocKind, Label* fail);
     void allocateObject(Register result, Register temp, gc::AllocKind allocKind,
                         uint32_t nDynamicSlots, gc::InitialHeap initialHeap, Label* fail);

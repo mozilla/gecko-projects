@@ -1472,13 +1472,15 @@ XMLHttpRequestMainThread::Open(const nsACString& aMethod,
   // Step 8
   nsAutoCString host;
   parsedURL->GetHost(host);
-  if (!host.IsEmpty()) {
-    if (!aUsername.IsVoid() || !aPassword.IsVoid()) {
-      Unused << NS_MutateURI(parsedURL)
-                  .SetUsername(NS_ConvertUTF16toUTF8(aUsername))
-                  .SetPassword(NS_ConvertUTF16toUTF8(aPassword))
-                  .Finalize(parsedURL);
+  if (!host.IsEmpty() && (!aUsername.IsVoid() || !aPassword.IsVoid())) {
+    auto mutator = NS_MutateURI(parsedURL);
+    if (!aUsername.IsVoid()) {
+      mutator.SetUsername(NS_ConvertUTF16toUTF8(aUsername));
     }
+    if (!aPassword.IsVoid()) {
+      mutator.SetPassword(NS_ConvertUTF16toUTF8(aPassword));
+    }
+    Unused << mutator.Finalize(parsedURL);
   }
 
   // Step 9
@@ -3104,7 +3106,6 @@ XMLHttpRequestMainThread::OverrideMimeType(const nsAString& aMimeType,
 
   if (mState == XMLHttpRequest_Binding::LOADING ||
       mState == XMLHttpRequest_Binding::DONE) {
-    ResetResponse();
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_LOADING_OR_DONE);
     return;
   }

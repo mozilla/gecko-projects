@@ -367,12 +367,6 @@ struct HelperThread
      */
     bool terminate;
 
-    /*
-     * Indicate that this thread has been registered and needs to be
-     * unregistered at shutdown.
-     */
-    bool registered;
-
     /* The current task being executed by this thread, if any. */
     mozilla::Maybe<HelperTaskUnion> currentTask;
 
@@ -414,10 +408,31 @@ struct HelperThread
     static void ThreadMain(void* arg);
     void threadLoop();
 
+    static void WakeupAll();
+
     void ensureRegisteredWithProfiler();
     void unregisterWithProfilerIfNeeded();
 
   private:
+    struct AutoProfilerLabel
+    {
+        AutoProfilerLabel(HelperThread* helperThread, const char* label,
+                          uint32_t line,
+                          ProfilingStackFrame::Category category);
+        ~AutoProfilerLabel();
+
+    private:
+        ProfilingStack* profilingStack;
+    };
+
+    /*
+     * The profiling thread for this helper thread, which can be used to push
+     * and pop label frames.
+     * This field being non-null Indicates that this thread has been registered
+     * and needs to be unregistered at shutdown.
+     */
+    ProfilingStack* profilingStack;
+
     struct TaskSpec
     {
         using Selector = bool(GlobalHelperThreadState::*)(const AutoLockHelperThreadState&);
@@ -589,12 +604,12 @@ CancelOffThreadParses(JSRuntime* runtime);
  */
 bool
 StartOffThreadParseScript(JSContext* cx, const ReadOnlyCompileOptions& options,
-                          const char16_t* chars, size_t length,
+                          JS::SourceBufferHolder& srcBuf,
                           JS::OffThreadCompileCallback callback, void* callbackData);
 
 bool
 StartOffThreadParseModule(JSContext* cx, const ReadOnlyCompileOptions& options,
-                          const char16_t* chars, size_t length,
+                          JS::SourceBufferHolder& srcBuf,
                           JS::OffThreadCompileCallback callback, void* callbackData);
 
 bool
@@ -720,18 +735,18 @@ struct ParseTask : public mozilla::LinkedListElement<ParseTask>, public JS::OffT
 
 struct ScriptParseTask : public ParseTask
 {
-    JS::TwoByteChars data;
+    JS::SourceBufferHolder data;
 
-    ScriptParseTask(JSContext* cx, const char16_t* chars, size_t length,
+    ScriptParseTask(JSContext* cx, JS::SourceBufferHolder& srcBuf,
                     JS::OffThreadCompileCallback callback, void* callbackData);
     void parse(JSContext* cx) override;
 };
 
 struct ModuleParseTask : public ParseTask
 {
-    JS::TwoByteChars data;
+    JS::SourceBufferHolder data;
 
-    ModuleParseTask(JSContext* cx, const char16_t* chars, size_t length,
+    ModuleParseTask(JSContext* cx, JS::SourceBufferHolder& srcBuf,
                     JS::OffThreadCompileCallback callback, void* callbackData);
     void parse(JSContext* cx) override;
 };

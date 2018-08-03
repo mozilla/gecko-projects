@@ -22,6 +22,9 @@ class nsIGlobalObject;
 
 namespace mozilla {
 namespace dom {
+
+class ContentParent;
+
 namespace ipc {
 
 /**
@@ -58,7 +61,8 @@ public:
 
   SharedMap();
 
-  SharedMap(nsIGlobalObject* aGlobal, const FileDescriptor&, size_t);
+  SharedMap(nsIGlobalObject* aGlobal, const FileDescriptor&, size_t,
+            nsTArray<RefPtr<BlobImpl>>&& aBlobs);
 
   // Returns true if the map contains the given (UTF-8) key.
   bool Has(const nsACString& name);
@@ -96,11 +100,8 @@ public:
    * the program will crash.
    */
   const nsString GetKeyAtIndex(uint32_t aIndex) const;
-  // Note: This function should only be called if the instance has a live,
-  // cached wrapper. If it does not, this function will return null, and assert
-  // in debug builds.
-  // The returned value will always be in the same Realm as that wrapper.
-  JS::Value GetValueAtIndex(uint32_t aIndex) const;
+  bool GetValueAtIndex(JSContext* aCx, uint32_t aIndex,
+                       JS::MutableHandle<JS::Value> aResult) const;
 
 
   /**
@@ -108,7 +109,7 @@ public:
    * memory region for this map. The file descriptor may be passed between
    * processes, and used to update corresponding instances in child processes.
    */
-  FileDescriptor CloneMapFile();
+  FileDescriptor CloneMapFile() const;
 
   /**
    * Returns the size of the memory mapped region that backs this map. Must be
@@ -321,6 +322,8 @@ protected:
 class WritableSharedMap final : public SharedMap
 {
 public:
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(WritableSharedMap, SharedMap)
 
   WritableSharedMap();
 
@@ -347,6 +350,10 @@ public:
   // Flushes any queued changes to a new snapshot, and broadcasts it to all
   // child SharedMap instances.
   void Flush();
+
+
+  // Sends the current set of shared map data to the given content process.
+  void SendTo(ContentParent* aContentParent) const;
 
 
   /**

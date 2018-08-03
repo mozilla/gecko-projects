@@ -1160,11 +1160,17 @@ public:
    */
   static bool DevToolsEnabled(JSContext* aCx);
 
+  static nsresult CalculateBufferSizeForImage(const uint32_t& aStride,
+                                            const mozilla::gfx::IntSize& aImageSize,
+                                            const mozilla::gfx::SurfaceFormat& aFormat,
+                                            size_t* aMaxBufferSize,
+                                            size_t* aUsedBufferSize);
+
+private:
   /**
    * Fill (with the parameters given) the localized string named |aKey| in
    * properties file |aFile|.
    */
-private:
   static nsresult FormatLocalizedString(PropertiesFile aFile,
                                         const char* aKey,
                                         const char16_t** aParams,
@@ -3161,6 +3167,12 @@ public:
   static uint64_t GenerateTabId();
 
   /**
+   * Generate an id for a BrowsingContext using a range of serial
+   * numbers reserved for the current process.
+   */
+  static uint64_t GenerateBrowsingContextId();
+
+  /**
    * Check whether we should skip moving the cursor for a same-value .value set
    * on a text input or textarea.
    */
@@ -3420,7 +3432,6 @@ private:
   static bool sIsBytecodeCacheEnabled;
   static int32_t sBytecodeCacheStrategy;
   static uint32_t sCookiesLifetimePolicy;
-  static uint32_t sCookiesBehavior;
   static bool sShortcutsCustomized;
 
   static int32_t sPrivacyMaxInnerWidth;

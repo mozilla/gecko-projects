@@ -160,21 +160,23 @@ InterceptStreamListener::Cleanup()
 HttpChannelChild::HttpChannelChild()
   : HttpAsyncAborter<HttpChannelChild>(this)
   , NeckoTargetHolder(nullptr)
-  , mCacheKey(0)
+  , mBgChildMutex("HttpChannelChild::BgChildMutex")
+  , mEventTargetMutex("HttpChannelChild::EventTargetMutex")
   , mSynthesizedStreamLength(0)
-  , mIsFromCache(false)
-  , mCacheEntryAvailable(false)
   , mCacheEntryId(0)
-  , mAltDataCacheEntryAvailable(false)
+  , mCacheKey(0)
   , mCacheFetchCount(0)
   , mCacheExpirationTime(nsICacheEntry::NO_EXPIRATION_TIME)
-  , mSendResumeAt(false)
   , mDeletingChannelSent(false)
   , mIPCOpen(false)
-  , mKeptAlive(false)
   , mUnknownDecoderInvolved(false)
   , mDivertingToParent(false)
   , mFlushedForDiversion(false)
+  , mIsFromCache(false)
+  , mCacheEntryAvailable(false)
+  , mAltDataCacheEntryAvailable(false)
+  , mSendResumeAt(false)
+  , mKeptAlive(false)
   , mSuspendSent(false)
   , mSynthesizedResponse(false)
   , mShouldInterceptSubsequentRedirect(false)
@@ -183,8 +185,6 @@ HttpChannelChild::HttpChannelChild()
   , mPostRedirectChannelShouldUpgrade(false)
   , mShouldParentIntercept(false)
   , mSuspendParentAfterSynthesizeResponse(false)
-  , mBgChildMutex("HttpChannelChild::BgChildMutex")
-  , mEventTargetMutex("HttpChannelChild::EventTargetMutex")
 {
   LOG(("Creating HttpChannelChild @%p\n", this));
 
@@ -2690,11 +2690,16 @@ HttpChannelChild::ContinueAsyncOpen()
   // This id identifies the inner window's top-level document,
   // which changes on every new load or navigation.
   uint64_t contentWindowId = 0;
+  TimeStamp navigationStartTimeStamp;
   if (tabChild) {
     MOZ_ASSERT(tabChild->WebNavigation());
     nsCOMPtr<nsIDocument> document = tabChild->GetDocument();
     if (document) {
       contentWindowId = document->InnerWindowID();
+      nsDOMNavigationTiming* navigationTiming = document->GetNavigationTiming();
+      if (navigationTiming) {
+        navigationStartTimeStamp = navigationTiming->GetNavigationStartTimeStamp();
+      }
       mTopLevelOuterContentWindowId = document->OuterWindowID();
     }
   }
@@ -2806,6 +2811,8 @@ HttpChannelChild::ContinueAsyncOpen()
   openArgs.handleFetchEventEnd()      = mHandleFetchEventEnd;
 
   openArgs.forceMainDocumentChannel() = mForceMainDocumentChannel;
+
+  openArgs.navigationStartTimeStamp() = navigationStartTimeStamp;
 
   // This must happen before the constructor message is sent. Otherwise messages
   // from the parent could arrive quickly and be delivered to the wrong event
@@ -3974,20 +3981,22 @@ HttpChannelChild::ActorDestroy(ActorDestroyReason aWhy)
 }
 
 mozilla::ipc::IPCResult
-HttpChannelChild::RecvLogBlockedCORSRequest(const nsString& aMessage)
+HttpChannelChild::RecvLogBlockedCORSRequest(const nsString& aMessage,
+                                            const nsCString& aCategory)
 {
-  Unused << LogBlockedCORSRequest(aMessage);
+  Unused << LogBlockedCORSRequest(aMessage, aCategory);
   return IPC_OK();
 }
 
 NS_IMETHODIMP
-HttpChannelChild::LogBlockedCORSRequest(const nsAString & aMessage)
+HttpChannelChild::LogBlockedCORSRequest(const nsAString & aMessage,
+                                        const nsACString& aCategory)
 {
   if (mLoadInfo) {
     uint64_t innerWindowID = mLoadInfo->GetInnerWindowID();
     bool privateBrowsing = !!mLoadInfo->GetOriginAttributes().mPrivateBrowsingId;
     nsCORSListenerProxy::LogBlockedCORSRequest(innerWindowID, privateBrowsing,
-                                               aMessage);
+                                               aMessage, aCategory);
   }
   return NS_OK;
 }

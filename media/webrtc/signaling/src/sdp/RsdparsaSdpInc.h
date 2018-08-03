@@ -20,6 +20,7 @@ struct StringVec;
 struct U8Vec;
 struct U32Vec;
 struct U16Vec;
+struct F32Vec;
 struct RustHeapString;
 
 enum class RustSdpAddrType {
@@ -71,9 +72,17 @@ enum class RustSdpFormatType {
   kRustStrings
 };
 
+enum class RustSdpAttributeFingerprintHashAlgorithm : uint16_t {
+  kSha1,
+  kSha224,
+  kSha256,
+  kSha384,
+  kSha512,
+};
+
 struct RustSdpAttributeFingerprint {
-  StringView hashAlgorithm;
-  StringView fingerprint;
+  RustSdpAttributeFingerprintHashAlgorithm hashAlgorithm;
+  U8Vec* fingerprint;
 };
 
 enum class RustSdpSetup {
@@ -81,6 +90,16 @@ enum class RustSdpSetup {
   kRustActpass,
   kRustHoldconn,
   kRustPassive
+};
+
+enum class RustSdpAttributeDtlsMessageType : uint8_t {
+  kClient,
+  kServer,
+};
+
+struct RustSdpAttributeDtlsMessage {
+  RustSdpAttributeDtlsMessageType role;
+  StringView value;
 };
 
 struct RustSdpAttributeSsrc {
@@ -119,6 +138,45 @@ struct RustSdpAttributeRid {
   U16Vec* formats;
   RustSdpAttributeRidParameters params;
   StringVec* depends;
+};
+
+struct RustSdpAttributeImageAttrXYRange {
+  uint32_t min;
+  uint32_t max;
+  uint32_t step;
+  U32Vec* discrete_values;
+};
+
+struct RustSdpAttributeImageAttrSRange {
+  float min;
+  float max;
+  F32Vec* discrete_values;
+};
+
+struct RustSdpAttributeImageAttrPRange {
+  float min;
+  float max;
+};
+
+struct RustSdpAttributeImageAttrSet {
+  RustSdpAttributeImageAttrXYRange x;
+  RustSdpAttributeImageAttrXYRange y;
+  bool has_sar;
+  RustSdpAttributeImageAttrSRange sar;
+  bool has_par;
+  RustSdpAttributeImageAttrPRange par;
+  float q;
+};
+
+struct RustSdpAttributeImageAttrSetVec;
+struct RustSdpAttributeImageAttrSetList {
+  RustSdpAttributeImageAttrSetVec* sets;
+};
+
+struct RustSdpAttributeImageAttr {
+  uint32_t payloadType;
+  RustSdpAttributeImageAttrSetList send;
+  RustSdpAttributeImageAttrSetList recv;
 };
 
 struct RustSdpAttributeFmtpParameters {
@@ -162,6 +220,7 @@ struct RustSdpAttributeFmtp {
 struct RustSdpAttributeFlags {
   bool iceLite;
   bool rtcpMux;
+  bool rtcpRsize;
   bool bundleOnly;
   bool endOfCandidates;
 };
@@ -243,6 +302,10 @@ extern "C" {
 size_t string_vec_len(const StringVec* vec);
 nsresult string_vec_get_view(const StringVec* vec, size_t index,
                              StringView* str);
+nsresult free_boxed_string_vec(StringVec* vec);
+
+size_t f32_vec_len(const F32Vec* vec);
+nsresult f32_vec_get(const F32Vec* vec, size_t index, float* ret);
 
 size_t u32_vec_len(const U32Vec* vec);
 nsresult u32_vec_get(const U32Vec* vec, size_t index, uint32_t* ret);
@@ -313,6 +376,9 @@ nsresult sdp_get_icepwd(const RustAttributeList* aList, StringView* ret);
 nsresult sdp_get_identity(const RustAttributeList* aList, StringView* ret);
 nsresult sdp_get_iceoptions(const RustAttributeList* aList, StringVec** ret);
 
+nsresult sdp_get_dtls_message(const RustAttributeList* aList,
+                              RustSdpAttributeDtlsMessage* ret);
+
 size_t sdp_get_fingerprint_count(const RustAttributeList* aList);
 void sdp_get_fingerprints(const RustAttributeList* aList, size_t listSize,
                           RustSdpAttributeFingerprint* ret);
@@ -362,7 +428,11 @@ void sdp_get_rtcpfbs(const RustAttributeList* aList, size_t listSize,
 
 size_t sdp_get_imageattr_count(const RustAttributeList* aList);
 void sdp_get_imageattrs(const RustAttributeList* aList, size_t listSize,
-                        StringView* ret);
+                        RustSdpAttributeImageAttr* ret);
+
+size_t sdp_imageattr_get_set_count(const RustSdpAttributeImageAttrSetVec* sets);
+void sdp_imageattr_get_sets(const RustSdpAttributeImageAttrSetVec* sets,
+                            size_t listSize, RustSdpAttributeImageAttrSet* ret);
 
 size_t sdp_get_sctpmap_count(const RustAttributeList* aList);
 void sdp_get_sctpmaps(const RustAttributeList* aList, size_t listSize,
@@ -390,6 +460,11 @@ size_t sdp_get_remote_candidate_count(const RustAttributeList* aList);
 void sdp_get_remote_candidates(const RustAttributeList* aList,
                                size_t listSize,
                                RustSdpAttributeRemoteCandidate* ret);
+
+size_t sdp_get_candidate_count(const RustAttributeList* aList);
+void sdp_get_candidates(const RustAttributeList* aLisst,
+                        size_t listSize,
+                        StringVec** ret);
 
 size_t sdp_get_rid_count(const RustAttributeList* aList);
 void sdp_get_rids(const RustAttributeList* aList, size_t listSize,

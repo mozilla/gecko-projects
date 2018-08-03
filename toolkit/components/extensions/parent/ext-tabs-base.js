@@ -7,8 +7,6 @@
 
 /* globals EventEmitter */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
                                "resource://gre/modules/PrivateBrowsingUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "Services",
@@ -788,7 +786,7 @@ class WindowBase {
    *        @readonly
    */
   get xulWindow() {
-    return this.window.document.docShell.treeOwner
+    return this.window.docShell.treeOwner
                .QueryInterface(Ci.nsIInterfaceRequestor)
                .getInterface(Ci.nsIXULWindow);
   }

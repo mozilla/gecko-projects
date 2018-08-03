@@ -694,9 +694,6 @@ GetNonCCWObjectRealm(JSObject* obj)
 }
 
 JS_FRIEND_API(JSObject*)
-GetGlobalForObjectCrossCompartment(JSObject* obj);
-
-JS_FRIEND_API(JSObject*)
 GetPrototypeNoProxy(JSObject* obj);
 
 JS_FRIEND_API(void)
@@ -1354,9 +1351,9 @@ struct XrayJitInfo {
     // security checks.
     bool (*isCrossCompartmentXray)(const BaseProxyHandler* handler);
 
-    // Test whether xrays with a global object's compartment have expandos of
-    // their own, instead of sharing them with Xrays from other compartments.
-    bool (*globalHasExclusiveExpandos)(JSObject* obj);
+    // Test whether xrays in |obj|'s compartment have expandos of their own,
+    // instead of sharing them with Xrays from other compartments.
+    bool (*compartmentHasExclusiveExpandos)(JSObject* obj);
 
     // Proxy reserved slot used by xrays in sandboxes to store their holder
     // object.
@@ -1613,10 +1610,6 @@ enum Type {
     MaxTypedArrayViewType,
 
     Int64,
-    Float32x4,
-    Int8x16,
-    Int16x8,
-    Int32x4
 };
 
 static inline size_t
@@ -1637,10 +1630,6 @@ byteSize(Type atype)
       case Int64:
       case Float64:
         return 8;
-      case Int8x16:
-      case Int16x8:
-      case Int32x4:
-      case Float32x4:
         return 16;
       default:
         MOZ_CRASH("invalid scalar type");
@@ -1654,9 +1643,6 @@ isSignedIntType(Type atype) {
       case Int16:
       case Int32:
       case Int64:
-      case Int8x16:
-      case Int16x8:
-      case Int32x4:
         return true;
       case Uint8:
       case Uint8Clamped:
@@ -1664,62 +1650,10 @@ isSignedIntType(Type atype) {
       case Uint32:
       case Float32:
       case Float64:
-      case Float32x4:
         return false;
       default:
         MOZ_CRASH("invalid scalar type");
     }
-}
-
-static inline bool
-isSimdType(Type atype) {
-    switch (atype) {
-      case Int8:
-      case Uint8:
-      case Uint8Clamped:
-      case Int16:
-      case Uint16:
-      case Int32:
-      case Uint32:
-      case Int64:
-      case Float32:
-      case Float64:
-        return false;
-      case Int8x16:
-      case Int16x8:
-      case Int32x4:
-      case Float32x4:
-        return true;
-      case MaxTypedArrayViewType:
-        break;
-    }
-    MOZ_CRASH("invalid scalar type");
-}
-
-static inline size_t
-scalarByteSize(Type atype) {
-    switch (atype) {
-      case Int8x16:
-        return 1;
-      case Int16x8:
-        return 2;
-      case Int32x4:
-      case Float32x4:
-        return 4;
-      case Int8:
-      case Uint8:
-      case Uint8Clamped:
-      case Int16:
-      case Uint16:
-      case Int32:
-      case Uint32:
-      case Int64:
-      case Float32:
-      case Float64:
-      case MaxTypedArrayViewType:
-        break;
-    }
-    MOZ_CRASH("invalid simd type");
 }
 
 } /* namespace Scalar */
@@ -2960,17 +2894,6 @@ typedef long
 extern JS_FRIEND_API(void)
 SetJitExceptionHandler(JitExceptionHandler handler);
 #endif
-
-/**
- * Get the first SavedFrame object in this SavedFrame stack whose principals are
- * subsumed by the cx's principals. If there is no such frame, return nullptr.
- *
- * Do NOT pass a non-SavedFrame object here.
- *
- * The savedFrame and cx do not need to be in the same compartment.
- */
-extern JS_FRIEND_API(JSObject*)
-GetFirstSubsumedSavedFrame(JSContext* cx, JS::HandleObject savedFrame, JS::SavedFrameSelfHosted selfHosted);
 
 /**
  * Get the first SavedFrame object in this SavedFrame stack whose principals are

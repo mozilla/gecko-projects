@@ -191,6 +191,9 @@ JSRuntime::~JSRuntime()
     MOZ_ASSERT(oldCount > 0);
 
     MOZ_ASSERT(wasmInstances.lock()->empty());
+
+    MOZ_ASSERT(offThreadParsesRunning_ == 0);
+    MOZ_ASSERT(!offThreadParsingBlocked_);
 }
 
 bool
@@ -391,7 +394,7 @@ JSRuntime::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::Runtim
 
     {
         AutoLockScriptData lock(this);
-        rtSizes->scriptData += scriptDataTable(lock).sizeOfExcludingThis(mallocSizeOf);
+        rtSizes->scriptData += scriptDataTable(lock).shallowSizeOfExcludingThis(mallocSizeOf);
         for (ScriptDataTable::Range r = scriptDataTable(lock).all(); !r.empty(); r.popFront())
             rtSizes->scriptData += mallocSizeOf(r.front());
     }
@@ -412,6 +415,13 @@ HandleInterrupt(JSContext* cx, bool invokeCallback)
 {
     MOZ_ASSERT(cx->requestDepth >= 1);
     MOZ_ASSERT(!cx->zone()->isAtomsZone());
+
+    // Interrupts can occur at different points between recording and replay,
+    // so no recorded behaviors should occur while handling an interrupt.
+    // Additionally, returning false here will change subsequent behavior, so
+    // such an event cannot occur during recording or replay without
+    // invalidating the recording.
+    mozilla::recordreplay::AutoDisallowThreadEvents d;
 
     cx->runtime()->gc.gcIfRequested();
 
@@ -447,15 +457,18 @@ HandleInterrupt(JSContext* cx, bool invokeCallback)
                 RootedValue rval(cx);
                 switch (Debugger::onSingleStep(cx, &rval)) {
                   case ResumeMode::Terminate:
+                    mozilla::recordreplay::InvalidateRecording("Debugger single-step produced an error");
                     return false;
                   case ResumeMode::Continue:
                     return true;
                   case ResumeMode::Return:
                     // See note in Debugger::propagateForcedReturn.
                     Debugger::propagateForcedReturn(cx, iter.abstractFramePtr(), rval);
+                    mozilla::recordreplay::InvalidateRecording("Debugger single-step forced return");
                     return false;
                   case ResumeMode::Throw:
                     cx->setPendingException(rval);
+                    mozilla::recordreplay::InvalidateRecording("Debugger single-step threw an exception");
                     return false;
                   default:;
                 }
@@ -479,6 +492,7 @@ HandleInterrupt(JSContext* cx, bool invokeCallback)
     JS_ReportErrorFlagsAndNumberUC(cx, JSREPORT_WARNING, GetErrorMessage, nullptr,
                                    JSMSG_TERMINATED, chars);
 
+    mozilla::recordreplay::InvalidateRecording("Interrupt callback forced return");
     return false;
 }
 
@@ -606,7 +620,7 @@ FreeOp::isDefaultFreeOp() const
     return runtime_ && runtime_->defaultFreeOp() == this;
 }
 
-JSObject*
+GlobalObject*
 JSRuntime::getIncumbentGlobal(JSContext* cx)
 {
     // If the embedding didn't set a callback for getting the incumbent
@@ -617,16 +631,21 @@ JSRuntime::getIncumbentGlobal(JSContext* cx)
         return cx->global();
     }
 
-    return cx->getIncumbentGlobalCallback(cx);
+    if (JSObject* obj = cx->getIncumbentGlobalCallback(cx)) {
+        MOZ_ASSERT(obj->is<GlobalObject>(),
+                   "getIncumbentGlobalCallback must return a global!");
+        return &obj->as<GlobalObject>();
+    }
+
+    return nullptr;
 }
 
 bool
 JSRuntime::enqueuePromiseJob(JSContext* cx, HandleFunction job, HandleObject promise,
-                             HandleObject incumbentGlobal)
+                             Handle<GlobalObject*> incumbentGlobal)
 {
     MOZ_ASSERT(cx->enqueuePromiseJobCallback,
                "Must set a callback using JS::SetEnqueuePromiseJobCallback before using Promises");
-    MOZ_ASSERT_IF(incumbentGlobal, !IsWrapper(incumbentGlobal) && !IsWindowProxy(incumbentGlobal));
 
     void* data = cx->enqueuePromiseJobCallbackData;
     RootedObject allocationSite(cx);
@@ -772,16 +791,21 @@ JSRuntime::setUsedByHelperThread(Zone* zone)
     MOZ_ASSERT(!zone->usedByHelperThread());
     MOZ_ASSERT(!zone->wasGCStarted());
     MOZ_ASSERT(!isOffThreadParsingBlocked());
+
     zone->setUsedByHelperThread();
-    numActiveHelperThreadZones++;
+    if (numActiveHelperThreadZones++ == 0)
+        gc.setParallelAtomsAllocEnabled(true);
 }
 
 void
 JSRuntime::clearUsedByHelperThread(Zone* zone)
 {
     MOZ_ASSERT(zone->usedByHelperThread());
+
     zone->clearUsedByHelperThread();
-    numActiveHelperThreadZones--;
+    if (--numActiveHelperThreadZones == 0)
+        gc.setParallelAtomsAllocEnabled(false);
+
     JSContext* cx = mainContextFromOwnThread();
     if (gc.fullGCForAtomsRequested() && cx->canCollectAtoms())
         gc.triggerFullGCForAtoms(cx);

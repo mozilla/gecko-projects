@@ -65,8 +65,13 @@ pref("devtools.inspector.shapesHighlighter.enabled", true);
 pref("devtools.flexboxinspector.enabled", false);
 // Enable the new Animation Inspector
 pref("devtools.new-animationinspector.enabled", true);
-// Enable the Variable Fonts editor
+
+// Enable the Variable Fonts editor only in Nightly
+#if defined(NIGHTLY_BUILD)
+pref("devtools.inspector.fonteditor.enabled", true);
+#else
 pref("devtools.inspector.fonteditor.enabled", false);
+#endif
 // Enable the font highlight-on-hover feature
 pref("devtools.inspector.fonthighlighter.enabled", false);
 
@@ -228,9 +233,6 @@ pref("devtools.accessibility.enabled", false);
 // Web Audio Editor Inspector Width should be a preference
 pref("devtools.webaudioeditor.inspectorWidth", 300);
 
-// Experimental UI for the browser console that doesn't use a XUL wrapper doc
-pref("devtools.browserconsole.html", false);
-
 // Web console filters
 pref("devtools.webconsole.filter.error", true);
 pref("devtools.webconsole.filter.warn", true);
@@ -277,8 +279,12 @@ pref("devtools.webconsole.sidebarToggle", true);
 pref("devtools.webconsole.sidebarToggle", false);
 #endif
 
-// Enable CodeMirror in the JsTerm: |false|
+// Enable CodeMirror in the JsTerm in Nightly builds
+#if defined(NIGHTLY_BUILD)
+pref("devtools.webconsole.jsterm.codeMirror", true);
+#else
 pref("devtools.webconsole.jsterm.codeMirror", false);
+#endif
 
 // Disable the new performance recording panel by default
 pref("devtools.performance.new-panel-enabled", false);
@@ -310,3 +316,13 @@ pref("devtools.responsive.reloadConditions.touchSimulation", false);
 pref("devtools.responsive.reloadConditions.userAgent", false);
 // Whether to show the notification about reloading to apply emulation
 pref("devtools.responsive.reloadNotification.enabled", true);
+
+// Enable new about:debugging.
+pref("devtools.aboutdebugging.new-enabled", false);
+
+// about:debugging: only show system add-ons in local builds by default.
+#ifdef MOZILLA_OFFICIAL
+  pref("devtools.aboutdebugging.showSystemAddons", false);
+#else
+  pref("devtools.aboutdebugging.showSystemAddons", true);
+#endif

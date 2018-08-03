@@ -32,6 +32,9 @@
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/PTextureChild.h"
 #include "mozilla/layers/SyncObject.h"
+#ifdef XP_DARWIN
+#include "mozilla/layers/TextureSync.h"
+#endif
 #include "ShadowLayerUtils.h"
 #include "mozilla/layers/TextureClient.h"  // for TextureClient
 #include "mozilla/mozalloc.h"           // for operator new, etc
@@ -767,11 +770,19 @@ ShadowLayerForwarder::EndTransaction(const nsIntRegion& aRegionToClear,
   // finish. If it does we don't have to delay messages at all.
   GetCompositorBridgeChild()->PostponeMessagesIfAsyncPainting();
 
+  if (recordreplay::IsRecordingOrReplaying()) {
+    recordreplay::child::NotifyPaintStart();
+  }
+
   MOZ_LAYERS_LOG(("[LayersForwarder] sending transaction..."));
   RenderTraceScope rendertrace3("Forward Transaction", "000093");
   if (!mShadowManager->SendUpdate(info)) {
     MOZ_LAYERS_LOG(("[LayersForwarder] WARNING: sending transaction failed!"));
     return false;
+  }
+
+  if (recordreplay::IsRecordingOrReplaying()) {
+    recordreplay::child::WaitForPaintToComplete();
   }
 
   if (startTime) {
@@ -797,12 +808,44 @@ ShadowLayerForwarder::FindCompositable(const CompositableHandle& aHandle)
 }
 
 void
-ShadowLayerForwarder::SetLayerObserverEpoch(uint64_t aLayerObserverEpoch)
+ShadowLayerForwarder::SetLayersObserverEpoch(LayersObserverEpoch aEpoch)
 {
   if (!IPCOpen()) {
     return;
   }
-  Unused << mShadowManager->SendSetLayerObserverEpoch(aLayerObserverEpoch);
+  Unused << mShadowManager->SendSetLayersObserverEpoch(aEpoch);
+}
+
+void
+ShadowLayerForwarder::UpdateTextureLocks()
+{
+#ifdef XP_DARWIN
+  if (!IPCOpen()) {
+    return;
+  }
+
+  auto compositorBridge = GetCompositorBridgeChild();
+  if (compositorBridge) {
+    auto pid = compositorBridge->OtherPid();
+    TextureSync::UpdateTextureLocks(pid);
+  }
+#endif
+}
+
+void
+ShadowLayerForwarder::SyncTextures(const nsTArray<uint64_t>& aSerials)
+{
+#ifdef XP_DARWIN
+  if (!IPCOpen()) {
+    return;
+  }
+
+  auto compositorBridge = GetCompositorBridgeChild();
+  if (compositorBridge) {
+    auto pid = compositorBridge->OtherPid();
+    TextureSync::WaitForTextures(pid, aSerials);
+  }
+#endif
 }
 
 void

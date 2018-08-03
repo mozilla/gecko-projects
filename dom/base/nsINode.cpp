@@ -33,6 +33,7 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/ShadowRoot.h"
+#include "mozilla/dom/SVGUseElement.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "nsAttrValueOrString.h"
 #include "nsBindingManager.h"
@@ -58,6 +59,7 @@
 #include "nsAtom.h"
 #include "nsIBaseWindow.h"
 #include "nsICategoryManager.h"
+#include "nsIContentInlines.h"
 #include "nsIContentIterator.h"
 #include "nsIControllers.h"
 #include "nsIDocument.h"
@@ -516,13 +518,11 @@ operator<<(std::ostream& aStream, const nsINode& aNode)
   return aStream << str.get();
 }
 
-bool
-nsINode::IsAnonymousContentInSVGUseSubtree() const
+SVGUseElement*
+nsINode::DoGetContainingSVGUseShadowHost() const
 {
-  MOZ_ASSERT(IsInAnonymousSubtree());
-  nsIContent* parent = AsContent()->GetBindingParent();
-  // Watch out for parentless native-anonymous subtrees.
-  return parent && parent->IsSVGElement(nsGkAtoms::use);
+  MOZ_ASSERT(IsInShadowTree());
+  return SVGUseElement::FromNodeOrNull(AsContent()->GetContainingShadowHost());
 }
 
 void
@@ -1387,8 +1387,7 @@ nsINode::doInsertChildAt(nsIContent* aKid, uint32_t aIndex,
 
   bool wasInXBLScope = ShouldUseXBLScope(aKid);
   rv = aKid->BindToTree(doc, parent,
-                        parent ? parent->GetBindingParent() : nullptr,
-                        true);
+                        parent ? parent->GetBindingParent() : nullptr);
   if (NS_SUCCEEDED(rv) && !wasInXBLScope && ShouldUseXBLScope(aKid)) {
     MOZ_ASSERT(ShouldUseXBLScope(this),
                "Why does the kid need to use an XBL scope?");
@@ -1659,6 +1658,93 @@ nsINode::GetLastElementChild() const
 
   return nullptr;
 }
+
+static
+bool MatchAttribute(Element* aElement,
+                    int32_t aNamespaceID,
+                    nsAtom* aAttrName,
+                    void* aData)
+{
+  MOZ_ASSERT(aElement, "Must have content node to work with!");
+  nsString* attrValue = static_cast<nsString*>(aData);
+  if (aNamespaceID != kNameSpaceID_Unknown &&
+      aNamespaceID != kNameSpaceID_Wildcard) {
+    return attrValue->EqualsLiteral("*") ?
+      aElement->HasAttr(aNamespaceID, aAttrName) :
+      aElement->AttrValueIs(aNamespaceID, aAttrName, *attrValue,
+                            eCaseMatters);
+  }
+
+  // Qualified name match. This takes more work.
+  uint32_t count = aElement->GetAttrCount();
+  for (uint32_t i = 0; i < count; ++i) {
+    const nsAttrName* name = aElement->GetAttrNameAt(i);
+    bool nameMatch;
+    if (name->IsAtom()) {
+      nameMatch = name->Atom() == aAttrName;
+    } else if (aNamespaceID == kNameSpaceID_Wildcard) {
+      nameMatch = name->NodeInfo()->Equals(aAttrName);
+    } else {
+      nameMatch = name->NodeInfo()->QualifiedNameEquals(aAttrName);
+    }
+
+    if (nameMatch) {
+      return attrValue->EqualsLiteral("*") ||
+        aElement->AttrValueIs(name->NamespaceID(), name->LocalName(),
+                              *attrValue, eCaseMatters);
+    }
+  }
+
+  return false;
+}
+
+already_AddRefed<nsIHTMLCollection>
+nsINode::GetElementsByAttribute(const nsAString& aAttribute,
+                                const nsAString& aValue)
+{
+  RefPtr<nsAtom> attrAtom(NS_Atomize(aAttribute));
+  nsAutoPtr<nsString> attrValue(new nsString(aValue));
+  RefPtr<nsContentList> list = new nsContentList(this,
+                                          MatchAttribute,
+                                          nsContentUtils::DestroyMatchString,
+                                          attrValue.forget(),
+                                          true,
+                                          attrAtom,
+                                          kNameSpaceID_Unknown);
+
+  return list.forget();
+}
+
+already_AddRefed<nsIHTMLCollection>
+nsINode::GetElementsByAttributeNS(const nsAString& aNamespaceURI,
+                                  const nsAString& aAttribute,
+                                  const nsAString& aValue,
+                                  ErrorResult& aRv)
+{
+  RefPtr<nsAtom> attrAtom(NS_Atomize(aAttribute));
+  nsAutoPtr<nsString> attrValue(new nsString(aValue));
+
+  int32_t nameSpaceId = kNameSpaceID_Wildcard;
+  if (!aNamespaceURI.EqualsLiteral("*")) {
+    nsresult rv =
+      nsContentUtils::NameSpaceManager()->RegisterNameSpace(aNamespaceURI,
+                                                            nameSpaceId);
+    if (NS_FAILED(rv)) {
+      aRv.Throw(rv);
+      return nullptr;
+    }
+  }
+
+  RefPtr<nsContentList> list = new nsContentList(this,
+                                          MatchAttribute,
+                                          nsContentUtils::DestroyMatchString,
+                                          attrValue.forget(),
+                                          true,
+                                          attrAtom,
+                                          nameSpaceId);
+  return list.forget();
+}
+
 
 void
 nsINode::Prepend(const Sequence<OwningNodeOrString>& aNodes,
@@ -2362,14 +2448,13 @@ nsINode::AddSizeOfIncludingThis(nsWindowSizes& aSizes, size_t* aNodeSize) const
 #define EVENT(name_, id_, type_, struct_)                                    \
   EventHandlerNonNull* nsINode::GetOn##name_() {                             \
     EventListenerManager *elm = GetExistingListenerManager();                \
-    return elm ? elm->GetEventHandler(nsGkAtoms::on##name_, EmptyString())   \
-               : nullptr;                                                    \
+    return elm ? elm->GetEventHandler(nsGkAtoms::on##name_) : nullptr;       \
   }                                                                          \
   void nsINode::SetOn##name_(EventHandlerNonNull* handler)                   \
   {                                                                          \
     EventListenerManager *elm = GetOrCreateListenerManager();                \
     if (elm) {                                                               \
-      elm->SetEventHandler(nsGkAtoms::on##name_, EmptyString(), handler);    \
+      elm->SetEventHandler(nsGkAtoms::on##name_, handler);                   \
     }                                                                        \
   }
 #define TOUCH_EVENT EVENT
@@ -2850,7 +2935,10 @@ nsINode::Localize(JSContext* aCx,
       aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
       return nullptr;
     }
-    domElements.AppendElement(domElement, fallible);
+    if (!domElements.AppendElement(domElement, fallible)) {
+      aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+      return nullptr;
+    }
 
     domElement->GetNamespaceURI(element->mNamespaceURI);
     element->mLocalName = domElement->LocalName();
@@ -2887,6 +2975,12 @@ nsINode::Localize(JSContext* aCx,
   callbackResult->AppendNativeHandler(nativeHandler);
 
   return promise.forget();
+}
+
+nsINode*
+nsINode::GetFlattenedTreeParentNodeNonInline() const
+{
+  return GetFlattenedTreeParentNode();
 }
 
 NS_IMPL_ISUPPORTS(nsNodeWeakReference,

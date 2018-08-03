@@ -24,8 +24,6 @@ ChromeUtils.defineModuleGetter(this, "ReaderMode",
   "resource://gre/modules/ReaderMode.jsm");
 ChromeUtils.defineModuleGetter(this, "PageStyleHandler",
   "resource:///modules/PageStyleHandler.jsm");
-ChromeUtils.defineModuleGetter(this, "LightweightThemeChildListener",
-  "resource:///modules/LightweightThemeChildListener.jsm");
 
 // TabChildGlobal
 var global = this;
@@ -52,6 +50,14 @@ addMessageListener("Browser:HideSessionRestoreButton", function(message) {
   }
 });
 
+if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
+  addMessageListener("Browser:HasSiblings", function(message) {
+    let tabChild = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
+                           .getInterface(Ci.nsITabChild);
+    let hasSiblings = message.data;
+    tabChild.hasSiblings = hasSiblings;
+  });
+}
 
 // XXX(nika): Should we try to call this in the parent process instead?
 addMessageListener("Browser:Reload", function(message) {
@@ -81,32 +87,27 @@ addMessageListener("MixedContent:ReenableProtection", function() {
   docShell.mixedContentChannel = null;
 });
 
-var LightweightThemeChildListenerStub = {
-  _childListener: null,
-  get childListener() {
-    if (!this._childListener) {
-      this._childListener = new LightweightThemeChildListener();
-    }
-    return this._childListener;
-  },
+XPCOMUtils.defineLazyProxy(this, "LightweightThemeChildHelper",
+  "resource:///modules/LightweightThemeChildHelper.jsm");
 
-  init() {
-    addEventListener("LightweightTheme:Support", this, false, true);
-    addMessageListener("LightweightTheme:Update", this);
-    sendAsyncMessage("LightweightTheme:Request");
-  },
+XPCOMUtils.defineLazyProxy(this, "ManifestMessages", () => {
+  let tmp = {};
+  ChromeUtils.import("resource://gre/modules/ManifestMessages.jsm", tmp);
+  return new tmp.ManifestMessages(global);
+});
 
-  handleEvent(event) {
-    return this.childListener.handleEvent(event);
-  },
+let themeablePagesWhitelist = new Set([
+  "about:home",
+  "about:newtab",
+  "about:welcome",
+]);
 
-  receiveMessage(msg) {
-    return this.childListener.receiveMessage(msg);
-  },
-};
-
-LightweightThemeChildListenerStub.init();
-
+addEventListener("pageshow", function({ originalTarget }) {
+  if (originalTarget.defaultView == content && themeablePagesWhitelist.has(content.document.documentURI)) {
+    LightweightThemeChildHelper.listen(themeablePagesWhitelist);
+    LightweightThemeChildHelper.update(chromeOuterWindowID, content);
+  }
+}, false, true);
 
 var AboutReaderListener = {
 
@@ -121,6 +122,7 @@ var AboutReaderListener = {
     addEventListener("pagehide", this, false);
     addMessageListener("Reader:ToggleReaderMode", this);
     addMessageListener("Reader:PushState", this);
+    this.init = null;
   },
 
   receiveMessage(message) {
@@ -264,6 +266,7 @@ var ContentSearchMediator = {
   init(chromeGlobal) {
     chromeGlobal.addEventListener("ContentSearchClient", this, true, true);
     addMessageListener("ContentSearch", this);
+    this.init = null;
   },
 
   handleEvent(event) {
@@ -399,18 +402,11 @@ var DOMFullscreenHandler = {
     addEventListener("MozDOMFullscreen:NewOrigin", this);
     addEventListener("MozDOMFullscreen:Exit", this);
     addEventListener("MozDOMFullscreen:Exited", this);
-  },
-
-  get _windowUtils() {
-    if (!content) {
-      return null;
-    }
-    return content.QueryInterface(Ci.nsIInterfaceRequestor)
-                  .getInterface(Ci.nsIDOMWindowUtils);
+    this.init = null;
   },
 
   receiveMessage(aMessage) {
-    let windowUtils = this._windowUtils;
+    let windowUtils = content && content.windowUtils;
     switch (aMessage.name) {
       case "DOMFullscreen:Entered": {
         this._lastTransactionId = windowUtils.lastTransactionId;
@@ -484,6 +480,7 @@ DOMFullscreenHandler.init();
 var UserContextIdNotifier = {
   init() {
     addEventListener("DOMWindowCreated", this);
+    this.init = null;
   },
 
   uninit() {
@@ -511,9 +508,7 @@ UserContextIdNotifier.init();
 Services.obs.notifyObservers(this, "tab-content-frameloader-created");
 
 addMessageListener("AllowScriptsToClose", () => {
-  content.QueryInterface(Ci.nsIInterfaceRequestor)
-         .getInterface(Ci.nsIDOMWindowUtils)
-         .allowScriptsToClose();
+  content.windowUtils.allowScriptsToClose();
 });
 
 addEventListener("MozAfterPaint", function onFirstPaint() {
@@ -528,3 +523,8 @@ addEventListener("MozAfterPaint", function onFirstNonBlankPaint() {
   removeEventListener("MozAfterPaint", onFirstNonBlankPaint);
   sendAsyncMessage("Browser:FirstNonBlankPaint");
 });
+
+addMessageListener("DOM:WebManifest:hasManifestLink", ManifestMessages);
+addMessageListener("DOM:ManifestObtainer:Obtain", ManifestMessages);
+addMessageListener("DOM:Manifest:FireAppInstalledEvent", ManifestMessages);
+addMessageListener("DOM:WebManifest:fetchIcon", ManifestMessages);

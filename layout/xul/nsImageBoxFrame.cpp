@@ -267,9 +267,9 @@ nsImageBoxFrame::UpdateImage()
   } else {
     // Only get the list-style-image if we aren't being drawn
     // by a native theme.
-    uint8_t appearance = StyleDisplay()->mAppearance;
-    if (!(appearance && nsBox::gTheme &&
-          nsBox::gTheme->ThemeSupportsWidget(nullptr, this, appearance))) {
+    auto* display = StyleDisplay();
+    if (!(display->HasAppearance() && nsBox::gTheme &&
+          nsBox::gTheme->ThemeSupportsWidget(nullptr, this, display->mAppearance))) {
       // get the list-style-image
       imgRequestProxy *styleRequest = StyleList()->GetListStyleImage();
       if (styleRequest) {
@@ -552,7 +552,7 @@ nsDisplayXULImage::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBui
   }
 
   if (!imageFrame->mImageRequest) {
-    return false;
+    return true;
   }
 
   uint32_t flags = imgIContainer::FLAG_SYNC_DECODE_IF_FAST;
@@ -661,7 +661,7 @@ nsImageBoxFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
 
   // If we're using a native theme implementation, we shouldn't draw anything.
   const nsStyleDisplay* disp = StyleDisplay();
-  if (disp->mAppearance && nsBox::gTheme &&
+  if (disp->HasAppearance() && nsBox::gTheme &&
       nsBox::gTheme->ThemeSupportsWidget(nullptr, this, disp->mAppearance))
     return;
 

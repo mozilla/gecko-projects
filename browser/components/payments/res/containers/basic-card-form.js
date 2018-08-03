@@ -22,6 +22,8 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
     super();
 
     this.genericErrorText = document.createElement("div");
+    this.genericErrorText.setAttribute("aria-live", "polite");
+    this.genericErrorText.classList.add("page-error");
 
     this.addressAddLink = document.createElement("a");
     this.addressAddLink.className = "add-link";
@@ -54,6 +56,8 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
     let url = "formautofill/editCreditCard.xhtml";
     this.promiseReady = this._fetchMarkup(url).then(doc => {
       this.form = doc.getElementById("form");
+      this.form.addEventListener("input", this);
+      this.form.addEventListener("invalid", this);
       return this.form;
     });
   }
@@ -111,9 +115,11 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
       return;
     }
 
+    let editing = !!basicCardPage.guid;
     this.cancelButton.textContent = this.dataset.cancelButtonLabel;
     this.backButton.textContent = this.dataset.backButtonLabel;
-    this.saveButton.textContent = this.dataset.saveButtonLabel;
+    this.saveButton.textContent = editing ? this.dataset.updateButtonLabel :
+                                            this.dataset.addButtonLabel;
     this.persistCheckbox.label = this.dataset.persistCheckboxLabel;
     this.addressAddLink.textContent = this.dataset.addressAddLinkLabel;
     this.addressEditLink.textContent = this.dataset.addressEditLinkLabel;
@@ -129,7 +135,6 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
 
     this.genericErrorText.textContent = page.error;
 
-    let editing = !!basicCardPage.guid;
     this.form.querySelector("#cc-number").disabled = editing;
 
     // If a card is selected we want to edit it.
@@ -148,9 +153,17 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
       if (!record.billingAddressGUID && selectedShippingAddress) {
         record.billingAddressGUID = selectedShippingAddress;
       }
-      // Adding a new record: default persistence to checked when in a not-private session
+
+      let defaults = PaymentDialogUtils.getDefaultPreferences();
+      // Adding a new record: default persistence to pref value when in a not-private session
       this.persistCheckbox.hidden = false;
-      this.persistCheckbox.checked = !state.isPrivate;
+      if (basicCardPage.hasOwnProperty("persistCheckboxValue")) {
+        // returning to this page, use previous checked state
+        this.persistCheckbox.checked = basicCardPage.persistCheckboxValue;
+      } else {
+        this.persistCheckbox.checked = state.isPrivate ? false :
+                                                         defaults.saveCreditCardDefaultChecked;
+      }
     }
 
     this.formHandler.loadRecord(record, addresses, basicCardPage.preserveFieldValues);
@@ -161,14 +174,28 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
     if (basicCardPage.billingAddressGUID) {
       billingAddressSelect.value = basicCardPage.billingAddressGUID;
     } else if (!editing) {
-      billingAddressSelect.value = Object.keys(addresses)[0];
+      if (paymentRequest.getAddresses(state)[selectedShippingAddress]) {
+        billingAddressSelect.value = selectedShippingAddress;
+      } else {
+        billingAddressSelect.value = Object.keys(addresses)[0];
+      }
     }
+
+    this.updateSaveButtonState();
   }
 
   handleEvent(event) {
     switch (event.type) {
       case "click": {
         this.onClick(event);
+        break;
+      }
+      case "input": {
+        this.onInput(event);
+        break;
+      }
+      case "invalid": {
+        this.onInvalid(event);
         break;
       }
     }
@@ -189,15 +216,16 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
           page: {
             id: "address-page",
             previousId: "basic-card-page",
-            selectedStateKey: ["basic-card-page", "billingAddressGUID"],
           },
           "address-page": {
             guid: null,
+            selectedStateKey: ["basic-card-page", "billingAddressGUID"],
             title: this.dataset.billingAddressTitleAdd,
           },
           "basic-card-page": {
             preserveFieldValues: true,
             guid: basicCardPage.guid,
+            persistCheckboxValue: this.persistCheckbox.checked,
           },
         };
         let billingAddressGUID = this.form.querySelector("#billingAddressGUID");
@@ -236,6 +264,7 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
           }
 
           let basicCardPageState = Object.assign({}, basicCardPage, {preserveFieldValues: true});
+          delete basicCardPageState.persistCheckboxValue;
 
           Object.assign(nextState, {
             "address-page": addressPageState,
@@ -247,7 +276,9 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
         break;
       }
       case this.saveButton: {
-        this.saveRecord();
+        if (this.form.checkValidity()) {
+          this.saveRecord();
+        }
         break;
       }
       default: {
@@ -256,11 +287,22 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
     }
   }
 
-  saveRecord() {
+  onInput(event) {
+    this.updateSaveButtonState();
+  }
+
+  onInvalid(event) {
+    this.saveButton.disabled = true;
+  }
+
+  updateSaveButtonState() {
+    this.saveButton.disabled = !this.form.checkValidity();
+  }
+
+  async saveRecord() {
     let record = this.formHandler.buildFormObject();
     let currentState = this.requestStore.getState();
     let {
-      page,
       tempBasicCards,
       "basic-card-page": basicCardPage,
     } = currentState;
@@ -280,28 +322,24 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
       record["cc-number"] = record["cc-number"] || "";
     }
 
-    let state = {
-      errorStateChange: {
+    try {
+      let {guid} = await paymentRequest.updateAutofillRecord("creditCards", record,
+                                                             basicCardPage.guid);
+      this.requestStore.setState({
+        page: {
+          id: "payment-summary",
+        },
+        selectedPaymentCard: guid,
+      });
+    } catch (ex) {
+      log.warn("saveRecord: error:", ex);
+      this.requestStore.setState({
         page: {
           id: "basic-card-page",
           error: this.dataset.errorGenericSave,
         },
-      },
-      preserveOldProperties: true,
-      selectedStateKey: ["selectedPaymentCard"],
-      successStateChange: {
-        page: {
-          id: "payment-summary",
-        },
-      },
-    };
-
-    const previousId = page.previousId;
-    if (previousId) {
-      state.successStateChange[previousId] = Object.assign({}, currentState[previousId]);
+      });
     }
-
-    paymentRequest.updateAutofillRecord("creditCards", record, basicCardPage.guid, state);
   }
 }
 

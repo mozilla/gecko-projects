@@ -49,6 +49,8 @@ but will never be visible at the same time. -->
 but will never be visible at the same time. -->
 <!ENTITY  reloadSelectedTabs.label           "Reload Selected Tabs">
 <!ENTITY  reloadSelectedTabs.accesskey       "R">
+<!ENTITY  bookmarkSelectedTabs.label         "Bookmark Tabs…">
+<!ENTITY  bookmarkSelectedTabs.accesskey     "k">
 
 <!-- LOCALIZATION NOTE (pinTab.label, unpinTab.label): "Pin" is being
 used as a metaphor for expressing the fact that these tabs are "pinned" to the
@@ -309,6 +311,10 @@ These should match what Safari and other Apple applications use on OS X Lion. --
 
 <!ENTITY webDeveloperMenu.label       "Web Developer">
 <!ENTITY webDeveloperMenu.accesskey   "W">
+
+<!ENTITY devtoolsRecordExecution.label "Record Execution">
+<!ENTITY devtoolsSaveRecording.label "Save Recording">
+<!ENTITY devtoolsReplayExecution.label "Replay Execution">
 
 <!ENTITY inspectContextMenu.label     "Inspect Element">
 <!ENTITY inspectContextMenu.accesskey "Q">
@@ -607,6 +613,9 @@ These should match what Safari and other Apple applications use on OS X Lion. --
 <!ENTITY hidePluginCmd.label          "Hide this plugin">
 <!ENTITY hidePluginCmd.accesskey      "H">
 <!ENTITY copyLinkCmd.label            "Copy Link Location">
+<!-- LOCALIZATION NOTE (copyLinkCmd.accesskey): The access keys for "Copy Link
+Location" and "Copy Email Address" should be the same if possible; the two
+context menu items are mutually exclusive. -->
 <!ENTITY copyLinkCmd.accesskey        "a">
 <!ENTITY copyImageCmd.label           "Copy Image Location">
 <!ENTITY copyImageCmd.accesskey       "o">
@@ -617,7 +626,10 @@ These should match what Safari and other Apple applications use on OS X Lion. --
 <!ENTITY copyAudioURLCmd.label        "Copy Audio Location">
 <!ENTITY copyAudioURLCmd.accesskey    "o">
 <!ENTITY copyEmailCmd.label           "Copy Email Address">
-<!ENTITY copyEmailCmd.accesskey       "E">
+<!-- LOCALIZATION NOTE (copyEmailCmd.accesskey): The access keys for "Copy Link
+Location" and "Copy Email Address" should be the same if possible; the two
+context menu items are mutually exclusive. -->
+<!ENTITY copyEmailCmd.accesskey       "A">
 <!ENTITY thisFrameMenu.label              "This Frame">
 <!ENTITY thisFrameMenu.accesskey          "h">
 
@@ -752,6 +764,10 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 <!ENTITY spellAddDictionaries.label "Add Dictionaries…">
 <!ENTITY spellAddDictionaries.accesskey "A">
 
+<!-- LOCALIZATION NOTE (editBookmark.panel.width): width of the bookmark panel.
+     Should be large enough to fully display the Done and Cancel/
+     Remove Bookmark buttons. -->
+<!ENTITY editBookmark.panel.width                    "23em">
 <!ENTITY editBookmark.done.label                     "Done">
 <!ENTITY editBookmark.showForNewBookmarks.label       "Show editor when saving">
 <!ENTITY editBookmark.showForNewBookmarks.accesskey   "S">
@@ -1029,6 +1045,7 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 <!ENTITY sendToDevice.syncNotReady.label "Syncing Devices…">
 
 <!ENTITY pageAction.shareUrl.label "Share">
+<!ENTITY pageAction.shareMore.label "More…">
 
 <!ENTITY libraryButton.tooltip "View history, saved bookmarks, and more">
 

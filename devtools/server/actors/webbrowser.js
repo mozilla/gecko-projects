@@ -335,9 +335,7 @@ BrowserTabList.prototype.getTab = function({ outerWindowID, tabId }) {
       });
     }
     if (window) {
-      const iframe = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIDOMWindowUtils)
-                         .containerElement;
+      const iframe = window.windowUtils.containerElement;
       if (iframe) {
         return this._getActorForBrowser(iframe);
       }
@@ -659,8 +657,9 @@ DevToolsUtils.makeInfallible(function(window) {
 
 BrowserTabList.prototype.onCloseWindow =
 DevToolsUtils.makeInfallible(function(window) {
-  window = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                   .getInterface(Ci.nsIDOMWindow);
+  if (window instanceof Ci.nsIXULWindow) {
+    window = window.docShell.domWindow;
+  }
 
   if (appShellDOMWindowType(window) !== DebuggerServer.chromeWindowType) {
     return;

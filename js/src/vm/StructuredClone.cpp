@@ -482,7 +482,7 @@ struct JSStructuredCloneWriter {
           counts(out.context()), entries(out.context()),
           memory(out.context()),
           transferable(out.context(), tVal),
-          transferableObjects(out.context(), GCHashSet<JSObject*>(cx)),
+          transferableObjects(out.context(), TransferableObjectsSet(cx)),
           cloneDataPolicy(cloneDataPolicy)
     {
         out.setCallbacks(cb, cbClosure, OwnTransferablePolicy::NoTransferables);
@@ -566,9 +566,23 @@ struct JSStructuredCloneWriter {
                                   SystemAllocPolicy>;
     Rooted<CloneMemory> memory;
 
+    struct TransferableObjectsHasher : public DefaultHasher<JSObject*>
+    {
+        static inline HashNumber hash(const Lookup& l) {
+            // Iteration order of the transferable objects table must be
+            // preserved during recording/replaying, as the callbacks used
+            // during transfer may interact with the recording. Just use the
+            // same hash number for all elements to ensure this.
+            if (mozilla::recordreplay::IsRecordingOrReplaying())
+                return 0;
+            return DefaultHasher<JSObject*>::hash(l);
+        }
+    };
+
     // Set of transferable objects
     RootedValue transferable;
-    Rooted<GCHashSet<JSObject*>> transferableObjects;
+    typedef GCHashSet<JSObject*, TransferableObjectsHasher> TransferableObjectsSet;
+    Rooted<TransferableObjectsSet> transferableObjects;
 
     const JS::CloneDataPolicy cloneDataPolicy;
 
@@ -1391,7 +1405,16 @@ JSStructuredCloneWriter::traverseObject(HandleObject obj)
     ESClass cls;
     if (!GetBuiltinClass(context(), obj, &cls))
         return false;
-    return out.writePair(cls == ESClass::Array ? SCTAG_ARRAY_OBJECT : SCTAG_OBJECT_OBJECT, 0);
+
+    if (cls == ESClass::Array) {
+        uint32_t length = 0;
+        if (!JS_GetArrayLength(context(), obj, &length))
+            return false;
+
+        return out.writePair(SCTAG_ARRAY_OBJECT, NativeEndian::swapToLittleEndian(length));
+    }
+
+    return out.writePair(SCTAG_OBJECT_OBJECT, 0);
 }
 
 bool
@@ -2345,7 +2368,7 @@ JSStructuredCloneReader::startRead(MutableHandleValue vp)
       case SCTAG_ARRAY_OBJECT:
       case SCTAG_OBJECT_OBJECT: {
         JSObject* obj = (tag == SCTAG_ARRAY_OBJECT)
-                        ? (JSObject*) NewDenseEmptyArray(context())
+                        ? (JSObject*) NewDenseUnallocatedArray(context(), NativeEndian::swapFromLittleEndian(data))
                         : (JSObject*) NewBuiltinClassInstance<PlainObject>(context());
         if (!obj || !objs.append(ObjectValue(*obj)))
             return false;

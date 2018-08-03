@@ -37,12 +37,7 @@ struct JS_PUBLIC_API(WorkBudget)
  */
 class JS_PUBLIC_API(SliceBudget)
 {
-    const mozilla::TimeStamp &UnlimitedDeadline() const {
-        static const mozilla::TimeStamp unlimitedDeadline =
-            mozilla::TimeStamp::Now() + mozilla::TimeDuration::Forever();
-        return unlimitedDeadline;
-    }
-
+    static mozilla::TimeStamp unlimitedDeadline;
     static const intptr_t unlimitedStartCounter = INTPTR_MAX;
 
     bool checkOverBudget();
@@ -74,7 +69,8 @@ class JS_PUBLIC_API(SliceBudget)
     explicit SliceBudget(WorkBudget work);
 
     void makeUnlimited() {
-        deadline = UnlimitedDeadline();
+        MOZ_ASSERT(unlimitedDeadline);
+        deadline = unlimitedDeadline;
         counter = unlimitedStartCounter;
     }
 
@@ -90,9 +86,11 @@ class JS_PUBLIC_API(SliceBudget)
 
     bool isWorkBudget() const { return deadline.IsNull(); }
     bool isTimeBudget() const { return !deadline.IsNull() && !isUnlimited(); }
-    bool isUnlimited() const { return deadline == UnlimitedDeadline(); }
+    bool isUnlimited() const { return deadline == unlimitedDeadline; }
 
     int describe(char* buffer, size_t maxlen) const;
+
+    static void Init();
 };
 
 } // namespace js

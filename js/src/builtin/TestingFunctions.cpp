@@ -38,6 +38,7 @@
 #include "gc/Heap.h"
 #include "jit/BaselineJIT.h"
 #include "jit/InlinableNatives.h"
+#include "jit/JitRealm.h"
 #include "js/Debug.h"
 #include "js/HashTable.h"
 #include "js/StructuredClone.h"
@@ -3979,12 +3980,7 @@ static bool
 IsSimdAvailable(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-#if defined(JS_CODEGEN_NONE) || !defined(ENABLE_SIMD)
-    bool available = false;
-#else
-    bool available = cx->jitSupportsSimd();
-#endif
-    args.rval().set(BooleanValue(available));
+    args.rval().set(BooleanValue(cx->jitSupportsSimd()));
     return true;
 }
 
@@ -5179,7 +5175,8 @@ js::TestingFunctionArgumentToScript(JSContext* cx,
 
         RootedScript script(cx);
         CompileOptions options(cx);
-        if (!JS::Compile(cx, options, chars, len, &script))
+        SourceBufferHolder source(chars, len, SourceBufferHolder::NoOwnership);
+        if (!JS::Compile(cx, options, source, &script))
             return nullptr;
         return script;
     }

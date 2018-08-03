@@ -38,7 +38,7 @@ using base::CountHistogram;
 using base::FlagHistogram;
 using base::LinearHistogram;
 using mozilla::MakeTuple;
-using mozilla::StaticMutex;
+using mozilla::StaticMutexNotRecorded;
 using mozilla::StaticMutexAutoLock;
 using mozilla::Telemetry::HistogramAccumulation;
 using mozilla::Telemetry::KeyedHistogramAccumulation;
@@ -115,7 +115,7 @@ namespace TelemetryIPCAccumulator = mozilla::TelemetryIPCAccumulator;
 // a normal Mutex would show up as a leak in BloatView.  StaticMutex
 // also has the "OffTheBooks" property, so it won't show as a leak
 // in BloatView.
-static StaticMutex gTelemetryHistogramMutex;
+static StaticMutexNotRecorded gTelemetryHistogramMutex;
 
 
 ////////////////////////////////////////////////////////////////////////
@@ -199,6 +199,8 @@ public:
   bool IsEmpty() const { return mHistogramMap.IsEmpty(); }
 
   bool IsExpired() const { return mIsExpired; }
+
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
 private:
   typedef nsBaseHashtableET<nsCStringHashKey, Histogram*> KeyedHistogramEntry;
@@ -1036,6 +1038,15 @@ KeyedHistogram::Clear()
     delete h;
   }
   mHistogramMap.Clear();
+}
+
+size_t
+KeyedHistogram::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
+{
+  size_t n = 0;
+  n += aMallocSizeOf(this);
+  n += mHistogramMap.SizeOfIncludingThis(aMallocSizeOf);
+  return n;
 }
 
 nsresult
@@ -2560,12 +2571,44 @@ TelemetryHistogram::GetMapShallowSizesOfExcludingThis(mozilla::MallocSizeOf
 }
 
 size_t
-TelemetryHistogram::GetHistogramSizesofIncludingThis(mozilla::MallocSizeOf
+TelemetryHistogram::GetHistogramSizesOfIncludingThis(mozilla::MallocSizeOf
                                                      aMallocSizeOf)
 {
   StaticMutexAutoLock locker(gTelemetryHistogramMutex);
-  // TODO
-  return 0;
+
+  size_t n = 0;
+
+  // If we allocated the array, let's count the number of pointers in there and
+  // each entry's size.
+  if (gKeyedHistogramStorage) {
+    n += HistogramCount * size_t(ProcessID::Count) * sizeof(KeyedHistogram*);
+    for (size_t i = 0; i < HistogramCount * size_t(ProcessID::Count); ++i) {
+      if (gKeyedHistogramStorage[i] && gKeyedHistogramStorage[i] != gExpiredKeyedHistogram) {
+        n += gKeyedHistogramStorage[i]->SizeOfIncludingThis(aMallocSizeOf);
+      }
+    }
+  }
+
+  // If we allocated the array, let's count the number of pointers in there.
+  if (gHistogramStorage) {
+    n += HistogramCount * size_t(ProcessID::Count) * sizeof(Histogram*);
+    for (size_t i = 0; i < HistogramCount * size_t(ProcessID::Count); ++i) {
+      if (gHistogramStorage[i] && gHistogramStorage[i] != gExpiredHistogram) {
+        n += gHistogramStorage[i]->SizeOfIncludingThis(aMallocSizeOf);
+      }
+    }
+  }
+
+  // We only allocate the expired (keyed) histogram once.
+  if (gExpiredKeyedHistogram) {
+    n += gExpiredKeyedHistogram->SizeOfIncludingThis(aMallocSizeOf);
+  }
+
+  if (gExpiredHistogram) {
+    n += gExpiredHistogram->SizeOfIncludingThis(aMallocSizeOf);
+  }
+
+  return n;
 }
 
 ////////////////////////////////////////////////////////////////////////

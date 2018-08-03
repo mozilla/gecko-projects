@@ -182,7 +182,7 @@ public:
 
 class PSMutex : public StaticMutex {};
 
-typedef BaseAutoLock<PSMutex> PSAutoLock;
+typedef BaseAutoLock<PSMutex&> PSAutoLock;
 
 // Only functions that take a PSLockRef arg can access CorePS's and ActivePS's
 // fields.
@@ -718,7 +718,8 @@ uint32_t ActivePS::sNextGeneration = 0;
 // The mutex that guards accesses to CorePS and ActivePS.
 static PSMutex gPSMutex;
 
-Atomic<uint32_t, MemoryOrdering::Relaxed> RacyFeatures::sActiveAndFeatures(0);
+Atomic<uint32_t, MemoryOrdering::Relaxed, recordreplay::Behavior::DontPreserve>
+  RacyFeatures::sActiveAndFeatures(0);
 
 // Each live thread has a RegisteredThread, and we store a reference to it in TLS.
 // This class encapsulates that TLS.
@@ -1514,7 +1515,7 @@ AddSharedLibraryInfoToStream(JSONWriter& aWriter, const SharedLibrary& aLib)
   aWriter.StringProperty("path", NS_ConvertUTF16toUTF8(aLib.GetModulePath()).get());
   aWriter.StringProperty("debugName", NS_ConvertUTF16toUTF8(aLib.GetDebugName()).get());
   aWriter.StringProperty("debugPath", NS_ConvertUTF16toUTF8(aLib.GetDebugPath()).get());
-  aWriter.StringProperty("breakpadId", aLib.GetBreakpadId().c_str());
+  aWriter.StringProperty("breakpadId", aLib.GetBreakpadId().get());
   aWriter.StringProperty("arch", aLib.GetArch().c_str());
   aWriter.EndObject();
 }
@@ -1800,6 +1801,7 @@ CollectJavaThreadProfileData()
 
     buffer->AddThreadIdEntry(0);
     buffer->AddEntry(ProfileBufferEntry::Time(sampleTime));
+    bool parentFrameWasIdleFrame = false;
     int frameId = 0;
     while (true) {
       jni::String::LocalRef frameName =
@@ -1807,8 +1809,22 @@ CollectJavaThreadProfileData()
       if (!frameName) {
         break;
       }
-      buffer->CollectCodeLocation("", frameName->ToCString().get(), -1,
-                                  Nothing());
+      nsCString frameNameString = frameName->ToCString();
+
+      // Compute a category for the frame:
+      //  - IDLE for the wait function android.os.MessageQueue.nativePollOnce()
+      //  - OTHER for any function that's directly called by that wait function
+      //  - no category on everything else
+      Maybe<js::ProfilingStackFrame::Category> category;
+      if (frameNameString.EqualsLiteral("android.os.MessageQueue.nativePollOnce()")) {
+        category = Some(js::ProfilingStackFrame::Category::IDLE);
+        parentFrameWasIdleFrame = true;
+      } else if (parentFrameWasIdleFrame) {
+        category = Some(js::ProfilingStackFrame::Category::OTHER);
+        parentFrameWasIdleFrame = false;
+      }
+
+      buffer->CollectCodeLocation("", frameNameString.get(), -1, category);
     }
     sampleId++;
   }
@@ -2327,7 +2343,7 @@ FindCurrentThreadRegisteredThread(PSLockRef aLock)
   return nullptr;
 }
 
-static void
+static ProfilingStack*
 locked_register_thread(PSLockRef aLock, const char* aName, void* aStackTop)
 {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
@@ -2337,7 +2353,7 @@ locked_register_thread(PSLockRef aLock, const char* aName, void* aStackTop)
   VTUNE_REGISTER_THREAD(aName);
 
   if (!TLSRegisteredThread::Init(aLock)) {
-    return;
+    return nullptr;
   }
 
   RefPtr<ThreadInfo> info =
@@ -2368,7 +2384,12 @@ locked_register_thread(PSLockRef aLock, const char* aName, void* aStackTop)
     }
   }
 
+  ProfilingStack* profilingStack =
+    &registeredThread->RacyRegisteredThread().ProfilingStack();
+
   CorePS::AppendRegisteredThread(aLock, std::move(registeredThread));
+
+  return profilingStack;
 }
 
 static void
@@ -3122,6 +3143,12 @@ locked_profiler_stop(PSLockRef aLock)
   // At the very start, clear RacyFeatures.
   RacyFeatures::SetInactive();
 
+#if defined(GP_OS_android)
+  if (ActivePS::FeatureJava(aLock)) {
+    java::GeckoJavaSampler::Stop();
+  }
+#endif
+
 #ifdef MOZ_TASK_TRACER
   if (ActivePS::FeatureTaskTracer(aLock)) {
     tasktracer::StopLogging();
@@ -3268,7 +3295,7 @@ profiler_feature_active(uint32_t aFeature)
   return RacyFeatures::IsActiveWithFeature(aFeature);
 }
 
-void
+ProfilingStack*
 profiler_register_thread(const char* aName, void* aGuessStackTop)
 {
   DEBUG_LOG("profiler_register_thread(%s)", aName);
@@ -3276,10 +3303,15 @@ profiler_register_thread(const char* aName, void* aGuessStackTop)
   MOZ_ASSERT_IF(NS_IsMainThread(), Scheduler::IsCooperativeThread());
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 
+  // Make sure we have a nsThread wrapper for the current thread, and that NSPR
+  // knows its name.
+  (void) NS_GetCurrentThread();
+  NS_SetCurrentThreadName(aName);
+
   PSAutoLock lock(gPSMutex);
 
   void* stackTop = GetStackTop(aGuessStackTop);
-  locked_register_thread(lock, aName, stackTop);
+  return locked_register_thread(lock, aName, stackTop);
 }
 
 void

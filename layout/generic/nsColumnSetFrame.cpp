@@ -333,7 +333,7 @@ nsColumnSetFrame::ChooseColumnStrategy(const ReflowInput& aReflowInput,
   int32_t numColumns = colStyle->mColumnCount;
 
   // If column-fill is set to 'balance', then we want to balance the columns.
-  const bool isBalancing = colStyle->mColumnFill == NS_STYLE_COLUMN_FILL_BALANCE
+  const bool isBalancing = colStyle->mColumnFill == StyleColumnFill::Balance
                            && !aForceAuto;
   if (isBalancing) {
     const uint32_t MAX_NESTED_COLUMN_BALANCING = 2;
@@ -494,7 +494,11 @@ nsColumnSetFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   nscoord iSize = 0;
   DISPLAY_MIN_WIDTH(this, iSize);
-  if (mFrames.FirstChild()) {
+
+  if (mFrames.FirstChild() && !StyleDisplay()->IsContainSize()) {
+    // We want to ignore this in the case that we're size contained
+    // because our children should not contribute to our
+    // intrinsic size.
     iSize = mFrames.FirstChild()->GetMinISize(aRenderingContext);
   }
   const nsStyleColumn* colStyle = StyleColumn();
@@ -539,7 +543,10 @@ nsColumnSetFrame::GetPrefISize(gfxContext *aRenderingContext)
   nscoord colISize;
   if (colStyle->mColumnWidth.GetUnit() == eStyleUnit_Coord) {
     colISize = colStyle->mColumnWidth.GetCoordValue();
-  } else if (mFrames.FirstChild()) {
+  } else if (mFrames.FirstChild() && !StyleDisplay()->IsContainSize()) {
+    // We want to ignore this in the case that we're size contained
+    // because our children should not contribute to our
+    // intrinsic size.
     colISize = mFrames.FirstChild()->GetPrefISize(aRenderingContext);
   } else {
     colISize = 0;
@@ -656,7 +663,7 @@ nsColumnSetFrame::ReflowChildren(ReflowOutput&     aDesiredSize,
     // If column-fill is auto (not the default), then we might need to
     // move content between columns for any change in column block-size.
     if (skipIncremental && changingBSize &&
-        StyleColumn()->mColumnFill == NS_STYLE_COLUMN_FILL_AUTO) {
+        StyleColumn()->mColumnFill == StyleColumnFill::Auto) {
       skipIncremental = false;
     }
     // If we need to pull up content from the prev-in-flow then this is not just
@@ -908,6 +915,11 @@ nsColumnSetFrame::ReflowChildren(ReflowOutput&     aDesiredSize,
     } else {
       contentSize.BSize(wm) = aConfig.mComputedBSize;
     }
+  } else if (aReflowInput.mStyleDisplay->IsContainSize()) {
+    // If we are intrinsically sized, but are size contained,
+    // we need to behave as if we have no contents. Our BSize
+    // should be zero or minBSize if specified.
+    contentSize.BSize(wm) = aReflowInput.ApplyMinMaxBSize(0);
   } else {
     // We add the "consumed" block-size back in so that we're applying
     // constraints to the correct bSize value, then subtract it again
@@ -1274,7 +1286,7 @@ nsColumnSetFrame::SetInitialChildList(ChildListID     aListID,
 {
   MOZ_ASSERT(aListID != kPrincipalList || aChildList.OnlyChild(),
              "initial principal child list must have exactly one child");
-  nsContainerFrame::SetInitialChildList(kPrincipalList, aChildList);
+  nsContainerFrame::SetInitialChildList(aListID, aChildList);
 }
 
 void

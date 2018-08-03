@@ -293,6 +293,7 @@ private:
 
   // The apz prefs are explained in AsyncPanZoomController.cpp
   DECL_GFX_PREF(Live, "apz.allow_checkerboarding",             APZAllowCheckerboarding, bool, true);
+  DECL_GFX_PREF(Live, "apz.allow_double_tap_zooming",          APZAllowDoubleTapZooming, bool, true);
   DECL_GFX_PREF(Live, "apz.allow_immediate_handoff",           APZAllowImmediateHandoff, bool, true);
   DECL_GFX_PREF(Live, "apz.allow_zooming",                     APZAllowZooming, bool, false);
   DECL_GFX_PREF(Live, "apz.android.chrome_fling_physics.enabled", APZUseChromeFlingPhysics, bool, false);
@@ -467,7 +468,7 @@ private:
   DECL_GFX_PREF(Live, "gfx.color_management.rendering_intent", CMSRenderingIntent, int32_t, 0);
   DECL_GFX_PREF(Live, "gfx.content.always-paint",              AlwaysPaint, bool, false);
   // Size in megabytes
-  DECL_GFX_PREF(Once, "gfx.content.skia-font-cache-size",      SkiaContentFontCacheSize, int32_t, 10);
+  DECL_GFX_PREF(Once, "gfx.content.skia-font-cache-size",      SkiaContentFontCacheSize, int32_t, 5);
 
   DECL_GFX_PREF(Once, "gfx.device-reset.limit",                DeviceResetLimitCount, int32_t, 10);
   DECL_GFX_PREF(Once, "gfx.device-reset.threshold-ms",         DeviceResetThresholdMilliseconds, int32_t, -1);
@@ -513,6 +514,12 @@ private:
   DECL_GFX_PREF(Once, "gfx.use-mutex-on-present",              UseMutexOnPresent, bool, false);
   DECL_GFX_PREF(Once, "gfx.use-surfacetexture-textures",       UseSurfaceTextureTextures, bool, false);
 
+#if defined(RELEASE_OR_BETA)
+  DECL_GFX_PREF(Once, "gfx.allow-texture-direct-mapping",      AllowTextureDirectMapping, bool, false);
+#else
+  DECL_GFX_PREF(Once, "gfx.allow-texture-direct-mapping",      AllowTextureDirectMapping, bool, true);
+#endif
+
   DECL_GFX_PREF(Live, "gfx.vsync.collect-scroll-transforms",   CollectScrollTransforms, bool, false);
   DECL_GFX_PREF(Once, "gfx.vsync.compositor.unobserve-count",  CompositorUnobserveCount, int32_t, 10);
 
@@ -520,6 +527,8 @@ private:
   DECL_GFX_PREF(Once, "gfx.webrender.all.qualified",           WebRenderAllQualified, bool, false);
   DECL_GFX_PREF(Live, "gfx.webrender.blob-images",             WebRenderBlobImages, bool, true);
   DECL_GFX_PREF(Live, "gfx.webrender.blob.invalidation",       WebRenderBlobInvalidation, bool, false);
+  DECL_GFX_PREF(Live, "gfx.webrender.dl.dump-parent",          WebRenderDLDumpParent, bool, false);
+  DECL_GFX_PREF(Live, "gfx.webrender.dl.dump-content",         WebRenderDLDumpContent, bool, false);
   DECL_GFX_PREF(Once, "gfx.webrender.enabled",                 WebRenderEnabledDoNotUseDirectly, bool, false);
   DECL_GFX_PREF(Once, "gfx.webrender.force-disabled",          WebRenderForceDisabled, bool, false);
   DECL_GFX_PREF(Live, "gfx.webrender.highlight-painted-layers",WebRenderHighlightPaintedLayers, bool, false);
@@ -683,6 +692,7 @@ private:
   DECL_GFX_PREF(Live, "layout.display-list.dump-content",      LayoutDumpDisplayListContent, bool, false);
   DECL_GFX_PREF(Live, "layout.display-list.dump-parent",       LayoutDumpDisplayListParent, bool, false);
   DECL_GFX_PREF(Live, "layout.display-list.show-rebuild-area", LayoutDisplayListShowArea, bool, false);
+  DECL_GFX_PREF(Live, "layout.display-list.flatten-transform", LayoutFlattenTransform, bool, true);
 
   DECL_GFX_PREF(Once, "layout.frame_rate",                     LayoutFrameRate, int32_t, -1);
   DECL_GFX_PREF(Once, "layout.less-event-region-items",        LessEventRegionItems, bool, true);

@@ -62,10 +62,7 @@ const backgroundPageThumbsContent = {
     // disableDialogs only works on the current inner window, so it has
     // to be called every page load, but before scripts run.
     if (content && subj == content.document) {
-      content.
-        QueryInterface(Ci.nsIInterfaceRequestor).
-        getInterface(Ci.nsIDOMWindowUtils).
-        disableDialogs();
+      content.windowUtils.disableDialogs();
     }
   },
 
@@ -186,8 +183,7 @@ const backgroundPageThumbsContent = {
         this._loadAboutBlank();
       });
     };
-    let win = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIDOMWindow);
+    let win = docShell.domWindow;
     win.requestIdleCallback(() => doCapture().catch(ex => this._failCurrentCapture(ex.message)));
   },
 

@@ -113,9 +113,11 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
       return;
     }
 
+    let editing = !!addressPage.guid;
     this.cancelButton.textContent = this.dataset.cancelButtonLabel;
     this.backButton.textContent = this.dataset.backButtonLabel;
-    this.saveButton.textContent = this.dataset.saveButtonLabel;
+    this.saveButton.textContent = editing ? this.dataset.updateButtonLabel :
+                                            this.dataset.addButtonLabel;
     this.persistCheckbox.label = this.dataset.persistCheckboxLabel;
 
     this.backButton.hidden = page.onboardingWizard;
@@ -130,7 +132,6 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
     this.pageTitleHeading.textContent = addressPage.title;
     this.genericErrorText.textContent = page.error;
 
-    let editing = !!addressPage.guid;
     let addresses = paymentRequest.getAddresses(state);
 
     // If an address is selected we want to edit it.
@@ -142,9 +143,11 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
       // When editing an existing record, prevent changes to persistence
       this.persistCheckbox.hidden = true;
     } else {
-      // Adding a new record: default persistence to checked when in a not-private session
+      let defaults = PaymentDialogUtils.getDefaultPreferences();
+      // Adding a new record: default persistence to the pref value when in a not-private session
       this.persistCheckbox.hidden = false;
-      this.persistCheckbox.checked = !state.isPrivate;
+      this.persistCheckbox.checked = state.isPrivate ? false :
+                                                       defaults.saveAddressDefaultChecked;
     }
 
     this.formHandler.loadRecord(record);
@@ -243,7 +246,7 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
     }
   }
 
-  saveRecord() {
+  async saveRecord() {
     let record = this.formHandler.buildFormObject();
     let currentState = this.requestStore.getState();
     let {
@@ -258,22 +261,15 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
       record.isTemporary = true;
     }
 
-    let state = {
-      errorStateChange: {
-        page: {
-          id: "address-page",
-          onboardingWizard: page.onboardingWizard,
-          error: this.dataset.errorGenericSave,
-        },
-        "address-page": addressPage,
-      },
-      preserveOldProperties: true,
-      selectedStateKey: page.selectedStateKey,
-    };
-
+    let successStateChange;
     const previousId = page.previousId;
     if (page.onboardingWizard && !Object.keys(savedBasicCards).length) {
-      state.successStateChange = {
+      successStateChange = {
+        "basic-card-page": {
+          // Preserve field values as the user may have already edited the card
+          // page and went back to the address page to make a correction.
+          preserveFieldValues: true,
+        },
         page: {
           id: "basic-card-page",
           previousId: "address-page",
@@ -281,7 +277,7 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
         },
       };
     } else {
-      state.successStateChange = {
+      successStateChange = {
         page: {
           id: previousId || "payment-summary",
           onboardingWizard: page.onboardingWizard,
@@ -290,11 +286,40 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
     }
 
     if (previousId) {
-      state.successStateChange[previousId] = Object.assign({}, currentState[previousId]);
-      state.successStateChange[previousId].preserveFieldValues = true;
+      successStateChange[previousId] = Object.assign({}, currentState[previousId]);
+      successStateChange[previousId].preserveFieldValues = true;
     }
 
-    paymentRequest.updateAutofillRecord("addresses", record, addressPage.guid, state);
+    try {
+      let {guid} = await paymentRequest.updateAutofillRecord("addresses", record, addressPage.guid);
+      let selectedStateKey = addressPage.selectedStateKey;
+
+      if (selectedStateKey.length == 1) {
+        Object.assign(successStateChange, {
+          [selectedStateKey[0]]: guid,
+        });
+      } else if (selectedStateKey.length == 2) {
+        // Need to keep properties like preserveFieldValues from getting removed.
+        let subObj = Object.assign({}, successStateChange[selectedStateKey[0]]);
+        subObj[selectedStateKey[1]] = guid;
+        Object.assign(successStateChange, {
+          [selectedStateKey[0]]: subObj,
+        });
+      } else {
+        throw new Error(`selectedStateKey not supported: '${selectedStateKey}'`);
+      }
+
+      this.requestStore.setState(successStateChange);
+    } catch (ex) {
+      log.warn("saveRecord: error:", ex);
+      this.requestStore.setState({
+        page: {
+          id: "address-page",
+          onboardingWizard: page.onboardingWizard,
+          error: this.dataset.errorGenericSave,
+        },
+      });
+    }
   }
 }
 

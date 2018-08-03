@@ -61,7 +61,7 @@
     <!-- The command disabled state must be manually updated through
          PlacesCommandHook.updateBookmarkAllTabsCommand() -->
     <command id="Browser:BookmarkAllTabs"
-             oncommand="PlacesCommandHook.bookmarkCurrentPages();"/>
+             oncommand="PlacesCommandHook.bookmarkPages(PlacesCommandHook.uniqueCurrentPages);"/>
     <command id="Browser:Home"    oncommand="BrowserHome();"/>
     <command id="Browser:Back"    oncommand="BrowserBack();" disabled="true"/>
     <command id="Browser:BackOrBackDuplicate" oncommand="BrowserBack(event);" disabled="true">
@@ -98,6 +98,9 @@
     <command id="Tools:Downloads" oncommand="BrowserDownloadsUI();"/>
     <command id="Tools:Addons" oncommand="BrowserOpenAddonsMgr();"/>
     <command id="Tools:Sanitize" oncommand="Sanitizer.showUI(window);"/>
+    <command id="Tools:RecordExecution" oncommand="BeginRecordExecution()"/>
+    <command id="Tools:SaveRecording" oncommand="SaveRecordedExecution()"/>
+    <command id="Tools:ReplayExecution" oncommand="BeginReplayExecution()"/>
     <command id="Tools:PrivateBrowsing"
       oncommand="OpenBrowserWindow({private: true});"/>
     <command id="History:UndoCloseTab" oncommand="undoCloseTab();"/>
@@ -133,29 +136,9 @@
                  label="&bookmarkThisPageCmd.label;"
                  bookmarklabel="&bookmarkThisPageCmd.label;"
                  editlabel="&editThisBookmarkCmd.label;"/>
-
-    <!-- popup blocking menu items -->
-    <broadcaster id="blockedPopupAllowSite"
-                 accesskey="&allowPopups.accesskey;"
-                 oncommand="gPopupBlockerObserver.toggleAllowPopupsForSite(event);"/>
-    <broadcaster id="blockedPopupEditSettings"
-#ifdef XP_WIN
-                 label="&editPopupSettings.label;"
-#else
-                 label="&editPopupSettingsUnix.label;"
-#endif
-                 accesskey="&editPopupSettings.accesskey;"
-                 oncommand="gPopupBlockerObserver.editPopupSettings();"/>
-    <broadcaster id="blockedPopupDontShowMessage"
-                 accesskey="&dontShowMessage.accesskey;"
-                 type="checkbox"
-                 oncommand="gPopupBlockerObserver.dontShowMessage();"/>
-    <broadcaster id="blockedPopupsSeparator"/>
     <broadcaster id="isImage"/>
     <broadcaster id="canViewSource"/>
     <broadcaster id="isFrameImage"/>
-    <broadcaster id="singleFeedMenuitemState" disabled="true"/>
-    <broadcaster id="multipleFeedsMenuState" hidden="true"/>
 
     <!-- Sync broadcasters -->
     <!-- A broadcaster of a number of attributes suitable for "sync now" UI -
@@ -173,16 +156,15 @@
                  sidebarurl="chrome://browser/content/syncedtabs/sidebar.xhtml"
                  oncommand="SidebarUI.toggle('viewTabsSidebar');"/>
     <broadcaster id="workOfflineMenuitemState"/>
-
-    <broadcaster id="devtoolsMenuBroadcaster_PageSource"
-                 label="&pageSourceCmd.label;"
-                 key="key_viewSource"
-                 command="View:PageSource">
-      <observes element="canViewSource" attribute="disabled"/>
-    </broadcaster>
-    <broadcaster id="reportPhishingBroadcaster" disabled="true"/>
-    <broadcaster id="reportPhishingErrorBroadcaster" disabled="true"/>
-    <broadcaster id="trackingProtectionBroadcaster" enabled="false"/>
+    <broadcaster id="devtoolsMenuBroadcaster_RecordExecution"
+                 label="&devtoolsRecordExecution.label;"
+                 command="Tools:RecordExecution"/>
+    <broadcaster id="devtoolsMenuBroadcaster_SaveRecording"
+                 label="&devtoolsSaveRecording.label;"
+                 command="Tools:SaveRecording"/>
+    <broadcaster id="devtoolsMenuBroadcaster_ReplayExecution"
+                 label="&devtoolsReplayExecution.label;"
+                 command="Tools:ReplayExecution"/>
   </broadcasterset>
 
   <keyset id="mainKeyset">
@@ -306,7 +288,7 @@
     <key id="addBookmarkAsKb" key="&bookmarkThisPageCmd.commandkey;" command="Browser:AddBookmarkAs" modifiers="accel"/>
 # Accel+Shift+A-F are reserved on GTK
 #ifndef MOZ_WIDGET_GTK
-    <key id="bookmarkAllTabsKb" key="&bookmarkThisPageCmd.commandkey;" oncommand="PlacesCommandHook.bookmarkCurrentPages();" modifiers="accel,shift"/>
+    <key id="bookmarkAllTabsKb" key="&bookmarkThisPageCmd.commandkey;" oncommand="PlacesCommandHook.bookmarkPages(PlacesCommandHook.uniqueCurrentPages);" modifiers="accel,shift"/>
     <key id="manBookmarkKb" key="&bookmarksCmd.commandkey;" command="Browser:ShowAllBookmarks" modifiers="accel,shift"/>
 #else
     <key id="manBookmarkKb" key="&bookmarksGtkCmd.commandkey;" command="Browser:ShowAllBookmarks" modifiers="accel,shift"/>

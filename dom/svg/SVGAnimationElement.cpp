@@ -72,7 +72,10 @@ SVGAnimationElement::GetTargetElementContent()
              "if we don't have an xlink:href or href attribute");
 
   // No "href" or "xlink:href" attribute --> I should target my parent.
-  return GetFlattenedTreeParentElement();
+  //
+  // Note that we want to use GetParentElement instead of the flattened tree to
+  // allow <use><animate>, for example.
+  return GetParentElement();
 }
 
 bool
@@ -158,28 +161,17 @@ SVGAnimationElement::GetSimpleDuration(ErrorResult& rv)
 nsresult
 SVGAnimationElement::BindToTree(nsIDocument* aDocument,
                                 nsIContent* aParent,
-                                nsIContent* aBindingParent,
-                                bool aCompileEventHandlers)
+                                nsIContent* aBindingParent)
 {
   MOZ_ASSERT(!mHrefTarget.get(),
              "Shouldn't have href-target yet (or it should've been cleared)");
   nsresult rv = SVGAnimationElementBase::BindToTree(aDocument, aParent,
-                                                    aBindingParent,
-                                                    aCompileEventHandlers);
+                                                    aBindingParent);
   NS_ENSURE_SUCCESS(rv,rv);
 
-  // XXXdholbert is GetCtx (as a check for SVG parent) still needed here?
-  if (!GetCtx()) {
-    // No use proceeding. We don't have an SVG parent (yet) so we won't be able
-    // to register ourselves etc. Maybe next time we'll have more luck.
-    // (This sort of situation will arise a lot when trees are being constructed
-    // piece by piece via script)
-    return NS_OK;
-  }
-
   // Add myself to the animation controller's master set of animation elements.
-  if (aDocument) {
-    nsSMILAnimationController *controller = aDocument->GetAnimationController();
+  if (nsIDocument* doc = GetComposedDoc()) {
+    nsSMILAnimationController* controller = doc->GetAnimationController();
     if (controller) {
       controller->RegisterAnimationElement(this);
     }
@@ -191,10 +183,7 @@ SVGAnimationElement::BindToTree(nsIDocument* aDocument,
       nsAutoString hrefStr;
       href->ToString(hrefStr);
 
-      // Pass in |aParent| instead of |this| -- first argument is only used
-      // for a call to GetComposedDoc(), and |this| might not have a current
-      // document yet.
-      UpdateHrefTarget(aParent, hrefStr);
+      UpdateHrefTarget(hrefStr);
     }
 
     mTimedElement.BindToTree(aParent);
@@ -208,7 +197,7 @@ SVGAnimationElement::BindToTree(nsIDocument* aDocument,
 void
 SVGAnimationElement::UnbindFromTree(bool aDeep, bool aNullParent)
 {
-  nsSMILAnimationController *controller = OwnerDoc()->GetAnimationController();
+  nsSMILAnimationController* controller = OwnerDoc()->GetAnimationController();
   if (controller) {
     controller->UnregisterAnimationElement(this);
   }
@@ -291,6 +280,10 @@ SVGAnimationElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
     }
   }
 
+  if (!IsInComposedDoc()) {
+    return rv;
+  }
+
   if (!((aNamespaceID == kNameSpaceID_None ||
          aNamespaceID == kNameSpaceID_XLink) &&
         aName == nsGkAtoms::href)) {
@@ -307,21 +300,20 @@ SVGAnimationElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
       const nsAttrValue* xlinkHref =
         mAttrsAndChildren.GetAttr(nsGkAtoms::href, kNameSpaceID_XLink);
       if (xlinkHref) {
-        UpdateHrefTarget(this, xlinkHref->GetStringValue());
+        UpdateHrefTarget(xlinkHref->GetStringValue());
       }
     } else if (!HasAttr(kNameSpaceID_None, nsGkAtoms::href)) {
       mHrefTarget.Unlink();
       AnimationTargetChanged();
     } // else: we unset xlink:href, but we still have href attribute, so keep
       // mHrefTarget linking to href.
-  } else if (IsInUncomposedDoc() &&
-             !(aNamespaceID == kNameSpaceID_XLink &&
+  } else if (!(aNamespaceID == kNameSpaceID_XLink &&
                HasAttr(kNameSpaceID_None, nsGkAtoms::href))) {
     // Note: "href" takes priority over xlink:href. So if "xlink:href" is being
     // set here, we only let that update our target if "href" is *unset*.
     MOZ_ASSERT(aValue->Type() == nsAttrValue::eString,
                "Expected href attribute to be string type");
-    UpdateHrefTarget(this, aValue->GetStringValue());
+    UpdateHrefTarget(aValue->GetStringValue());
   } // else: we're not yet in a document -- we'll update the target on
     // next BindToTree call.
 
@@ -417,14 +409,13 @@ SVGAnimationElement::IsEventAttributeNameInternal(nsAtom* aName)
 }
 
 void
-SVGAnimationElement::UpdateHrefTarget(nsIContent* aNodeForContext,
-                                      const nsAString& aHrefStr)
+SVGAnimationElement::UpdateHrefTarget(const nsAString& aHrefStr)
 {
   nsCOMPtr<nsIURI> targetURI;
   nsCOMPtr<nsIURI> baseURI = GetBaseURI();
   nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI),
                                             aHrefStr, OwnerDoc(), baseURI);
-  mHrefTarget.Reset(aNodeForContext, targetURI);
+  mHrefTarget.Reset(this, targetURI);
   AnimationTargetChanged();
 }
 

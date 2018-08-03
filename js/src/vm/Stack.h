@@ -23,6 +23,7 @@
 #include "jit/JSJitFrameIter.h"
 #include "js/RootingAPI.h"
 #include "js/TypeDecls.h"
+#include "js/UniquePtr.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/JSFunction.h"
 #include "vm/JSScript.h"
@@ -1052,18 +1053,26 @@ FillArgumentsFromArraylike(JSContext* cx, Args& args, const Arraylike& arraylike
     return true;
 }
 
+} // namespace js
+
+namespace mozilla {
+
 template <>
-struct DefaultHasher<AbstractFramePtr> {
-    typedef AbstractFramePtr Lookup;
+struct DefaultHasher<js::AbstractFramePtr> {
+    typedef js::AbstractFramePtr Lookup;
 
     static js::HashNumber hash(const Lookup& key) {
         return mozilla::HashGeneric(key.raw());
     }
 
-    static bool match(const AbstractFramePtr& k, const Lookup& l) {
+    static bool match(const js::AbstractFramePtr& k, const Lookup& l) {
         return k == l;
     }
 };
+
+} // namespace mozilla
+
+namespace js {
 
 /*****************************************************************************/
 
@@ -1634,7 +1643,7 @@ class JitActivation : public Activation
     // This table is lazily initialized by calling getRematerializedFrame.
     typedef GCVector<RematerializedFrame*> RematerializedFrameVector;
     typedef HashMap<uint8_t*, RematerializedFrameVector> RematerializedFrameTable;
-    RematerializedFrameTable* rematerializedFrames_;
+    js::UniquePtr<RematerializedFrameTable> rematerializedFrames_;
 
     // This vector is used to remember the outcome of the evaluation of recover
     // instructions.
@@ -1915,9 +1924,8 @@ class InterpreterFrameIterator
 // asJSJit() and asWasm(), but the user has to be careful not to have those be
 // used after JitFrameIter leaves the scope or the operator++ is called.
 //
-// TODO(bug 1360211) In particular, this can handle the transition from wasm to
-// ion and from ion to wasm, since these will be interleaved in the same
-// JitActivation.
+// In particular, this can handle the transition from wasm to jit and from jit
+// to wasm, since these can be interleaved in the same JitActivation.
 class JitFrameIter
 {
   protected:

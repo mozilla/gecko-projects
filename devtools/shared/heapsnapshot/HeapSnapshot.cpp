@@ -284,11 +284,21 @@ HeapSnapshot::saveNode(const protobuf::Node& node, NodeIdSet& edgeReferents)
       return false;
   }
 
+  const char16_t* descriptiveTypeName = nullptr;
+  if (node.descriptiveTypeNameOrRef_case() != protobuf::Node::DESCRIPTIVETYPENAMEORREF_NOT_SET) {
+    Maybe<StringOrRef> descriptiveTypeNameOrRef = GET_STRING_OR_REF(node, descriptivetypename);
+    descriptiveTypeName = getOrInternString<char16_t>(internedTwoByteStrings, descriptiveTypeNameOrRef);
+    if (NS_WARN_IF(!descriptiveTypeName))
+        return false;
+  }
+
   if (NS_WARN_IF(!nodes.putNew(id, DeserializedNode(id, coarseType, typeName,
                                                     size, std::move(edges),
                                                     allocationStack,
                                                     jsObjectClassName,
-                                                    scriptFilename, *this))))
+                                                    scriptFilename,
+                                                    descriptiveTypeName,
+                                                     *this))))
   {
     return false;
   };
@@ -452,8 +462,8 @@ HeapSnapshot::init(JSContext* cx, const uint8_t* buffer, uint32_t size)
   // Check the set of node ids referred to by edges we found and ensure that we
   // have the node corresponding to each id. If we don't have all of them, it is
   // unsafe to perform analyses of this heap snapshot.
-  for (auto range = edgeReferents.all(); !range.empty(); range.popFront()) {
-    if (NS_WARN_IF(!nodes.has(range.front())))
+  for (auto iter = edgeReferents.iter(); !iter.done(); iter.next()) {
+    if (NS_WARN_IF(!nodes.has(iter.get())))
       return false;
   }
 
@@ -643,11 +653,11 @@ HeapSnapshot::ComputeShortestPaths(JSContext*cx, uint64_t start,
     return;
   }
 
-  for (auto range = shortestPaths.eachTarget(); !range.empty(); range.popFront()) {
-    JS::RootedValue key(cx, JS::NumberValue(range.front().identifier()));
+  for (auto iter = shortestPaths.targetIter(); !iter.done(); iter.next()) {
+    JS::RootedValue key(cx, JS::NumberValue(iter.get().identifier()));
     JS::AutoValueVector paths(cx);
 
-    bool ok = shortestPaths.forEachPath(range.front(), [&](JS::ubi::Path& path) {
+    bool ok = shortestPaths.forEachPath(iter.get(), [&](JS::ubi::Path& path) {
       JS::AutoValueVector pathValues(cx);
 
       for (JS::ubi::BackEdge* edge : path) {
@@ -1335,6 +1345,16 @@ public:
       if (NS_WARN_IF(!attachOneByteString(scriptFilename,
                                           [&] (std::string* name) { protobufNode.set_allocated_scriptfilename(name); },
                                           [&] (uint64_t ref) { protobufNode.set_scriptfilenameref(ref); })))
+      {
+        return false;
+      }
+    }
+
+    if (ubiNode.descriptiveTypeName()) {
+      auto descriptiveTypeName = TwoByteString(ubiNode.descriptiveTypeName());
+      if (NS_WARN_IF(!attachTwoByteString(descriptiveTypeName,
+                                          [&] (std::string* name) { protobufNode.set_allocated_descriptivetypename(name); },
+                                          [&] (uint64_t ref) { protobufNode.set_descriptivetypenameref(ref); })))
       {
         return false;
       }

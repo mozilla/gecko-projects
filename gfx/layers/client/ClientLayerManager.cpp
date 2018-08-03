@@ -317,6 +317,15 @@ ClientLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback,
                                            void* aCallbackData,
                                            EndTransactionFlags)
 {
+  // This just causes the compositor to check whether the GPU is done with its
+  // textures or not and unlock them if it is. This helps us avoid the case
+  // where we take a long time painting asynchronously, turn IPC back on at
+  // the end of that, and then have to wait for the compositor to to get into
+  // TiledLayerBufferComposite::UseTiles before getting a response.
+  if (mForwarder) {
+    mForwarder->UpdateTextureLocks();
+  }
+
   // Wait for any previous async paints to complete before starting to paint again.
   // Do this outside the profiler and telemetry block so this doesn't count as time
   // spent rasterizing.
@@ -493,7 +502,7 @@ ClientLayerManager::GetRemoteRenderer()
 CompositorBridgeChild*
 ClientLayerManager::GetCompositorBridgeChild()
 {
-  if (!XRE_IsParentProcess()) {
+  if (!XRE_IsParentProcess() && !recordreplay::IsRecordingOrReplaying()) {
     return CompositorBridgeChild::Get();
   }
   return GetRemoteRenderer();
@@ -521,7 +530,11 @@ ClientLayerManager::DidComposite(TransactionId aTransactionId,
                                  const TimeStamp& aCompositeStart,
                                  const TimeStamp& aCompositeEnd)
 {
-  MOZ_ASSERT(mWidget);
+  if (!mWidget) {
+    // When recording/replaying this manager may have already been destroyed.
+    MOZ_ASSERT(recordreplay::IsRecordingOrReplaying());
+    return;
+  }
 
   // Notifying the observers may tick the refresh driver which can cause
   // a lot of different things to happen that may affect the lifetime of
@@ -919,9 +932,9 @@ ClientLayerManager::AsyncPanZoomEnabled() const
 }
 
 void
-ClientLayerManager::SetLayerObserverEpoch(uint64_t aLayerObserverEpoch)
+ClientLayerManager::SetLayersObserverEpoch(LayersObserverEpoch aEpoch)
 {
-  mForwarder->SetLayerObserverEpoch(aLayerObserverEpoch);
+  mForwarder->SetLayersObserverEpoch(aEpoch);
 }
 
 void

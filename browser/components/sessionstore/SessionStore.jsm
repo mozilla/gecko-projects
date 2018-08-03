@@ -1690,11 +1690,7 @@ var SessionStoreInternal = {
       // We have to wait for these messages to come up from
       // each window and each browser. In the meantime, hide
       // the windows to improve perceived shutdown speed.
-      let baseWin = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIDocShell)
-                          .QueryInterface(Ci.nsIDocShellTreeItem)
-                          .treeOwner
-                          .QueryInterface(Ci.nsIBaseWindow);
+      let baseWin = window.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow);
       baseWin.visibility = false;
     }
 
@@ -2386,7 +2382,10 @@ var SessionStoreInternal = {
     // Note that we cannot simply replace the contents of the cache
     // as |aState| can be an incomplete state that will be completed
     // by |restoreTabs|.
-    let tabState = JSON.parse(aState);
+    let tabState = aState;
+    if (typeof tabState == "string") {
+      tabState = JSON.parse(aState);
+    }
     if (!tabState) {
       throw Components.Exception("Invalid state string: not JSON", Cr.NS_ERROR_INVALID_ARG);
     }
@@ -2522,13 +2521,15 @@ var SessionStoreInternal = {
 
     // create a new tab
     let tabbrowser = aWindow.gBrowser;
-    let tab = tabbrowser.selectedTab = tabbrowser.addTab(null, state);
+    let tab = tabbrowser.selectedTab =
+      tabbrowser.addTab(null, {
+        index: pos,
+        pinned: state.pinned,
+        userContextId: state.userContextId,
+      });
 
     // restore tab content
     this.restoreTab(tab, state);
-
-    // restore the tab's position
-    tabbrowser.moveTabTo(tab, pos);
 
     // Notify of changes to closed objects.
     this._notifyOfClosedObjectsChange();
@@ -4145,8 +4146,7 @@ var SessionStoreInternal = {
     var _this = this;
     function win_(aName) { return _this._getWindowDimension(win, aName); }
 
-    const dwu = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                   .getInterface(Ci.nsIDOMWindowUtils);
+    const dwu = win.windowUtils;
     // find available space on the screen where this window is being placed
     let screen = gScreenManager.screenForRect(aLeft, aTop, aWidth, aHeight);
     if (screen) {
@@ -4387,7 +4387,7 @@ var SessionStoreInternal = {
     }
 
     var window =
-      Services.ww.openWindow(null, this._prefBranch.getCharPref("chromeURL"),
+      Services.ww.openWindow(null, AppConstants.BROWSER_CHROME_URL,
                              "_blank", features, argString);
 
     this._updateWindowRestoreState(window, aState);
@@ -4469,7 +4469,7 @@ var SessionStoreInternal = {
         }
         // Width and height attribute report the inner size, but we want
         // to store the outer size, so add the difference.
-        let xulWin = aWindow.getInterface(Ci.nsIDocShell)
+        let xulWin = aWindow.docShell
                             .treeOwner
                             .QueryInterface(Ci.nsIInterfaceRequestor)
                             .getInterface(Ci.nsIXULWindow);

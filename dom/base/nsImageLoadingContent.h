@@ -191,15 +191,6 @@ protected:
   void CancelImageRequests(bool aNotify);
 
   /**
-   * UseAsPrimaryRequest is called by subclasses when they have an existing
-   * imgRequestProxy that they want this nsImageLoadingContent to use.  This may
-   * effectively be called instead of LoadImage or LoadImageWithChannel.
-   * If aNotify is true, this method will notify on state changes.
-   */
-  nsresult UseAsPrimaryRequest(imgRequestProxy* aRequest, bool aNotify,
-                               ImageLoadType aImageLoadType);
-
-  /**
    * Derived classes of nsImageLoadingContent MUST call
    * DestroyImageLoadingContent from their destructor, or earlier.  It
    * does things that cannot be done in ~nsImageLoadingContent because
@@ -221,7 +212,7 @@ protected:
 
   // Subclasses are *required* to call BindToTree/UnbindFromTree.
   void BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                  nsIContent* aBindingParent, bool aCompileEventHandlers);
+                  nsIContent* aBindingParent);
   void UnbindFromTree(bool aDeep, bool aNullParent);
 
   nsresult OnLoadComplete(imgIRequest* aRequest, nsresult aStatus);

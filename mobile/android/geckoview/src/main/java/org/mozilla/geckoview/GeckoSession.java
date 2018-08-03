@@ -15,6 +15,7 @@ import java.util.UUID;
 
 import org.mozilla.gecko.annotation.WrapForJNI;
 import org.mozilla.gecko.EventDispatcher;
+import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.gfx.LayerSession;
 import org.mozilla.gecko.GeckoEditableChild;
 import org.mozilla.gecko.GeckoThread;
@@ -163,6 +164,7 @@ public class GeckoSession extends LayerSession
             "GeckoViewNavigation", this,
             new String[]{
                 "GeckoView:LocationChange",
+                "GeckoView:OnLoadError",
                 "GeckoView:OnLoadRequest",
                 "GeckoView:OnNewSession"
             }
@@ -181,6 +183,105 @@ public class GeckoSession extends LayerSession
             // The flags are already matched with nsIDocShell.idl.
             private int filterFlags(int flags) {
                 return flags & NavigationDelegate.LOAD_REQUEST_IS_USER_TRIGGERED;
+            }
+
+            private @NavigationDelegate.LoadErrorCategory int getErrorCategory(
+                    long errorModule, @NavigationDelegate.LoadError int error) {
+                // Match flags with XPCOM ErrorList.h.
+                if (errorModule == 21) {
+                    return NavigationDelegate.ERROR_CATEGORY_SECURITY;
+                }
+                return error & 0xF;
+            }
+
+            private @NavigationDelegate.LoadError int convertGeckoError(
+                    long geckoError, int geckoErrorModule, int geckoErrorClass) {
+                // Match flags with XPCOM ErrorList.h.
+                // safebrowsing
+                if (geckoError == 0x805D001FL) {
+                    return NavigationDelegate.ERROR_SAFEBROWSING_PHISHING_URI;
+                }
+                if (geckoError == 0x805D001EL) {
+                    return NavigationDelegate.ERROR_SAFEBROWSING_MALWARE_URI;
+                }
+                if (geckoError == 0x805D0023L) {
+                    return NavigationDelegate.ERROR_SAFEBROWSING_UNWANTED_URI;
+                }
+                if (geckoError == 0x805D0026L) {
+                    return NavigationDelegate.ERROR_SAFEBROWSING_HARMFUL_URI;
+                }
+                // content
+                if (geckoError == 0x805E0010L) {
+                    return NavigationDelegate.ERROR_CONTENT_CRASHED;
+                }
+                if (geckoError == 0x804B001BL) {
+                    return NavigationDelegate.ERROR_INVALID_CONTENT_ENCODING;
+                }
+                if (geckoError == 0x804B004AL) {
+                    return NavigationDelegate.ERROR_UNSAFE_CONTENT_TYPE;
+                }
+                if (geckoError == 0x804B001DL) {
+                    return NavigationDelegate.ERROR_CORRUPTED_CONTENT;
+                }
+                // network
+                if (geckoError == 0x804B0014L) {
+                    return NavigationDelegate.ERROR_NET_RESET;
+                }
+                if (geckoError == 0x804B0047L) {
+                    return NavigationDelegate.ERROR_NET_INTERRUPT;
+                }
+                if (geckoError == 0x804B000EL) {
+                    return NavigationDelegate.ERROR_NET_TIMEOUT;
+                }
+                if (geckoError == 0x804B000DL) {
+                    return NavigationDelegate.ERROR_CONNECTION_REFUSED;
+                }
+                if (geckoError == 0x804B0033L) {
+                    return NavigationDelegate.ERROR_UNKNOWN_SOCKET_TYPE;
+                }
+                if (geckoError == 0x804B001FL) {
+                    return NavigationDelegate.ERROR_REDIRECT_LOOP;
+                }
+                if (geckoError == 0x804B0010L) {
+                    return NavigationDelegate.ERROR_OFFLINE;
+                }
+                if (geckoError == 0x804B0013L) {
+                    return NavigationDelegate.ERROR_PORT_BLOCKED;
+                }
+                // uri
+                if (geckoError == 0x804B0012L) {
+                    return NavigationDelegate.ERROR_UNKNOWN_PROTOCOL;
+                }
+                if (geckoError == 0x804B001EL) {
+                    return NavigationDelegate.ERROR_UNKNOWN_HOST;
+                }
+                if (geckoError == 0x804B000AL) {
+                    return NavigationDelegate.ERROR_MALFORMED_URI;
+                }
+                if (geckoError == 0x80520012L) {
+                    return NavigationDelegate.ERROR_FILE_NOT_FOUND;
+                }
+                if (geckoError == 0x80520015L) {
+                    return NavigationDelegate.ERROR_FILE_ACCESS_DENIED;
+                }
+                // proxy
+                if (geckoError == 0x804B002AL) {
+                    return NavigationDelegate.ERROR_UNKNOWN_PROXY_HOST;
+                }
+                if (geckoError == 0x804B0048L) {
+                    return NavigationDelegate.ERROR_PROXY_CONNECTION_REFUSED;
+                }
+
+                if (geckoErrorModule == 21) {
+                    if (geckoErrorClass == 1) {
+                        return NavigationDelegate.ERROR_SECURITY_SSL;
+                    }
+                    if (geckoErrorClass == 2) {
+                        return NavigationDelegate.ERROR_SECURITY_BAD_CERT;
+                    }
+                }
+
+                return NavigationDelegate.ERROR_UNKNOWN;
             }
 
             @Override
@@ -224,6 +325,18 @@ public class GeckoSession extends LayerSession
                             return null;
                         }
                     });
+                } else if ("GeckoView:OnLoadError".equals(event)) {
+                    final String uri = message.getString("uri");
+                    final long errorCode = message.getLong("error");
+                    final int errorModule = message.getInt("errorModule");
+                    final int errorClass = message.getInt("errorClass");
+                    final int error = convertGeckoError(errorCode, errorModule,
+                                                        errorClass);
+                    final int errorCat = getErrorCategory(errorModule, error);
+
+                    delegate.onLoadError(GeckoSession.this, uri, errorCat, error);
+
+                    callback.sendSuccess(!GeckoAppShell.isFennec());
                 } else if ("GeckoView:OnNewSession".equals(event)) {
                     final String uri = message.getString("uri");
                     final GeckoResult<GeckoSession> result = delegate.onNewSession(GeckoSession.this, uri);
@@ -271,6 +384,7 @@ public class GeckoSession extends LayerSession
             new String[]{
                 "GeckoView:PageStart",
                 "GeckoView:PageStop",
+                "GeckoView:ProgressChanged",
                 "GeckoView:SecurityChanged"
             }
         ) {
@@ -285,6 +399,9 @@ public class GeckoSession extends LayerSession
                 } else if ("GeckoView:PageStop".equals(event)) {
                     delegate.onPageStop(GeckoSession.this,
                                         message.getBoolean("success"));
+                } else if ("GeckoView:ProgressChanged".equals(event)) {
+                    delegate.onProgressChange(GeckoSession.this,
+                                              message.getInt("progress"));
                 } else if ("GeckoView:SecurityChanged".equals(event)) {
                     final GeckoBundle identity = message.getBundle("identity");
                     delegate.onSecurityChange(GeckoSession.this, new ProgressDelegate.SecurityInformation(identity));
@@ -946,22 +1063,6 @@ public class GeckoSession extends LayerSession
         loadUri(uri, null, LOAD_FLAGS_NONE);
     }
 
-    private void loadUri(@NonNull String uri, @Nullable String referrer,
-                         @Nullable String baseUri, int flags) {
-        final GeckoBundle msg = new GeckoBundle();
-        msg.putString("uri", uri);
-        msg.putInt("flags", flags);
-
-        if (baseUri != null) {
-            msg.putString("baseUri", baseUri);
-        }
-
-        if (referrer != null) {
-            msg.putString("referrer", referrer);
-        }
-        mEventDispatcher.dispatch("GeckoView:LoadUri", msg);
-    }
-
     /**
      * Load the given URI with the specified referrer and load type.
      *
@@ -979,8 +1080,16 @@ public class GeckoSession extends LayerSession
      * @param referrer the referrer, may be null
      * @param flags the load flags to use, an OR-ed value of {@link #LOAD_FLAGS_NONE LOAD_FLAGS_*}
      */
-    public void loadUri(@NonNull String uri, @Nullable String referrer, @LoadFlags int flags) {
-        loadUri(uri, referrer, null, flags);
+    public void loadUri(@NonNull String uri, @Nullable String referrer,
+                        @LoadFlags int flags) {
+        final GeckoBundle msg = new GeckoBundle();
+        msg.putString("uri", uri);
+        msg.putInt("flags", flags);
+
+        if (referrer != null) {
+            msg.putString("referrer", referrer);
+        }
+        mEventDispatcher.dispatch("GeckoView:LoadUri", msg);
     }
 
     /**
@@ -1006,7 +1115,8 @@ public class GeckoSession extends LayerSession
      * @param referrer the Uri to use as the referrer
      * @param flags the load flags to use, an OR-ed value of {@link #LOAD_FLAGS_NONE LOAD_FLAGS_*}
      */
-    public void loadUri(@NonNull Uri uri, @Nullable Uri referrer, @LoadFlags int flags) {
+    public void loadUri(@NonNull Uri uri, @Nullable Uri referrer,
+                        @LoadFlags int flags) {
         loadUri(uri.toString(), referrer != null ? referrer.toString() : null, flags);
     }
 
@@ -1016,38 +1126,14 @@ public class GeckoSession extends LayerSession
      * @param data a String representing the data
      * @param mimeType the mime type of the data, e.g. "text/plain". Maybe be null, in
      *                 which case the type is guessed.
+     *
      */
     public void loadString(@NonNull final String data, @Nullable final String mimeType) {
-        loadString(data, mimeType, null);
-    }
-
-    /**
-     * Load the specified String data. Internally this is converted to a data URI.
-     *
-     * @param data a String representing the data
-     * @param mimeType the mime type of the data, e.g. "text/plain". Maybe be null, in
-     *                 which case the type is guessed.
-     * @param baseUri  the base URI of the document. Relative paths will be resolved from here.
-     *
-     */
-    public void loadString(@NonNull final String data, @Nullable final String mimeType,
-                           @Nullable final String baseUri) {
         if (data == null) {
             throw new IllegalArgumentException("data cannot be null");
         }
 
-        loadUri(createDataUri(data, mimeType), null, baseUri, LOAD_FLAGS_NONE);
-    }
-
-    /**
-     * Load the specified bytes. Internally this is converted to a data URI.
-     *
-     * @param bytes the data to load
-     * @param mimeType the mime type of the data, e.g. video/mp4. May be null, in which
-     *                 case the type is guessed.
-     */
-    public void loadData(@NonNull final byte[] bytes, @Nullable final String mimeType) {
-        loadData(bytes, mimeType, null);
+        loadUri(createDataUri(data, mimeType), null, LOAD_FLAGS_NONE);
     }
 
     /**
@@ -1056,15 +1142,13 @@ public class GeckoSession extends LayerSession
      * @param bytes    the data to load
      * @param mimeType the mime type of the data, e.g. video/mp4. May be null, in which
      *                 case the type is guessed.
-     * @param baseUri  the base URI of the document. Relative paths will be resolved from here.
      */
-    public void loadData(@NonNull final byte[] bytes, @Nullable final String mimeType,
-                         @Nullable final String baseUri) {
+    public void loadData(@NonNull final byte[] bytes, @Nullable final String mimeType) {
         if (bytes == null) {
             throw new IllegalArgumentException("data cannot be null");
         }
 
-        loadUri(createDataUri(bytes, mimeType), null, baseUri, LOAD_FLAGS_NONE);
+        loadUri(createDataUri(bytes, mimeType), null, LOAD_FLAGS_NONE);
     }
 
     /**
@@ -1887,6 +1971,13 @@ public class GeckoSession extends LayerSession
         void onPageStop(GeckoSession session, boolean success);
 
         /**
+         * Page loading has progressed.
+         * @param session GeckoSession that initiated the callback.
+         * @param progress Current page load progress value [0, 100].
+         */
+        void onProgressChange(GeckoSession session, int progress);
+
+        /**
         * The security status has been updated.
         * @param session GeckoSession that initiated the callback.
         * @param securityInfo The new security information.
@@ -2042,7 +2133,8 @@ public class GeckoSession extends LayerSession
          */
         final int FLAG_IS_PASSWORD = 4;
 
-        @StringDef({ACTION_CUT,
+        @StringDef({ACTION_HIDE,
+                    ACTION_CUT,
                     ACTION_COPY,
                     ACTION_DELETE,
                     ACTION_PASTE,
@@ -2052,6 +2144,10 @@ public class GeckoSession extends LayerSession
                     ACTION_COLLAPSE_TO_END})
         /* package */ @interface Action {}
 
+        /**
+         * Hide selection actions and cause {@link #onHideAction} to be called.
+         */
+        final String ACTION_HIDE = "org.mozilla.geckoview.HIDE";
         /**
          * Copy onto the clipboard then delete the selected content. Selection
          * must be editable.
@@ -2151,7 +2247,7 @@ public class GeckoSession extends LayerSession
          * @param session The GeckoSession that initiated the callback.
          * @param selection Current selection attributes.
          * @param actions Array of built-in actions available; possible values
-         * come from the {@link #ACTION_CUT ACTION_*} constants.
+         * come from the {@link #ACTION_HIDE ACTION_*} constants.
          * @param response Callback object for performing built-in actions. For example,
          * {@code response.respond(actions[0])} performs the first action. May be used
          * multiple times to perform multiple actions at once.
@@ -2170,9 +2266,8 @@ public class GeckoSession extends LayerSession
          */
         final int HIDE_REASON_NO_SELECTION = 0;
         /**
-         * Actions are no longer available due to the user moving the selection becoming
-         * out of view. Previous actions are still available after a callback with this
-         * reason.
+         * Actions are no longer available due to the user moving the selection out of view.
+         * Previous actions are still available after a callback with this reason.
          */
         final int HIDE_REASON_INVISIBLE_SELECTION = 1;
         /**
@@ -2276,6 +2371,83 @@ public class GeckoSession extends LayerSession
          *        <code>window.open()</code> will return null.
         */
         @Nullable GeckoResult<GeckoSession> onNewSession(@NonNull GeckoSession session, @NonNull String uri);
+
+        @IntDef({ERROR_CATEGORY_UNKNOWN, ERROR_CATEGORY_SECURITY,
+                 ERROR_CATEGORY_NETWORK, ERROR_CATEGORY_CONTENT,
+                 ERROR_CATEGORY_URI, ERROR_CATEGORY_PROXY,
+                 ERROR_CATEGORY_SAFEBROWSING})
+        public @interface LoadErrorCategory {}
+
+        @IntDef({ERROR_UNKNOWN, ERROR_SECURITY_SSL, ERROR_SECURITY_BAD_CERT,
+                 ERROR_NET_RESET, ERROR_NET_INTERRUPT, ERROR_NET_TIMEOUT,
+                 ERROR_CONNECTION_REFUSED, ERROR_UNKNOWN_PROTOCOL,
+                 ERROR_UNKNOWN_HOST, ERROR_UNKNOWN_SOCKET_TYPE,
+                 ERROR_UNKNOWN_PROXY_HOST, ERROR_MALFORMED_URI,
+                 ERROR_REDIRECT_LOOP, ERROR_SAFEBROWSING_PHISHING_URI,
+                 ERROR_SAFEBROWSING_MALWARE_URI, ERROR_SAFEBROWSING_UNWANTED_URI,
+                 ERROR_SAFEBROWSING_HARMFUL_URI, ERROR_CONTENT_CRASHED,
+                 ERROR_OFFLINE, ERROR_PORT_BLOCKED,
+                 ERROR_PROXY_CONNECTION_REFUSED, ERROR_FILE_NOT_FOUND,
+                 ERROR_FILE_ACCESS_DENIED, ERROR_INVALID_CONTENT_ENCODING,
+                 ERROR_UNSAFE_CONTENT_TYPE, ERROR_CORRUPTED_CONTENT})
+        public @interface LoadError {}
+
+        public static final int ERROR_CATEGORY_UNKNOWN = 0x1;
+        public static final int ERROR_CATEGORY_SECURITY = 0x2;
+        public static final int ERROR_CATEGORY_NETWORK = 0x3;
+        public static final int ERROR_CATEGORY_CONTENT = 0x4;
+        public static final int ERROR_CATEGORY_URI = 0x5;
+        public static final int ERROR_CATEGORY_PROXY = 0x6;
+        public static final int ERROR_CATEGORY_SAFEBROWSING = 0x7;
+
+        public static final int ERROR_UNKNOWN = 0x11;
+
+        // Security
+        public static final int ERROR_SECURITY_SSL = 0x22;
+        public static final int ERROR_SECURITY_BAD_CERT = 0x32;
+
+        // Network
+        public static final int ERROR_NET_INTERRUPT = 0x23;
+        public static final int ERROR_NET_TIMEOUT = 0x33;
+        public static final int ERROR_CONNECTION_REFUSED = 0x43;
+        public static final int ERROR_UNKNOWN_SOCKET_TYPE = 0x53;
+        public static final int ERROR_REDIRECT_LOOP = 0x63;
+        public static final int ERROR_OFFLINE = 0x73;
+        public static final int ERROR_PORT_BLOCKED = 0x83;
+        public static final int ERROR_NET_RESET = 0x93;
+
+        // Content
+        public static final int ERROR_UNSAFE_CONTENT_TYPE = 0x24;
+        public static final int ERROR_CORRUPTED_CONTENT = 0x34;
+        public static final int ERROR_CONTENT_CRASHED = 0x44;
+        public static final int ERROR_INVALID_CONTENT_ENCODING = 0x54;
+
+        // URI
+        public static final int ERROR_UNKNOWN_HOST = 0x25;
+        public static final int ERROR_MALFORMED_URI = 0x35;
+        public static final int ERROR_UNKNOWN_PROTOCOL = 0x45;
+        public static final int ERROR_FILE_NOT_FOUND = 0x55;
+        public static final int ERROR_FILE_ACCESS_DENIED = 0x65;
+
+        // Proxy
+        public static final int ERROR_PROXY_CONNECTION_REFUSED = 0x26;
+        public static final int ERROR_UNKNOWN_PROXY_HOST = 0x36;
+
+        // Safebrowsing
+        public static final int ERROR_SAFEBROWSING_MALWARE_URI = 0x27;
+        public static final int ERROR_SAFEBROWSING_UNWANTED_URI = 0x37;
+        public static final int ERROR_SAFEBROWSING_HARMFUL_URI = 0x47;
+        public static final int ERROR_SAFEBROWSING_PHISHING_URI = 0x57;
+
+        /**
+         * @param session The GeckoSession that initiated the callback.
+         * @param uri The URI that failed to load.
+         * @param category The error category.
+         * @param error The error type.
+         */
+        void onLoadError(GeckoSession session, String uri,
+                         @LoadErrorCategory int category,
+                         @LoadError int error);
     }
 
     /**
@@ -2995,9 +3167,9 @@ public class GeckoSession extends LayerSession
 
             private static @Type int getTypeFromString(String type) {
                 // The strings here should match the possible types in MediaDevice::MediaDevice in MediaManager.cpp
-                if ("video".equals(type)) {
+                if ("videoinput".equals(type)) {
                     return TYPE_VIDEO;
-                } else if ("audio".equals(type)) {
+                } else if ("audioinput".equals(type)) {
                     return TYPE_AUDIO;
                 } else {
                     throw new IllegalArgumentException("String: " + type + " is not a valid media type string");

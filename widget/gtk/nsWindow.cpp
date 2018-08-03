@@ -211,7 +211,7 @@ static void     hierarchy_changed_cb      (GtkWidget *widget,
                                            GtkWidget *previous_toplevel);
 static gboolean window_state_event_cb     (GtkWidget *widget,
                                            GdkEventWindowState *event);
-static void     theme_changed_cb          (GtkSettings *settings,
+static void     settings_changed_cb       (GtkSettings *settings,
                                            GParamSpec *pspec,
                                            nsWindow *data);
 static void     check_resize_cb           (GtkContainer* container,
@@ -482,6 +482,8 @@ nsWindow::nsWindow()
     mPendingConfigures = 0;
     mCSDSupportLevel = CSD_SUPPORT_NONE;
     mDrawInTitlebar = false;
+
+    mHasAlphaVisual = false;
 }
 
 nsWindow::~nsWindow()
@@ -732,7 +734,7 @@ nsWindow::Destroy()
     ClearCachedResources();
 
     g_signal_handlers_disconnect_by_func(gtk_settings_get_default(),
-                                         FuncToGpointer(theme_changed_cb),
+                                         FuncToGpointer(settings_changed_cb),
                                          this);
 
     nsIRollupListener* rollupListener = nsBaseWidget::GetActiveRollupListener();
@@ -2134,10 +2136,7 @@ nsWindow::OnExposeEvent(cairo_t *cr)
 
     bool shaped = false;
     if (eTransparencyTransparent == GetTransparencyMode()) {
-        GdkScreen *screen = gdk_window_get_screen(mGdkWindow);
-        if (gdk_screen_is_composited(screen) &&
-            gdk_window_get_visual(mGdkWindow) ==
-            gdk_screen_get_rgba_visual(screen)) {
+        if (mHasAlphaVisual) {
             // Remove possible shape mask from when window manger was not
             // previously compositing.
             static_cast<nsWindow*>(GetTopLevelWidget())->
@@ -2238,12 +2237,9 @@ nsWindow::OnExposeEvent(cairo_t *cr)
     bool painted = false;
     {
       if (GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC) {
-        GdkScreen *screen = gdk_window_get_screen(mGdkWindow);
         if (GetTransparencyMode() == eTransparencyTransparent &&
             layerBuffering == BufferMode::BUFFER_NONE &&
-            gdk_screen_is_composited(screen) &&
-            gdk_window_get_visual(mGdkWindow) ==
-            gdk_screen_get_rgba_visual(screen)) {
+            mHasAlphaVisual) {
           // If our draw target is unbuffered and we use an alpha channel,
           // clear the image beforehand to ensure we don't get artifacts from a
           // reused SHM image. See bug 1258086.
@@ -2937,8 +2933,8 @@ bool
 nsWindow::DispatchCommandEvent(nsAtom* aCommand)
 {
     nsEventStatus status;
-    WidgetCommandEvent event(true, nsGkAtoms::onAppCommand, aCommand, this);
-    DispatchEvent(&event, status);
+    WidgetCommandEvent appCommandEvent(true, aCommand, this);
+    DispatchEvent(&appCommandEvent, status);
     return TRUE;
 }
 
@@ -3447,6 +3443,8 @@ nsWindow::ThemeChanged()
 
         children = children->next;
     }
+
+    IMContextWrapper::OnThemeChanged();
 }
 
 void
@@ -3667,6 +3665,8 @@ nsWindow::Create(nsIWidget* aParent,
     nsWindow       *parentnsWindow = nullptr;
     GtkWidget      *eventWidget = nullptr;
     bool            drawToContainer = false;
+    bool            needsAlphaVisual = (mWindowType == eWindowType_popup &&
+                                       aInitData->mSupportTranslucency);
 
     if (aParent) {
         parentnsWindow = static_cast<nsWindow*>(aParent);
@@ -3717,14 +3717,6 @@ nsWindow::Create(nsIWidget* aParent,
         }
         mShell = gtk_window_new(type);
 
-        bool useAlphaVisual = (mWindowType == eWindowType_popup &&
-                               aInitData->mSupportTranslucency);
-
-        // mozilla.widget.use-argb-visuals is a hidden pref defaulting to false
-        // to allow experimentation
-        if (Preferences::GetBool("mozilla.widget.use-argb-visuals", false))
-            useAlphaVisual = true;
-
 #ifdef MOZ_X11
         // Ensure gfxPlatform is initialized, since that is what initializes
         // gfxVars, used below.
@@ -3743,22 +3735,28 @@ nsWindow::Create(nsIWidget* aParent,
             int screenNumber = GDK_SCREEN_XNUMBER(screen);
             int visualId = 0;
             if (GLContextGLX::FindVisual(display, screenNumber,
-                                         useWebRender, useAlphaVisual,
+                                         useWebRender, needsAlphaVisual,
                                          &visualId)) {
                 // If we're using CSD, rendering will go through mContainer, but
                 // it will inherit this visual as it is a child of mShell.
                 gtk_widget_set_visual(mShell,
                                       gdk_x11_screen_lookup_visual(screen,
                                                                    visualId));
+                mHasAlphaVisual = needsAlphaVisual;
+            } else {
+                NS_WARNING("We're missing X11 Visual for WebRender!");
             }
         } else
 #endif // MOZ_X11
         {
-            if (useAlphaVisual) {
+            if (needsAlphaVisual) {
                 GdkScreen *screen = gtk_widget_get_screen(mShell);
                 if (gdk_screen_is_composited(screen)) {
                     GdkVisual *visual = gdk_screen_get_rgba_visual(screen);
-                    gtk_widget_set_visual(mShell, visual);
+                    if (visual) {
+                        gtk_widget_set_visual(mShell, visual);
+                        mHasAlphaVisual = true;
+                    }
                 }
             }
         }
@@ -4021,10 +4019,13 @@ nsWindow::Create(nsIWidget* aParent,
         GtkSettings* default_settings = gtk_settings_get_default();
         g_signal_connect_after(default_settings,
                                "notify::gtk-theme-name",
-                               G_CALLBACK(theme_changed_cb), this);
+                               G_CALLBACK(settings_changed_cb), this);
         g_signal_connect_after(default_settings,
                                "notify::gtk-font-name",
-                               G_CALLBACK(theme_changed_cb), this);
+                               G_CALLBACK(settings_changed_cb), this);
+        g_signal_connect_after(default_settings,
+                               "notify::gtk-enable-animations",
+                               G_CALLBACK(settings_changed_cb), this);
     }
 
     if (mContainer) {
@@ -4142,8 +4143,10 @@ nsWindow::Create(nsIWidget* aParent,
       GdkVisual* gdkVisual = gdk_window_get_visual(mGdkWindow);
       mXVisual = gdk_x11_visual_get_xvisual(gdkVisual);
       mXDepth = gdk_visual_get_depth(gdkVisual);
+      bool shaped = needsAlphaVisual && !mHasAlphaVisual;
 
-      mSurfaceProvider.Initialize(mXDisplay, mXWindow, mXVisual, mXDepth);
+      mSurfaceProvider.Initialize(mXDisplay, mXWindow, mXVisual, mXDepth,
+                                  shaped);
     }
 #ifdef MOZ_WAYLAND
     else if (!mIsX11Display) {
@@ -6051,7 +6054,7 @@ window_state_event_cb (GtkWidget *widget, GdkEventWindowState *event)
 }
 
 static void
-theme_changed_cb (GtkSettings *settings, GParamSpec *pspec, nsWindow *data)
+settings_changed_cb (GtkSettings *settings, GParamSpec *pspec, nsWindow *data)
 {
     RefPtr<nsWindow> window = data;
     window->ThemeChanged();
@@ -6682,12 +6685,6 @@ nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
       return mLayerManager;
     }
 
-    if (!mLayerManager && !IsComposited() &&
-        eTransparencyTransparent == GetTransparencyMode())
-    {
-        mLayerManager = CreateBasicLayerManager();
-    }
-
     return nsBaseWidget::GetLayerManager(aShadowManager, aBackendHint, aPersistence);
 }
 
@@ -7203,24 +7200,17 @@ nsWindow::RoundsWidgetCoordinatesTo()
 
 void nsWindow::GetCompositorWidgetInitData(mozilla::widget::CompositorWidgetInitData* aInitData)
 {
+  // Make sure the window XID is propagated to X server, we can fail otherwise
+  // in GPU process (Bug 1401634).
+  if (mXDisplay && mXWindow != X11None) {
+    XFlush(mXDisplay);
+  }
+
   *aInitData = mozilla::widget::GtkCompositorWidgetInitData(
                                 (mXWindow != X11None) ? mXWindow : (uintptr_t)nullptr,
                                 mXDisplay ? nsCString(XDisplayString(mXDisplay)) : nsCString(),
+                                mIsTransparent && !mHasAlphaVisual,
                                 GetClientSize());
-}
-
-bool
-nsWindow::IsComposited() const
-{
-  if (!mGdkWindow) {
-    NS_WARNING("nsWindow::HasARGBVisual called before realization!");
-    return false;
-  }
-
-  GdkScreen* gdkScreen = gdk_screen_get_default();
-  return gdk_screen_is_composited(gdkScreen) &&
-         (gdk_window_get_visual(mGdkWindow)
-            == gdk_screen_get_rgba_visual(gdkScreen));
 }
 
 #ifdef MOZ_WAYLAND

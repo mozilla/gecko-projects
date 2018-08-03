@@ -145,13 +145,6 @@ Animation::SetEffectNoUpdate(AnimationEffect* aEffect)
   bool wasRelevant = mIsRelevant;
 
   if (mEffect) {
-    if (!aEffect) {
-      // If the new effect is null, call ResetPendingTasks before clearing
-      // mEffect since ResetPendingTasks needs it to get the appropriate
-      // PendingAnimationTracker.
-      ResetPendingTasks();
-    }
-
     // We need to notify observers now because once we set mEffect to null
     // we won't be able to find the target element to notify.
     if (mIsRelevant) {
@@ -234,7 +227,11 @@ Animation::SetTimelineNoUpdate(AnimationTimeline* aTimeline)
 void
 Animation::SetStartTime(const Nullable<TimeDuration>& aNewStartTime)
 {
-  if (aNewStartTime == mStartTime) {
+  // Return early if the start time will not change. However, if we
+  // are pending, then setting the start time to any value
+  // including the current value has the effect of aborting
+  // pending tasks so we should not return early in that case.
+  if (!Pending() && aNewStartTime == mStartTime) {
     return;
   }
 

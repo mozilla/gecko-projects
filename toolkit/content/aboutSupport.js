@@ -340,8 +340,7 @@ var snapshotFormatters = {
       delete data.info;
     }
 
-    let windowUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                            .getInterface(Ci.nsIDOMWindowUtils);
+    let windowUtils = window.windowUtils;
     let gpuProcessPid = windowUtils.gpuProcessPid;
 
     if (gpuProcessPid != -1) {
@@ -926,9 +925,7 @@ function copyRawDataToClipboard(button) {
 }
 
 function getLoadContext() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIWebNavigation)
-               .QueryInterface(Ci.nsILoadContext);
+  return window.docShell.QueryInterface(Ci.nsILoadContext);
 }
 
 function copyContentsToClipboard() {

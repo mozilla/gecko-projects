@@ -245,8 +245,8 @@ MessagePort::Create(nsIGlobalObject* aGlobal,
 void
 MessagePort::UnshippedEntangle(MessagePort* aEntangledPort)
 {
-  MOZ_ASSERT(aEntangledPort);
-  MOZ_ASSERT(!mUnshippedEntangledPort);
+  MOZ_DIAGNOSTIC_ASSERT(aEntangledPort);
+  MOZ_DIAGNOSTIC_ASSERT(!mUnshippedEntangledPort);
 
   mUnshippedEntangledPort = aEntangledPort;
 }
@@ -294,6 +294,8 @@ MessagePort::Initialize(const nsID& aUUID,
                               [self]() { self->CloseForced(); });
     if (NS_WARN_IF(!strongWorkerRef)) {
       // The worker is shutting down.
+      mState = eStateDisentangled;
+      UpdateMustKeepAlive();
       aRv.Throw(NS_ERROR_FAILURE);
       return;
     }
@@ -375,7 +377,7 @@ MessagePort::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
 
   // If we are unshipped we are connected to the other port on the same thread.
   if (mState == eStateUnshippedEntangled) {
-    MOZ_ASSERT(mUnshippedEntangledPort);
+    MOZ_DIAGNOSTIC_ASSERT(mUnshippedEntangledPort);
     mUnshippedEntangledPort->mMessages.AppendElement(data);
     mUnshippedEntangledPort->Dispatch();
     return;
@@ -560,20 +562,13 @@ MessagePort::CloseInternal(bool aSoftly)
 EventHandlerNonNull*
 MessagePort::GetOnmessage()
 {
-  if (NS_IsMainThread()) {
-    return GetEventHandler(nsGkAtoms::onmessage, EmptyString());
-  }
-  return GetEventHandler(nullptr, NS_LITERAL_STRING("message"));
+  return GetEventHandler(nsGkAtoms::onmessage);
 }
 
 void
 MessagePort::SetOnmessage(EventHandlerNonNull* aCallback)
 {
-  if (NS_IsMainThread()) {
-    SetEventHandler(nsGkAtoms::onmessage, EmptyString(), aCallback);
-  } else {
-    SetEventHandler(nullptr, NS_LITERAL_STRING("message"), aCallback);
-  }
+  SetEventHandler(nsGkAtoms::onmessage, aCallback);
 
   // When using onmessage, the call to start() is implied.
   Start();
@@ -748,6 +743,8 @@ MessagePort::CloneAndDisentangle(MessagePortIdentifier& aIdentifier)
     // Disconnect the entangled port and connect it to PBackground.
     if (!port->ConnectToPBackground()) {
       // We are probably shutting down. We cannot proceed.
+      mState = eStateDisentangled;
+      UpdateMustKeepAlive();
       return;
     }
 

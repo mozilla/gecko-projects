@@ -44,6 +44,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
   ExtensionPermissions: "resource://gre/modules/ExtensionPermissions.jsm",
   ExtensionStorage: "resource://gre/modules/ExtensionStorage.jsm",
+  ExtensionStorageIDB: "resource://gre/modules/ExtensionStorageIDB.jsm",
   ExtensionTestCommon: "resource://testing-common/ExtensionTestCommon.jsm",
   FileSource: "resource://gre/modules/L10nRegistry.jsm",
   L10nRegistry: "resource://gre/modules/L10nRegistry.jsm",
@@ -250,6 +251,8 @@ var UninstallObserver = {
         userContextId: WEBEXT_STORAGE_USER_CONTEXT_ID,
       });
       Services.qms.clearStoragesForPrincipal(storagePrincipal);
+
+      ExtensionStorageIDB.clearMigratedExtensionPref(addon.id);
 
       // Clear localStorage created by the extension
       let storage = Services.domStorageManager.getStorage(null, principal);
@@ -1636,9 +1639,9 @@ class Extension extends ExtensionData {
     sharedData.set("extensions/activeIDs", activeExtensionIDs);
 
     Services.ppmm.sharedData.flush();
-    return this.broadcast("Extension:Startup", this.id).then(() => {
-      return Promise.all(promises);
-    });
+    this.broadcast("Extension:Startup", this.id);
+
+    return Promise.all(promises);
   }
 
   /**
@@ -1769,14 +1772,33 @@ class Extension extends ExtensionData {
 
       this.updatePermissions(this.startupReason);
 
+      // Select the storage.local backend if it is already known,
+      // and start the data migration if needed.
+      if (this.hasPermission("storage")) {
+        if (!ExtensionStorageIDB.isBackendEnabled) {
+          this.setSharedData("storageIDBBackend", false);
+        } else if (ExtensionStorageIDB.isMigratedExtension(this)) {
+          this.setSharedData("storageIDBBackend", true);
+          this.setSharedData("storageIDBPrincipal", ExtensionStorageIDB.getStoragePrincipal(this));
+        } else {
+          // If the extension has to migrate backend, ensure that the data migration
+          // starts once Firefox is idle after the extension has been started.
+          this.once("ready", () => ChromeUtils.idleDispatch(() => {
+            ExtensionStorageIDB.selectBackend({extension: this});
+          }));
+        }
+      }
+
       // The "startup" Management event sent on the extension instance itself
       // is emitted just before the Management "startup" event,
       // and it is used to run code that needs to be executed before
       // any of the "startup" listeners.
       this.emit("startup", this);
-      Management.emit("startup", this);
 
-      await this.runManifest(this.manifest);
+      await Promise.all([
+        Management.emit("startup", this),
+        this.runManifest(this.manifest),
+      ]);
 
       Management.emit("ready", this);
       this.emit("ready");

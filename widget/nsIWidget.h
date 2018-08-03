@@ -1305,7 +1305,7 @@ class nsIWidget : public nsISupports
     /**
      * Called when Gecko knows which themed widgets exist in this window.
      * The passed array contains an entry for every themed widget of the right
-     * type (currently only NS_THEME_TOOLBAR) within the window, except for
+     * type (currently only StyleAppearance::Toolbar) within the window, except for
      * themed widgets which are transformed or have effects applied to them
      * (e.g. CSS opacity or filters).
      * This could sometimes be called during display list construction
@@ -1851,7 +1851,7 @@ public:
      * NS_RAW_NATIVE_IME_CONTEXT, the result is unique even if in a remote
      * process.
      */
-    virtual NativeIMEContext GetNativeIMEContext();
+    virtual NativeIMEContext GetNativeIMEContext() = 0;
 
     /*
      * Given a WidgetKeyboardEvent, this method synthesizes a corresponding

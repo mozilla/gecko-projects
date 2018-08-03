@@ -490,6 +490,7 @@ AutoJSAPI::Init(nsIGlobalObject* aGlobalObject)
 bool
 AutoJSAPI::Init(JSObject* aObject)
 {
+  MOZ_ASSERT(!js::IsCrossCompartmentWrapper(aObject));
   return Init(xpc::NativeGlobal(aObject));
 }
 
@@ -588,9 +589,10 @@ AutoJSAPI::ReportException()
         JS::RootingContext* rcx = JS::RootingContext::get(cx());
         DispatchScriptErrorEvent(inner, rcx, xpcReport, exn);
       } else {
-        JS::Rooted<JSObject*> stack(cx(),
-          xpc::FindExceptionStackForConsoleReport(inner, exn));
-        xpcReport->LogToConsoleWithStack(stack);
+        JS::Rooted<JSObject*> stack(cx());
+        JS::Rooted<JSObject*> stackGlobal(cx());
+        xpc::FindExceptionStackForConsoleReport(inner, exn, &stack, &stackGlobal);
+        xpcReport->LogToConsoleWithStack(stack, stackGlobal);
       }
     } else {
       // On a worker, we just use the worker error reporting mechanism and don't
@@ -669,6 +671,7 @@ AutoEntryScript::AutoEntryScript(JSObject* aObject,
                                  bool aIsMainThread)
   : AutoEntryScript(xpc::NativeGlobal(aObject), aReason, aIsMainThread)
 {
+  MOZ_ASSERT(!js::IsCrossCompartmentWrapper(aObject));
 }
 
 AutoEntryScript::~AutoEntryScript()

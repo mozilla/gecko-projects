@@ -270,6 +270,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(HTMLEditor)
   NS_INTERFACE_MAP_ENTRY(nsITableEditor)
   NS_INTERFACE_MAP_ENTRY(nsIEditorStyleSheets)
   NS_INTERFACE_MAP_ENTRY(nsIMutationObserver)
+  NS_INTERFACE_MAP_ENTRY(nsIEditorMailSupport)
 NS_INTERFACE_MAP_END_INHERITING(TextEditor)
 
 nsresult
@@ -1214,14 +1215,9 @@ HTMLEditor::CollapseSelectionToDeepestNonTableFirstChild(Selection* aSelection,
   selection->Collapse(node, 0);
 }
 
-
-/**
- * This is mostly like InsertHTMLWithCharsetAndContext, but we can't use that
- * because it is selection-based and the rules code won't let us edit under the
- * <head> node
- */
-NS_IMETHODIMP
-HTMLEditor::ReplaceHeadContentsWithHTML(const nsAString& aSourceToInsert)
+nsresult
+HTMLEditor::ReplaceHeadContentsWithSourceWithTransaction(
+              const nsAString& aSourceToInsert)
 {
   // don't do any post processing, rules get confused
   AutoTopLevelEditSubActionNotifier
@@ -1244,55 +1240,63 @@ HTMLEditor::ReplaceHeadContentsWithHTML(const nsAString& aSourceToInsert)
 
   RefPtr<nsContentList> nodeList =
     document->GetElementsByTagName(NS_LITERAL_STRING("head"));
-  NS_ENSURE_TRUE(nodeList, NS_ERROR_NULL_POINTER);
+  if (NS_WARN_IF(!nodeList)) {
+    return NS_ERROR_FAILURE;
+  }
 
   nsCOMPtr<nsIContent> headNode = nodeList->Item(0);
-  NS_ENSURE_TRUE(headNode, NS_ERROR_NULL_POINTER);
+  if (NS_WARN_IF(!headNode)) {
+    return NS_ERROR_FAILURE;
+  }
 
   // First, make sure there are no return chars in the source.  Bad things
   // happen if you insert returns (instead of dom newlines, \n) into an editor
   // document.
-  nsAutoString inputString (aSourceToInsert);  // hope this does copy-on-write
+  nsAutoString inputString(aSourceToInsert);
 
   // Windows linebreaks: Map CRLF to LF:
-  inputString.ReplaceSubstring(u"\r\n", u"\n");
+  inputString.ReplaceSubstring(NS_LITERAL_STRING("\r\n"),
+                               NS_LITERAL_STRING("\n"));
 
   // Mac linebreaks: Map any remaining CR to LF:
-  inputString.ReplaceSubstring(u"\r", u"\n");
+  inputString.ReplaceSubstring(NS_LITERAL_STRING("\r"),
+                               NS_LITERAL_STRING("\n"));
 
   AutoPlaceholderBatch beginBatching(this);
 
   // Get the first range in the selection, for context:
   RefPtr<nsRange> range = selection->GetRangeAt(0);
-  NS_ENSURE_TRUE(range, NS_ERROR_NULL_POINTER);
+  if (NS_WARN_IF(!range)) {
+    return NS_ERROR_FAILURE;
+  }
 
   ErrorResult err;
-  RefPtr<DocumentFragment> docfrag =
+  RefPtr<DocumentFragment> documentFragment =
     range->CreateContextualFragment(inputString, err);
 
   // XXXX BUG 50965: This is not returning the text between <title>...</title>
   // Special code is needed in JS to handle title anyway, so it doesn't matter!
 
   if (err.Failed()) {
-#ifdef DEBUG
-    printf("Couldn't create contextual fragment: error was %X\n",
-           err.ErrorCodeAsInt());
-#endif
     return err.StealNSResult();
   }
-  NS_ENSURE_TRUE(docfrag, NS_ERROR_NULL_POINTER);
+  if (NS_WARN_IF(!documentFragment)) {
+    return NS_ERROR_FAILURE;
+  }
 
   // First delete all children in head
   while (nsCOMPtr<nsIContent> child = headNode->GetFirstChild()) {
     nsresult rv = DeleteNodeWithTransaction(*child);
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
   }
 
   // Now insert the new nodes
   int32_t offsetOfNewNode = 0;
 
   // Loop over the contents of the fragment and move into the document
-  while (nsCOMPtr<nsIContent> child = docfrag->GetFirstChild()) {
+  while (nsCOMPtr<nsIContent> child = documentFragment->GetFirstChild()) {
     nsresult rv =
       InsertNodeWithTransaction(*child,
                                 EditorRawDOMPoint(headNode, offsetOfNewNode++));
@@ -1362,13 +1366,15 @@ HTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString)
   if (foundhead) {
     if (foundclosehead) {
       nsresult rv =
-        ReplaceHeadContentsWithHTML(Substring(beginhead, beginclosehead));
+        ReplaceHeadContentsWithSourceWithTransaction(
+          Substring(beginhead, beginclosehead));
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
     } else if (foundbody) {
       nsresult rv =
-        ReplaceHeadContentsWithHTML(Substring(beginhead, beginbody));
+        ReplaceHeadContentsWithSourceWithTransaction(
+          Substring(beginhead, beginbody));
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -1376,7 +1382,9 @@ HTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString)
       // XXX Without recourse to some parser/content sink/docshell hackery we
       // don't really know where the head ends and the body begins so we assume
       // that there is no body
-      nsresult rv = ReplaceHeadContentsWithHTML(Substring(beginhead, endtotal));
+      nsresult rv =
+        ReplaceHeadContentsWithSourceWithTransaction(
+          Substring(beginhead, endtotal));
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -1387,14 +1395,15 @@ HTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString)
     NS_NAMED_LITERAL_STRING(head, "<head>");
     if (foundclosehead) {
       nsresult rv =
-        ReplaceHeadContentsWithHTML(head + Substring(begintotal,
-                                                     beginclosehead));
+        ReplaceHeadContentsWithSourceWithTransaction(
+          head + Substring(begintotal, beginclosehead));
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
     } else if (foundbody) {
-      nsresult rv = ReplaceHeadContentsWithHTML(head + Substring(begintotal,
-                                                                 beginbody));
+      nsresult rv =
+        ReplaceHeadContentsWithSourceWithTransaction(
+          head + Substring(begintotal, beginbody));
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -1402,7 +1411,7 @@ HTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString)
       // XXX Without recourse to some parser/content sink/docshell hackery we
       // don't really know where the head ends and the body begins so we assume
       // that there is no head
-      nsresult rv = ReplaceHeadContentsWithHTML(head);
+      nsresult rv = ReplaceHeadContentsWithSourceWithTransaction(head);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -2345,7 +2354,7 @@ HTMLEditor::Indent(const nsAString& aIndent)
     if (NS_WARN_IF(error.Failed())) {
       return error.StealNSResult();
     }
-    rv = InsertTextAsAction(NS_LITERAL_STRING(" "));
+    rv = InsertTextAsSubAction(NS_LITERAL_STRING(" "));
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -3068,19 +3077,29 @@ HTMLEditor::GetURLForStyleSheet(StyleSheet* aStyleSheet,
 NS_IMETHODIMP
 HTMLEditor::GetEmbeddedObjects(nsIArray** aNodeList)
 {
-  NS_ENSURE_TRUE(aNodeList, NS_ERROR_NULL_POINTER);
+  if (NS_WARN_IF(!aNodeList)) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
   nsresult rv;
   nsCOMPtr<nsIMutableArray> nodes = do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   nsCOMPtr<nsIContentIterator> iter =
-      do_CreateInstance("@mozilla.org/content/post-content-iterator;1", &rv);
-  NS_ENSURE_TRUE(iter, NS_ERROR_NULL_POINTER);
-  NS_ENSURE_SUCCESS(rv, rv);
+    do_CreateInstance("@mozilla.org/content/post-content-iterator;1", &rv);
+  if (NS_WARN_IF(!iter)) {
+    return NS_ERROR_FAILURE;
+  }
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   nsCOMPtr<nsIDocument> doc = GetDocument();
-  NS_ENSURE_TRUE(doc, NS_ERROR_UNEXPECTED);
+  if (NS_WARN_IF(!doc)) {
+    return NS_ERROR_UNEXPECTED;
+  }
 
   iter->Init(doc->GetRootElement());
 
@@ -3103,7 +3122,7 @@ HTMLEditor::GetEmbeddedObjects(nsIArray** aNodeList)
    }
 
   nodes.forget(aNodeList);
-  return rv;
+  return NS_OK;
 }
 
 nsresult
@@ -4768,9 +4787,9 @@ HTMLEditor::IsActiveInDOMWindow()
 }
 
 Element*
-HTMLEditor::GetActiveEditingHost()
+HTMLEditor::GetActiveEditingHost() const
 {
-  nsCOMPtr<nsIDocument> document = GetDocument();
+  nsIDocument* document = GetDocument();
   if (NS_WARN_IF(!document)) {
     return nullptr;
   }
@@ -4779,8 +4798,10 @@ HTMLEditor::GetActiveEditingHost()
   }
 
   // We're HTML editor for contenteditable
-  RefPtr<Selection> selection = GetSelection();
-  NS_ENSURE_TRUE(selection, nullptr);
+  Selection* selection = GetSelection();
+  if (NS_WARN_IF(!selection)) {
+    return nullptr;
+  }
   nsINode* focusNode = selection->GetFocusNode();
   if (NS_WARN_IF(!focusNode) || NS_WARN_IF(!focusNode->IsContent())) {
     return nullptr;
@@ -5014,7 +5035,7 @@ HTMLEditor::GetInputEventTargetContent()
 }
 
 Element*
-HTMLEditor::GetEditorRoot()
+HTMLEditor::GetEditorRoot() const
 {
   return GetActiveEditingHost();
 }

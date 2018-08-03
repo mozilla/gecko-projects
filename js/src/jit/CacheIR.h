@@ -61,7 +61,7 @@ enum class BaselineCacheIRStubKind;
 // An OperandId represents either a cache input or a value returned by a
 // CacheIR instruction. Most code should use the ValOperandId and ObjOperandId
 // classes below. The ObjOperandId class represents an operand that's known to
-// be an object.
+// be an object, just as StringOperandId represents a known string, etc.
 class OperandId
 {
   protected:
@@ -166,7 +166,8 @@ class TypedOperandId : public OperandId
     _(Compare)              \
     _(ToBool)               \
     _(Call)                 \
-    _(UnaryArith)
+    _(UnaryArith)           \
+    _(BinaryArith)
 
 enum class CacheKind : uint8_t
 {
@@ -181,6 +182,7 @@ extern const char* CacheKindNames[];
     _(GuardIsObject)                      \
     _(GuardIsObjectOrNull)                \
     _(GuardIsNullOrUndefined)             \
+    _(GuardIsBoolean)                     \
     _(GuardIsString)                      \
     _(GuardIsSymbol)                      \
     _(GuardIsNumber)                      \
@@ -290,6 +292,22 @@ extern const char* CacheKindNames[];
     _(LoadStringResult)                   \
     _(LoadInstanceOfObjectResult)         \
     _(LoadTypeOfObjectResult)             \
+    _(DoubleAddResult)                    \
+    _(DoubleSubResult)                    \
+    _(DoubleMulResult)                    \
+    _(DoubleDivResult)                    \
+    _(DoubleModResult)                    \
+    _(Int32AddResult)                     \
+    _(Int32SubResult)                     \
+    _(Int32MulResult)                     \
+    _(Int32DivResult)                     \
+    _(Int32ModResult)                     \
+    _(Int32BitOrResult)                   \
+    _(Int32BitXorResult)                  \
+    _(Int32BitAndResult)                  \
+    _(Int32LeftShiftResult)               \
+    _(Int32RightShiftResult)              \
+    _(Int32URightShiftResult)             \
     _(Int32NotResult)                     \
     _(Int32NegationResult)                \
     _(DoubleNegationResult)               \
@@ -300,6 +318,8 @@ extern const char* CacheKindNames[];
     _(LoadValueResult)                    \
                                           \
     _(CallStringSplitResult)              \
+    _(CallStringConcatResult)             \
+    _(CallStringObjectConcatResult)       \
                                           \
     _(CompareStringResult)                \
     _(CompareObjectResult)                \
@@ -539,6 +559,12 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     ObjOperandId guardIsObject(ValOperandId val) {
         writeOpWithOperandId(CacheOp::GuardIsObject, val);
         return ObjOperandId(val.id());
+    }
+    Int32OperandId guardIsBoolean(ValOperandId val) {
+        Int32OperandId res(nextOperandId_++);
+        writeOpWithOperandId(CacheOp::GuardIsBoolean, val);
+        writeOperandId(res);
+        return res;
     }
     StringOperandId guardIsString(ValOperandId val) {
         writeOpWithOperandId(CacheOp::GuardIsString, val);
@@ -989,6 +1015,72 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         buffer_.writeByte(uint32_t(hasOwn));
     }
 
+    void doubleAddResult(ValOperandId lhsId, ValOperandId rhsId) {
+        writeOpWithOperandId(CacheOp::DoubleAddResult, lhsId);
+        writeOperandId(rhsId);
+    }
+    void doubleSubResult(ValOperandId lhsId, ValOperandId rhsId) {
+        writeOpWithOperandId(CacheOp::DoubleSubResult, lhsId);
+        writeOperandId(rhsId);
+    }
+    void doubleMulResult(ValOperandId lhsId, ValOperandId rhsId) {
+        writeOpWithOperandId(CacheOp::DoubleMulResult, lhsId);
+        writeOperandId(rhsId);
+    }
+    void doubleDivResult(ValOperandId lhsId, ValOperandId rhsId) {
+        writeOpWithOperandId(CacheOp::DoubleDivResult, lhsId);
+        writeOperandId(rhsId);
+    }
+    void doubleModResult(ValOperandId lhsId, ValOperandId rhsId) {
+        writeOpWithOperandId(CacheOp::DoubleModResult, lhsId);
+        writeOperandId(rhsId);
+    }
+
+    void int32AddResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32AddResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32SubResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32SubResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32MulResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32MulResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32DivResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32DivResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32ModResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32ModResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32BitOrResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32BitOrResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32BitXOrResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32BitXorResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32BitAndResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32BitAndResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32LeftShiftResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32LeftShiftResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32RightShiftResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32RightShiftResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32URightShiftResult(Int32OperandId lhs, Int32OperandId rhs, bool allowDouble) {
+        writeOpWithOperandId(CacheOp::Int32URightShiftResult, lhs);
+        writeOperandId(rhs);
+        buffer_.writeByte(uint32_t(allowDouble));
+    }
     void int32NotResult(Int32OperandId id) {
         writeOpWithOperandId(CacheOp::Int32NotResult, id);
     }
@@ -1139,6 +1231,14 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     void loadValueResult(const Value& val) {
         writeOp(CacheOp::LoadValueResult);
         addStubField(val.asRawBits(), StubField::Type::Value);
+    }
+    void callStringConcatResult(StringOperandId lhs, StringOperandId rhs) {
+        writeOpWithOperandId(CacheOp::CallStringConcatResult, lhs);
+        writeOperandId(rhs);
+    }
+    void callStringObjectConcatResult(ValOperandId lhs, ValOperandId rhs) {
+        writeOpWithOperandId(CacheOp::CallStringObjectConcatResult, lhs);
+        writeOperandId(rhs);
     }
     void callStringSplitResult(StringOperandId str, StringOperandId sep, ObjectGroup* group) {
         writeOp(CacheOp::CallStringSplitResult);
@@ -1775,6 +1875,30 @@ class MOZ_RAII UnaryArithIRGenerator : public IRGenerator
                           JSOp op, HandleValue val, HandleValue res);
 
     bool tryAttachStub();
+};
+
+class MOZ_RAII BinaryArithIRGenerator : public IRGenerator
+{
+    JSOp op_;
+    HandleValue lhs_;
+    HandleValue rhs_;
+    HandleValue res_;
+
+    void trackAttached(const char* name);
+
+    bool tryAttachInt32();
+    bool tryAttachDouble();
+    bool tryAttachDoubleWithInt32();
+    bool tryAttachBooleanWithInt32();
+    bool tryAttachStringConcat();
+    bool tryAttachStringObjectConcat();
+
+  public:
+    BinaryArithIRGenerator(JSContext* cx, HandleScript, jsbytecode* pc, ICState::Mode,
+                           JSOp op, HandleValue lhs, HandleValue rhs, HandleValue res);
+
+    bool tryAttachStub();
+
 };
 
 } // namespace jit

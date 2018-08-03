@@ -172,10 +172,6 @@ template<typename Functor>
 void
 EnumerateShadowRoots(const nsIDocument& aDoc, const Functor& aCb)
 {
-  if (!aDoc.IsShadowDOMEnabled()) {
-    return;
-  }
-
   const nsIDocument::ShadowRootSet& shadowRoots = aDoc.ComposedShadowRoots();
   for (auto iter = shadowRoots.ConstIter(); !iter.Done(); iter.Next()) {
     ShadowRoot* root = iter.Get()->GetKey();
@@ -389,7 +385,7 @@ ServoStyleSet::ResolveStyleFor(Element* aElement,
         aElement, CSSPseudoElementType::NotPseudo);
   }
 
-  return ResolveServoStyle(aElement);
+  return ResolveServoStyle(*aElement);
 }
 
 const ServoElementSnapshotTable&
@@ -537,13 +533,13 @@ ServoStyleSet::ResolveStyleForPlaceholder()
 
 static inline bool
 LazyPseudoIsCacheable(CSSPseudoElementType aType,
-                      Element* aOriginatingElement,
+                      const Element& aOriginatingElement,
                       ComputedStyle* aParentContext)
 {
   return aParentContext &&
          !nsCSSPseudoElements::IsEagerlyCascadedInServo(aType) &&
-         aOriginatingElement->HasServoData() &&
-         !Servo_Element_IsPrimaryStyleReusedViaRuleNode(aOriginatingElement);
+         aOriginatingElement.HasServoData() &&
+         !Servo_Element_IsPrimaryStyleReusedViaRuleNode(&aOriginatingElement);
 }
 
 already_AddRefed<ComputedStyle>
@@ -565,7 +561,7 @@ ServoStyleSet::ResolvePseudoElementStyle(Element* aOriginatingElement,
       Servo_ResolveStyle(aPseudoElement, mRawSet.get()).Consume();
   } else {
     bool cacheable =
-      LazyPseudoIsCacheable(aType, aOriginatingElement, aParentContext);
+      LazyPseudoIsCacheable(aType, *aOriginatingElement, aParentContext);
     computedValues =
       cacheable ? aParentContext->GetCachedLazyPseudoStyle(aType) : nullptr;
 
@@ -907,7 +903,7 @@ ServoStyleSet::AddDocStyleSheet(StyleSheet* aSheet, nsIDocument* aDocument)
 }
 
 already_AddRefed<ComputedStyle>
-ServoStyleSet::ProbePseudoElementStyle(Element* aOriginatingElement,
+ServoStyleSet::ProbePseudoElementStyle(const Element& aOriginatingElement,
                                        CSSPseudoElementType aType,
                                        ComputedStyle* aParentContext)
 {
@@ -927,7 +923,8 @@ ServoStyleSet::ProbePseudoElementStyle(Element* aOriginatingElement,
   RefPtr<ComputedStyle> computedValues =
     cacheable ? aParentContext->GetCachedLazyPseudoStyle(aType) : nullptr;
   if (!computedValues) {
-    computedValues = Servo_ResolvePseudoStyle(aOriginatingElement, aType,
+    computedValues = Servo_ResolvePseudoStyle(&aOriginatingElement,
+                                              aType,
                                               /* is_probe = */ true,
                                               nullptr,
                                               mRawSet.get()).Consume();
@@ -1159,6 +1156,7 @@ ServoStyleSet::AssertTreeIsClean()
 
 bool
 ServoStyleSet::GetKeyframesForName(const Element& aElement,
+                                   const ComputedStyle& aStyle,
                                    nsAtom* aName,
                                    const nsTimingFunction& aTimingFunction,
                                    nsTArray<Keyframe>& aKeyframes)
@@ -1166,6 +1164,7 @@ ServoStyleSet::GetKeyframesForName(const Element& aElement,
   MOZ_ASSERT(!StylistNeedsUpdate());
   return Servo_StyleSet_GetKeyframesForName(mRawSet.get(),
                                             &aElement,
+                                            &aStyle,
                                             aName,
                                             &aTimingFunction,
                                             &aKeyframes);

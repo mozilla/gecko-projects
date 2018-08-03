@@ -41,7 +41,7 @@ const kPrefUIDensity                 = "browser.uidensity";
 const kPrefAutoTouchMode             = "browser.touchmode.auto";
 const kPrefAutoHideDownloadsButton   = "browser.download.autohideButton";
 
-const kExpectedWindowURL = "chrome://browser/content/browser.xul";
+const kExpectedWindowURL = AppConstants.BROWSER_CHROME_URL;
 
 /**
  * The keys are the handlers that are fired when the event type (the value)
@@ -1714,11 +1714,8 @@ var CustomizableUIInternal = {
           // Err, we're done.
           break;
         }
-        // Cue some voodoo
-        target = target.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
-                                   .getInterface(Ci.nsIWebNavigation)
-                                   .QueryInterface(Ci.nsIDocShell)
-                                   .chromeEventHandler;
+        // Find containing browser or iframe element in the parent doc.
+        target = target.defaultView.docShell.chromeEventHandler;
         if (!target) {
           break;
         }
@@ -4522,7 +4519,7 @@ OverflowableToolbar.prototype = {
 
       if (!shouldMoveAllItems && minSize) {
         if (!targetWidth) {
-          let dwu = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+          let dwu = win.windowUtils;
           targetWidth = Math.floor(dwu.getBoundsWithoutFlushing(this._target).width);
         }
         if (targetWidth <= minSize) {

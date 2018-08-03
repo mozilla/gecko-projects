@@ -48,7 +48,7 @@ window.checkResults = function(reportObj) {
   ok(cspReport["referrer"].startsWith("http://mochi.test:8888/tests/dom/security/test/csp/test_report.html"),
      "Incorrect referrer");
 
-  is(cspReport["blocked-uri"], "", "Incorrect blocked-uri");
+  is(cspReport["blocked-uri"], "inline", "Incorrect blocked-uri");
 
   is(cspReport["violated-directive"], "default-src", "Incorrect violated-directive");
 
@@ -57,7 +57,7 @@ window.checkResults = function(reportObj) {
 
   is(cspReport["source-file"], docUri, "Incorrect source-file");
 
-  is(cspReport["script-sample"], "\n    var foo = \"propEscFoo\";\n    var bar...",
+  is(cspReport["script-sample"], "\n    var foo = \"propEscFoo\";\n    var bar…",
      "Incorrect script-sample");
 
   is(cspReport["line-number"], 7, "Incorrect line-number");

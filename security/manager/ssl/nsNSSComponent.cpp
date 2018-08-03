@@ -202,8 +202,8 @@ nsNSSComponent::nsNSSComponent()
   , mLoadableRootsLoaded(false)
   , mLoadableRootsLoadedResult(NS_ERROR_FAILURE)
   , mMutex("nsNSSComponent.mMutex")
-  , mNSSInitialized(false)
   , mMitmDetecionEnabled(false)
+  , mNonIdempotentCleanupMustHappen(false)
 {
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent::ctor\n"));
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
@@ -897,12 +897,6 @@ nsNSSComponent::HasUserCertsInstalled(bool* result)
     return NS_ERROR_NOT_SAME_THREAD;
   }
 
-  MutexAutoLock nsNSSComponentLock(mMutex);
-
-  if (!mNSSInitialized) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
   *result = false;
   UniqueCERTCertList certList(
     CERT_FindUserCertsByUsage(CERT_GetDefaultCertDB(), certUsageSSLClient,
@@ -937,12 +931,6 @@ nsresult
 nsNSSComponent::CheckForSmartCardChanges()
 {
 #ifndef MOZ_NO_SMART_CARDS
-  MutexAutoLock nsNSSComponentLock(mMutex);
-
-  if (!mNSSInitialized) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
   // SECMOD_UpdateSlotList attempts to acquire the list lock as well,
   // so we have to do this in two steps. The lock protects the list itself, so
   // if we get our own owned references to the modules we're interested in,
@@ -1654,6 +1642,51 @@ AttemptToRenameBothPKCS11ModuleDBVersions(const nsACString& profilePath)
   }
   return AttemptToRenamePKCS11ModuleDB(profilePath, sqlModuleDBFilename);
 }
+
+// When we changed from the old dbm database format to the newer sqlite
+// implementation, the upgrade process left behind the existing files. Suppose a
+// user had not set a password for the old key3.db (which is about 99% of
+// users). After upgrading, both the old database and the new database are
+// unprotected. If the user then sets a password for the new database, the old
+// one will not be protected. In this scenario, we should probably just remove
+// the old database (it would only be relevant if the user downgraded to a
+// version of Firefox before 58, but we have to trade this off against the
+// user's old private keys being unexpectedly unprotected after setting a
+// password).
+// This was never an issue on Android because we always used the new
+// implementation.
+static void
+MaybeCleanUpOldNSSFiles(const nsACString& profilePath)
+{
+  UniquePK11SlotInfo slot(PK11_GetInternalKeySlot());
+  if (!slot) {
+    return;
+  }
+  // Unfortunately we can't now tell the difference between "there already was a
+  // password when the upgrade happened" and "there was not a password but then
+  // the user added one after upgrading".
+  bool hasPassword = PK11_NeedLogin(slot.get()) &&
+                     !PK11_NeedUserInit(slot.get());
+  if (!hasPassword) {
+    return;
+  }
+  nsCOMPtr<nsIFile> dbFile = do_CreateInstance("@mozilla.org/file/local;1");
+  if (!dbFile) {
+    return;
+  }
+  nsresult rv = dbFile->InitWithNativePath(profilePath);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+  NS_NAMED_LITERAL_CSTRING(keyDBFilename, "key3.db");
+  rv = dbFile->AppendNative(keyDBFilename);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+  // Since this isn't a directory, the `recursive` argument to `Remove` is
+  // irrelevant.
+  Unused << dbFile->Remove(false);
+}
 #endif // ifndef ANDROID
 
 // Given a profile directory, attempt to initialize NSS. If nocertdb is true,
@@ -1685,6 +1718,9 @@ InitializeNSSWithFallbacks(const nsACString& profilePath, bool nocertdb,
   SECStatus srv = ::mozilla::psm::InitializeNSS(profilePath, false, !safeMode);
   if (srv == SECSuccess) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("initialized NSS in r/w mode"));
+#ifndef ANDROID
+    MaybeCleanUpOldNSSFiles(profilePath);
+#endif // ifndef ANDROID
     return NS_OK;
   }
 #ifndef ANDROID
@@ -1903,13 +1939,11 @@ nsNSSComponent::InitializeNSS()
     mMitmDetecionEnabled =
       Preferences::GetBool("security.pki.mitm_canary_issuer.enabled", true);
 
-#ifdef XP_WIN
     nsCOMPtr<nsINSSComponent> handle(this);
     NS_DispatchToCurrentThread(NS_NewRunnableFunction("nsNSSComponent::TrustLoaded3rdPartyRoots",
     [handle]() {
       MOZ_ALWAYS_SUCCEEDS(handle->TrustLoaded3rdPartyRoots());
     }));
-#endif // XP_WIN
 
     // TLSServerSocket may be run with the session cache enabled. It is
     // necessary to call this once before that can happen. This specifies a
@@ -1933,7 +1967,7 @@ nsNSSComponent::InitializeNSS()
       return rv;
     }
 
-    mNSSInitialized = true;
+    mNonIdempotentCleanupMustHappen = true;
     return NS_OK;
   }
 }
@@ -1952,7 +1986,7 @@ nsNSSComponent::ShutdownNSS()
   // it to fail to find the roots it is expecting. However, if initialization
   // failed, we won't have dispatched the load loadable roots background task.
   // In that case, we don't want to block on an event that will never happen.
-  if (mNSSInitialized) {
+  if (mNonIdempotentCleanupMustHappen) {
     Unused << BlockUntilLoadableRootsLoaded();
 
     // We can only run SSL_ShutdownServerSessionIDCache once (the rest of
@@ -1961,6 +1995,7 @@ nsNSSComponent::ShutdownNSS()
     // TLSServerSocket may be run with the session cache enabled. This ensures
     // those resources are cleaned up.
     Unused << SSL_ShutdownServerSessionIDCache();
+    mNonIdempotentCleanupMustHappen = false;
   }
 
   ::mozilla::psm::UnloadLoadableRoots();
@@ -1980,8 +2015,6 @@ nsNSSComponent::ShutdownNSS()
   // We don't actually shut down NSS - XPCOM does, after all threads have been
   // joined and the component manager has been shut down (and so there shouldn't
   // be any XPCOM objects holding NSS resources).
-
-  mNSSInitialized = false;
 }
 
 nsresult
@@ -2197,7 +2230,6 @@ nsNSSComponent::IsCertTestBuiltInRoot(CERTCertificate* cert, bool* result)
   }
 
   MutexAutoLock lock(mMutex);
-  MOZ_ASSERT(mNSSInitialized);
   if (mTestBuiltInRootHash.IsEmpty()) {
     return NS_OK;
   }
@@ -2227,7 +2259,6 @@ nsNSSComponent::IsCertContentSigningRoot(CERTCertificate* cert, bool* result)
   }
 
   MutexAutoLock lock(mMutex);
-  MOZ_ASSERT(mNSSInitialized);
 
   if (mContentSigningRootHash.IsEmpty()) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("mContentSigningRootHash is empty"));
@@ -2258,7 +2289,6 @@ NS_IMETHODIMP
 nsNSSComponent::GetDefaultCertVerifier(SharedCertVerifier** result)
 {
   MutexAutoLock lock(mMutex);
-  MOZ_ASSERT(mNSSInitialized);
   NS_ENSURE_ARG_POINTER(result);
   RefPtr<SharedCertVerifier> certVerifier(mDefaultCertVerifier);
   certVerifier.forget(result);

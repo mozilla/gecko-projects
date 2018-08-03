@@ -69,7 +69,6 @@
 #include "nsIScriptError.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsISSLStatus.h"
-#include "nsISSLStatusProvider.h"
 #include "nsITransportSecurityInfo.h"
 #include "nsIWebProgressListener.h"
 #include "LoadContextInfo.h"
@@ -95,7 +94,6 @@
 #include "nsIHttpPushListener.h"
 #include "nsIX509Cert.h"
 #include "ScopedNSSTypes.h"
-#include "NullPrincipal.h"
 #include "nsIDeprecationWarner.h"
 #include "nsIDocument.h"
 #include "nsICompressConvStats.h"
@@ -104,6 +102,7 @@
 #include "mozilla/extensions/StreamFilterParent.h"
 #include "mozilla/net/Predictor.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/NullPrincipal.h"
 #include "mozilla/StaticPrefs.h"
 #include "CacheControlParser.h"
 #include "nsMixedContentBlocker.h"
@@ -426,10 +425,10 @@ nsHttpChannel::AddSecurityMessage(const nsAString& aMessageTag,
 }
 
 NS_IMETHODIMP
-nsHttpChannel::LogBlockedCORSRequest(const nsAString& aMessage)
+nsHttpChannel::LogBlockedCORSRequest(const nsAString& aMessage, const nsACString& aCategory)
 {
     if (mWarningReporter) {
-        return mWarningReporter->LogBlockedCORSRequest(aMessage);
+        return mWarningReporter->LogBlockedCORSRequest(aMessage, aCategory);
     }
     return NS_ERROR_UNEXPECTED;
 }
@@ -571,6 +570,12 @@ nsHttpChannel::Connect()
           this, isTrackingResource, mClassOfService));
 
     if (isTrackingResource) {
+        if (CheckFastBlocked()) {
+            Unused << AsyncAbort(NS_ERROR_ABORT);
+            CloseCacheEntry(false);
+            return NS_OK;
+        }
+
         AddClassFlags(nsIClassOfService::Tail);
     }
 
@@ -581,6 +586,39 @@ nsHttpChannel::Connect()
     }
 
     return ConnectOnTailUnblock();
+}
+
+bool
+nsHttpChannel::CheckFastBlocked()
+{
+    LOG(("nsHttpChannel::CheckFastBlocked [this=%p]\n", this));
+
+    static bool sFastBlockInited = false;
+    static bool sIsFastBlockEnabled = false;
+    static uint32_t sFastBlockTimeout = 0;
+
+    if (!sFastBlockInited) {
+        sFastBlockInited = true;
+        Preferences::AddBoolVarCache(&sIsFastBlockEnabled, "browser.fastblock.enabled");
+        Preferences::AddUintVarCache(&sFastBlockTimeout, "browser.fastblock.timeout");
+    }
+
+    TimeStamp timestamp;
+    if (NS_FAILED(GetNavigationStartTimeStamp(&timestamp))) {
+        return false;
+    }
+
+    if (!sIsFastBlockEnabled || !timestamp) {
+        return false;
+    }
+
+    TimeDuration duration = TimeStamp::NowLoRes() - timestamp;
+    if (duration.ToMilliseconds() < sFastBlockTimeout) {
+        return false;
+    }
+
+    LOG(("FastBlock timeout (%lf) [this=%p]\n", duration.ToMilliseconds(), this));
+    return true;
 }
 
 nsresult
@@ -1857,11 +1895,11 @@ nsHttpChannel::ProcessSecurityHeaders()
     uint32_t flags =
       NS_UsePrivateBrowsing(this) ? nsISocketProvider::NO_PERMANENT_STORAGE : 0;
 
-    // Get the SSLStatus
-    nsCOMPtr<nsISSLStatusProvider> sslprov = do_QueryInterface(mSecurityInfo);
-    NS_ENSURE_TRUE(sslprov, NS_ERROR_FAILURE);
+    // Get the TransportSecurityInfo
+    nsCOMPtr<nsITransportSecurityInfo> transSecInfo = do_QueryInterface(mSecurityInfo);
+    NS_ENSURE_TRUE(transSecInfo, NS_ERROR_FAILURE);
     nsCOMPtr<nsISSLStatus> sslStatus;
-    rv = sslprov->GetSSLStatus(getter_AddRefs(sslStatus));
+    rv = transSecInfo->GetSSLStatus(getter_AddRefs(sslStatus));
     NS_ENSURE_SUCCESS(rv, rv);
     NS_ENSURE_TRUE(sslStatus, NS_ERROR_FAILURE);
 
@@ -1992,17 +2030,15 @@ nsHttpChannel::ProcessSSLInformation()
         !IsHTTPS() || mPrivateBrowsing)
         return;
 
-    nsCOMPtr<nsISSLStatusProvider> statusProvider =
+    nsCOMPtr<nsITransportSecurityInfo> securityInfo =
         do_QueryInterface(mSecurityInfo);
-    if (!statusProvider)
+    if (!securityInfo)
         return;
     nsCOMPtr<nsISSLStatus> sslstat;
-    statusProvider->GetSSLStatus(getter_AddRefs(sslstat));
+    securityInfo->GetSSLStatus(getter_AddRefs(sslstat));
     if (!sslstat)
         return;
 
-    nsCOMPtr<nsITransportSecurityInfo> securityInfo =
-        do_QueryInterface(mSecurityInfo);
     uint32_t state;
     if (securityInfo &&
         NS_SUCCEEDED(securityInfo->GetSecurityState(&state)) &&
@@ -5514,6 +5550,18 @@ nsHttpChannel::SetupReplacementChannel(nsIURI       *newURI,
         resumableChannel->ResumeAt(mStartPos, mEntityID);
     }
 
+    nsCOMPtr<nsIHttpChannelInternal> internalChannel = do_QueryInterface(newChannel, &rv);
+    if (NS_SUCCEEDED(rv)) {
+        TimeStamp timestamp;
+        rv = GetNavigationStartTimeStamp(&timestamp);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+            return rv;
+        }
+        if (timestamp) {
+            Unused << internalChannel->SetNavigationStartTimeStamp(timestamp);
+        }
+    }
+
     return NS_OK;
 }
 
@@ -6494,6 +6542,23 @@ nsHttpChannel::AttachStreamFilter(ipc::Endpoint<extensions::PStreamFilterParent>
   return true;
 }
 
+NS_IMETHODIMP
+nsHttpChannel::GetNavigationStartTimeStamp(TimeStamp* aTimeStamp)
+{
+  LOG(("nsHttpChannel::GetNavigationStartTimeStamp %p", this));
+  MOZ_ASSERT(aTimeStamp);
+  *aTimeStamp = mNavigationStartTimeStamp;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsHttpChannel::SetNavigationStartTimeStamp(TimeStamp aTimeStamp)
+{
+  LOG(("nsHttpChannel::SetNavigationStartTimeStamp %p", this));
+  mNavigationStartTimeStamp = aTimeStamp;
+  return NS_OK;
+}
+
 //-----------------------------------------------------------------------------
 // nsHttpChannel::nsISupportsPriority
 //-----------------------------------------------------------------------------
@@ -6898,6 +6963,21 @@ nsHttpChannel::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
                 mozilla::MutexAutoLock lock(mRCWNLock);
                 mFirstResponseSource = RESPONSE_FROM_NETWORK;
                 mOnStartRequestTimestamp = TimeStamp::Now();
+
+                // Conditional or byte range header could be added in
+                // OnCacheEntryCheck. We need to remove them because the
+                // request might be sent again due to auth retry and we must
+                // not send these headers without having the entry.
+                if (mDidReval) {
+                    LOG(("  Removing conditional request headers"));
+                    UntieValidationRequest();
+                    mDidReval = false;
+                }
+                if (mCachedContentIsPartial) {
+                    LOG(("  Removing byte range request headers"));
+                    UntieByteRangeRequest();
+                    mCachedContentIsPartial = false;
+                }
             }
             mAvailableCachedAltDataType.Truncate();
         } else if (WRONG_RACING_RESPONSE_SOURCE(request)) {
@@ -8186,7 +8266,7 @@ nsHttpChannel::OfflineCacheEntryAsForeignMarker::MarkAsForeign()
     nsresult rv;
 
     nsCOMPtr<nsIURI> noRefURI;
-    rv = mCacheURI->CloneIgnoringRef(getter_AddRefs(noRefURI));
+    rv = NS_GetURIWithoutRef(mCacheURI, getter_AddRefs(noRefURI));
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsAutoCString spec;

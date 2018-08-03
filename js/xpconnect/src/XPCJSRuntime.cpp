@@ -41,6 +41,8 @@
 #include "nsCycleCollector.h"
 #include "jsapi.h"
 #include "js/MemoryMetrics.h"
+#include "js/UbiNode.h"
+#include "js/UbiNodeUtils.h"
 #include "mozilla/dom/GeneratedAtomList.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
@@ -57,6 +59,7 @@
 #include "nsAboutProtocolUtils.h"
 
 #include "GeckoProfiler.h"
+#include "NodeUbiReporting.h"
 #include "nsIInputStream.h"
 #include "nsIXULRuntime.h"
 #include "nsJSPrincipals.h"
@@ -124,9 +127,12 @@ public:
   NS_IMETHOD Run() override
   {
       AUTO_PROFILER_LABEL("AsyncFreeSnowWhite::Run", GCCC);
-      
+
       TimeStamp start = TimeStamp::Now();
-      bool hadSnowWhiteObjects = nsCycleCollector_doDeferredDeletion();
+      // 2 ms budget, given that kICCSliceBudget is only 3 ms
+      js::SliceBudget budget = js::SliceBudget(js::TimeBudget(2));
+      bool hadSnowWhiteObjects =
+        nsCycleCollector_doDeferredDeletionWithBudget(budget);
       Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_ASYNC_SNOW_WHITE_FREEING,
                             uint32_t((TimeStamp::Now() - start).ToMilliseconds()));
       if (hadSnowWhiteObjects && !mContinuation) {
@@ -143,7 +149,7 @@ public:
   nsresult Dispatch()
   {
       nsCOMPtr<nsIRunnable> self(this);
-      return NS_IdleDispatchToCurrentThread(self.forget(), 2500);
+      return NS_IdleDispatchToCurrentThread(self.forget(), 500);
   }
 
   void Start(bool aContinuation = false, bool aPurge = false)
@@ -161,7 +167,8 @@ public:
     : Runnable("AsyncFreeSnowWhite")
     , mContinuation(false)
     , mActive(false)
-    , mPurge(false) {}
+    , mPurge(false)
+  {}
 
 public:
   bool mContinuation;
@@ -177,7 +184,7 @@ CompartmentPrivate::CompartmentPrivate(JS::Compartment* c)
     , isWebExtensionContentScript(false)
     , allowCPOWs(false)
     , isContentXBLCompartment(false)
-    , isAddonCompartment(false)
+    , isSandboxCompartment(false)
     , universalXPConnectEnabled(false)
     , forcePermissiveCOWs(false)
     , wasNuked(false)
@@ -452,6 +459,16 @@ bool
 IsInContentXBLScope(JSObject* obj)
 {
     return IsContentXBLCompartment(js::GetObjectCompartment(obj));
+}
+
+bool
+IsInSandboxCompartment(JSObject* obj)
+{
+    JS::Compartment* comp = js::GetObjectCompartment(obj);
+
+    // We always eagerly create compartment privates for sandbox compartments.
+    CompartmentPrivate* priv = CompartmentPrivate::Get(comp);
+    return priv && priv->isSandboxCompartment;
 }
 
 bool
@@ -2813,6 +2830,67 @@ XPCJSRuntime::Get()
     return nsXPConnect::GetRuntimeInstance();
 }
 
+// Subclass of JS::ubi::Base for DOM reflector objects for the JS::ubi::Node memory
+// analysis framework; see js/public/UbiNode.h.
+// In XPCJSRuntime::Initialize, we register the ConstructUbiNode function as a
+// hook with the SpiderMonkey runtime for it to use to construct ubi::Nodes
+// of this class for JSObjects whose class has the JSCLASS_IS_DOMJSCLASS flag set.
+// ReflectorNode specializes Concrete<JSObject> for DOM reflector nodes, reporting
+// the edge from the JSObject to the nsINode it represents, in addition to the
+// usual edges departing any normal JSObject.
+namespace JS {
+namespace ubi {
+class ReflectorNode : public Concrete<JSObject>
+{
+protected:
+  explicit ReflectorNode(JSObject *ptr) : Concrete<JSObject>(ptr) { }
+
+public:
+  static void construct(void *storage, JSObject *ptr)
+  {
+      new (storage) ReflectorNode(ptr);
+  }
+  js::UniquePtr<JS::ubi::EdgeRange> edges(JSContext* cx, bool wantNames) const override;
+};
+
+js::UniquePtr<EdgeRange>
+ReflectorNode::edges(JSContext* cx, bool wantNames) const
+{
+    js::UniquePtr<SimpleEdgeRange> range(
+        static_cast<SimpleEdgeRange*>(Concrete<JSObject>::edges(cx, wantNames).release()));
+    if (!range) {
+        return nullptr;
+    }
+    // UNWRAP_OBJECT assumes the object is completely initialized, but ours
+    // may not be.  Luckily, UnwrapDOMObjectToISupports checks for the
+    // uninitialized case (and returns null if uninitialized), so we can use
+    // that to guard against uninitialized objects.
+    nsISupports* supp = UnwrapDOMObjectToISupports(&get());
+    if (supp) {
+        nsCOMPtr<nsINode> node;
+        UNWRAP_OBJECT(Node, &get(), node);
+        if (node) {
+            char16_t* edgeName = nullptr;
+            if (wantNames) {
+                edgeName = NS_strdup(u"Reflected Node");
+            }
+            if (!range->addEdge(Edge(edgeName, node.get()))){
+                return nullptr;
+            }
+        }
+    }
+    return range;
+}
+
+} // Namespace ubi
+} // Namespace JS
+
+void
+ConstructUbiNode(void* storage, JSObject* ptr)
+{
+  JS::ubi::ReflectorNode::construct(storage, ptr);
+}
+
 void
 XPCJSRuntime::Initialize(JSContext* cx)
 {
@@ -2876,6 +2954,9 @@ XPCJSRuntime::Initialize(JSContext* cx)
     RegisterJSMainRuntimeRealmsSystemDistinguishedAmount(JSMainRuntimeRealmsSystemDistinguishedAmount);
     RegisterJSMainRuntimeRealmsUserDistinguishedAmount(JSMainRuntimeRealmsUserDistinguishedAmount);
     mozilla::RegisterJSSizeOfTab(JSSizeOfTab);
+
+    // Set the callback for reporting memory to ubi::Node.
+    JS::ubi::SetConstructUbiNodeForDOMObjectCallback(cx, &ConstructUbiNode);
 
     xpc_LocalizeRuntime(JS_GetRuntime(cx));
 }

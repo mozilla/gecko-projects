@@ -20,22 +20,15 @@ const kDumpAllStacks = false;
 const whitelist = {
   components: new Set([
     "ContentProcessSingleton.js",
-    "EnterprisePoliciesContent.js", // bug 1470324
     "extension-process-script.js",
   ]),
   modules: new Set([
-    // From the test harness
     "chrome://mochikit/content/ShutdownLeaksCollector.jsm",
-    "resource://specialpowers/MockColorPicker.jsm",
-    "resource://specialpowers/MockFilePicker.jsm",
-    "resource://specialpowers/MockPermissionPrompt.jsm",
 
     // General utilities
     "resource://gre/modules/AppConstants.jsm",
     "resource://gre/modules/AsyncShutdown.jsm",
     "resource://gre/modules/DeferredTask.jsm",
-    "resource://gre/modules/FileUtils.jsm",
-    "resource://gre/modules/NetUtil.jsm",
     "resource://gre/modules/PromiseUtils.jsm",
     "resource://gre/modules/Services.jsm", // bug 1464542
     "resource://gre/modules/Timer.jsm",
@@ -45,7 +38,7 @@ const whitelist = {
     "resource://gre/modules/Log.jsm",
 
     // Session store
-    "resource:///modules/sessionstore/ContentRestore.jsm",
+    "resource:///modules/sessionstore/ContentSessionStore.jsm",
     "resource://gre/modules/sessionstore/SessionHistory.jsm",
 
     // Forms and passwords
@@ -56,12 +49,12 @@ const whitelist = {
     "resource:///modules/ContentLinkHandler.jsm",
     "resource:///modules/ContentMetaHandler.jsm",
     "resource:///modules/PageStyleHandler.jsm",
-    "resource:///modules/LightweightThemeChildListener.jsm",
     "resource://gre/modules/BrowserUtils.jsm",
     "resource://gre/modules/E10SUtils.jsm",
     "resource://gre/modules/PrivateBrowsingUtils.jsm",
     "resource://gre/modules/ReaderMode.jsm",
-    "resource://gre/modules/RemotePageManager.jsm",
+    "resource://gre/modules/WebProgressChild.jsm",
+    "resource://gre/modules/WebNavigationChild.jsm",
 
     // Pocket
     "chrome://pocket/content/AboutPocket.jsm",
@@ -71,19 +64,9 @@ const whitelist = {
     "resource://gre/modules/TelemetrySession.jsm", // bug 1470339
     "resource://gre/modules/TelemetryUtils.jsm", // bug 1470339
 
-    // PDF.js
-    "resource://pdf.js/PdfJsRegistration.jsm",
-    "resource://pdf.js/PdfjsContentUtils.jsm",
-
     // Extensions
     "resource://gre/modules/ExtensionUtils.jsm",
     "resource://gre/modules/MessageChannel.jsm",
-
-    // Service workers
-    "resource://gre/modules/ServiceWorkerCleanUp.jsm",
-
-    // Shield
-    "resource://normandy-content/AboutPages.jsm",
   ]),
 };
 

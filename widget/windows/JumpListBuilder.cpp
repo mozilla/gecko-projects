@@ -34,10 +34,6 @@ using mozilla::dom::Promise;
 namespace mozilla {
 namespace widget {
 
-static NS_DEFINE_CID(kJumpListItemCID,     NS_WIN_JUMPLISTITEM_CID);
-static NS_DEFINE_CID(kJumpListLinkCID,     NS_WIN_JUMPLISTLINK_CID);
-static NS_DEFINE_CID(kJumpListShortcutCID, NS_WIN_JUMPLISTSHORTCUT_CID);
-
 // defined in WinTaskbar.cpp
 extern const wchar_t *gMozillaJumpListIDGeneric;
 
@@ -189,9 +185,7 @@ NS_IMETHODIMP JumpListBuilder::InitListBuild(JSContext* aCx,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  nsIGlobalObject* globalObject =
-    xpc::NativeGlobal(JS::CurrentGlobalOrNull(aCx));
-
+  nsIGlobalObject* globalObject = xpc::CurrentNativeGlobal(aCx);
   if (NS_WARN_IF(!globalObject)) {
     return NS_ERROR_FAILURE;
   }
@@ -233,16 +227,21 @@ void JumpListBuilder::DoInitListBuild(RefPtr<Promise>&& aPromise)
   // The returned objArray of removed items are for manually removed items.
   // This does not return items which are removed because they were previously
   // part of the jump list but are no longer part of the jump list.
-  if (SUCCEEDED(hr) && objArray) {
+  if (SUCCEEDED(hr)) {
     sBuildingList = true;
     RemoveIconCacheAndGetJumplistShortcutURIs(objArray, urisToRemove);
-  }
 
-  NS_DispatchToMainThread(NS_NewRunnableFunction("InitListBuildResolve",
-                                                 [urisToRemove = std::move(urisToRemove),
-                                                  promise = std::move(aPromise)]() {
-    promise->MaybeResolve(urisToRemove);
-  }));
+    NS_DispatchToMainThread(NS_NewRunnableFunction("InitListBuildResolve",
+                                                   [urisToRemove = std::move(urisToRemove),
+                                                    promise = std::move(aPromise)]() {
+      promise->MaybeResolve(urisToRemove);
+    }));
+  } else {
+    NS_DispatchToMainThread(NS_NewRunnableFunction("InitListBuildReject",
+                                                   [promise = std::move(aPromise)]() {
+      promise->MaybeReject(NS_ERROR_FAILURE);
+    }));
+  }
 }
 
 // Ensures that we have no old ICO files left in the jump list cache
@@ -531,6 +530,11 @@ void JumpListBuilder::RemoveIconCacheAndGetJumplistShortcutURIs(IObjectArray *aO
                                                                 nsTArray<nsString>& aURISpecs)
 {
   MOZ_ASSERT(!NS_IsMainThread());
+
+  // Early return here just in case some versions of Windows don't populate this
+  if (!aObjArray) {
+    return;
+  }
 
   uint32_t count = 0;
   aObjArray->GetCount(&count);

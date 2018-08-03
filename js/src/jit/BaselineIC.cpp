@@ -14,7 +14,6 @@
 #include "jstypes.h"
 
 #include "builtin/Eval.h"
-#include "builtin/SIMD.h"
 #include "gc/Policy.h"
 #include "jit/BaselineCacheIRCompiler.h"
 #include "jit/BaselineDebugModeOSR.h"
@@ -2013,71 +2012,6 @@ TryAttachFunCallStub(JSContext* cx, ICCall_Fallback* stub, HandleScript script, 
     return true;
 }
 
-// Check if target is a native SIMD operation which returns a SIMD type.
-// If so, set res to a template object matching the SIMD type produced and return true.
-static bool
-GetTemplateObjectForSimd(JSContext* cx, JSFunction* target, MutableHandleObject res)
-{
-    if (!target->hasJitInfo())
-        return false;
-
-    const JSJitInfo* jitInfo = target->jitInfo();
-    if (jitInfo->type() != JSJitInfo::InlinableNative)
-        return false;
-
-    // Check if this is a native inlinable SIMD operation.
-    SimdType ctrlType;
-    switch (jitInfo->inlinableNative) {
-      case InlinableNative::SimdInt8x16:   ctrlType = SimdType::Int8x16;   break;
-      case InlinableNative::SimdUint8x16:  ctrlType = SimdType::Uint8x16;  break;
-      case InlinableNative::SimdInt16x8:   ctrlType = SimdType::Int16x8;   break;
-      case InlinableNative::SimdUint16x8:  ctrlType = SimdType::Uint16x8;  break;
-      case InlinableNative::SimdInt32x4:   ctrlType = SimdType::Int32x4;   break;
-      case InlinableNative::SimdUint32x4:  ctrlType = SimdType::Uint32x4;  break;
-      case InlinableNative::SimdFloat32x4: ctrlType = SimdType::Float32x4; break;
-      case InlinableNative::SimdBool8x16:  ctrlType = SimdType::Bool8x16;  break;
-      case InlinableNative::SimdBool16x8:  ctrlType = SimdType::Bool16x8;  break;
-      case InlinableNative::SimdBool32x4:  ctrlType = SimdType::Bool32x4;  break;
-      // This is not an inlinable SIMD operation.
-      default: return false;
-    }
-
-    // The controlling type is not necessarily the return type.
-    // Check the actual operation.
-    SimdOperation simdOp = SimdOperation(jitInfo->nativeOp);
-    SimdType retType;
-
-    switch(simdOp) {
-      case SimdOperation::Fn_allTrue:
-      case SimdOperation::Fn_anyTrue:
-      case SimdOperation::Fn_extractLane:
-        // These operations return a scalar. No template object needed.
-        return false;
-
-      case SimdOperation::Fn_lessThan:
-      case SimdOperation::Fn_lessThanOrEqual:
-      case SimdOperation::Fn_equal:
-      case SimdOperation::Fn_notEqual:
-      case SimdOperation::Fn_greaterThan:
-      case SimdOperation::Fn_greaterThanOrEqual:
-        // These operations return a boolean vector with the same shape as the
-        // controlling type.
-        retType = GetBooleanSimdType(ctrlType);
-        break;
-
-      default:
-        // All other operations return the controlling type.
-        retType = ctrlType;
-        break;
-    }
-
-    // Create a template object based on retType.
-    RootedGlobalObject global(cx, cx->global());
-    Rooted<SimdTypeDescr*> descr(cx, GlobalObject::getOrCreateSimdTypeDescr(cx, global, retType));
-    res.set(cx->realm()->jitRealm()->getSimdTemplateObjectFor(cx, descr));
-    return true;
-}
-
 static bool
 GetTemplateObjectForNative(JSContext* cx, HandleFunction target, const CallArgs& args,
                            MutableHandleObject res, bool* skipAttach)
@@ -2161,9 +2095,6 @@ GetTemplateObjectForNative(JSContext* cx, HandleFunction target, const CallArgs&
         return !!res;
     }
 
-    if (JitSupportsSimd() && GetTemplateObjectForSimd(cx, target, res))
-       return !!res;
-
     return true;
 }
 
@@ -2177,12 +2108,6 @@ GetTemplateObjectForClassHook(JSContext* cx, JSNative hook, CallArgs& args,
     if (hook == TypedObject::construct) {
         Rooted<TypeDescr*> descr(cx, &args.callee().as<TypeDescr>());
         templateObject.set(TypedObject::createZeroed(cx, descr, gc::TenuredHeap));
-        return !!templateObject;
-    }
-
-    if (hook == SimdTypeDescr::call && JitSupportsSimd()) {
-        Rooted<SimdTypeDescr*> descr(cx, &args.callee().as<SimdTypeDescr>());
-        templateObject.set(cx->realm()->jitRealm()->getSimdTemplateObjectFor(cx, descr));
         return !!templateObject;
     }
 
@@ -4932,6 +4857,163 @@ ICUnaryArith_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
 
     return tailCallVM(DoUnaryArithFallbackInfo, masm);
 }
+
+//
+// BinaryArith_Fallback
+//
+
+static bool
+DoBinaryArithFallback(JSContext* cx, BaselineFrame* frame, ICBinaryArith_Fallback* stub_,
+                      HandleValue lhs, HandleValue rhs, MutableHandleValue ret)
+{
+    // This fallback stub may trigger debug mode toggling.
+    DebugModeOSRVolatileStub<ICBinaryArith_Fallback*> stub(ICStubEngine::Baseline, frame, stub_);
+
+    RootedScript script(cx, frame->script());
+    jsbytecode* pc = stub->icEntry()->pc(script);
+    JSOp op = JSOp(*pc);
+    FallbackICSpew(cx, stub, "CacheIRBinaryArith(%s,%d,%d)", CodeName[op],
+            int(lhs.isDouble() ? JSVAL_TYPE_DOUBLE : lhs.extractNonDoubleType()),
+            int(rhs.isDouble() ? JSVAL_TYPE_DOUBLE : rhs.extractNonDoubleType()));
+
+    // Don't pass lhs/rhs directly, we need the original values when
+    // generating stubs.
+    RootedValue lhsCopy(cx, lhs);
+    RootedValue rhsCopy(cx, rhs);
+
+    // Perform the compare operation.
+    switch(op) {
+      case JSOP_ADD:
+        // Do an add.
+        if (!AddValues(cx, &lhsCopy, &rhsCopy, ret))
+            return false;
+        break;
+      case JSOP_SUB:
+        if (!SubValues(cx, &lhsCopy, &rhsCopy, ret))
+            return false;
+        break;
+      case JSOP_MUL:
+        if (!MulValues(cx, &lhsCopy, &rhsCopy, ret))
+            return false;
+        break;
+      case JSOP_DIV:
+        if (!DivValues(cx, &lhsCopy, &rhsCopy, ret))
+            return false;
+        break;
+      case JSOP_MOD:
+        if (!ModValues(cx, &lhsCopy, &rhsCopy, ret))
+            return false;
+        break;
+      case JSOP_POW:
+        if (!PowValues(cx, &lhsCopy, &rhsCopy, ret))
+            return false;
+        break;
+      case JSOP_BITOR: {
+        int32_t result;
+        if (!BitOr(cx, lhs, rhs, &result))
+            return false;
+        ret.setInt32(result);
+        break;
+      }
+      case JSOP_BITXOR: {
+        int32_t result;
+        if (!BitXor(cx, lhs, rhs, &result))
+            return false;
+        ret.setInt32(result);
+        break;
+      }
+      case JSOP_BITAND: {
+        int32_t result;
+        if (!BitAnd(cx, lhs, rhs, &result))
+            return false;
+        ret.setInt32(result);
+        break;
+      }
+      case JSOP_LSH: {
+        int32_t result;
+        if (!BitLsh(cx, lhs, rhs, &result))
+            return false;
+        ret.setInt32(result);
+        break;
+      }
+      case JSOP_RSH: {
+        int32_t result;
+        if (!BitRsh(cx, lhs, rhs, &result))
+            return false;
+        ret.setInt32(result);
+        break;
+      }
+      case JSOP_URSH: {
+        if (!UrshOperation(cx, lhs, rhs, ret))
+            return false;
+        break;
+      }
+      default:
+        MOZ_CRASH("Unhandled baseline arith op");
+    }
+
+    // Check if debug mode toggling made the stub invalid.
+    if (stub.invalid())
+        return true;
+
+    if (ret.isDouble())
+        stub->setSawDoubleResult();
+
+    // Check if debug mode toggling made the stub invalid.
+    if (stub.invalid())
+        return true;
+
+    if (ret.isDouble())
+        stub->setSawDoubleResult();
+
+    if (stub->state().maybeTransition())
+        stub->discardStubs(cx);
+
+    if (stub->state().canAttachStub()) {
+        BinaryArithIRGenerator gen(cx, script, pc, stub->state().mode(),
+                                   op, lhs, rhs, ret);
+        if (gen.tryAttachStub()) {
+            bool attached = false;
+            ICStub* newStub = AttachBaselineCacheIRStub(cx, gen.writerRef(), gen.cacheKind(),
+                                                        BaselineCacheIRStubKind::Regular,
+                                                        ICStubEngine::Baseline, script, stub, &attached);
+            if (newStub)
+                JitSpew(JitSpew_BaselineIC, "  Attached BinaryArith CacheIR stub for %s", CodeName[op]);
+
+        } else {
+            stub->noteUnoptimizableOperands();
+        }
+    }
+    return true;
+}
+
+typedef bool (*DoBinaryArithFallbackFn)(JSContext*, BaselineFrame*, ICBinaryArith_Fallback*,
+                                        HandleValue, HandleValue, MutableHandleValue);
+static const VMFunction DoBinaryArithFallbackInfo =
+    FunctionInfo<DoBinaryArithFallbackFn>(DoBinaryArithFallback, "DoBinaryArithFallback",
+                                          TailCall, PopValues(2));
+
+bool
+ICBinaryArith_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
+{
+    MOZ_ASSERT(R0 == JSReturnOperand);
+
+    // Restore the tail call register.
+    EmitRestoreTailCallReg(masm);
+
+    // Ensure stack is fully synced for the expression decompiler.
+    masm.pushValue(R0);
+    masm.pushValue(R1);
+
+    // Push arguments.
+    masm.pushValue(R1);
+    masm.pushValue(R0);
+    masm.push(ICStubReg);
+    pushStubPayload(masm, R0.scratchReg());
+
+    return tailCallVM(DoBinaryArithFallbackInfo, masm);
+}
+
 
 } // namespace jit
 } // namespace js

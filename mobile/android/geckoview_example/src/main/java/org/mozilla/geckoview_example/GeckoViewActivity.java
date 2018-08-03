@@ -115,6 +115,7 @@ public class GeckoViewActivity extends AppCompatActivity {
                     .remoteDebuggingEnabled(true)
                     .nativeCrashReportingEnabled(true)
                     .javaCrashReportingEnabled(true)
+                    .crashReportingJobId(1024)
                     .consoleOutput(true)
                     .trackingProtectionCategories(TrackingProtectionDelegate.CATEGORY_ALL);
 
@@ -433,6 +434,11 @@ public class GeckoViewActivity extends AppCompatActivity {
         }
 
         @Override
+        public void onProgressChange(GeckoSession session, int progress) {
+            Log.i(LOGTAG, "onProgressChange " + progress);
+        }
+
+        @Override
         public void onSecurityChange(GeckoSession session, SecurityInformation securityInfo) {
             Log.i(LOGTAG, "Security status changed to " + securityInfo.securityMode);
         }
@@ -582,6 +588,13 @@ public class GeckoViewActivity extends AppCompatActivity {
             startActivity(intent);
 
             return GeckoResult.fromValue(newSession);
+        }
+
+        public void onLoadError(final GeckoSession session, final String uri,
+                                final int category, final int error) {
+            Log.d(LOGTAG, "onLoadError=" + uri +
+                  " error category=" + category +
+                  " error=" + error);
         }
     }
 

@@ -130,8 +130,7 @@ Finder.prototype = {
 
   get clipboardSearchString() {
     return GetClipboardSearchString(this._getWindow()
-                                        .QueryInterface(Ci.nsIInterfaceRequestor)
-                                        .getInterface(Ci.nsIWebNavigation)
+                                        .docShell
                                         .QueryInterface(Ci.nsILoadContext));
   },
 
@@ -470,7 +469,7 @@ Finder.prototype = {
   _getWindow() {
     if (!this._docShell)
       return null;
-    return this._docShell.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
+    return this._docShell.domWindow;
   },
 
   /**
@@ -507,8 +506,7 @@ Finder.prototype = {
       return null;
     }
 
-    let utils = topWin.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIDOMWindowUtils);
+    let utils = topWin.windowUtils;
 
     let scrollX = {}, scrollY = {};
     utils.getScrollXY(false, scrollX, scrollY);
@@ -572,9 +570,7 @@ Finder.prototype = {
     }
 
     // Yuck. See bug 138068.
-    let docShell = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIWebNavigation)
-                          .QueryInterface(Ci.nsIDocShell);
+    let docShell = aWindow.docShell;
 
     let controller = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
                              .getInterface(Ci.nsISelectionDisplay)

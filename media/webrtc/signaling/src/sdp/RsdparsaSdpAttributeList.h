@@ -123,6 +123,7 @@ private:
   void LoadIdentity(RustAttributeList* attributeList);
   void LoadIceOptions(RustAttributeList* attributeList);
   void LoadFingerprint(RustAttributeList* attributeList);
+  void LoadDtlsMessage(RustAttributeList* attributeList);
   void LoadSetup(RustAttributeList* attributeList);
   void LoadSsrc(RustAttributeList* attributeList);
   void LoadRtpmap(RustAttributeList* attributeList);
@@ -145,6 +146,7 @@ private:
   void LoadRids(RustAttributeList* attributeList);
   void LoadExtmap(RustAttributeList* attributeList);
   void LoadMaxPtime(RustAttributeList* attributeList);
+  void LoadCandidate(RustAttributeList* attributeList);
 
   void WarnAboutMisplacedAttribute(SdpAttribute::AttributeType type,
                                    uint32_t lineNumber,

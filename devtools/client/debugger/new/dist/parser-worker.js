@@ -764,212 +764,6 @@ module.exports = overArg;
 
 /***/ }),
 
-/***/ 1363:
-/***/ (function(module, exports, __webpack_require__) {
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const networkRequest = __webpack_require__(1367);
-const workerUtils = __webpack_require__(1368);
-
-module.exports = {
-  networkRequest,
-  workerUtils
-};
-
-/***/ }),
-
-/***/ 1367:
-/***/ (function(module, exports) {
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-function networkRequest(url, opts) {
-  return fetch(url, {
-    cache: opts.loadFromCache ? "default" : "no-cache"
-  }).then(res => {
-    if (res.status >= 200 && res.status < 300) {
-      return res.text().then(text => ({ content: text }));
-    }
-    return Promise.reject(`request failed with status ${res.status}`);
-  });
-}
-
-module.exports = networkRequest;
-
-/***/ }),
-
-/***/ 1368:
-/***/ (function(module, exports) {
-
-function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
-
-function WorkerDispatcher() {
-  this.msgId = 1;
-  this.worker = null;
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-WorkerDispatcher.prototype = {
-  start(url) {
-    this.worker = new Worker(url);
-    this.worker.onerror = () => {
-      console.error(`Error in worker ${url}`);
-    };
-  },
-
-  stop() {
-    if (!this.worker) {
-      return;
-    }
-
-    this.worker.terminate();
-    this.worker = null;
-  },
-
-  task(method, { queue = false } = {}) {
-    const calls = [];
-    const push = args => {
-      return new Promise((resolve, reject) => {
-        if (queue && calls.length === 0) {
-          Promise.resolve().then(flush);
-        }
-
-        calls.push([args, resolve, reject]);
-
-        if (!queue) {
-          flush();
-        }
-      });
-    };
-
-    const flush = () => {
-      const items = calls.slice();
-      calls.length = 0;
-
-      const id = this.msgId++;
-      this.worker.postMessage({ id, method, calls: items.map(item => item[0]) });
-
-      const listener = ({ data: result }) => {
-        if (result.id !== id) {
-          return;
-        }
-
-        if (!this.worker) {
-          return;
-        }
-
-        this.worker.removeEventListener("message", listener);
-
-        result.results.forEach((resultData, i) => {
-          const [, resolve, reject] = items[i];
-
-          if (resultData.error) {
-            reject(resultData.error);
-          } else {
-            resolve(resultData.response);
-          }
-        });
-      };
-
-      this.worker.addEventListener("message", listener);
-    };
-
-    return (...args) => push(args);
-  }
-};
-
-function workerHandler(publicInterface) {
-  return function (msg) {
-    const { id, method, calls } = msg.data;
-
-    Promise.all(calls.map(args => {
-      try {
-        const response = publicInterface[method].apply(undefined, args);
-        if (response instanceof Promise) {
-          return response.then(val => ({ response: val }),
-          // Error can't be sent via postMessage, so be sure to
-          // convert to string.
-          err => ({ error: err.toString() }));
-        } else {
-          return { response };
-        }
-      } catch (error) {
-        // Error can't be sent via postMessage, so be sure to convert to
-        // string.
-        return { error: error.toString() };
-      }
-    })).then(results => {
-      self.postMessage({ id, results });
-    });
-  };
-}
-
-function streamingWorkerHandler(publicInterface, { timeout = 100 } = {}, worker = self) {
-  let streamingWorker = (() => {
-    var _ref = _asyncToGenerator(function* (id, tasks) {
-      let isWorking = true;
-
-      const intervalId = setTimeout(function () {
-        isWorking = false;
-      }, timeout);
-
-      const results = [];
-      while (tasks.length !== 0 && isWorking) {
-        const { callback, context, args } = tasks.shift();
-        const result = yield callback.call(context, args);
-        results.push(result);
-      }
-      worker.postMessage({ id, status: "pending", data: results });
-      clearInterval(intervalId);
-
-      if (tasks.length !== 0) {
-        yield streamingWorker(id, tasks);
-      }
-    });
-
-    return function streamingWorker(_x, _x2) {
-      return _ref.apply(this, arguments);
-    };
-  })();
-
-  return (() => {
-    var _ref2 = _asyncToGenerator(function* (msg) {
-      const { id, method, args } = msg.data;
-      const workerMethod = publicInterface[method];
-      if (!workerMethod) {
-        console.error(`Could not find ${method} defined in worker.`);
-      }
-      worker.postMessage({ id, status: "start" });
-
-      try {
-        const tasks = workerMethod(args);
-        yield streamingWorker(id, tasks);
-        worker.postMessage({ id, status: "done" });
-      } catch (error) {
-        worker.postMessage({ id, status: "error", error });
-      }
-    });
-
-    return function (_x3) {
-      return _ref2.apply(this, arguments);
-    };
-  })();
-}
-
-module.exports = {
-  WorkerDispatcher,
-  workerHandler,
-  streamingWorkerHandler
-};
-
-/***/ }),
-
 /***/ 1375:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -1943,11 +1737,11 @@ var _frameworks = __webpack_require__(1703);
 
 var _pausePoints = __webpack_require__(3612);
 
-var _mapOriginalExpression = __webpack_require__(3613);
+var _mapExpression = __webpack_require__(3755);
 
-var _mapOriginalExpression2 = _interopRequireDefault(_mapOriginalExpression);
+var _mapExpression2 = _interopRequireDefault(_mapExpression);
 
-var _devtoolsUtils = __webpack_require__(1363);
+var _devtoolsUtils = __webpack_require__(3651);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -1969,7 +1763,7 @@ self.onmessage = workerHandler({
   hasSyntaxError: _validate.hasSyntaxError,
   getFramework: _frameworks.getFramework,
   getPausePoints: _pausePoints.getPausePoints,
-  mapOriginalExpression: _mapOriginalExpression2.default
+  mapExpression: _mapExpression2.default
 });
 
 /***/ }),
@@ -22782,6 +22576,7 @@ function buildScopeList(ast, sourceId) {
     sourceId,
     freeVariables: new Map(),
     freeVariableStack: [],
+    inType: null,
     scope: lexical,
     scopeStack: [],
     declarationBindingIds: new Set()
@@ -22908,6 +22703,8 @@ function parseDeclarator(declaratorId, targetScope, type, locationType, declarat
     parseDeclarator(declaratorId.left, targetScope, type, locationType, declaration, state);
   } else if (isNode(declaratorId, "RestElement")) {
     parseDeclarator(declaratorId.argument, targetScope, type, locationType, declaration, state);
+  } else if (t.isTSParameterProperty(declaratorId)) {
+    parseDeclarator(declaratorId.parameter, targetScope, type, locationType, declaration, state);
   }
 }
 
@@ -22956,6 +22753,10 @@ const scopeCollectionVisitor = {
     state.scopeStack.push(state.scope);
 
     const parentNode = ancestors.length === 0 ? null : ancestors[ancestors.length - 1].node;
+
+    if (state.inType) {
+      return;
+    }
 
     if (t.isProgram(node)) {
       const scope = pushTempScope(state, "module", "Module", {
@@ -23127,6 +22928,10 @@ const scopeCollectionVisitor = {
       });
     } else if (t.isImportDeclaration(node) && (!node.importKind || node.importKind === "value")) {
       node.specifiers.forEach(spec => {
+        if (spec.importKind && spec.importKind !== "value") {
+          return;
+        }
+
         if (t.isImportNamespaceSpecifier(spec)) {
           state.declarationBindingIds.add(spec.local);
 
@@ -23176,10 +22981,29 @@ const scopeCollectionVisitor = {
           }
         }]
       };
+    } else if (t.isTSModuleDeclaration(node)) {
+      state.declarationBindingIds.add(node.id);
+      state.scope.bindings[node.id.name] = {
+        type: "const",
+        refs: [{
+          type: "ts-namespace-decl",
+          start: fromBabelLocation(node.id.loc.start, state.sourceId),
+          end: fromBabelLocation(node.id.loc.end, state.sourceId),
+          declaration: {
+            start: fromBabelLocation(node.loc.start, state.sourceId),
+            end: fromBabelLocation(node.loc.end, state.sourceId)
+          }
+        }]
+      };
+    } else if (t.isTSModuleBlock(node)) {
+      pushTempScope(state, "block", "TypeScript Namespace", {
+        start: fromBabelLocation(node.loc.start, state.sourceId),
+        end: fromBabelLocation(node.loc.end, state.sourceId)
+      });
     } else if (t.isIdentifier(node) && t.isReferenced(node, parentNode) &&
     // Babel doesn't cover this in 'isReferenced' yet, but it should
     // eventually.
-    !t.isTSEnumMember(parentNode, { id: node }) &&
+    !t.isTSEnumMember(parentNode, { id: node }) && !t.isTSModuleDeclaration(parentNode, { id: node }) &&
     // isReferenced above fails to see `var { foo } = ...` as a non-reference
     // because the direct parent is not enough to know that the pattern is
     // used within a variable declaration.
@@ -23241,6 +23065,18 @@ const scopeCollectionVisitor = {
         end: fromBabelLocation(node.loc.end, state.sourceId)
       });
     }
+
+    if (
+    // In general Flow expressions are deleted, so they can't contain
+    // runtime bindings, but typecasts are the one exception there.
+    t.isFlow(node) && !t.isTypeCastExpression(node) ||
+    // In general TS items are deleted, but TS has a few wrapper node
+    // types that can contain general JS expressions.
+    node.type.startsWith("TS") && !t.isTSTypeAssertion(node) && !t.isTSAsExpression(node) && !t.isTSNonNullExpression(node) && !t.isTSModuleDeclaration(node) && !t.isTSModuleBlock(node) && !t.isTSParameterProperty(node) && !t.isTSExportAssignment(node)) {
+      // Flag this node as a root "type" node. All items inside of this
+      // will be skipped entirely.
+      state.inType = node;
+    }
   },
   exit(node, ancestors, state) {
     const currentScope = state.scope;
@@ -23281,6 +23117,10 @@ const scopeCollectionVisitor = {
 
         refs.push(...value);
       }
+    }
+
+    if (state.inType === node) {
+      state.inType = null;
     }
   }
 };
@@ -23331,8 +23171,9 @@ function buildMetaBindings(sourceId, node, ancestors, parentIndex = ancestors.le
     };
   }
 
-  // Consider "Object(foo)" to be equivalent to "foo"
-  if (t.isCallExpression(parent) && t.isIdentifier(parent.callee, { name: "Object" }) && parent.arguments.length === 1 && parent.arguments[0] === node) {
+  // Consider "Object(foo)", and "__webpack_require__.i(foo)" to be
+  // equivalent to "foo" since they are essentially identity functions.
+  if (t.isCallExpression(parent) && (t.isIdentifier(parent.callee, { name: "Object" }) || t.isMemberExpression(parent.callee, { computed: false }) && t.isIdentifier(parent.callee.object, { name: "__webpack_require__" }) && t.isIdentifier(parent.callee.property, { name: "i" })) && parent.arguments.length === 1 && parent.arguments[0] === node) {
     return {
       type: "inherit",
       start: fromBabelLocation(parent.loc.start, sourceId),
@@ -24662,6 +24503,10 @@ class SimplePath {
     return node[key];
   }
 
+  get key() {
+    return this._ancestor.key;
+  }
+
   set node(replacement) {
     if (this.type !== "Identifier") {
       throw new Error("Replacing anything other than leaf nodes is undefined behavior " + "in t.traverse()");
@@ -24775,7 +24620,7 @@ const isImport = node => t.isImport(node) || t.isImportDeclaration(node);
 const isReturn = node => t.isReturnStatement(node);
 const isCall = node => t.isCallExpression(node) || t.isJSXElement(node);
 
-const inStepExpression = parent => t.isArrayExpression(parent) || t.isObjectProperty(parent) || t.isCallExpression(parent) || t.isJSXElement(parent);
+const inStepExpression = parent => t.isArrayExpression(parent) || t.isObjectProperty(parent) || t.isCallExpression(parent) || t.isJSXElement(parent) || t.isSequenceExpression(parent);
 
 const inExpression = (parent, grandParent) => inStepExpression(parent) || t.isJSXAttribute(grandParent) || t.isTemplateLiteral(parent);
 
@@ -24783,6 +24628,52 @@ const isExport = node => t.isExportNamedDeclaration(node) || t.isExportDefaultDe
 
 function getStartLine(node) {
   return node.loc.start.line;
+}
+
+// Finds the first call item in a step expression so that we can step
+// to the beginning of the list and either step in or over. e.g. [], x(), { }
+function isFirstCall(node, parentNode, grandParentNode) {
+  let children = [];
+  if (t.isArrayExpression(parentNode)) {
+    children = parentNode.elements;
+  }
+
+  if (t.isObjectProperty(parentNode)) {
+    children = grandParentNode.properties.map(({ value }) => value);
+  }
+
+  if (t.isSequenceExpression(parentNode)) {
+    children = parentNode.expressions;
+  }
+
+  if (t.isCallExpression(parentNode)) {
+    children = parentNode.arguments;
+  }
+
+  return children.find(child => isCall(child)) === node;
+}
+
+// Check to see if the node is a step expression and if any of its children
+// expressions include calls. e.g. [ a() ], { a: a() }
+function hasCall(node) {
+  let children = [];
+  if (t.isArrayExpression(node)) {
+    children = node.elements;
+  }
+
+  if (t.isObjectExpression(node)) {
+    children = node.properties.map(({ value }) => value);
+  }
+
+  if (t.isSequenceExpression(node)) {
+    children = node.expressions;
+  }
+
+  if (t.isCallExpression(node)) {
+    children = node.arguments;
+  }
+
+  return children.find(child => isCall(child));
 }
 
 function getPausePoints(sourceId) {
@@ -24796,18 +24687,15 @@ function onEnter(node, ancestors, state) {
   const parent = ancestors[ancestors.length - 1];
   const parentNode = parent && parent.node;
   const grandParent = ancestors[ancestors.length - 2];
+  const grandParentNode = grandParent && grandParent.node;
   const startLocation = node.loc.start;
 
-  if (isImport(node) || t.isClassDeclaration(node) || isExport(node) || t.isDebuggerStatement(node) || t.isThrowStatement(node) || t.isExpressionStatement(node) || t.isBreakStatement(node) || t.isContinueStatement(node)) {
+  if (isImport(node) || t.isClassDeclaration(node) || isExport(node) || t.isDebuggerStatement(node) || t.isThrowStatement(node) || t.isBreakStatement(node) || t.isContinueStatement(node)) {
     return addStopPoint(state, startLocation);
   }
 
   if (isControlFlow(node)) {
-    if (isForStatement(node)) {
-      addStopPoint(state, startLocation);
-    } else {
-      addEmptyPoint(state, startLocation);
-    }
+    addPoint(state, startLocation, isForStatement(node));
 
     const test = node.test || node.discriminant;
     if (test) {
@@ -24816,28 +24704,25 @@ function onEnter(node, ancestors, state) {
     return;
   }
 
-  if (t.isBlockStatement(node)) {
+  if (t.isBlockStatement(node) || t.isArrayExpression(node)) {
     return addEmptyPoint(state, startLocation);
   }
 
   if (isReturn(node)) {
     // We do not want to pause at the return if the
     // argument is a call on the same line e.g. return foo()
-    if (isCall(node.argument) && getStartLine(node) == getStartLine(node.argument)) {
-      return addEmptyPoint(state, startLocation);
-    }
 
-    return addStopPoint(state, startLocation);
+    return addPoint(state, startLocation, !isCall(node.argument) || getStartLine(node) != getStartLine(node.argument));
   }
 
   if (isAssignment(node)) {
-    // We only want to pause at literal assignments `var a = foo()`
+    // step at assignments unless the right side is a call or default assignment
+    // e.g. `var a = b()`,  `a = b(c = 2)`, `a = [ b() ]`
     const value = node.right || node.init;
+    const defaultAssignment = t.isFunction(parentNode) && parent.key === "params";
+    const includesCall = isCall(value) || hasCall(value);
 
-    if (isCall(value) || t.isFunction(parentNode)) {
-      return addEmptyPoint(state, startLocation);
-    }
-    return addStopPoint(state, startLocation);
+    return addPoint(state, startLocation, !includesCall && !defaultAssignment);
   }
 
   if (isCall(node)) {
@@ -24849,13 +24734,15 @@ function onEnter(node, ancestors, state) {
       location = node.callee.property.loc.start;
     }
 
-    // NOTE: we do not want to land inside an expression e.g. [], {}, call
-    const step = !inExpression(parent.node, grandParent && grandParent.node);
+    // NOTE: We want to skip all nested calls in expressions except for the
+    // first call in arrays and objects expression e.g. [], {}, call
+    const step = isFirstCall(node, parentNode, grandParentNode) || !inExpression(parentNode, grandParentNode);
 
     // NOTE: we add a point at the beginning of the expression
     // and each of the calls because the engine does not support
     // column-based member expression calls.
     addPoint(state, startLocation, { break: true, step });
+
     if (location && !(0, _isEqual2.default)(location, startLocation)) {
       addPoint(state, location, { break: true, step });
     }
@@ -24870,14 +24757,7 @@ function onEnter(node, ancestors, state) {
   if (t.isFunction(node)) {
     const { line, column } = node.loc.end;
     addBreakPoint(state, startLocation);
-    return addStopPoint(state, { line, column: column - 1 });
-  }
-
-  if (t.isProgram(node)) {
-    const lastStatement = node.body[node.body.length - 1];
-    if (lastStatement) {
-      return addStopPoint(state, lastStatement.loc.end);
-    }
+    return addEmptyPoint(state, { line, column: column - 1 });
   }
 
   if (!hasPoint(state, startLocation) && inStepExpression(parentNode)) {
@@ -24890,6 +24770,10 @@ function hasPoint(state, { line, column }) {
 }
 
 function addPoint(state, { line, column }, types) {
+  if (typeof types === "boolean") {
+    types = { step: types, break: types };
+  }
+
   if (!state[line]) {
     state[line] = {};
   }
@@ -25383,6 +25267,170 @@ module.exports = {
   workerHandler,
   streamingWorkerHandler
 };
+
+/***/ }),
+
+/***/ 3755:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.default = mapExpression;
+
+var _mapOriginalExpression = __webpack_require__(3613);
+
+var _mapOriginalExpression2 = _interopRequireDefault(_mapOriginalExpression);
+
+var _mapBindings = __webpack_require__(3756);
+
+var _mapBindings2 = _interopRequireDefault(_mapBindings);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function mapExpression(expression, mappings, bindings, shouldMapBindings = true) {
+  let originalExpression = expression;
+  if (mappings) {
+    originalExpression = (0, _mapOriginalExpression2.default)(expression, mappings);
+  }
+
+  let safeExpression = originalExpression;
+  if (shouldMapBindings) {
+    safeExpression = (0, _mapBindings2.default)(originalExpression, bindings);
+  }
+
+  return safeExpression;
+}
+
+/***/ }),
+
+/***/ 3756:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.default = mapExpressionBindings;
+
+var _ast = __webpack_require__(1375);
+
+var _generator = __webpack_require__(2365);
+
+var _generator2 = _interopRequireDefault(_generator);
+
+var _types = __webpack_require__(2268);
+
+var t = _interopRequireWildcard(_types);
+
+function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// translates new bindings `var a = 3` into `self.a = 3`
+// and existing bindings `var a = 3` into `a = 3` for re-assignments
+function globalizeDeclaration(node, bindings) {
+  return node.declarations.map(declaration => {
+    const identifier = bindings.includes(declaration.id.name) ? declaration.id : t.memberExpression(t.identifier("self"), declaration.id);
+
+    return t.expressionStatement(t.assignmentExpression("=", identifier, declaration.init));
+  });
+}
+
+// translates new bindings `a = 3` into `self.a = 3`
+// and keeps assignments the same for existing bindings.
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function globalizeAssignment(node, bindings) {
+  if (bindings.includes(node.left.name)) {
+    return node;
+  }
+
+  const identifier = t.memberExpression(t.identifier("self"), node.left);
+  return t.assignmentExpression(node.operator, identifier, node.right);
+}
+
+function isTopLevel(ancestors) {
+  return ancestors.filter(ancestor => ancestor.key == "body").length == 1;
+}
+
+function replaceNode(ancestors, node) {
+  const parent = ancestors[ancestors.length - 1];
+
+  if (typeof parent.index === "number") {
+    if (Array.isArray(node)) {
+      parent.node[parent.key].splice(parent.index, 1, ...node);
+    } else {
+      parent.node[parent.key][parent.index] = node;
+    }
+  } else {
+    parent.node[parent.key] = node;
+  }
+}
+
+function hasDestructuring(node) {
+  return node.declarations.some(declaration => t.isPattern(declaration.id));
+}
+
+function mapExpressionBindings(expression, bindings = []) {
+  const ast = (0, _ast.parseScript)(expression);
+  let shouldUpdate = true;
+  t.traverse(ast, (node, ancestors) => {
+    const parent = ancestors[ancestors.length - 1];
+
+    if (t.isWithStatement(node)) {
+      shouldUpdate = false;
+      return;
+    }
+
+    if (!isTopLevel(ancestors)) {
+      return;
+    }
+
+    if (t.isAssignmentExpression(node)) {
+      if (t.isIdentifier(node.left)) {
+        const newNode = globalizeAssignment(node, bindings);
+        return replaceNode(ancestors, newNode);
+      }
+
+      if (t.isPattern(node.left)) {
+        shouldUpdate = false;
+        return;
+      }
+    }
+
+    if (!t.isVariableDeclaration(node)) {
+      return;
+    }
+
+    if (hasDestructuring(node)) {
+      shouldUpdate = false;
+      return;
+    }
+
+    if (!t.isForStatement(parent.node)) {
+      const newNodes = globalizeDeclaration(node, bindings);
+      replaceNode(ancestors, newNodes);
+    }
+  });
+
+  if (!shouldUpdate) {
+    return expression;
+  }
+
+  return (0, _generator2.default)(ast).code;
+}
 
 /***/ }),
 

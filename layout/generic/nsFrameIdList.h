@@ -46,9 +46,7 @@ FRAME_ID(nsImageFrame, Image, Leaf)
 FRAME_ID(nsInlineFrame, Inline, NotLeaf)
 FRAME_ID(nsLeafBoxFrame, LeafBox, Leaf)
 FRAME_ID(nsLegendFrame, Legend, NotLeaf)
-FRAME_ID(nsListBoxBodyFrame, Box, NotLeaf)
 FRAME_ID(nsListControlFrame, ListControl, NotLeaf)
-FRAME_ID(nsListItemFrame, Box, NotLeaf)
 FRAME_ID(nsMathMLFrame, None, NotLeaf)
 FRAME_ID(nsMathMLmactionFrame, None, NotLeaf)
 FRAME_ID(nsMathMLmathBlockFrame, Block, NotLeaf)
@@ -126,7 +124,11 @@ FRAME_ID(nsSVGStopFrame, SVGStop, Leaf)
 FRAME_ID(nsSVGSwitchFrame, SVGSwitch, NotLeaf)
 FRAME_ID(nsSVGSymbolFrame, SVGSymbol, NotLeaf)
 FRAME_ID(SVGTextFrame, SVGText, NotLeaf)
-FRAME_ID(nsSVGUseFrame, SVGUse, Leaf)
+
+// Not a leaf, though it always has a ShadowRoot, so in practice light DOM
+// children never render.
+FRAME_ID(nsSVGUseFrame, SVGUse, NotLeaf)
+
 FRAME_ID(SVGViewFrame, SVGView, Leaf)
 FRAME_ID(nsTableCellFrame, TableCell, NotLeaf)
 FRAME_ID(nsTableColFrame, TableCol, Leaf)

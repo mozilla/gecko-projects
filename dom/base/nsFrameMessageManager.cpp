@@ -126,6 +126,7 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(nsFrameMessageManager)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsFrameMessageManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mListeners)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChildManagers)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSharedData)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsFrameMessageManager)
@@ -138,6 +139,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsFrameMessageManager)
     tmp->mChildManagers[i - 1]->Disconnect(false);
   }
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChildManagers)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSharedData)
   tmp->mInitialProcessData.setNull();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
@@ -663,6 +665,17 @@ public:
   RefPtr<nsFrameMessageManager> mMM;
 };
 
+// When recording or replaying, return whether a message should be received in
+// the middleman process instead of the recording/replaying process.
+static bool
+DirectMessageToMiddleman(const nsAString& aMessage)
+{
+  // Middleman processes run developer tools server code and need to receive
+  // debugger related messages. The session store flush message needs to be
+  // received in order to cleanly shutdown the process.
+  return StringBeginsWith(aMessage, NS_LITERAL_STRING("debug:"))
+      || aMessage.EqualsLiteral("SessionStore:flush");
+}
 
 void
 nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
@@ -676,6 +689,19 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
                                       nsTArray<StructuredCloneData>* aRetVal,
                                       ErrorResult& aError)
 {
+  // If we are recording or replaying, we will end up here in both the
+  // middleman process and the recording/replaying process. Ignore the message
+  // in one of the processes, so that it is only received in one place.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    if (DirectMessageToMiddleman(aMessage)) {
+      return;
+    }
+  } else if (recordreplay::IsMiddleman()) {
+    if (!DirectMessageToMiddleman(aMessage)) {
+      return;
+    }
+  }
+
   MOZ_ASSERT(aTarget);
 
   nsAutoTObserverArray<nsMessageListenerInfo, 1>* listeners =
@@ -722,8 +748,14 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
         continue;
       }
 
-      AutoEntryScript aes(object, "message manager handler");
+      AutoEntryScript aes(js::UncheckedUnwrap(object), "message manager handler");
       JSContext* cx = aes.cx();
+
+      // We passed the unwrapped object to AutoEntryScript so we now need to
+      // enter the (maybe wrapper) object's realm. We will have to revisit this
+      // later because CCWs are not associated with a single realm so this
+      // doesn't make much sense. See bug 1477923.
+      JSAutoRealmAllowCCW ar(cx, object);
 
       RootedDictionary<ReceiveMessageArgument> argument(cx);
 

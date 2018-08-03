@@ -714,9 +714,8 @@ nsNavHistory::RecalculateOriginFrecencyStats(nsIObserver *aCallback)
     )
   );
 
-  nsCOMPtr<mozIStorageConnection> conn = mDB->MainConn();
-  nsCOMPtr<nsIEventTarget> target = do_GetInterface(conn);
-  MOZ_ASSERT(target);
+  nsCOMPtr<nsIEventTarget> target(do_GetInterface(mDB->MainConn()));
+  NS_ENSURE_STATE(target);
   nsresult rv = target->Dispatch(NS_NewRunnableFunction(
     "nsNavHistory::RecalculateOriginFrecencyStats",
     [self, callback] {
@@ -925,82 +924,6 @@ bool
 nsNavHistory::hasHistoryEntries()
 {
   return GetDaysOfHistory() > 0;
-}
-
-
-namespace {
-
-class InvalidateAllFrecenciesCallback : public AsyncStatementCallback
-{
-public:
-  InvalidateAllFrecenciesCallback()
-  {
-  }
-
-  NS_IMETHOD HandleCompletion(uint16_t aReason) override
-  {
-    if (aReason == REASON_FINISHED) {
-      nsNavHistory *navHistory = nsNavHistory::GetHistoryService();
-      NS_ENSURE_STATE(navHistory);
-      navHistory->NotifyManyFrecenciesChanged();
-    }
-    return NS_OK;
-  }
-};
-
-} // namespace
-
-nsresult
-nsNavHistory::invalidateFrecencies(const nsCString& aPlaceIdsQueryString)
-{
-  // Exclude place: queries by setting their frecency to zero.
-  nsCString invalidFrecenciesSQLFragment(
-    "UPDATE moz_places SET frecency = "
-  );
-  if (!aPlaceIdsQueryString.IsEmpty())
-    invalidFrecenciesSQLFragment.AppendLiteral("NOTIFY_FRECENCY(");
-  invalidFrecenciesSQLFragment.AppendLiteral(
-      "(CASE "
-       "WHEN url_hash BETWEEN hash('place', 'prefix_lo') AND "
-                             "hash('place', 'prefix_hi') "
-       "THEN 0 "
-       "ELSE -1 "
-       "END) "
-  );
-  if (!aPlaceIdsQueryString.IsEmpty()) {
-    invalidFrecenciesSQLFragment.AppendLiteral(
-      ", url, guid, hidden, last_visit_date) "
-    );
-  }
-  invalidFrecenciesSQLFragment.AppendLiteral(
-    "WHERE frecency > 0 "
-  );
-  if (!aPlaceIdsQueryString.IsEmpty()) {
-    invalidFrecenciesSQLFragment.AppendLiteral("AND id IN(");
-    invalidFrecenciesSQLFragment.Append(aPlaceIdsQueryString);
-    invalidFrecenciesSQLFragment.Append(')');
-  }
-  RefPtr<InvalidateAllFrecenciesCallback> cb =
-    aPlaceIdsQueryString.IsEmpty() ? new InvalidateAllFrecenciesCallback()
-                                   : nullptr;
-
-  nsCOMPtr<mozIStorageAsyncStatement> stmt = mDB->GetAsyncStatement(
-    invalidFrecenciesSQLFragment
-  );
-  NS_ENSURE_STATE(stmt);
-
-  nsCOMPtr<mozIStoragePendingStatement> ps;
-  nsresult rv = stmt->ExecuteAsync(cb, getter_AddRefs(ps));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Trigger frecency updates for affected origins.
-  nsCOMPtr<mozIStorageAsyncStatement> updateOriginFrecenciesStmt =
-    mDB->GetAsyncStatement("DELETE FROM moz_updateoriginsupdate_temp");
-  NS_ENSURE_STATE(updateOriginFrecenciesStmt);
-  rv = updateOriginFrecenciesStmt->ExecuteAsync(nullptr, getter_AddRefs(ps));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return NS_OK;
 }
 
 

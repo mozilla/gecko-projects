@@ -11,10 +11,10 @@
 #include "nsContentUtils.h"
 #include "nsIHttpHeaderVisitor.h"
 #include "nsContentSecurityManager.h"
-#include "NullPrincipal.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIInputStreamChannel.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/NullPrincipal.h"
 
 NS_IMPL_ADDREF(nsViewSourceChannel)
 NS_IMPL_RELEASE(nsViewSourceChannel)
@@ -67,7 +67,8 @@ nsViewSourceChannel::Init(nsIURI* uri)
     // Until then we follow the principal of least privilege and use
     // nullPrincipal as the loadingPrincipal and the least permissive
     // securityflag.
-    nsCOMPtr<nsIPrincipal> nullPrincipal = NullPrincipal::CreateWithoutOriginAttributes();
+    nsCOMPtr<nsIPrincipal> nullPrincipal =
+      mozilla::NullPrincipal::CreateWithoutOriginAttributes();
 
     rv = pService->NewChannel2(path,
                                nullptr, // aOriginCharset
@@ -1133,11 +1134,12 @@ nsViewSourceChannel::SetAltDataForChild(bool aIsForChild)
 }
 
 NS_IMETHODIMP
-nsViewSourceChannel::LogBlockedCORSRequest(const nsAString& aMessage)
+nsViewSourceChannel::LogBlockedCORSRequest(const nsAString& aMessage,
+                                           const nsACString& aCategory)
 {
   if (!mHttpChannel) {
     NS_WARNING("nsViewSourceChannel::LogBlockedCORSRequest mHttpChannel is null");
     return NS_ERROR_UNEXPECTED;
   }
-  return mHttpChannel->LogBlockedCORSRequest(aMessage);
+  return mHttpChannel->LogBlockedCORSRequest(aMessage, aCategory);
 }

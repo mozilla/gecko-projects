@@ -41,7 +41,7 @@
 #include "nsISound.h"
 #include "nsIScreenManager.h"
 #include "nsIServiceManager.h"
-#include "nsThemeConstants.h"
+#include "nsStyleConsts.h"
 #include "nsTransitionManager.h"
 #include "nsDisplayList.h"
 #include "nsIDOMXULSelectCntrlItemEl.h"
@@ -306,17 +306,6 @@ nsMenuPopupFrame::CreateWidgetForView(nsView* aView)
   bool remote = HasRemoteContent();
 
   nsTransparencyMode mode = nsLayoutUtils::GetFrameTransparency(this, this);
-#ifdef MOZ_WIDGET_GTK
-  if (remote) {
-    // Paradoxically, on Linux, setting the transparency mode to opaque will
-    // give us proper transparency for composited popups. The shape-mask-based
-    // pseudo-transparency that we use otherwise will render transparent areas
-    // as opaque black when compositing is enabled.
-    // See bug 630346.
-    mode = eTransparencyOpaque;
-  }
-#endif
-
   nsIContent* parentContent = GetContent()->GetParent();
   nsAtom *tag = nullptr;
   if (parentContent && parentContent->IsXULElement())
@@ -370,12 +359,13 @@ nsMenuPopupFrame::GetShadowStyle()
     return shadow;
 
   switch (StyleDisplay()->mAppearance) {
-    case NS_THEME_TOOLTIP:
+    case StyleAppearance::Tooltip:
       return NS_STYLE_WINDOW_SHADOW_TOOLTIP;
-    case NS_THEME_MENUPOPUP:
+    case StyleAppearance::Menupopup:
       return NS_STYLE_WINDOW_SHADOW_MENU;
+    default:
+      return NS_STYLE_WINDOW_SHADOW_DEFAULT;
   }
-  return NS_STYLE_WINDOW_SHADOW_DEFAULT;
 }
 
 NS_IMETHODIMP nsXULPopupShownEvent::Run()

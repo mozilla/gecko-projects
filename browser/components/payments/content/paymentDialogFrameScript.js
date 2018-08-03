@@ -18,14 +18,17 @@
 "use strict";
 
 /* eslint-env mozilla/frame-script */
+/* global Services */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "FormAutofill",
                                "resource://formautofill/FormAutofill.jsm");
 ChromeUtils.defineModuleGetter(this, "FormAutofillUtils",
                                "resource://formautofill/FormAutofillUtils.jsm");
+
+const SAVE_CREDITCARD_DEFAULT_PREF = "dom.payments.defaults.saveCreditCard";
+const SAVE_ADDRESS_DEFAULT_PREF = "dom.payments.defaults.saveAddress";
 
 let PaymentFrameScript = {
   init() {
@@ -84,6 +87,16 @@ let PaymentFrameScript = {
       getFormFormat(country) {
         let format = FormAutofillUtils.getFormFormat(country);
         return Cu.cloneInto(format, waivedContent);
+      },
+
+      getDefaultPreferences() {
+        let prefValues = {
+          saveCreditCardDefaultChecked:
+            Services.prefs.getBoolPref(SAVE_CREDITCARD_DEFAULT_PREF, false),
+          saveAddressDefaultChecked:
+            Services.prefs.getBoolPref(SAVE_ADDRESS_DEFAULT_PREF, false),
+        };
+        return prefValues;
       },
     };
     waivedContent.PaymentDialogUtils = Cu.cloneInto(PaymentDialogUtils, waivedContent, {

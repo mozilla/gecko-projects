@@ -363,24 +363,6 @@ browser.usage:
       - 'main'
       - 'content'
 
-# The following section contains the session restore scalars.
-browser.session.restore:
-  worker_restart_count:
-    bug_numbers:
-      - 1402267
-    description: >
-      A counter incremented every time the SessionFile worker is restarted due
-      to too many failures, as defined in the browser.sessionstore.max_write_failures
-      pref.
-    expires: "64"
-    kind: uint
-    notification_emails:
-      - mdeboer@mozilla.com
-      - session-restore-telemetry-alerts@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - 'main'
-
 extensions.updates:
   rdf:
     bug_numbers:
@@ -746,6 +728,27 @@ webrtc.nicer:
       - 'main'
       - 'content'
 
+webrtc.sdp:
+  parser_diff:
+    bug_numbers:
+      - 1432955
+    description: >
+      The number of differences between the C based sipcc SDP parser and
+      the new rust based rsdparsa SDP parser keyed by predefined
+      names of attributes and values that do not match between
+      the sipcc parsing result and the rsdparsa parsing result or
+      between the rsdparsa parsing result and the original sdp.
+      This should help to improve the new rsdparsa to replace
+      the sipcc parser.
+    expires: "64"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'content'
+
 mathml:
   doc_count:
     bug_numbers:
@@ -770,6 +773,87 @@ mediarecorder:
     kind: uint
     notification_emails:
       - bvandyk@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - main
+      - content
+
+media:
+  page_count:
+    bug_numbers:
+      - 1476456
+    description: >
+      The number of times a top level document is loaded.
+    expires: "68"
+    kind: uint
+    notification_emails:
+      - cpearce@mozilla.com
+      - alwu@mozilla.com
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - main
+      - content
+
+  page_had_media_count:
+    bug_numbers:
+      - 1476456
+    description: >
+      The number of times a document hierarchy contained at least one audible HTMLMediaElement that had play() called upon it.
+    expires: "68"
+    kind: uint
+    notification_emails:
+      - cpearce@mozilla.com
+      - alwu@mozilla.com
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - main
+      - content
+
+  page_had_play_revoked_count:
+    bug_numbers:
+      - 1476456
+    description: >
+      The number of times a document hierarchy contained at least one muted playing HTMLMediaElement that was paused due to becoming unmuted while not being allowed to autoplay.
+    expires: "68"
+    kind: uint
+    notification_emails:
+      - cpearce@mozilla.com
+      - alwu@mozilla.com
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - main
+      - content
+
+  autoplay_would_not_be_allowed_count:
+    bug_numbers:
+      - 1476456
+    description: >
+      The number of HTMLMediaElement autoplays on audible HTMLMediaElements which would not be allowed to play if block autoplay was enabled; we'd either prompt for permission to play or block outright depending on user preferences.
+    expires: "68"
+    kind: uint
+    notification_emails:
+      - cpearce@mozilla.com
+      - alwu@mozilla.com
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - main
+      - content
+
+  autoplay_would_be_allowed_count:
+    bug_numbers:
+      - 1476456
+    description: >
+      The number of HTMLMediaElement autoplays on audible HTMLMediaElements that would have been allowed (not blocked) by the autoplay policy if block autoplay was enabled.
+    expires: "68"
+    kind: uint
+    notification_emails:
+      - cpearce@mozilla.com
+      - alwu@mozilla.com
+      - nohlmeier@mozilla.com
     release_channel_collection: opt-in
     record_in_processes:
       - main
@@ -1051,13 +1135,14 @@ devtools.onboarding:
       - 1408339
     description: >
       How many users are flagged as existing devtools users.
-    expires: "63"
+    expires: "66"
     kind: boolean
     notification_emails:
       - dev-developer-tools@lists.mozilla.org
       - jdescottes@mozilla.com
     record_in_processes:
       - 'main'
+    release_channel_collection: opt-out
 
 devtools.responsive:
   toolbox_opened_first:
@@ -1447,9 +1532,10 @@ gfx.advanced.layers:
       a failure can be traced back to a specific Direct3D API call.
     keyed: true
     kind: uint
-    expires: "61"
+    expires: "70"
     notification_emails:
       - gfx-telemetry-alerts@mozilla.com
+      - rhunt@mozilla.com
     record_in_processes:
       - 'main'
 

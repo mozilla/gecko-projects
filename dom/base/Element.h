@@ -664,13 +664,14 @@ public:
     RemoveStates(aStates);
   }
 
-  virtual void UpdateEditableState(bool aNotify) override;
+  void UpdateEditableState(bool aNotify) override;
 
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                              nsIContent* aBindingParent,
-                              bool aCompileEventHandlers) override;
-  virtual void UnbindFromTree(bool aDeep = true,
-                              bool aNullParent = true) override;
+  nsresult BindToTree(nsIDocument* aDocument,
+                      nsIContent* aParent,
+                      nsIContent* aBindingParent) override;
+
+  void UnbindFromTree(bool aDeep = true,
+                      bool aNullParent = true) override;
 
   /**
    * Normalizes an attribute name and returns it as a nodeinfo if an attribute
@@ -1986,6 +1987,14 @@ private:
    * @return the frame's client area
    */
   MOZ_CAN_RUN_SCRIPT nsRect GetClientAreaRect();
+
+  /**
+   * GetCustomInterface is somewhat like a GetInterface, but it is expected
+   * that the implementation is provided by a custom element or via the 
+   * the XBL implements keyword. To use this, create a public method that
+   * wraps a call to GetCustomInterface.
+   */
+  template<class T> void GetCustomInterface(nsGetterAddRefs<T> aResult);
 
   // Prevent people from doing pointless checks/casts on Element instances.
   void IsElement() = delete;

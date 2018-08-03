@@ -374,9 +374,6 @@ IsCompatibleLIRCoercion(MIRType to, MIRType from)
         (from == MIRType::Int32 || from == MIRType::Boolean)) {
         return true;
     }
-    // SIMD types can be coerced with from*Bits operators.
-    if (IsSimdType(to) && IsSimdType(from))
-        return true;
     return false;
 }
 
@@ -684,6 +681,14 @@ LIRGeneratorShared::tempFixed(Register reg)
 {
     LDefinition t = temp(LDefinition::GENERAL);
     t.setOutput(LGeneralReg(reg));
+    return t;
+}
+
+LDefinition
+LIRGeneratorShared::tempFixed(FloatRegister reg)
+{
+    LDefinition t = temp(LDefinition::DOUBLE);
+    t.setOutput(LFloatReg(reg));
     return t;
 }
 

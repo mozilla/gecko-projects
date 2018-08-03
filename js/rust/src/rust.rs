@@ -234,7 +234,12 @@ impl Runtime {
             let _ac = AutoCompartment::with_obj(self.cx(), glob.get());
             let options = CompileOptionsWrapper::new(self.cx(), filename_cstr.as_ptr(), line_num);
 
-            if !JS::Evaluate2(self.cx(), options.ptr, ptr as *const u16, len as _, rval) {
+            let mut srcBuf = JS::SourceBufferHolder {
+                data_: ptr,
+                length_: len as _,
+                ownsChars_: false
+            };
+            if !JS::Evaluate(self.cx(), options.ptr, &mut srcBuf, rval) {
                 debug!("...err!");
                 panic::maybe_resume_unwind();
                 Err(())
@@ -615,7 +620,7 @@ impl GCMethods for JS::Value {
 // ___________________________________________________________________________
 // Implementations for various things in jsapi.rs
 
-impl Drop for JSAutoRealm {
+impl Drop for JSAutoRealmAllowCCW {
     fn drop(&mut self) {
         unsafe { JS::LeaveRealm(self.cx_, self.oldRealm_); }
     }

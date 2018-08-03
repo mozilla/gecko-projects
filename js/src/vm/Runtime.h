@@ -292,7 +292,8 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
      * considered inaccessible, and those JitcodeGlobalTable entry can be
      * disposed of.
      */
-    mozilla::Atomic<uint64_t, mozilla::ReleaseAcquire> profilerSampleBufferRangeStart_;
+    mozilla::Atomic<uint64_t, mozilla::ReleaseAcquire,
+                    mozilla::recordreplay::Behavior::DontPreserve> profilerSampleBufferRangeStart_;
 
     mozilla::Maybe<uint64_t> profilerSampleBufferRangeStart() {
         if (beingDestroyed_ || !geckoProfiler().enabled()) {
@@ -330,9 +331,9 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     js::UnprotectedData<js::OffThreadPromiseRuntimeState> offThreadPromiseState;
     js::UnprotectedData<JS::ConsumeStreamCallback> consumeStreamCallback;
 
-    JSObject* getIncumbentGlobal(JSContext* cx);
+    js::GlobalObject* getIncumbentGlobal(JSContext* cx);
     bool enqueuePromiseJob(JSContext* cx, js::HandleFunction job, js::HandleObject promise,
-                           js::HandleObject incumbentGlobal);
+                           js::Handle<js::GlobalObject*> incumbentGlobal);
     void addUnhandledRejectedPromise(JSContext* cx, js::HandleObject promise);
     void removeUnhandledRejectedPromise(JSContext* cx, js::HandleObject promise);
 
@@ -344,7 +345,8 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     js::UnprotectedData<JS::ReadableStreamFinalizeCallback> readableStreamFinalizeCallback;
 
     /* Had an out-of-memory error which did not populate an exception. */
-    mozilla::Atomic<bool> hadOutOfMemory;
+    mozilla::Atomic<bool, mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> hadOutOfMemory;
 
     /*
      * Allow relazifying functions in compartments that are active. This is
@@ -357,6 +359,11 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
 
     /* Compartment memory reporting callback. */
     js::MainThreadData<JSSizeOfIncludingThisCompartmentCallback> sizeOfIncludingThisCompartmentCallback;
+
+    /* Callback for creating ubi::Nodes representing DOM node objects. Set by
+     * JS::ubi::SetConstructUbiNodeForDOMObjectCallback. Refer to js/public/UbiNode.h.
+     */
+    void (*constructUbiNodeForDOMObjectCallback) (void*, JSObject*) = nullptr;
 
     /* Realm destroy callback. */
     js::MainThreadData<JS::DestroyRealmCallback> destroyRealmCallback;
@@ -471,10 +478,12 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
 #endif
 
     // Number of zones which may be operated on by helper threads.
-    mozilla::Atomic<size_t> numActiveHelperThreadZones;
+    mozilla::Atomic<size_t, mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> numActiveHelperThreadZones;
 
     // Any activity affecting the heap.
-    mozilla::Atomic<JS::HeapState> heapState_;
+    mozilla::Atomic<JS::HeapState, mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> heapState_;
 
     friend class js::AutoLockScriptData;
 
@@ -843,11 +852,13 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
 
   private:
     // Settings for how helper threads can be used.
-    mozilla::Atomic<bool> offthreadIonCompilationEnabled_;
-    mozilla::Atomic<bool> parallelParsingEnabled_;
+    mozilla::Atomic<bool, mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> offthreadIonCompilationEnabled_;
+    mozilla::Atomic<bool, mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> parallelParsingEnabled_;
 
-    mozilla::Atomic<uint32_t> offThreadParsesRunning_;
 #ifdef DEBUG
+    mozilla::Atomic<uint32_t> offThreadParsesRunning_;
     mozilla::Atomic<bool> offThreadParsingBlocked_;
 #endif
 
@@ -870,21 +881,17 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
         return parallelParsingEnabled_;
     }
 
+#ifdef DEBUG
+
     void incOffThreadParsesRunning() {
         MOZ_ASSERT(!isOffThreadParsingBlocked());
-        if (!offThreadParsesRunning_)
-            gc.setParallelAtomsAllocEnabled(true);
         offThreadParsesRunning_++;
     }
 
     void decOffThreadParsesRunning() {
         MOZ_ASSERT(isOffThreadParseRunning());
         offThreadParsesRunning_--;
-        if (!offThreadParsesRunning_)
-            gc.setParallelAtomsAllocEnabled(false);
     }
-
-#ifdef DEBUG
 
     bool isOffThreadParseRunning() const {
         return offThreadParsesRunning_;

@@ -1721,6 +1721,8 @@ Database::InitTempEntities()
   NS_ENSURE_SUCCESS(rv, rv);
   rv = mMainConn->ExecuteSimpleSQL(CREATE_BOOKMARKS_DELETED_AFTERINSERT_TRIGGER);
   NS_ENSURE_SUCCESS(rv, rv);
+  rv = mMainConn->ExecuteSimpleSQL(CREATE_BOOKMARKS_DELETED_AFTERDELETE_TRIGGER);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
 }
@@ -2728,7 +2730,9 @@ Database::MigrateV52OriginFrecencies()
     new MigrateV52OriginFrecenciesRunnable(mMainConn));
   nsCOMPtr<nsIEventTarget> target(do_GetInterface(mMainConn));
   MOZ_ASSERT(target);
-  Unused << target->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  if (target) {
+    Unused << target->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  }
 }
 
 nsresult

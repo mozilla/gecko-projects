@@ -16,6 +16,7 @@
 #include "mozilla/SafeMode.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WindowsVersion.h"
+#include "mozilla/WinHeaderOnlyUtils.h"
 #include "nsWindowsHelpers.h"
 
 #include <windows.h>
@@ -79,32 +80,6 @@ ShowError(DWORD aError = ::GetLastError())
 
   ::MessageBoxW(nullptr, rawMsgBuf, L"Firefox", MB_OK | MB_ICONERROR);
   ::LocalFree(rawMsgBuf);
-}
-
-static bool
-SetArgv0ToFullBinaryPath(wchar_t* aArgv[])
-{
-  DWORD bufLen = MAX_PATH;
-  mozilla::UniquePtr<wchar_t[]> buf;
-
-  while (true) {
-    buf = mozilla::MakeUnique<wchar_t[]>(bufLen);
-    DWORD retLen = ::GetModuleFileNameW(nullptr, buf.get(), bufLen);
-    if (!retLen) {
-      return false;
-    }
-
-    if (retLen == bufLen && ::GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
-      bufLen *= 2;
-      continue;
-    }
-
-    break;
-  }
-
-  // We intentionally leak buf into argv[0]
-  aArgv[0] = buf.release();
-  return true;
 }
 
 namespace mozilla {
@@ -219,10 +194,13 @@ LauncherMain(int argc, wchar_t* argv[])
     return 1;
   }
 
+  const DWORD timeout = ::IsDebuggerPresent() ? INFINITE :
+                        kWaitForInputIdleTimeoutMS;
+
   // Keep the current process around until the callback process has created
   // its message queue, to avoid the launched process's windows being forced
   // into the background.
-  ::WaitForInputIdle(process.get(), kWaitForInputIdleTimeoutMS);
+  mozilla::WaitForInputIdle(process.get(), timeout);
 
   return 0;
 }

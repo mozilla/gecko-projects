@@ -300,8 +300,7 @@ function createScreenshotData(document, args) {
 
   // Only adjust for scrollbars when considering the full window
   if (!args.selector) {
-    const winUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIDOMWindowUtils);
+    const winUtils = window.windowUtils;
     const scrollbarHeight = {};
     const scrollbarWidth = {};
     winUtils.getScrollbarSize(false, scrollbarWidth, scrollbarHeight);
@@ -374,9 +373,7 @@ function saveToClipboard(context, reply) {
       });
       const input = channel.open2();
 
-      const loadContext = context.environment.chromeWindow
-                                 .QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIWebNavigation)
+      const loadContext = context.environment.chromeWindow.docShell
                                  .QueryInterface(Ci.nsILoadContext);
 
       const callback = {

@@ -9,6 +9,7 @@
 #include "MediaInfo.h"
 #include "mozilla/AbstractThread.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/AudioDeviceInfo.h"
 #include "mozilla/ipc/FileDescriptor.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
@@ -58,6 +59,7 @@ struct AudioIpcInitParams {
   int mServerConnection;
   size_t mPoolSize;
   size_t mStackSize;
+  void (*mThreadCreateCallback)(const char*);
 };
 
 // These functions are provided by audioipc-server crate
@@ -429,6 +431,9 @@ cubeb* GetCubebContextUnlocked()
     initParams.mPoolSize = sAudioIPCPoolSize;
     initParams.mStackSize = sAudioIPCStackSize;
     initParams.mServerConnection = sIPCConnection->ClonePlatformHandle().release();
+    initParams.mThreadCreateCallback = [](const char* aName) {
+      PROFILER_REGISTER_THREAD(aName);
+    };
 
     MOZ_LOG(gCubebLog, LogLevel::Debug, ("%s: %d", PREF_AUDIOIPC_POOL_SIZE, (int) initParams.mPoolSize));
     MOZ_LOG(gCubebLog, LogLevel::Debug, ("%s: %d", PREF_AUDIOIPC_STACK_SIZE, (int) initParams.mStackSize));
@@ -522,33 +527,44 @@ uint32_t GetCubebMSGLatencyInFrames(cubeb_stream_params * params)
 #endif
 }
 
+static const char* gInitCallbackPrefs[] = {
+  PREF_VOLUME_SCALE,
+  PREF_CUBEB_LATENCY_PLAYBACK,
+  PREF_CUBEB_LATENCY_MSG,
+  PREF_CUBEB_BACKEND,
+  PREF_CUBEB_FORCE_NULL_CONTEXT,
+  PREF_CUBEB_SANDBOX,
+  PREF_AUDIOIPC_POOL_SIZE,
+  PREF_AUDIOIPC_STACK_SIZE,
+  nullptr,
+};
+static const char* gCallbackPrefs[] = {
+  PREF_CUBEB_FORCE_SAMPLE_RATE,
+  // We don't want to call the callback on startup, because the pref is the
+  // empty string by default ("", which means "logging disabled"). Because the
+  // logging can be enabled via environment variables (MOZ_LOG="module:5"),
+  // calling this callback on init would immediately re-disable the logging.
+  PREF_CUBEB_LOGGING_LEVEL,
+  nullptr,
+};
+
 void InitLibrary()
 {
-  Preferences::RegisterCallbackAndCall(PrefChanged, PREF_VOLUME_SCALE);
-  Preferences::RegisterCallbackAndCall(PrefChanged, PREF_CUBEB_LATENCY_PLAYBACK);
-  Preferences::RegisterCallbackAndCall(PrefChanged, PREF_CUBEB_LATENCY_MSG);
-  Preferences::RegisterCallback(PrefChanged, PREF_CUBEB_FORCE_SAMPLE_RATE);
-  Preferences::RegisterCallbackAndCall(PrefChanged, PREF_CUBEB_BACKEND);
-  Preferences::RegisterCallbackAndCall(PrefChanged, PREF_CUBEB_FORCE_NULL_CONTEXT);
-  Preferences::RegisterCallbackAndCall(PrefChanged, PREF_CUBEB_SANDBOX);
-  Preferences::RegisterCallbackAndCall(PrefChanged, PREF_AUDIOIPC_POOL_SIZE);
-  Preferences::RegisterCallbackAndCall(PrefChanged, PREF_AUDIOIPC_STACK_SIZE);
+  Preferences::RegisterCallbacksAndCall(PrefChanged, gInitCallbackPrefs);
+  Preferences::RegisterCallbacks(PrefChanged, gCallbackPrefs);
+
   if (MOZ_LOG_TEST(gCubebLog, LogLevel::Verbose)) {
     cubeb_set_log_callback(CUBEB_LOG_VERBOSE, CubebLogCallback);
   } else if (MOZ_LOG_TEST(gCubebLog, LogLevel::Error)) {
     cubeb_set_log_callback(CUBEB_LOG_NORMAL, CubebLogCallback);
   }
-  // We don't want to call the callback on startup, because the pref is the
-  // empty string by default ("", which means "logging disabled"). Because the
-  // logging can be enabled via environment variables (MOZ_LOG="module:5"),
-  // calling this callback on init would immediately re-disable the logging.
-  Preferences::RegisterCallback(PrefChanged, PREF_CUBEB_LOGGING_LEVEL);
+
 #ifndef MOZ_WIDGET_ANDROID
   AbstractThread::MainThread()->Dispatch(
     NS_NewRunnableFunction("CubebUtils::InitLibrary", &InitBrandName));
 #endif
 #ifdef MOZ_CUBEB_REMOTING
-  if (sCubebSandbox && XRE_IsContentProcess()) {
+  if (sCubebSandbox && XRE_IsContentProcess() && !recordreplay::IsMiddleman()) {
     InitAudioIPCConnection();
   }
 #endif
@@ -556,16 +572,8 @@ void InitLibrary()
 
 void ShutdownLibrary()
 {
-  Preferences::UnregisterCallback(PrefChanged, PREF_VOLUME_SCALE);
-  Preferences::UnregisterCallback(PrefChanged, PREF_AUDIOIPC_STACK_SIZE);
-  Preferences::UnregisterCallback(PrefChanged, PREF_AUDIOIPC_POOL_SIZE);
-  Preferences::UnregisterCallback(PrefChanged, PREF_CUBEB_SANDBOX);
-  Preferences::UnregisterCallback(PrefChanged, PREF_CUBEB_BACKEND);
-  Preferences::UnregisterCallback(PrefChanged, PREF_CUBEB_LATENCY_PLAYBACK);
-  Preferences::UnregisterCallback(PrefChanged, PREF_CUBEB_FORCE_SAMPLE_RATE);
-  Preferences::UnregisterCallback(PrefChanged, PREF_CUBEB_LATENCY_MSG);
-  Preferences::UnregisterCallback(PrefChanged, PREF_CUBEB_LOGGING_LEVEL);
-  Preferences::UnregisterCallback(PrefChanged, PREF_CUBEB_FORCE_NULL_CONTEXT);
+  Preferences::UnregisterCallbacks(PrefChanged, gInitCallbackPrefs);
+  Preferences::UnregisterCallbacks(PrefChanged, gCallbackPrefs);
 
   StaticMutexAutoLock lock(sMutex);
   if (sCubebContext) {
@@ -681,7 +689,8 @@ void GetDeviceCollection(nsTArray<RefPtr<AudioDeviceInfo>>& aDeviceInfos,
       for (unsigned int i = 0; i < collection.count; ++i) {
         auto device = collection.device[i];
         RefPtr<AudioDeviceInfo> info =
-          new AudioDeviceInfo(NS_ConvertUTF8toUTF16(device.friendly_name),
+          new AudioDeviceInfo(device.devid,
+                              NS_ConvertUTF8toUTF16(device.friendly_name),
                               NS_ConvertUTF8toUTF16(device.group_id),
                               NS_ConvertUTF8toUTF16(device.vendor_name),
                               ConvertCubebType(device.type),

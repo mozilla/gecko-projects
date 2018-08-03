@@ -83,7 +83,6 @@ function MarkupView(inspector, frame, controllerWindow) {
   // The popup will be attached to the toolbox document.
   this.popup = new AutocompletePopup(inspector.toolbox.doc, {
     autoSelect: true,
-    theme: "auto",
   });
 
   this.undo = new UndoStack();
@@ -1090,11 +1089,20 @@ MarkupView.prototype = {
         continue;
       }
 
-      if (type === "attributes" || type === "characterData"
-        || type === "events" || type === "pseudoClassLock") {
+      if (
+        type === "attributes" ||
+        type === "characterData" ||
+        type === "customElementDefined" ||
+        type === "events" ||
+        type === "pseudoClassLock"
+      ) {
         container.update();
-      } else if (type === "childList" || type === "nativeAnonymousChildList"
-        || type === "slotchange" || type === "shadowRootAttached") {
+      } else if (
+        type === "childList" ||
+        type === "nativeAnonymousChildList" ||
+        type === "slotchange" ||
+        type === "shadowRootAttached"
+      ) {
         container.childrenDirty = true;
         // Update the children to take care of changes in the markup view DOM
         // and update container (and its subtree) DOM tree depth level for

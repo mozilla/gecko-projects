@@ -4,11 +4,11 @@
 
 use api::{DevicePoint, DeviceSize, DeviceRect, LayoutRect, LayoutToWorldTransform};
 use api::{PremultipliedColorF, WorldToLayoutTransform};
-use clip_scroll_tree::TransformIndex;
+use clip_scroll_tree::SpatialNodeIndex;
 use gpu_cache::{GpuCacheAddress, GpuDataRequest};
-use prim_store::{EdgeAaSegmentMask};
+use prim_store::{EdgeAaSegmentMask, Transform};
 use render_task::RenderTaskAddress;
-use util::{MatrixHelpers, TransformedRectKind};
+use util::{LayoutToWorldFastTransform, TransformedRectKind};
 
 // Contains type that must exactly match the same structures declared in GLSL.
 
@@ -195,6 +195,7 @@ impl PrimitiveHeaders {
 
 // This is a convenience type used to make it easier to pass
 // the common parts around during batching.
+#[derive(Debug)]
 pub struct PrimitiveHeader {
     pub local_rect: LayoutRect,
     pub local_clip_rect: LayoutRect,
@@ -349,12 +350,15 @@ impl From<BrushInstance> for PrimitiveInstance {
 pub struct TransformPaletteId(pub u32);
 
 impl TransformPaletteId {
-    // Get the palette ID for an identity transform.
-    pub fn identity() -> TransformPaletteId {
-        TransformPaletteId(0)
+    /// Identity transform ID.
+    pub const IDENTITY: Self = TransformPaletteId(0);
+
+    /// Extract the spatial node index from the id.
+    pub fn _spatial_node_index(&self) -> SpatialNodeIndex {
+        SpatialNodeIndex(self.0 as usize & 0xFFFFFF)
     }
 
-    // Extract the transform kind from the id.
+    /// Extract the transform kind from the id.
     pub fn transform_kind(&self) -> TransformedRectKind {
         if (self.0 >> 24) == 0 {
             TransformedRectKind::AxisAligned
@@ -370,12 +374,12 @@ impl TransformPaletteId {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 #[repr(C)]
 pub struct TransformData {
-    pub transform: LayoutToWorldTransform,
-    pub inv_transform: WorldToLayoutTransform,
+    transform: LayoutToWorldTransform,
+    inv_transform: WorldToLayoutTransform,
 }
 
 impl TransformData {
-    pub fn invalid() -> Self {
+    fn invalid() -> Self {
         TransformData {
             transform: LayoutToWorldTransform::identity(),
             inv_transform: WorldToLayoutTransform::identity(),
@@ -385,7 +389,7 @@ impl TransformData {
 
 // Extra data stored about each transform palette entry.
 pub struct TransformMetadata {
-    pub transform_kind: TransformedRectKind,
+    transform_kind: TransformedRectKind,
 }
 
 // Stores a contiguous list of TransformData structs, that
@@ -401,47 +405,94 @@ pub struct TransformPalette {
 }
 
 impl TransformPalette {
-    pub fn new(spatial_node_count: usize) -> TransformPalette {
+    pub fn new(spatial_node_count: usize) -> Self {
         TransformPalette {
             transforms: Vec::with_capacity(spatial_node_count),
             metadata: Vec::with_capacity(spatial_node_count),
         }
     }
 
-    // Set the local -> world transform for a given spatial
-    // node in the transform palette.
-    pub fn set(
-        &mut self,
-        index: TransformIndex,
-        data: TransformData,
-    ) {
-        let index = index.0 as usize;
-
+    #[inline]
+    fn grow(&mut self, index: SpatialNodeIndex) {
         // Pad the vectors out if they are not long enough to
         // account for this index. This can occur, for instance,
         // when we stop recursing down the CST due to encountering
         // a node with an invalid transform.
-        while index >= self.transforms.len() {
+        while self.transforms.len() <= index.0 as usize {
             self.transforms.push(TransformData::invalid());
             self.metadata.push(TransformMetadata {
                 transform_kind: TransformedRectKind::AxisAligned,
             });
         }
+    }
 
-        // Store the transform itself, along with metadata about it.
-        self.metadata[index] = TransformMetadata {
-            transform_kind: data.transform.transform_kind(),
+    pub fn invalidate(&mut self, index: SpatialNodeIndex) {
+        self.grow(index);
+        self.metadata[index.0 as usize] = TransformMetadata {
+            transform_kind: TransformedRectKind::AxisAligned,
         };
-        self.transforms[index] = data;
+        self.transforms[index.0 as usize] = TransformData::invalid();
+    }
+
+    // Set the local -> world transform for a given spatial
+    // node in the transform palette.
+    pub fn set(
+        &mut self, index: SpatialNodeIndex, fast_transform: &LayoutToWorldFastTransform,
+    ) -> bool {
+        self.grow(index);
+
+        match fast_transform.inverse() {
+            Some(inverted) => {
+                // Store the transform itself, along with metadata about it.
+                self.metadata[index.0 as usize] = TransformMetadata {
+                    transform_kind: fast_transform.kind()
+                };
+                // Write the data that will be made available to the GPU for this node.
+                self.transforms[index.0 as usize] = TransformData {
+                    transform: fast_transform.to_transform().into_owned(),
+                    inv_transform: inverted.to_transform().into_owned(),
+                };
+                true
+            }
+            None => {
+                self.invalidate(index);
+                false
+            }
+        }
+    }
+
+    // Get the relevant information about a given transform that is
+    // used by the CPU code during culling and primitive prep pass.
+    // TODO(gw): In the future, it will be possible to specify
+    //           a coordinate system id here, to allow retrieving
+    //           transforms in the local space of a given spatial node.
+    pub fn get_transform(
+        &self,
+        index: SpatialNodeIndex,
+    ) -> Transform {
+        let data = &self.transforms[index.0 as usize];
+        let metadata = &self.metadata[index.0 as usize];
+
+        Transform {
+            m: &data.transform,
+            transform_kind: metadata.transform_kind,
+            backface_is_visible: data.transform.is_backface_visible(),
+        }
     }
 
     // Get a transform palette id for the given spatial node.
     // TODO(gw): In the future, it will be possible to specify
     //           a coordinate system id here, to allow retrieving
     //           transforms in the local space of a given spatial node.
-    pub fn get_id(&self, index: TransformIndex) -> TransformPaletteId {
+    pub fn get_id(
+        &self,
+        index: SpatialNodeIndex,
+    ) -> TransformPaletteId {
         let transform_kind = self.metadata[index.0 as usize].transform_kind as u32;
-        TransformPaletteId(index.0 | (transform_kind << 24))
+        TransformPaletteId(
+            (index.0 as u32) |
+            (transform_kind << 24)
+        )
     }
 }
 

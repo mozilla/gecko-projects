@@ -11,7 +11,6 @@ ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryArchive.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryUtils.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetrySend.jsm");
-ChromeUtils.import("resource://gre/modules/Preferences.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AppConstants",
@@ -129,12 +128,7 @@ function sectionalizeObject(obj) {
  * Obtain the main DOMWindow for the current context.
  */
 function getMainWindow() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIWebNavigation)
-               .QueryInterface(Ci.nsIDocShellTreeItem)
-               .rootTreeItem
-               .QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDOMWindow);
+  return window.docShell.rootTreeItem.domWindow;
 }
 
 /**

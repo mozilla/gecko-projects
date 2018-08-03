@@ -125,7 +125,7 @@ TransceiverImpl::UpdateSinkIdentity(const dom::MediaStreamTrack* aTrack,
                                     nsIPrincipal* aPrincipal,
                                     const PeerIdentity* aSinkIdentity)
 {
-  if (!(mJsepTransceiver->mJsDirection & sdp::kSend)) {
+  if (mJsepTransceiver->IsStopped()) {
     return NS_OK;
   }
 
@@ -241,7 +241,7 @@ TransceiverImpl::UpdateConduit()
   }
 
   mConduit->SetLocalCNAME(mJsepTransceiver->mSendTrack.GetCNAME().c_str());
-  mConduit->SetLocalMID(mJsepTransceiver->mTransport->mTransportId);
+  mConduit->SetLocalMID(mMid);
 
   nsresult rv;
 

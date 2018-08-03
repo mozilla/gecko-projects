@@ -36,7 +36,7 @@ PromptFactory.prototype = {
   },
 
   _handleClick: function(aEvent) {
-    let target = aEvent.target;
+    let target = aEvent.composedTarget;
     if (aEvent.defaultPrevented || target.isContentEditable ||
         target.disabled || target.readOnly || !target.willValidate) {
       // target.willValidate is false when any associated fieldset is disabled,
@@ -365,8 +365,7 @@ PromptDelegate.prototype = {
     }
     // Accessing the document object can throw if this window no longer exists. See bug 789888.
     try {
-      let winUtils = this._domWin.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDOMWindowUtils);
+      let winUtils = this._domWin.windowUtils;
       if (!aEntering) {
         winUtils.leaveModalState();
       }

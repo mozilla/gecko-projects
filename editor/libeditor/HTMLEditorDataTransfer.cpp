@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "HTMLEditUtils.h"
+#include "InternetCiter.h"
 #include "TextEditUtils.h"
 #include "WSRunObject.h"
 #include "mozilla/dom/Comment.h"
@@ -1554,37 +1555,42 @@ HTMLEditor::CanPasteTransferable(nsITransferable* aTransferable)
   return false;
 }
 
-/**
- * HTML PasteAsQuotation: Paste in a blockquote type=cite.
- */
 NS_IMETHODIMP
-HTMLEditor::PasteAsQuotation(int32_t aSelectionType)
+HTMLEditor::PasteAsQuotation(int32_t aClipboardType)
 {
-  if (IsPlaintextEditor()) {
-    return PasteAsPlaintextQuotation(aSelectionType);
+  if (NS_WARN_IF(aClipboardType != nsIClipboard::kGlobalClipboard &&
+                 aClipboardType != nsIClipboard::kSelectionClipboard)) {
+    return NS_ERROR_INVALID_ARG;
   }
-
-  nsAutoString citation;
-  return PasteAsCitedQuotation(citation, aSelectionType);
+  return HTMLEditor::PasteAsQuotationAsAction(aClipboardType);
 }
 
-NS_IMETHODIMP
-HTMLEditor::PasteAsCitedQuotation(const nsAString& aCitation,
-                                  int32_t aSelectionType)
+nsresult
+HTMLEditor::PasteAsQuotationAsAction(int32_t aClipboardType)
 {
+  MOZ_ASSERT(aClipboardType == nsIClipboard::kGlobalClipboard ||
+             aClipboardType == nsIClipboard::kSelectionClipboard);
+
+  if (IsPlaintextEditor()) {
+    return PasteAsPlaintextQuotation(aClipboardType);
+  }
+
+  // If it's not in plain text edit mode, paste text into new
+  // <blockquote type="cite"> element after removing selection.
+
   AutoPlaceholderBatch beginBatching(this);
   AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
                                       *this, EditSubAction::eInsertQuotation,
                                       nsIEditor::eNext);
 
-  // get selection
   RefPtr<Selection> selection = GetSelection();
-  NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
+  if (NS_WARN_IF(!selection)) {
+    return NS_ERROR_FAILURE;
+  }
 
-  // give rules a chance to handle or cancel
+  // Adjust Selection and clear cached style before inserting <blockquote>.
   EditSubActionInfo subActionInfo(EditSubAction::eInsertElement);
   bool cancel, handled;
-  // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
   nsresult rv =
     rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
@@ -1592,23 +1598,32 @@ HTMLEditor::PasteAsCitedQuotation(const nsAString& aCitation,
     return rv;
   }
   if (cancel || handled) {
-    return NS_OK; // rules canceled the operation
+    return NS_OK;
   }
 
+  // Then, remove Selection and create <blockquote type="cite"> now.
+  // XXX Why don't we insert the <blockquote> into the DOM tree after
+  //     pasting the content in clipboard into it?
   nsCOMPtr<Element> newNode =
     DeleteSelectionAndCreateElement(*nsGkAtoms::blockquote);
-  NS_ENSURE_TRUE(newNode, NS_ERROR_NULL_POINTER);
-
-  // Try to set type=cite.  Ignore it if this fails.
+  if (NS_WARN_IF(!newNode)) {
+    return NS_ERROR_FAILURE;
+  }
   newNode->SetAttr(kNameSpaceID_None, nsGkAtoms::type,
                    NS_LITERAL_STRING("cite"), true);
 
-  // Set the selection to the underneath the node we just inserted:
+  // Collapse Selection in the new <blockquote> element.
   rv = selection->Collapse(newNode, 0);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   // XXX Why don't we call HTMLEditRules::DidDoAction() after Paste()?
-  return Paste(aSelectionType);
+  rv = Paste(aClipboardType);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  return NS_OK;
 }
 
 /**
@@ -1666,6 +1681,7 @@ HTMLEditor::InsertTextWithQuotations(const nsAString& aStringToInsert)
 {
   // The whole operation should be undoable in one transaction:
   BeginTransaction();
+  AutoPlaceholderBatch beginBatching(this);
 
   // We're going to loop over the string, collecting up a "hunk"
   // that's all the same type (quoted or not),
@@ -1740,7 +1756,7 @@ HTMLEditor::InsertTextWithQuotations(const nsAString& aStringToInsert)
       rv = InsertAsPlaintextQuotation(curHunk, false,
                                       getter_AddRefs(dummyNode));
     } else {
-      rv = InsertTextAsAction(curHunk);
+      rv = InsertTextAsSubAction(curHunk);
       NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
         "Failed to insert a line of the quoted text");
     }
@@ -1760,6 +1776,7 @@ NS_IMETHODIMP
 HTMLEditor::InsertAsQuotation(const nsAString& aQuotedText,
                               nsINode** aNodeInserted)
 {
+  AutoPlaceholderBatch beginBatching(this);
   if (IsPlaintextEditor()) {
     return InsertAsPlaintextQuotation(aQuotedText, true, aNodeInserted);
   }
@@ -1778,11 +1795,15 @@ HTMLEditor::InsertAsPlaintextQuotation(const nsAString& aQuotedText,
                                        bool aAddCites,
                                        nsINode** aNodeInserted)
 {
-  // get selection
-  RefPtr<Selection> selection = GetSelection();
-  NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
+  if (aNodeInserted) {
+    *aNodeInserted = nullptr;
+  }
 
-  AutoPlaceholderBatch beginBatching(this);
+  RefPtr<Selection> selection = GetSelection();
+  if (NS_WARN_IF(!selection)) {
+    return NS_ERROR_FAILURE;
+  }
+
   AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
                                       *this, EditSubAction::eInsertQuotation,
                                       nsIEditor::eNext);
@@ -1807,7 +1828,7 @@ HTMLEditor::InsertAsPlaintextQuotation(const nsAString& aQuotedText,
   // We could use 100vw, but 98vw avoids a horizontal scroll bar where possible.
   // All this is done to wrap overlong lines to the screen and not to the
   // container element, the width-restricted body.
-  nsCOMPtr<Element> newNode =
+  RefPtr<Element> newNode =
     DeleteSelectionAndCreateElement(*nsGkAtoms::span);
 
   // If this succeeded, then set selection inside the pre
@@ -1830,13 +1851,17 @@ HTMLEditor::InsertAsPlaintextQuotation(const nsAString& aQuotedText,
     }
 
     // and set the selection inside it:
-    selection->Collapse(newNode, 0);
+    DebugOnly<nsresult> rv = selection->Collapse(newNode, 0);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+      "Failed to collapse selection into the new node");
   }
 
   if (aAddCites) {
-    rv = TextEditor::InsertAsQuotation(aQuotedText, aNodeInserted);
+    rv = InsertWithQuotationsAsSubAction(aQuotedText);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+      "Failed to insert the text with quotations");
   } else {
-    rv = InsertTextAsAction(aQuotedText);
+    rv = InsertTextAsSubAction(aQuotedText);
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
       "Failed to insert the quoted text as plain text");
   }
@@ -1845,15 +1870,16 @@ HTMLEditor::InsertAsPlaintextQuotation(const nsAString& aQuotedText,
   // don't need to know the inserted node.
 
   if (aNodeInserted && NS_SUCCEEDED(rv)) {
-    *aNodeInserted = newNode;
-    NS_IF_ADDREF(*aNodeInserted);
+    newNode.forget(aNodeInserted);
   }
 
   // Set the selection to just after the inserted node:
   if (NS_SUCCEEDED(rv) && newNode) {
     EditorRawDOMPoint afterNewNode(newNode);
     if (afterNewNode.AdvanceOffset()) {
-      selection->Collapse(afterNewNode);
+      DebugOnly<nsresult> rv = selection->Collapse(afterNewNode);
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+        "Failed to collapse after the new node");
     }
   }
 
@@ -1862,15 +1888,38 @@ HTMLEditor::InsertAsPlaintextQuotation(const nsAString& aQuotedText,
 }
 
 NS_IMETHODIMP
-HTMLEditor::StripCites()
-{
-  return TextEditor::StripCites();
-}
-
-NS_IMETHODIMP
 HTMLEditor::Rewrap(bool aRespectNewlines)
 {
-  return TextEditor::Rewrap(aRespectNewlines);
+  // Rewrap makes no sense if there's no wrap column; default to 72.
+  int32_t wrapWidth = WrapWidth();
+  if (wrapWidth <= 0) {
+    wrapWidth = 72;
+  }
+
+  nsAutoString current;
+  bool isCollapsed;
+  nsresult rv = SharedOutputString(nsIDocumentEncoder::OutputFormatted |
+                                   nsIDocumentEncoder::OutputLFLineBreak,
+                                   &isCollapsed, current);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsString wrapped;
+  uint32_t firstLineOffset = 0;   // XXX need to reset this if there is a
+                                  //     selection
+  rv = InternetCiter::Rewrap(current, wrapWidth, firstLineOffset,
+                             aRespectNewlines, wrapped);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (isCollapsed) {
+    DebugOnly<nsresult> rv = SelectAllInternal();
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),  "Failed to select all text");
+  }
+
+  return InsertTextWithQuotations(wrapped);
 }
 
 NS_IMETHODIMP
@@ -1879,17 +1928,20 @@ HTMLEditor::InsertAsCitedQuotation(const nsAString& aQuotedText,
                                    bool aInsertHTML,
                                    nsINode** aNodeInserted)
 {
-  // Don't let anyone insert html into a "plaintext" editor:
+  AutoPlaceholderBatch beginBatching(this);
+
+  // Don't let anyone insert HTML when we're in plaintext mode.
   if (IsPlaintextEditor()) {
-    NS_ASSERTION(!aInsertHTML, "InsertAsCitedQuotation: trying to insert html into plaintext editor");
+    NS_ASSERTION(!aInsertHTML,
+      "InsertAsCitedQuotation: trying to insert html into plaintext editor");
     return InsertAsPlaintextQuotation(aQuotedText, true, aNodeInserted);
   }
 
-  // get selection
   RefPtr<Selection> selection = GetSelection();
-  NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
+  if (NS_WARN_IF(!selection)) {
+    return NS_ERROR_FAILURE;
+  }
 
-  AutoPlaceholderBatch beginBatching(this);
   AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
                                       *this, EditSubAction::eInsertQuotation,
                                       nsIEditor::eNext);
@@ -1908,9 +1960,11 @@ HTMLEditor::InsertAsCitedQuotation(const nsAString& aQuotedText,
     return NS_OK; // rules canceled the operation
   }
 
-  nsCOMPtr<Element> newNode =
+  RefPtr<Element> newNode =
     DeleteSelectionAndCreateElement(*nsGkAtoms::blockquote);
-  NS_ENSURE_TRUE(newNode, NS_ERROR_NULL_POINTER);
+  if (NS_WARN_IF(!newNode)) {
+    return NS_ERROR_FAILURE;
+  }
 
   // Try to set type=cite.  Ignore it if this fails.
   newNode->SetAttr(kNameSpaceID_None, nsGkAtoms::type,
@@ -1926,7 +1980,7 @@ HTMLEditor::InsertAsCitedQuotation(const nsAString& aQuotedText,
   if (aInsertHTML) {
     rv = LoadHTML(aQuotedText);
   } else {
-    rv = InsertTextAsAction(aQuotedText);  // XXX ignore charset
+    rv = InsertTextAsSubAction(aQuotedText);  // XXX ignore charset
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to insert the quoted text");
   }
 

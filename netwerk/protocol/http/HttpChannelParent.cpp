@@ -65,20 +65,20 @@ namespace net {
 HttpChannelParent::HttpChannelParent(const PBrowserOrId& iframeEmbedding,
                                      nsILoadContext* aLoadContext,
                                      PBOverrideStatus aOverrideStatus)
-  : mIPCClosed(false)
+  : mLoadContext(aLoadContext)
+  , mNestedFrameId(0)
+  , mIPCClosed(false)
+  , mPBOverride(aOverrideStatus)
+  , mStatus(NS_OK)
   , mIgnoreProgress(false)
   , mSentRedirect1BeginFailed(false)
   , mReceivedRedirect2Verify(false)
-  , mPBOverride(aOverrideStatus)
-  , mLoadContext(aLoadContext)
-  , mStatus(NS_OK)
   , mPendingDiversion(false)
   , mDivertingFromChild(false)
   , mDivertedOnStartRequest(false)
   , mSuspendedForDiversion(false)
   , mSuspendAfterSynthesizeResponse(false)
   , mWillSynthesizeResponse(false)
-  , mNestedFrameId(0)
 {
   LOG(("Creating HttpChannelParent [this=%p]\n", this));
 
@@ -154,7 +154,8 @@ HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs)
                        a.dispatchFetchEventEnd(),
                        a.handleFetchEventStart(),
                        a.handleFetchEventEnd(),
-                       a.forceMainDocumentChannel());
+                       a.forceMainDocumentChannel(),
+                       a.navigationStartTimeStamp());
   }
   case HttpChannelCreationArgs::THttpChannelConnectArgs:
   {
@@ -454,7 +455,8 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
                                  const TimeStamp&           aDispatchFetchEventEnd,
                                  const TimeStamp&           aHandleFetchEventStart,
                                  const TimeStamp&           aHandleFetchEventEnd,
-                                 const bool&                aForceMainDocumentChannel)
+                                 const bool&                aForceMainDocumentChannel,
+                                 const TimeStamp&           aNavigationStartTimeStamp)
 {
   nsCOMPtr<nsIURI> uri = DeserializeURI(aURI);
   if (!uri) {
@@ -639,6 +641,8 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
   httpChannel->SetDispatchFetchEventEnd(aDispatchFetchEventEnd);
   httpChannel->SetHandleFetchEventStart(aHandleFetchEventStart);
   httpChannel->SetHandleFetchEventEnd(aHandleFetchEventEnd);
+
+  httpChannel->SetNavigationStartTimeStamp(aNavigationStartTimeStamp);
 
   nsCOMPtr<nsIApplicationCacheChannel> appCacheChan =
     do_QueryObject(httpChannel);
@@ -2354,10 +2358,12 @@ HttpChannelParent::DoSendSetPriority(int16_t aValue)
 }
 
 nsresult
-HttpChannelParent::LogBlockedCORSRequest(const nsAString& aMessage)
+HttpChannelParent::LogBlockedCORSRequest(const nsAString& aMessage,
+                                         const nsACString& aCategory)
 {
   if (mIPCClosed ||
-      NS_WARN_IF(!SendLogBlockedCORSRequest(nsString(aMessage)))) {
+      NS_WARN_IF(!SendLogBlockedCORSRequest(nsString(aMessage),
+                                            nsCString(aCategory)))) {
     return NS_ERROR_UNEXPECTED;
   }
   return NS_OK;

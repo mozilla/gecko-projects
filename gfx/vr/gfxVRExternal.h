@@ -37,6 +37,8 @@ protected:
   VRHMDSensorState GetSensorState() override;
   void StartPresentation() override;
   void StopPresentation() override;
+  void StartVRNavigation() override;
+  void StopVRNavigation(const TimeDuration& aTimeout) override;
 
   bool SubmitFrame(const layers::SurfaceDescriptor& aTexture,
                    uint64_t aFrameId,
@@ -55,9 +57,18 @@ private:
   bool PopulateLayerTexture(const layers::SurfaceDescriptor& aTexture,
                             VRLayerTextureType* aTextureType,
                             VRLayerTextureHandle* aTextureHandle);
+  void PushState(bool aNotifyCond = false);
+#if defined(MOZ_WIDGET_ANDROID)
+  bool PullState(const std::function<bool()>& aWaitCondition = nullptr);
+  void PostVRTask();
+  void RunVRTask();
+#else
+  bool PullState();
+#endif
 
   VRTelemetry mTelemetry;
-  bool mIsPresenting;
+  TimeStamp mVRNavigationTransitionEnd;
+  VRBrowserState mBrowserState;
   VRHMDSensorState mLastSensorState;
 };
 
@@ -86,9 +97,16 @@ public:
                              double aDuration,
                              const VRManagerPromise& aPromise) override;
   virtual void StopVibrateHaptic(uint32_t aControllerIdx) override;
+#if defined(MOZ_WIDGET_ANDROID)
+  bool PullState(VRDisplayState* aDisplayState,
+                 VRHMDSensorState* aSensorState = nullptr,
+                 VRControllerState* aControllerState = nullptr,
+                 const std::function<bool()>& aWaitCondition = nullptr);
+#else
   bool PullState(VRDisplayState* aDisplayState,
                  VRHMDSensorState* aSensorState = nullptr,
                  VRControllerState* aControllerState = nullptr);
+#endif
   void PushState(VRBrowserState* aBrowserState, const bool aNotifyCond = false);
 
 protected:
@@ -105,6 +123,7 @@ private:
 #elif defined(MOZ_WIDGET_ANDROID)
   bool mDoShutdown;
   bool mExternalStructFailed;
+  bool mEnumerationCompleted;
 #endif
 
   volatile VRExternalShmem* mExternalShmem;

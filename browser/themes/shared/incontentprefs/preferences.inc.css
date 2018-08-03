@@ -209,6 +209,10 @@ button > hbox > label {
   font-size: 90%;
 }
 
+#activeLanguages {
+  height: 16em;
+}
+
 #activeLanguages > richlistitem {
   padding: 0.3em;
 }
@@ -380,6 +384,10 @@ button > hbox > label {
   margin-bottom: 4px;
 }
 
+#trackingProtectionBox {
+  margin-top: 16px;
+}
+
 #doNotTrackLearnMoreBox {
   margin-top: 32px;
 }
@@ -431,6 +439,10 @@ button > hbox > label {
 
 .text-link {
   margin-bottom: 0;
+}
+
+.text-link[disabled="true"] {
+  pointer-events: none;
 }
 
 #showUpdateHistory {
@@ -902,4 +914,8 @@ menulist[indicator=true] > menupopup menuitem[indicator=true]:not([image]) > .me
 
 .proxy-port-input {
   width: calc(5ch + 22px); /* 5 chars + 11px padding on both sides */
+}
+
+#defaultBrowserLanguage {
+  min-width: 20em;
 }

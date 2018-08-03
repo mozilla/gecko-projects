@@ -2,8 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import PaymentStateSubscriberMixin from "../mixins/PaymentStateSubscriberMixin.js";
-import RichSelect from "../components/rich-select.js";
+import RichPicker from "./rich-picker.js";
 import ShippingOption from "../components/shipping-option.js";
 
 /**
@@ -12,21 +11,19 @@ import ShippingOption from "../components/shipping-option.js";
  * <option> listening to shippingOptions.
  */
 
-export default class ShippingOptionPicker extends PaymentStateSubscriberMixin(HTMLElement) {
+export default class ShippingOptionPicker extends RichPicker {
   constructor() {
     super();
-    this.dropdown = new RichSelect();
-    this.dropdown.addEventListener("change", this);
     this.dropdown.setAttribute("option-type", "shipping-option");
   }
 
-  connectedCallback() {
-    this.appendChild(this.dropdown);
-    super.connectedCallback();
-  }
-
   render(state) {
-    let {shippingOptions} = state.request.paymentDetails;
+    this.addLink.hidden = true;
+    this.editLink.hidden = true;
+
+    // If requestShipping is true but paymentDetails.shippingOptions isn't defined
+    // then use an empty array as a fallback.
+    let shippingOptions = state.request.paymentDetails.shippingOptions || [];
     let desiredOptions = [];
     for (let option of shippingOptions) {
       let optionEl = this.dropdown.getOptionByValue(option.id);

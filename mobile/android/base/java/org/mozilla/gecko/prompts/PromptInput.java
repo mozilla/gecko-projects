@@ -12,17 +12,22 @@ import java.util.GregorianCalendar;
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.widget.AllCapsTextView;
+import org.mozilla.gecko.widget.FocusableDatePicker;
 import org.mozilla.gecko.widget.DateTimePicker;
+import org.mozilla.gecko.widget.FocusableTimePicker;
 
 import android.content.Context;
 import android.content.res.Configuration;
+import android.support.annotation.NonNull;
 import android.support.design.widget.TextInputLayout;
 import android.text.Html;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.text.format.DateFormat;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
@@ -38,7 +43,7 @@ public abstract class PromptInput {
     protected final String mLabel;
     protected final String mType;
     protected final String mId;
-    protected final String mValue;
+    protected String mValue;
     protected final String mMinValue;
     protected final String mMaxValue;
     protected OnChangeListener mListener;
@@ -113,7 +118,7 @@ public abstract class PromptInput {
             input.setRawInputType(Configuration.KEYBOARD_12KEY);
             input.setInputType(InputType.TYPE_CLASS_NUMBER |
                                InputType.TYPE_NUMBER_FLAG_SIGNED);
-            return input;
+            return inputLayout;
         }
     }
 
@@ -135,7 +140,7 @@ public abstract class PromptInput {
 
     public static class CheckboxInput extends PromptInput {
         public static final String INPUT_TYPE = "checkbox";
-        private final boolean mChecked;
+        private boolean mChecked;
 
         public CheckboxInput(GeckoBundle obj) {
             super(obj);
@@ -156,6 +161,13 @@ public abstract class PromptInput {
         public Object getValue() {
             CheckBox checkbox = (CheckBox)mView;
             return checkbox.isChecked() ? Boolean.TRUE : Boolean.FALSE;
+        }
+
+        @Override
+        public void saveCurrentInput(@NonNull final GeckoBundle userInput) {
+            if (userInput.containsKey(mId)) {
+                mChecked = (Boolean) userInput.get(mId);
+            }
         }
     }
 
@@ -178,7 +190,8 @@ public abstract class PromptInput {
         @Override
         public View getView(Context context) throws UnsupportedOperationException {
             if (mType.equals("date")) {
-                DatePicker input = new DatePicker(context);
+                // FocusableDatePicker allow us to have priority in responding to scroll events.
+                DatePicker input = new FocusableDatePicker(context);
                 try {
                     if (!TextUtils.isEmpty(mValue)) {
                         GregorianCalendar calendar = new GregorianCalendar();
@@ -206,7 +219,8 @@ public abstract class PromptInput {
                                                           DateTimePicker.PickersState.WEEK, mMinValue, mMaxValue);
                 mView = (View)input;
             } else if (mType.equals("time")) {
-                TimePicker input = new TimePicker(context);
+                // FocusableDatePicker allow us to have priority in responding to scroll events.
+                TimePicker input = new FocusableTimePicker(context);
                 input.setIs24HourView(DateFormat.is24HourFormat(context));
 
                 GregorianCalendar calendar = new GregorianCalendar();
@@ -228,6 +242,13 @@ public abstract class PromptInput {
                                                           DateTimePicker.PickersState.MONTH, mMinValue, mMaxValue);
                 mView = (View)input;
             }
+
+            // Make sure the widgets will not be chopped on smaller screens (Bug 1412517)
+            LinearLayout.LayoutParams parentParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            parentParams.gravity = Gravity.CENTER;
+            mView.setLayoutParams(parentParams);
+
             return mView;
         }
 
@@ -271,7 +292,7 @@ public abstract class PromptInput {
     public static class MenulistInput extends PromptInput {
         public static final String INPUT_TYPE = "menulist";
         private final String[] mListitems;
-        private final int mSelected;
+        private int mSelected;
 
         public Spinner spinner;
         public AllCapsTextView textView;
@@ -316,6 +337,13 @@ public abstract class PromptInput {
         public Object getValue() {
             return spinner.getSelectedItemPosition();
         }
+
+        @Override
+        public void saveCurrentInput(@NonNull final GeckoBundle userInput) {
+            if (userInput.containsKey(mId)) {
+                mSelected = (Integer) userInput.get(mId);
+            }
+        }
     }
 
     public static class LabelInput extends PromptInput {
@@ -332,6 +360,11 @@ public abstract class PromptInput {
             mView = view;
             return mView;
         }
+
+        @Override
+        public void saveCurrentInput(@NonNull final GeckoBundle userInput) {
+            // No user input to save
+        }
     }
 
     public PromptInput(GeckoBundle obj) {
@@ -342,6 +375,12 @@ public abstract class PromptInput {
         mValue = obj.getString("value", "");
         mMaxValue = obj.getString("max", "");
         mMinValue = obj.getString("min", "");
+    }
+
+    public void saveCurrentInput(@NonNull final GeckoBundle userInput) {
+        if (userInput.containsKey(mId)) {
+            mValue = (String) userInput.get(mId);
+        }
     }
 
     public void putInBundle(final GeckoBundle bundle) {

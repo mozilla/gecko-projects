@@ -220,8 +220,8 @@ panel[photon] > .panel-arrowcontainer > .panel-arrowcontent {
 }
 
 #confirmation-hint {
-  --arrowpanel-background: #058b00;
-  --arrowpanel-border-color: #046b00;
+  --arrowpanel-background: #0060df;
+  --arrowpanel-border-color: #0060df;
   --arrowpanel-color: #fff;
 }
 
@@ -609,6 +609,12 @@ toolbarbutton[constrain-size="true"][cui-areatype="menu-panel"] > .toolbarbutton
   margin-inline-end: 7px;
   padding: 2px;
   transition: padding .2s ease;
+}
+
+/* Don't resize the toggle in touch mode. */
+#appMenu-popup[touchmode] #appMenu-tp-toggle {
+  margin-top: 12px;
+  margin-bottom: 12px;
 }
 
 #appMenu-tp-toggle::before {

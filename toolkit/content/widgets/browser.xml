@@ -364,20 +364,14 @@
 
       <property name="outerWindowID" readonly="true">
         <getter><![CDATA[
-          return this.contentWindow
-                     .QueryInterface(Ci.nsIInterfaceRequestor)
-                     .getInterface(Ci.nsIDOMWindowUtils)
-                     .outerWindowID;
+          return this.contentWindow.windowUtils.outerWindowID;
         ]]></getter>
       </property>
 
       <property name="innerWindowID" readonly="true">
         <getter><![CDATA[
           try {
-            return this.contentWindow
-                       .QueryInterface(Ci.nsIInterfaceRequestor)
-                       .getInterface(Ci.nsIDOMWindowUtils)
-                       .currentInnerWindowID;
+            return this.contentWindow.windowUtils.currentInnerWindowID;
           } catch (e) {
             if (e.result != Cr.NS_ERROR_NOT_AVAILABLE) {
               throw e;
@@ -592,6 +586,16 @@
           <![CDATA[
             let event = document.createEvent("Events");
             event.initEvent("DOMAudioPlaybackStopped", true, false);
+            this.dispatchEvent(event);
+          ]]>
+        </body>
+      </method>
+
+      <method name="notifyAudibleAutoplayMediaOccurred">
+        <body>
+          <![CDATA[
+            let event = document.createEvent("Events");
+            event.initEvent("AudibleAutoplayMediaOccurred", true, false);
             this.dispatchEvent(event);
           ]]>
         </body>
@@ -850,6 +854,7 @@
             this.messageManager.addMessageListener("AudioPlayback:ActiveMediaBlockStart", this);
             this.messageManager.addMessageListener("AudioPlayback:ActiveMediaBlockStop", this);
             this.messageManager.addMessageListener("UnselectedTabHover:Toggle", this);
+            this.messageManager.addMessageListener("AudibleAutoplayMediaOccurred", this);
 
             if (this.hasAttribute("selectmenulist")) {
               this.messageManager.addMessageListener("Forms:ShowDropDown", this);
@@ -977,6 +982,9 @@
               this._shouldSendUnselectedTabHover = data.enable ?
                 ++this._unselectedTabHoverMessageListenerCount > 0 :
                 --this._unselectedTabHoverMessageListenerCount == 0;
+              break;
+            case "AudibleAutoplayMediaOccurred":
+              this.notifyAudibleAutoplayMediaOccurred();
               break;
             case "Forms:ShowDropDown": {
               if (!this._selectParentHelper) {

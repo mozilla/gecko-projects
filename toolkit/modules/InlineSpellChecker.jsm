@@ -419,8 +419,7 @@ var SpellCheckHelper = {
       if (win) {
         var isSpellcheckable = false;
         try {
-          var editingSession = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                                  .getInterface(Ci.nsIWebNavigation)
+          var editingSession = win.docShell
                                   .QueryInterface(Ci.nsIInterfaceRequestor)
                                   .getInterface(Ci.nsIEditingSession);
           if (editingSession.windowIsEditable(win) &&
@@ -492,14 +491,14 @@ RemoteSpellChecker.prototype = {
 
     let dictionary = Cc["@mozilla.org/spellchecker/personaldictionary;1"]
                        .getService(Ci.mozIPersonalDictionary);
-    dictionary.addWord(this._spellInfo.misspelling, "");
+    dictionary.addWord(this._spellInfo.misspelling);
 
     this._spellInfo.target.sendAsyncMessage("InlineSpellChecker:recheck", {});
   },
   undoAddToDictionary(word) {
     let dictionary = Cc["@mozilla.org/spellchecker/personaldictionary;1"]
                        .getService(Ci.mozIPersonalDictionary);
-    dictionary.removeWord(word, "");
+    dictionary.removeWord(word);
 
     this._spellInfo.target.sendAsyncMessage("InlineSpellChecker:recheck", {});
   },

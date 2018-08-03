@@ -115,7 +115,7 @@
 #include "ActiveLayerTracker.h"
 
 #include "nsITheme.h"
-#include "nsThemeConstants.h"
+#include "nsStyleConsts.h"
 
 #include "ImageLoader.h"
 
@@ -2298,7 +2298,7 @@ nsIFrame::ComputeSelectionStyle() const
   }
   RefPtr<ComputedStyle> sc =
     PresContext()->StyleSet()->ProbePseudoElementStyle(
-      element, CSSPseudoElementType::selection, Style());
+      *element, CSSPseudoElementType::selection, Style());
   return sc.forget();
 }
 
@@ -2405,7 +2405,8 @@ nsFrame::DisplayBackgroundUnconditional(nsDisplayListBuilder* aBuilder,
   // receive a propagated background should just set aForceBackground to
   // true.
   if (aBuilder->IsForEventDelivery() || aForceBackground ||
-      !StyleBackground()->IsTransparent(this) || StyleDisplay()->mAppearance) {
+      !StyleBackground()->IsTransparent(this) ||
+      StyleDisplay()->HasAppearance()) {
     return nsDisplayBackgroundImage::AppendBackgroundItemsToTop(
         aBuilder, this, GetRectRelativeToSelf(), aLists.BorderBackground());
   }
@@ -5357,12 +5358,11 @@ nsIFrame::InlinePrefISizeData::ForceBreak(StyleClear aBreakType)
             // been cleared past
             floats_cur_left = 0,
             floats_cur_right = 0;
-    const WritingMode wm = mLineContainerWM;
 
     for (uint32_t i = 0, i_end = mFloats.Length(); i != i_end; ++i) {
       const FloatInfo& floatInfo = mFloats[i];
       const nsStyleDisplay* floatDisp = floatInfo.Frame()->StyleDisplay();
-      StyleClear breakType = floatDisp->PhysicalBreakType(wm);
+      StyleClear breakType = floatDisp->mBreakType;
       if (breakType == StyleClear::Left ||
           breakType == StyleClear::Right ||
           breakType == StyleClear::Both) {
@@ -5379,7 +5379,7 @@ nsIFrame::InlinePrefISizeData::ForceBreak(StyleClear aBreakType)
         }
       }
 
-      StyleFloat floatStyle = floatDisp->PhysicalFloats(wm);
+      StyleFloat floatStyle = floatDisp->mFloat;
       nscoord& floats_cur =
         floatStyle == StyleFloat::Left ? floats_cur_left : floats_cur_right;
       nscoord floatWidth = floatInfo.Width();
@@ -5414,7 +5414,7 @@ nsIFrame::InlinePrefISizeData::ForceBreak(StyleClear aBreakType)
       // no longer any floats we need to keep. See below.
       for (FloatInfo& floatInfo : Reversed(mFloats)) {
         const nsStyleDisplay* floatDisp = floatInfo.Frame()->StyleDisplay();
-        if (floatDisp->PhysicalFloats(wm) != clearFloatType) {
+        if (floatDisp->mFloat != clearFloatType) {
           newFloats.AppendElement(floatInfo);
         } else {
           // This is a float on the side that this break directly clears
@@ -5424,7 +5424,7 @@ nsIFrame::InlinePrefISizeData::ForceBreak(StyleClear aBreakType)
           // (earlier) floats on that side would be indirectly cleared
           // as well. Thus, we should break out of this loop and stop
           // considering earlier floats to be kept in mFloats.
-          StyleClear floatBreakType = floatDisp->PhysicalBreakType(wm);
+          StyleClear floatBreakType = floatDisp->mBreakType;
           if (floatBreakType != aBreakType &&
               floatBreakType != StyleClear::None) {
             break;
@@ -6251,7 +6251,7 @@ nsFrame::ComputeSimpleTightBounds(DrawTarget* aDrawTarget) const
 {
   if (StyleOutline()->ShouldPaintOutline() || StyleBorder()->HasBorder() ||
       !StyleBackground()->IsTransparent(this) ||
-      StyleDisplay()->mAppearance) {
+      StyleDisplay()->HasAppearance()) {
     // Not necessarily tight, due to clipping, negative
     // outline-offset, and lots of other issues, but that's OK
     return GetVisualOverflowRect();
@@ -8146,8 +8146,7 @@ nsFrame::GetNextPrevLineFromeBlockFrame(nsPresContext* aPresContext,
                                     false, // aVisual
                                     aPos->mScrollViewStop,
                                     false, // aFollowOOFs
-                                    false, // aSkipPopupChecks
-                                    false  // aSkipShadow
+                                    false // aSkipPopupChecks
                                     );
       if (NS_FAILED(result))
         return result;
@@ -8244,8 +8243,7 @@ nsFrame::GetNextPrevLineFromeBlockFrame(nsPresContext* aPresContext,
                                       false, // aVisual
                                       aPos->mScrollViewStop,
                                       false, // aFollowOOFs
-                                      false, // aSkipPopupChecks
-                                      false  // aSkipShadow
+                                      false // aSkipPopupChecks
                                       );
       }
       while ( !found ){
@@ -9036,8 +9034,7 @@ nsIFrame::GetFrameFromDirection(nsDirection aDirection, bool aVisual,
                                   aVisual && presContext->BidiEnabled(),
                                   aScrollViewStop,
                                   true,  // aFollowOOFs
-                                  false, // aSkipPopupChecks
-                                  false  // aSkipShadow
+                                  false // aSkipPopupChecks
                                   );
     if (NS_FAILED(result))
       return result;
@@ -9390,10 +9387,10 @@ ComputeAndIncludeOutlineArea(nsIFrame* aFrame, nsOverflowAreas& aOverflowAreas,
       nsPresContext* presContext = aFrame->PresContext();
       nsITheme* theme = presContext->GetTheme();
       if (theme && theme->ThemeSupportsWidget(presContext, aFrame,
-                                              NS_THEME_FOCUS_OUTLINE)) {
+                                              StyleAppearance::FocusOutline)) {
         outerRect.Inflate(offset);
         theme->GetWidgetOverflow(presContext->DeviceContext(), aFrame,
-                                 NS_THEME_FOCUS_OUTLINE, &outerRect);
+                                 StyleAppearance::FocusOutline, &outerRect);
       } else {
         useOutlineAuto = false;
       }
@@ -9878,7 +9875,7 @@ nsFrame::DoGetParentComputedStyle(nsIFrame** aProviderFrame) const
           pseudo == nsCSSAnonBoxes::tableWrapper) {
         if (Servo_Element_IsDisplayContents(parentElement)) {
           RefPtr<ComputedStyle> style =
-            PresShell()->StyleSet()->ResolveServoStyle(parentElement);
+            PresShell()->StyleSet()->ResolveServoStyle(*parentElement);
           // NOTE(emilio): we return a weak reference because the element also
           // holds the style context alive. This is a bit silly (we could've
           // returned a weak ref directly), but it's probably not worth
@@ -9996,7 +9993,7 @@ nsIFrame::IsFocusable(int32_t *aTabIndex, bool aWithMouse)
       // will be enough to make them keyboard scrollable.
       nsIScrollableFrame *scrollFrame = do_QueryFrame(this);
       if (scrollFrame &&
-          !scrollFrame->GetScrollbarStyles().IsHiddenInBothDirections() &&
+          !scrollFrame->GetScrollStyles().IsHiddenInBothDirections() &&
           !scrollFrame->GetScrollRange().IsEqualEdges(nsRect(0, 0, 0, 0))) {
         // Scroll bars will be used for overflow
         isFocusable = true;

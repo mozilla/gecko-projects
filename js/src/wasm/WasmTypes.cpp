@@ -68,15 +68,8 @@ Val::Val(const LitVal& val)
       case ValType::F32: u.f32_ = val.f32(); return;
       case ValType::I64: u.i64_ = val.i64(); return;
       case ValType::F64: u.f64_ = val.f64(); return;
-      case ValType::I8x16:
-      case ValType::B8x16:
-      case ValType::I16x8:
-      case ValType::B16x8:
-      case ValType::I32x4:
-      case ValType::F32x4:
-      case ValType::B32x4: memcpy(&u, val.rawSimd(), jit::Simd128DataSize); return;
+      case ValType::Ref:
       case ValType::AnyRef: u.ptr_ = val.ptr(); return;
-      case ValType::Ref: break;
     }
     MOZ_CRASH();
 }
@@ -92,15 +85,6 @@ Val::writePayload(uint8_t* dst) const
       case ValType::I64:
       case ValType::F64:
         memcpy(dst, &u.i64_, sizeof(u.i64_));
-        return;
-      case ValType::I8x16:
-      case ValType::I16x8:
-      case ValType::I32x4:
-      case ValType::F32x4:
-      case ValType::B8x16:
-      case ValType::B16x8:
-      case ValType::B32x4:
-        memcpy(dst, &u, jit::Simd128DataSize);
         return;
       case ValType::Ref:
       case ValType::AnyRef:
@@ -123,8 +107,8 @@ Val::writePayload(uint8_t* dst) const
 void
 Val::trace(JSTracer* trc)
 {
-    if (type_.isValid() && type_ == ValType::AnyRef && u.ptr_)
-        TraceManuallyBarrieredEdge(trc, &u.ptr_, "wasm anyref global");
+    if (type_.isValid() && type_.isRefOrAnyRef() && u.ptr_)
+        TraceManuallyBarrieredEdge(trc, &u.ptr_, "wasm ref/anyref global");
 }
 
 bool
@@ -237,13 +221,6 @@ IsImmediateType(ValType vt)
       case ValType::F64:
       case ValType::AnyRef:
         return true;
-      case ValType::I8x16:
-      case ValType::I16x8:
-      case ValType::I32x4:
-      case ValType::F32x4:
-      case ValType::B8x16:
-      case ValType::B16x8:
-      case ValType::B32x4:
       case ValType::Ref:
         return false;
     }
@@ -265,13 +242,6 @@ EncodeImmediateType(ValType vt)
         return 3;
       case ValType::AnyRef:
         return 4;
-      case ValType::I8x16:
-      case ValType::I16x8:
-      case ValType::I32x4:
-      case ValType::F32x4:
-      case ValType::B8x16:
-      case ValType::B16x8:
-      case ValType::B32x4:
       case ValType::Ref:
         break;
     }
@@ -571,7 +541,7 @@ Assumptions::operator==(const Assumptions& rhs) const
 {
     return cpuId == rhs.cpuId &&
            buildId.length() == rhs.buildId.length() &&
-           PodEqual(buildId.begin(), rhs.buildId.begin(), buildId.length());
+           ArrayEqual(buildId.begin(), rhs.buildId.begin(), buildId.length());
 }
 
 size_t

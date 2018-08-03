@@ -293,7 +293,9 @@ class GCRuntime
     void onOutOfMallocMemory(const AutoLockGC& lock);
 
 #ifdef JS_GC_ZEAL
-    const void* addressOfZealModeBits() { return &zealModeBits; }
+    const uint32_t* addressOfZealModeBits() {
+        return &zealModeBits.refNoCheck();
+    }
     void getZealBits(uint32_t* zealBits, uint32_t* frequency, uint32_t* nextScheduled);
     void setZeal(uint8_t zeal, uint32_t frequency);
     bool parseAndSetZeal(const char* str);
@@ -737,12 +739,15 @@ class GCRuntime
     MainThreadData<RootedValueMap> rootsHash;
 
     // An incrementing id used to assign unique ids to cells that require one.
-    mozilla::Atomic<uint64_t, mozilla::ReleaseAcquire> nextCellUniqueId_;
+    mozilla::Atomic<uint64_t,
+                    mozilla::ReleaseAcquire,
+                    mozilla::recordreplay::Behavior::DontPreserve> nextCellUniqueId_;
 
     /*
      * Number of the committed arenas in all GC chunks including empty chunks.
      */
-    mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> numArenasFreeCommitted;
+    mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire,
+                    mozilla::recordreplay::Behavior::DontPreserve> numArenasFreeCommitted;
     MainThreadData<VerifyPreTracer*> verifyPreData;
 
   private:
@@ -756,7 +761,9 @@ class GCRuntime
      */
     MainThreadData<JSGCMode> mode;
 
-    mozilla::Atomic<size_t, mozilla::ReleaseAcquire> numActiveZoneIters;
+    mozilla::Atomic<size_t,
+                    mozilla::ReleaseAcquire,
+                    mozilla::recordreplay::Behavior::DontPreserve> numActiveZoneIters;
 
     /* During shutdown, the GC needs to clean up every possible object. */
     MainThreadData<bool> cleanUpEverything;
@@ -790,7 +797,9 @@ class GCRuntime
      */
     UnprotectedData<bool> grayBitsValid;
 
-    mozilla::Atomic<JS::gcreason::Reason, mozilla::Relaxed> majorGCTriggerReason;
+    mozilla::Atomic<JS::gcreason::Reason,
+                    mozilla::Relaxed,
+                    mozilla::recordreplay::Behavior::DontPreserve> majorGCTriggerReason;
 
   private:
     /* Perform full GC if rt->keepAtoms() becomes false. */
@@ -1005,7 +1014,7 @@ class GCRuntime
     // after minor GC.
     MainThreadData<LifoAlloc> blocksToFreeAfterMinorGC;
 
-    const void* addressOfNurseryPosition() {
+    void* addressOfNurseryPosition() {
         return nursery_.refNoCheck().addressOfPosition();
     }
     const void* addressOfNurseryCurrentEnd() {

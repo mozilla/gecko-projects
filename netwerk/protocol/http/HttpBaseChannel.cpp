@@ -10,6 +10,7 @@
 
 #include "mozilla/net/HttpBaseChannel.h"
 
+#include "nsGlobalWindowOuter.h"
 #include "nsHttpHandler.h"
 #include "nsMimeTypes.h"
 #include "nsNetCID.h"
@@ -42,6 +43,7 @@
 #include "nsINetworkInterceptController.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/PerformanceStorage.h"
+#include "mozilla/NullPrincipal.h"
 #include "mozilla/Services.h"
 #include "mozIThirdPartyUtil.h"
 #include "nsStreamUtils.h"
@@ -51,7 +53,6 @@
 #include "nsILoadGroupChild.h"
 #include "mozilla/ConsoleReportCollector.h"
 #include "LoadInfo.h"
-#include "NullPrincipal.h"
 #include "nsISSLSocketControl.h"
 #include "mozilla/Telemetry.h"
 #include "nsIURL.h"
@@ -155,14 +156,25 @@ private:
 NS_IMPL_ISUPPORTS(AddHeadersToChannelVisitor, nsIHttpHeaderVisitor)
 
 HttpBaseChannel::HttpBaseChannel()
-  : mCanceled(false)
+  : mReportCollector(new ConsoleReportCollector())
+  , mHttpHandler(gHttpHandler)
+  , mChannelCreationTime(0)
   , mStartPos(UINT64_MAX)
+  , mTransferSize(0)
+  , mDecodedBodySize(0)
+  , mEncodedBodySize(0)
+  , mRequestContextID(0)
+  , mContentWindowId(0)
+  , mTopLevelOuterContentWindowId(0)
+  , mAltDataLength(0)
+  , mChannelId(0)
+  , mReqContentLength(0U)
   , mStatus(NS_OK)
+  , mCanceled(false)
+  , mIsTrackingResource(false)
   , mLoadFlags(LOAD_NORMAL)
   , mCaps(0)
   , mClassOfService(0)
-  , mPriority(PRIORITY_NORMAL)
-  , mRedirectionLimit(gHttpHandler->RedirectionLimit())
   , mUpgradeToSecure(false)
   , mApplyConversion(true)
   , mIsPending(false)
@@ -191,40 +203,29 @@ HttpBaseChannel::HttpBaseChannel()
   , mAllowStaleCacheContent(false)
   , mAddedAsNonTailRequest(false)
   , mAsyncOpenWaitingForStreamLength(false)
+  , mUpgradableToSecure(true)
   , mTlsFlags(0)
   , mSuspendCount(0)
   , mInitialRwin(0)
   , mProxyResolveFlags(0)
   , mContentDispositionHint(UINT32_MAX)
-  , mHttpHandler(gHttpHandler)
   , mReferrerPolicy(NS_GetDefaultReferrerPolicy())
+  , mCorsMode(nsIHttpChannelInternal::CORS_MODE_NO_CORS)
+  , mRedirectMode(nsIHttpChannelInternal::REDIRECT_MODE_FOLLOW)
+  , mLastRedirectFlags(0)
+  , mPriority(PRIORITY_NORMAL)
+  , mRedirectionLimit(gHttpHandler->RedirectionLimit())
   , mRedirectCount(0)
   , mInternalRedirectCount(0)
-  , mChannelCreationTime(0)
   , mAsyncOpenTimeOverriden(false)
   , mForcePending(false)
   , mCorsIncludeCredentials(false)
-  , mCorsMode(nsIHttpChannelInternal::CORS_MODE_NO_CORS)
-  , mRedirectMode(nsIHttpChannelInternal::REDIRECT_MODE_FOLLOW)
   , mOnStartRequestCalled(false)
   , mOnStopRequestCalled(false)
-  , mUpgradableToSecure(true)
   , mAfterOnStartRequestBegun(false)
-  , mTransferSize(0)
-  , mDecodedBodySize(0)
-  , mEncodedBodySize(0)
-  , mRequestContextID(0)
-  , mContentWindowId(0)
-  , mTopLevelOuterContentWindowId(0)
   , mRequireCORSPreflight(false)
-  , mReportCollector(new ConsoleReportCollector())
-  , mAltDataLength(0)
   , mAltDataForChild(false)
   , mForceMainDocumentChannel(false)
-  , mIsTrackingResource(false)
-  , mChannelId(0)
-  , mLastRedirectFlags(0)
-  , mReqContentLength(0U)
   , mPendingInputStreamLengthOperation(false)
 {
   this->mSelfAddr.inet = {};
@@ -1516,7 +1517,10 @@ NS_IMETHODIMP HttpBaseChannel::GetTopLevelContentWindowId(uint64_t *aWindowId)
     if (loadContext) {
       nsCOMPtr<mozIDOMWindowProxy> topWindow;
       loadContext->GetTopWindow(getter_AddRefs(topWindow));
-      nsCOMPtr<nsIDOMWindowUtils> windowUtils = do_GetInterface(topWindow);
+      nsCOMPtr<nsIDOMWindowUtils> windowUtils;
+      if (topWindow) {
+        windowUtils = nsGlobalWindowOuter::Cast(topWindow)->WindowUtils();
+      }
       if (windowUtils) {
         windowUtils->GetCurrentInnerWindowID(&mContentWindowId);
       }
@@ -1788,9 +1792,9 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
   //  (1) modify it
   //  (2) keep a reference to it after returning from this function
   //
-  // Use CloneIgnoringRef to strip away any fragment per RFC 2616 section 14.36
+  // Strip away any fragment per RFC 2616 section 14.36
   // and Referrer Policy section 6.3.5.
-  rv = referrer->CloneIgnoringRef(getter_AddRefs(clone));
+  rv = NS_GetURIWithoutRef(referrer, getter_AddRefs(clone));
   if (NS_FAILED(rv)) return rv;
 
   nsAutoCString currentHost;
@@ -1835,7 +1839,7 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
   // send spoofed referrer if desired
   if (userSpoofReferrerSource) {
     nsCOMPtr<nsIURI> mURIclone;
-    rv = mURI->CloneIgnoringRef(getter_AddRefs(mURIclone));
+    rv = NS_GetURIWithoutRef(mURI, getter_AddRefs(mURIclone));
     if (NS_FAILED(rv)) return rv;
     clone = mURIclone;
     currentHost = referrerHost;
@@ -4591,6 +4595,18 @@ HttpBaseChannel::SetLastRedirectFlags(uint32_t aValue)
 {
   mLastRedirectFlags = aValue;
   return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetNavigationStartTimeStamp(TimeStamp* aTimeStamp)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::SetNavigationStartTimeStamp(TimeStamp aTimeStamp)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 nsresult

@@ -447,13 +447,12 @@ nsImageLoadingContent::AddObserver(imgINotificationObserver* aObserver)
     return;
   }
 
-  nsresult rv = NS_OK;
   RefPtr<imgRequestProxy> currentReq;
   if (mCurrentRequest) {
     // Scripted observers may not belong to the same document as us, so when we
     // create the imgRequestProxy, we shouldn't use any. This allows the request
     // to dispatch notifications from the correct scheduler group.
-    rv = mCurrentRequest->Clone(aObserver, nullptr, getter_AddRefs(currentReq));
+    nsresult rv = mCurrentRequest->Clone(aObserver, nullptr, getter_AddRefs(currentReq));
     if (NS_FAILED(rv)) {
       return;
     }
@@ -462,7 +461,7 @@ nsImageLoadingContent::AddObserver(imgINotificationObserver* aObserver)
   RefPtr<imgRequestProxy> pendingReq;
   if (mPendingRequest) {
     // See above for why we don't use the loading document.
-    rv = mPendingRequest->Clone(aObserver, nullptr, getter_AddRefs(pendingReq));
+    nsresult rv = mPendingRequest->Clone(aObserver, nullptr, getter_AddRefs(pendingReq));
     if (NS_FAILED(rv)) {
       mCurrentRequest->CancelAndForgetObserver(NS_BINDING_ABORTED);
       return;
@@ -1165,32 +1164,6 @@ nsImageLoadingContent::CancelImageRequests(bool aNotify)
   ClearCurrentRequest(NS_BINDING_ABORTED, Some(OnNonvisible::DISCARD_IMAGES));
 }
 
-nsresult
-nsImageLoadingContent::UseAsPrimaryRequest(imgRequestProxy* aRequest,
-                                           bool aNotify,
-                                           ImageLoadType aImageLoadType)
-{
-  // Our state will change. Watch it.
-  AutoStateChanger changer(this, aNotify);
-
-  // Get rid if our existing images
-  ClearPendingRequest(NS_BINDING_ABORTED, Some(OnNonvisible::DISCARD_IMAGES));
-  ClearCurrentRequest(NS_BINDING_ABORTED, Some(OnNonvisible::DISCARD_IMAGES));
-
-  // Clone the request we were given.
-  RefPtr<imgRequestProxy>& req = PrepareNextRequest(aImageLoadType);
-  nsresult rv = aRequest->SyncClone(this, GetOurOwnerDoc(), getter_AddRefs(req));
-  if (NS_SUCCEEDED(rv)) {
-    CloneScriptedRequests(req);
-    TrackImage(req);
-  } else {
-    MOZ_ASSERT(!req, "Shouldn't have non-null request here");
-    return rv;
-  }
-
-  return NS_OK;
-}
-
 nsIDocument*
 nsImageLoadingContent::GetOurOwnerDoc()
 {
@@ -1525,8 +1498,7 @@ nsImageLoadingContent::HaveSize(imgIRequest *aImage)
 
 void
 nsImageLoadingContent::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                                  nsIContent* aBindingParent,
-                                  bool aCompileEventHandlers)
+                                  nsIContent* aBindingParent)
 {
   // We may be entering the document, so if our image should be tracked,
   // track it.

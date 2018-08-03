@@ -135,6 +135,11 @@ public:
   void SetSelection(mozilla::dom::Selection* aSelection);
 
   /**
+   * Returns pointer to a Selection if the range is associated with a Selection.
+   */
+  mozilla::dom::Selection* GetSelection() const { return mSelection; }
+
+  /**
    * Return true if this range was generated.
    * @see SetIsGenerated
    */
@@ -157,6 +162,17 @@ public:
 
   nsINode* GetCommonAncestor() const;
   void Reset();
+
+  /**
+   * ResetTemporarily() is called when Selection starts to cache the instance
+   * to reuse later.  This method clears mStart, mEnd and mIsPositioned but
+   * does not clear mRoot for reducing the cost to register this as a mutation
+   * observer again.
+   */
+  void ResetTemporarily()
+  {
+    DoSetRange(RawRangeBoundary(), RawRangeBoundary(), mRoot);
+  }
 
   /**
    * SetStart() and SetEnd() sets start point or end point separately.

@@ -22,7 +22,8 @@ job-defaults:
       implementation: docker-worker
       os: linux
       docker-image: {in-tree: pipfile-updates}
-      max-run-time: 1200
+      taskcluster-proxy: true
+      max-run-time: 2400
       command:
          - /runme.sh
       artifacts:

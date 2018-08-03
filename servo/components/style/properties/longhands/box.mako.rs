@@ -54,116 +54,29 @@ ${helpers.single_keyword("position", "static absolute relative fixed sticky",
                          spec="https://drafts.csswg.org/css-position/#position-property",
                          servo_restyle_damage="rebuild_and_reflow")}
 
-<%helpers:single_keyword
-    name="float"
-    values="none left right"
-    // https://drafts.csswg.org/css-logical-props/#float-clear
-    extra_specified="inline-start inline-end"
-    needs_conversion="True"
-    animation_value_type="discrete"
-    gecko_enum_prefix="StyleFloat"
-    gecko_inexhaustive="True"
+${helpers.predefined_type(
+    "float",
+    "Float",
+    "computed::Float::None",
+    initial_specified_value="specified::Float::None",
+    spec="https://drafts.csswg.org/css-box/#propdef-float",
+    animation_value_type="discrete",
+    needs_context=False,
+    flags="APPLIES_TO_FIRST_LETTER",
+    servo_restyle_damage="rebuild_and_reflow",
     gecko_ffi_name="mFloat"
-    flags="APPLIES_TO_FIRST_LETTER"
-    spec="https://drafts.csswg.org/css-box/#propdef-float"
+)}
+
+${helpers.predefined_type(
+    "clear",
+    "Clear",
+    "computed::Clear::None",
+    animation_value_type="discrete",
+    needs_context=False,
+    gecko_ffi_name="mBreakType",
+    spec="https://drafts.csswg.org/css-box/#propdef-clear",
     servo_restyle_damage="rebuild_and_reflow"
->
-    impl ToComputedValue for SpecifiedValue {
-        type ComputedValue = computed_value::T;
-
-        #[inline]
-        fn to_computed_value(&self, context: &Context) -> computed_value::T {
-            let ltr = context.style().writing_mode.is_bidi_ltr();
-            // https://drafts.csswg.org/css-logical-props/#float-clear
-            match *self {
-                SpecifiedValue::InlineStart => {
-                    context.rule_cache_conditions.borrow_mut()
-                        .set_writing_mode_dependency(context.builder.writing_mode);
-                    if ltr {
-                        computed_value::T::Left
-                    } else {
-                        computed_value::T::Right
-                    }
-                }
-                SpecifiedValue::InlineEnd => {
-                    context.rule_cache_conditions.borrow_mut()
-                        .set_writing_mode_dependency(context.builder.writing_mode);
-                    if ltr {
-                        computed_value::T::Right
-                    } else {
-                        computed_value::T::Left
-                    }
-                }
-                % for value in "None Left Right".split():
-                    SpecifiedValue::${value} => computed_value::T::${value},
-                % endfor
-            }
-        }
-        #[inline]
-        fn from_computed_value(computed: &computed_value::T) -> SpecifiedValue {
-            match *computed {
-                % for value in "None Left Right".split():
-                    computed_value::T::${value} => SpecifiedValue::${value},
-                % endfor
-            }
-        }
-    }
-</%helpers:single_keyword>
-
-<%helpers:single_keyword
-    name="clear"
-    values="none left right both"
-    // https://drafts.csswg.org/css-logical-props/#float-clear
-    extra_specified="inline-start inline-end"
-    needs_conversion="True"
-    gecko_inexhaustive="True"
-    animation_value_type="discrete"
-    gecko_enum_prefix="StyleClear"
-    gecko_ffi_name="mBreakType"
-    spec="https://drafts.csswg.org/css-box/#propdef-clear"
-    servo_restyle_damage="rebuild_and_reflow"
->
-    impl ToComputedValue for SpecifiedValue {
-        type ComputedValue = computed_value::T;
-
-        #[inline]
-        fn to_computed_value(&self, context: &Context) -> computed_value::T {
-            let ltr = context.style().writing_mode.is_bidi_ltr();
-            // https://drafts.csswg.org/css-logical-props/#float-clear
-            match *self {
-                SpecifiedValue::InlineStart => {
-                    context.rule_cache_conditions.borrow_mut()
-                        .set_writing_mode_dependency(context.builder.writing_mode);
-                    if ltr {
-                        computed_value::T::Left
-                    } else {
-                        computed_value::T::Right
-                    }
-                }
-                SpecifiedValue::InlineEnd => {
-                    context.rule_cache_conditions.borrow_mut()
-                        .set_writing_mode_dependency(context.builder.writing_mode);
-                    if ltr {
-                        computed_value::T::Right
-                    } else {
-                        computed_value::T::Left
-                    }
-                }
-                % for value in "None Left Right Both".split():
-                    SpecifiedValue::${value} => computed_value::T::${value},
-                % endfor
-            }
-        }
-        #[inline]
-        fn from_computed_value(computed: &computed_value::T) -> SpecifiedValue {
-            match *computed {
-                % for value in "None Left Right Both".split():
-                    computed_value::T::${value} => SpecifiedValue::${value},
-                % endfor
-            }
-        }
-    }
-</%helpers:single_keyword>
+)}
 
 ${helpers.predefined_type(
     "vertical-align",
@@ -595,41 +508,15 @@ ${helpers.predefined_type("contain",
                           spec="https://drafts.csswg.org/css-contain/#contain-property")}
 
 // Non-standard
-${helpers.single_keyword("-moz-appearance",
-                         """none button button-arrow-down button-arrow-next button-arrow-previous button-arrow-up
-                            button-bevel button-focus caret checkbox checkbox-container checkbox-label checkmenuitem
-                            dialog dualbutton groupbox inner-spin-button listbox listitem menuarrow menubar menucheckbox
-                            menuimage menuitem menuitemtext menulist menulist-button menulist-text menulist-textfield
-                            menupopup menuradio menuseparator meterbar meterchunk number-input progressbar
-                            progressbar-vertical progresschunk progresschunk-vertical radio radio-container radio-label
-                            radiomenuitem range range-thumb resizer resizerpanel scale-horizontal scalethumbend
-                            scalethumb-horizontal scalethumbstart scalethumbtick scalethumb-vertical scale-vertical
-                            scrollbar scrollbar-horizontal scrollbar-small scrollbar-vertical scrollbarbutton-down
-                            scrollbarbutton-left scrollbarbutton-right scrollbarbutton-up scrollbarthumb-horizontal
-                            scrollbarthumb-vertical scrollbartrack-horizontal scrollbartrack-vertical scrollcorner
-                            searchfield separator
-                            spinner spinner-downbutton spinner-textfield spinner-upbutton splitter statusbar
-                            statusbarpanel tab tabpanel tabpanels tab-scroll-arrow-back tab-scroll-arrow-forward
-                            textfield textfield-multiline toolbar toolbarbutton toolbarbutton-dropdown toolbargripper
-                            toolbox tooltip treeheader treeheadercell treeheadersortarrow treeitem treeline treetwisty
-                            treetwistyopen treeview window
-                            -moz-gtk-info-bar -moz-mac-active-source-list-selection -moz-mac-disclosure-button-closed
-                            -moz-mac-disclosure-button-open -moz-mac-fullscreen-button -moz-mac-help-button
-                            -moz-mac-source-list -moz-mac-source-list-selection -moz-mac-vibrancy-dark
-                            -moz-mac-vibrancy-light -moz-mac-vibrant-titlebar-light -moz-mac-vibrant-titlebar-dark
-                            -moz-win-borderless-glass -moz-win-browsertabbar-toolbox
-                            -moz-win-communications-toolbox -moz-win-exclude-glass -moz-win-glass -moz-win-media-toolbox
-                            -moz-window-button-box -moz-window-button-box-maximized -moz-window-button-close
-                            -moz-window-button-maximize -moz-window-button-minimize -moz-window-button-restore
-                            -moz-window-frame-bottom -moz-window-frame-left -moz-window-frame-right -moz-window-titlebar
-                            -moz-window-titlebar-maximized
-                         """,
-                         gecko_ffi_name="mAppearance",
-                         gecko_constant_prefix="ThemeWidgetType_NS_THEME",
-                         products="gecko",
-                         alias="-webkit-appearance:layout.css.webkit-appearance.enabled",
-                         spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-appearance)",
-                         animation_value_type="discrete")}
+${helpers.predefined_type(
+    "-moz-appearance",
+    "Appearance",
+    "computed::Appearance::None",
+    products="gecko",
+    alias="-webkit-appearance:layout.css.webkit-appearance.enabled",
+    spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-appearance)",
+    animation_value_type="discrete",
+)}
 
 ${helpers.predefined_type("-moz-binding", "url::UrlOrNone", "computed::url::UrlOrNone::none()",
                           products="gecko",

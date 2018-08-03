@@ -195,7 +195,7 @@ PreviewController.prototype = {
 
   get screenPixelsPerCSSPixel() {
     let chromeWin = this.tab.ownerGlobal;
-    let windowUtils = chromeWin.getInterface(Ci.nsIDOMWindowUtils);
+    let windowUtils = chromeWin.windowUtils;
     return windowUtils.screenPixelsPerCSSPixel;
   },
 
@@ -429,10 +429,7 @@ TabWindow.prototype = {
   },
 
   createTabPreview(controller) {
-    let docShell = this.win
-                  .QueryInterface(Ci.nsIInterfaceRequestor)
-                  .getInterface(Ci.nsIWebNavigation)
-                  .QueryInterface(Ci.nsIDocShell);
+    let docShell = this.win.docShell;
     let preview = AeroPeek.taskbar.createTaskbarTabPreview(docShell, controller);
     preview.visible = AeroPeek.enabled;
     preview.active = this.tabbrowser.selectedTab == controller.tab;

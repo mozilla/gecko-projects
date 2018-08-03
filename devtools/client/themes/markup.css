@@ -332,17 +332,14 @@ ul.children + .tag-line::before {
 }
 
 .reveal-link {
-  margin-inline-start: 10px;
   cursor: pointer;
-  display: none;
-}
+  background: url("chrome://devtools/skin/images/reveal.svg") no-repeat;
+  display: inline-block;
+  width: 16px;
+  height: 8px;
 
-.reveal-link:hover {
-  text-decoration: underline
-}
-
-.tag-line:hover .reveal-link {
-  display: inline;
+  -moz-context-properties: stroke;
+  stroke: currentColor;
 }
 
 /* Draw a circle next to nodes that have a pseudo class lock.
@@ -396,7 +393,7 @@ ul.children + .tag-line::before {
 
 /* Markup Badges */
 .markup-badge {
-  display: none;
+  display: inline-block;
   font-size: 9px;
   font-weight: normal;
   line-height: 11px;
@@ -416,6 +413,7 @@ ul.children + .tag-line::before {
   color: var(--theme-selection-color);
 }
 
+.markup-badge[data-custom],
 .markup-badge[data-display="flex"].interactive,
 .markup-badge[data-display="grid"],
 .markup-badge[data-display="inline-flex"],

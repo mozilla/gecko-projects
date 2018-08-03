@@ -805,7 +805,7 @@ Element::Scroll(const CSSIntPoint& aScroll, const ScrollOptions& aOptions)
     if (aOptions.mBehavior == ScrollBehavior::Smooth) {
       scrollMode = nsIScrollableFrame::SMOOTH_MSD;
     } else if (aOptions.mBehavior == ScrollBehavior::Auto) {
-      ScrollbarStyles styles = sf->GetScrollbarStyles();
+      ScrollStyles styles = sf->GetScrollStyles();
       if (styles.mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
         scrollMode = nsIScrollableFrame::SMOOTH_MSD;
       }
@@ -902,7 +902,7 @@ Element::SetScrollTop(int32_t aScrollTop)
   nsIScrollableFrame* sf = GetScrollFrame(nullptr, flushType);
   if (sf) {
     nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
-    if (sf->GetScrollbarStyles().mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
+    if (sf->GetScrollStyles().mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
       scrollMode = nsIScrollableFrame::SMOOTH_MSD;
     }
     sf->ScrollToCSSPixels(CSSIntPoint(sf->GetScrollPositionCSSPixels().x,
@@ -927,7 +927,7 @@ Element::SetScrollLeft(int32_t aScrollLeft)
   nsIScrollableFrame* sf = GetScrollFrame();
   if (sf) {
     nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
-    if (sf->GetScrollbarStyles().mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
+    if (sf->GetScrollStyles().mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
       scrollMode = nsIScrollableFrame::SMOOTH_MSD;
     }
 
@@ -1245,6 +1245,10 @@ Element::AttachShadowWithoutNameChecks(ShadowRootMode aMode)
     new ShadowRoot(this, aMode, nodeInfo.forget());
 
   shadowRoot->SetIsComposedDocParticipant(IsInComposedDoc());
+
+  if (NodeOrAncestorHasDirAuto()) {
+    shadowRoot->SetAncestorHasDirAuto();
+  }
 
   /**
    * 5. Set context object’s shadow root to shadow.
@@ -1598,8 +1602,7 @@ EditableInclusiveDescendantCount(nsIContent* aContent)
 
 nsresult
 Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                    nsIContent* aBindingParent,
-                    bool aCompileEventHandlers)
+                    nsIContent* aBindingParent)
 {
   MOZ_ASSERT(aParent || aDocument, "Must have document if no parent!");
   MOZ_ASSERT((NODE_FROM(aParent, aDocument)->OwnerDoc() == OwnerDoc()),
@@ -1763,8 +1766,7 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   nsresult rv;
   for (nsIContent* child = GetFirstChild(); child;
        child = child->GetNextSibling()) {
-    rv = child->BindToTree(aDocument, this, aBindingParent,
-                           aCompileEventHandlers);
+    rv = child->BindToTree(aDocument, this, aBindingParent);
     NS_ENSURE_SUCCESS(rv, rv);
 
     editableDescendantCount += EditableInclusiveDescendantCount(child);
@@ -1811,11 +1813,10 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   // Call BindToTree on shadow root children.
   if (ShadowRoot* shadowRoot = GetShadowRoot()) {
     shadowRoot->SetIsComposedDocParticipant(IsInComposedDoc());
+    MOZ_ASSERT(shadowRoot->GetBindingParent() == this);
     for (nsIContent* child = shadowRoot->GetFirstChild(); child;
          child = child->GetNextSibling()) {
-      rv = child->BindToTree(nullptr, shadowRoot,
-                             shadowRoot->GetBindingParent(),
-                             aCompileEventHandlers);
+      rv = child->BindToTree(nullptr, shadowRoot, this);
       NS_ENSURE_SUCCESS(rv, rv);
     }
   }
@@ -1969,7 +1970,7 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     nsPresContext* presContext = document->GetPresContext();
     if (presContext) {
       MOZ_ASSERT(this !=
-                 presContext->GetViewportScrollbarStylesOverrideElement(),
+                 presContext->GetViewportScrollStylesOverrideElement(),
                  "Leaving behind a raw pointer to this element (as having "
                  "propagated scrollbar styles) - that's dangerous...");
     }
@@ -4302,6 +4303,16 @@ Element::UpdateIntersectionObservation(DOMIntersectionObserver* aObserver, int32
     entry.Data() = aThreshold;
   }
   return updated;
+}
+
+template<class T> void
+Element::GetCustomInterface(nsGetterAddRefs<T> aResult)
+{
+  nsCOMPtr<nsISupports> iface =
+    CustomElementRegistry::CallGetCustomInterface(this, NS_GET_TEMPLATE_IID(T));
+  if (iface) {
+    CallQueryInterface(iface, static_cast<T**>(aResult));
+  }
 }
 
 void

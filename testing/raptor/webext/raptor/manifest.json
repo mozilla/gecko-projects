@@ -16,14 +16,15 @@
       "matches": ["*://*.amazon.com/*",
                   "*://*.facebook.com/*",
                   "*://*.google.com/*",
-                  "*://*.google.ca/*",
                   "*://*.youtube.com/*"],
       "js": ["measure.js"]
     },
     {
       "matches": ["*://*/Speedometer/index.html*",
                   "*://*/StyleBench/*",
-                  "*://*/MotionMark/*"],
+                  "*://*/MotionMark/*",
+                  "*://*/SunSpider/*",
+                  "*://*/webaudio/*"],
       "js": ["benchmark-relay.js"]
     }
   ],

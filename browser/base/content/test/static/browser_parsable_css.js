@@ -46,6 +46,12 @@ let whitelist = [
   {sourceName: /(?:res|gre-resources)\/forms\.css$/i,
    errorMessage: /Unknown property.*overflow-clip-box/i,
    isFromDevTools: false},
+  // The '-moz-menulist-button' value is only supported in chrome and UA sheets
+  // but forms.css is loaded as a document sheet by this test.
+  // Maybe bug 1261237 will fix this?
+  {sourceName: /(?:res|gre-resources)\/forms\.css$/i,
+   errorMessage: /Error in parsing value for \u2018-moz-appearance\u2019/iu,
+   isFromDevTools: false},
   // These variables are declared somewhere else, and error when we load the
   // files directly. They're all marked intermittent because their appearance
   // in the error console seems to not be consistent.
@@ -66,6 +72,15 @@ let whitelist = [
    errorMessage: /Property contained reference to invalid variable.*color/i,
    isFromDevTools: true},
 ];
+
+if (!Services.prefs.getBoolPref("layout.css.xul-box-display-values.content.enabled")) {
+  // These are UA sheets which use non-content-exposed `display` values.
+  whitelist.push({
+    sourceName: /(skin\/shared\/Heartbeat|((?:res|gre-resources)\/(ua|html)))\.css$/i,
+    errorMessage: /Error in parsing value for .*\bdisplay\b/i,
+    isFromDevTools: false
+  });
+}
 
 if (!Services.prefs.getBoolPref("full-screen-api.unprefix.enabled")) {
   whitelist.push({
@@ -120,8 +135,8 @@ let propNameWhitelist = [
    platforms: ["win", "macosx"],
    isFromDevTools: false},
 
-  // These properties *are* actually referenced. Need to find why
-  // their reference isn't getting counted.
+  // These variables are used in a shorthand, but the CSS parser deletes the values
+  // when expanding the shorthands. See https://github.com/w3c/csswg-drafts/issues/2515
   {propName: "--bezier-diagonal-color",
    isFromDevTools: true},
   {propName: "--bezier-grid-color",
@@ -252,15 +267,15 @@ let customPropsToReferencesMap = new Map();
 
 function processCSSRules(sheet) {
   for (let rule of sheet.cssRules) {
-    if (rule instanceof CSSMediaRule) {
+    if (rule instanceof CSSConditionRule || rule instanceof CSSKeyframesRule) {
       processCSSRules(rule);
       continue;
     }
-    if (!(rule instanceof CSSStyleRule))
+    if (!(rule instanceof CSSStyleRule) && !(rule instanceof CSSKeyframeRule))
       continue;
 
     // Extract urls from the css text.
-    // Note: CSSStyleRule.cssText always has double quotes around URLs even
+    // Note: CSSRule.cssText always has double quotes around URLs even
     //       when the original CSS file didn't.
     let urls = rule.cssText.match(/url\("[^"]*"\)/g);
     // Extract props by searching all "--" preceeded by "var(" or a non-word
@@ -347,7 +362,7 @@ add_task(async function checkAllTheCSS() {
   iframe.contentWindow.location = testFile;
   await iframeLoaded;
   let doc = iframe.contentWindow.document;
-  doc.docShell.cssErrorReportingEnabled = true;
+  iframe.contentWindow.docShell.cssErrorReportingEnabled = true;
 
   // Parse and remove all manifests from the list.
   // NOTE that this must be done before filtering out devtools paths

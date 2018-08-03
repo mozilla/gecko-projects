@@ -9,6 +9,7 @@ import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.WithDisplay
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.WithDevToolsAPI
 
 import android.os.Build
+import android.os.Bundle
 
 import android.support.test.filters.MediumTest
 import android.support.test.InstrumentationRegistry
@@ -61,9 +62,11 @@ class AccessibilityTest : BaseSessionTest() {
 
     private interface EventDelegate {
         fun onAccessibilityFocused(event: AccessibilityEvent) { }
+        fun onClicked(event: AccessibilityEvent) { }
         fun onFocused(event: AccessibilityEvent) { }
         fun onTextSelectionChanged(event: AccessibilityEvent) { }
         fun onTextChanged(event: AccessibilityEvent) { }
+        fun onTextTraversal(event: AccessibilityEvent) { }
     }
 
     @Before fun setup() {
@@ -85,9 +88,11 @@ class AccessibilityTest : BaseSessionTest() {
             override fun onRequestSendAccessibilityEvent(host: ViewGroup, child: View, event: AccessibilityEvent): Boolean {
                 when (event.eventType) {
                     AccessibilityEvent.TYPE_VIEW_FOCUSED -> newDelegate.onFocused(event)
+                    AccessibilityEvent.TYPE_VIEW_CLICKED -> newDelegate.onClicked(event)
                     AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED -> newDelegate.onAccessibilityFocused(event)
                     AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> newDelegate.onTextSelectionChanged(event)
                     AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> newDelegate.onTextChanged(event)
+                    AccessibilityEvent.TYPE_VIEW_TEXT_TRAVERSED_AT_MOVEMENT_GRANULARITY -> newDelegate.onTextTraversal(event)
                     else -> {}
                 }
                 return false
@@ -99,6 +104,13 @@ class AccessibilityTest : BaseSessionTest() {
 
     @After fun teardown() {
         sessionRule.session.accessibility.view = null
+    }
+
+    private fun waitForInitialFocus() {
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onFocused(event: AccessibilityEvent) { }
+        })
     }
 
     @Test fun testRootNode() {
@@ -120,7 +132,7 @@ class AccessibilityTest : BaseSessionTest() {
     @Test fun testAccessibilityFocus() {
         var nodeId = AccessibilityNodeProvider.HOST_VIEW_ID
         sessionRule.session.loadTestPath(INPUTS_PATH)
-        sessionRule.waitForPageStop()
+        waitForInitialFocus()
 
         provider.performAction(AccessibilityNodeProvider.HOST_VIEW_ID,
             AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
@@ -149,7 +161,7 @@ class AccessibilityTest : BaseSessionTest() {
 
     @Test fun testTextEntryNode() {
         sessionRule.session.loadString("<input aria-label='Name' value='Tobias'>", "text/html")
-        sessionRule.waitForPageStop()
+        waitForInitialFocus()
 
         mainSession.evaluateJS("$('input').focus()")
 
@@ -167,5 +179,265 @@ class AccessibilityTest : BaseSessionTest() {
                 }
             }
         })
+    }
+
+    private fun waitUntilTextSelectionChanged(fromIndex: Int, toIndex: Int) {
+        var eventFromIndex = 0;
+        var eventToIndex = 0;
+        do {
+            sessionRule.waitUntilCalled(object : EventDelegate {
+                override fun onTextSelectionChanged(event: AccessibilityEvent) {
+                    eventFromIndex = event.fromIndex;
+                    eventToIndex = event.toIndex;
+                }
+            })
+        } while (fromIndex != eventFromIndex || toIndex != eventToIndex)
+    }
+
+    private fun waitUntilTextTraversed(fromIndex: Int, toIndex: Int) {
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onTextTraversal(event: AccessibilityEvent) {
+              assertThat("fromIndex matches", event.fromIndex, equalTo(fromIndex))
+              assertThat("toIndex matches", event.toIndex, equalTo(toIndex))
+            }
+        })
+    }
+
+    private fun waitUntilClick(checked: Boolean? = null, selected: Boolean? = null) {
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onClicked(event: AccessibilityEvent) {
+                var nodeId = getSourceId(event)
+                var node = provider.createAccessibilityNodeInfo(nodeId)
+
+                if (checked != null) {
+                    assertThat("Event's checked state matches", event.isChecked, equalTo(checked))
+                    assertThat("Checkbox node has correct checked state", node.isChecked, equalTo(checked))
+                }
+
+                if (selected != null) {
+                    assertThat("Selectable node has correct selected state", node.isSelected, equalTo(selected))
+                }
+            }
+        })
+    }
+
+    private fun setSelectionArguments(start: Int, end: Int): Bundle {
+        val arguments = Bundle(2)
+        arguments.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, start)
+        arguments.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, end)
+        return arguments
+    }
+
+    private fun moveByGranularityArguments(granularity: Int, extendSelection: Boolean = false): Bundle {
+        val arguments = Bundle(2)
+        arguments.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT, granularity)
+        arguments.putBoolean(AccessibilityNodeInfo.ACTION_ARGUMENT_EXTEND_SELECTION_BOOLEAN, extendSelection)
+        return arguments
+    }
+
+    @Test fun testClipboard() {
+        var nodeId = AccessibilityNodeProvider.HOST_VIEW_ID;
+        sessionRule.session.loadString("<input value='hello cruel world' id='input'>", "text/html")
+        waitForInitialFocus()
+
+        mainSession.evaluateJS("$('input').focus()")
+
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                val node = provider.createAccessibilityNodeInfo(nodeId)
+                assertThat("Focused EditBox", node.className.toString(),
+                        equalTo("android.widget.EditText"))
+            }
+
+            @AssertCalled(count = 1)
+            override fun onTextSelectionChanged(event: AccessibilityEvent) {
+                assertThat("fromIndex should be at start", event.fromIndex, equalTo(0))
+                assertThat("toIndex should be at start", event.toIndex, equalTo(0))
+            }
+        })
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_SET_SELECTION, setSelectionArguments(5, 11))
+        waitUntilTextSelectionChanged(5, 11)
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_COPY, null)
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_SET_SELECTION, setSelectionArguments(11, 11))
+        waitUntilTextSelectionChanged(11, 11)
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_PASTE, null)
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onTextChanged(event: AccessibilityEvent) {
+                assertThat("text should be pasted", event.text[0].toString(), equalTo("hello cruel cruel world"))
+            }
+        })
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_SET_SELECTION, setSelectionArguments(17, 23))
+        waitUntilTextSelectionChanged(17, 23)
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_PASTE, null)
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled
+            override fun onTextChanged(event: AccessibilityEvent) {
+                assertThat("text should be pasted", event.text[0].toString(), equalTo("hello cruel cruel cruel"))
+            }
+        })
+    }
+
+    @Test fun testMoveByCharacter() {
+        var nodeId = AccessibilityNodeProvider.HOST_VIEW_ID
+        sessionRule.session.loadTestPath(LOREM_IPSUM_HTML_PATH)
+        waitForInitialFocus()
+
+        provider.performAction(AccessibilityNodeProvider.HOST_VIEW_ID,
+                AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
+
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                val node = provider.createAccessibilityNodeInfo(nodeId)
+                assertThat("Accessibility focus on first paragraph", node.text as String, startsWith("Lorem ipsum"))
+            }
+        })
+
+        provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER))
+        waitUntilTextTraversed(0, 1) // "L"
+
+        provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER))
+        waitUntilTextTraversed(1, 2) // "o"
+
+        provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER))
+        waitUntilTextTraversed(0, 1) // "L"
+    }
+
+    @Test fun testMoveByWord() {
+        var nodeId = AccessibilityNodeProvider.HOST_VIEW_ID
+        sessionRule.session.loadTestPath(LOREM_IPSUM_HTML_PATH)
+        waitForInitialFocus()
+
+        provider.performAction(AccessibilityNodeProvider.HOST_VIEW_ID,
+                AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
+
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                val node = provider.createAccessibilityNodeInfo(nodeId)
+                assertThat("Accessibility focus on first paragraph", node.text as String, startsWith("Lorem ipsum"))
+            }
+        })
+
+        provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD))
+        waitUntilTextTraversed(0, 5) // "Lorem"
+
+        provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD))
+        waitUntilTextTraversed(6, 11) // "ipsum"
+
+        provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD))
+        waitUntilTextTraversed(0, 5) // "Lorem"
+    }
+
+    @Test fun testMoveByLine() {
+        var nodeId = AccessibilityNodeProvider.HOST_VIEW_ID
+        sessionRule.session.loadTestPath(LOREM_IPSUM_HTML_PATH)
+        waitForInitialFocus()
+
+        provider.performAction(AccessibilityNodeProvider.HOST_VIEW_ID,
+                AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
+
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                val node = provider.createAccessibilityNodeInfo(nodeId)
+                assertThat("Accessibility focus on first paragraph", node.text as String, startsWith("Lorem ipsum"))
+            }
+        })
+
+        provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_LINE))
+        waitUntilTextTraversed(0, 18) // "Lorem ipsum dolor "
+
+        provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_LINE))
+        waitUntilTextTraversed(18, 28) // "sit amet, "
+
+        provider.performAction(nodeId,
+                AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY,
+                moveByGranularityArguments(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_LINE))
+        waitUntilTextTraversed(0, 18) // "Lorem ipsum dolor "
+    }
+
+    @Test fun testCheckbox() {
+        var nodeId = AccessibilityNodeProvider.HOST_VIEW_ID;
+        sessionRule.session.loadString("<label><input id='checkbox' type='checkbox'>many option</label>", "text/html")
+        waitForInitialFocus()
+
+        mainSession.evaluateJS("$('#checkbox').focus()")
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                var node = provider.createAccessibilityNodeInfo(nodeId)
+                assertThat("Checkbox node is checkable", node.isCheckable, equalTo(true))
+                assertThat("Checkbox node is clickable", node.isClickable, equalTo(true))
+                assertThat("Checkbox node is focusable", node.isFocusable, equalTo(true))
+                assertThat("Checkbox node is not checked", node.isChecked, equalTo(false))
+                assertThat("Checkbox node has correct role", node.text.toString(), equalTo("many option check button"))
+            }
+        })
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_CLICK, null)
+        waitUntilClick(checked = true)
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_CLICK, null)
+        waitUntilClick(checked = false)
+    }
+
+    @Test fun testSelectable() {
+        var nodeId = View.NO_ID
+        sessionRule.session.loadString(
+                """<ul style="list-style-type: none;" role="listbox">
+                        <li id="li" role="option" onclick="this.setAttribute('aria-selected',
+                            this.getAttribute('aria-selected') == 'true' ? 'false' : 'true')">1</li>
+                </ul>""","text/html")
+        waitForInitialFocus()
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
+        sessionRule.waitUntilCalled(object : EventDelegate {
+            @AssertCalled(count = 1)
+            override fun onAccessibilityFocused(event: AccessibilityEvent) {
+                nodeId = getSourceId(event)
+                var node = provider.createAccessibilityNodeInfo(nodeId)
+                assertThat("Selectable node is clickable", node.isClickable, equalTo(true))
+                assertThat("Selectable node is not selected", node.isSelected, equalTo(false))
+                assertThat("Selectable node has correct role", node.text.toString(), equalTo("1 option list box"))
+            }
+        })
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_CLICK, null)
+        waitUntilClick(selected = true)
+
+        provider.performAction(nodeId, AccessibilityNodeInfo.ACTION_CLICK, null)
+        waitUntilClick(selected = false)
     }
 }

@@ -44,8 +44,7 @@ public:
 
   // nsIContent specializations
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                              nsIContent* aBindingParent,
-                              bool aCompileEventHandlers) override;
+                              nsIContent* aBindingParent) override;
   virtual void UnbindFromTree(bool aDeep, bool aNullParent) override;
 
   virtual bool IsNodeOfType(uint32_t aFlags) const override;
@@ -90,8 +89,7 @@ public:
  protected:
   // nsSVGElement overrides
 
-  void UpdateHrefTarget(nsIContent* aNodeForContext,
-                        const nsAString& aHrefStr);
+  void UpdateHrefTarget(const nsAString& aHrefStr);
   void AnimationTargetChanged();
 
   /**

@@ -1528,6 +1528,9 @@ CompositorBridgeChild* nsBaseWidget::GetRemoteRenderer()
 already_AddRefed<gfx::DrawTarget>
 nsBaseWidget::StartRemoteDrawing()
 {
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return recordreplay::child::DrawTargetForRemoteDrawing(mBounds.Size());
+  }
   return nullptr;
 }
 
@@ -1830,18 +1833,6 @@ nsBaseWidget::NotifyWindowDestroyed()
 }
 
 void
-nsBaseWidget::NotifySizeMoveDone()
-{
-  if (!mWidgetListener || mWidgetListener->GetXULWindow())
-    return;
-
-  nsIPresShell* presShell = mWidgetListener->GetPresShell();
-  if (presShell) {
-    presShell->WindowSizeMoveDone();
-  }
-}
-
-void
 nsBaseWidget::NotifyWindowMoved(int32_t aX, int32_t aY)
 {
   if (mWidgetListener) {
@@ -1854,27 +1845,34 @@ nsBaseWidget::NotifyWindowMoved(int32_t aX, int32_t aY)
 }
 
 void
-nsBaseWidget::NotifySysColorChanged()
+nsBaseWidget::NotifyPresShell(NotificationFunc aNotificationFunc)
 {
-  if (!mWidgetListener || mWidgetListener->GetXULWindow())
+  if (!mWidgetListener || mWidgetListener->GetXULWindow()) {
     return;
+  }
 
   nsIPresShell* presShell = mWidgetListener->GetPresShell();
   if (presShell) {
-    presShell->SysColorChanged();
+    (presShell->*aNotificationFunc)();
   }
+}
+
+void
+nsBaseWidget::NotifySizeMoveDone()
+{
+  NotifyPresShell(&nsIPresShell::WindowSizeMoveDone);
+}
+
+void
+nsBaseWidget::NotifySysColorChanged()
+{
+  NotifyPresShell(&nsIPresShell::SysColorChanged);
 }
 
 void
 nsBaseWidget::NotifyThemeChanged()
 {
-  if (!mWidgetListener || mWidgetListener->GetXULWindow())
-    return;
-
-  nsIPresShell* presShell = mWidgetListener->GetPresShell();
-  if (presShell) {
-    presShell->ThemeChanged();
-  }
+  NotifyPresShell(&nsIPresShell::ThemeChanged);
 }
 
 void
@@ -1931,6 +1929,22 @@ nsBaseWidget::EnsureTextEventDispatcher()
     return;
   }
   mTextEventDispatcher = new TextEventDispatcher(this);
+}
+
+nsIWidget::NativeIMEContext
+nsBaseWidget::GetNativeIMEContext()
+{
+  if (mTextEventDispatcher && mTextEventDispatcher->GetPseudoIMEContext()) {
+    // If we already have a TextEventDispatcher and it's working with
+    // a TextInputProcessor, we need to return pseudo IME context since
+    // TextCompositionArray::IndexOf(nsIWidget*) should return a composition
+    // on the pseudo IME context in such case.
+    NativeIMEContext pseudoIMEContext;
+    pseudoIMEContext.InitWithRawNativeIMEContext(
+                       mTextEventDispatcher->GetPseudoIMEContext());
+    return pseudoIMEContext;
+  }
+  return NativeIMEContext(this);
 }
 
 nsIWidget::TextEventDispatcher*
@@ -2440,12 +2454,6 @@ nsBaseWidget::DefaultFillScrollCapture(DrawTarget* aSnapshotDrawTarget)
   aSnapshotDrawTarget->Flush();
 }
 #endif
-
-nsIWidget::NativeIMEContext
-nsIWidget::GetNativeIMEContext()
-{
-  return NativeIMEContext(this);
-}
 
 const IMENotificationRequests&
 nsIWidget::IMENotificationRequestsRef()

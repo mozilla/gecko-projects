@@ -224,9 +224,8 @@ class TestFirefoxRefresh(MarionetteTestCase):
 
     def checkBookmarkToolbarVisibility(self):
         toolbarVisible = self.marionette.execute_script("""
-          const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
-          let xulStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
-          return xulStore.getValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed")
+          const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
+          return Services.xulStore.getValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed");
         """)
         self.assertEqual(toolbarVisible, "false")
 
@@ -469,6 +468,7 @@ class TestFirefoxRefresh(MarionetteTestCase):
         self.setUpScriptData()
 
         self.reset_profile_path = None
+        self.reset_profile_local_path = None
         self.desktop_backup_path = None
 
         self.createProfileData()
@@ -508,6 +508,12 @@ class TestFirefoxRefresh(MarionetteTestCase):
               profile.remove(false)
               global.profSvc.flush();
             """, script_args=(self.profileNameToRemove,))
+            # Remove the local profile dir if it's not the same as the profile dir:
+            different_path = self.reset_profile_local_path != self.reset_profile_path
+            if self.reset_profile_local_path and different_path:
+                shutil.rmtree(self.reset_profile_local_path,
+                              ignore_errors=False, onerror=handleRemoveReadonly)
+
             # And delete all the files.
             shutil.rmtree(self.reset_profile_path,
                           ignore_errors=False, onerror=handleRemoveReadonly)
@@ -544,9 +550,10 @@ class TestFirefoxRefresh(MarionetteTestCase):
         self.setUpScriptData()
 
         # Determine the new profile path (we'll need to remove it when we're done)
-        self.reset_profile_path = self.runCode("""
+        [self.reset_profile_path, self.reset_profile_local_path] = self.runCode("""
           let profD = Services.dirsvc.get("ProfD", Ci.nsIFile);
-          return profD.path;
+          let localD = Services.dirsvc.get("ProfLD", Ci.nsIFile);
+          return [profD.path, localD.path];
         """)
 
         # Determine the backup path

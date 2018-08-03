@@ -750,13 +750,13 @@ class SpecializedRegSet : public Accessors
 
     using Parent::addUnchecked;
     void add(RegType reg) {
-        MOZ_ASSERT(!has(reg));
+        MOZ_ASSERT(!this->has(reg));
         addUnchecked(reg);
     }
 
     using Parent::takeUnchecked;
     void take(RegType reg) {
-        MOZ_ASSERT(has(reg));
+        MOZ_ASSERT(this->has(reg));
         takeUnchecked(reg);
     }
 
@@ -789,7 +789,7 @@ class SpecializedRegSet : public Accessors
 
     template <RegTypeName Name = RegSet::DefaultType>
     RegType getAnyExcluding(RegType preclude) {
-        if (!has(preclude))
+        if (!this->has(preclude))
             return getAny<Name>();
 
         take(preclude);
@@ -829,9 +829,9 @@ class SpecializedRegSet : public Accessors
 
     bool aliases(ValueOperand v) const {
 #ifdef JS_NUNBOX32
-        return has(v.typeReg()) || has(v.payloadReg());
+        return this->has(v.typeReg()) || this->has(v.payloadReg());
 #else
-        return has(v.valueReg());
+        return this->has(v.valueReg());
 #endif
     }
 
@@ -874,7 +874,7 @@ class SpecializedRegSet<Accessors, RegisterSet> : public Accessors
 
     using Parent::has;
     bool has(AnyRegister reg) const {
-        return reg.isFloat() ? has(reg.fpu()) : has(reg.gpr());
+        return reg.isFloat() ? this->has(reg.fpu()) : this->has(reg.gpr());
     }
 
     template <RegTypeName Name>
@@ -893,11 +893,11 @@ class SpecializedRegSet<Accessors, RegisterSet> : public Accessors
     }
 
     void add(Register reg) {
-        MOZ_ASSERT(!has(reg));
+        MOZ_ASSERT(!this->has(reg));
         addUnchecked(reg);
     }
     void add(FloatRegister reg) {
-        MOZ_ASSERT(!has(reg));
+        MOZ_ASSERT(!this->has(reg));
         addUnchecked(reg);
     }
     void add(AnyRegister reg) {
@@ -916,7 +916,10 @@ class SpecializedRegSet<Accessors, RegisterSet> : public Accessors
     }
 
     void take(Register reg) {
-        MOZ_ASSERT(this->has(reg));
+#ifdef DEBUG
+        bool hasReg = this->has(reg);
+        MOZ_ASSERT(hasReg);
+#endif
         takeUnchecked(reg);
     }
     void take(FloatRegister reg) {

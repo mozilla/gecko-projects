@@ -45,7 +45,6 @@ const FLEXBOX_CONTAINER_PATTERN_HEIGHT = 14; // px
 const FLEXBOX_JUSTIFY_CONTENT_PATTERN_WIDTH = 7; // px
 const FLEXBOX_JUSTIFY_CONTENT_PATTERN_HEIGHT = 7; // px
 const FLEXBOX_CONTAINER_PATTERN_LINE_DISH = [5, 3]; // px
-const BASIS_FILL_COLOR = "rgb(109, 184, 255, 0.4)";
 
 /**
  * Cached used by `FlexboxHighlighter.getFlexContainerPattern`.
@@ -60,12 +59,12 @@ const JUSTIFY_CONTENT = "justify-content";
  * display: [inline-]flex elements.
  *
  * Available Options:
+ * - color(colorValue)
+ *     @param  {String} colorValue
+ *     The color that should be used to draw the highlighter for this flexbox.
  * - showAlignment(isShown)
- *   @param  {Boolean} isShown
- *   Shows the alignment in the flexbox highlighter.
- * - showFlexBasis(isShown)
- *   @param  {Boolean} isShown
- *   Shows the flex basis in the flexbox highlighter.
+ *     @param  {Boolean} isShown
+ *     Shows the alignment in the flexbox highlighter.
  */
 class FlexboxHighlighter extends AutoRefreshHighlighter {
   constructor(highlighterEnv) {
@@ -169,6 +168,10 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     return this.getElement("canvas");
   }
 
+  get color() {
+    return this.options.color || DEFAULT_COLOR;
+  }
+
   get ctx() {
     return this.canvas.getCanvasContext("2d");
   }
@@ -211,7 +214,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     ctx.moveTo(0, 0);
     ctx.lineTo(width, height);
 
-    ctx.strokeStyle = DEFAULT_COLOR;
+    ctx.strokeStyle = this.color;
     ctx.stroke();
     ctx.restore();
 
@@ -258,7 +261,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     ctx.moveTo(0, height);
     ctx.lineTo(width, 0);
 
-    ctx.strokeStyle = DEFAULT_COLOR;
+    ctx.strokeStyle = this.color;
     ctx.stroke();
     ctx.restore();
 
@@ -289,10 +292,6 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.alignItemsValue = this.computedStyle.alignItems;
     const newAlignItems = this.alignItemsValue;
 
-    const oldFlexBasis = this.flexBasis;
-    this.flexBasis = this.computedStyle.flexBasis;
-    const newFlexBasis = this.flexBasis;
-
     const oldFlexDirection = this.flexDirection;
     this.flexDirection = this.computedStyle.flexDirection;
     const newFlexDirection = this.flexDirection;
@@ -308,7 +307,6 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     return hasMoved ||
            hasFlexDataChanged ||
            oldAlignItems !== newAlignItems ||
-           oldFlexBasis !== newFlexBasis ||
            oldFlexDirection !== newFlexDirection ||
            oldFlexWrap !== newFlexWrap ||
            oldJustifyContent !== newJustifyContent;
@@ -317,7 +315,6 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
   _hide() {
     this.alignItemsValue = null;
     this.computedStyle = null;
-    this.flexBasis = null;
     this.flexData = null;
     this.flexDirection = null;
     this.flexWrap = null;
@@ -393,7 +390,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.ctx.translate(offset - canvasX, offset - canvasY);
     this.ctx.setLineDash(FLEXBOX_LINES_PROPERTIES.alignItems.lineDash);
     this.ctx.lineWidth = lineWidth * 3;
-    this.ctx.strokeStyle = DEFAULT_COLOR;
+    this.ctx.strokeStyle = this.color;
 
     const { bounds } = this.currentQuads.content[0];
     const isColumn = this.flexDirection.startsWith("column");
@@ -493,7 +490,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.ctx.translate(offset - canvasX, offset - canvasY);
     this.ctx.setLineDash(FLEXBOX_LINES_PROPERTIES.edge.lineDash);
     this.ctx.lineWidth = lineWidth;
-    this.ctx.strokeStyle = DEFAULT_COLOR;
+    this.ctx.strokeStyle = this.color;
 
     const { bounds } = this.currentQuads.content[0];
     drawRect(this.ctx, 0, 0, bounds.width, bounds.height, this.currentMatrix);
@@ -517,7 +514,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.ctx.translate(offset - canvasX, offset - canvasY);
     this.ctx.setLineDash(FLEXBOX_LINES_PROPERTIES.edge.lineDash);
     this.ctx.lineWidth = 0;
-    this.ctx.strokeStyle = DEFAULT_COLOR;
+    this.ctx.strokeStyle = this.color;
     this.ctx.fillStyle = this.getFlexContainerPattern(devicePixelRatio);
 
     const { bounds } = this.currentQuads.content[0];
@@ -535,28 +532,6 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.ctx.restore();
   }
 
-  /**
-   * Renders the flex basis for a given flex item.
-   */
-  renderFlexItemBasis(flexItem, left, top, right, bottom, boundsWidth) {
-    if (!this.options.showFlexBasis || !this.computedStyle) {
-      return;
-    }
-
-    let basis = this.flexBasis;
-
-    if (basis.endsWith("px")) {
-      right = Math.round(left + parseFloat(basis));
-    } else if (basis.endsWith("%")) {
-      basis = parseFloat(basis) / 100 * boundsWidth;
-      right = Math.round(left + basis);
-    }
-
-    this.ctx.fillStyle = BASIS_FILL_COLOR;
-    drawRect(this.ctx, left, top, right, bottom, this.currentMatrix);
-    this.ctx.fill();
-  }
-
   renderFlexItems() {
     if (!this.flexData || !this.currentQuads.content || !this.currentQuads.content[0]) {
       return;
@@ -572,7 +547,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.ctx.translate(offset - canvasX, offset - canvasY);
     this.ctx.setLineDash(FLEXBOX_LINES_PROPERTIES.item.lineDash);
     this.ctx.lineWidth = lineWidth;
-    this.ctx.strokeStyle = DEFAULT_COLOR;
+    this.ctx.strokeStyle = this.color;
 
     const { bounds } = this.currentQuads.content[0];
 
@@ -593,8 +568,6 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
         clearRect(this.ctx, left, top, right, bottom, this.currentMatrix);
         drawRect(this.ctx, left, top, right, bottom, this.currentMatrix);
         this.ctx.stroke();
-
-        this.renderFlexItemBasis(flexItem.node, left, top, right, bottom, bounds.width);
       }
     }
 
@@ -615,7 +588,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.ctx.save();
     this.ctx.translate(offset - canvasX, offset - canvasY);
     this.ctx.lineWidth = lineWidth;
-    this.ctx.strokeStyle = DEFAULT_COLOR;
+    this.ctx.strokeStyle = this.color;
 
     const { bounds } = this.currentQuads.content[0];
     const isColumn = this.flexDirection.startsWith("column");

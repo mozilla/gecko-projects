@@ -433,7 +433,7 @@ var Sanitizer = {
         let refObj = {};
         TelemetryStopwatch.start("FX_SANITIZE_SITESETTINGS", refObj);
         await clearData(range, Ci.nsIClearDataService.CLEAR_PERMISSIONS |
-                               Ci.nsIClearDataService.CLEAR_PREFERENCES |
+                               Ci.nsIClearDataService.CLEAR_CONTENT_PREFERENCES |
                                Ci.nsIClearDataService.CLEAR_DOM_PUSH_NOTIFICATIONS |
                                Ci.nsIClearDataService.CLEAR_SECURITY_SETTINGS);
         TelemetryStopwatch.finish("FX_SANITIZE_SITESETTINGS", refObj);
@@ -497,7 +497,7 @@ var Sanitizer = {
         let handler = Cc["@mozilla.org/browser/clh;1"].getService(Ci.nsIBrowserHandler);
         let defaultArgs = handler.defaultArgs;
         let features = "chrome,all,dialog=no," + privateStateForNewWindow;
-        let newWindow = existingWindow.openDialog("chrome://browser/content/", "_blank",
+        let newWindow = existingWindow.openDialog(AppConstants.BROWSER_CHROME_URL, "_blank",
                                                   features, defaultArgs);
 
         let onFullScreen = null;

@@ -237,6 +237,8 @@ function runSubtestsSeriallyInFreshWindows(aSubtests) {
         return;
       }
 
+      SimpleTest.ok(true, "Starting subtest " + test.file);
+
       if (typeof test.dp_suppression != 'undefined') {
         // Normally during a test, the displayport will get suppressed during page
         // load, and unsuppressed at a non-deterministic time during the test. The
@@ -311,8 +313,7 @@ async function waitUntilApzStable() {
         if (!topWin) {
           topWin = Services.wm.getMostRecentWindow('navigator:geckoview');
         }
-        var topUtils = topWin.QueryInterface(Ci.nsIInterfaceRequestor)
-                             .getInterface(Ci.nsIDOMWindowUtils);
+        var topUtils = topWin.windowUtils;
 
         var repaintDone = function() {
           Services.obs.removeObserver(repaintDone, "apz-repaints-flushed");

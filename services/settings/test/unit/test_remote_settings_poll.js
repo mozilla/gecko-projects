@@ -501,7 +501,7 @@ add_task(async function test_syncs_clients_with_local_dump() {
     last_modified: 8000,
     host: "localhost",
     bucket: "main",
-    collection: "tippytop"
+    collection: "example"
   }]));
 
   let error;
@@ -513,9 +513,51 @@ add_task(async function test_syncs_clients_with_local_dump() {
 
   // The `main/some-unknown` should be skipped because it has no dump.
   // The `blocklists/addons` should be skipped because it is not the main bucket.
-  // The `tippytop` has a dump, and should cause a network error because the test
+  // The `example` has a dump, and should cause a network error because the test
   // does not setup the server to receive the requests of `maybeSync()`.
   Assert.ok(/HTTP 404/.test(error.message), "server will return 404 on sync");
-  Assert.equal(error.details.collection, "tippytop");
+  Assert.equal(error.details.collection, "example");
 });
 add_task(clear_state);
+
+
+add_task(async function test_adding_client_resets_last_etag() {
+  function serve200or304(request, response) {
+    const entries = [{
+      id: "aa71e6cc-9f37-447a-b6e0-c025e8eabd03",
+      last_modified: 42,
+      host: "localhost",
+      bucket: "main",
+      collection: "a-collection"
+    }];
+    if (request.queryString == `_since=${encodeURIComponent('"42"')}`) {
+      response.write(JSON.stringify({
+        data: entries.slice(0, 1)
+      }));
+      response.setHeader("ETag", '"42"');
+      response.setStatusLine(null, 304, "Not Modified");
+    } else {
+      response.write(JSON.stringify({
+        data: entries
+      }));
+      response.setHeader("ETag", '"42"');
+      response.setStatusLine(null, 200, "OK");
+    }
+    response.setHeader("Date", (new Date()).toUTCString());
+  }
+  server.registerPathHandler(CHANGES_PATH, serve200or304);
+
+  // Poll once, without any client for "a-collection"
+  await RemoteSettings.pollChanges();
+
+  // Register a new client.
+  let maybeSyncCalled = false;
+  const c = RemoteSettings("a-collection");
+  c.maybeSync = () => { maybeSyncCalled = true; };
+
+  // Poll again.
+  await RemoteSettings.pollChanges();
+
+  // The new client was called, even if the server data didn't change.
+  Assert.ok(maybeSyncCalled);
+});

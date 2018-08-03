@@ -50,6 +50,7 @@ use webdriver::error::{ErrorStatus, WebDriverError, WebDriverResult};
 use webdriver::server::{WebDriverHandler, Session};
 use webdriver::httpapi::{WebDriverExtensionRoute};
 
+use build::BuildInfo;
 use capabilities::{FirefoxCapabilities, FirefoxOptions};
 use logging;
 use prefs;
@@ -884,26 +885,24 @@ impl MarionetteSession {
                 WebDriverResponse::Generic(ValueResponse::new(element.to_json()))
             },
             NewSession(_) => {
-                let mut session_id = try_opt!(
+                let session_id = try_opt!(
                     try_opt!(resp.result.find("sessionId"),
                              ErrorStatus::InvalidSessionId,
                              "Failed to find sessionId field").as_string(),
                     ErrorStatus::InvalidSessionId,
-                    "sessionId was not a string");
+                    "sessionId is not a string");
 
-                if session_id.starts_with("{") && session_id.ends_with("}") {
-                    session_id = &session_id[1..session_id.len()-1];
-                }
-
-                let capabilities = try_opt!(
+                let mut capabilities = try_opt!(
                     try_opt!(resp.result.find("capabilities"),
                              ErrorStatus::UnknownError,
                              "Failed to find capabilities field").as_object(),
                     ErrorStatus::UnknownError,
-                    "capabiltites field was not an Object");
+                    "capabilities field is not an object").clone();
+
+                capabilities.insert("moz:geckodriverVersion".into(), BuildInfo.into());
 
                 WebDriverResponse::NewSession(NewSessionResponse::new(
-                    session_id.to_string(), Json::Object(capabilities.clone())))
+                    session_id.to_string(), Json::Object(capabilities)))
             },
             DeleteSession => {
                 WebDriverResponse::DeleteSession
@@ -1130,11 +1129,6 @@ impl MarionetteCommand {
                 for (k, v) in caps.iter() {
                     data.insert(k.to_string(), v.to_json());
                 }
-
-                // duplicate in capabilities.desiredCapabilities for legacy compat
-                let mut legacy_caps = BTreeMap::new();
-                legacy_caps.insert("desiredCapabilities".to_string(), caps.to_json());
-                data.insert("capabilities".to_string(), legacy_caps.to_json());
 
                 (Some("WebDriver:NewSession"), Some(Ok(data)))
             }

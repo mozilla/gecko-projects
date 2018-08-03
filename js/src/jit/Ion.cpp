@@ -21,7 +21,6 @@
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIRSpewer.h"
 #include "jit/CodeGenerator.h"
-#include "jit/EagerSimdUnbox.h"
 #include "jit/EdgeCaseAnalysis.h"
 #include "jit/EffectiveAddressAnalysis.h"
 #include "jit/FoldLinearArithConstants.h"
@@ -302,7 +301,7 @@ JitRuntime::initialize(JSContext* cx)
             // Duplicate VMFunction definition. See VMFunction::hash.
             continue;
         }
-        JitSpew(JitSpew_Codegen, "# VM function wrapper");
+        JitSpew(JitSpew_Codegen, "# VM function wrapper (%s)", fun->name());
         if (!generateVMWrapper(cx, masm, *fun))
             return false;
     }
@@ -441,17 +440,6 @@ JitRealm::performStubReadBarriers(uint32_t stubsToBarrier) const
         const ReadBarrieredJitCode& jitCode = stubs_[stub];
         MOZ_ASSERT(jitCode);
         jitCode.get();
-    }
-}
-
-void
-JitRealm::performSIMDTemplateReadBarriers(uint32_t simdTemplatesToBarrier) const
-{
-    while (simdTemplatesToBarrier) {
-        auto type = PopNextBitmaskValue<SimdType>(&simdTemplatesToBarrier);
-        const ReadBarrieredObject& tpl = simdTemplateObjects_[type];
-        MOZ_ASSERT(tpl);
-        tpl.get();
     }
 }
 
@@ -649,11 +637,6 @@ JitRealm::sweep(JS::Realm* realm)
         if (stub && IsAboutToBeFinalized(&stub))
             stub.set(nullptr);
     }
-
-    for (ReadBarrieredObject& obj : simdTemplateObjects_) {
-        if (obj && IsAboutToBeFinalized(&obj))
-            obj.set(nullptr);
-    }
 }
 
 void
@@ -667,7 +650,7 @@ JitRealm::sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const
 {
     size_t n = mallocSizeOf(this);
     if (stubCodes_)
-        n += stubCodes_->sizeOfIncludingThis(mallocSizeOf);
+        n += stubCodes_->shallowSizeOfIncludingThis(mallocSizeOf);
     return n;
 }
 
@@ -678,8 +661,8 @@ JitZone::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                 size_t* cachedCFG) const
 {
     *jitZone += mallocSizeOf(this);
-    *jitZone += baselineCacheIRStubCodes_.sizeOfExcludingThis(mallocSizeOf);
-    *jitZone += ionCacheIRStubInfoSet_.sizeOfExcludingThis(mallocSizeOf);
+    *jitZone += baselineCacheIRStubCodes_.shallowSizeOfExcludingThis(mallocSizeOf);
+    *jitZone += ionCacheIRStubInfoSet_.shallowSizeOfExcludingThis(mallocSizeOf);
 
     *baselineStubsOptimized += optimizedStubSpace_.sizeOfExcludingThis(mallocSizeOf);
     *cachedCFG += cfgSpace_.sizeOfExcludingThis(mallocSizeOf);
@@ -714,6 +697,9 @@ JitRuntime::getVMWrapper(const VMFunction& f) const
 void
 JitCodeHeader::init(JitCode* jitCode)
 {
+    // As long as JitCode isn't moveable, we can avoid tracing this and
+    // mutating executable data.
+    MOZ_ASSERT(!gc::IsMovableKind(gc::AllocKind::JITCODE));
     jitCode_ = jitCode;
 
 #if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
@@ -1481,17 +1467,6 @@ OptimizeMIR(MIRGenerator* mir)
         AssertExtendedGraphCoherency(graph);
 
         if (mir->shouldCancel("Apply types"))
-            return false;
-    }
-
-    if (!JitOptions.disableRecoverIns && mir->optimizationInfo().eagerSimdUnboxEnabled()) {
-        AutoTraceLog log(logger, TraceLogger_EagerSimdUnbox);
-        if (!EagerSimdUnbox(mir, graph))
-            return false;
-        gs.spewPass("Eager Simd Unbox");
-        AssertGraphCoherency(graph);
-
-        if (mir->shouldCancel("Eager Simd Unbox"))
             return false;
     }
 

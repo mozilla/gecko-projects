@@ -6,14 +6,11 @@
  * Defines a handler object to represent forms that autofill can handle.
  */
 
-/* exported FormAutofillHandler */
-
 "use strict";
 
 var EXPORTED_SYMBOLS = ["FormAutofillHandler"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
 
@@ -896,8 +893,7 @@ class FormAutofillHandler {
     /**
      * A WindowUtils reference of which Window the form belongs
      */
-    this.winUtils = this.form.rootElement.ownerGlobal.QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIDOMWindowUtils);
+    this.winUtils = this.form.rootElement.ownerGlobal.windowUtils;
 
     /**
      * Time in milliseconds since epoch when a user started filling in the form.

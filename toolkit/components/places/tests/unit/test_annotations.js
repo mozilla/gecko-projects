@@ -11,37 +11,6 @@ try {
   do_throw("Could not get annotation service\n");
 }
 
-var annoObserver = {
-  PAGE_lastSet_URI: "",
-  PAGE_lastSet_AnnoName: "",
-
-  onPageAnnotationSet(aURI, aName) {
-    this.PAGE_lastSet_URI = aURI.spec;
-    this.PAGE_lastSet_AnnoName = aName;
-  },
-
-  ITEM_lastSet_Id: -1,
-  ITEM_lastSet_AnnoName: "",
-  onItemAnnotationSet(aItemId, aName) {
-    this.ITEM_lastSet_Id = aItemId;
-    this.ITEM_lastSet_AnnoName = aName;
-  },
-
-  PAGE_lastRemoved_URI: "",
-  PAGE_lastRemoved_AnnoName: "",
-  onPageAnnotationRemoved(aURI, aName) {
-    this.PAGE_lastRemoved_URI = aURI.spec;
-    this.PAGE_lastRemoved_AnnoName = aName;
-  },
-
-  ITEM_lastRemoved_Id: -1,
-  ITEM_lastRemoved_AnnoName: "",
-  onItemAnnotationRemoved(aItemId, aName) {
-    this.ITEM_lastRemoved_Id = aItemId;
-    this.ITEM_lastRemoved_AnnoName = aName;
-  }
-};
-
 add_task(async function test_execute() {
   let testURI = uri("http://mozilla.com/");
   let testItem = await PlacesUtils.bookmarks.insert({
@@ -54,19 +23,6 @@ add_task(async function test_execute() {
   let testAnnoVal = "test";
   let earlierDate = new Date(Date.now() - 1000);
 
-  annosvc.addObserver(annoObserver);
-  // create new string annotation
-  try {
-    annosvc.setPageAnnotation(testURI, testAnnoName, testAnnoVal, 0, 0);
-  } catch (ex) {
-    do_throw("unable to add page-annotation");
-  }
-  Assert.equal(annoObserver.PAGE_lastSet_URI, testURI.spec);
-  Assert.equal(annoObserver.PAGE_lastSet_AnnoName, testAnnoName);
-
-  // get string annotation
-  var storedAnnoVal = annosvc.getPageAnnotation(testURI, testAnnoName);
-  Assert.ok(testAnnoVal === storedAnnoVal);
   // string item-annotation
   let item = await PlacesUtils.bookmarks.fetch(testItem.guid);
 
@@ -80,7 +36,7 @@ add_task(async function test_execute() {
   });
 
   try {
-    annosvc.setItemAnnotation(testItemId, testAnnoName, testAnnoVal, 0, 0);
+    annosvc.setItemAnnotation(testItemId, testAnnoName, testAnnoVal, 0, annosvc.EXPIRE_NEVER);
   } catch (ex) {
     do_throw("unable to add item annotation " + ex);
   }
@@ -89,8 +45,6 @@ add_task(async function test_execute() {
 
   // verify that setting the annotation updates the last modified time
   Assert.ok(updatedItem.lastModified > item.lastModified);
-  Assert.equal(annoObserver.ITEM_lastSet_Id, testItemId);
-  Assert.equal(annoObserver.ITEM_lastSet_AnnoName, testAnnoName);
 
   try {
     var annoVal = annosvc.getItemAnnotation(testItemId, testAnnoName);
@@ -112,14 +66,8 @@ add_task(async function test_execute() {
 
   // get annotation info
   var value = {}, flags = {}, exp = {}, storageType = {};
-  annosvc.getPageAnnotationInfo(testURI, testAnnoName, flags, exp, storageType);
-  Assert.equal(flags.value, 0);
-  Assert.equal(exp.value, 0);
-  Assert.equal(storageType.value, Ci.nsIAnnotationService.TYPE_STRING);
   annosvc.getItemAnnotationInfo(testItemId, testAnnoName, value, flags, exp, storageType);
   Assert.equal(value.value, testAnnoVal);
-  Assert.equal(flags.value, 0);
-  Assert.equal(exp.value, 0);
   Assert.equal(storageType.value, Ci.nsIAnnotationService.TYPE_STRING);
 
   // get annotation names for an item
@@ -130,64 +78,36 @@ add_task(async function test_execute() {
   // test int32 anno type
   var int32Key = testAnnoName + "/types/Int32";
   var int32Val = 23;
-  annosvc.setPageAnnotation(testURI, int32Key, int32Val, 0, 0);
-  value = {}, flags = {}, exp = {}, storageType = {};
-  annosvc.getPageAnnotationInfo(testURI, int32Key, flags, exp, storageType);
-  Assert.equal(flags.value, 0);
-  Assert.equal(exp.value, 0);
-  Assert.equal(storageType.value, Ci.nsIAnnotationService.TYPE_INT32);
-  var storedVal = annosvc.getPageAnnotation(testURI, int32Key);
-  Assert.ok(int32Val === storedVal);
-  annosvc.setItemAnnotation(testItemId, int32Key, int32Val, 0, 0);
+  annosvc.setItemAnnotation(testItemId, int32Key, int32Val, 0, annosvc.EXPIRE_NEVER);
   Assert.ok(annosvc.itemHasAnnotation(testItemId, int32Key));
   annosvc.getItemAnnotationInfo(testItemId, int32Key, value, flags, exp, storageType);
   Assert.equal(value.value, int32Val);
-  Assert.equal(flags.value, 0);
-  Assert.equal(exp.value, 0);
-  storedVal = annosvc.getItemAnnotation(testItemId, int32Key);
+  let storedVal = annosvc.getItemAnnotation(testItemId, int32Key);
   Assert.ok(int32Val === storedVal);
 
   // test int64 anno type
   var int64Key = testAnnoName + "/types/Int64";
   var int64Val = 4294967296;
-  annosvc.setPageAnnotation(testURI, int64Key, int64Val, 0, 0);
-  annosvc.getPageAnnotationInfo(testURI, int64Key, flags, exp, storageType);
-  Assert.equal(flags.value, 0);
-  Assert.equal(exp.value, 0);
-  storedVal = annosvc.getPageAnnotation(testURI, int64Key);
-  Assert.ok(int64Val === storedVal);
-  annosvc.setItemAnnotation(testItemId, int64Key, int64Val, 0, 0);
+  annosvc.setItemAnnotation(testItemId, int64Key, int64Val, 0, annosvc.EXPIRE_NEVER);
   Assert.ok(annosvc.itemHasAnnotation(testItemId, int64Key));
   annosvc.getItemAnnotationInfo(testItemId, int64Key, value, flags, exp, storageType);
   Assert.equal(value.value, int64Val);
-  Assert.equal(flags.value, 0);
-  Assert.equal(exp.value, 0);
   storedVal = annosvc.getItemAnnotation(testItemId, int64Key);
   Assert.ok(int64Val === storedVal);
 
   // test double anno type
   var doubleKey = testAnnoName + "/types/Double";
   var doubleVal = 0.000002342;
-  annosvc.setPageAnnotation(testURI, doubleKey, doubleVal, 0, 0);
-  annosvc.getPageAnnotationInfo(testURI, doubleKey, flags, exp, storageType);
-  Assert.equal(flags.value, 0);
-  Assert.equal(exp.value, 0);
-  storedVal = annosvc.getPageAnnotation(testURI, doubleKey);
-  Assert.ok(doubleVal === storedVal);
-  annosvc.setItemAnnotation(testItemId, doubleKey, doubleVal, 0, 0);
+  annosvc.setItemAnnotation(testItemId, doubleKey, doubleVal, 0, annosvc.EXPIRE_NEVER);
   Assert.ok(annosvc.itemHasAnnotation(testItemId, doubleKey));
   annosvc.getItemAnnotationInfo(testItemId, doubleKey, value, flags, exp, storageType);
   Assert.equal(value.value, doubleVal);
-  Assert.equal(flags.value, 0);
-  Assert.equal(exp.value, 0);
   Assert.equal(storageType.value, Ci.nsIAnnotationService.TYPE_DOUBLE);
   storedVal = annosvc.getItemAnnotation(testItemId, doubleKey);
   Assert.ok(doubleVal === storedVal);
 
   // test annotation removal
-  annosvc.removePageAnnotation(testURI, int32Key);
-
-  annosvc.setItemAnnotation(testItemId, testAnnoName, testAnnoVal, 0, 0);
+  annosvc.setItemAnnotation(testItemId, testAnnoName, testAnnoVal, 0, annosvc.EXPIRE_NEVER);
   // verify that removing an annotation updates the last modified date
   testItem = await PlacesUtils.bookmarks.fetch(testItem.guid);
 
@@ -207,11 +127,6 @@ add_task(async function test_execute() {
   info("lastModified4 = " + lastModified4);
   Assert.ok(is_time_ordered(lastModified3, lastModified4));
 
-  Assert.equal(annoObserver.PAGE_lastRemoved_URI, testURI.spec);
-  Assert.equal(annoObserver.PAGE_lastRemoved_AnnoName, int32Key);
-  Assert.equal(annoObserver.ITEM_lastRemoved_Id, testItemId);
-  Assert.equal(annoObserver.ITEM_lastRemoved_AnnoName, int32Key);
-
   // test that getItems/PagesWithAnnotation returns an empty array after
   // removing all items/pages which had the annotation set, see bug 380317.
   Assert.equal((await getItemsWithAnnotation(int32Key)).length, 0);
@@ -221,7 +136,7 @@ add_task(async function test_execute() {
   var invalidIds = [-1, 0, 37643];
   for (var id of invalidIds) {
     try {
-      annosvc.setItemAnnotation(id, "foo", "bar", 0, 0);
+      annosvc.setItemAnnotation(id, "foo", "bar", 0, annosvc.EXPIRE_NEVER);
       do_throw("setItemAnnotation* should throw for invalid item id: " + id);
     } catch (ex) { }
   }
@@ -232,14 +147,6 @@ add_task(async function test_execute() {
     title: "",
     url: testURI,
   });
-  let itemId = await PlacesUtils.promiseItemId(item.guid);
-  try {
-    annosvc.setItemAnnotation(itemId, "foo", "bar", 0, annosvc.EXPIRE_WITH_HISTORY);
-    do_throw("setting an item annotation with EXPIRE_HISTORY should throw");
-  } catch (ex) {
-  }
-
-  annosvc.removeObserver(annoObserver);
 });
 
 add_task(async function test_getAnnotationsHavingName() {
@@ -264,20 +171,17 @@ add_task(async function test_getAnnotationsHavingName() {
     "string": "seven"
   };
   for (let name in ANNOS) {
-    PlacesUtils.annotations.setPageAnnotation(
-      url, name, ANNOS[name], 0,
-      PlacesUtils.annotations.EXPIRE_SESSION);
     PlacesUtils.annotations.setItemAnnotation(
       id, name, ANNOS[name], 0,
-      PlacesUtils.annotations.EXPIRE_SESSION);
+      PlacesUtils.annotations.EXPIRE_NEVER);
     PlacesUtils.annotations.setItemAnnotation(
       fid, name, ANNOS[name], 0,
-      PlacesUtils.annotations.EXPIRE_SESSION);
+      PlacesUtils.annotations.EXPIRE_NEVER);
   }
 
   for (let name in ANNOS) {
     let results = PlacesUtils.annotations.getAnnotationsWithName(name);
-    Assert.equal(results.length, 3);
+    Assert.equal(results.length, 2);
 
     for (let result of results) {
       Assert.equal(result.annotationName, name);

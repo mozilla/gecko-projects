@@ -12,6 +12,7 @@
 #include "mozilla/AutoplayPermissionManager.h"
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/HTMLMediaElementBinding.h"
+#include "nsIAutoplay.h"
 #include "nsContentUtils.h"
 #include "nsIDocument.h"
 #include "MediaManager.h"
@@ -70,6 +71,11 @@ IsWindowAllowedToPlay(nsPIDOMWindowInner* aWindow)
     return true;
   }
 
+  if (approver->IsExtensionPage()) {
+    // Always allow extension page to autoplay.
+    return true;
+  }
+
   return false;
 }
 
@@ -88,42 +94,61 @@ AutoplayPolicy::RequestFor(const nsIDocument& aDocument)
   return window->GetAutoplayPermissionManager();
 }
 
-/* static */ Authorization
+static uint32_t
+DefaultAutoplayBehaviour()
+{
+  int prefValue = Preferences::GetInt("media.autoplay.default", nsIAutoplay::ALLOWED);
+  if (prefValue < nsIAutoplay::ALLOWED || prefValue > nsIAutoplay::PROMPT) {
+    // Invalid pref values are just converted to ALLOWED.
+    return nsIAutoplay::ALLOWED;
+  }
+  return prefValue;
+}
+
+static bool
+IsMediaElementAllowedToPlay(const HTMLMediaElement& aElement)
+{
+  return ((aElement.Volume() == 0.0 || aElement.Muted()) &&
+           Preferences::GetBool("media.autoplay.allow-muted", true)) ||
+          IsWindowAllowedToPlay(aElement.OwnerDoc()->GetInnerWindow()) ||
+          (aElement.OwnerDoc()->MediaDocumentKind() == nsIDocument::MediaDocumentKind::Video);
+}
+
+/* static */ bool
+AutoplayPolicy::WouldBeAllowedToPlayIfAutoplayDisabled(const HTMLMediaElement& aElement)
+{
+  return IsMediaElementAllowedToPlay(aElement);
+}
+
+/* static */ uint32_t
 AutoplayPolicy::IsAllowedToPlay(const HTMLMediaElement& aElement)
 {
-  if (Preferences::GetBool("media.autoplay.enabled")) {
-    return Authorization::Allowed;
-  }
-
+  const uint32_t autoplayDefault = DefaultAutoplayBehaviour();
   // TODO : this old way would be removed when user-gestures-needed becomes
   // as a default option to block autoplay.
   if (!Preferences::GetBool("media.autoplay.enabled.user-gestures-needed", false)) {
     // If element is blessed, it would always be allowed to play().
-    return (aElement.IsBlessed() || EventStateManager::IsHandlingUserInput())
-             ? Authorization::Allowed
-             : Authorization::Blocked;
+    return (autoplayDefault == nsIAutoplay::ALLOWED ||
+            aElement.IsBlessed() ||
+            EventStateManager::IsHandlingUserInput())
+              ? nsIAutoplay::ALLOWED : nsIAutoplay::BLOCKED;
   }
 
-  // Muted content
-  if (aElement.Volume() == 0.0 || aElement.Muted()) {
-    return Authorization::Allowed;
+  if (IsMediaElementAllowedToPlay(aElement)) {
+    return nsIAutoplay::ALLOWED;
   }
 
-  if (IsWindowAllowedToPlay(aElement.OwnerDoc()->GetInnerWindow())) {
-    return Authorization::Allowed;
-  }
-
-  if (Preferences::GetBool("media.autoplay.ask-permission", false)) {
-    return Authorization::Prompt;
-  }
-
-  return Authorization::Blocked;
+  return autoplayDefault;
 }
 
 /* static */ bool
 AutoplayPolicy::IsAudioContextAllowedToPlay(NotNull<AudioContext*> aContext)
 {
-  if (Preferences::GetBool("media.autoplay.enabled")) {
+  if (!Preferences::GetBool("media.autoplay.block-webaudio", false)) {
+    return true;
+  }
+
+  if (DefaultAutoplayBehaviour() == nsIAutoplay::ALLOWED) {
     return true;
   }
 

@@ -25,19 +25,19 @@ from voluptuous import Any, Required, Optional
 # See example in bug 1348286
 _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US = [
     'buildhub.json',
-    "target.common.tests.zip",
-    "target.cppunittest.tests.zip",
+    "target.common.tests.tar.gz",
+    "target.cppunittest.tests.tar.gz",
     "target.crashreporter-symbols.zip",
     "target.json",
-    "target.mochitest.tests.zip",
+    "target.mochitest.tests.tar.gz",
     "target.mozinfo.json",
-    "target.reftest.tests.zip",
-    "target.talos.tests.zip",
-    "target.awsy.tests.zip",
+    "target.reftest.tests.tar.gz",
+    "target.talos.tests.tar.gz",
+    "target.awsy.tests.tar.gz",
     "target.test_packages.json",
     "target.txt",
     "target.web-platform.tests.tar.gz",
-    "target.xpcshell.tests.zip",
+    "target.xpcshell.tests.tar.gz",
     "target_info.txt",
     "target.jsshell.zip",
     "mozharness.zip",
@@ -71,19 +71,19 @@ _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_L10N = [
 # See example in bug 1348286
 _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US = [
     "en-US/buildhub.json",
-    "en-US/target.common.tests.zip",
-    "en-US/target.cppunittest.tests.zip",
+    "en-US/target.common.tests.tar.gz",
+    "en-US/target.cppunittest.tests.tar.gz",
     "en-US/target.crashreporter-symbols.zip",
     "en-US/target.json",
-    "en-US/target.mochitest.tests.zip",
+    "en-US/target.mochitest.tests.tar.gz",
     "en-US/target.mozinfo.json",
-    "en-US/target.reftest.tests.zip",
-    "en-US/target.talos.tests.zip",
-    "en-US/target.awsy.tests.zip",
+    "en-US/target.reftest.tests.tar.gz",
+    "en-US/target.talos.tests.tar.gz",
+    "en-US/target.awsy.tests.tar.gz",
     "en-US/target.test_packages.json",
     "en-US/target.txt",
     "en-US/target.web-platform.tests.tar.gz",
-    "en-US/target.xpcshell.tests.zip",
+    "en-US/target.xpcshell.tests.tar.gz",
     "en-US/target_info.txt",
     "en-US/mozharness.zip",
     "en-US/robocop.apk",
@@ -146,6 +146,12 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
                _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
                     "host/bin/mar",
                     "host/bin/mbsdiff",
+                ]),
+    'win64-asan-reporter-nightly':
+        filter(lambda a: a != 'target.crashreporter-symbols.zip',
+               _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
+                    "host/bin/mar.exe",
+                    "host/bin/mbsdiff.exe",
                 ]),
     'android-x86-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
     'android-aarch64-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
@@ -213,6 +219,9 @@ UPSTREAM_ARTIFACT_SIGNED_PATHS = {
     'linux64-asan-reporter-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_EN_US + [
         "target.tar.bz2",
         "target.tar.bz2.asc",
+    ],
+    'win64-asan-reporter-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_EN_US + [
+        "target.zip",
     ],
     'android-x86-nightly': ["en-US/target.apk"],
     'android-aarch64-nightly': ["en-US/target.apk"],
@@ -344,7 +353,10 @@ def make_task_description(config, jobs):
             'treeherder', {}).get('machine', {}).get('platform', '')
         treeherder.setdefault('platform',
                               "{}/opt".format(dep_th_platform))
-        treeherder.setdefault('tier', 1)
+        treeherder.setdefault(
+            'tier',
+            dep_job.task.get('extra', {}).get('treeherder', {}).get('tier', 1)
+        )
         treeherder.setdefault('kind', 'build')
         label = job['label']
         description = (

@@ -272,7 +272,7 @@ GetCharacterCodeName(const char16_t* aChars, uint32_t aLength)
   if (!aLength) {
     return EmptyCString();
   }
-  nsAutoCString result;
+  nsCString result;
   for (uint32_t i = 0; i < aLength; ++i) {
     if (!result.IsEmpty()) {
       result.AppendLiteral(", ");
@@ -291,7 +291,7 @@ GetCharacterCodeName(const UniCharsAndModifiers& aUniCharsAndModifiers)
   if (aUniCharsAndModifiers.IsEmpty()) {
     return EmptyCString();
   }
-  nsAutoCString result;
+  nsCString result;
   for (uint32_t i = 0; i < aUniCharsAndModifiers.Length(); i++) {
     if (!result.IsEmpty()) {
       result.AppendLiteral(", ");
@@ -578,7 +578,7 @@ private:
 static const nsCString
 ToString(const MSG& aMSG)
 {
-  nsAutoCString result;
+  nsCString result;
   result.AssignLiteral("{ message=");
   result.Append(GetMessageName(aMSG.message).get());
   result.AppendLiteral(", ");
@@ -641,7 +641,7 @@ ToString(const UniCharsAndModifiers& aUniCharsAndModifiers)
   if (aUniCharsAndModifiers.IsEmpty()) {
     return NS_LITERAL_CSTRING("{}");
   }
-  nsAutoCString result;
+  nsCString result;
   result.AssignLiteral("{ ");
   result.Append(GetCharacterCodeName(aUniCharsAndModifiers.CharAt(0)));
   for (size_t i = 1; i < aUniCharsAndModifiers.Length(); ++i) {
@@ -664,7 +664,7 @@ ToString(const UniCharsAndModifiers& aUniCharsAndModifiers)
 const nsCString
 ToString(const ModifierKeyState& aModifierKeyState)
 {
-  nsAutoCString result;
+  nsCString result;
   result.AssignLiteral("{ ");
   result.Append(GetModifiersName(aModifierKeyState.GetModifiers()).get());
   result.AppendLiteral(" }");
@@ -2146,16 +2146,17 @@ NativeKey::DispatchCommandEvent(uint32_t aEventCommand) const
          "event", this));
       return false;
   }
-  WidgetCommandEvent commandEvent(true, nsGkAtoms::onAppCommand,
-                                  command, mWidget);
+  WidgetCommandEvent appCommandEvent(true, command, mWidget);
 
-  mWidget->InitEvent(commandEvent);
+  mWidget->InitEvent(appCommandEvent);
   MOZ_LOG(sNativeKeyLogger, LogLevel::Info,
-    ("%p   NativeKey::DispatchCommandEvent(), dispatching %s command event...",
+    ("%p   NativeKey::DispatchCommandEvent(), dispatching "
+     "%s app command event...",
      this, nsAtomCString(command).get()));
-  bool ok = mWidget->DispatchWindowEvent(&commandEvent) || mWidget->Destroyed();
+  bool ok =
+    mWidget->DispatchWindowEvent(&appCommandEvent) || mWidget->Destroyed();
   MOZ_LOG(sNativeKeyLogger, LogLevel::Info,
-    ("%p   NativeKey::DispatchCommandEvent(), dispatched command event, "
+    ("%p   NativeKey::DispatchCommandEvent(), dispatched app command event, "
      "result=%s, mWidget->Destroyed()=%s",
      this, GetBoolName(ok), GetBoolName(mWidget->Destroyed())));
   return ok;
@@ -2857,7 +2858,7 @@ GetResultOfInSendMessageEx()
   if (!ret) {
     return NS_LITERAL_CSTRING("ISMEX_NOSEND");
   }
-  nsAutoCString result;
+  nsCString result;
   if (ret & ISMEX_CALLBACK) {
     result = "ISMEX_CALLBACK";
   }
@@ -4197,7 +4198,7 @@ KeyboardLayout::GetLayoutName(HKL aLayout) const
   }
 
   if (NS_WARN_IF((layout & 0xF000) != 0xF000)) {
-    nsAutoCString result;
+    nsCString result;
     result.AppendPrintf("Odd HKL: 0x%08X",
                         reinterpret_cast<uintptr_t>(aLayout));
     return result;

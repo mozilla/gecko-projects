@@ -87,6 +87,7 @@
 #include "nsGenericHTMLElement.h"
 #include "nsGkAtoms.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
+#include "nsIAutoplay.h"
 #include "nsICachingChannel.h"
 #include "nsICategoryManager.h"
 #include "nsIClassOfService.h"
@@ -511,6 +512,13 @@ HTMLMediaElement::MediaLoadListener::OnStartRequest(nsIRequest* aRequest,
   if (!mElement) {
     // We've been notified by the shutdown observer, and are shutting down.
     return NS_BINDING_ABORTED;
+  }
+
+  // Media element playback is not currently supported when recording or
+  // replaying. See bug 1304146.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    mElement->ReportLoadError("Media elements not available when recording", nullptr, 0);
+    return NS_ERROR_NOT_AVAILABLE;
   }
 
   // The element is only needed until we've had a chance to call
@@ -1998,7 +2006,7 @@ HTMLMediaElement::Load()
        HasSourceChildren(this),
        EventStateManager::IsHandlingUserInput(),
        HasAttr(kNameSpaceID_None, nsGkAtoms::autoplay),
-       AutoplayPolicy::IsAllowedToPlay(*this) == Authorization::Allowed,
+       AutoplayPolicy::IsAllowedToPlay(*this) == nsIAutoplay::ALLOWED,
        OwnerDoc(),
        DocumentOrigin(OwnerDoc()).get(),
        OwnerDoc() ? OwnerDoc()->HasBeenUserGestureActivated() : 0,
@@ -2514,13 +2522,19 @@ HTMLMediaElement::ResumeLoad(PreloadAction aAction)
   }
 }
 
+bool
+HTMLMediaElement::AllowedToPlay() const
+{
+  return AutoplayPolicy::IsAllowedToPlay(*this) == nsIAutoplay::ALLOWED;
+}
+
 void
 HTMLMediaElement::UpdatePreloadAction()
 {
   PreloadAction nextAction = PRELOAD_UNDEFINED;
   // If autoplay is set, or we're playing, we should always preload data,
   // as we'll need it to play.
-  if ((AutoplayPolicy::IsAllowedToPlay(*this) == Authorization::Allowed &&
+  if ((AutoplayPolicy::IsAllowedToPlay(*this) == nsIAutoplay::ALLOWED &&
        HasAttr(kNameSpaceID_None, nsGkAtoms::autoplay)) ||
       !mPaused) {
     nextAction = HTMLMediaElement::PRELOAD_ENOUGH;
@@ -3053,9 +3067,10 @@ HTMLMediaElement::PauseIfShouldNotBePlaying()
   if (GetPaused()) {
     return;
   }
-  if (AutoplayPolicy::IsAllowedToPlay(*this) != Authorization::Allowed) {
+  if (AutoplayPolicy::IsAllowedToPlay(*this) != nsIAutoplay::ALLOWED) {
     ErrorResult rv;
     Pause(rv);
+    OwnerDoc()->SetDocTreeHadPlayRevoked();
   }
 }
 
@@ -4003,6 +4018,21 @@ HTMLMediaElement::AudioChannelAgentDelayingPlayback()
   return mAudioChannelWrapper && mAudioChannelWrapper->IsPlaybackBlocked();
 }
 
+void
+HTMLMediaElement::UpdateHadAudibleAutoplayState() const
+{
+  // If we're audible, and autoplaying...
+  if ((Volume() > 0.0 && !Muted()) &&
+      (!OwnerDoc()->HasBeenUserGestureActivated() || Autoplay())) {
+    OwnerDoc()->SetDocTreeHadAudibleMedia();
+    if (AutoplayPolicy::WouldBeAllowedToPlayIfAutoplayDisabled(*this)) {
+      ScalarAdd(Telemetry::ScalarID::MEDIA_AUTOPLAY_WOULD_BE_ALLOWED_COUNT, 1);
+    } else {
+      ScalarAdd(Telemetry::ScalarID::MEDIA_AUTOPLAY_WOULD_NOT_BE_ALLOWED_COUNT, 1);
+    }
+  }
+}
+
 already_AddRefed<Promise>
 HTMLMediaElement::Play(ErrorResult& aRv)
 {
@@ -4062,15 +4092,17 @@ HTMLMediaElement::Play(ErrorResult& aRv)
     return promise.forget();
   }
 
+  UpdateHadAudibleAutoplayState();
+
   const bool handlingUserInput = EventStateManager::IsHandlingUserInput();
   switch (AutoplayPolicy::IsAllowedToPlay(*this)) {
-    case Authorization::Allowed: {
+    case nsIAutoplay::ALLOWED: {
       mPendingPlayPromises.AppendElement(promise);
       PlayInternal(handlingUserInput);
       UpdateCustomPolicyAfterPlayed();
       break;
     }
-    case Authorization::Blocked: {
+    case nsIAutoplay::BLOCKED: {
       LOG(LogLevel::Debug, ("%p play not blocked.", this));
       promise->MaybeReject(NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR);
       if (StaticPrefs::MediaBlockEventEnabled()) {
@@ -4078,7 +4110,7 @@ HTMLMediaElement::Play(ErrorResult& aRv)
       }
       break;
     }
-    case Authorization::Prompt: {
+    case nsIAutoplay::PROMPT: {
       // Prompt the user for permission to play.
       mPendingPlayPromises.AppendElement(promise);
       EnsureAutoplayRequested(handlingUserInput);
@@ -4512,11 +4544,10 @@ HTMLMediaElement::AfterMaybeChangeAttr(int32_t aNamespaceID,
 nsresult
 HTMLMediaElement::BindToTree(nsIDocument* aDocument,
                              nsIContent* aParent,
-                             nsIContent* aBindingParent,
-                             bool aCompileEventHandlers)
+                             nsIContent* aBindingParent)
 {
   nsresult rv = nsGenericHTMLElement::BindToTree(
-    aDocument, aParent, aBindingParent, aCompileEventHandlers);
+    aDocument, aParent, aBindingParent);
 
   mUnboundFromTree = false;
 
@@ -4777,16 +4808,6 @@ HTMLMediaElement::UnbindFromTree(bool aDeep, bool aNullParent)
   RunInStableState(task);
 }
 
-static bool
-IsVP9InMP4(const MediaContainerType& aContainerType)
-{
-  const MediaContainerType mimeType(aContainerType.Type());
-  return DecoderTraits::IsMP4SupportedType(
-           mimeType,
-           /* DecoderDoctorDiagnostics* */ nullptr) &&
-         IsVP9CodecString(aContainerType.ExtendedType().Codecs().AsString());
-}
-
 /* static */
 CanPlayStatus
 HTMLMediaElement::GetCanPlay(const nsAString& aType,
@@ -4798,14 +4819,6 @@ HTMLMediaElement::GetCanPlay(const nsAString& aType,
   }
   CanPlayStatus status =
     DecoderTraits::CanHandleContainerType(*containerType, aDiagnostics);
-  if (status == CANPLAY_YES && IsVP9InMP4(*containerType)) {
-    // We don't have a demuxer that can handle VP9 in non-fragmented MP4.
-    // So special-case VP9 in MP4 here, as we assume canPlayType() implies
-    // non-fragmented MP4 anyway. Note we report that we can play VP9
-    // in MP4 in MediaSource.isTypeSupported(), as the fragmented MP4
-    // demuxer can handle VP9 in fragmented MP4.
-    return CANPLAY_NO;
-  }
   if (status == CANPLAY_YES &&
       (*containerType).ExtendedType().Codecs().IsEmpty()) {
     // Per spec: 'Generally, a user agent should never return "probably" for a
@@ -6127,7 +6140,7 @@ HTMLMediaElement::ChangeReadyState(nsMediaReadyState aState)
     if (!mPaused) {
       if (mDecoder && !mPausedForInactiveDocumentOrChannel) {
         MOZ_ASSERT(AutoplayPolicy::IsAllowedToPlay(*this) ==
-                   Authorization::Allowed);
+                   nsIAutoplay::ALLOWED);
         mDecoder->Play();
       }
       NotifyAboutPlaying();
@@ -6238,13 +6251,14 @@ HTMLMediaElement::CheckAutoplayDataReady()
     return;
   }
 
+  UpdateHadAudibleAutoplayState();
   switch (AutoplayPolicy::IsAllowedToPlay(*this)) {
-    case Authorization::Blocked:
+    case nsIAutoplay::BLOCKED:
       return;
-    case Authorization::Prompt:
+    case nsIAutoplay::PROMPT:
       EnsureAutoplayRequested(false);
       return;
-    case Authorization::Allowed:
+    case nsIAutoplay::ALLOWED:
       break;
   }
 
@@ -7363,28 +7377,25 @@ HTMLMediaElement::SetMediaKeys(mozilla::dom::MediaKeys* aMediaKeys,
 EventHandlerNonNull*
 HTMLMediaElement::GetOnencrypted()
 {
-  return EventTarget::GetEventHandler(nsGkAtoms::onencrypted, EmptyString());
+  return EventTarget::GetEventHandler(nsGkAtoms::onencrypted);
 }
 
 void
 HTMLMediaElement::SetOnencrypted(EventHandlerNonNull* aCallback)
 {
-  EventTarget::SetEventHandler(
-    nsGkAtoms::onencrypted, EmptyString(), aCallback);
+  EventTarget::SetEventHandler(nsGkAtoms::onencrypted, aCallback);
 }
 
 EventHandlerNonNull*
 HTMLMediaElement::GetOnwaitingforkey()
 {
-  return EventTarget::GetEventHandler(nsGkAtoms::onwaitingforkey,
-                                      EmptyString());
+  return EventTarget::GetEventHandler(nsGkAtoms::onwaitingforkey);
 }
 
 void
 HTMLMediaElement::SetOnwaitingforkey(EventHandlerNonNull* aCallback)
 {
-  EventTarget::SetEventHandler(
-    nsGkAtoms::onwaitingforkey, EmptyString(), aCallback);
+  EventTarget::SetEventHandler(nsGkAtoms::onwaitingforkey, aCallback);
 }
 
 void

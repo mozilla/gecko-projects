@@ -40,14 +40,6 @@ class Alias(object):
         return "alias"
 
 <%!
-# nsCSSPropertyID of longhands and shorthands is ordered alphabetically
-# with vendor prefixes removed. Note that aliases use their alias name
-# as order key directly because they may be duplicate without prefix.
-def order_key(prop):
-    if prop.name.startswith("-"):
-        return prop.name[prop.name.find("-", 1) + 1:]
-    return prop.name
-
 # See bug 1454823 for situation of internal flag.
 def is_internal(prop):
     # A property which is not controlled by pref and not enabled in
@@ -74,10 +66,13 @@ def method(prop):
 # moved or perhaps using a blacklist for the ones with non-layout-dependence
 # but other non-trivial dependence like scrollbar colors.
 SERIALIZED_PREDEFINED_TYPES = [
+    "Appearance",
+    "Clear",
     "Color",
     "Content",
     "CounterIncrement",
     "CounterReset",
+    "Float",
     "FontFamily",
     "FontFeatureSettings",
     "FontLanguageOverride",
@@ -158,16 +153,16 @@ def sub_properties(prop):
 %>
 
 data = [
-    % for prop in sorted(data.longhands, key=order_key):
+    % for prop in data.longhands:
     Longhand("${prop.name}", "${method(prop)}", "${prop.ident}", [${flags(prop)}], ${pref(prop)}),
     % endfor
 
-    % for prop in sorted(data.shorthands, key=order_key):
+    % for prop in data.shorthands:
     Shorthand("${prop.name}", "${prop.camel_case}", "${prop.ident}", [${flags(prop)}], ${pref(prop)},
               [${sub_properties(prop)}]),
     % endfor
 
-    % for prop in sorted(data.all_aliases(), key=lambda x: x.name):
+    % for prop in data.all_aliases():
     Alias("${prop.name}", "${prop.camel_case}", "${prop.ident}", "${prop.original.ident}", [], ${pref(prop)}),
     % endfor
 ]

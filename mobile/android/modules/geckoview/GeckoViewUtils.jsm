@@ -244,10 +244,9 @@ var GeckoViewUtils = {
     try {
       docShell = aWin.QueryInterface(Ci.nsIDocShell);
     } catch (e) {
-      docShell = aWin.QueryInterface(Ci.nsIInterfaceRequestor)
-                     .getInterface(Ci.nsIDocShell);
+      docShell = aWin.docShell;
     }
-    return docShell.QueryInterface(Ci.nsIDocShellTreeItem).rootTreeItem
+    return docShell.rootTreeItem
                    .QueryInterface(Ci.nsIInterfaceRequestor);
   },
 
@@ -259,7 +258,7 @@ var GeckoViewUtils = {
    */
   getChromeWindow: function(aWin) {
     const docShell = this.getRootDocShell(aWin);
-    return docShell && docShell.getInterface(Ci.nsIDOMWindow);
+    return docShell && docShell.domWindow;
   },
 
   /**

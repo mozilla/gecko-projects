@@ -47,7 +47,7 @@
 #include "nsBoxLayoutState.h"
 #include "nsTreeContentView.h"
 #include "nsTreeUtils.h"
-#include "nsThemeConstants.h"
+#include "nsStyleConsts.h"
 #include "nsITheme.h"
 #include "imgIRequest.h"
 #include "imgIContainer.h"
@@ -191,22 +191,7 @@ nsTreeBodyFrame::GetXULMinSize(nsBoxLayoutState& aBoxLayoutState)
   int32_t desiredRows;
   if (MOZ_UNLIKELY(!baseElement)) {
     desiredRows = 0;
-  }
-  else if (baseElement->IsHTMLElement(nsGkAtoms::select)) {
-    min.width = CalcMaxRowWidth();
-    nsAutoString size;
-    baseElement->GetAttr(kNameSpaceID_None, nsGkAtoms::size, size);
-    if (!size.IsEmpty()) {
-      nsresult err;
-      desiredRows = size.ToInteger(&err);
-      mHasFixedRowCount = true;
-      mPageLength = desiredRows;
-    }
-    else {
-      desiredRows = 1;
-    }
   } else {
-    // tree
     nsAutoString rows;
     baseElement->GetAttr(kNameSpaceID_None, nsGkAtoms::rows, rows);
     if (!rows.IsEmpty()) {
@@ -1738,22 +1723,6 @@ nsTreeBodyFrame::IsCellCropped(int32_t aRow, nsTreeColumn* aCol, bool *_retval)
   return NS_OK;
 }
 
-void
-nsTreeBodyFrame::MarkDirtyIfSelect()
-{
-  nsIContent* baseElement = GetBaseElement();
-
-  if (baseElement && baseElement->IsHTMLElement(nsGkAtoms::select)) {
-    // If we are an intrinsically sized select widget, we may need to
-    // resize, if the widest item was removed or a new item was added.
-    // XXX optimize this more
-
-    mStringWidth = -1;
-    PresShell()->FrameNeedsReflow(this, nsIPresShell::eTreeChange,
-                                  NS_FRAME_IS_DIRTY);
-  }
-}
-
 nsresult
 nsTreeBodyFrame::CreateTimer(const LookAndFeel::IntID aID,
                              nsTimerCallbackFunc aFunc, int32_t aType,
@@ -1812,9 +1781,7 @@ nsTreeBodyFrame::RowCountChanged(int32_t aIndex, int32_t aCount)
 
   if (mTopRowIndex == 0) {
     // Just update the scrollbar and return.
-    if (FullScrollbarsUpdate(false)) {
-      MarkDirtyIfSelect();
-    }
+    FullScrollbarsUpdate(false);
     return NS_OK;
   }
 
@@ -1841,9 +1808,7 @@ nsTreeBodyFrame::RowCountChanged(int32_t aIndex, int32_t aCount)
     }
   }
 
-  if (FullScrollbarsUpdate(needsInvalidation)) {
-    MarkDirtyIfSelect();
-  }
+  FullScrollbarsUpdate(needsInvalidation);
   return NS_OK;
 }
 
@@ -2025,7 +1990,7 @@ nsTreeBodyFrame::GetTwistyRect(int32_t aRowIndex,
   bool useTheme = false;
   nsITheme *theme = nullptr;
   const nsStyleDisplay* twistyDisplayData = aTwistyContext->StyleDisplay();
-  if (twistyDisplayData->mAppearance) {
+  if (twistyDisplayData->mAppearance != StyleAppearance::None) {
     theme = aPresContext->GetTheme();
     if (theme && theme->ThemeSupportsWidget(aPresContext, nullptr, twistyDisplayData->mAppearance))
       useTheme = true;
@@ -2810,7 +2775,7 @@ nsTreeBodyFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // geometrics for the row. In order to make the vibrancy effect to work
   // properly, we also need the tree to be themed as a source list.
   if (selection && treeFrame && theme &&
-      treeFrame->StyleDisplay()->mAppearance == NS_THEME_MAC_SOURCE_LIST) {
+      treeFrame->StyleDisplay()->mAppearance == StyleAppearance::MozMacSourceList) {
     // Loop through our onscreen rows. If the row is selected and a
     // -moz-appearance is provided, RegisterThemeGeometry might be necessary.
     const auto end = std::min(mRowCount, LastVisibleRow() + 1);
@@ -2825,7 +2790,7 @@ nsTreeBodyFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
         ComputedStyle* rowContext =
           GetPseudoComputedStyle(nsCSSAnonBoxes::mozTreeRow);
         auto appearance = rowContext->StyleDisplay()->mAppearance;
-        if (appearance) {
+        if (appearance != StyleAppearance::None) {
           if (theme->ThemeSupportsWidget(PresContext(), this, appearance)) {
             nsITheme::ThemeGeometryType type =
               theme->ThemeGeometryTypeForWidget(this, appearance);
@@ -3003,7 +2968,7 @@ nsTreeBodyFrame::PaintRow(int32_t               aRowIndex,
   // Paint our borders and background for our row rect.
   nsITheme* theme = nullptr;
   auto appearance = rowContext->StyleDisplay()->mAppearance;
-  if (appearance) {
+  if (appearance != StyleAppearance::None) {
     theme = aPresContext->GetTheme();
   }
 
@@ -3133,7 +3098,7 @@ nsTreeBodyFrame::PaintSeparator(int32_t              aRowIndex,
   bool useTheme = false;
   nsITheme *theme = nullptr;
   const nsStyleDisplay* displayData = separatorContext->StyleDisplay();
-  if ( displayData->mAppearance ) {
+  if (displayData->HasAppearance()) {
     theme = aPresContext->GetTheme();
     if (theme && theme->ThemeSupportsWidget(aPresContext, nullptr, displayData->mAppearance))
       useTheme = true;
@@ -4250,13 +4215,8 @@ nsTreeBodyFrame::GetBaseElement()
   nsIFrame* parent = GetParent();
   while (parent) {
     nsIContent* content = parent->GetContent();
-    if (content) {
-      dom::NodeInfo* ni = content->NodeInfo();
-
-      if (ni->Equals(nsGkAtoms::tree, kNameSpaceID_XUL) ||
-          (ni->Equals(nsGkAtoms::select) &&
-           content->IsHTMLElement()))
-        return content->AsElement();
+    if (content && content->IsXULElement(nsGkAtoms::tree)) {
+      return content->AsElement();
     }
 
     parent = parent->GetParent();

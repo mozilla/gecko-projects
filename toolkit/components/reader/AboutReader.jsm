@@ -9,7 +9,6 @@ var EXPORTED_SYMBOLS = [ "AboutReader" ];
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/ReaderMode.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AsyncPrefs", "resource://gre/modules/AsyncPrefs.jsm");
 ChromeUtils.defineModuleGetter(this, "NarrateControls", "resource://gre/modules/narrate/NarrateControls.jsm");
@@ -41,8 +40,7 @@ var AboutReader = function(mm, win, articlePromise) {
 
   this._docRef = Cu.getWeakReference(doc);
   this._winRef = Cu.getWeakReference(win);
-  this._innerWindowId = win.QueryInterface(Ci.nsIInterfaceRequestor)
-    .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+  this._innerWindowId = win.windowUtils.currentInnerWindowID;
 
   this._article = null;
   this._languagePromise = new Promise(resolve => {

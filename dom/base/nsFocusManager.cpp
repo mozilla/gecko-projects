@@ -188,7 +188,9 @@ nsFocusManager::nsFocusManager()
 
 nsFocusManager::~nsFocusManager()
 {
-  Preferences::RemoveObservers(this, kObservedPrefs);
+  Preferences::UnregisterCallbacks(
+    PREF_CHANGE_METHOD(nsFocusManager::PrefChanged),
+    kObservedPrefs, this);
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
@@ -213,7 +215,9 @@ nsFocusManager::Init()
 
   sTestMode = Preferences::GetBool("focusmanager.testmode", false);
 
-  Preferences::AddWeakObservers(fm, kObservedPrefs);
+  Preferences::RegisterCallbacks(
+    PREF_CHANGE_METHOD(nsFocusManager::PrefChanged),
+    kObservedPrefs, fm);
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
@@ -230,30 +234,34 @@ nsFocusManager::Shutdown()
   NS_IF_RELEASE(sInstance);
 }
 
+void
+nsFocusManager::PrefChanged(const char* aPref)
+{
+  nsDependentCString pref(aPref);
+  if (pref.EqualsLiteral("accessibility.browsewithcaret")) {
+    UpdateCaretForCaretBrowsingMode();
+  }
+  else if (pref.EqualsLiteral("accessibility.tabfocus_applies_to_xul")) {
+    nsIContent::sTabFocusModelAppliesToXUL =
+      Preferences::GetBool("accessibility.tabfocus_applies_to_xul",
+                           nsIContent::sTabFocusModelAppliesToXUL);
+  }
+  else if (pref.EqualsLiteral("accessibility.mouse_focuses_formcontrol")) {
+    sMouseFocusesFormControl =
+      Preferences::GetBool("accessibility.mouse_focuses_formcontrol",
+                           false);
+  }
+  else if (pref.EqualsLiteral("focusmanager.testmode")) {
+    sTestMode = Preferences::GetBool("focusmanager.testmode", false);
+  }
+}
+
 NS_IMETHODIMP
 nsFocusManager::Observe(nsISupports *aSubject,
                         const char *aTopic,
                         const char16_t *aData)
 {
-  if (!nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
-    nsDependentString data(aData);
-    if (data.EqualsLiteral("accessibility.browsewithcaret")) {
-      UpdateCaretForCaretBrowsingMode();
-    }
-    else if (data.EqualsLiteral("accessibility.tabfocus_applies_to_xul")) {
-      nsIContent::sTabFocusModelAppliesToXUL =
-        Preferences::GetBool("accessibility.tabfocus_applies_to_xul",
-                             nsIContent::sTabFocusModelAppliesToXUL);
-    }
-    else if (data.EqualsLiteral("accessibility.mouse_focuses_formcontrol")) {
-      sMouseFocusesFormControl =
-        Preferences::GetBool("accessibility.mouse_focuses_formcontrol",
-                             false);
-    }
-    else if (data.EqualsLiteral("focusmanager.testmode")) {
-      sTestMode = Preferences::GetBool("focusmanager.testmode", false);
-    }
-  } else if (!nsCRT::strcmp(aTopic, "xpcom-shutdown")) {
+  if (!nsCRT::strcmp(aTopic, "xpcom-shutdown")) {
     mActiveWindow = nullptr;
     mFocusedWindow = nullptr;
     mFocusedElement = nullptr;
@@ -2582,8 +2590,7 @@ nsFocusManager::GetSelectionLocation(nsIDocument* aDocument,
                                              false, // aVisual
                                              false, // aLockInScrollView
                                              true,  // aFollowOOFs
-                                             false, // aSkipPopupChecks
-                                             false  // aSkipShadow
+                                             false // aSkipPopupChecks
                                              );
           NS_ENSURE_SUCCESS(rv, rv);
 
@@ -3315,8 +3322,7 @@ nsFocusManager::GetNextTabbableContentInScope(nsIContent* aOwner,
                                              false, // aVisual
                                              false, // aLockInScrollView
                                              true, // aFollowOOFs
-                                             true,  // aSkipPopupChecks
-                                             false // aSkipShadow
+                                             true  // aSkipPopupChecks
                                              );
           if (NS_SUCCEEDED(rv)) {
             nsIFrame* frame =
@@ -3447,6 +3453,24 @@ nsFocusManager::GetNextTabbableContentInAncestorScopes(
   return nullptr;
 }
 
+static nsIContent*
+GetTopLevelHost(nsIContent* aContent)
+{
+  nsIContent* topLevelhost = nullptr;
+  while (aContent) {
+    if (HTMLSlotElement* slot = aContent->GetAssignedSlot()) {
+      aContent = slot;
+    } else if (ShadowRoot* shadowRoot = aContent->GetContainingShadow()) {
+      aContent = shadowRoot->Host();
+      topLevelhost = aContent;
+    } else {
+      aContent = aContent->GetParent();
+    }
+  }
+
+  return topLevelhost;
+}
+
 nsresult
 nsFocusManager::GetNextTabbableContent(nsIPresShell* aPresShell,
                                        nsIContent* aRootContent,
@@ -3463,6 +3487,8 @@ nsFocusManager::GetNextTabbableContent(nsIPresShell* aPresShell,
   nsCOMPtr<nsIContent> startContent = aStartContent;
   if (!startContent)
     return NS_OK;
+
+  nsIContent* currentTopLevelHost = GetTopLevelHost(aStartContent);
 
   LOGCONTENTNAVIGATION("GetNextTabbable: %s", aStartContent);
   LOGFOCUSNAVIGATION(("  tabindex: %d", aCurrentTabIndex));
@@ -3543,8 +3569,7 @@ nsFocusManager::GetNextTabbableContent(nsIPresShell* aPresShell,
                                        false, // aVisual
                                        false, // aLockInScrollView
                                        true,  // aFollowOOFs
-                                       aForDocumentNavigation,  // aSkipPopupChecks
-                                       nsDocument::IsShadowDOMEnabled(aRootContent) // aSkipShadow
+                                       aForDocumentNavigation  // aSkipPopupChecks
                                        );
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -3569,7 +3594,29 @@ nsFocusManager::GetNextTabbableContent(nsIPresShell* aPresShell,
     // Walk frames to find something tabbable matching mCurrentTabIndex
     nsIFrame* frame = static_cast<nsIFrame*>(frameTraversal->CurrentItem());
     while (frame) {
+      // Try to find the topmost Shadow DOM host, since we want to
+      // skip Shadow DOM in frame traversal.
       nsIContent* currentContent = frame->GetContent();
+      nsIContent* oldTopLevelHost = currentTopLevelHost;
+      nsIContent* topLevel = GetTopLevelHost(currentContent);
+      currentTopLevelHost = topLevel;
+      if (topLevel) {
+        if (topLevel == oldTopLevelHost) {
+          // We're within Shadow DOM, continue.
+          do {
+            if (aForward) {
+              frameTraversal->Next();
+            } else {
+              frameTraversal->Prev();
+            }
+            frame = static_cast<nsIFrame*>(frameTraversal->CurrentItem());
+            // For the usage of GetPrevContinuation, see the comment
+            // at the end of while (frame) loop.
+          } while (frame && frame->GetPrevContinuation());
+          continue;
+        }
+        currentContent = topLevel;
+      }
 
       // For document navigation, check if this element is an open panel. Since
       // panels aren't focusable (tabIndex would be -1), we'll just assume that

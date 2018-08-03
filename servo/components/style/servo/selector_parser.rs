@@ -11,10 +11,10 @@ use attr::{AttrIdentifier, AttrValue};
 use cssparser::{serialize_identifier, CowRcStr, Parser as CssParser, SourceLocation, ToCss};
 use dom::{OpaqueNode, TElement, TNode};
 use element_state::{DocumentState, ElementState};
-use fnv::FnvHashMap;
+use fxhash::FxHashMap;
 use invalidation::element::document_state::InvalidationMatchingData;
 use invalidation::element::element_wrapper::ElementSnapshot;
-use properties::{CascadeFlags, ComputedValues, PropertyFlags};
+use properties::{ComputedValues, PropertyFlags};
 use properties::longhands::display::computed_value::T as Display;
 use selector_parser::{AttrValue as SelectorAttrValue, PseudoElementCascadeType, SelectorParser};
 use selectors::attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstraint};
@@ -223,19 +223,19 @@ impl PseudoElement {
     /// properties...  Also, I guess it just could do all: inherit on the
     /// stylesheet, though chances are that'd be kinda slow if we don't cache
     /// them...
-    pub fn cascade_flags(&self) -> CascadeFlags {
+    pub fn inherits_all(&self) -> bool {
         match *self {
             PseudoElement::After |
             PseudoElement::Before |
             PseudoElement::Selection |
             PseudoElement::DetailsContent |
-            PseudoElement::DetailsSummary => CascadeFlags::empty(),
+            PseudoElement::DetailsSummary |
             // Anonymous table flows shouldn't inherit their parents properties in order
             // to avoid doubling up styles such as transformations.
             PseudoElement::ServoAnonymousTableCell |
             PseudoElement::ServoAnonymousTableRow |
             PseudoElement::ServoText |
-            PseudoElement::ServoInputText => CascadeFlags::empty(),
+            PseudoElement::ServoInputText => false,
 
             // For tables, we do want style to inherit, because TableWrapper is
             // responsible for handling clipping and scrolling, while Table is
@@ -248,7 +248,7 @@ impl PseudoElement {
             PseudoElement::ServoTableWrapper |
             PseudoElement::ServoAnonymousBlock |
             PseudoElement::ServoInlineBlockWrapper |
-            PseudoElement::ServoInlineAbsolute => CascadeFlags::INHERIT_ALL,
+            PseudoElement::ServoInlineAbsolute => true,
         }
     }
 
@@ -617,12 +617,12 @@ impl SelectorImpl {
 
 /// A map from elements to snapshots for the Servo style back-end.
 #[derive(Debug)]
-pub struct SnapshotMap(FnvHashMap<OpaqueNode, ServoElementSnapshot>);
+pub struct SnapshotMap(FxHashMap<OpaqueNode, ServoElementSnapshot>);
 
 impl SnapshotMap {
     /// Create a new empty `SnapshotMap`.
     pub fn new() -> Self {
-        SnapshotMap(FnvHashMap::default())
+        SnapshotMap(FxHashMap::default())
     }
 
     /// Get a snapshot given an element.
@@ -632,7 +632,7 @@ impl SnapshotMap {
 }
 
 impl Deref for SnapshotMap {
-    type Target = FnvHashMap<OpaqueNode, ServoElementSnapshot>;
+    type Target = FxHashMap<OpaqueNode, ServoElementSnapshot>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

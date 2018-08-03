@@ -31,6 +31,8 @@ var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var { assert } = DevToolsUtils;
 var { TabSources } = require("devtools/server/actors/utils/TabSources");
 var makeDebugger = require("devtools/server/actors/utils/make-debugger");
+const Debugger = require("Debugger");
+const ReplayDebugger = require("devtools/server/actors/replay/debugger");
 const InspectorUtils = require("InspectorUtils");
 
 const EXTENSION_CONTENT_JSM = "resource://gre/modules/ExtensionContent.jsm";
@@ -51,9 +53,7 @@ loader.lazyRequireGetter(this, "StyleSheetActor", "devtools/server/actors/styles
 loader.lazyRequireGetter(this, "getSheetText", "devtools/server/actors/stylesheets", true);
 
 function getWindowID(window) {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDOMWindowUtils)
-               .currentInnerWindowID;
+  return window.windowUtils.currentInnerWindowID;
 }
 
 function getDocShellChromeEventHandler(docShell) {
@@ -62,8 +62,7 @@ function getDocShellChromeEventHandler(docShell) {
     try {
       // Toplevel xul window's docshell doesn't have chromeEventHandler
       // attribute. The chrome event handler is just the global window object.
-      handler = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDOMWindow);
+      handler = docShell.domWindow;
     } catch (e) {
       // ignore
     }
@@ -80,6 +79,7 @@ function getChildDocShells(parentDocShell) {
   const docShells = [];
   while (docShellsEnum.hasMoreElements()) {
     const docShell = docShellsEnum.getNext();
+    docShell.QueryInterface(Ci.nsIDocShell);
     docShell.QueryInterface(Ci.nsIInterfaceRequestor)
             .getInterface(Ci.nsIWebProgress);
     docShells.push(docShell);
@@ -94,8 +94,7 @@ exports.getChildDocShells = getChildDocShells;
  */
 
 function getInnerId(window) {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+  return window.windowUtils.currentInnerWindowID;
 }
 
 const browsingContextTargetPrototype = {
@@ -240,6 +239,12 @@ const browsingContextTargetPrototype = {
     // Used by the ParentProcessTargetActor to list all frames in the Browser Toolbox
     this.listenForNewDocShells = false;
 
+    let canRewind = false;
+    if (Debugger.recordReplayProcessKind() == "Middleman") {
+      const replayDebugger = new ReplayDebugger();
+      canRewind = replayDebugger.canRewind();
+    }
+
     this.traits = {
       reconfigure: true,
       // Supports frame listing via `listFrames` request and `frameUpdate` events
@@ -250,6 +255,8 @@ const browsingContextTargetPrototype = {
       noTabReconfigureOnClose: true,
       // Supports the logInPage request.
       logInPage: true,
+      // Supports requests related to rewinding.
+      canRewind,
     };
 
     this._workerTargetActorList = null;
@@ -338,18 +345,14 @@ const browsingContextTargetPrototype = {
   get window() {
     // On xpcshell, there is no document
     if (this.docShell) {
-      return this.docShell
-        .QueryInterface(Ci.nsIInterfaceRequestor)
-        .getInterface(Ci.nsIDOMWindow);
+      return this.docShell.domWindow;
     }
     return null;
   },
 
   get outerWindowID() {
     if (this.window) {
-      return this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDOMWindowUtils)
-                        .outerWindowID;
+      return this.window.windowUtils.outerWindowID;
     }
     return null;
   },
@@ -376,8 +379,7 @@ const browsingContextTargetPrototype = {
    */
   get windows() {
     return this.docShells.map(docShell => {
-      return docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                     .getInterface(Ci.nsIDOMWindow);
+      return docShell.domWindow;
     });
   },
 
@@ -393,9 +395,7 @@ const browsingContextTargetPrototype = {
       return this.docShell;
     }
 
-    return this._originalWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIWebNavigation)
-                               .QueryInterface(Ci.nsIDocShell);
+    return this._originalWindow.docShell;
   },
 
   /**
@@ -422,9 +422,7 @@ const browsingContextTargetPrototype = {
    * Getter for the nsIWebNavigation for the target.
    */
   get webNavigation() {
-    return this.docShell
-      .QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIWebNavigation);
+    return this.docShell.QueryInterface(Ci.nsIWebNavigation);
   },
 
   /**
@@ -782,9 +780,7 @@ const browsingContextTargetPrototype = {
     const webProgress = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
                               .getInterface(Ci.nsIWebProgress);
     const window = webProgress.DOMWindow;
-    const id = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                   .getInterface(Ci.nsIDOMWindowUtils)
-                   .outerWindowID;
+    const id = window.windowUtils.outerWindowID;
     let parentID = undefined;
     // Ignore the parent of the original document on non-e10s firefox,
     // as we get the xul window as parent and don't care about it.
@@ -792,10 +788,7 @@ const browsingContextTargetPrototype = {
     // current window in order to deal with front end. e.g. toolbox will be fall
     // into infinite loop due to recursive search with by using parent id.
     if (window.parent && window.parent != window && window != this._originalWindow) {
-      parentID = window.parent
-                       .QueryInterface(Ci.nsIInterfaceRequestor)
-                       .getInterface(Ci.nsIDOMWindowUtils)
-                       .outerWindowID;
+      parentID = window.parent.windowUtils.outerWindowID;
     }
 
     return {
@@ -830,10 +823,7 @@ const browsingContextTargetPrototype = {
 
   _notifyDocShellDestroy(webProgress) {
     webProgress = webProgress.QueryInterface(Ci.nsIWebProgress);
-    const id = webProgress.DOMWindow
-                        .QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDOMWindowUtils)
-                        .outerWindowID;
+    const id = webProgress.DOMWindow.windowUtils.outerWindowID;
     this.emit("frameUpdate", {
       frames: [{
         id,
@@ -1138,8 +1128,7 @@ const browsingContextTargetPrototype = {
    * Disable or enable the service workers testing features.
    */
   _setServiceWorkersTestingEnabled(enabled) {
-    const windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDOMWindowUtils);
+    const windowUtils = this.window.windowUtils;
     windowUtils.serviceWorkersTestingEnabled = enabled;
   },
 
@@ -1166,8 +1155,7 @@ const browsingContextTargetPrototype = {
       return null;
     }
 
-    const windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDOMWindowUtils);
+    const windowUtils = this.window.windowUtils;
     return windowUtils.serviceWorkersTestingEnabled;
   },
 
@@ -1179,9 +1167,7 @@ const browsingContextTargetPrototype = {
       // The browsing context is already closed.
       return;
     }
-    const windowUtils = this.window
-                          .QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIDOMWindowUtils);
+    const windowUtils = this.window.windowUtils;
     windowUtils.suppressEventHandling(true);
     windowUtils.suspendTimeouts();
   },
@@ -1194,9 +1180,7 @@ const browsingContextTargetPrototype = {
       // The browsing context is already closed.
       return;
     }
-    const windowUtils = this.window
-                          .QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIDOMWindowUtils);
+    const windowUtils = this.window.windowUtils;
     windowUtils.resumeTimeouts();
     windowUtils.suppressEventHandling(false);
   },
@@ -1228,9 +1212,7 @@ const browsingContextTargetPrototype = {
   },
 
   _setWindow(window) {
-    const docShell = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIWebNavigation)
-                         .QueryInterface(Ci.nsIDocShell);
+    const docShell = window.docShell;
     // Here is the very important call where we switch the currently targeted
     // browsing context (it will indirectly update this.window and many other
     // attributes defined from docShell).
@@ -1497,8 +1479,7 @@ DebuggerProgressListener.prototype = {
     // Add the docshell to the watched set. We're actually adding the window,
     // because docShell objects are not wrappercached and would be rejected
     // by the WeakSet.
-    const docShellWindow = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDOMWindow);
+    const docShellWindow = docShell.domWindow;
     this._watchedDocShells.add(docShellWindow);
 
     const webProgress = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -1520,8 +1501,7 @@ DebuggerProgressListener.prototype = {
   },
 
   unwatch(docShell) {
-    const docShellWindow = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDOMWindow);
+    const docShellWindow = docShell.domWindow;
     if (!this._watchedDocShells.has(docShellWindow)) {
       return;
     }
@@ -1548,8 +1528,7 @@ DebuggerProgressListener.prototype = {
 
   _getWindowsInDocShell(docShell) {
     return getChildDocShells(docShell).map(d => {
-      return d.QueryInterface(Ci.nsIInterfaceRequestor)
-              .getInterface(Ci.nsIDOMWindow);
+      return d.domWindow;
     });
   },
 

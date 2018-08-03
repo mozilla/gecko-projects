@@ -343,7 +343,7 @@ public:
    */
   void SetFocusTarget(const FocusTarget& aFocusTarget) { mFocusTarget = aFocusTarget; }
 
-  void SetLayerObserverEpoch(uint64_t aLayerObserverEpoch);
+  void SetLayersObserverEpoch(LayersObserverEpoch aEpoch);
 
   static void PlatformSyncBeforeUpdate();
 
@@ -360,6 +360,9 @@ public:
 
   virtual void UpdateFwdTransactionId() override;
   virtual uint64_t GetFwdTransactionId() override;
+
+  void UpdateTextureLocks();
+  void SyncTextures(const nsTArray<uint64_t>& aSerials);
 
   void ReleaseLayer(const LayerHandle& aHandle);
 

@@ -2073,7 +2073,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
                                            //         otherwise equal to
                                            //         mDisplay
   uint8_t mContain;             // NS_STYLE_CONTAIN_*
-  uint8_t mAppearance;          // NS_THEME_*
+  mozilla::StyleAppearance mAppearance;
   uint8_t mPosition;            // NS_STYLE_POSITION_*
 
   mozilla::StyleFloat mFloat;
@@ -2222,6 +2222,11 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
   nsStyleCoord mShapeMargin;
 
   mozilla::StyleShapeSource mShapeOutside;
+
+  bool HasAppearance() const
+  {
+    return mAppearance != mozilla::StyleAppearance::None;
+  }
 
   bool IsBlockInsideStyle() const {
     return mozilla::StyleDisplay::Block == mDisplay ||
@@ -2455,12 +2460,6 @@ private:
   inline bool HasFixedPosContainingBlockStyleInternal(
     mozilla::ComputedStyle&) const;
   void GenerateCombinedTransform();
-public:
-  // Return the 'float' and 'clear' properties, with inline-{start,end} values
-  // resolved to {left,right} according to the given writing mode. These are
-  // defined in WritingModes.h.
-  inline mozilla::StyleFloat PhysicalFloats(mozilla::WritingMode aWM) const;
-  inline mozilla::StyleClear PhysicalBreakType(mozilla::WritingMode aWM) const;
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTable
@@ -2812,19 +2811,20 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleColumn
 
   nsChangeHint CalcDifference(const nsStyleColumn& aNewData) const;
 
-  /**
-   * This is the maximum number of columns we can process. It's used in both
-   * nsColumnSetFrame and nsRuleNode.
-   */
+  // This is the maximum number of columns we can process. It's used in
+  // nsColumnSetFrame.
   static const uint32_t kMaxColumnCount = 1000;
 
-  uint32_t     mColumnCount; // NS_STYLE_COLUMN_COUNT_* or another integer
+  // This represents the value of column-count: auto.
+  static const uint32_t kColumnCountAuto = 0;
+
+  uint32_t mColumnCount = kColumnCountAuto;
   nsStyleCoord mColumnWidth; // coord, auto
 
   mozilla::StyleComplexColor mColumnRuleColor;
   uint8_t      mColumnRuleStyle;  // NS_STYLE_BORDER_STYLE_*
-  uint8_t      mColumnFill;  // NS_STYLE_COLUMN_FILL_*
-  uint8_t      mColumnSpan;  // NS_STYLE_COLUMN_SPAN_*
+  mozilla::StyleColumnFill mColumnFill = mozilla::StyleColumnFill::Balance;
+  mozilla::StyleColumnSpan mColumnSpan = mozilla::StyleColumnSpan::None;
 
   void SetColumnRuleWidth(nscoord aWidth) {
     mColumnRuleWidth = NS_ROUND_BORDER_TO_PIXELS(aWidth, mTwipsPerPixel);

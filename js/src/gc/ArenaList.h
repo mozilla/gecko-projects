@@ -241,7 +241,7 @@ class FreeLists
 
     inline void unmarkPreMarkedFreeCells(AllocKind kind);
 
-    const void* addressOfFreeList(AllocKind thingKind) const {
+    FreeSpan** addressOfFreeList(AllocKind thingKind) {
         return &freeLists_[thingKind];
     }
 };
@@ -263,7 +263,8 @@ class ArenaLists
         ParallelAlloc
     };
 
-    using ConcurrentUseState = mozilla::Atomic<ConcurrentUse, mozilla::SequentiallyConsistent>;
+    using ConcurrentUseState = mozilla::Atomic<ConcurrentUse, mozilla::SequentiallyConsistent,
+                                               mozilla::recordreplay::Behavior::DontPreserve>;
 
     // Whether this structure can be accessed by other threads.
     UnprotectedData<AllAllocKindArray<ConcurrentUseState>> concurrentUseState_;
@@ -298,7 +299,7 @@ class ArenaLists
     FreeLists& freeLists() { return freeLists_.ref(); }
     const FreeLists& freeLists() const { return freeLists_.ref(); }
 
-    const void* addressOfFreeList(AllocKind thingKind) const {
+    FreeSpan** addressOfFreeList(AllocKind thingKind) {
         return freeLists_.refNoCheck().addressOfFreeList(thingKind);
     }
 

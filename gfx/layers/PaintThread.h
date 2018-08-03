@@ -186,7 +186,7 @@ typedef bool (*PrepDrawTargetForPaintingCallback)(CapturedPaintState* aPaintStat
 // Holds the key operations needed to update a tiled content client on the
 // paint thread.
 class CapturedTiledPaintState {
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CapturedPaintState)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CapturedTiledPaintState)
 public:
   struct Copy {
     Copy(RefPtr<gfx::DrawTarget> aSource,
@@ -223,6 +223,19 @@ public:
     nsIntRegion mDirtyRegion;
   };
 
+  struct EdgePad {
+    EdgePad(RefPtr<gfx::DrawTarget> aTarget,
+            nsIntRegion&& aValidRegion)
+      : mTarget(aTarget)
+      , mValidRegion(aValidRegion)
+    {}
+
+    void EdgePadBuffer();
+
+    RefPtr<gfx::DrawTarget> mTarget;
+    nsIntRegion mValidRegion;
+  };
+
   CapturedTiledPaintState()
   {}
   CapturedTiledPaintState(gfx::DrawTarget* aTarget,
@@ -244,10 +257,15 @@ public:
     mClients.clear();
   }
 
+  void PrePaint();
+  void Paint();
+  void PostPaint();
+
   RefPtr<gfx::DrawTarget> mTarget;
   RefPtr<gfx::DrawTargetCapture> mCapture;
   std::vector<Copy> mCopies;
   std::vector<Clear> mClears;
+  Maybe<EdgePad> mEdgePad;
 
   std::vector<RefPtr<TextureClient>> mClients;
 

@@ -928,8 +928,8 @@ ArrayBufferObject::prepareForAsmJS(JSContext* cx, Handle<ArrayBufferObject*> buf
             return true;
 
         // Non-prepared-for-asm.js wasm buffers can be detached at any time.
-        // This error can only be triggered for SIMD.js (which isn't shipping)
-        // on !WASM_HUGE_MEMORY so this error is only visible in testing.
+        // This error can only be triggered for Atomics on !WASM_HUGE_MEMORY
+        // so this error is only visible in testing.
         if (buffer->isWasm() || buffer->isPreparedForAsmJS())
             return false;
 
@@ -1281,7 +1281,7 @@ ArrayBufferObject*
 ArrayBufferObject::createEmpty(JSContext* cx)
 {
     AutoSetNewObjectMetadata metadata(cx);
-    ArrayBufferObject* obj = NewObjectWithClassProto<ArrayBufferObject>(cx, nullptr);
+    ArrayBufferObject* obj = NewBuiltinClassInstance<ArrayBufferObject>(cx);
     if (!obj)
         return nullptr;
 
@@ -1298,7 +1298,7 @@ ArrayBufferObject::createFromNewRawBuffer(JSContext* cx, WasmArrayRawBuffer* buf
                                           uint32_t initialSize)
 {
     AutoSetNewObjectMetadata metadata(cx);
-    ArrayBufferObject* obj = NewObjectWithClassProto<ArrayBufferObject>(cx, nullptr);
+    ArrayBufferObject* obj = NewBuiltinClassInstance<ArrayBufferObject>(cx);
     if (!obj) {
         WasmArrayRawBuffer::Release(buffer->dataPointer());
         return nullptr;
@@ -1636,7 +1636,7 @@ InnerViewTable::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
         vectorSize += e.front().value().sizeOfExcludingThis(mallocSizeOf);
 
     return vectorSize
-         + map.sizeOfExcludingThis(mallocSizeOf)
+         + map.shallowSizeOfExcludingThis(mallocSizeOf)
          + nurseryKeys.sizeOfExcludingThis(mallocSizeOf);
 }
 

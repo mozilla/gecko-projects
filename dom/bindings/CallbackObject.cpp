@@ -196,8 +196,7 @@ CallbackObject::CallSetup::CallSetup(CallbackObject* aCallback,
       globalObject = win;
     } else {
       // No DOM Window. Store the global.
-      JSObject* global = JS::GetNonCCWObjectGlobal(realCallback);
-      globalObject = xpc::NativeGlobal(global);
+      globalObject = xpc::NativeGlobal(realCallback);
       MOZ_ASSERT(globalObject);
     }
   }
@@ -376,7 +375,7 @@ CallbackObjectHolderBase::ToXPCOMCallback(CallbackObject* aCallback,
     return nullptr;
   }
 
-  JSAutoRealm ar(cx, callback);
+  JSAutoRealmAllowCCW ar(cx, callback);
   RefPtr<nsXPCWrappedJS> wrappedJS;
   nsresult rv =
     nsXPCWrappedJS::GetNewOrUsed(callback, aIID, getter_AddRefs(wrappedJS));

@@ -201,24 +201,21 @@ function saveDocument(aDocument, aSkipPrompt) {
   } else if (aDocument.nodeType == 9 /* DOCUMENT_NODE */) {
     // Otherwise it's an actual nsDocument (and possibly a CPOW).
     // We want to use cached data because the document is currently visible.
-    let ifreq =
-      aDocument.defaultView
-               .QueryInterface(Ci.nsIInterfaceRequestor);
+    let win = aDocument.defaultView;
 
     try {
-      contentDisposition =
-        ifreq.getInterface(Ci.nsIDOMWindowUtils)
-             .getDocumentMetadata("content-disposition");
+      contentDisposition = win.windowUtils
+                              .getDocumentMetadata("content-disposition");
     } catch (ex) {
       // Failure to get a content-disposition is ok
     }
 
     try {
       let shEntry =
-        ifreq.getInterface(Ci.nsIWebNavigation)
-             .QueryInterface(Ci.nsIWebPageDescriptor)
-             .currentDescriptor
-             .QueryInterface(Ci.nsISHEntry);
+        win.docShell
+           .QueryInterface(Ci.nsIWebPageDescriptor)
+           .currentDescriptor
+           .QueryInterface(Ci.nsISHEntry);
 
       cacheKey = shEntry.cacheKey;
     } catch (ex) {
@@ -764,8 +761,7 @@ function DownloadURL(aURL, aFileName, aInitiatingDocument) {
   // For private browsing, try to get document out of the most recent browser
   // window, or provide our own if there's no browser window.
   let isPrivate = aInitiatingDocument.defaultView
-                                     .QueryInterface(Ci.nsIInterfaceRequestor)
-                                     .getInterface(Ci.nsIWebNavigation)
+                                     .docShell
                                      .QueryInterface(Ci.nsILoadContext)
                                      .usePrivateBrowsing;
 
@@ -894,8 +890,7 @@ function getPostData(aDocument) {
     // returns a session history entry.
     let sessionHistoryEntry =
         aDocument.defaultView
-                 .QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIWebNavigation)
+                 .docShell
                  .QueryInterface(Ci.nsIWebPageDescriptor)
                  .currentDescriptor
                  .QueryInterface(Ci.nsISHEntry);

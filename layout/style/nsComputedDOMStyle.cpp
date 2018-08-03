@@ -12,6 +12,7 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/FontPropertyTypes.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPtr.h"
 
 #include "nsError.h"
 #include "nsIFrame.h"
@@ -20,7 +21,7 @@
 #include "nsIScrollableFrame.h"
 #include "nsContentUtils.h"
 #include "nsIContent.h"
-#include "nsThemeConstants.h"
+#include "nsStyleConsts.h"
 
 #include "nsDOMCSSRect.h"
 #include "nsDOMCSSRGBColor.h"
@@ -36,6 +37,7 @@
 #include "nsPresContext.h"
 #include "nsIDocument.h"
 
+#include "nsCSSProps.h"
 #include "nsCSSPseudoElements.h"
 #include "mozilla/EffectSet.h"
 #include "mozilla/IntegerRange.h"
@@ -436,8 +438,7 @@ nsComputedDOMStyle::GetPropertyValue(const nsAString& aPropertyName,
 {
   aReturn.Truncate();
 
-  nsCSSPropertyID prop =
-    nsCSSProps::LookupProperty(aPropertyName, CSSEnabledState::eForAllContent);
+  nsCSSPropertyID prop = nsCSSProps::LookupProperty(aPropertyName);
 
   const ComputedStyleMap::Entry* entry = nullptr;
   if (prop != eCSSPropertyExtra_variable) {
@@ -718,7 +719,7 @@ CollectImageURLsForProperty(nsCSSPropertyID aProp,
                             nsTArray<nsString>& aURLs)
 {
   if (nsCSSProps::IsShorthand(aProp)) {
-    CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(p, aProp, CSSEnabledState::eInChrome) {
+    CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(p, aProp, CSSEnabledState::eForAllContent) {
       CollectImageURLsForProperty(*p, aStyle, aURLs);
     }
     return;
@@ -760,8 +761,7 @@ nsComputedDOMStyle::GetCSSImageURLs(const nsAString& aPropertyName,
                                     nsTArray<nsString>& aImageURLs,
                                     mozilla::ErrorResult& aRv)
 {
-  nsCSSPropertyID prop =
-    nsCSSProps::LookupProperty(aPropertyName, CSSEnabledState::eInChrome);
+  nsCSSPropertyID prop = nsCSSProps::LookupProperty(aPropertyName);
   if (prop == eCSSProperty_UNKNOWN) {
     aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
     return;
@@ -1148,7 +1148,7 @@ nsComputedDOMStyle::SetValueFromComplexColor(nsROCSSPrimitiveValue* aValue,
 void
 nsComputedDOMStyle::SetValueForWidgetColor(nsROCSSPrimitiveValue* aValue,
                                            const StyleComplexColor& aColor,
-                                           uint8_t aWidgetType)
+                                           StyleAppearance aWidgetType)
 {
   if (!aColor.IsAuto()) {
     SetToRGBAColor(aValue, aColor.CalcColor(mComputedStyle));
@@ -1186,7 +1186,7 @@ nsComputedDOMStyle::DoGetColumnCount()
 
   const nsStyleColumn* column = StyleColumn();
 
-  if (column->mColumnCount == NS_STYLE_COLUMN_COUNT_AUTO) {
+  if (column->mColumnCount == nsStyleColumn::kColumnCountAuto) {
     val->SetIdent(eCSSKeyword_auto);
   } else {
     val->SetNumber(column->mColumnCount);
@@ -2986,7 +2986,7 @@ nsComputedDOMStyle::DoGetScrollbarFaceColor()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   SetValueForWidgetColor(val, StyleUserInterface()->mScrollbarFaceColor,
-                         NS_THEME_SCROLLBARTHUMB_VERTICAL);
+                         StyleAppearance::ScrollbarthumbVertical);
   return val.forget();
 }
 
@@ -2995,7 +2995,7 @@ nsComputedDOMStyle::DoGetScrollbarTrackColor()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   SetValueForWidgetColor(val, StyleUserInterface()->mScrollbarTrackColor,
-                         NS_THEME_SCROLLBAR_VERTICAL);
+                         StyleAppearance::ScrollbarVertical);
   return val.forget();
 }
 
@@ -5469,9 +5469,9 @@ nsComputedDOMStyle::DummyGetter()
 }
 
 static void
-MarkComputedStyleMapDirty(const char* aPref, void* aData)
+MarkComputedStyleMapDirty(const char* aPref, ComputedStyleMap* aData)
 {
-  static_cast<ComputedStyleMap*>(aData)->MarkDirty();
+  aData->MarkDirty();
 }
 
 void
@@ -5492,6 +5492,8 @@ nsComputedDOMStyle::GetComputedStyleMap()
   return &map;
 }
 
+static StaticAutoPtr<nsTArray<const char*>> gCallbackPrefs;
+
 /* static */ void
 nsComputedDOMStyle::RegisterPrefChangeCallbacks()
 {
@@ -5499,22 +5501,41 @@ nsComputedDOMStyle::RegisterPrefChangeCallbacks()
   // just those that are implemented on computed style objects, as it's not
   // easy to grab specific property data from ServoCSSPropList.h based on the
   // entries iterated in nsComputedDOMStylePropertyList.h.
-  ComputedStyleMap* data = GetComputedStyleMap();
+
+  AutoTArray<const char*, 64> prefs;
   for (const auto* p = nsCSSProps::kPropertyPrefTable;
        p->mPropID != eCSSProperty_UNKNOWN; p++) {
-    nsCString name;
-    name.AssignLiteral(p->mPref, strlen(p->mPref));
-    Preferences::RegisterCallback(MarkComputedStyleMapDirty, name, data);
+    // Many properties are controlled by the same preference, so de-duplicate
+    // them before adding observers.
+    //
+    // Note: This is done by pointer comparison, which works because the mPref
+    // members are string literals from the same same translation unit, and are
+    // therefore de-duplicated by the compiler. On the off chance that we wind
+    // up with some duplicates with different pointers, though, it's not a bit
+    // deal.
+    if (!prefs.ContainsSorted(p->mPref)) {
+      prefs.InsertElementSorted(p->mPref);
+    }
   }
+  prefs.AppendElement(nullptr);
+
+  MOZ_ASSERT(!gCallbackPrefs);
+  gCallbackPrefs = new nsTArray<const char*>(std::move(prefs));
+
+  Preferences::RegisterCallbacks(MarkComputedStyleMapDirty,
+                                 gCallbackPrefs->Elements(),
+                                 GetComputedStyleMap());
 }
 
 /* static */ void
 nsComputedDOMStyle::UnregisterPrefChangeCallbacks()
 {
-  ComputedStyleMap* data = GetComputedStyleMap();
-  for (const auto* p = nsCSSProps::kPropertyPrefTable;
-       p->mPropID != eCSSProperty_UNKNOWN; p++) {
-    Preferences::UnregisterCallback(MarkComputedStyleMapDirty,
-                                    nsDependentCString(p->mPref), data);
+  if (!gCallbackPrefs) {
+    return;
   }
+
+  Preferences::UnregisterCallbacks(MarkComputedStyleMapDirty,
+                                   gCallbackPrefs->Elements(),
+                                   GetComputedStyleMap());
+  gCallbackPrefs = nullptr;
 }

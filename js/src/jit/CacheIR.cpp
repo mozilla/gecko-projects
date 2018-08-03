@@ -1213,7 +1213,7 @@ GetPropIRGenerator::tryAttachXrayCrossCompartmentWrapper(HandleObject obj, ObjOp
     if (!info || !info->isCrossCompartmentXray(GetProxyHandler(obj)))
         return false;
 
-    if (!info->globalHasExclusiveExpandos(cx_->global()))
+    if (!info->compartmentHasExclusiveExpandos(obj))
         return false;
 
     RootedObject target(cx_, UncheckedUnwrap(obj));
@@ -3596,6 +3596,10 @@ CanAttachAddElement(NativeObject* obj, bool isInit)
         if (!proto->isNative())
             return false;
 
+        // TypedArrayObjects [[Set]] has special behavior.
+        if (proto->is<TypedArrayObject>())
+            return false;
+
         // We have to make sure the proto has no non-writable (frozen) elements
         // because we're not allowed to shadow them. There are a few cases to
         // consider:
@@ -4702,7 +4706,7 @@ jit::NewWrapperWithObjectShape(JSContext* cx, HandleNativeObject obj)
     RootedObject wrapper(cx);
     {
         AutoRealm ar(cx, obj);
-        wrapper = NewObjectWithClassProto(cx, &shapeContainerClass, nullptr);
+        wrapper = NewBuiltinClassInstance(cx, &shapeContainerClass);
         if (!obj)
             return nullptr;
         wrapper->as<NativeObject>().setSlot(SHAPE_CONTAINER_SLOT, PrivateGCThingValue(obj->lastProperty()));
@@ -5073,6 +5077,353 @@ UnaryArithIRGenerator::tryAttachNumber()
         break;
       default:
         MOZ_CRASH("Unexpected OP");
+    }
+
+    writer.returnFromIC();
+    return true;
+}
+
+BinaryArithIRGenerator::BinaryArithIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc, ICState::Mode mode,
+                                               JSOp op, HandleValue lhs, HandleValue rhs, HandleValue res)
+  : IRGenerator(cx, script, pc, CacheKind::BinaryArith, mode),
+    op_(op),
+    lhs_(lhs),
+    rhs_(rhs),
+    res_(res)
+{ }
+
+void
+BinaryArithIRGenerator::trackAttached(const char* name)
+{
+#ifdef JS_CACHEIR_SPEW
+    if (const CacheIRSpewer::Guard& sp = CacheIRSpewer::Guard(*this, name)) {
+        sp.opcodeProperty("op", op_);
+        sp.valueProperty("rhs", rhs_);
+        sp.valueProperty("lhs", lhs_);
+    }
+#endif
+}
+
+bool
+BinaryArithIRGenerator::tryAttachStub()
+{
+
+    // Attempt common case first
+    if (tryAttachInt32())
+        return true;
+    if (tryAttachBooleanWithInt32())
+        return true;
+    if (tryAttachDoubleWithInt32())
+        return true;
+
+    // This attempt must come after tryAttachDoubleWithInt32
+    // and tryAttachInt32, as it will attach for those cases
+    if (tryAttachDouble())
+        return true;
+
+
+    if (tryAttachStringConcat())
+        return true;
+    if (tryAttachStringObjectConcat())
+        return true;
+
+
+    trackAttached(IRGenerator::NotAttached);
+    return false;
+}
+
+bool
+BinaryArithIRGenerator::tryAttachDoubleWithInt32()
+{
+    // ONLY bit-wise
+    if (op_ != JSOP_BITOR && op_ != JSOP_BITXOR && op_ != JSOP_BITAND)
+        return false;
+
+    // Check guard conditions
+    if ((!(lhs_.isInt32()  && rhs_.isDouble()) &&
+         !(lhs_.isDouble() && rhs_.isInt32())))
+        return false;
+
+    // output always int
+    MOZ_ASSERT(res_.isInt32());
+
+    ValOperandId lhsId(writer.setInputOperandId(0));
+    ValOperandId rhsId(writer.setInputOperandId(1));
+
+
+    // Operations below commute, so we don't care about ordering.
+    Int32OperandId IntId = writer.guardIsInt32(lhs_.isInt32() ? lhsId : rhsId);
+    writer.guardType(lhs_.isDouble() ? lhsId : rhsId, JSVAL_TYPE_DOUBLE);
+    Int32OperandId truncatedId = writer.truncateDoubleToUInt32(lhs_.isDouble() ? lhsId : rhsId);
+    switch (op_) {
+      case JSOP_BITOR:
+        writer.int32BitOrResult(IntId, truncatedId);
+        trackAttached("BinaryArith.Int32Double.BitOr");
+        break;
+      case JSOP_BITXOR:
+        writer.int32BitXOrResult(IntId, truncatedId);
+        trackAttached("BinaryArith.Int32Double.BitXOr");
+        break;
+      case JSOP_BITAND:
+        writer.int32BitAndResult(IntId, truncatedId);
+        trackAttached("BinaryArith.Int32Double.BitAnd");
+        break;
+      default:
+        MOZ_CRASH("Unhandled op in tryAttachDoubleWithInt32");
+    }
+
+    writer.returnFromIC();
+    return true;
+}
+
+bool
+BinaryArithIRGenerator::tryAttachDouble()
+{
+    // Check valid opcodes
+    if (op_ != JSOP_ADD && op_ != JSOP_SUB &&
+        op_ != JSOP_MUL && op_ != JSOP_DIV &&
+        op_ != JSOP_MOD)
+        return false;
+
+    // Check guard conditions
+    if (!lhs_.isNumber() || !rhs_.isNumber())
+        return false;
+
+    if (!cx_->runtime()->jitSupportsFloatingPoint)
+        return false;
+
+    ValOperandId lhsId(writer.setInputOperandId(0));
+    ValOperandId rhsId(writer.setInputOperandId(1));
+
+    writer.guardIsNumber(lhsId);
+    writer.guardIsNumber(rhsId);
+
+    switch (op_) {
+       case JSOP_ADD:
+        writer.doubleAddResult(lhsId, rhsId);
+        trackAttached("BinaryArith.Double.Add");
+        break;
+      case JSOP_SUB:
+        writer.doubleSubResult(lhsId, rhsId);
+        trackAttached("BinaryArith.Double.Sub");
+        break;
+      case JSOP_MUL:
+        writer.doubleMulResult(lhsId, rhsId);
+        trackAttached("BinaryArith.Double.Mul");
+        break;
+      case JSOP_DIV:
+        writer.doubleDivResult(lhsId, rhsId);
+        trackAttached("BinaryArith.Double.Div");
+        break;
+      case JSOP_MOD:
+        writer.doubleModResult(lhsId, rhsId);
+        trackAttached("BinaryArith.Double.Mod");
+        break;
+      default:
+        MOZ_CRASH("Unhandled Op");
+    }
+    writer.returnFromIC();
+    return true;
+}
+
+bool
+BinaryArithIRGenerator::tryAttachInt32()
+{
+    // Check guard conditions
+    if (!lhs_.isInt32() || !rhs_.isInt32())
+        return false;
+
+    // These ICs will failure() if result can't be encoded in an Int32:
+    // If sample result is not Int32, we should avoid IC.
+    if (!res_.isInt32())
+        return false;
+
+    // Unsupported OP
+    if (op_ == JSOP_POW)
+        return false;
+
+    ValOperandId lhsId(writer.setInputOperandId(0));
+    ValOperandId rhsId(writer.setInputOperandId(1));
+
+    Int32OperandId lhsIntId = writer.guardIsInt32(lhsId);
+    Int32OperandId rhsIntId = writer.guardIsInt32(rhsId);
+
+    switch (op_) {
+      case JSOP_ADD:
+        writer.int32AddResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.Int32.Add");
+        break;
+      case JSOP_SUB:
+        writer.int32SubResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.Int32.Sub");
+        break;
+      case JSOP_MUL:
+        writer.int32MulResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.Int32.Mul");
+        break;
+      case JSOP_DIV:
+        writer.int32DivResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.Int32.Div");
+        break;
+      case JSOP_MOD:
+        writer.int32ModResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.Int32.Mod");
+        break;
+      case JSOP_BITOR:
+        writer.int32BitOrResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.Int32.BitOr");
+        break;
+      case JSOP_BITXOR:
+        writer.int32BitXOrResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.Int32.BitXOr");
+        break;
+      case JSOP_BITAND:
+        writer.int32BitAndResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.Int32.BitAnd");
+        break;
+      case JSOP_LSH:
+        writer.int32LeftShiftResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.Int32.LeftShift");
+        break;
+      case JSOP_RSH:
+        writer.int32RightShiftResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.Int32.RightShift");
+        break;
+      case JSOP_URSH:
+        writer.int32URightShiftResult(lhsIntId, rhsIntId, res_.isDouble());
+        trackAttached("BinaryArith.Int32.UnsignedRightShift");
+        break;
+      default:
+        MOZ_CRASH("Unhandled op in tryAttachInt32");
+    }
+
+    writer.returnFromIC();
+    return true;
+}
+
+bool
+BinaryArithIRGenerator::tryAttachStringConcat()
+{
+    // Only Addition
+    if (op_ != JSOP_ADD)
+        return false;
+
+    // Check guards
+    if (!lhs_.isString() || !rhs_.isString())
+        return false;
+
+    ValOperandId lhsId(writer.setInputOperandId(0));
+    ValOperandId rhsId(writer.setInputOperandId(1));
+
+    StringOperandId lhsStrId = writer.guardIsString(lhsId);
+    StringOperandId rhsStrId = writer.guardIsString(rhsId);
+
+    writer.callStringConcatResult(lhsStrId, rhsStrId);
+
+    writer.returnFromIC();
+    trackAttached("BinaryArith.StringConcat");
+    return true;
+}
+
+bool
+BinaryArithIRGenerator::tryAttachStringObjectConcat()
+{
+    // Only Addition
+    if (op_ != JSOP_ADD)
+        return false;
+
+    // Check Guards
+    if (!(lhs_.isObject() && rhs_.isString()) &&
+        !(lhs_.isString() && rhs_.isObject()))
+        return false;
+
+    ValOperandId lhsId(writer.setInputOperandId(0));
+    ValOperandId rhsId(writer.setInputOperandId(1));
+
+    // This guard is actually overly tight, as the runtime
+    // helper can handle lhs or rhs being a string, so long
+    // as the other is an object.
+    if (lhs_.isString()) {
+        writer.guardIsString(lhsId);
+        writer.guardIsObject(rhsId);
+    } else {
+        writer.guardIsObject(lhsId);
+        writer.guardIsString(rhsId);
+    }
+
+    writer.callStringObjectConcatResult(lhsId, rhsId);
+
+    writer.returnFromIC();
+    trackAttached("BinaryArith.StringObjectConcat");
+    return true;
+}
+
+bool
+BinaryArithIRGenerator::tryAttachBooleanWithInt32()
+{
+    // Check operation
+    if (op_ != JSOP_ADD && op_ != JSOP_SUB &&
+        op_ != JSOP_BITOR && op_ != JSOP_BITAND &&
+        op_ != JSOP_BITXOR && op_ != JSOP_MUL && op_ != JSOP_DIV)
+        return false;
+
+    // Check guards
+    if (!(lhs_.isBoolean() && (rhs_.isBoolean() || rhs_.isInt32())) &&
+        !(rhs_.isBoolean() && (lhs_.isBoolean() || lhs_.isInt32())))
+        return false;
+
+
+    ValOperandId lhsId(writer.setInputOperandId(0));
+    ValOperandId rhsId(writer.setInputOperandId(1));
+
+    Int32OperandId lhsIntId = (lhs_.isBoolean() ? writer.guardIsBoolean(lhsId)
+                                                : writer.guardIsInt32(lhsId));
+    Int32OperandId rhsIntId = (rhs_.isBoolean() ? writer.guardIsBoolean(rhsId)
+                                                : writer.guardIsInt32(rhsId));
+
+    switch (op_) {
+      case JSOP_ADD:
+        writer.int32AddResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.BooleanInt32.Add");
+        break;
+      case JSOP_SUB:
+        writer.int32SubResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.BooleanInt32.Sub");
+        break;
+      case JSOP_MUL:
+        writer.int32MulResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.BooleanInt32.Mul");
+        break;
+      case JSOP_DIV:
+        writer.int32DivResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.BooleanInt32.Div");
+        break;
+      case JSOP_BITOR:
+        writer.int32BitOrResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.BooleanInt32.BitOr");
+        break;
+      case JSOP_BITXOR:
+        writer.int32BitXOrResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.BooleanInt32.BitXOr");
+        break;
+      case JSOP_BITAND:
+        writer.int32BitAndResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.BooleanInt32.BitAnd");
+        break;
+      case JSOP_LSH:
+        writer.int32LeftShiftResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.BooleanInt32.LeftShift");
+        break;
+      case JSOP_RSH:
+        writer.int32RightShiftResult(lhsIntId, rhsIntId);
+        trackAttached("BinaryArith.BooleanInt32.RightShift");
+        break;
+      case JSOP_URSH:
+        writer.int32URightShiftResult(lhsIntId, rhsIntId, res_.isDouble());
+        trackAttached("BinaryArith.BooleanInt32.UnsignedRightShift");
+        break;
+      default:
+        MOZ_CRASH("Unhandled op in tryAttachInt32");
     }
 
     writer.returnFromIC();

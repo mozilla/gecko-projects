@@ -9,6 +9,7 @@ import android.annotation.TargetApi;
 import android.app.ActivityManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Build;
@@ -115,6 +116,11 @@ public class WebAppActivity extends AppCompatActivity
             }
 
             @Override
+            public void onProgressChange(GeckoSession session, int progress) {
+
+            }
+
+            @Override
             public void onSecurityChange(GeckoSession session, SecurityInformation security) {
                 // We want to ignore the extraneous first about:blank load
                 if (mIsFirstLoad && security.origin.startsWith("moz-nullprincipal:")) {
@@ -170,6 +176,15 @@ public class WebAppActivity extends AppCompatActivity
         updateFromManifest();
 
         mGeckoSession.loadUri(mManifest.getStartUri().toString());
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+
+        if (mPromptService != null) {
+            mPromptService.changePromptOrientation(newConfig.orientation);
+        }
     }
 
     private void fallbackToFennec(String message) {
@@ -438,6 +453,10 @@ public class WebAppActivity extends AppCompatActivity
     public GeckoResult<GeckoSession> onNewSession(final GeckoSession session, final String uri) {
         // We should never get here because we abort loads that need a new session in onLoadRequest()
         throw new IllegalStateException("Unexpected new session");
+    }
+
+    public void onLoadError(final GeckoSession session, final String urlStr,
+                            final int category, final int error) {
     }
 
     private void updateFullScreen() {

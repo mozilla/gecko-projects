@@ -115,11 +115,16 @@ Accessible::Accessible(nsIContent* aContent, DocAccessible* aDoc) :
 {
   mBits.groupInfo = nullptr;
   mInt.mIndexOfEmbeddedChild = -1;
+
+  // Assign an ID to this Accessible for use in UniqueID().
+  recordreplay::RegisterThing(this);
 }
 
 Accessible::~Accessible()
 {
   NS_ASSERTION(!mDoc, "LastRelease was never called!?!");
+
+  recordreplay::UnregisterThing(this);
 }
 
 ENameValueFlag
@@ -937,7 +942,8 @@ Accessible::HandleAccEvent(AccEvent* aEvent)
             vcEvent->OldStartOffset(), vcEvent->OldEndOffset(),
             position ? reinterpret_cast<uintptr_t>(position->UniqueID()) : 0,
             vcEvent->NewStartOffset(), vcEvent->NewEndOffset(),
-            vcEvent->Reason(), vcEvent->IsFromUserInput());
+            vcEvent->Reason(), vcEvent->BoundaryType(),
+            vcEvent->IsFromUserInput());
           break;
         }
 #if defined(XP_WIN)
@@ -1787,7 +1793,7 @@ Accessible::RelationByType(RelationType aType) const
         nsCOMPtr<nsIDOMXULButtonElement> buttonEl;
         if (doc->IsXULDocument()) {
           dom::XULDocument* xulDoc = doc->AsXULDocument();
-          nsCOMPtr<nsINodeList> possibleDefaultButtons =
+          nsCOMPtr<nsIHTMLCollection> possibleDefaultButtons =
             xulDoc->GetElementsByAttribute(NS_LITERAL_STRING("default"),
                                            NS_LITERAL_STRING("true"));
           if (possibleDefaultButtons) {

@@ -280,20 +280,128 @@
          data-l10n-id="addressbar-suggestions-settings"/>
 </groupbox>
 
-<!-- Tracking -->
+<!-- Tracking / Content Blocking -->
 <groupbox id="trackingGroup" data-category="panePrivacy" hidden="true">
-  <caption><label data-l10n-id="tracking-header"/></caption>
+  <caption>
+    <label id="trackingProtectionHeader" hidden="true" data-l10n-id="tracking-header"/>
+    <label id="contentBlockingHeader" data-l10n-id="content-blocking-header"/>
+  </caption>
   <vbox data-subcategory="trackingprotection">
     <hbox align="start">
       <vbox flex="1">
-        <description data-l10n-id="tracking-desc">
+        <description id="trackingProtectionDescription" class="description-with-side-element" hidden="true" data-l10n-id="tracking-desc">
           <html:a id="trackingProtectionLearnMore" data-l10n-name="learn-more" target="_blank" class="learnMore text-link"/>
         </description>
+        <description id="contentBlockingDescription" class="description-with-side-element" data-l10n-id="content-blocking-desc"></description>
+        <label id="contentBlockingLearnMore" data-l10n-id="content-blocking-learn-more" class="learnMore text-link"/>
       </vbox>
-      <spacer flex="1"/>
+      <vbox>
+        <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
+        <hbox>
+          <button id="contentBlockingRestoreDefaults"
+                  class="accessory-button"
+                  flex="1"
+                  data-l10n-id="content-blocking-restore-defaults"/>
+        </hbox>
+        <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
+        <hbox>
+          <button id="trackingProtectionExceptions"
+                  class="accessory-button"
+                  flex="1"
+                  data-l10n-id="tracking-exceptions"
+                  preference="pref.privacy.disable_button.tracking_protection_exceptions"
+                  search-l10n-ids="
+                    permissions-remove.label,
+                    permissions-remove-all.label,
+                    permissions-button-cancel.label,
+                    permissions-button-ok.label,
+                    permissions-exceptions-tracking-protection-window.title,
+                    permissions-exceptions-tracking-protection-desc,
+                  "/>
+        </hbox>
+      </vbox>
     </hbox>
-    <hbox>
-      <vbox id="trackingProtectionBox" flex="1" hidden="true">
+    <hbox id="contentBlockingCheckboxContainer">
+      <checkbox id="contentBlockingCheckbox"
+                onsyncfrompreference="return gPrivacyPane.updateContentBlockingToggle()"
+                preference="browser.contentblocking.enabled"/>
+      <button id="contentBlockingToggle"
+              data-l10n-id="content-blocking-toggle-on"/>
+      <label id="contentBlockingToggleLabel"
+             data-l10n-id="content-blocking-toggle-label-on"
+             control="contentBlockingToggle"/>
+    </hbox>
+    <vbox id="contentBlockingCategories">
+      <label id="content-blocking-categories-label" data-l10n-id="content-blocking-category-label"/>
+      <hbox class="content-blocking-category">
+        <vbox class="content-blocking-category-icon">
+          <image class="fastblock-icon content-blocking-icon"/>
+        </vbox>
+        <vbox class="content-blocking-category-labels" flex="1">
+          <label data-l10n-id="content-blocking-fastblock-label"
+                 class="content-blocking-category-name"
+                 control="fastBlockMenu"/>
+          <description data-l10n-id="content-blocking-fastblock-description" class="content-blocking-category-description"/>
+        </vbox>
+        <vbox>
+          <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
+          <hbox>
+            <menulist class="content-blocking-category-menu" id="fastBlockMenu" preference="browser.fastblock.enabled">
+              <menupopup>
+                <menuitem data-l10n-id="content-blocking-fastblock-option-enabled"
+                          value="true"
+                          search-l10n-ids=""/>
+                <menuitem data-l10n-id="content-blocking-fastblock-option-disabled"
+                          value="false"
+                          search-l10n-ids=""/>
+              </menupopup>
+            </menulist>
+          </hbox>
+        </vbox>
+      </hbox>
+      <vbox>
+        <hbox id="contentBlockingTrackingProtectionExtensionContentLabel" align="center" hidden="true">
+          <description control="contentBlockingDisableTrackingProtectionExtension" flex="1"/>
+        </hbox>
+        <hbox id="contentBlockingTrackingProtectionExtensionContentButton" hidden="true">
+          <button id="contentBlockingDisableTrackingProtectionExtension"
+                  class="extension-controlled-button accessory-button"
+                  data-l10n-id="disable-extension"/>
+        </hbox>
+        <hbox class="content-blocking-category">
+          <vbox class="content-blocking-category-icon">
+            <image class="tracking-protection-icon content-blocking-icon" />
+          </vbox>
+          <vbox class="content-blocking-category-labels" flex="1">
+            <label data-l10n-id="content-blocking-tracking-protection-label"
+                   class="content-blocking-category-name"
+                   control="trackingProtectionMenu"/>
+            <description data-l10n-id="content-blocking-tracking-protection-description" class="content-blocking-category-description"/>
+            <label id="changeBlockListLink" data-l10n-id="content-blocking-tracking-protection-change-blocklist" class="text-link"/>
+          </vbox>
+          <vbox>
+            <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
+            <hbox>
+              <menulist class="content-blocking-category-menu" id="trackingProtectionMenu">
+                <menupopup>
+                  <menuitem data-l10n-id="content-blocking-tracking-protection-option-enabled"
+                            value="always"
+                            search-l10n-ids=""/>
+                  <menuitem data-l10n-id="content-blocking-tracking-protection-option-pbm"
+                            value="private"
+                            search-l10n-ids=""/>
+                  <menuitem data-l10n-id="content-blocking-tracking-protection-option-disabled"
+                            value="never"
+                            search-l10n-ids=""/>
+                </menupopup>
+              </menulist>
+            </hbox>
+          </vbox>
+        </hbox>
+      </vbox>
+    </vbox>
+    <hbox id="trackingProtectionBox" hidden="true">
+      <vbox flex="1">
         <vbox>
           <hbox id="trackingProtectionExtensionContentLabel" align="center" hidden="true">
             <description control="disableTrackingProtectionExtension" flex="1"/>
@@ -314,42 +422,12 @@
           </vbox>
         </vbox>
       </vbox>
-      <vbox id="trackingProtectionPBMBox" flex="1">
-        <hbox id="trackingProtectionPBMExtensionContentLabel" align="center" hidden="true">
-          <description control="disableTrackingProtectionExtension" flex="1"/>
-        </hbox>
-        <hbox align="start">
-          <checkbox id="trackingProtectionPBM"
-                    preference="privacy.trackingprotection.pbmode.enabled"/>
-          <label id="trackingProtectionPBMLabel"
-                 flex="1"
-                 control="trackingProtectionPBM"
-                 data-l10n-id="tracking-pbm-label"/>
-        </hbox>
-      </vbox>
       <vbox id="trackingProtectionAdvancedSettings">
         <hbox id="trackingProtectionExtensionContentButton" hidden="true">
           <button id="disableTrackingProtectionExtension"
                   class="extension-controlled-button accessory-button"
                   flex="1"
                   data-l10n-id="disable-extension"/>
-        </hbox>
-        <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
-        <hbox>
-          <button id="trackingProtectionExceptions"
-                  class="accessory-button"
-                  flex="1"
-                  hidden="true"
-                  data-l10n-id="tracking-exceptions"
-                  preference="pref.privacy.disable_button.tracking_protection_exceptions"
-                  search-l10n-ids="
-                    permissions-remove.label,
-                    permissions-remove-all.label,
-                    permissions-button-cancel.label,
-                    permissions-button-ok.label,
-                    permissions-exceptions-tracking-protection-window.title,
-                    permissions-exceptions-tracking-protection-desc,
-                  "/>
         </hbox>
         <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
         <hbox>
@@ -367,8 +445,8 @@
       class="learnMore text-link" href="https://www.mozilla.org/dnt"
       data-l10n-id="do-not-track-learn-more"></label></label>
       <radiogroup id="doNotTrackRadioGroup" aria-labelledby="doNotTrackDesc" preference="privacy.donottrackheader.enabled">
-        <radio value="false" data-l10n-id="do-not-track-option-default"/>
         <radio value="true" data-l10n-id="do-not-track-option-always"/>
+        <radio value="false" data-l10n-id="do-not-track-option-default"/>
       </radiogroup>
     </vbox>
   </vbox>
@@ -496,8 +574,8 @@
 
   <separator flex="1"/>
 
-  <hbox align="start" id="autoplayMediaBox" hidden="true">
-    <checkbox id="autoplayMediaPolicy"
+  <hbox align="start" id="autoplayMediaCheckboxWrapper" hidden="true">
+    <checkbox id="autoplayMediaCheckbox"
               data-l10n-id="permissions-block-autoplay-media"
               flex="1" />
     <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
@@ -509,7 +587,7 @@
                                permissions-button-cancel.label,
                                permissions-button-ok.label,
                                permissions-exceptions-autoplay-media-window.title,
-                               permissions-exceptions-autoplay-media-desc
+                               permissions-exceptions-autoplay-media-desc2
                                " />
     </hbox>
   </hbox>
@@ -568,6 +646,37 @@
              data-l10n-id="permissions-a11y-privacy-link"/>
     </hbox>
   </vbox>
+
+  <hbox align="center" id="autoplayMediaComboboxWrapper" hidden="true">
+    <hbox align="center" flex="1">
+      <label id="autoplayMediaPolicy"
+             control="autoplayMediaPolicyMenu"
+             data-l10n-id="permissions-block-autoplay-media-menu"/>
+      <menulist id="autoplayMediaPolicyMenu"
+                sizetopopup="always"
+                preference="media.autoplay.default">
+        <menupopup>
+          <!-- Defined in dom/media/nsIAutoplay.idl -->
+          <menuitem data-l10n-id="autoplay-option-allow" value="0"/>
+          <menuitem data-l10n-id="autoplay-option-ask" value="2"/>
+          <menuitem data-l10n-id="autoplay-option-dont" value="1"/>
+        </menupopup>
+      </menulist>
+    </hbox>
+
+    <hbox pack="end">
+      <button id="autoplayMediaPolicyComboboxButton"
+              class="accessory-button"
+              data-l10n-id="permissions-block-autoplay-media-exceptions"
+              search-l10n-ids="permissions-address,
+                               permissions-button-cancel.label,
+                               permissions-button-ok.label,
+                               permissions-exceptions-autoplay-media-window.title,
+                               permissions-exceptions-autoplay-media-desc2
+                               " />
+    </hbox>
+  </hbox>
+
 </groupbox>
 
 <!-- Firefox Data Collection and Use -->

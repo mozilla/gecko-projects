@@ -4,7 +4,10 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <stdio.h>
-#ifndef XP_WIN
+#ifdef XP_WIN
+#include <process.h>
+#define getpid _getpid
+#else
 #include <signal.h>
 #include <unistd.h>
 #endif
@@ -46,9 +49,10 @@ StaticAutoPtr<CodeCoverageHandler> CodeCoverageHandler::instance;
 
 void CodeCoverageHandler::DumpCounters()
 {
+  printf_stderr("[CodeCoverage] Requested dump for %d.\n", getpid());
+
   CrossProcessMutexAutoLock lock(*CodeCoverageHandler::Get()->GetMutex());
 
-  printf_stderr("[CodeCoverage] Requested dump.\n");
   counters_dump();
   printf_stderr("[CodeCoverage] Dump completed.\n");
 }
@@ -60,9 +64,10 @@ void CodeCoverageHandler::DumpCountersSignalHandler(int)
 
 void CodeCoverageHandler::ResetCounters()
 {
+  printf_stderr("[CodeCoverage] Requested reset for %d.\n", getpid());
+
   CrossProcessMutexAutoLock lock(*CodeCoverageHandler::Get()->GetMutex());
 
-  printf_stderr("[CodeCoverage] Requested reset.\n");
   counters_reset();
   printf_stderr("[CodeCoverage] Reset completed.\n");
 }

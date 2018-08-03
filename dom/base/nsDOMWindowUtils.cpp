@@ -2707,10 +2707,8 @@ nsDOMWindowUtils::ComputeAnimationDistance(Element* aElement,
 {
   NS_ENSURE_ARG_POINTER(aElement);
 
-  nsCSSPropertyID property =
-    nsCSSProps::LookupProperty(aProperty, CSSEnabledState::eIgnoreEnabledState);
-  if (property == eCSSProperty_UNKNOWN ||
-      nsCSSProps::IsShorthand(property)) {
+  nsCSSPropertyID property = nsCSSProps::LookupProperty(aProperty);
+  if (property == eCSSProperty_UNKNOWN || nsCSSProps::IsShorthand(property)) {
     return NS_ERROR_ILLEGAL_VALUE;
   }
 
@@ -2737,8 +2735,7 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(Element* aElement,
     return NS_ERROR_INVALID_ARG;
   }
 
-  nsCSSPropertyID propertyID =
-    nsCSSProps::LookupProperty(aProperty, CSSEnabledState::eForAllContent);
+  nsCSSPropertyID propertyID = nsCSSProps::LookupProperty(aProperty);
   if (propertyID == eCSSProperty_UNKNOWN ||
       nsCSSProps::IsShorthand(propertyID)) {
     return NS_ERROR_INVALID_ARG;
@@ -3551,6 +3548,10 @@ nsDOMWindowUtils::AllowScriptsToClose()
 NS_IMETHODIMP
 nsDOMWindowUtils::GetIsParentWindowMainWidgetVisible(bool* aIsVisible)
 {
+  if (!XRE_IsParentProcess()) {
+    MOZ_CRASH("IsParentWindowMainWidgetVisible is only available in the parent process");
+  }
+
   // this should reflect the "is parent window visible" logic in
   // nsWindowWatcher::OpenWindowInternal()
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
@@ -3559,12 +3560,6 @@ nsDOMWindowUtils::GetIsParentWindowMainWidgetVisible(bool* aIsVisible)
   nsCOMPtr<nsIWidget> parentWidget;
   nsIDocShell *docShell = window->GetDocShell();
   if (docShell) {
-    if (TabChild *tabChild = TabChild::GetFrom(docShell)) {
-      if (!tabChild->SendIsParentWindowMainWidgetVisible(aIsVisible))
-        return NS_ERROR_FAILURE;
-      return NS_OK;
-    }
-
     nsCOMPtr<nsIDocShellTreeOwner> parentTreeOwner;
     docShell->GetTreeOwner(getter_AddRefs(parentTreeOwner));
     nsCOMPtr<nsIBaseWindow> parentWindow(do_GetInterface(parentTreeOwner));
@@ -3657,6 +3652,34 @@ GetTargetFrame(const Element* aElement, const nsAString& aPseudoElement)
   return frame;
 }
 
+static OMTAValue
+GetOMTAValue(nsIFrame* aFrame,
+             DisplayItemType aDisplayItemKey,
+             WebRenderBridgeChild* aWebRenderBridgeChild)
+{
+  OMTAValue value = mozilla::null_t();
+
+  Layer* layer =
+    FrameLayerBuilder::GetDedicatedLayer(aFrame, aDisplayItemKey);
+  if (layer) {
+    ShadowLayerForwarder* forwarder = layer->Manager()->AsShadowForwarder();
+    if (forwarder && forwarder->HasShadowManager()) {
+      forwarder->GetShadowManager()->
+        SendGetAnimationValue(layer->GetCompositorAnimationsId(), &value);
+    }
+  } else if (aWebRenderBridgeChild) {
+    RefPtr<WebRenderAnimationData> animationData =
+      GetWebRenderUserData<WebRenderAnimationData>(aFrame,
+                                                   (uint32_t)aDisplayItemKey);
+    if (animationData) {
+      aWebRenderBridgeChild->SendGetAnimationValue(
+        animationData->GetAnimationInfo().GetCompositorAnimationsId(),
+        &value);
+    }
+  }
+  return value;
+}
+
 NS_IMETHODIMP
 nsDOMWindowUtils::GetOMTAStyle(Element* aElement,
                                const nsAString& aProperty,
@@ -3681,56 +3704,19 @@ nsDOMWindowUtils::GetOMTAStyle(Element* aElement,
     }
 
     if (aProperty.EqualsLiteral("opacity")) {
-      float value = 0;
-      bool hadAnimatedOpacity = false;
-
-      Layer* layer =
-        FrameLayerBuilder::GetDedicatedLayer(frame, DisplayItemType::TYPE_OPACITY);
-      if (layer) {
-        ShadowLayerForwarder* forwarder = layer->Manager()->AsShadowForwarder();
-        if (forwarder && forwarder->HasShadowManager()) {
-          forwarder->GetShadowManager()->
-            SendGetAnimationOpacity(layer->GetCompositorAnimationsId(),
-                                    &value,
-                                    &hadAnimatedOpacity);
-        }
-      } else if (WebRenderBridgeChild* wrbc = GetWebRenderBridge()) {
-        RefPtr<WebRenderAnimationData> animationData =
-            GetWebRenderUserData<WebRenderAnimationData>(frame, (uint32_t)DisplayItemType::TYPE_OPACITY);
-        if (animationData) {
-          wrbc->SendGetAnimationOpacity(
-              animationData->GetAnimationInfo().GetCompositorAnimationsId(),
-              &value,
-              &hadAnimatedOpacity);
-        }
-      }
-      if (hadAnimatedOpacity) {
+      OMTAValue value = GetOMTAValue(frame,
+                                     DisplayItemType::TYPE_OPACITY,
+                                     GetWebRenderBridge());
+      if (value.type() == OMTAValue::Tfloat) {
         cssValue = new nsROCSSPrimitiveValue;
-        cssValue->SetNumber(value);
+        cssValue->SetNumber(value.get_float());
       }
     } else if (aProperty.EqualsLiteral("transform")) {
-      MaybeTransform transform;
-
-      Layer* layer =
-        FrameLayerBuilder::GetDedicatedLayer(frame, DisplayItemType::TYPE_TRANSFORM);
-      if (layer) {
-        ShadowLayerForwarder* forwarder = layer->Manager()->AsShadowForwarder();
-        if (forwarder && forwarder->HasShadowManager()) {
-          forwarder->GetShadowManager()->
-            SendGetAnimationTransform(layer->GetCompositorAnimationsId(), &transform);
-        }
-      } else if (WebRenderBridgeChild* wrbc = GetWebRenderBridge()) {
-        RefPtr<WebRenderAnimationData> animationData =
-            GetWebRenderUserData<WebRenderAnimationData>(frame, (uint32_t)DisplayItemType::TYPE_TRANSFORM);
-        if (animationData) {
-          wrbc->SendGetAnimationTransform(
-              animationData->GetAnimationInfo().GetCompositorAnimationsId(),
-              &transform);
-        }
-      }
-      if (transform.type() == MaybeTransform::TMatrix4x4) {
-        Matrix4x4 matrix = transform.get_Matrix4x4();
-        cssValue = nsComputedDOMStyle::MatrixToCSSValue(matrix);
+      OMTAValue value = GetOMTAValue(frame,
+                                     DisplayItemType::TYPE_TRANSFORM,
+                                     GetWebRenderBridge());
+      if (value.type() == OMTAValue::TMatrix4x4) {
+        cssValue = nsComputedDOMStyle::MatrixToCSSValue(value.get_Matrix4x4());
       }
     }
   }

@@ -22,6 +22,7 @@ const { assert } = require("devtools/shared/DevToolsUtils");
 const { TabSources } = require("devtools/server/actors/utils/TabSources");
 
 loader.lazyRequireGetter(this, "WorkerTargetActorList", "devtools/server/actors/worker/worker-list", true);
+loader.lazyRequireGetter(this, "MemoryActor", "devtools/server/actors/memory", true);
 
 function ContentProcessTargetActor(connection) {
   this.conn = connection;
@@ -41,8 +42,7 @@ function ContentProcessTargetActor(connection) {
       const windowEnumerator = Services.ww.getWindowEnumerator();
       while (windowEnumerator.hasMoreElements()) {
         const window = windowEnumerator.getNext().QueryInterface(Ci.nsIDOMWindow);
-        const tabChildGlobal = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                                     .getInterface(Ci.nsIDocShell)
+        const tabChildGlobal = window.docShell
                                      .sameTypeRootTreeItem
                                      .QueryInterface(Ci.nsIInterfaceRequestor)
                                      .getInterface(Ci.nsIContentFrameMessageManager);
@@ -104,13 +104,17 @@ ContentProcessTargetActor.prototype = {
       this.threadActor = new ChromeDebuggerActor(this.conn, this);
       this._contextPool.addActor(this.threadActor);
     }
-
+    if (!this.memoryActor) {
+      this.memoryActor = new MemoryActor(this.conn, this);
+      this._contextPool.addActor(this.memoryActor);
+    }
     return {
       actor: this.actorID,
       name: "Content process",
 
       consoleActor: this._consoleActor.actorID,
       chromeDebugger: this.threadActor.actorID,
+      memoryActor: this.memoryActor.actorID,
 
       traits: {
         highlightable: false,

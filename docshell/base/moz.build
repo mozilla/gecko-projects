@@ -44,7 +44,6 @@ XPIDL_SOURCES += [
     'nsIDocShellTreeItem.idl',
     'nsIDocShellTreeOwner.idl',
     'nsIDocumentLoaderFactory.idl',
-    'nsIDownloadHistory.idl',
     'nsILoadContext.idl',
     'nsIPrivacyTransitionObserver.idl',
     'nsIReflowObserver.idl',
@@ -77,7 +76,12 @@ EXPORTS.mozilla += [
     'LoadContext.h',
 ]
 
+EXPORTS.mozilla.dom += [
+    'BrowsingContext.h',
+]
+
 UNIFIED_SOURCES += [
+    'BrowsingContext.cpp',
     'LoadContext.cpp',
     'nsAboutRedirector.cpp',
     'nsDefaultURIFixup.cpp',

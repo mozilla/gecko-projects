@@ -138,9 +138,9 @@
 #include "mozilla/widget/nsAutoRollup.h"
 #include "mozilla/widget/WinNativeEventData.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
-#include "nsThemeConstants.h"
+#include "nsStyleConsts.h"
 #include "nsBidiKeyboard.h"
-#include "nsThemeConstants.h"
+#include "nsStyleConsts.h"
 #include "gfxConfig.h"
 #include "InProcessWinCompositorWidget.h"
 #include "ScreenHelperWin.h"
@@ -4093,7 +4093,7 @@ nsWindow::AddWindowOverlayWebRenderCommands(layers::WebRenderBridgeChild* aWrBri
     wr::LayoutRect rect = wr::ToLayoutRect(*mWindowButtonsRect);
     nsTArray<wr::ComplexClipRegion> roundedClip;
     roundedClip.AppendElement(wr::ToComplexClipRegion(
-      RoundedRect(ThebesRect(mWindowButtonsRect->ToUnknownRect()),
+      RoundedRect(IntRectToRect(mWindowButtonsRect->ToUnknownRect()),
                   RectCornerRadii(0, 0, 3, 3))));
     wr::WrClipId clipId =
       aBuilder.DefineClip(Nothing(), rect, &roundedClip);
@@ -5313,8 +5313,9 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
 
     case WM_SETTINGCHANGE:
     {
-      if (wParam == SPI_SETKEYBOARDDELAY) {
-        // CaretBlinkTime is cached in nsLookAndFeel
+      if (wParam == SPI_SETCLIENTAREAANIMATION ||
+          // CaretBlinkTime is cached in nsLookAndFeel
+          wParam == SPI_SETKEYBOARDDELAY) {
         NotifyThemeChanged();
         break;
       }

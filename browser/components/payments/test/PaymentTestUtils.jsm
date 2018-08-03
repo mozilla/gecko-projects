@@ -12,10 +12,23 @@ var PaymentTestUtils = {
      * Add a completion handler to the existing `showPromise` to call .complete().
      * @returns {Object} representing the PaymentResponse
      */
-    addCompletionHandler: async () => {
+    addCompletionHandler: async ({result, delayMs = 0}) => {
       let response = await content.showPromise;
-      response.complete();
+      let completeException;
+
+      // delay the given # milliseconds
+      await new Promise(resolve => content.setTimeout(resolve, delayMs));
+
+      try {
+        await response.complete(result);
+      } catch (ex) {
+        completeException = {
+          name: ex.name,
+          message: ex.message,
+        };
+      }
       return {
+        completeException,
         response: response.toJSON(),
         // XXX: Bug NNN: workaround for `details` not being included in `toJSON`.
         methodDetails: response.details,
@@ -73,12 +86,23 @@ var PaymentTestUtils = {
       const rq = new content.PaymentRequest(methodData, details, options);
       content.rq = rq; // assign it so we can retrieve it later
 
-      const handle = content.QueryInterface(Ci.nsIInterfaceRequestor)
-                            .getInterface(Ci.nsIDOMWindowUtils)
-                            .setHandlingUserInput(true);
+      const handle = content.windowUtils.setHandlingUserInput(true);
       content.showPromise = rq.show();
 
       handle.destruct();
+    },
+
+    /**
+     * Add a rejection handler for the `showPromise` created by createAndShowRequest
+     * and stash details of any eventual exception or response in `rqResult`
+     */
+    catchShowPromiseRejection: () => {
+      content.rqResult = {};
+      content.showPromise.then(res => content.rqResult.response = res)
+                         .catch(ex => content.rqResult.showException = {
+                           name: ex.name,
+                           message: ex.message,
+                         });
     },
   },
 
@@ -148,6 +172,21 @@ var PaymentTestUtils = {
       select.focus();
       // eslint-disable-next-line no-undef
       EventUtils.synthesizeKey(option.textContent, {}, content.window);
+    },
+
+    /**
+     * Click the primary button for the current page
+     *
+     * Don't await on this method from a ContentTask when expecting the dialog to close
+     *
+     * @returns {undefined}
+     */
+    clickPrimaryButton: () => {
+      let {requestStore} = Cu.waiveXrays(content.document.querySelector("payment-dialog"));
+      let {page} = requestStore.getState();
+      let button = content.document.querySelector(`#${page.id} button.primary`);
+      ok(!button.disabled, "Primary button should not be disabled when clicking it");
+      button.click();
     },
 
     /**

@@ -843,6 +843,13 @@ mozJSComponentLoader::ObjectForLocation(ComponentLoaderInfo& aInfo,
         // The script wasn't in the cache , so compile it now.
         LOG(("Slow loading %s\n", nativePath.get()));
 
+        // If we are debugging a replaying process and have diverged from the
+        // recording, trying to load and compile new code will cause the
+        // debugger operation to fail, so just abort now.
+        if (recordreplay::HasDivergedFromRecording()) {
+            return NS_ERROR_FAILURE;
+        }
+
         // Use lazy source if we're using the startup cache. Non-lazy source +
         // startup cache regresses installer size (due to source code stored in
         // XDR encoded modules in omni.ja). Also, XDR decoding is relatively
@@ -1011,7 +1018,7 @@ mozJSComponentLoader::ImportInto(const nsACString& registryLocation,
         FindTargetObject(cx, &targetObject);
     }
 
-    Maybe<JSAutoRealm> ar;
+    Maybe<JSAutoRealmAllowCCW> ar;
     if (targetObject) {
         ar.emplace(cx, targetObject);
     }
@@ -1298,6 +1305,8 @@ mozJSComponentLoader::Import(JSContext* aCx, const nsACString& aLocation,
         NS_ENSURE_SUCCESS(rv, rv);
     }
 
+    AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING(
+      "mozJSComponentLoader::Import", JS, aLocation);
     ComponentLoaderInfo info(aLocation);
 
     rv = info.EnsureKey();

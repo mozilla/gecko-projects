@@ -14,9 +14,9 @@
 #include "mozilla/ServoBindingTypes.h"
 #include "mozilla/ServoComputedDataInlines.h"
 #include "mozilla/ServoElementSnapshot.h"
+#include "mozilla/css/DocumentMatchingFunction.h"
 #include "mozilla/css/SheetLoadData.h"
 #include "mozilla/css/SheetParsingMode.h"
-#include "mozilla/css/URLMatchingFunction.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/ComputedTimingFunction.h"
 #include "nsChangeHint.h"
@@ -138,6 +138,10 @@ struct MediumFeaturesChangedResult {
   bool mAffectsNonDocumentRules;
   bool mUsesViewportUnits;
 };
+
+// Debugging stuff.
+void Gecko_Element_DebugListAttributes(RawGeckoElementBorrowed, nsCString*);
+void Gecko_Snapshot_DebugListAttributes(const ServoElementSnapshot*, nsCString*);
 
 bool Gecko_IsSignificantChild(RawGeckoNodeBorrowed node, bool whitespace_is_significant);
 RawGeckoNodeBorrowedOrNull Gecko_GetLastChild(RawGeckoNodeBorrowed node);
@@ -673,7 +677,7 @@ void Gecko_UnregisterProfilerThread();
 
 bool Gecko_DocumentRule_UseForPresentation(RawGeckoPresContextBorrowed,
                                            const nsACString* aPattern,
-                                           mozilla::css::URLMatchingFunction aURLMatchingFunction);
+                                           mozilla::css::DocumentMatchingFunction);
 
 // Allocator hinting.
 void Gecko_SetJemallocThreadLocalArena(bool enabled);

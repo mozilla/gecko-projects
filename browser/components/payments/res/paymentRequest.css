@@ -45,9 +45,23 @@ payment-dialog > header,
 payment-dialog > header {
   border-bottom: 1px solid rgba(0,0,0,0.1);
   display: flex;
+  /* Wrap so that the error text appears full-width above the rest of the contents */
+  flex-wrap: wrap;
   /* from visual spec: */
   padding-bottom: 19px;
   padding-top: 19px;
+}
+
+payment-dialog > header > .page-error:empty {
+  display: none;
+}
+
+payment-dialog > header > .page-error {
+  background: #D70022;
+  border-radius: 3px;
+  color: white;
+  padding: 6px;
+  width: 100%;
 }
 
 #main-container {
@@ -55,6 +69,7 @@ payment-dialog > header {
   grid-area: main;
   position: relative;
   max-height: 100%;
+  padding-top: 18px;
 }
 
 .page {
@@ -77,6 +92,10 @@ payment-dialog > header {
   display: none;
 }
 
+.page-error {
+  color: #D70022;
+}
+
 .page > footer {
   align-items: center;
   background-color: #eaeaee;
@@ -84,10 +103,6 @@ payment-dialog > header {
   /* from visual spec: */
   padding-top: 20px;
   padding-bottom: 18px;
-}
-
-#error-text {
-  text-align: center;
 }
 
 #order-details-overlay {
@@ -134,10 +149,10 @@ payment-dialog #pay::before {
   width: 16px;
 }
 
-payment-dialog[changes-prevented][completion-state="fail"] #pay,
-payment-dialog[changes-prevented][completion-state="unknown"] #pay,
-payment-dialog[changes-prevented][completion-state="processing"] #pay,
-payment-dialog[changes-prevented][completion-state="success"] #pay {
+payment-dialog[changes-prevented][complete-status="fail"] #pay,
+payment-dialog[changes-prevented][complete-status="unknown"] #pay,
+payment-dialog[changes-prevented][complete-status="processing"] #pay,
+payment-dialog[changes-prevented][complete-status="success"] #pay {
   /* Show the pay button above #disabled-overlay */
   position: relative;
   z-index: 1;
@@ -158,4 +173,17 @@ payment-dialog[changes-prevented][completion-state="success"] #pay {
   right: 0;
   bottom: 0;
   left: 0;
+}
+
+#branding {
+  background-image: url(chrome://branding/content/icon32.png);
+  background-size: 16px;
+  background-repeat: no-repeat;
+  background-position: left center;
+  padding-inline-start: 20px;
+  line-height: 20px;
+}
+
+body[dir="rtl"] #branding {
+  background-position: right center;
 }

@@ -738,7 +738,7 @@ nsJSObjWrapper::NP_HasMethod(NPObject *npobj, NPIdentifier id)
 
   nsJSObjWrapper *npjsobj = (nsJSObjWrapper *)npobj;
 
-  JSAutoRealm ar(cx, npjsobj->mJSObj);
+  JSAutoRealmAllowCCW ar(cx, npjsobj->mJSObj);
   MarkCrossZoneNPIdentifier(cx, id);
 
   AutoJSExceptionSuppressor suppressor(aes, npjsobj);
@@ -778,7 +778,7 @@ doInvoke(NPObject *npobj, NPIdentifier method, const NPVariant *args,
   nsJSObjWrapper *npjsobj = (nsJSObjWrapper *)npobj;
 
   JS::Rooted<JSObject*> jsobj(cx, npjsobj->mJSObj);
-  JSAutoRealm ar(cx, jsobj);
+  JSAutoRealmAllowCCW ar(cx, jsobj);
   MarkCrossZoneNPIdentifier(cx, method);
   JS::Rooted<JS::Value> fv(cx);
 
@@ -871,7 +871,7 @@ nsJSObjWrapper::NP_HasProperty(NPObject *npobj, NPIdentifier npid)
 
   AutoJSExceptionSuppressor suppressor(aes, npjsobj);
   JS::Rooted<JSObject*> jsobj(cx, npjsobj->mJSObj);
-  JSAutoRealm ar(cx, jsobj);
+  JSAutoRealmAllowCCW ar(cx, jsobj);
   MarkCrossZoneNPIdentifier(cx, npid);
 
   NS_ASSERTION(NPIdentifierIsInt(npid) || NPIdentifierIsString(npid),
@@ -908,7 +908,7 @@ nsJSObjWrapper::NP_GetProperty(NPObject *npobj, NPIdentifier id,
   nsJSObjWrapper *npjsobj = (nsJSObjWrapper *)npobj;
 
   AutoJSExceptionSuppressor suppressor(aes, npjsobj);
-  JSAutoRealm ar(cx, npjsobj->mJSObj);
+  JSAutoRealmAllowCCW ar(cx, npjsobj->mJSObj);
   MarkCrossZoneNPIdentifier(cx, id);
 
   JS::Rooted<JS::Value> v(cx);
@@ -945,7 +945,7 @@ nsJSObjWrapper::NP_SetProperty(NPObject *npobj, NPIdentifier npid,
 
   AutoJSExceptionSuppressor suppressor(aes, npjsobj);
   JS::Rooted<JSObject*> jsObj(cx, npjsobj->mJSObj);
-  JSAutoRealm ar(cx, jsObj);
+  JSAutoRealmAllowCCW ar(cx, jsObj);
   MarkCrossZoneNPIdentifier(cx, npid);
 
   JS::Rooted<JS::Value> v(cx, NPVariantToJSVal(npp, cx, value));
@@ -983,7 +983,7 @@ nsJSObjWrapper::NP_RemoveProperty(NPObject *npobj, NPIdentifier npid)
   AutoJSExceptionSuppressor suppressor(aes, npjsobj);
   JS::ObjectOpResult result;
   JS::Rooted<JSObject*> obj(cx, npjsobj->mJSObj);
-  JSAutoRealm ar(cx, obj);
+  JSAutoRealmAllowCCW ar(cx, obj);
   MarkCrossZoneNPIdentifier(cx, npid);
 
   NS_ASSERTION(NPIdentifierIsInt(npid) || NPIdentifierIsString(npid),
@@ -1037,7 +1037,7 @@ nsJSObjWrapper::NP_Enumerate(NPObject *npobj, NPIdentifier **idarray,
 
   AutoJSExceptionSuppressor suppressor(aes, npjsobj);
   JS::Rooted<JSObject*> jsobj(cx, npjsobj->mJSObj);
-  JSAutoRealm ar(cx, jsobj);
+  JSAutoRealmAllowCCW ar(cx, jsobj);
 
   JS::Rooted<JS::IdVector> ida(cx, JS::IdVector(cx));
   if (!JS_Enumerate(cx, jsobj, &ida)) {
@@ -1904,7 +1904,8 @@ nsNPObjWrapper::OnDestroy(NPObject *npobj)
   }
 }
 
-// Look up or create a JSObject that wraps the NPObject npobj.
+// Look up or create a JSObject that wraps the NPObject npobj. The return value
+// is always in the compartment of the passed-in JSContext (it might be a CCW).
 
 // static
 JSObject *
@@ -2020,8 +2021,8 @@ nsJSNPRuntime::OnPluginDestroy(NPP npp)
     // Prevent modification of sJSObjWrappers table if we go reentrant.
     sJSObjWrappersAccessible = false;
 
-    for (JSObjWrapperTable::Enum e(sJSObjWrappers); !e.empty(); e.popFront()) {
-      nsJSObjWrapper *npobj = e.front().value();
+    for (auto iter = sJSObjWrappers.modIter(); !iter.done(); iter.next()) {
+      nsJSObjWrapper* npobj = iter.get().value();
       MOZ_ASSERT(npobj->_class == &nsJSObjWrapper::sJSObjWrapperNPClass);
       if (npobj->mNpp == npp) {
         if (npobj->_class && npobj->_class->invalidate) {
@@ -2030,7 +2031,7 @@ nsJSNPRuntime::OnPluginDestroy(NPP npp)
 
         _releaseobject(npobj);
 
-        e.removeFront();
+        iter.remove();
       }
     }
 
@@ -2093,8 +2094,8 @@ nsJSNPRuntime::OnPluginDestroyPending(NPP npp)
   if (sJSObjWrappersAccessible) {
     // Prevent modification of sJSObjWrappers table if we go reentrant.
     sJSObjWrappersAccessible = false;
-    for (JSObjWrapperTable::Enum e(sJSObjWrappers); !e.empty(); e.popFront()) {
-      nsJSObjWrapper *npobj = e.front().value();
+    for (auto iter = sJSObjWrappers.iter(); !iter.done(); iter.next()) {
+      nsJSObjWrapper* npobj = iter.get().value();
       MOZ_ASSERT(npobj->_class == &nsJSObjWrapper::sJSObjWrapperNPClass);
       if (npobj->mNpp == npp) {
         npobj->mDestroyPending = true;

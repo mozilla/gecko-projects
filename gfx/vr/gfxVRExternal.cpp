@@ -56,7 +56,7 @@ int VRDisplayExternal::sPushIndex = 0;
 
 VRDisplayExternal::VRDisplayExternal(const VRDisplayState& aDisplayState)
   : VRDisplayHost(VRDeviceType::External)
-  , mIsPresenting(false)
+  , mBrowserState{}
   , mLastSensorState{}
 {
   MOZ_COUNT_CTOR_INHERITED(VRDisplayExternal, VRDisplayHost);
@@ -86,10 +86,14 @@ VRDisplayExternal::ZeroSensor()
 void
 VRDisplayExternal::Refresh()
 {
-  VRManager *vm = VRManager::Get();
-  VRSystemManagerExternal* manager = vm->GetExternalManager();
 
-  manager->PullState(&mDisplayInfo.mDisplayState, &mLastSensorState, mDisplayInfo.mControllerState);
+  if (!mVRNavigationTransitionEnd.IsNull() &&
+      TimeStamp::Now() > mVRNavigationTransitionEnd) {
+    mBrowserState.navigationTransitionActive = false;
+  }
+
+  PullState();
+  PushState();
 }
 
 VRHMDSensorState
@@ -101,42 +105,70 @@ VRDisplayExternal::GetSensorState()
 void
 VRDisplayExternal::StartPresentation()
 {
-  if (mIsPresenting) {
+  if (mBrowserState.presentationActive) {
     return;
   }
   sPushIndex = 0;
-  mIsPresenting = true;
   mTelemetry.Clear();
   mTelemetry.mPresentationStart = TimeStamp::Now();
 
   // Indicate that we are ready to start immersive mode
-  VRBrowserState state;
-  memset(&state, 0, sizeof(VRBrowserState));
-  state.layerState[0].type = VRLayerType::LayerType_Stereo_Immersive;
-  VRManager *vm = VRManager::Get();
-  VRSystemManagerExternal* manager = vm->GetExternalManager();
-  manager->PushState(&state);
+  mBrowserState.presentationActive = true;
+  mBrowserState.layerState[0].type = VRLayerType::LayerType_Stereo_Immersive;
+  PushState();
 
+#if defined(MOZ_WIDGET_ANDROID)
+  /**
+   * Android compositor is paused when presentation starts. That causes VRManager::NotifyVsync() not to be called.
+   * We post a VRTask to call VRManager::NotifyVsync() while the compositor is paused on Android.
+   * VRManager::NotifyVsync() should be called constinuosly while the compositor is paused because Gecko WebVR Architecture
+   * relies on that to act as a "watchdog" in order to avoid render loop stalls and recover from SubmitFrame call timeouts.
+   */
+  PostVRTask();
+#endif
   // TODO - Implement telemetry:
 
   // mTelemetry.mLastDroppedFrameCount = stats.m_nNumReprojectedFrames;
 }
 
+#if defined(MOZ_WIDGET_ANDROID)
+void
+VRDisplayExternal::PostVRTask() {
+  MessageLoop * vrLoop = VRListenerThreadHolder::Loop();
+  if (!vrLoop || !mBrowserState.presentationActive) {
+    return;
+  }
+  RefPtr<Runnable> task = NewRunnableMethod(
+    "VRDisplayExternal::RunVRTask",
+    this,
+    &VRDisplayExternal::RunVRTask);
+  VRListenerThreadHolder::Loop()->PostDelayedTask(task.forget(), 50);
+}
+
+void
+VRDisplayExternal::RunVRTask() {
+  if (mBrowserState.presentationActive) {
+    VRManager *vm = VRManager::Get();
+    vm->NotifyVsync(TimeStamp::Now());
+    PostVRTask();
+  }
+}
+
+#endif // defined(MOZ_WIDGET_ANDROID)
+
 void
 VRDisplayExternal::StopPresentation()
 {
-  if (!mIsPresenting) {
+  if (!mBrowserState.presentationActive) {
     return;
   }
-  mIsPresenting = false;
   sPushIndex = 0;
 
   // Indicate that we have stopped immersive mode
-  VRBrowserState state;
-  memset(&state, 0, sizeof(VRBrowserState));
-  VRManager *vm = VRManager::Get();
-  VRSystemManagerExternal* manager = vm->GetExternalManager();
-  manager->PushState(&state, true);
+  mBrowserState.presentationActive = false;
+  memset(mBrowserState.layerState, 0, sizeof(VRLayerState) * mozilla::ArrayLength(mBrowserState.layerState));
+
+  PushState(true);
 
   // TODO - Implement telemetry:
 
@@ -152,6 +184,25 @@ VRDisplayExternal::StopPresentation()
                                         mTelemetry.mLastDroppedFrameCount) / duration.ToSeconds();
   Telemetry::Accumulate(Telemetry::WEBVR_DROPPED_FRAMES_IN_OPENVR, droppedFramesPerSec);
 */
+}
+
+void
+VRDisplayExternal::StartVRNavigation()
+{
+  mBrowserState.navigationTransitionActive = true;
+  mVRNavigationTransitionEnd = TimeStamp();
+  PushState();
+}
+
+void
+VRDisplayExternal::StopVRNavigation(const TimeDuration& aTimeout)
+{
+  if (aTimeout.ToMilliseconds() <= 0) {
+    mBrowserState.navigationTransitionActive = false;
+    mVRNavigationTransitionEnd = TimeStamp();
+    PushState();
+  }
+  mVRNavigationTransitionEnd = TimeStamp::Now() + aTimeout;
 }
 
 bool
@@ -207,10 +258,8 @@ VRDisplayExternal::SubmitFrame(const layers::SurfaceDescriptor& aTexture,
                                const gfx::Rect& aLeftEyeRect,
                                const gfx::Rect& aRightEyeRect)
 {
-  VRBrowserState state;
-  memset(&state, 0, sizeof(VRBrowserState));
-  state.layerState[0].type = VRLayerType::LayerType_Stereo_Immersive;
-  VRLayer_Stereo_Immersive& layer = state.layerState[0].layer_stereo_immersive;
+  MOZ_ASSERT(mBrowserState.layerState[0].type == VRLayerType::LayerType_Stereo_Immersive);
+  VRLayer_Stereo_Immersive& layer = mBrowserState.layerState[0].layer_stereo_immersive;
   if (!PopulateLayerTexture(aTexture, &layer.mTextureType, &layer.mTextureHandle)) {
     return false;
   }
@@ -226,16 +275,24 @@ VRDisplayExternal::SubmitFrame(const layers::SurfaceDescriptor& aTexture,
   layer.mRightEyeRect.width = aRightEyeRect.width;
   layer.mRightEyeRect.height = aRightEyeRect.height;
 
-  VRManager *vm = VRManager::Get();
-  VRSystemManagerExternal* manager = vm->GetExternalManager();
-  manager->PushState(&state, true);
+  PushState(true);
   sPushIndex++;
 
-  VRDisplayState displayState;
-  memset(&displayState, 0, sizeof(VRDisplayState));
-  while (displayState.mLastSubmittedFrameId < aFrameId) {
-    if (manager->PullState(&displayState, &mLastSensorState, mDisplayInfo.mControllerState)) {
-      if (displayState.mSuppressFrames || !displayState.mIsConnected) {
+#if defined(MOZ_WIDGET_ANDROID)
+  PullState([&]() {
+    return (mDisplayInfo.mDisplayState.mLastSubmittedFrameId >= aFrameId) ||
+            mDisplayInfo.mDisplayState.mSuppressFrames ||
+            !mDisplayInfo.mDisplayState.mIsConnected;
+  });
+
+  if (mDisplayInfo.mDisplayState.mSuppressFrames || !mDisplayInfo.mDisplayState.mIsConnected) {
+    // External implementation wants to supress frames, service has shut down or hardware has been disconnected.
+    return false;
+  }
+#else
+  while (mDisplayInfo.mDisplayState.mLastSubmittedFrameId < aFrameId) {
+    if (PullState()) {
+      if (mDisplayInfo.mDisplayState.mSuppressFrames || !mDisplayInfo.mDisplayState.mIsConnected) {
         // External implementation wants to supress frames, service has shut down or hardware has been disconnected.
         return false;
       }
@@ -246,9 +303,41 @@ VRDisplayExternal::SubmitFrame(const layers::SurfaceDescriptor& aTexture,
     sleep(0);
 #endif
   }
+#endif // defined(MOZ_WIDGET_ANDROID)
 
-  return displayState.mLastSubmittedFrameSuccessful;
+  return mDisplayInfo.mDisplayState.mLastSubmittedFrameSuccessful;
 }
+
+void
+VRDisplayExternal::PushState(bool aNotifyCond)
+{
+  VRManager *vm = VRManager::Get();
+  VRSystemManagerExternal* manager = vm->GetExternalManager();
+  manager->PushState(&mBrowserState, aNotifyCond);
+}
+
+#if defined(MOZ_WIDGET_ANDROID)
+bool
+VRDisplayExternal::PullState(const std::function<bool()>& aWaitCondition)
+{
+  VRManager *vm = VRManager::Get();
+  VRSystemManagerExternal* manager = vm->GetExternalManager();
+  return manager->PullState(&mDisplayInfo.mDisplayState,
+                            &mLastSensorState,
+                            mDisplayInfo.mControllerState,
+                            aWaitCondition);
+}
+#else
+bool
+VRDisplayExternal::PullState()
+{
+  VRManager *vm = VRManager::Get();
+  VRSystemManagerExternal* manager = vm->GetExternalManager();
+  return manager->PullState(&mDisplayInfo.mDisplayState,
+                            &mLastSensorState,
+                            mDisplayInfo.mControllerState);
+}
+#endif
 
 VRSystemManagerExternal::VRSystemManagerExternal(VRExternalShmem* aAPIShmem /* = nullptr*/)
  : mExternalShmem(aAPIShmem)
@@ -263,6 +352,7 @@ VRSystemManagerExternal::VRSystemManagerExternal(VRExternalShmem* aAPIShmem /* =
 #elif defined(MOZ_WIDGET_ANDROID)
   mDoShutdown = false;
   mExternalStructFailed = false;
+  mEnumerationCompleted = false;
 #endif
 }
 
@@ -463,13 +553,20 @@ VRSystemManagerExternal::Enumerate()
       // We must block until enumeration has completed in order
       // to signal that the WebVR promise should be resolved at the
       // right time.
+#if defined(MOZ_WIDGET_ANDROID)
+      PullState(&displayState, nullptr, nullptr, [&](){
+        return mEnumerationCompleted;
+      });
+#else
       while (!PullState(&displayState)) {
 #ifdef XP_WIN
         Sleep(0);
 #else
         sleep(0);
-#endif
+#endif // XP_WIN
       }
+#endif // defined(MOZ_WIDGET_ANDROID)
+
       if (displayState.mIsConnected) {
         mDisplay = new VRDisplayExternal(displayState);
       }
@@ -561,6 +658,48 @@ VRSystemManagerExternal::RemoveControllers()
   // Controller updates are handled in VRDisplayClient for VRSystemManagerExternal
 }
 
+
+#if defined(MOZ_WIDGET_ANDROID)
+bool
+VRSystemManagerExternal::PullState(VRDisplayState* aDisplayState,
+                                   VRHMDSensorState* aSensorState /* = nullptr */,
+                                   VRControllerState* aControllerState /* = nullptr */,
+                                   const std::function<bool()>& aWaitCondition /* = nullptr */)
+{
+  MOZ_ASSERT(mExternalShmem);
+  if (!mExternalShmem) {
+    return false;
+  }
+  bool done = false;
+  while(!done) {
+    if (pthread_mutex_lock((pthread_mutex_t*)&(mExternalShmem->systemMutex)) == 0) {
+      while (true) {
+        memcpy(aDisplayState, (void*)&(mExternalShmem->state.displayState), sizeof(VRDisplayState));
+        if (aSensorState) {
+          memcpy(aSensorState, (void*)&(mExternalShmem->state.sensorState), sizeof(VRHMDSensorState));
+        }
+        if (aControllerState) {
+          memcpy(aControllerState, (void*)&(mExternalShmem->state.controllerState), sizeof(VRControllerState) * kVRControllerMaxCount);
+        }
+        mEnumerationCompleted = mExternalShmem->state.enumerationCompleted;
+        mDoShutdown = aDisplayState->shutdown;
+        if (!aWaitCondition || aWaitCondition()) {
+          done = true;
+          break;
+        }
+        // Block current thead using the condition variable until data changes
+        pthread_cond_wait((pthread_cond_t*)&mExternalShmem->systemCond, (pthread_mutex_t*)&mExternalShmem->systemMutex);
+      }
+      pthread_mutex_unlock((pthread_mutex_t*)&(mExternalShmem->systemMutex));
+    } else if (!aWaitCondition) {
+      // pthread_mutex_lock failed and we are not waiting for a condition to exit from PullState call.
+      // return false to indicate that PullState call failed
+      return false;
+    }
+  }
+  return true;
+}
+#else 
 bool
 VRSystemManagerExternal::PullState(VRDisplayState* aDisplayState,
                                    VRHMDSensorState* aSensorState /* = nullptr */,
@@ -569,20 +708,6 @@ VRSystemManagerExternal::PullState(VRDisplayState* aDisplayState,
   bool success = false;
   MOZ_ASSERT(mExternalShmem);
   if (mExternalShmem) {
-#if defined(MOZ_WIDGET_ANDROID)
-    if (pthread_mutex_lock((pthread_mutex_t*)&(mExternalShmem->systemMutex)) == 0) {
-      memcpy(aDisplayState, (void*)&(mExternalShmem->state.displayState), sizeof(VRDisplayState));
-      if (aSensorState) {
-        memcpy(aSensorState, (void*)&(mExternalShmem->state.sensorState), sizeof(VRHMDSensorState));
-      }
-      if (aControllerState) {
-        memcpy(aControllerState, (void*)&(mExternalShmem->state.controllerState), sizeof(VRControllerState) * kVRControllerMaxCount);
-      }
-      success = mExternalShmem->state.enumerationCompleted;
-      pthread_mutex_unlock((pthread_mutex_t*)&(mExternalShmem->systemMutex));
-      mDoShutdown = aDisplayState->shutdown;
-    }
-#else
     VRExternalShmem tmp;
     memcpy(&tmp, (void *)mExternalShmem, sizeof(VRExternalShmem));
     if (tmp.generationA == tmp.generationB && tmp.generationA != 0 && tmp.generationA != -1 && tmp.state.enumerationCompleted) {
@@ -595,11 +720,12 @@ VRSystemManagerExternal::PullState(VRDisplayState* aDisplayState,
       }
       success = true;
     }
-#endif // defined(MOZ_WIDGET_ANDROID)
   }
 
   return success;
 }
+#endif // defined(MOZ_WIDGET_ANDROID)
+
 
 void
 VRSystemManagerExternal::PushState(VRBrowserState* aBrowserState, bool aNotifyCond)

@@ -14,7 +14,7 @@
 
 #include <limits>
 #include <type_traits>
-#include "nsStringFwd.h"
+#include "nsString.h"
 #include "nsCSSPropertyID.h"
 #include "nsStyleStructFwd.h"
 #include "nsCSSKeywords.h"
@@ -28,6 +28,17 @@
 // Length of the "--" prefix on custom names (such as custom property names,
 // and, in the future, custom media query names).
 #define CSS_CUSTOM_NAME_PREFIX_LENGTH 2
+
+namespace mozilla {
+class ComputedStyle;
+}
+
+extern "C" {
+  nsCSSPropertyID Servo_ResolveLogicalProperty(nsCSSPropertyID,
+                                               const mozilla::ComputedStyle*);
+  nsCSSPropertyID Servo_Property_LookupEnabledForAllContent(const nsACString*);
+  const uint8_t* Servo_Property_GetName(nsCSSPropertyID, uint32_t* aLength);
+}
 
 struct nsCSSKTableEntry
 {
@@ -71,8 +82,20 @@ public:
   // Looks up the property with name aProperty and returns its corresponding
   // nsCSSPropertyID value.  If aProperty is the name of a custom property,
   // then eCSSPropertyExtra_variable will be returned.
-  static nsCSSPropertyID LookupProperty(const nsAString& aProperty,
-                                      EnabledState aEnabled);
+  //
+  // This only returns properties enabled for all content, and resolves aliases
+  // to return the aliased property.
+  static nsCSSPropertyID LookupProperty(const nsACString& aProperty)
+  {
+    return Servo_Property_LookupEnabledForAllContent(&aProperty);
+  }
+
+  static nsCSSPropertyID LookupProperty(const nsAString& aProperty)
+  {
+    NS_ConvertUTF16toUTF8 utf8(aProperty);
+    return LookupProperty(utf8);
+  }
+
   // As above, but looked up using a property's IDL name.
   // eCSSPropertyExtra_variable won't be returned from these methods.
   static nsCSSPropertyID LookupPropertyByIDLName(
@@ -86,7 +109,8 @@ public:
   // "--".  This assumes that the CSS Variables pref has been enabled.
   static bool IsCustomPropertyName(const nsAString& aProperty);
 
-  static inline bool IsShorthand(nsCSSPropertyID aProperty) {
+  static bool IsShorthand(nsCSSPropertyID aProperty)
+  {
     MOZ_ASSERT(0 <= aProperty && aProperty < eCSSProperty_COUNT,
                "out of range");
     return (aProperty >= eCSSProperty_COUNT_no_shorthands);
@@ -96,7 +120,15 @@ public:
   static nsCSSFontDesc LookupFontDesc(const nsAString& aProperty);
 
   // Given a property enum, get the string value
-  static const nsCString& GetStringValue(nsCSSPropertyID aProperty);
+  //
+  // This string is static.
+  static const nsDependentCSubstring GetStringValue(nsCSSPropertyID aProperty)
+  {
+    uint32_t len;
+    const uint8_t* chars = Servo_Property_GetName(aProperty, &len);
+    return nsDependentCSubstring(reinterpret_cast<const char*>(chars), len);
+  }
+
   static const nsCString& GetStringValue(nsCSSFontDesc aFontDesc);
   static const nsCString& GetStringValue(nsCSSCounterDesc aCounterDesc);
 
@@ -139,22 +171,31 @@ private:
   static const Flags kFlagsTable[eCSSProperty_COUNT];
 
 public:
-  static inline bool PropHasFlags(nsCSSPropertyID aProperty, Flags aFlags)
+  static bool PropHasFlags(nsCSSPropertyID aProperty, Flags aFlags)
   {
     MOZ_ASSERT(0 <= aProperty && aProperty < eCSSProperty_COUNT,
                "out of range");
     return (nsCSSProps::kFlagsTable[aProperty] & aFlags) == aFlags;
   }
 
+  static nsCSSPropertyID Physicalize(nsCSSPropertyID aProperty,
+                                     const mozilla::ComputedStyle& aStyle)
+  {
+    if (PropHasFlags(aProperty, Flags::IsLogical)) {
+      return Servo_ResolveLogicalProperty(aProperty, &aStyle);
+    }
+    return aProperty;
+  }
+
 private:
   // A table for shorthand properties.  The appropriate index is the
   // property ID minus eCSSProperty_COUNT_no_shorthands.
-  static const nsCSSPropertyID *const
+  static const nsCSSPropertyID* const
     kSubpropertyTable[eCSSProperty_COUNT - eCSSProperty_COUNT_no_shorthands];
 
 public:
-  static inline
-  const nsCSSPropertyID * SubpropertyEntryFor(nsCSSPropertyID aProperty) {
+  static const nsCSSPropertyID* SubpropertyEntryFor(nsCSSPropertyID aProperty)
+  {
     MOZ_ASSERT(eCSSProperty_COUNT_no_shorthands <= aProperty &&
                aProperty < eCSSProperty_COUNT,
                "out of range");

@@ -230,11 +230,7 @@ nsContextMenu.prototype = {
       this.browser = gContextMenuContentData.browser;
       this.selectionInfo = gContextMenuContentData.selectionInfo;
     } else {
-      this.browser = this.ownerDoc.defaultView
-                         .QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIWebNavigation)
-                         .QueryInterface(Ci.nsIDocShell)
-                         .chromeEventHandler;
+      this.browser = this.ownerDoc.defaultView.docShell.chromeEventHandler;
       this.selectionInfo = BrowserUtils.getSelectionDetails(window);
     }
 
@@ -260,8 +256,7 @@ nsContextMenu.prototype = {
         InlineSpellCheckerUI.initFromRemote(gContextMenuContentData.spellInfo);
       } else {
         var targetWin = this.ownerDoc.defaultView;
-        var editingSession = targetWin.QueryInterface(Ci.nsIInterfaceRequestor)
-                                      .getInterface(Ci.nsIWebNavigation)
+        var editingSession = targetWin.docShell
                                       .QueryInterface(Ci.nsIInterfaceRequestor)
                                       .getInterface(Ci.nsIEditingSession);
 
@@ -1471,8 +1466,7 @@ nsContextMenu.prototype = {
   mediaCommand: function CM_mediaCommand(command, data) {
     let mm = this.browser.messageManager;
     let win = this.browser.ownerGlobal;
-    let windowUtils = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIDOMWindowUtils);
+    let windowUtils = win.windowUtils;
     mm.sendAsyncMessage("ContextMenu:MediaCommand",
                         {command,
                          data,

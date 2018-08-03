@@ -685,7 +685,7 @@
 .tabbrowser-tab:hover::after,
 #tabbrowser-tabs:not([movingtab]) > .tabbrowser-tab[beforehovered]::after,
 .tabbrowser-tab[multiselected]::after,
-.tabbrowser-tab[before-multiselected]::after {
+#tabbrowser-tabs:not([movingtab]) > .tabbrowser-tab[before-multiselected]::after {
   margin-top: var(--tabs-top-border-width);
   margin-bottom: 0;
 }
@@ -753,9 +753,20 @@
   min-height: 12px;
 }
 
-#appMenu-allTabsView {
+#allTabsMenu-allTabsView {
   --blue-40: #45a1ff;
   max-width: 42em;
+}
+
+/* The list of tabs is in its own panel-subview-body which will scroll. We don't
+   want any padding above/below the scrollbars, so remove the padding/margin
+   from the separator and outer panel-subview-body. */
+#allTabsMenu-allTabsView > .panel-subview-body {
+  padding-bottom: 0;
+}
+
+#allTabsMenu-tabsSeparator {
+  margin-bottom: 0;
 }
 
 .all-tabs-item > .all-tabs-secondary-button {
@@ -787,14 +798,6 @@
 
 .all-tabs-item[selected] {
   box-shadow: inset 4px 0 var(--blue-40);
-}
-
-.all-tabs-item[tabIsVisible] {
-  box-shadow: inset -4px 0 ThreeDShadow;
-}
-
-.all-tabs-item[selected][tabIsVisible] {
-  box-shadow: inset -4px 0 ThreeDShadow, inset 4px 0 var(--blue-40);
 }
 
 .all-tabs-secondary-button > label {

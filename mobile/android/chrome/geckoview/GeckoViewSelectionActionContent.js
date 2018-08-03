@@ -21,6 +21,10 @@ class GeckoViewSelectionActionContent extends GeckoViewContentModule {
     this._previousMessage = "";
 
     this._actions = [{
+      id: "org.mozilla.geckoview.HIDE",
+      predicate: _ => true,
+      perform: _ => this.handleEvent({type: "pagehide"}),
+    }, {
       id: "org.mozilla.geckoview.CUT",
       predicate: e => !e.collapsed && e.selectionEditable && !this._isPasswordField(e),
       perform: _ => docShell.doCommand("cmd_cut"),
@@ -84,8 +88,7 @@ class GeckoViewSelectionActionContent extends GeckoViewContentModule {
       offset.left += currentRect.left;
       offset.top += currentRect.top;
 
-      let targetDocShell = currentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                        .getInterface(Ci.nsIWebNavigation);
+      let targetDocShell = currentWindow.docShell;
       if (targetDocShell.isMozBrowser) {
         break;
       }
@@ -130,7 +133,8 @@ class GeckoViewSelectionActionContent extends GeckoViewContentModule {
     } else if (!aEvent.collapsed &&
                !aEvent.selectionVisible) {
       reason = "invisibleselection";
-    } else if (aEvent.selectionEditable &&
+    } else if (!this._isActive &&
+               aEvent.selectionEditable &&
                aEvent.collapsed &&
                reason !== "longpressonemptycontent" &&
                reason !== "taponcaret" &&

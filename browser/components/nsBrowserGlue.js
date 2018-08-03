@@ -12,9 +12,9 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
   if (!Services.prefs.getBoolPref("browser.startup.blankWindow", false))
     return;
 
-  let store = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
+  let store = Services.xulStore;
   let getValue = attr =>
-    store.getValue("chrome://browser/content/browser.xul", "main-window", attr);
+    store.getValue(AppConstants.BROWSER_CHROME_URL, "main-window", attr);
   let width = getValue("width");
   let height = getValue("height");
 
@@ -33,9 +33,7 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
   // Hide the titlebar if the actual browser window will draw in it.
   if (Services.prefs.getBoolPref("browser.tabs.drawInTitlebar")) {
-    win.QueryInterface(Ci.nsIInterfaceRequestor)
-       .getInterface(Ci.nsIDOMWindowUtils)
-       .setChromeMargin(0, 2, 2, 2);
+    win.windowUtils.setChromeMargin(0, 2, 2, 2);
   }
 
   if (AppConstants.platform != "macosx") {
@@ -209,7 +207,6 @@ const listeners = {
     // PLEASE KEEP THIS LIST IN SYNC WITH THE LISTENERS ADDED IN AsyncPrefs.init
 
     "FeedConverter:addLiveBookmark": ["Feeds"],
-    "WCCR:setAutoHandler": ["Feeds"],
     "webrtc:UpdateGlobalIndicators": ["webrtcUI"],
     "webrtc:UpdatingIndicators": ["webrtcUI"],
   },
@@ -234,7 +231,6 @@ const listeners = {
     "LoginStats:LoginEncountered": ["LoginManagerParent"],
     // PLEASE KEEP THIS LIST IN SYNC WITH THE MOBILE LISTENERS IN BrowserCLH.js
     "WCCR:registerProtocolHandler": ["Feeds"],
-    "WCCR:registerContentHandler": ["Feeds"],
     "rtcpeer:CancelRequest": ["webrtcUI"],
     "rtcpeer:Request": ["webrtcUI"],
     "webrtc:CancelRequest": ["webrtcUI"],
@@ -759,6 +755,9 @@ BrowserGlue.prototype = {
 
     // Initialize the default l10n resource sources for L10nRegistry.
     let locales = Services.locale.getPackagedLocales();
+    const greSource = new FileSource("toolkit", locales, "resource://gre/localization/{locale}/");
+    L10nRegistry.registerSource(greSource);
+
     const appSource = new FileSource("app", locales, "resource://app/localization/{locale}/");
     L10nRegistry.registerSource(appSource);
 
@@ -768,7 +767,6 @@ BrowserGlue.prototype = {
   _checkForOldBuildUpdates() {
     // check for update if our build is old
     if (AppConstants.MOZ_UPDATER &&
-        Services.prefs.getBoolPref("app.update.enabled") &&
         Services.prefs.getBoolPref("app.update.checkInstallTime")) {
 
       let buildID = Services.appinfo.appBuildID;
@@ -970,15 +968,6 @@ BrowserGlue.prototype = {
 
   // the first browser window has finished initializing
   _onFirstWindowLoaded: function BG__onFirstWindowLoaded(aWindow) {
-    // Set up listeners and, if PdfJs is enabled, register the PDF stream converter.
-    // We delay all of the parent's initialization other than stream converter
-    // registration, because it requires file IO from HandlerService.js
-    Services.ppmm.loadProcessScript("resource://pdf.js/pdfjschildbootstrap.js", true);
-    if (PdfJs.enabled) {
-      PdfJs.ensureRegistered();
-      Services.ppmm.loadProcessScript("resource://pdf.js/pdfjschildbootstrap-enabled.js", true);
-    }
-
     TabCrashHandler.init();
     if (AppConstants.MOZ_CRASHREPORTER) {
       PluginCrashReporter.init();
@@ -1402,9 +1391,10 @@ BrowserGlue.prototype = {
 
     // warnAboutClosingTabs checks browser.tabs.warnOnClose and returns if it's
     // ok to close the window. It doesn't actually close the window.
+    let closingTabs = win.gBrowser.tabs.length - win.gBrowser._removingTabs.length;
     if (windowcount == 1) {
       aCancelQuit.data =
-        !win.gBrowser.warnAboutClosingTabs(win.gBrowser.closingTabsEnum.ALL);
+        !win.gBrowser.warnAboutClosingTabs(closingTabs, win.gBrowser.closingTabsEnum.ALL);
     } else {
       // More than 1 window. Compose our own message.
       let tabSubstring = gTabbrowserBundle.GetStringFromName("tabs.closeWarningMultipleWindowsTabSnippet");
@@ -1413,7 +1403,7 @@ BrowserGlue.prototype = {
       windowString = PluralForm.get(windowcount, windowString).replace(/#1/, windowcount);
       windowString = windowString.replace(/%(?:1$)?S/i, tabSubstring);
       aCancelQuit.data =
-        !win.gBrowser.warnAboutClosingTabs(win.gBrowser.closingTabsEnum.ALL, null, windowString);
+        !win.gBrowser.warnAboutClosingTabs(closingTabs, win.gBrowser.closingTabsEnum.ALL, null, windowString);
     }
   },
 
@@ -1787,9 +1777,9 @@ BrowserGlue.prototype = {
    * "collapsed" attribute, try to determine whether it's customized.
    */
   _maybeToggleBookmarkToolbarVisibility() {
-    const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
+    const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
     const NUM_TOOLBAR_BOOKMARKS_TO_UNHIDE = 3;
-    let xulStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
+    let xulStore = Services.xulStore;
 
     if (!xulStore.hasValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed")) {
       // We consider the toolbar customized if it has more than NUM_TOOLBAR_BOOKMARKS_TO_UNHIDE
@@ -1812,8 +1802,8 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 69;
-    const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
+    const UI_VERSION = 72;
+    const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
     if (Services.prefs.prefHasUserValue("browser.migration.version")) {
@@ -1836,64 +1826,7 @@ BrowserGlue.prototype = {
     if (currentUIVersion >= UI_VERSION)
       return;
 
-    let xulStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
-
-    if (currentUIVersion < 36) {
-      xulStore.removeValue("chrome://passwordmgr/content/passwordManager.xul",
-                           "passwordCol",
-                           "hidden");
-    }
-
-    if (currentUIVersion < 37) {
-      Services.prefs.clearUserPref("browser.sessionstore.restore_on_demand");
-    }
-
-    if (currentUIVersion < 38) {
-      LoginHelper.removeLegacySignonFiles();
-    }
-
-    if (currentUIVersion < 39) {
-      // Remove the 'defaultset' value for all the toolbars
-      let toolbars = ["nav-bar", "PersonalToolbar",
-                      "TabsToolbar", "toolbar-menubar"];
-      for (let toolbarId of toolbars) {
-        xulStore.removeValue(BROWSER_DOCURL, toolbarId, "defaultset");
-      }
-    }
-
-    if (currentUIVersion < 40) {
-      const kOldSafeBrowsingPref = "browser.safebrowsing.enabled";
-      // Default value is set to true, a user pref means that the pref was
-      // set to false.
-      if (Services.prefs.prefHasUserValue(kOldSafeBrowsingPref) &&
-          !Services.prefs.getBoolPref(kOldSafeBrowsingPref)) {
-        Services.prefs.setBoolPref("browser.safebrowsing.phishing.enabled",
-                                   false);
-        // Should just remove support for the pref entirely, even if it's
-        // only in about:config
-        Services.prefs.clearUserPref(kOldSafeBrowsingPref);
-      }
-    }
-
-    if (currentUIVersion < 41) {
-      const Preferences = ChromeUtils.import("resource://gre/modules/Preferences.jsm", {}).Preferences;
-      Preferences.resetBranch("loop.");
-    }
-
-    if (currentUIVersion < 42) {
-      let backupFile = Services.dirsvc.get("ProfD", Ci.nsIFile);
-      backupFile.append("tabgroups-session-backup.json");
-      OS.File.remove(backupFile.path, {ignoreAbsent: true}).catch(ex => Cu.reportError(ex));
-    }
-
-    if (currentUIVersion < 43) {
-      let currentTheme = Services.prefs.getCharPref("lightweightThemes.selectedThemeID", "");
-      if (currentTheme == "firefox-devedition@mozilla.org") {
-        let newTheme = Services.prefs.getCharPref("devtools.theme") == "dark" ?
-          "firefox-compact-dark@mozilla.org" : "firefox-compact-light@mozilla.org";
-        Services.prefs.setCharPref("lightweightThemes.selectedThemeID", newTheme);
-      }
-    }
+    let xulStore = Services.xulStore;
 
     if (currentUIVersion < 44) {
       // Merge the various cosmetic animation prefs into one. If any were set to
@@ -2102,10 +2035,6 @@ BrowserGlue.prototype = {
       }
     }
 
-    if (currentUIVersion < 60) {
-      // This version is superseded by version 66.  See bug 1444965.
-    }
-
     if (currentUIVersion < 61) {
       // Remove persisted toolbarset from navigator toolbox
       xulStore.removeValue(BROWSER_DOCURL, "navigator-toolbox", "toolbarset");
@@ -2183,6 +2112,31 @@ BrowserGlue.prototype = {
           Services.prefs.clearUserPref("social." + item);
         }
       }
+    }
+
+    if (currentUIVersion < 70) {
+      // Migrate old ctrl-tab pref to new one in existing profiles. (This code
+      // doesn't run at all in new profiles.)
+      Services.prefs.setBoolPref("browser.ctrlTab.recentlyUsedOrder",
+        Services.prefs.getBoolPref("browser.ctrlTab.previews", false));
+      Services.prefs.clearUserPref("browser.ctrlTab.previews");
+      // Remember that we migrated the pref in case we decide to flip it for
+      // these users.
+      Services.prefs.setBoolPref("browser.ctrlTab.migrated", true);
+    }
+
+    if (currentUIVersion < 71) {
+      // Clear legacy saved prefs for content handlers.
+      let savedContentHandlers = Services.prefs.getChildList("browser.contentHandlers.types");
+      for (let savedHandlerPref of savedContentHandlers) {
+        Services.prefs.clearUserPref(savedHandlerPref);
+      }
+    }
+
+    if (currentUIVersion < 72) {
+      // Migrate performance tool's recording interval value from msec to usec.
+      let pref = "devtools.performance.recording.interval";
+      Services.prefs.setIntPref(pref, Services.prefs.getIntPref(pref, 1) * 1000);
     }
 
     // Update the migration version.
@@ -2364,7 +2318,7 @@ BrowserGlue.prototype = {
     let urlString = Cc["@mozilla.org/supports-string;1"].createInstance(Ci.nsISupportsString);
     urlString.data = url;
     return new Promise(resolve => {
-      let win = Services.ww.openWindow(null, Services.prefs.getCharPref("browser.chromeURL"),
+      let win = Services.ww.openWindow(null, AppConstants.BROWSER_CHROME_URL,
                                        "_blank", "chrome,all,dialog=no", urlString);
       win.addEventListener("load", () => { resolve(win); }, {once: true});
     });

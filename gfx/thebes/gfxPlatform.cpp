@@ -57,6 +57,7 @@
 #endif
 
 #ifdef XP_WIN
+#include <windows.h>
 #include "mozilla/WindowsVersion.h"
 #include "mozilla/gfx/DeviceManagerDx.h"
 #endif
@@ -453,29 +454,12 @@ static const char* kObservedPrefs[] = {
     nullptr
 };
 
-class FontPrefsObserver final : public nsIObserver
+static void
+FontPrefChanged(const char* aPref, void* aData)
 {
-    ~FontPrefsObserver() = default;
-public:
-    NS_DECL_ISUPPORTS
-    NS_DECL_NSIOBSERVER
-};
-
-NS_IMPL_ISUPPORTS(FontPrefsObserver, nsIObserver)
-
-NS_IMETHODIMP
-FontPrefsObserver::Observe(nsISupports *aSubject,
-                           const char *aTopic,
-                           const char16_t *someData)
-{
-    if (!someData) {
-        NS_ERROR("font pref observer code broken");
-        return NS_ERROR_UNEXPECTED;
-    }
+    MOZ_ASSERT(aPref);
     NS_ASSERTION(gfxPlatform::GetPlatform(), "the singleton instance has gone");
-    gfxPlatform::GetPlatform()->FontsPrefsChanged(NS_ConvertUTF16toUTF8(someData).get());
-
-    return NS_OK;
+    gfxPlatform::GetPlatform()->FontsPrefsChanged(aPref);
 }
 
 class MemoryPressureObserver final : public nsIObserver
@@ -666,7 +650,7 @@ gfxPlatform::Init()
 
     gfxConfig::Init();
 
-    if (XRE_IsParentProcess()) {
+    if (XRE_IsParentProcess() || recordreplay::IsRecordingOrReplaying()) {
       GPUProcessManager::Initialize();
 
       if (Preferences::GetBool("media.wmf.skip-blacklist")) {
@@ -761,7 +745,7 @@ gfxPlatform::Init()
       gpu->LaunchGPUProcess();
     }
 
-    if (XRE_IsParentProcess()) {
+    if (XRE_IsParentProcess() || recordreplay::IsRecordingOrReplaying()) {
       if (gfxPlatform::ForceSoftwareVsync()) {
         gPlatform->mVsyncSource = (gPlatform)->gfxPlatform::CreateHardwareVsyncSource();
       } else {
@@ -823,8 +807,7 @@ gfxPlatform::Init()
     gPlatform->mSRGBOverrideObserver = new SRGBOverrideObserver();
     Preferences::AddWeakObserver(gPlatform->mSRGBOverrideObserver, GFX_PREF_CMS_FORCE_SRGB);
 
-    gPlatform->mFontPrefsObserver = new FontPrefsObserver();
-    Preferences::AddStrongObservers(gPlatform->mFontPrefsObserver, kObservedPrefs);
+    Preferences::RegisterPrefixCallbacks(FontPrefChanged, kObservedPrefs);
 
     GLContext::PlatformStartup();
 
@@ -998,9 +981,7 @@ gfxPlatform::Shutdown()
     Preferences::RemoveObserver(gPlatform->mSRGBOverrideObserver, GFX_PREF_CMS_FORCE_SRGB);
     gPlatform->mSRGBOverrideObserver = nullptr;
 
-    NS_ASSERTION(gPlatform->mFontPrefsObserver, "mFontPrefsObserver has alreay gone");
-    Preferences::RemoveObservers(gPlatform->mFontPrefsObserver, kObservedPrefs);
-    gPlatform->mFontPrefsObserver = nullptr;
+    Preferences::UnregisterPrefixCallbacks(FontPrefChanged, kObservedPrefs);
 
     NS_ASSERTION(gPlatform->mMemoryPressureObserver, "mMemoryPressureObserver has already gone");
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -1059,10 +1040,12 @@ gfxPlatform::InitLayersIPC()
   sLayersIPCIsUp = true;
 
   if (XRE_IsContentProcess()) {
-    if (gfxVars::UseOMTP()) {
+    if (gfxVars::UseOMTP() && !recordreplay::IsRecordingOrReplaying()) {
       layers::PaintThread::Start();
     }
-  } else if (XRE_IsParentProcess()) {
+  }
+
+  if (XRE_IsParentProcess() || recordreplay::IsRecordingOrReplaying()) {
     if (!gfxConfig::IsEnabled(Feature::GPU_PROCESS) && gfxVars::UseWebRender()) {
       wr::RenderThread::Start();
     }
@@ -1088,7 +1071,7 @@ gfxPlatform::ShutdownLayersIPC()
           layers::ImageBridgeChild::ShutDown();
         }
 
-        if (gfxVars::UseOMTP()) {
+        if (gfxVars::UseOMTP() && !recordreplay::IsRecordingOrReplaying()) {
           layers::PaintThread::Shutdown();
         }
     } else if (XRE_IsParentProcess()) {
@@ -2518,7 +2501,7 @@ gfxPlatform::InitCompositorAccelerationPrefs()
     feature.UserForceEnable("Force-enabled by pref");
   }
 
-  // Safe and headless modes override everything.
+  // Safe, headless, and record/replay modes override everything.
   if (InSafeMode()) {
     feature.ForceDisable(FeatureStatus::Blocked, "Acceleration blocked by safe-mode",
                          NS_LITERAL_CSTRING("FEATURE_FAILURE_COMP_SAFEMODE"));
@@ -2526,6 +2509,10 @@ gfxPlatform::InitCompositorAccelerationPrefs()
   if (IsHeadless()) {
     feature.ForceDisable(FeatureStatus::Blocked, "Acceleration blocked by headless mode",
                          NS_LITERAL_CSTRING("FEATURE_FAILURE_COMP_HEADLESSMODE"));
+  }
+  if (recordreplay::IsRecordingOrReplaying()) {
+    feature.ForceDisable(FeatureStatus::Blocked, "Acceleration blocked by recording/replaying",
+                         NS_LITERAL_CSTRING("FEATURE_FAILURE_COMP_RECORDREPLAY"));
   }
 }
 
@@ -2540,6 +2527,22 @@ gfxPlatform::WebRenderEnvvarEnabled()
 {
   const char* env = PR_GetEnv("MOZ_WEBRENDER");
   return (env && *env == '1');
+}
+
+/* This is a pretty conservative check for having a battery.
+ * For now we'd rather err on the side of thinking we do. */
+static bool HasBattery()
+{
+#ifdef XP_WIN
+  SYSTEM_POWER_STATUS status;
+  const BYTE NO_SYSTEM_BATTERY = 128;
+  if (GetSystemPowerStatus(&status)) {
+    if (status.BatteryFlag == NO_SYSTEM_BATTERY) {
+      return false;
+    }
+  }
+#endif
+  return true;
 }
 
 void
@@ -2566,6 +2569,50 @@ gfxPlatform::InitWebRenderConfig()
     return;
   }
 
+  FeatureState& featureWebRenderQualified = gfxConfig::GetFeature(Feature::WEBRENDER_QUALIFIED);
+  featureWebRenderQualified.EnableByDefault();
+  nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
+  nsCString failureId;
+  int32_t status;
+  if (NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_WEBRENDER,
+                                             failureId, &status))) {
+    if (status != nsIGfxInfo::FEATURE_STATUS_OK) {
+      featureWebRenderQualified.Disable(FeatureStatus::Blocked,
+                                         "No qualified hardware",
+                                         failureId);
+    } else if (HasBattery()) {
+      featureWebRenderQualified.Disable(FeatureStatus::Blocked,
+                                         "Has battery",
+                                         NS_LITERAL_CSTRING("FEATURE_FAILURE_WR_HAS_BATTERY"));
+    } else {
+      nsAutoString adapterVendorID;
+      gfxInfo->GetAdapterVendorID(adapterVendorID);
+      if (adapterVendorID != u"0x10de") {
+        featureWebRenderQualified.Disable(FeatureStatus::Blocked,
+                                         "Not Nvidia",
+                                         NS_LITERAL_CSTRING("FEATURE_FAILURE_NOT_NVIDIA"));
+      } else {
+        nsAutoString adapterDeviceID;
+        gfxInfo->GetAdapterDeviceID(adapterDeviceID);
+        nsresult valid;
+        int32_t deviceID = adapterDeviceID.ToInteger(&valid, 16);
+        if (valid != NS_OK) {
+          featureWebRenderQualified.Disable(FeatureStatus::Blocked,
+                                            "Bad device id",
+                                            NS_LITERAL_CSTRING("FEATURE_FAILURE_BAD_DEVICE_ID"));
+        } else if (deviceID < 1000) { // > 1000 or 0x3e8 roughly corresponds to Tesla and newer
+          featureWebRenderQualified.Disable(FeatureStatus::Blocked,
+                                            "Device too old",
+                                            NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
+        }
+      }
+    }
+  } else {
+    featureWebRenderQualified.Disable(FeatureStatus::Blocked,
+                                       "gfxInfo is broken",
+                                       NS_LITERAL_CSTRING("FEATURE_FAILURE_WR_NO_GFX_INFO"));
+  }
+
   FeatureState& featureWebRender = gfxConfig::GetFeature(Feature::WEBRENDER);
 
   featureWebRender.DisableByDefault(
@@ -2587,18 +2634,12 @@ gfxPlatform::InitWebRenderConfig()
 
   // gfx.webrender.all.qualified works on all channels
   } else if (gfxPrefs::WebRenderAllQualified()) {
-    nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
-    nsCString discardFailureId;
-    int32_t status;
-    if (NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_WEBRENDER,
-                                               discardFailureId, &status))) {
-      if (status == nsIGfxInfo::FEATURE_STATUS_OK) {
-        featureWebRender.UserEnable("Qualified enabled by pref ");
-      } else {
-        featureWebRender.ForceDisable(FeatureStatus::Blocked,
-                                      "Qualified enable blocked",
-                                      discardFailureId);
-      }
+    if (featureWebRenderQualified.IsEnabled()) {
+      featureWebRender.UserEnable("Qualified enabled by pref ");
+    } else {
+      featureWebRender.ForceDisable(FeatureStatus::Blocked,
+                                    "Qualified enable blocked",
+                                    failureId);
     }
   }
 
@@ -2731,9 +2772,6 @@ gfxPlatform::InitOMTPConfig()
   if (InSafeMode()) {
     omtp.ForceDisable(FeatureStatus::Blocked, "OMTP blocked by safe-mode",
                       NS_LITERAL_CSTRING("FEATURE_FAILURE_COMP_SAFEMODE"));
-  } else if (gfxPrefs::TileEdgePaddingEnabled()) {
-    omtp.ForceDisable(FeatureStatus::Blocked, "OMTP does not yet support tiling with edge padding",
-                      NS_LITERAL_CSTRING("FEATURE_FAILURE_OMTP_TILING"));
   }
 
   if (omtp.IsEnabled()) {
@@ -2870,7 +2908,7 @@ gfxPlatform::IsInLayoutAsapMode()
 /* static */ bool
 gfxPlatform::ForceSoftwareVsync()
 {
-  return gfxPrefs::LayoutFrameRate() > 0;
+  return gfxPrefs::LayoutFrameRate() > 0 || recordreplay::IsRecordingOrReplaying();
 }
 
 /* static */ int

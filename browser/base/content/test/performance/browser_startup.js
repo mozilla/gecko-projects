@@ -31,7 +31,6 @@ const startupPhases = {
       "MainProcessSingleton.js",
 
       // Bugs to fix: The following components shouldn't be initialized that early.
-      "WebContentConverter.js", // bug 1369443
       "nsSessionStartup.js", // bug 1369456
       "PushComponents.js", // bug 1369436
     ]),
@@ -39,9 +38,6 @@ const startupPhases = {
       "resource://gre/modules/AppConstants.jsm",
       "resource://gre/modules/XPCOMUtils.jsm",
       "resource://gre/modules/Services.jsm",
-
-      // Bugs to fix: Probably loaded too early, needs investigation.
-      "resource://gre/modules/RemotePageManager.jsm", // bug 1369466
     ])
   }},
 

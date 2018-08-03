@@ -2,14 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 var EXPORTED_SYMBOLS = ["PageStyleHandler"];
 
 var PageStyleHandler = {
   getViewer(content) {
-    return content.document.docShell.contentViewer;
+    return content.docShell.contentViewer;
   },
 
   sendStyleSheetInfo(mm) {
@@ -51,7 +50,7 @@ var PageStyleHandler = {
       return;
     }
 
-    let mm = win.document.docShell
+    let mm = win.docShell
                 .QueryInterface(Ci.nsIInterfaceRequestor)
                 .getInterface(Ci.nsIContentFrameMessageManager);
     this.sendStyleSheetInfo(mm);

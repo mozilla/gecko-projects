@@ -1,11 +1,18 @@
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
+
+// This test can be really slow on debug platforms and should be split.
+requestLongerTimeout(3);
+
 async function evalInConsoleAtPoint(
   dbg,
+  target,
   fixture,
   { line, column },
   statements
 ) {
-  const filename = `fixtures/${fixture}/input.js`;
-  const fnName = fixture.replace(/-([a-z])/g, (s, c) => c.toUpperCase());
+  const filename = `${target}://./${fixture}/input.`;
+  const fnName = (target + "-" + fixture).replace(/-([a-z])/g, (s, c) => c.toUpperCase());
 
   await invokeWithBreakpoint(
     dbg,
@@ -41,7 +48,7 @@ add_task(async function() {
 
   const dbg = await initDebugger("doc-sourcemapped.html");
 
-  await evalInConsoleAtPoint(dbg, "babel-eval-maps", { line: 14, column: 4 }, [
+  await evalInConsoleAtPoint(dbg, "webpack3-babel6", "eval-maps", { line: 14, column: 4 }, [
     "one === 1",
     "two === 4",
     "three === 5"
@@ -49,8 +56,9 @@ add_task(async function() {
 
   await evalInConsoleAtPoint(
     dbg,
-    "babel-modules-cjs",
-    { line: 20, column: 2 },
+    "webpack3-babel6",
+    "esmodules-cjs",
+    { line: 18, column: 2 },
     [
       `aDefault === "a-default"`,
       `anAliased === "an-original"`,
@@ -66,7 +74,8 @@ add_task(async function() {
 
   await evalInConsoleAtPoint(
     dbg,
-    "babel-shadowed-vars",
+    "webpack3-babel6",
+    "shadowed-vars",
     { line: 18, column: 6 },
     [`aVar === "var3"`, `aLet === "let3"`, `aConst === "const3"`]
   );

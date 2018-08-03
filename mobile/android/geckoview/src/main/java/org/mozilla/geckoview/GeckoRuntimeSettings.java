@@ -20,6 +20,11 @@ import org.mozilla.geckoview.GeckoSession.TrackingProtectionDelegate;
 
 public final class GeckoRuntimeSettings implements Parcelable {
     /**
+     * {@link #mExtras} key for the crash reporting job id.
+     */
+    public static final String EXTRA_CRASH_REPORTING_JOB_ID = "crashReporterJobId";
+
+    /**
      * Settings builder used to construct the settings object.
      */
     public static final class Builder {
@@ -123,6 +128,8 @@ public final class GeckoRuntimeSettings implements Parcelable {
          * a SIGSEGV handler to be installed, and any crash encountered there will be
          * reported to Mozilla.
          *
+         * <br>If crash reporting is enabled {@link #crashReportingJobId(int)} must also be used.
+         *
          * @param enabled A flag determining whether native crash reporting should be enabled.
          *                Defaults to false.
          * @return This Builder.
@@ -137,12 +144,29 @@ public final class GeckoRuntimeSettings implements Parcelable {
          * a default unhandled exception handler to be installed, and any exceptions encountered
          * will automatically reported to Mozilla.
          *
+         * <br>If crash reporting is enabled {@link #crashReportingJobId(int)} must also be used.
+         *
          * @param enabled A flag determining whether Java crash reporting should be enabled.
          *                Defaults to false.
          * @return This Builder.
          */
         public @NonNull Builder javaCrashReportingEnabled(final boolean enabled) {
             mSettings.mJavaCrashReporting = enabled;
+            return this;
+        }
+
+        /**
+         * On Oreo and later devices we use the JobScheduler for crash reporting in the background.<br>
+         * This allows for setting the unique Job Id to be used.
+         * <a href="https://developer.android.com/reference/android/app/job/JobInfo.Builder#JobInfo.Builder(int,%20android.content.ComponentName)">
+         *           See why it must be unique</a>
+         *
+         * @param id A unique integer.
+         *
+         * @return This Builder.
+         */
+        public @NonNull Builder crashReportingJobId(final int id) {
+            mSettings.mCrashReportingJobId = id;
             return this;
         }
 
@@ -176,27 +200,10 @@ public final class GeckoRuntimeSettings implements Parcelable {
          *
          * @param lifetime The enforced cookie lifetime.
          *                 Use one of the {@link #COOKIE_LIFETIME_NORMAL COOKIE_LIFETIME_*} flags.
-         *                 Use {@link #cookieLifetimeDays} to set expiration
-         *                 days for {@link #COOKIE_LIFETIME_DAYS}.
          * @return The Builder instance.
          */
         public @NonNull Builder cookieLifetime(@CookieLifetime int lifetime) {
             mSettings.mCookieLifetime.set(lifetime);
-            return this;
-        }
-
-        /**
-         * Set the expiration days for {@link #COOKIE_LIFETIME_DAYS}.
-         *
-         * @param days Limit lifetime to N days. Only enforced for {@link #COOKIE_LIFETIME_DAYS}.
-         * @return The Builder instance.
-         */
-        public @NonNull Builder cookieLifetimeDays(int days) {
-            if (mSettings.mCookieLifetime.get() != COOKIE_LIFETIME_DAYS) {
-                throw new IllegalStateException(
-                    "Setting expiration days for incompatible cookie lifetime");
-            }
-            mSettings.mCookieLifetimeDays.set(days);
             return this;
         }
 
@@ -278,20 +285,23 @@ public final class GeckoRuntimeSettings implements Parcelable {
         "network.cookie.cookieBehavior", COOKIE_ACCEPT_ALL);
     /* package */ Pref<Integer> mCookieLifetime = new Pref<Integer>(
         "network.cookie.lifetimePolicy", COOKIE_LIFETIME_NORMAL);
-    /* package */ Pref<Integer> mCookieLifetimeDays = new Pref<Integer>(
-        "network.cookie.lifetime.days", 90);
     /* package */ Pref<String> mTrackingProtection = new Pref<String>(
         "urlclassifier.trackingTable",
-        TrackingProtection.buildPrefValue(TrackingProtectionDelegate.CATEGORY_ALL));
+        TrackingProtection.buildPrefValue(
+            TrackingProtectionDelegate.CATEGORY_TEST |
+            TrackingProtectionDelegate.CATEGORY_ANALYTIC |
+            TrackingProtectionDelegate.CATEGORY_SOCIAL |
+            TrackingProtectionDelegate.CATEGORY_AD));
     /* package */ Pref<Boolean> mConsoleOutput = new Pref<Boolean>(
         "geckoview.console.enabled", false);
 
     /* package */ boolean mNativeCrashReporting;
     /* package */ boolean mJavaCrashReporting;
+    /* package */ int mCrashReportingJobId;
     /* package */ boolean mDebugPause;
 
     private final Pref<?>[] mPrefs = new Pref<?>[] {
-        mCookieBehavior, mCookieLifetime, mCookieLifetimeDays, mConsoleOutput,
+        mCookieBehavior, mCookieLifetime, mConsoleOutput,
         mJavaScript, mRemoteDebugging, mTrackingProtection, mWebFonts
     };
 
@@ -326,6 +336,7 @@ public final class GeckoRuntimeSettings implements Parcelable {
 
         mNativeCrashReporting = settings.mNativeCrashReporting;
         mJavaCrashReporting = settings.mJavaCrashReporting;
+        mCrashReportingJobId = settings.mCrashReportingJobId;
         mDebugPause = settings.mDebugPause;
     }
 
@@ -441,6 +452,13 @@ public final class GeckoRuntimeSettings implements Parcelable {
     }
 
     /**
+     * Get the Job Id used on Oreo and later devices to manage crash reporting in background.
+     */
+    public int getCrashReportingServiceJobId() {
+        return mCrashReportingJobId;
+    }
+
+    /**
      * Gets whether the pause-for-debugger is enabled or not.
      *
      * @return True if the pause is enabled.
@@ -524,43 +542,15 @@ public final class GeckoRuntimeSettings implements Parcelable {
     }
 
     /**
-     * Get the enforced lifetime expiration days.
-     *
-     * Note: This is only enforced for {@link #COOKIE_LIFETIME_DAYS}.
-     *
-     * @return The enforced expiration days.
-     */
-    public int getCookieLifetimeDays() {
-        return mCookieLifetimeDays.get();
-    }
-
-    /**
      * Set the cookie lifetime.
      *
      * @param lifetime The enforced cookie lifetime.
      *                 Use one of the {@link #COOKIE_LIFETIME_NORMAL COOKIE_LIFETIME_*} flags.
-     *                 Use {@link #setCookieLifetimeDays} to set expiration
-     *                 days for {@link #COOKIE_LIFETIME_DAYS}.
      * @return This GeckoRuntimeSettings instance.
      */
     public @NonNull GeckoRuntimeSettings setCookieLifetime(
             @CookieLifetime int lifetime) {
         mCookieLifetime.set(lifetime);
-        return this;
-    }
-
-    /**
-     * Set the expiration days for {@link #COOKIE_LIFETIME_DAYS}.
-     *
-     * @param days Limit lifetime to N days. Only enforced for {@link #COOKIE_LIFETIME_DAYS}.
-     * @return This GeckoRuntimeSettings instance.
-     */
-    public @NonNull GeckoRuntimeSettings setCookieLifetimeDays(int days) {
-        if (mCookieLifetime.get() != COOKIE_LIFETIME_DAYS) {
-            throw new IllegalStateException(
-                "Setting expiration days for incompatible cookie lifetime");
-        }
-        mCookieLifetimeDays.set(days);
         return this;
     }
 
@@ -631,6 +621,7 @@ public final class GeckoRuntimeSettings implements Parcelable {
 
         ParcelableUtils.writeBoolean(out, mNativeCrashReporting);
         ParcelableUtils.writeBoolean(out, mJavaCrashReporting);
+        out.writeInt(mCrashReportingJobId);
         ParcelableUtils.writeBoolean(out, mDebugPause);
     }
 
@@ -649,6 +640,7 @@ public final class GeckoRuntimeSettings implements Parcelable {
 
         mNativeCrashReporting = ParcelableUtils.readBoolean(source);
         mJavaCrashReporting = ParcelableUtils.readBoolean(source);
+        mCrashReportingJobId = source.readInt();
         mDebugPause = ParcelableUtils.readBoolean(source);
     }
 

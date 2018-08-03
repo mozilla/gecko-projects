@@ -376,7 +376,7 @@ void
 CompositorBridgeParent::InitSameProcess(widget::CompositorWidget* aWidget,
                                         const LayersId& aLayerTreeId)
 {
-  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(XRE_IsParentProcess() || recordreplay::IsRecordingOrReplaying());
   MOZ_ASSERT(NS_IsMainThread());
 
   mWidget = aWidget;
@@ -454,11 +454,10 @@ CompositorBridgeParent::~CompositorBridgeParent()
   }
 }
 
-mozilla::ipc::IPCResult
-CompositorBridgeParent::RecvForceIsFirstPaint()
+void
+CompositorBridgeParent::ForceIsFirstPaint()
 {
   mCompositionManager->ForceIsFirstPaint();
-  return IPC_OK();
 }
 
 void
@@ -616,7 +615,7 @@ mozilla::ipc::IPCResult
 CompositorBridgeParent::RecvFlushRenderingAsync()
 {
   if (mWrBridge) {
-    mWrBridge->FlushRenderingAsync();
+    mWrBridge->FlushRendering(false);
     return IPC_OK();
   }
 
@@ -1045,7 +1044,12 @@ CompositorBridgeParent::CompositeToTarget(DrawTarget* aTarget, const gfx::IntRec
 
   TimeStamp time = mTestTime.valueOr(mCompositorScheduler->GetLastComposeTime());
   bool requestNextFrame = mCompositionManager->TransformShadowTree(time, mVsyncRate);
-  if (requestNextFrame) {
+
+  // Don't eagerly schedule new compositions here when recording or replaying.
+  // Recording/replaying processes schedule composites at the top of the main
+  // thread's event loop rather than via PVsync, which can cause the composites
+  // scheduled here to pile up without any drawing actually happening.
+  if (requestNextFrame && !recordreplay::IsRecordingOrReplaying()) {
     ScheduleComposition();
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
     // If we have visible windowed plugins then we need to wait for content (and
@@ -1800,16 +1804,14 @@ CompositorBridgeParent::RecvAdoptChild(const LayersId& child)
     MOZ_ASSERT(mWrBridge);
     RefPtr<wr::WebRenderAPI> api = mWrBridge->GetWebRenderAPI();
     api = api->Clone();
-    childWrBridge->UpdateWebRender(mWrBridge->CompositorScheduler(),
+    wr::Epoch newEpoch = childWrBridge->UpdateWebRender(mWrBridge->CompositorScheduler(),
                                    api,
                                    mWrBridge->AsyncImageManager(),
                                    GetAnimationStorage(),
                                    mWrBridge->GetTextureFactoryIdentifier());
     // Pretend we composited, since parent CompositorBridgeParent was replaced.
-    if (cpcp) {
-      TimeStamp now = TimeStamp::Now();
-      cpcp->DidComposite(child, now, now);
-    }
+    TimeStamp now = TimeStamp::Now();
+    NotifyPipelineRendered(childWrBridge->PipelineId(), newEpoch, now, now);
   }
 
   if (oldApzUpdater) {
@@ -2127,7 +2129,7 @@ CompositorBridgeParent::DidComposite(TimeStamp& aCompositeStart,
                                      TimeStamp& aCompositeEnd)
 {
   if (mWrBridge) {
-    NotifyDidComposite(mWrBridge->FlushPendingTransactionIds(), aCompositeStart, aCompositeEnd);
+    MOZ_ASSERT(false); // This should never get called for a WR compositor
   } else {
     NotifyDidComposite(mPendingTransaction, aCompositeStart, aCompositeEnd);
 #if defined(ENABLE_FRAME_LATENCY_LOG)
@@ -2201,19 +2203,13 @@ CompositorBridgeParent::GetAsyncImagePipelineManager() const
 void
 CompositorBridgeParent::NotifyDidComposite(TransactionId aTransactionId, TimeStamp& aCompositeStart, TimeStamp& aCompositeEnd)
 {
+  MOZ_ASSERT(!mWrBridge); // We should be going through NotifyPipelineRendered instead
+
   Unused << SendDidComposite(LayersId{0}, aTransactionId, aCompositeStart, aCompositeEnd);
 
   if (mLayerManager) {
     nsTArray<ImageCompositeNotificationInfo> notifications;
     mLayerManager->ExtractImageCompositeNotifications(&notifications);
-    if (!notifications.IsEmpty()) {
-      Unused << ImageBridgeParent::NotifyImageComposites(notifications);
-    }
-  }
-
-  if (mWrBridge) {
-    nsTArray<ImageCompositeNotificationInfo> notifications;
-    mWrBridge->ExtractImageCompositeNotifications(&notifications);
     if (!notifications.IsEmpty()) {
       Unused << ImageBridgeParent::NotifyImageComposites(notifications);
     }

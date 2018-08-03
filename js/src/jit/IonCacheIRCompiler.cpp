@@ -523,6 +523,20 @@ IonCacheIRCompiler::init()
         allocator.initInputLocation(0, ic->input());
         break;
       }
+      case CacheKind::BinaryArith: {
+        IonBinaryArithIC* ic = ic_->asBinaryArithIC();
+        ValueOperand output = ic->output();
+
+        available.add(output);
+
+        liveRegs_.emplace(ic->liveRegs());
+        outputUnchecked_.emplace(TypedOrValueRegister(output));
+
+        MOZ_ASSERT(numInputs == 2);
+        allocator.initInputLocation(0, ic->lhs());
+        allocator.initInputLocation(1, ic->rhs());
+        break;
+      }
       case CacheKind::Call:
       case CacheKind::Compare:
       case CacheKind::TypeOf:
@@ -861,35 +875,6 @@ IonCacheIRCompiler::emitGuardXrayExpandoShapeAndDefaultProto()
         masm.branchTestObject(Assembler::Equal, expandoAddress, failure->label());
         masm.bind(&done);
     }
-
-    return true;
-}
-
-bool
-IonCacheIRCompiler::emitGuardFunctionPrototype()
-{
-    Register obj = allocator.useRegister(masm, reader.objOperandId());
-    Register prototypeObject = allocator.useRegister(masm, reader.objOperandId());
-
-    // Allocate registers before the failure path to make sure they're registered
-    // by addFailurePath.
-    AutoScratchRegister scratch1(allocator, masm);
-    AutoScratchRegister scratch2(allocator, masm);
-
-    FailurePath* failure;
-    if (!addFailurePath(&failure))
-        return false;
-
-     // Guard on the .prototype object.
-    masm.loadPtr(Address(obj, NativeObject::offsetOfSlots()), scratch1);
-    uintptr_t slot =  readStubWord(reader.stubOffset(), StubField::Type::RawWord);
-    masm.move32(Imm32(slot), scratch2);
-    BaseValueIndex prototypeSlot(scratch1, scratch2);
-    masm.branchTestObject(Assembler::NotEqual, prototypeSlot, failure->label());
-    masm.unboxObject(prototypeSlot, scratch1);
-    masm.branchPtr(Assembler::NotEqual,
-                   prototypeObject,
-                   scratch1, failure->label());
 
     return true;
 }
@@ -2514,4 +2499,58 @@ IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer, CacheKind k
 
     attachStub(newStub, code);
     *attached = true;
+}
+
+typedef JSString* (*ConcatStringsFn)(JSContext*, HandleString, HandleString);
+static const VMFunction ConcatStringsInfo =
+    FunctionInfo<ConcatStringsFn>(ConcatStrings<CanGC>, "ConcatStrings", NonTailCall);
+
+bool
+IonCacheIRCompiler::emitCallStringConcatResult()
+{
+    AutoSaveLiveRegisters save(*this);
+    AutoOutputRegister output(*this);
+
+    Register lhs = allocator.useRegister(masm, reader.stringOperandId());
+    Register rhs = allocator.useRegister(masm, reader.stringOperandId());
+
+    allocator.discardStack(masm);
+
+    prepareVMCall(masm, save);
+
+    masm.Push(rhs);
+    masm.Push(lhs);
+
+    if (!callVM(masm, ConcatStringsInfo))
+        return false;
+
+    masm.tagValue(JSVAL_TYPE_STRING, ReturnReg, output.valueReg());
+    return true;
+}
+
+typedef bool (*DoConcatStringObjectFn)(JSContext*, HandleValue, HandleValue,
+                                       MutableHandleValue);
+const VMFunction DoIonConcatStringObjectInfo =
+    FunctionInfo<DoConcatStringObjectFn>(DoConcatStringObject, "DoIonConcatStringObject");
+
+bool
+IonCacheIRCompiler::emitCallStringObjectConcatResult()
+{
+    AutoSaveLiveRegisters save(*this);
+    AutoOutputRegister output(*this);
+
+    ValueOperand lhs = allocator.useValueRegister(masm, reader.valOperandId());
+    ValueOperand rhs = allocator.useValueRegister(masm, reader.valOperandId());
+
+    allocator.discardStack(masm);
+
+    prepareVMCall(masm, save);
+    masm.Push(rhs);
+    masm.Push(lhs);
+
+    if (!callVM(masm, DoIonConcatStringObjectInfo))
+        return false;
+
+    masm.storeCallResultValue(output);
+    return true;
 }

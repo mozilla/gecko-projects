@@ -5,6 +5,7 @@
 from __future__ import absolute_import, unicode_literals
 
 import os
+import gzip
 import itertools
 import json
 import sys
@@ -12,6 +13,7 @@ import shutil
 
 import mozpack.path as mozpath
 from mozbuild import shellutil
+from mozbuild.analyze.graph import Graph
 from mozbuild.base import MozbuildObject
 from mozbuild.backend.base import PartialBackend, HybridBackend
 from mozbuild.backend.recursivemake import RecursiveMakeBackend
@@ -44,6 +46,7 @@ from ..frontend.data import (
     Program,
     SimpleProgram,
     HostLibrary,
+    HostRustLibrary,
     HostProgram,
     HostSimpleProgram,
     RustLibrary,
@@ -265,11 +268,7 @@ class TupBackend(CommonBackend):
         self._gtests = '$(MOZ_OBJ_ROOT)/<gtest>'
         self._default_group = '$(MOZ_OBJ_ROOT)/<default>'
 
-        # The two rust libraries in the tree share many prerequisites, so we need
-        # to prune common dependencies and therefore build all rust from the same
-        # Tupfile.
-        self._rust_outputs = set()
-        self._rust_backend_file = self._get_backend_file('toolkit/library/rust')
+        self._rust_cmds = set()
 
         self._built_in_addons = set()
         self._built_in_addons_file = 'dist/bin/browser/chrome/browser/content/browser/built_in_addons.json'
@@ -294,6 +293,8 @@ class TupBackend(CommonBackend):
         args = [self.environment.substs['TUP'], 'upd'] + what
         if self.environment.substs.get('MOZ_AUTOMATION'):
             args += ['--quiet']
+        else:
+            args += ['--debug-logging']
         if verbose:
             args += ['--verbose']
         if jobs > 0:
@@ -304,12 +305,14 @@ class TupBackend(CommonBackend):
                                   line_handler=output.on_line,
                                   ensure_exit_code=False,
                                   append_env=self._get_mozconfig_env(config))
-        # upload Tup db
-        if (not status and
-            self.environment.substs.get('MOZ_AUTOMATION') and self.environment.substs.get('UPLOAD_TUP_DB')):
+        if not status and self.environment.substs.get('MOZ_AUTOMATION'):
             src = mozpath.join(self.environment.topsrcdir, '.tup')
-            dst = mozpath.join(os.environ['UPLOAD_PATH'], 'tup_db')
-            shutil.make_archive(dst, 'zip', src)
+            dst = os.environ['UPLOAD_PATH']
+            if self.environment.substs.get('UPLOAD_TUP_DB'):
+                shutil.make_archive(mozpath.join(dst, 'tup_db'), 'zip', src)
+            g = Graph(mozpath.join(src, 'db'))
+            with gzip.open(mozpath.join(dst, 'cost_dict.gz'), 'wt') as outfile:
+                json.dump(g.get_cost_dict(), outfile)
         return status
 
     def _get_backend_file(self, relobjdir):
@@ -380,9 +383,9 @@ class TupBackend(CommonBackend):
             static_libs += rust_linked
 
         symbols_file = []
-        if shlib.symbols_file:
+        if (shlib.symbols_file and
+            backend_file.environment.substs.get('GCC_USE_GNU_LD')):
             inputs.append(shlib.symbols_file)
-            # TODO: Assumes GNU LD
             symbols_file = ['-Wl,--version-script,%s' % shlib.symbols_file]
 
         cmd = (
@@ -484,13 +487,19 @@ class TupBackend(CommonBackend):
         else:
             outputs = [mozpath.relpath(prog.output_path.full_path,
                                        backend_file.objdir)]
-        host_libs = []
-        for lib in prog.linked_libraries:
-            if isinstance(lib, HostLibrary):
-                host_libs.append(lib)
-        host_libs = self._lib_paths(backend_file.objdir, host_libs)
-
+        host_libs = self._lib_paths(backend_file.objdir,
+                                    (lib for lib in prog.linked_libraries
+                                     if isinstance(lib, HostLibrary)))
         inputs = objs + host_libs
+
+        rust_linked = self._lib_paths(backend_file.objdir,
+                                      (lib for lib in prog.linked_libraries
+                                       if isinstance(lib, HostRustLibrary)))
+        extra_inputs = []
+        if rust_linked:
+            extra_inputs += [self._rust_libs]
+            host_libs += rust_linked
+
         use_cxx = any(f.endswith(('.cc', '.cpp')) for f in prog.source_files())
         cc_or_cxx = 'HOST_CXX' if use_cxx else 'HOST_CC'
         cmd = (
@@ -504,6 +513,7 @@ class TupBackend(CommonBackend):
         backend_file.rule(
             cmd=cmd,
             inputs=inputs,
+            extra_inputs=extra_inputs,
             outputs=outputs,
             display='LINK %o'
         )
@@ -667,7 +677,7 @@ class TupBackend(CommonBackend):
         # Run 'tup init' if necessary.
         if not os.path.exists(mozpath.join(self.environment.topsrcdir, ".tup")):
             tup = self.environment.substs.get('TUP', 'tup')
-            self._cmd.run_process(cwd=self.environment.topsrcdir, log_name='tup', args=[tup, 'init'])
+            self._cmd.run_process(cwd=self.environment.topsrcdir, log_name='tup', args=[tup, 'init', '--no-sync'])
 
 
     def _get_cargo_flags(self, obj):
@@ -722,6 +732,13 @@ class TupBackend(CommonBackend):
             'RUSTFLAGS': '%s %s' % (' '.join(self.environment.substs['MOZ_RUST_DEFAULT_FLAGS']),
                                     ' '.join(self.environment.substs['RUSTFLAGS'])),
         })
+
+        if os.environ.get('MOZ_AUTOMATION'):
+            # Build scripts generally read environment variables that are set
+            # by cargo, however, some may rely on MOZ_AUTOMATION. We may need
+            # to audit for others as well.
+            env['MOZ_AUTOMATION'] = os.environ['MOZ_AUTOMATION']
+
         return env
 
     def _gen_cargo_rules(self, backend_file, build_plan, cargo_env):
@@ -796,10 +813,14 @@ class TupBackend(CommonBackend):
             invocation['full-deps'] = set(inputs)
             invocation['full-deps'].update(invocation['outputs'])
 
-            output_key = tuple(outputs)
-            if output_key not in self._rust_outputs:
-                self._rust_outputs.add(output_key)
-                self._rust_backend_file.rule(
+            cmd_key = ' '.join(command)
+            if cmd_key not in self._rust_cmds:
+                self._rust_cmds.add(cmd_key)
+                # The two rust libraries in the tree share many prerequisites,
+                # so we need to prune common dependencies and therefore build
+                # all rust from the same Tupfile.
+                rust_backend_file = self._get_backend_file('toolkit/library/rust')
+                rust_backend_file.rule(
                     command,
                     inputs=sorted(inputs),
                     outputs=outputs,
@@ -809,9 +830,7 @@ class TupBackend(CommonBackend):
                 )
 
                 for dst, link in invocation['links'].iteritems():
-                    self._rust_outputs.add(output_key)
-                    self._rust_backend_file.symlink_rule(link, dst,
-                                                         self._rust_libs)
+                    rust_backend_file.symlink_rule(link, dst, self._rust_libs)
 
         for val in enumerate(invocations):
             _process(*val)
@@ -926,9 +945,22 @@ class TupBackend(CommonBackend):
             if not path:
                 raise Exception("Cannot install to " + target)
 
+        js_shell = self.environment.substs.get('JS_SHELL_NAME')
+        if js_shell:
+            js_shell = '%s%s' % (js_shell,
+                                 self.environment.substs['BIN_SUFFIX'])
+
         for path, files in obj.files.walk():
             self._add_features(target, path)
             for f in files:
+
+                if (js_shell and isinstance(obj, ObjdirFiles) and
+                    f.endswith(js_shell)):
+                    # Skip this convenience install for now. Accessing
+                    # !/js/src/js when trying to find headers creates
+                    # an error for tup when !/js/src/js is also a target.
+                    continue
+
                 output_group = None
                 if any(mozpath.match(mozpath.basename(f), p)
                        for p in self._compile_env_files):
@@ -1016,10 +1048,10 @@ class TupBackend(CommonBackend):
         backend_file.export_shell()
 
         all_idl_directories = set()
-        all_idl_directories.update(*map(lambda x: x[1], manager.modules.itervalues()))
+        all_idl_directories.update(*map(lambda x: x.directories, manager.modules.itervalues()))
 
         all_xpts = []
-        for module, (idls, _) in sorted(manager.modules.iteritems()):
+        for module_name, module in sorted(manager.modules.iteritems()):
             cmd = [
                 '$(PYTHON_PATH)',
                 '$(PLY_INCLUDE)',
@@ -1037,13 +1069,13 @@ class TupBackend(CommonBackend):
                 '$(DIST)/include',
                 '$(DIST)/xpcrs',
                 '.',
-                module,
+                module_name,
             ])
-            cmd.extend(sorted(idls))
+            cmd.extend(sorted(module.idl_files))
 
-            all_xpts.append('$(MOZ_OBJ_ROOT)/%s/%s.xpt' % (backend_file.relobjdir, module))
-            outputs = ['%s.xpt' % module]
-            stems = sorted(mozpath.splitext(mozpath.basename(idl))[0] for idl in idls)
+            all_xpts.append('$(MOZ_OBJ_ROOT)/%s/%s.xpt' % (backend_file.relobjdir, module_name))
+            outputs = ['%s.xpt' % module_name]
+            stems = sorted(module.stems())
             outputs.extend(['$(MOZ_OBJ_ROOT)/dist/include/%s.h' % f for f in stems])
             outputs.extend(['$(MOZ_OBJ_ROOT)/dist/xpcrs/rt/%s.rs' % f for f in stems])
             outputs.extend(['$(MOZ_OBJ_ROOT)/dist/xpcrs/bt/%s.rs' % f for f in stems])
@@ -1053,7 +1085,7 @@ class TupBackend(CommonBackend):
                     '$(MOZ_OBJ_ROOT)/xpcom/idl-parser/xpidl/xpidlyacc.py',
                     self._installed_idls,
                 ],
-                display='XPIDL %s' % module,
+                display='XPIDL %s' % module_name,
                 cmd=cmd,
                 outputs=outputs,
                 output_group=self._installed_files,

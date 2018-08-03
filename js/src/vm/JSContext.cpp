@@ -39,6 +39,12 @@
 #include "jit/PcScriptCache.h"
 #include "js/CharacterEncoding.h"
 #include "js/Printf.h"
+#ifdef JS_SIMULATOR_ARM64
+# include "jit/arm64/vixl/Simulator-vixl.h"
+#endif
+#ifdef JS_SIMULATOR_ARM
+# include "jit/arm/Simulator-arm.h"
+#endif
 #include "util/DoubleToString.h"
 #include "util/NativeStack.h"
 #include "util/Windows.h"
@@ -300,6 +306,7 @@ js::ReportOutOfMemory(JSContext* cx)
      */
     fprintf(stderr, "ReportOutOfMemory called\n");
 #endif
+    mozilla::recordreplay::InvalidateRecording("OutOfMemory exception thrown");
 
     if (cx->helperThread())
         return cx->addPendingOutOfMemory();
@@ -336,6 +343,7 @@ js::ReportOverRecursed(JSContext* maybecx, unsigned errorNumber)
      */
     fprintf(stderr, "ReportOverRecursed called\n");
 #endif
+    mozilla::recordreplay::InvalidateRecording("OverRecursed exception thrown");
     if (maybecx) {
         if (!maybecx->helperThread()) {
             JS_ReportErrorNumberASCII(maybecx, GetErrorMessage, nullptr, errorNumber);
@@ -1037,6 +1045,7 @@ InternalEnqueuePromiseJobCallback(JSContext* cx, JS::HandleObject job,
                                   JS::HandleObject incumbentGlobal, void* data)
 {
     MOZ_ASSERT(job);
+    JS::JobQueueMayNotBeEmpty(cx);
     if (!cx->jobQueue->append(job)) {
         ReportOutOfMemory(cx);
         return false;
@@ -1090,6 +1099,7 @@ JS_FRIEND_API(bool)
 js::EnqueueJob(JSContext* cx, JS::HandleObject job)
 {
     MOZ_ASSERT(cx->jobQueue);
+    JS::JobQueueMayNotBeEmpty(cx);
     if (!cx->jobQueue->append(job)) {
         ReportOutOfMemory(cx);
         return false;
@@ -1145,6 +1155,12 @@ js::RunJobs(JSContext* cx)
                 continue;
 
             cx->jobQueue->get()[i] = nullptr;
+
+            // If the next job is the last job in the job queue, allow
+            // skipping the standard job queuing behavior.
+            if (i == cx->jobQueue->length() - 1)
+                JS::JobQueueIsEmpty(cx);
+
             AutoRealm ar(cx, job);
             {
                 if (!JS::Call(cx, UndefinedHandleValue, job, args, &rval)) {
@@ -1288,6 +1304,7 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
     jobQueue(nullptr),
     drainingJobQueue(false),
     stopDrainingJobQueue(false),
+    canSkipEnqueuingJobs(false),
     promiseRejectionTrackerCallback(nullptr),
     promiseRejectionTrackerCallbackData(nullptr)
 {

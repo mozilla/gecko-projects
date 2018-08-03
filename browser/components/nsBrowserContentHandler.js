@@ -176,7 +176,7 @@ function getPostUpdateOverridePage(defaultOverridePage) {
  */
 function openBrowserWindow(cmdLine, urlOrUrlList, postData = null,
                            forcePrivate = false) {
-  let chromeURL = Services.prefs.getCharPref("browser.chromeURL");
+  let chromeURL = AppConstants.BROWSER_CHROME_URL;
 
   let args;
   if (!urlOrUrlList) {
@@ -210,8 +210,7 @@ function openBrowserWindow(cmdLine, urlOrUrlList, postData = null,
       win.document.documentElement.removeAttribute("windowtype");
 
       if (forcePrivate) {
-        win.QueryInterface(Ci.nsIInterfaceRequestor)
-           .getInterface(Ci.nsIWebNavigation)
+        win.docShell
            .QueryInterface(Ci.nsILoadContext)
            .usePrivateBrowsing = true;
       }
@@ -420,8 +419,7 @@ nsBrowserContentHandler.prototype = {
       if (cmdLine.state == Ci.nsICommandLine.STATE_INITIAL_LAUNCH) {
         let win = Services.wm.getMostRecentWindow("navigator:blank");
         if (win) {
-          win.QueryInterface(Ci.nsIInterfaceRequestor)
-             .getInterface(Ci.nsIWebNavigation)
+          win.docShell
              .QueryInterface(Ci.nsILoadContext)
              .usePrivateBrowsing = true;
         }
@@ -670,12 +668,7 @@ function handURIToExistingBrowser(uri, location, cmdLine, forcePrivate, triggeri
     return;
   }
 
-  var navNav = navWin.QueryInterface(Ci.nsIInterfaceRequestor)
-                     .getInterface(Ci.nsIWebNavigation);
-  var rootItem = navNav.QueryInterface(Ci.nsIDocShellTreeItem).rootTreeItem;
-  var rootWin = rootItem.QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDOMWindow);
-  var bwin = rootWin.QueryInterface(Ci.nsIDOMChromeWindow).browserDOMWindow;
+  var bwin = navWin.browserDOMWindow;
   bwin.openURI(uri, null, location,
                Ci.nsIBrowserDOMWindow.OPEN_EXTERNAL, triggeringPrincipal);
 }

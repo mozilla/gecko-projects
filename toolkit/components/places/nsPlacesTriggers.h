@@ -261,7 +261,7 @@
 )
 
 #define CREATE_KEYWORDS_FOREIGNCOUNT_AFTERINSERT_TRIGGER NS_LITERAL_CSTRING( \
-  "CREATE TEMP TRIGGER moz_keyords_foreign_count_afterinsert_trigger " \
+  "CREATE TEMP TRIGGER moz_keywords_foreign_count_afterinsert_trigger " \
   "AFTER INSERT ON moz_keywords FOR EACH ROW " \
   "BEGIN " \
     "UPDATE moz_places " \
@@ -294,6 +294,14 @@
 #define CREATE_BOOKMARKS_DELETED_AFTERINSERT_TRIGGER NS_LITERAL_CSTRING( \
   "CREATE TEMP TRIGGER moz_bookmarks_deleted_afterinsert_v1_trigger " \
   "AFTER INSERT ON moz_bookmarks_deleted FOR EACH ROW " \
+  "BEGIN " \
+    "SELECT note_sync_change(); " \
+  "END" \
+)
+
+#define CREATE_BOOKMARKS_DELETED_AFTERDELETE_TRIGGER NS_LITERAL_CSTRING( \
+  "CREATE TEMP TRIGGER moz_bookmarks_deleted_afterdelete_v1_trigger " \
+  "AFTER DELETE ON moz_bookmarks_deleted FOR EACH ROW " \
   "BEGIN " \
     "SELECT note_sync_change(); " \
   "END" \

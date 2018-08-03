@@ -23,6 +23,7 @@ exports.getRawSourceURL = getRawSourceURL;
 exports.getFormattedSourceId = getFormattedSourceId;
 exports.getFilename = getFilename;
 exports.getTruncatedFileName = getTruncatedFileName;
+exports.getDisplayPath = getDisplayPath;
 exports.getFileURL = getFileURL;
 exports.getSourcePath = getSourcePath;
 exports.getSourceLineCount = getSourceLineCount;
@@ -43,6 +44,8 @@ var _url = require("devtools/client/debugger/new/dist/vendors").vendored["url"];
 var _devtoolsModules = require("devtools/client/debugger/new/dist/vendors").vendored["devtools-modules"];
 
 var _sourcesTree = require("./sources-tree/index");
+
+var _prefs = require("./prefs");
 
 const sourceTypes = exports.sourceTypes = {
   coffee: "coffeescript",
@@ -67,18 +70,7 @@ function trimUrlQuery(url) {
 }
 
 function shouldPrettyPrint(source) {
-  if (!source) {
-    return false;
-  }
-
-  const _isPretty = isPretty(source);
-
-  const _isJavaScript = isJavaScript(source);
-
-  const isOriginal = (0, _devtoolsSourceMap.isOriginalId)(source.id);
-  const hasSourceMap = source.sourceMapURL;
-
-  if (_isPretty || isOriginal || hasSourceMap || !_isJavaScript) {
+  if (!source || isPretty(source) || !isJavaScript(source) || (0, _devtoolsSourceMap.isOriginalId)(source.id) || source.sourceMapURL || !_prefs.prefs.clientSourceMapsEnabled) {
     return false;
   }
 
@@ -192,6 +184,40 @@ function getFilename(source) {
 
 function getTruncatedFileName(source, length = 30) {
   return (0, _text.truncateMiddleText)(getFilename(source), length);
+}
+/* Gets path for files with same filename for editor tabs, breakpoints, etc.
+ * Pass the source, and list of other sources
+ *
+ * @memberof utils/source
+ * @static
+ */
+
+
+function getDisplayPath(mySource, sources) {
+  const filename = getFilename(mySource); // Find sources that have the same filename, but different paths
+  // as the original source
+
+  const similarSources = sources.filter(source => mySource.url != source.url && filename == getFilename(source));
+
+  if (similarSources.length == 0) {
+    return undefined;
+  } // get an array of source path directories e.g. ['a/b/c.html'] => [['b', 'a']]
+
+
+  const paths = [mySource, ...similarSources].map(source => (0, _sourcesTree.getURL)(source).path.split("/").reverse().slice(1)); // create an array of similar path directories and one dis-similar directory
+  // for example [`a/b/c.html`, `a1/b/c.html`] => ['b', 'a']
+  // where 'b' is the similar directory and 'a' is the dis-similar directory.
+
+  let similar = true;
+  const displayPath = [];
+
+  for (let i = 0; similar && i < paths[0].length; i++) {
+    const [dir, ...dirs] = paths.map(path => path[i]);
+    displayPath.push(dir);
+    similar = dirs.includes(dir);
+  }
+
+  return displayPath.reverse().join("/");
 }
 /**
  * Gets a readable source URL for display purposes.

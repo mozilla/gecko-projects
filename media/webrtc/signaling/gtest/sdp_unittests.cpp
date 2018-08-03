@@ -22,6 +22,7 @@
 #include "signaling/src/sdp/SipccSdpParser.h"
 #include "signaling/src/sdp/SdpMediaSection.h"
 #include "signaling/src/sdp/SdpAttribute.h"
+#include "signaling/src/sdp/ParsingResultComparer.h"
 
 extern "C" {
 #include "signaling/src/sdp/sipcc/sdp.h"
@@ -1873,7 +1874,7 @@ const std::string kBasicAudioVideoOffer =
 "a=ssrc:5150" CRLF
 "m=video 9 RTP/SAVPF 120 121 122 123" CRLF
 "c=IN IP6 ::1" CRLF
-"a=fingerprint:sha-1 DF:FA:FB:08:3B:3C:54:1D:D7:D4:05:77:A0:72:9B:14:08:6D:0F:4C:2E:AC:8A:FD:0A:8E:99:BF:5D:E8:3C:E7" CRLF
+"a=fingerprint:sha-1 DF:FA:FB:08:3B:3C:54:1D:D7:D4:05:77:A0:72:9B:14:08:6D:0F:4C" CRLF
 "a=mid:second" CRLF
 "a=rtpmap:120 VP8/90000" CRLF
 "a=fmtp:120 max-fs=3600;max-fr=30" CRLF
@@ -1904,6 +1905,7 @@ const std::string kBasicAudioVideoOffer =
 "a=end-of-candidates" CRLF
 "a=ssrc:1111 foo" CRLF
 "a=ssrc:1111 foo:bar" CRLF
+"a=ssrc:1111 msid:1d0cdb4e-5934-4f0f-9f88-40392cb60d31 315b086a-5cb6-4221-89de-caf0b038c79d" CRLF
 "a=imageattr:120 send * recv *" CRLF
 "a=imageattr:121 send [x=640,y=480] recv [x=640,y=480]" CRLF
 "a=rid:bar recv pt=120;max-width=800;max-height=600" CRLF
@@ -2055,7 +2057,7 @@ TEST_P(NewSdpTest, CheckFingerprint) {
       fingerprints.mFingerprints[0].hashFunc)
     << "Wrong hash function";
   ASSERT_EQ("DF:FA:FB:08:3B:3C:54:1D:D7:D4:05:77:A0:72:9B:14:"
-            "08:6D:0F:4C:2E:AC:8A:FD:0A:8E:99:BF:5D:E8:3C:E7",
+            "08:6D:0F:4C",
             SdpFingerprintAttributeList::FormatFingerprint(
                 fingerprints.mFingerprints[0].fingerprint))
     << "Wrong fingerprint";
@@ -2073,7 +2075,6 @@ TEST_P(NewSdpTest, CheckIdentity) {
 }
 
 TEST_P(NewSdpTest, CheckDtlsMessage) {
-  SKIP_TEST_WITH_RUST_PARSER; // See Bug 1432920
   ParseSdp(kBasicAudioVideoOffer);
   ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
   ASSERT_TRUE(mSdp->GetAttributeList().HasAttribute(
@@ -2157,11 +2158,15 @@ TEST_P(NewSdpTest, CheckSsrc)
   ASSERT_TRUE(mSdp->GetMediaSection(1).GetAttributeList().HasAttribute(
       SdpAttribute::kSsrcAttribute));
   ssrcs = mSdp->GetMediaSection(1).GetAttributeList().GetSsrc().mSsrcs;
-  ASSERT_EQ(2U, ssrcs.size());
+  ASSERT_EQ(3U, ssrcs.size());
   ASSERT_EQ(1111U, ssrcs[0].ssrc);
   ASSERT_EQ("foo", ssrcs[0].attribute);
   ASSERT_EQ(1111U, ssrcs[1].ssrc);
   ASSERT_EQ("foo:bar", ssrcs[1].attribute);
+  ASSERT_EQ(1111U, ssrcs[2].ssrc);
+  ASSERT_EQ("msid:1d0cdb4e-5934-4f0f-9f88-40392cb60d31 "
+                 "315b086a-5cb6-4221-89de-caf0b038c79d",
+            ssrcs[2].attribute);
 }
 
 TEST_P(NewSdpTest, CheckRtpmap) {
@@ -2489,7 +2494,7 @@ static const std::string kVideoWithRedAndUlpfecSdp =
   "t=0 0" CRLF
   "m=video 9 RTP/SAVPF 97 120 121 122 123" CRLF
   "c=IN IP6 ::1" CRLF
-  "a=fingerprint:sha-1 DF:FA:FB:08:3B:3C:54:1D:D7:D4:05:77:A0:72:9B:14:08:6D:0F:4C:2E:AC:8A:FD:0A:8E:99:BF:5D:E8:3C:E7" CRLF
+  "a=fingerprint:sha-1 DF:FA:FB:08:3B:3C:54:1D:D7:D4:05:77:A0:72:9B:14:08:6D:0F:4C" CRLF
   "a=rtpmap:97 H264/90000" CRLF
   "a=fmtp:97 profile-level-id=42a01e" CRLF
   "a=rtpmap:120 VP8/90000" CRLF
@@ -2819,7 +2824,6 @@ TEST_P(NewSdpTest, CheckDirections) {
 }
 
 TEST_P(NewSdpTest, CheckCandidates) {
-  SKIP_TEST_WITH_RUST_PARSER; // See Bug 1432920
   ParseSdp(kBasicAudioVideoOffer);
   ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
   ASSERT_EQ(3U, mSdp->GetMediaSectionCount()) << "Wrong number of media sections";
@@ -3045,6 +3049,7 @@ const std::string kBasicAudioVideoDataOffer =
 "a=rtcp-fb:97 nack pli" CRLF
 "a=rtcp-fb:97 ccm fir" CRLF
 "a=rtcp-fb:* ccm tmmbr" CRLF
+"a=rtcp-fb:120 transport-cc" CRLF
 "a=setup:actpass" CRLF
 "a=rtcp-mux" CRLF
 "m=application 9 DTLS/SCTP 5000" CRLF
@@ -3131,7 +3136,13 @@ TEST_P(NewSdpTest, CheckRtcpFb) {
   auto& video_attrs = mSdp->GetMediaSection(1).GetAttributeList();
   ASSERT_TRUE(video_attrs.HasAttribute(SdpAttribute::kRtcpFbAttribute));
   auto& rtcpfbs = video_attrs.GetRtcpFb().mFeedbacks;
-  ASSERT_EQ(20U, rtcpfbs.size());
+
+  if (IsParsingWithSipccParser()) {
+    ASSERT_EQ(20U, rtcpfbs.size());
+  } else {
+    ASSERT_EQ(21U, rtcpfbs.size());
+  }
+
   CheckRtcpFb(rtcpfbs[0], "120", SdpRtcpFbAttributeList::kAck, "rpsi");
   CheckRtcpFb(rtcpfbs[1], "120", SdpRtcpFbAttributeList::kAck, "app", "foo");
   CheckRtcpFb(rtcpfbs[2], "120", SdpRtcpFbAttributeList::kNack, "");
@@ -3152,6 +3163,10 @@ TEST_P(NewSdpTest, CheckRtcpFb) {
   CheckRtcpFb(rtcpfbs[17], "97",  SdpRtcpFbAttributeList::kNack, "pli");
   CheckRtcpFb(rtcpfbs[18], "97", SdpRtcpFbAttributeList::kCcm, "fir");
   CheckRtcpFb(rtcpfbs[19], "*", SdpRtcpFbAttributeList::kCcm, "tmmbr");
+
+  if (!IsParsingWithSipccParser()) {
+    CheckRtcpFb(rtcpfbs[20], "120", SdpRtcpFbAttributeList::kTransCC, "");
+  }
 }
 
 TEST_P(NewSdpTest, CheckRtcp) {
@@ -3735,7 +3750,6 @@ const std::string kMalformedImageattr =
 
 TEST_P(NewSdpTest, CheckMalformedImageattr)
 {
-  SKIP_TEST_WITH_RUST_PARSER; // See Bug 1432930
   if (::testing::get<0>(GetParam())) {
     // Don't do a parse/serialize before running this test
     return;
@@ -4117,6 +4131,22 @@ TEST_P(NewSdpTest, CheckAddDataChannel) {
   ASSERT_TRUE(mediaSection.GetAttributeList().
               HasAttribute(SdpAttribute::kSctpPortAttribute));
   ASSERT_EQ(15000U, mediaSection.GetAttributeList().GetSctpPort());
+}
+
+TEST(NewSdpTestNoFixture, CheckParsingResultComparer) {
+  auto check_comparison = [] (const std::string sdp_string) {
+    SipccSdpParser sipccParser;
+    RsdparsaSdpParser rustParser;
+
+    auto sipccSdp = sipccParser.Parse(sdp_string);
+    auto rustSdp = rustParser.Parse(sdp_string);
+
+    ParsingResultComparer comparer;
+    return comparer.Compare(*rustSdp, *sipccSdp, sdp_string);
+  };
+
+  ASSERT_TRUE(check_comparison(kBasicAudioVideoOffer));
+  ASSERT_TRUE(check_comparison(kH264AudioVideoOffer));
 }
 
 TEST(NewSdpTestNoFixture, CheckAttributeTypeSerialize) {

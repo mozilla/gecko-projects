@@ -11,10 +11,9 @@ use api::{BorderWidths, LayoutToWorldScale, NormalBorder};
 use app_units::Au;
 use border::{BorderCacheKey, BorderRenderTaskInfo};
 use box_shadow::BLUR_SAMPLE_SCALE;
-use clip_scroll_tree::{ClipChainIndex, ClipScrollNodeIndex, CoordinateSystemId};
-use clip_scroll_node::ClipScrollNode;
+use clip_scroll_tree::{ClipChainIndex, CoordinateSystemId, SpatialNodeIndex};
 use clip::{ClipChain, ClipChainNode, ClipChainNodeIter, ClipChainNodeRef, ClipSource};
-use clip::{ClipSourcesHandle, ClipWorkItem};
+use clip::{ClipSourcesIndex, ClipWorkItem};
 use frame_builder::{FrameBuildingContext, FrameBuildingState, PictureContext, PictureState};
 use frame_builder::PrimitiveRunContext;
 use glyph_rasterizer::{FontInstance, FontTransform, GlyphKey, FONT_SIZE_LIMIT};
@@ -31,10 +30,11 @@ use renderer::{MAX_VERTEX_TEXTURE_WIDTH};
 use resource_cache::{ImageProperties, ImageRequest, ResourceCache};
 use scene::SceneProperties;
 use segment::SegmentBuilder;
+use spatial_node::SpatialNode;
 use std::{mem, usize};
 use std::sync::Arc;
-use util::{MatrixHelpers, WorldToLayoutFastTransform, calculate_screen_bounding_rect};
-use util::{pack_as_float, recycle_vec};
+use util::{MatrixHelpers, calculate_screen_bounding_rect};
+use util::{pack_as_float, recycle_vec, TransformedRectKind};
 
 
 const MIN_BRUSH_SPLIT_AREA: f32 = 256.0 * 256.0;
@@ -42,17 +42,31 @@ pub const VECS_PER_SEGMENT: usize = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ScrollNodeAndClipChain {
-    pub scroll_node_id: ClipScrollNodeIndex,
+    pub spatial_node_index: SpatialNodeIndex,
     pub clip_chain_index: ClipChainIndex,
 }
 
 impl ScrollNodeAndClipChain {
     pub fn new(
-        scroll_node_id: ClipScrollNodeIndex,
+        spatial_node_index: SpatialNodeIndex,
         clip_chain_index: ClipChainIndex
     ) -> Self {
-        ScrollNodeAndClipChain { scroll_node_id, clip_chain_index }
+        ScrollNodeAndClipChain {
+            spatial_node_index,
+            clip_chain_index,
+        }
     }
+}
+
+// This is CPU-side information about a transform, that is relevant
+// during culling and primitive prep pass. Often it is the same as
+// the information in the clip-scroll tree. However, if we decide
+// to rasterize a picture in local space, then this will be the
+// transform relative to that picture's coordinate system.
+pub struct Transform<'a> {
+    pub m: &'a LayoutToWorldTransform,
+    pub backface_is_visible: bool,
+    pub transform_kind: TransformedRectKind,
 }
 
 #[derive(Debug)]
@@ -174,7 +188,7 @@ pub struct ScreenRect {
 #[derive(Debug)]
 pub struct PrimitiveMetadata {
     pub opacity: PrimitiveOpacity,
-    pub clip_sources: Option<ClipSourcesHandle>,
+    pub clip_sources_index: Option<ClipSourcesIndex>,
     pub prim_kind: PrimitiveKind,
     pub cpu_prim_index: SpecificPrimitiveIndex,
     pub gpu_location: GpuCacheHandle,
@@ -1242,7 +1256,7 @@ impl PrimitiveStore {
         composite_mode: Option<PictureCompositeMode>,
         is_in_3d_context: bool,
         pipeline_id: PipelineId,
-        reference_frame_index: ClipScrollNodeIndex,
+        reference_frame_index: SpatialNodeIndex,
         frame_output_pipeline_id: Option<PipelineId>,
         apply_local_clip_rect: bool,
     ) -> PictureIndex {
@@ -1267,14 +1281,14 @@ impl PrimitiveStore {
         local_rect: &LayoutRect,
         local_clip_rect: &LayoutRect,
         is_backface_visible: bool,
-        clip_sources: Option<ClipSourcesHandle>,
+        clip_sources_index: Option<ClipSourcesIndex>,
         tag: Option<ItemTag>,
         container: PrimitiveContainer,
     ) -> PrimitiveIndex {
         let prim_index = self.cpu_metadata.len();
 
         let base_metadata = PrimitiveMetadata {
-            clip_sources,
+            clip_sources_index,
             gpu_location: GpuCacheHandle::new(),
             clip_task_id: None,
             local_rect: *local_rect,
@@ -1481,7 +1495,9 @@ impl PrimitiveStore {
                 //           scale factor from the world transform to get an appropriately
                 //           sized border task.
                 let world_scale = LayoutToWorldScale::new(1.0);
-                let scale = world_scale * frame_context.device_pixel_scale;
+                let mut scale = world_scale * frame_context.device_pixel_scale;
+                let max_scale = BorderRenderTaskInfo::get_max_scale(&border.radius);
+                scale.0 = scale.0.min(max_scale.0);
                 let scale_au = Au::from_f32_px(scale.0);
                 let needs_update = scale_au != cache_key.scale;
                 let mut new_segments = Vec::new();
@@ -1558,7 +1574,7 @@ impl PrimitiveStore {
             PrimitiveKind::TextRun => {
                 let text = &mut self.cpu_text_runs[metadata.cpu_prim_index.0];
                 // The transform only makes sense for screen space rasterization
-                let transform = prim_run_context.scroll_node.world_content_transform.into();
+                let transform = prim_run_context.scroll_node.world_content_transform.to_transform();
                 text.prepare_for_render(
                     frame_context.device_pixel_scale,
                     &transform,
@@ -1969,6 +1985,9 @@ impl PrimitiveStore {
                     match brush.segment_desc {
                         Some(ref segment_desc) => {
                             for segment in &segment_desc.segments {
+                                if cfg!(debug_assertions) && self.chase_id == Some(prim_index) {
+                                    println!("\t\t{:?}", segment);
+                                }
                                 // has to match VECS_PER_SEGMENT
                                 request.write_segment(
                                     segment.local_rect,
@@ -1994,7 +2013,6 @@ impl PrimitiveStore {
         prim_run_context: &PrimitiveRunContext,
         clips: &Vec<ClipWorkItem>,
         has_clips_from_other_coordinate_systems: bool,
-        frame_context: &FrameBuildingContext,
         frame_state: &mut FrameBuildingState,
     ) {
         match brush.segment_desc {
@@ -2046,20 +2064,40 @@ impl PrimitiveStore {
                 continue;
             }
 
-            let local_clips = frame_state.clip_store.get_opt(&clip_item.clip_sources).expect("bug");
+            let local_clips = &frame_state.clip_store[clip_item.clip_sources_index];
+            rect_clips_only = rect_clips_only && local_clips.only_rectangular_clips;
+
+            // TODO(gw): We can easily extend the segment builder to support these clip sources in
+            // the future, but they are rarely used.
+            // We must do this check here in case we continue early below.
+            if local_clips.has_image_or_line_decoration_clip {
+                clip_mask_kind = BrushClipMaskKind::Global;
+            }
+
+            // If this clip item is positioned by another positioning node, its relative position
+            // could change during scrolling. This means that we would need to resegment. Instead
+            // of doing that, only segment with clips that have the same positioning node.
+            // TODO(mrobinson, #2858): It may make sense to include these nodes, resegmenting only
+            // when necessary while scrolling.
+            if local_clips.spatial_node_index != prim_run_context.spatial_node_index {
+                // We don't need to generate a global clip mask for rectangle clips because we are
+                // in the same coordinate system and rectangular clips are handled by the local
+                // clip chain rectangle.
+                if !local_clips.only_rectangular_clips {
+                    clip_mask_kind = BrushClipMaskKind::Global;
+                }
+                continue;
+            }
+
             for &(ref clip, _) in &local_clips.clips {
                 let (local_clip_rect, radius, mode) = match *clip {
                     ClipSource::RoundedRectangle(rect, radii, clip_mode) => {
-                        rect_clips_only = false;
-
                         (rect, Some(radii), clip_mode)
                     }
                     ClipSource::Rectangle(rect, mode) => {
                         (rect, None, mode)
                     }
                     ClipSource::BoxShadow(ref info) => {
-                        rect_clips_only = false;
-
                         // For inset box shadows, we can clip out any
                         // pixels that are inside the shadow region
                         // and are beyond the inner rect, as they can't
@@ -2084,35 +2122,7 @@ impl PrimitiveStore {
 
                         continue;
                     }
-                    ClipSource::LineDecoration(..) |
-                    ClipSource::Image(..) => {
-                        rect_clips_only = false;
-
-                        // TODO(gw): We can easily extend the segment builder
-                        //           to support these clip sources in the
-                        //           future, but they are rarely used.
-                        clip_mask_kind = BrushClipMaskKind::Global;
-                        continue;
-                    }
-                };
-
-                // If the scroll node transforms are different between the clip
-                // node and the primitive, we need to get the clip rect in the
-                // local space of the primitive, in order to generate correct
-                // local segments.
-                let local_clip_rect = if clip_item.transform_index == prim_run_context.scroll_node.transform_index {
-                    local_clip_rect
-                } else {
-                    let clip_transform = frame_context
-                        .transforms[clip_item.transform_index.0 as usize]
-                        .transform;
-                    let prim_transform = &prim_run_context.scroll_node.world_content_transform;
-                    let relative_transform = prim_transform
-                        .inverse()
-                        .unwrap_or(WorldToLayoutFastTransform::identity())
-                        .pre_mul(&clip_transform.into());
-
-                    relative_transform.transform_rect(&local_clip_rect)
+                    ClipSource::LineDecoration(..) | ClipSource::Image(..) => continue,
                 };
 
                 segment_builder.push_clip_rect(local_clip_rect, radius, mode);
@@ -2181,7 +2191,6 @@ impl PrimitiveStore {
             prim_run_context,
             clips,
             has_clips_from_other_coordinate_systems,
-            frame_context,
             frame_state,
         );
 
@@ -2281,8 +2290,8 @@ impl PrimitiveStore {
         let transform = &prim_run_context.scroll_node.world_content_transform;
         let extra_clip =  {
             let metadata = &self.cpu_metadata[prim_index.0];
-            metadata.clip_sources.as_ref().map(|clip_sources| {
-                let prim_clips = frame_state.clip_store.get_mut(clip_sources);
+            metadata.clip_sources_index.map(|clip_sources_index| {
+                let prim_clips = &mut frame_state.clip_store[clip_sources_index];
                 prim_clips.update(
                     frame_state.gpu_cache,
                     frame_state.resource_cache,
@@ -2303,11 +2312,10 @@ impl PrimitiveStore {
 
                 Arc::new(ClipChainNode {
                     work_item: ClipWorkItem {
-                        transform_index: prim_run_context.scroll_node.transform_index,
-                        clip_sources: clip_sources.weak(),
+                        clip_sources_index,
                         coordinate_system_id: prim_coordinate_system_id,
                     },
-                    // The local_clip_rect a property of ClipChain nodes that are ClipScrollNodes.
+                    // The local_clip_rect a property of ClipChain nodes that are ClipNodes.
                     // It's used to calculate a local clipping rectangle before we reach this
                     // point, so we can set it to zero here. It should be unused from this point
                     // on.
@@ -2430,8 +2438,7 @@ impl PrimitiveStore {
         let (prim_kind, cpu_prim_index) = {
             let metadata = &self.cpu_metadata[prim_index.0];
 
-            if !metadata.is_backface_visible &&
-               prim_run_context.scroll_node.world_content_transform.is_backface_visible() {
+            if !metadata.is_backface_visible && prim_run_context.transform.backface_is_visible {
                 if cfg!(debug_assertions) && Some(prim_index) == self.chase_id {
                     println!("\tculled for not having visible back faces");
                 }
@@ -2640,19 +2647,21 @@ impl PrimitiveStore {
         };
 
         for run in &pic_context.prim_runs {
-            if run.is_chasing(self.chase_id) {
-                println!("\tpreparing a run of length {} in pipeline {:?}",
-                    run.count, pic_context.pipeline_id);
-            }
             // TODO(gw): Perhaps we can restructure this to not need to create
             //           a new primitive context for every run (if the hash
             //           lookups ever show up in a profile).
             let scroll_node = &frame_context
                 .clip_scroll_tree
-                .nodes[run.clip_and_scroll.scroll_node_id.0];
-            let clip_chain = frame_context
-                .clip_scroll_tree
-                .get_clip_chain(run.clip_and_scroll.clip_chain_index);
+                .spatial_nodes[run.clip_and_scroll.spatial_node_index.0];
+            let clip_chain = &frame_context
+                .clip_chains[run.clip_and_scroll.clip_chain_index.0];
+
+            if run.is_chasing(self.chase_id) {
+                println!("\tpreparing a run of length {} in pipeline {:?}",
+                    run.count, pic_context.pipeline_id);
+                println!("\trun {:?}", run.clip_and_scroll);
+                println!("\ttransform {:?}", scroll_node.world_content_transform.to_transform());
+            }
 
             // Mark whether this picture contains any complex coordinate
             // systems, due to either the scroll node or the clip-chain.
@@ -2685,7 +2694,7 @@ impl PrimitiveStore {
                 .and_then(|original_reference_frame_index| {
                     frame_context
                         .clip_scroll_tree
-                        .nodes[original_reference_frame_index.0]
+                        .spatial_nodes[original_reference_frame_index.0]
                         .world_content_transform
                         .inverse()
                 })
@@ -2714,15 +2723,26 @@ impl PrimitiveStore {
             };
 
             let local_clip_chain_rect = match clip_chain_rect {
-                Some(rect) if rect.is_empty() => continue,
+                Some(rect) if rect.is_empty() => {
+                    if run.is_chasing(self.chase_id) {
+                        println!("\tculled by empty chain rect");
+                    }
+                    continue
+                },
                 Some(rect) => rect,
                 None => frame_context.max_local_clip,
             };
 
+            let transform = frame_context
+                .transforms
+                .get_transform(run.clip_and_scroll.spatial_node_index);
+
             let child_prim_run_context = PrimitiveRunContext::new(
                 clip_chain,
                 scroll_node,
+                run.clip_and_scroll.spatial_node_index,
                 local_clip_chain_rect,
+                transform,
             );
 
             for i in 0 .. run.count {
@@ -2741,26 +2761,38 @@ impl PrimitiveStore {
                     let clipped_rect = match clip_chain_rect {
                         Some(ref chain_rect) => match prim_local_rect.intersection(chain_rect) {
                             Some(rect) => rect,
-                            None => continue,
+                            None => {
+                                if cfg!(debug_assertions) && self.chase_id == Some(prim_index) {
+                                    println!("\tculled by chain rect {:?}", chain_rect);
+                                }
+                                continue
+                            },
                         },
                         None => prim_local_rect,
                     };
 
                     if let Some(ref matrix) = parent_relative_transform {
-                        let bounds = matrix.transform_rect(&clipped_rect);
-                        result.local_rect_in_actual_parent_space =
-                            result.local_rect_in_actual_parent_space.union(&bounds);
+                        match matrix.transform_rect(&clipped_rect) {
+                            Some(bounds) => {
+                                result.local_rect_in_actual_parent_space =
+                                    result.local_rect_in_actual_parent_space.union(&bounds);
+                            }
+                            None => {
+                                warn!("parent relative transform can't transform the primitive rect for {:?}", prim_index);
+                            }
+                        }
+
                     }
                     if let Some(ref matrix) = original_relative_transform {
-                        let bounds = matrix.transform_rect(&clipped_rect);
-                        result.local_rect_in_original_parent_space =
-                            result.local_rect_in_original_parent_space.union(&bounds);
-                    }
-
-                    if let Some(ref matrix) = parent_relative_transform {
-                        let bounds = matrix.transform_rect(&prim_local_rect);
-                        result.local_rect_in_actual_parent_space =
-                            result.local_rect_in_actual_parent_space.union(&bounds);
+                        match matrix.transform_rect(&clipped_rect) {
+                            Some(bounds) => {
+                                result.local_rect_in_original_parent_space =
+                                    result.local_rect_in_original_parent_space.union(&bounds);
+                            }
+                            None => {
+                                warn!("original relative transform can't transform the primitive rect for {:?}", prim_index);
+                            }
+                        }
                     }
                 }
             }
@@ -2914,7 +2946,7 @@ fn convert_clip_chain_to_clip_vector(
 }
 
 fn get_local_clip_rect_for_nodes(
-    scroll_node: &ClipScrollNode,
+    scroll_node: &SpatialNode,
     clip_chain: &ClipChain,
 ) -> Option<LayoutRect> {
     ClipChainNodeIter { current: clip_chain.nodes.clone() }
@@ -2934,8 +2966,8 @@ fn get_local_clip_rect_for_nodes(
                 })
             }
         )
-        .and_then(|local_rect| {
-            scroll_node.coordinate_system_relative_transform.unapply(&local_rect)
+        .map(|local_rect| {
+            local_rect.translate(&-scroll_node.coordinate_system_relative_offset)
         })
 }
 

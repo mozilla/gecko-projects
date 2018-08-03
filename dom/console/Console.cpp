@@ -1927,7 +1927,7 @@ Console::PopulateConsoleNotificationInTheTargetScope(JSContext* aCx,
                                                       aData->mCountValue);
   }
 
-  JSAutoRealm ar2(aCx, targetScope);
+  JSAutoRealmAllowCCW ar2(aCx, targetScope);
 
   if (NS_WARN_IF(!ToJSValue(aCx, event, aEventValue))) {
     return false;

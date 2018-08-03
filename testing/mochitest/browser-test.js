@@ -95,8 +95,8 @@ function testInit() {
       // Window is the [ChromeWindow] for messageManager, so we need content.window
       // Currently chrome tests are run in a content window instead of a ChromeWindow
       // eslint-disable-next-line no-undef
-      var webNav = content.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIWebNavigation);
+      var webNav = content.window.docShell
+                          .QueryInterface(Ci.nsIWebNavigation);
       webNav.loadURI(url, null, null, null, null);
     };
 
@@ -244,8 +244,9 @@ function takeInstrumentation() {
 
   // The selector for just this element
   function immediateSelector(element) {
-    if (element.localName == "notificationbox" && element.parentNode &&
-        element.parentNode.classList.contains("tabbrowser-tabpanels")) {
+    if (element.localName == "notificationbox" &&
+        element.parentNode &&
+        element.parentNode.id == "tabbrowser-tabpanels") {
       // Don't do a full selector for a tabpanel's notificationbox
       return element.localName;
     }
@@ -724,8 +725,7 @@ Tester.prototype = {
         }));
       }
 
-      let winUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDOMWindowUtils);
+      let winUtils = window.windowUtils;
       if (winUtils.isTestControllingRefreshes) {
         this.currentTest.addResult(new testResult({
           name: "test left refresh driver under test control",

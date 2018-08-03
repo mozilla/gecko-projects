@@ -8,11 +8,12 @@ var EXPORTED_SYMBOLS = [ "ContentWebRTC" ];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "MediaManagerService",
                                    "@mozilla.org/mediaManagerService;1",
                                    "nsIMediaManagerService");
 
-const kBrowserURL = "chrome://browser/content/browser.xul";
+const kBrowserURL = AppConstants.BROWSER_CHROME_URL;
 
 var ContentWebRTC = {
   // Called only for 'unload' to remove pending gUM prompts in reloaded frames.
@@ -171,7 +172,7 @@ function prompt(aContentWindow, aWindowID, aCallID, aConstraints, aDevices, aSec
   for (let device of aDevices) {
     device = device.QueryInterface(Ci.nsIMediaDevice);
     switch (device.type) {
-      case "audio":
+      case "audioinput":
         // Check that if we got a microphone, we have not requested an audio
         // capture, and if we have requested an audio capture, we are not
         // getting a microphone instead.
@@ -181,7 +182,7 @@ function prompt(aContentWindow, aWindowID, aCallID, aConstraints, aDevices, aSec
           devices.push(device);
         }
         break;
-      case "video":
+      case "videoinput":
         // Verify that if we got a camera, we haven't requested a screen share,
         // or that if we requested a screen share we aren't getting a camera.
         if (video && (device.mediaSource == "camera") != sharingScreen) {
@@ -414,23 +415,14 @@ function getTabStateForContentWindow(aContentWindow) {
 }
 
 function getInnerWindowIDForWindow(aContentWindow) {
-  return aContentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                       .getInterface(Ci.nsIDOMWindowUtils)
-                       .currentInnerWindowID;
+  return aContentWindow.windowUtils.currentInnerWindowID;
 }
 
 function getMessageManagerForWindow(aContentWindow) {
-  aContentWindow.QueryInterface(Ci.nsIInterfaceRequestor);
-
-  let docShell;
-  try {
-    // This throws NS_NOINTERFACE for closed tabs.
-    docShell = aContentWindow.getInterface(Ci.nsIDocShell);
-  } catch (e) {
-    if (e.result == Cr.NS_NOINTERFACE) {
-      return null;
-    }
-    throw e;
+  let docShell = aContentWindow.docShell;
+  if (!docShell) {
+    // Closed tab.
+    return null;
   }
 
   let ir = docShell.sameTypeRootTreeItem

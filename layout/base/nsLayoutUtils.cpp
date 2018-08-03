@@ -55,7 +55,7 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsCSSRendering.h"
 #include "nsTextFragment.h"
-#include "nsThemeConstants.h"
+#include "nsStyleConsts.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDocShell.h"
 #include "nsIWidget.h"
@@ -1965,7 +1965,7 @@ nsLayoutUtils::GetNearestScrollableFrameForDirection(nsIFrame* aFrame,
   for (nsIFrame* f = aFrame; f; f = nsLayoutUtils::GetCrossDocParentFrame(f)) {
     nsIScrollableFrame* scrollableFrame = do_QueryFrame(f);
     if (scrollableFrame) {
-      ScrollbarStyles ss = scrollableFrame->GetScrollbarStyles();
+      ScrollStyles ss = scrollableFrame->GetScrollStyles();
       uint32_t directions = scrollableFrame->GetPerceivedScrollingDirections();
       if (aDirection == eVertical ?
           (ss.mVertical != NS_STYLE_OVERFLOW_HIDDEN &&
@@ -1992,7 +1992,7 @@ nsLayoutUtils::GetNearestScrollableFrame(nsIFrame* aFrame, uint32_t aFlags)
           return scrollableFrame;
         }
       } else {
-        ScrollbarStyles ss = scrollableFrame->GetScrollbarStyles();
+        ScrollStyles ss = scrollableFrame->GetScrollStyles();
         if ((aFlags & SCROLLABLE_INCLUDE_HIDDEN) ||
             ss.mVertical != NS_STYLE_OVERFLOW_HIDDEN ||
             ss.mHorizontal != NS_STYLE_OVERFLOW_HIDDEN) {
@@ -2090,7 +2090,7 @@ nsLayoutUtils::HasPseudoStyle(nsIContent* aContent,
   RefPtr<ComputedStyle> pseudoContext;
   if (aContent) {
     pseudoContext = aPresContext->StyleSet()->
-      ProbePseudoElementStyle(aContent->AsElement(), aPseudoElement,
+      ProbePseudoElementStyle(*aContent->AsElement(), aPseudoElement,
                               aComputedStyle);
   }
   return pseudoContext != nullptr;
@@ -5535,8 +5535,8 @@ nsLayoutUtils::MinSizeContributionForAxis(PhysicalAxis       aAxis,
         // https://drafts.csswg.org/css-grid/#min-size-auto
         fixedMinSize = &minSize;
       } else if (::IsReplacedBoxResolvedAgainstZero(aFrame, *style,
-                     eAxisHorizontal ? stylePos->mMaxWidth
-                                     : stylePos->mMaxHeight)) {
+                     aAxis == eAxisHorizontal ? stylePos->mMaxWidth
+                                              : stylePos->mMaxHeight)) {
         // XXX bug 1463700: this doesn't handle calc() according to spec
         minSize = 0;
         fixedMinSize = &minSize;
@@ -7252,10 +7252,10 @@ nsLayoutUtils::GetFrameTransparency(nsIFrame* aBackgroundFrame,
   if (HasNonZeroCorner(aCSSRootFrame->StyleBorder()->mBorderRadius))
     return eTransparencyTransparent;
 
-  if (aCSSRootFrame->StyleDisplay()->mAppearance == NS_THEME_WIN_GLASS)
+  if (aCSSRootFrame->StyleDisplay()->mAppearance == StyleAppearance::MozWinGlass)
     return eTransparencyGlass;
 
-  if (aCSSRootFrame->StyleDisplay()->mAppearance == NS_THEME_WIN_BORDERLESS_GLASS)
+  if (aCSSRootFrame->StyleDisplay()->mAppearance == StyleAppearance::MozWinBorderlessGlass)
     return eTransparencyBorderlessGlass;
 
   nsITheme::Transparency transparency;
@@ -8730,11 +8730,11 @@ nsLayoutUtils::CalculateScrollableRectForFrame(nsIScrollableFrame* aScrollableFr
     contentBounds = aScrollableFrame->GetScrollRange();
 
     nsPoint scrollPosition = aScrollableFrame->GetScrollPosition();
-    if (aScrollableFrame->GetScrollbarStyles().mVertical == NS_STYLE_OVERFLOW_HIDDEN) {
+    if (aScrollableFrame->GetScrollStyles().mVertical == NS_STYLE_OVERFLOW_HIDDEN) {
       contentBounds.y = scrollPosition.y;
       contentBounds.height = 0;
     }
-    if (aScrollableFrame->GetScrollbarStyles().mHorizontal == NS_STYLE_OVERFLOW_HIDDEN) {
+    if (aScrollableFrame->GetScrollStyles().mHorizontal == NS_STYLE_OVERFLOW_HIDDEN) {
       contentBounds.x = scrollPosition.x;
       contentBounds.width = 0;
     }
@@ -9169,10 +9169,10 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
 
     metadata.SetSnapInfo(scrollableFrame->GetScrollSnapInfo());
 
-    ScrollbarStyles scrollbarStyles = scrollableFrame->GetScrollbarStyles();
+    ScrollStyles scrollStyles = scrollableFrame->GetScrollStyles();
     metadata.SetOverscrollBehavior(OverscrollBehaviorInfo::FromStyleConstants(
-        scrollbarStyles.mOverscrollBehaviorX,
-        scrollbarStyles.mOverscrollBehaviorY));
+        scrollStyles.mOverscrollBehaviorX,
+        scrollStyles.mOverscrollBehaviorY));
   }
 
   // If we have the scrollparent being the same as the scroll id, the
@@ -10264,7 +10264,7 @@ nsLayoutUtils::StyleForScrollbar(nsIFrame* aScrollbarPart)
              "Root element is the only case for this fallback "
              "path to be triggered");
   RefPtr<ComputedStyle> style =
-    pc->StyleSet()->ResolveServoStyle(content->AsElement());
+    pc->StyleSet()->ResolveServoStyle(*content->AsElement());
   // Dropping the strong reference is fine because the style should be
   // held strongly by the element.
   return style.get();

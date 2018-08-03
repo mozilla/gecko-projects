@@ -539,7 +539,7 @@ JavaScriptShared::findObjectById(JSContext* cx, const ObjectId& objId)
     JSAutoRealm ar(cx, scopeForTargetObjects());
     if (objId.hasXrayWaiver()) {
         {
-            JSAutoRealm ar2(cx, obj);
+            JSAutoRealmAllowCCW ar2(cx, obj);
             obj = js::ToWindowProxyIfWindow(obj);
             MOZ_ASSERT(obj);
         }
@@ -688,7 +688,12 @@ CrossProcessCpowHolder::~CrossProcessCpowHolder()
         // the corresponding part of the CPOW in the other process
         // will eventually be collected. The scope for this object
         // doesn't really matter, because it immediately becomes
-        // garbage.
+        // garbage. Ignore this for middleman processes used when
+        // recording or replaying, as they do not have a CPOW manager
+        // and the message will also be received in the recording
+        // process.
+        if (recordreplay::IsMiddleman())
+            return;
         AutoJSAPI jsapi;
         if (!jsapi.Init(xpc::PrivilegedJunkScope()))
             return;
@@ -713,6 +718,9 @@ bool
 JavaScriptShared::Unwrap(JSContext* cx, const InfallibleTArray<CpowEntry>& aCpows,
                          JS::MutableHandleObject objp)
 {
+    // Middleman processes never operate on CPOWs.
+    MOZ_ASSERT(!recordreplay::IsMiddleman());
+
     objp.set(nullptr);
 
     if (!aCpows.Length())

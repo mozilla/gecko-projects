@@ -22,6 +22,7 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/ServoBindings.h"
 #include "mozilla/ServoCSSParser.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/ServoUtils.h"
@@ -1933,6 +1934,17 @@ FontFaceSet::RefreshStandardFontLoadPrincipal()
   mAllowedFontLoads.Clear();
   if (mUserFontSet) {
     mUserFontSet->IncrementGeneration(false);
+  }
+}
+
+void
+FontFaceSet::CopyNonRuleFacesTo(FontFaceSet* aFontFaceSet) const
+{
+  for (const FontFaceRecord& rec : mNonRuleFaces) {
+    ErrorResult rv;
+    RefPtr<FontFace> f = rec.mFontFace;
+    aFontFaceSet->Add(*f, rv);
+    MOZ_ASSERT(!rv.Failed());
   }
 }
 

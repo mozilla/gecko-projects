@@ -36,11 +36,11 @@ new_debug_unreachable = "1.0"
 encoding_rs = {version = "0.7", optional = true}
 euclid = "0.18"
 fallible = { path = "../fallible" }
-fnv = "1.0"
+fxhash = "0.2"
 hashglobe = { path = "../hashglobe" }
 html5ever = {version = "0.22", optional = true}
 itertools = "0.7.6"
-itoa = "0.3"
+itoa = "0.4"
 lazy_static = "1"
 log = "0.4"
 malloc_size_of = { path = "../malloc_size_of" }
@@ -52,7 +52,7 @@ num-integer = "0.1.32"
 num-traits = "0.1.32"
 new-ordered-float = "1.0"
 owning_ref = "0.3.3"
-parking_lot = "0.5"
+parking_lot = "0.6"
 precomputed-hash = "0.1.1"
 rayon = "1"
 selectors = { path = "../selectors" }
@@ -66,6 +66,7 @@ string_cache = { version = "0.7", optional = true }
 style_derive = {path = "../style_derive"}
 style_traits = {path = "../style_traits"}
 servo_url = {path = "../url", optional = true}
+thin-slice = "0.1.0"
 time = "0.1"
 uluru = "0.2"
 unicode-bidi = "0.3"

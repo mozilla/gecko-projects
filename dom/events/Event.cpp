@@ -9,6 +9,7 @@
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/ShadowRoot.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/ContentEvents.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/EventStateManager.h"
@@ -225,10 +226,6 @@ Event::WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 void
 Event::GetType(nsAString& aType) const
 {
-  if (!mIsMainThreadEvent) {
-    aType = mEvent->mSpecifiedEventTypeString;
-    return;
-  }
   GetWidgetEventType(mEvent, aType);
 }
 
@@ -456,16 +453,16 @@ Event::PreventDefaultInternal(bool aCalledByDefaultHandler,
 void
 Event::SetEventType(const nsAString& aEventTypeArg)
 {
+  mEvent->mSpecifiedEventTypeString.Truncate();
   if (mIsMainThreadEvent) {
-    mEvent->mSpecifiedEventTypeString.Truncate();
     mEvent->mSpecifiedEventType =
       nsContentUtils::GetEventMessageAndAtom(aEventTypeArg, mEvent->mClass,
                                              &(mEvent->mMessage));
     mEvent->SetDefaultComposed();
   } else {
-    mEvent->mSpecifiedEventType = nullptr;
+    mEvent->mSpecifiedEventType =
+      NS_Atomize(NS_LITERAL_STRING("on") + aEventTypeArg);
     mEvent->mMessage = eUnidentifiedEvent;
-    mEvent->mSpecifiedEventTypeString = aEventTypeArg;
     mEvent->SetComposed(aEventTypeArg);
   }
   mEvent->SetDefaultComposedInNativeAnonymousContent();

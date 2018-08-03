@@ -26,9 +26,10 @@ exports.setIgnoreLayoutChanges = (...args) =>
  */
 const utilsCache = new WeakMap();
 function utilsFor(win) {
+  // XXXbz Given that we now have a direct getter for the DOMWindowUtils, is
+  // this weakmap cache path any faster than just calling the getter?
   if (!utilsCache.has(win)) {
-    utilsCache.set(win, win.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDOMWindowUtils));
+    utilsCache.set(win, win.windowUtils);
   }
   return utilsCache.get(win);
 }
@@ -40,9 +41,7 @@ function utilsFor(win) {
  * @return {DOMWindow}
  */
 function getTopWindow(win) {
-  const docShell = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIWebNavigation)
-                    .QueryInterface(Ci.nsIDocShell);
+  const docShell = win.docShell;
 
   if (!docShell.isMozBrowser) {
     return win.top;
@@ -101,9 +100,7 @@ function getParentWindow(win) {
     return null;
   }
 
-  const docShell = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIWebNavigation)
-                 .QueryInterface(Ci.nsIDocShell);
+  const docShell = win.docShell;
 
   if (!docShell.isMozBrowser) {
     return win.parent;
@@ -557,11 +554,6 @@ function isXBLAnonymous(node) {
     return false;
   }
 
-  // Shadow nodes also show up in getAnonymousNodes, so return false.
-  if (parent.openOrClosedShadowRoot && parent.openOrClosedShadowRoot.contains(node)) {
-    return false;
-  }
-
   const anonNodes = [...node.ownerDocument.getAnonymousNodes(parent) || []];
   return anonNodes.indexOf(node) > -1;
 }
@@ -608,6 +600,17 @@ function isShadowRoot(node) {
   return isFragment && !!node.host;
 }
 exports.isShadowRoot = isShadowRoot;
+
+/*
+ * Gets the shadow root mode (open or closed).
+ *
+ * @param {DOMNode} node
+ * @return {String|null}
+ */
+function getShadowRootMode(node) {
+  return isShadowRoot(node) ? node.mode : null;
+}
+exports.getShadowRootMode = getShadowRootMode;
 
 /**
  * Determine whether a node is a shadow host, ie. an element that has a shadowRoot
@@ -667,6 +670,9 @@ exports.isAfterPseudoElement = isAfterPseudoElement;
  * Get the current zoom factor applied to the container window of a given node.
  * Container windows are used as a weakmap key to store the corresponding
  * nsIDOMWindowUtils instance to avoid querying it every time.
+ *
+ * XXXbz Given that we now have a direct getter for the DOMWindowUtils, is
+ * this weakmap cache path any faster than just calling the getter?
  *
  * @param {DOMNode|DOMWindow}
  *        The node for which the zoom factor should be calculated, or its

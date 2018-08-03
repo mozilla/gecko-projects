@@ -450,13 +450,16 @@ GetStubReturnAddress(JSContext* cx, jsbytecode* pc)
 }
 
 static inline jsbytecode*
-GetNextNonLoopEntryPc(jsbytecode* pc)
+GetNextNonLoopEntryPc(jsbytecode* pc, jsbytecode** skippedLoopEntry)
 {
     JSOp op = JSOp(*pc);
     if (op == JSOP_GOTO)
         return pc + GET_JUMP_OFFSET(pc);
-    if (op == JSOP_LOOPENTRY || op == JSOP_NOP || op == JSOP_LOOPHEAD)
+    if (op == JSOP_LOOPENTRY || op == JSOP_NOP || op == JSOP_LOOPHEAD) {
+        if (op == JSOP_LOOPENTRY)
+            *skippedLoopEntry = pc;
         return GetNextPc(pc);
+    }
     return pc;
 }
 
@@ -982,15 +985,18 @@ InitFromBailout(JSContext* cx, size_t frameNo,
     //
     // The algorithm below is the "tortoise and the hare" algorithm. See bug
     // 994444 for more explanation.
+    jsbytecode* skippedLoopEntry = nullptr;
     if (!resumeAfter) {
         jsbytecode* fasterPc = pc;
         while (true) {
-            pc = GetNextNonLoopEntryPc(pc);
-            fasterPc = GetNextNonLoopEntryPc(GetNextNonLoopEntryPc(fasterPc));
+            pc = GetNextNonLoopEntryPc(pc, &skippedLoopEntry);
+            fasterPc = GetNextNonLoopEntryPc(GetNextNonLoopEntryPc(fasterPc, &skippedLoopEntry), &skippedLoopEntry);
             if (fasterPc == pc)
                 break;
         }
         op = JSOp(*pc);
+        if (skippedLoopEntry && script->trackRecordReplayProgress())
+            mozilla::recordreplay::AdvanceExecutionProgressCounter();
     }
 
     const uint32_t pcOff = script->pcToOffset(pc);
@@ -1178,8 +1184,8 @@ InitFromBailout(JSContext* cx, size_t frameNo,
             JitSpew(JitSpew_BaselineBailouts, "      Adjusted framesize -= %d: %d",
                     int(sizeof(Value) * numUnsynced), int(frameSize));
 
-            // If envChain is nullptr, then bailout is occurring during argument check.
-            // In this case, resume into the prologue.
+            // If envChain is nullptr, then bailout is occurring during argument check
+            // or early in the script's execution. In this case, resume into the prologue.
             uint8_t* opReturnAddr;
             if (envChain == nullptr) {
                 // Global and eval scripts expect the env chain in R1, so only
@@ -1189,6 +1195,10 @@ InitFromBailout(JSContext* cx, size_t frameNo,
                 opReturnAddr = baselineScript->prologueEntryAddr();
                 JitSpew(JitSpew_BaselineBailouts, "      Resuming into prologue.");
 
+                // Undo the progress for any loop entry we thought we were skipping
+                // over earlier.
+                if (skippedLoopEntry && script->trackRecordReplayProgress())
+                    --*mozilla::recordreplay::ExecutionProgressCounter();
             } else {
                 opReturnAddr = nativeCodeForPC;
             }
@@ -1841,6 +1851,14 @@ jit::FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfo)
     MOZ_ASSERT(numFrames > 0);
     BailoutKind bailoutKind = bailoutInfo->bailoutKind;
     bool checkGlobalDeclarationConflicts = bailoutInfo->checkGlobalDeclarationConflicts;
+    uint8_t* incomingStack = bailoutInfo->incomingStack;
+
+    // We have to get rid of the rematerialized frame, whether it is
+    // restored or unwound.
+    auto guardRemoveRematerializedFramesFromDebugger = mozilla::MakeScopeExit([&] {
+        JitActivation* act = cx->activation()->asJit();
+        act->removeRematerializedFramesFromDebugger(cx, incomingStack);
+    });
 
     // Free the bailout buffer.
     js_free(bailoutInfo);
@@ -1914,6 +1932,7 @@ jit::FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfo)
             if (frameno == numFrames - 1) {
                 outerScript = frame->script();
                 outerFp = iter.fp();
+                MOZ_ASSERT(outerFp == incomingStack);
             }
 
             frameno++;
@@ -1932,7 +1951,7 @@ jit::FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfo)
     // on.
     JitActivation* act = cx->activation()->asJit();
     if (act->hasRematerializedFrame(outerFp)) {
-        JSJitFrameIter iter(cx->activation()->asJit());
+        JSJitFrameIter iter(act);
         size_t inlineDepth = numFrames;
         bool ok = true;
         while (inlineDepth > 0) {
@@ -1940,18 +1959,22 @@ jit::FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfo)
                 // We must attempt to copy all rematerialized frames over,
                 // even if earlier ones failed, to invoke the proper frame
                 // cleanup in the Debugger.
-                ok = CopyFromRematerializedFrame(cx, act, outerFp, --inlineDepth,
-                                                 iter.baselineFrame());
+                if (!CopyFromRematerializedFrame(cx, act, outerFp, --inlineDepth,
+                                                 iter.baselineFrame()))
+                {
+                    ok = false;
+                }
             }
             ++iter;
         }
 
-        // After copying from all the rematerialized frames, remove them from
-        // the table to keep the table up to date.
-        act->removeRematerializedFrame(outerFp);
-
         if (!ok)
             return false;
+
+        // After copying from all the rematerialized frames, remove them from
+        // the table to keep the table up to date.
+        guardRemoveRematerializedFramesFromDebugger.release();
+        act->removeRematerializedFrame(outerFp);
     }
 
     // If we are catching an exception, we need to unwind scopes.
@@ -1989,7 +2012,6 @@ jit::FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfo)
       case Bailout_NonObjectInput:
       case Bailout_NonStringInput:
       case Bailout_NonSymbolInput:
-      case Bailout_UnexpectedSimdInput:
       case Bailout_NonSharedTypedArrayInput:
       case Bailout_Debugger:
       case Bailout_UninitializedThis:

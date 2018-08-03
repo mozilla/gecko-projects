@@ -77,7 +77,8 @@
     <caption><label data-l10n-id="tabs-group-header"/></caption>
 
     <checkbox id="ctrlTabRecentlyUsedOrder" data-l10n-id="ctrl-tab-recently-used-order"
-              preference="browser.ctrlTab.previews"/>
+              preference="browser.ctrlTab.recentlyUsedOrder"
+              oncommand="Services.prefs.clearUserPref('browser.ctrlTab.migrated');"/>
 
     <checkbox id="linkTargeting" data-l10n-id="open-new-link-as-tabs"
               preference="browser.link.open_newwindow"
@@ -282,6 +283,20 @@
 <groupbox id="languagesGroup" data-category="paneGeneral" hidden="true">
   <caption><label data-l10n-id="language-header"/></caption>
 
+  <vbox id="browserLanguagesBox" align="start" hidden="true">
+    <description flex="1" controls="chooseBrowserLanguage" data-l10n-id="choose-browser-language-description"/>
+    <menulist id="defaultBrowserLanguage" class="accessory-button" oncommand="gMainPane.onBrowserLanguageChange(event)" flex="1">
+      <menupopup/>
+    </menulist>
+  </vbox>
+  <hbox id="confirmBrowserLanguage" class="message-bar" align="center" hidden="true">
+    <image class="message-bar-icon"/>
+    <hbox class="message-bar-content" align="center" flex="1">
+      <description flex="1"/>
+      <button class="message-bar-button" oncommand="gMainPane.confirmBrowserLanguageChange()"/>
+    </hbox>
+  </hbox>
+
   <hbox id="languagesBox" align="center">
     <description flex="1" control="chooseLanguage" data-l10n-id="choose-language-description"/>
     <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
@@ -484,7 +499,7 @@
                 accesskey="&update.checkForUpdatesButton.accesskey;"
                 oncommand="gAppUpdater.checkForUpdates();"/>
       </hbox>
-      <hbox id="adminDisabled" align="start">
+      <hbox id="policyDisabled" align="start">
         <label>&update.adminDisabled;</label>
         <spacer flex="1"/>
         <button label="&update.checkForUpdatesButton.label;"
@@ -537,15 +552,13 @@
 #endif
 
 #ifdef MOZ_UPDATER
-  <description data-l10n-id="update-application-allow-description"></description>
-  <radiogroup id="updateRadioGroup">
+  <description id="updateAllowDescription" data-l10n-id="update-application-allow-description"></description>
+  <radiogroup id="updateRadioGroup" preference="app.update.auto">
     <radio id="autoDesktop"
-           value="auto"
+           value="true"
            data-l10n-id="update-application-auto"/>
-    <radio value="checkOnly"
+    <radio value="false"
            data-l10n-id="update-application-check-choose"/>
-    <radio value="manual"
-           data-l10n-id="update-application-manual"/>
   </radiogroup>
 #ifdef MOZ_MAINTENANCE_SERVICE
   <checkbox id="useService"

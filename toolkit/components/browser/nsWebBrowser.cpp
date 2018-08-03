@@ -553,6 +553,14 @@ nsWebBrowser::GetWindow()
 }
 
 NS_IMETHODIMP
+nsWebBrowser::GetDomWindow(mozIDOMWindowProxy** aWindow)
+{
+  if (!mDocShell)
+    return NS_ERROR_NOT_INITIALIZED;
+  return mDocShell->GetDomWindow(aWindow);
+}
+
+NS_IMETHODIMP
 nsWebBrowser::GetTreeOwner(nsIDocShellTreeOwner** aTreeOwner)
 {
   NS_ENSURE_ARG_POINTER(aTreeOwner);
@@ -1250,6 +1258,7 @@ nsWebBrowser::Create()
     mDocShell->SetItemType(nsIDocShellTreeItem::typeContent);
   }
   mDocShell->SetTreeOwner(mDocShellTreeOwner);
+  mDocShell->AttachBrowsingContext(nullptr);
 
   // If the webbrowser is a content docshell item then we won't hear any
   // events from subframes. To solve that we install our own chrome event

@@ -55,6 +55,8 @@ class nsIContent : public nsINode {
 public:
   typedef mozilla::widget::IMEState IMEState;
 
+  void ConstructUbiNode(void* storage) override;
+
 #ifdef MOZILLA_INTERNAL_API
   // If you're using the external API, the only thing you can know about
   // nsIContent is that it exists with an IID
@@ -91,8 +93,6 @@ public:
    *                       This is must either be non-null if a particular
    *                       binding parent is desired or match aParent's binding
    *                       parent.
-   * @param aCompileEventHandlers whether to initialize the event handlers in
-   *        the document (used by nsXULElement)
    * @note either aDocument or aParent must be non-null.  If both are null,
    *       this method _will_ crash.
    * @note This method must not be called by consumers of nsIContent on a node
@@ -101,10 +101,13 @@ public:
    *       changing their binding parent as needed).
    * @note This method does not add the content node to aParent's child list
    * @throws NS_ERROR_OUT_OF_MEMORY if that happens
+   *
+   * TODO(emilio): Should we move to nsIContent::BindToTree most of the
+   * FragmentOrElement / CharacterData duplicated code?
    */
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                              nsIContent* aBindingParent,
-                              bool aCompileEventHandlers) = 0;
+  virtual nsresult BindToTree(nsIDocument* aDocument,
+                              nsIContent* aParent,
+                              nsIContent* aBindingParent) = 0;
 
   /**
    * Unbind this content node from a tree.  This will set its current document

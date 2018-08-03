@@ -131,6 +131,8 @@ class MochitestFormatter(TbplFormatter):
 
     def __call__(self, data):
         output = super(MochitestFormatter, self).__call__(data)
+        if not output:
+            return None
         log_level = data.get('level', 'info').upper()
 
         if 'js_source' in data or log_level == 'ERROR':
@@ -1929,6 +1931,10 @@ toolbar#nav-bar {
             prefs['media.audio_loopback_dev'] = self.mediaDevices['audio']
             prefs['media.video_loopback_dev'] = self.mediaDevices['video']
 
+        # Disable web replay rewinding by default if recordings are being saved.
+        if options.recordingPath:
+            prefs["devtools.recordreplay.enableRewinding"] = False
+
         self.profile.set_preferences(prefs)
 
         # Extra prefs from --setpref
@@ -2726,6 +2732,9 @@ toolbar#nav-bar {
             if options.jsdebugger:
                 options.browserArgs.extend(['-jsdebugger', '-wait-for-jsdebugger'])
 
+            if options.recordingPath:
+                options.browserArgs.extend(['--save-recordings', options.recordingPath])
+
             # Remove the leak detection file so it can't "leak" to the tests run.
             # The file is not there if leak logging was not enabled in the
             # application build.
@@ -2804,10 +2813,13 @@ toolbar#nav-bar {
         except KeyboardInterrupt:
             self.log.info("runtests.py | Received keyboard interrupt.\n")
             status = -1
-        except Exception:
+        except Exception as e:
             traceback.print_exc()
             self.log.error(
                 "Automation Error: Received unexpected exception while running application\n")
+            if 'ADBTimeoutError' in repr(e):
+                self.log.info("runtests.py | Device disconnected. Aborting test.\n")
+                raise
             status = 1
         finally:
             self.stopServers()

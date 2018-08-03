@@ -466,6 +466,7 @@ public:
     , mType(static_cast<uint32_t>(PrefType::None))
     , mIsSticky(false)
     , mIsLocked(false)
+    , mDefaultChanged(false)
     , mHasDefaultValue(false)
     , mHasUserValue(false)
     , mDefaultValue()
@@ -501,6 +502,8 @@ public:
   bool IsLocked() const { return mIsLocked; }
   void SetIsLocked(bool aValue) { mIsLocked = aValue; }
 
+  bool DefaultChanged() const { return mDefaultChanged; }
+
   bool IsSticky() const { return mIsSticky; }
 
   bool HasDefaultValue() const { return mHasDefaultValue; }
@@ -510,7 +513,11 @@ public:
   void AddToMap(SharedPrefMapBuilder& aMap)
   {
     aMap.Add(Name(),
-             { HasDefaultValue(), HasUserValue(), IsSticky(), IsLocked() },
+             { HasDefaultValue(),
+               HasUserValue(),
+               IsSticky(),
+               IsLocked(),
+               DefaultChanged() },
              HasDefaultValue() ? mDefaultValue.Get<T>() : T(),
              HasUserValue() ? mUserValue.Get<T>() : T());
   }
@@ -713,6 +720,9 @@ public:
       }
       if (!ValueMatches(PrefValueKind::Default, aType, aValue)) {
         mDefaultValue.Replace(mHasDefaultValue, Type(), aType, aValue);
+        if (mHasDefaultValue) {
+          mDefaultChanged = true;
+        }
         mHasDefaultValue = true;
         if (aIsSticky) {
           mIsSticky = true;
@@ -936,6 +946,7 @@ private:
   uint32_t mType : 2;
   uint32_t mIsSticky : 1;
   uint32_t mIsLocked : 1;
+  uint32_t mDefaultChanged : 1;
   uint32_t mHasDefaultValue : 1;
   uint32_t mHasUserValue : 1;
 
@@ -1008,6 +1019,7 @@ public:
     return match(Matcher());                                                   \
   }
 
+  FORWARD(bool, DefaultChanged)
   FORWARD(bool, IsLocked)
   FORWARD(bool, IsSticky)
   FORWARD(bool, HasDefaultValue)
@@ -1185,7 +1197,18 @@ public:
                PrefChangedFunc aFunc,
                void* aData,
                Preferences::MatchKind aMatchKind)
-    : mDomain(aDomain)
+    : mDomain(AsVariant(nsCString(aDomain)))
+    , mFunc(aFunc)
+    , mData(aData)
+    , mNextAndMatchKind(aMatchKind)
+  {
+  }
+
+  CallbackNode(const char** aDomains,
+               PrefChangedFunc aFunc,
+               void* aData,
+               Preferences::MatchKind aMatchKind)
+    : mDomain(AsVariant(aDomains))
     , mFunc(aFunc)
     , mData(aData)
     , mNextAndMatchKind(aMatchKind)
@@ -1194,7 +1217,7 @@ public:
 
   // mDomain is a UniquePtr<>, so any uses of Domain() should only be temporary
   // borrows.
-  const nsCString& Domain() const { return mDomain; }
+  const Variant<nsCString, const char**>& Domain() const { return mDomain; }
 
   PrefChangedFunc Func() const { return mFunc; }
   void ClearFunc() { mFunc = nullptr; }
@@ -1205,6 +1228,35 @@ public:
   {
     return static_cast<Preferences::MatchKind>(mNextAndMatchKind &
                                                kMatchKindMask);
+  }
+
+  bool DomainIs(const nsACString& aDomain) const
+  {
+    return mDomain.is<nsCString>() && mDomain.as<nsCString>() == aDomain;
+  }
+
+  bool DomainIs(const char** aPrefs) const
+  {
+    return mDomain == AsVariant(aPrefs);
+  }
+
+  bool Matches(const nsACString& aPrefName) const
+  {
+    auto match = [&](const nsACString& aStr) {
+      return MatchKind() == Preferences::ExactMatch
+               ? aPrefName == aStr
+               : StringBeginsWith(aPrefName, aStr);
+    };
+
+    if (mDomain.is<nsCString>()) {
+      return match(mDomain.as<nsCString>());
+    }
+    for (const char** ptr = mDomain.as<const char**>(); *ptr; ptr++) {
+      if (match(nsDependentCString(*ptr))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   CallbackNode* Next() const
@@ -1223,15 +1275,17 @@ public:
   void AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf, PrefsSizes& aSizes)
   {
     aSizes.mCallbacksObjects += aMallocSizeOf(this);
-    aSizes.mCallbacksDomains +=
-      mDomain.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+    if (mDomain.is<nsCString>()) {
+      aSizes.mCallbacksDomains +=
+        mDomain.as<nsCString>().SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+    }
   }
 
 private:
   static const uintptr_t kMatchKindMask = uintptr_t(0x1);
   static const uintptr_t kNextMask = ~kMatchKindMask;
 
-  nsCString mDomain;
+  Variant<nsCString, const char**> mDomain;
 
   // If someone attempts to remove the node from the callback list while
   // NotifyCallbacks() is running, |func| is set to nullptr. Such nodes will
@@ -1651,7 +1705,8 @@ static Result<Pref*, nsresult>
 pref_LookupForModify(const char* aPrefName,
                      const std::function<bool(const PrefWrapper&)>& aCheckFn)
 {
-  Maybe<PrefWrapper> wrapper = pref_Lookup(aPrefName, /* includeTypeNone */ true);
+  Maybe<PrefWrapper> wrapper =
+    pref_Lookup(aPrefName, /* includeTypeNone */ true);
   if (wrapper.isNothing()) {
     return Err(NS_ERROR_INVALID_ARG);
   }
@@ -1714,8 +1769,8 @@ pref_SetPref(const char* aPrefName,
   bool valueChanged = false;
   nsresult rv;
   if (aKind == PrefValueKind::Default) {
-    rv = pref->SetDefaultValue(
-      aType, aValue, aIsSticky, aIsLocked, &valueChanged);
+    rv =
+      pref->SetDefaultValue(aType, aValue, aIsSticky, aIsLocked, &valueChanged);
   } else {
     MOZ_ASSERT(!aIsLocked); // `locked` is disallowed in user pref files
     rv = pref->SetUserValue(aType, aValue, aFromInit, &valueChanged);
@@ -1782,10 +1837,7 @@ NotifyCallbacks(const char* aPrefName, const PrefWrapper* aPref)
 
   for (CallbackNode* node = gFirstCallback; node; node = node->Next()) {
     if (node->Func()) {
-      bool matches = node->MatchKind() == Preferences::ExactMatch
-                       ? node->Domain() == prefName
-                       : StringBeginsWith(prefName, node->Domain());
-      if (matches) {
+      if (node->Matches(prefName)) {
         (node->Func())(aPrefName, node->Data());
       }
     }
@@ -2856,6 +2908,8 @@ nsPrefBranch::DeleteBranch(const char* aStartingAt)
     nsDependentCString name(pref->Name());
     if (StringBeginsWith(name, branchName) || name.Equals(branchNameNoDot)) {
       iter.Remove();
+      // The saved callback pref may be invalid now.
+      gCallbackPref = nullptr;
     }
   }
 
@@ -4737,6 +4791,41 @@ pref_ReadPrefFromJar(nsZipArchive* aJarReader, const char* aName)
   return NS_OK;
 }
 
+// These preference getter wrappers allow us to look up the value for static
+// preferences based on their native types, rather than manually mapping them to
+// the appropriate Preferences::Get* functions.
+template<typename T>
+static T
+GetPref(const char* aName, T aDefaultValue);
+
+template<>
+bool MOZ_MAYBE_UNUSED
+GetPref<bool>(const char* aName, bool aDefaultValue)
+{
+  return Preferences::GetBool(aName, aDefaultValue);
+}
+
+template<>
+int32_t MOZ_MAYBE_UNUSED
+GetPref<int32_t>(const char* aName, int32_t aDefaultValue)
+{
+  return Preferences::GetInt(aName, aDefaultValue);
+}
+
+template<>
+uint32_t MOZ_MAYBE_UNUSED
+GetPref<uint32_t>(const char* aName, uint32_t aDefaultValue)
+{
+  return Preferences::GetInt(aName, aDefaultValue);
+}
+
+template<>
+float MOZ_MAYBE_UNUSED
+GetPref<float>(const char* aName, float aDefaultValue)
+{
+  return Preferences::GetFloat(aName, aDefaultValue);
+}
+
 // Initialize default preference JavaScript buffers from appropriate TEXT
 // resources.
 /* static */ Result<Ok, const char*>
@@ -4753,17 +4842,28 @@ Preferences::InitInitialObjects(bool aIsStartup)
     // don't need to add them to the DB. For static var caches, though, the
     // current preference values may differ from their static defaults. So we
     // still need to notify callbacks for each of our shared prefs which have
-    // user values.
-    //
-    // While it is technically also possible for the default values to have
-    // changed at runtime, and therefore not match the static defaults, we don't
-    // support that for static preferences in this configuration, and therefore
-    // ignore the possibility.
+    // user values, of whose default values have changed since they were
+    // initialized.
     for (auto& pref : gSharedMap->Iter()) {
-      if (pref.HasUserValue() || pref.IsLocked()) {
+      if (pref.HasUserValue() || pref.DefaultChanged()) {
         NotifyCallbacks(pref.Name(), PrefWrapper(pref));
       }
     }
+
+#ifdef DEBUG
+      // Check that all varcache preferences match their current values. This
+      // can currently fail if the default value of a static varcache preference
+      // is changed in a preference file or at runtime, rather than in
+      // StaticPrefList.h.
+
+#define PREF(name, cpp_type, value)
+#define VARCACHE_PREF(name, id, cpp_type, value)                               \
+  MOZ_ASSERT(GetPref<StripAtomic<cpp_type>>(name, value) == StaticPrefs::id(), \
+             "Incorrect cached value for " name);
+#include "mozilla/StaticPrefList.h"
+#undef PREF
+#undef VARCACHE_PREF
+#endif
 
     return Ok();
   }
@@ -5330,12 +5430,13 @@ Preferences::RemoveObservers(nsIObserver* aObserver, const char** aPrefs)
   return NS_OK;
 }
 
+template<typename T>
 /* static */ nsresult
-Preferences::RegisterCallback(PrefChangedFunc aCallback,
-                              const nsACString& aPrefNode,
-                              void* aData,
-                              MatchKind aMatchKind,
-                              bool aIsPriority)
+Preferences::RegisterCallbackImpl(PrefChangedFunc aCallback,
+                                  T& aPrefNode,
+                                  void* aData,
+                                  MatchKind aMatchKind,
+                                  bool aIsPriority)
 {
   NS_ENSURE_ARG(aCallback);
 
@@ -5365,6 +5466,26 @@ Preferences::RegisterCallback(PrefChangedFunc aCallback,
 }
 
 /* static */ nsresult
+Preferences::RegisterCallback(PrefChangedFunc aCallback,
+                              const nsACString& aPrefNode,
+                              void* aData,
+                              MatchKind aMatchKind,
+                              bool aIsPriority)
+{
+  return RegisterCallbackImpl(
+    aCallback, aPrefNode, aData, aMatchKind, aIsPriority);
+}
+
+/* static */ nsresult
+Preferences::RegisterCallbacks(PrefChangedFunc aCallback,
+                               const char** aPrefs,
+                               void* aData,
+                               MatchKind aMatchKind)
+{
+  return RegisterCallbackImpl(aCallback, aPrefs, aData, aMatchKind);
+}
+
+/* static */ nsresult
 Preferences::RegisterCallbackAndCall(PrefChangedFunc aCallback,
                                      const nsACString& aPref,
                                      void* aClosure,
@@ -5379,10 +5500,28 @@ Preferences::RegisterCallbackAndCall(PrefChangedFunc aCallback,
 }
 
 /* static */ nsresult
-Preferences::UnregisterCallback(PrefChangedFunc aCallback,
-                                const nsACString& aPrefNode,
-                                void* aData,
-                                MatchKind aMatchKind)
+Preferences::RegisterCallbacksAndCall(PrefChangedFunc aCallback,
+                                      const char** aPrefs,
+                                      void* aClosure)
+{
+  MOZ_ASSERT(aCallback);
+
+  nsresult rv =
+    RegisterCallbacks(aCallback, aPrefs, aClosure, MatchKind::ExactMatch);
+  if (NS_SUCCEEDED(rv)) {
+    for (const char** ptr = aPrefs; *ptr; ptr++) {
+      (*aCallback)(*ptr, aClosure);
+    }
+  }
+  return rv;
+}
+
+template<typename T>
+/* static */ nsresult
+Preferences::UnregisterCallbackImpl(PrefChangedFunc aCallback,
+                                    T& aPrefNode,
+                                    void* aData,
+                                    MatchKind aMatchKind)
 {
   MOZ_ASSERT(aCallback);
   if (sShutdown) {
@@ -5397,7 +5536,7 @@ Preferences::UnregisterCallback(PrefChangedFunc aCallback,
 
   while (node) {
     if (node->Func() == aCallback && node->Data() == aData &&
-        node->MatchKind() == aMatchKind && node->Domain() == aPrefNode) {
+        node->MatchKind() == aMatchKind && node->DomainIs(aPrefNode)) {
       if (gCallbacksInProgress) {
         // Postpone the node removal until after callbacks enumeration is
         // finished.
@@ -5415,6 +5554,25 @@ Preferences::UnregisterCallback(PrefChangedFunc aCallback,
     }
   }
   return rv;
+}
+
+/* static */ nsresult
+Preferences::UnregisterCallback(PrefChangedFunc aCallback,
+                                const nsACString& aPrefNode,
+                                void* aData,
+                                MatchKind aMatchKind)
+{
+  return UnregisterCallbackImpl<const nsACString&>(
+    aCallback, aPrefNode, aData, aMatchKind);
+}
+
+/* static */ nsresult
+Preferences::UnregisterCallbacks(PrefChangedFunc aCallback,
+                                 const char** aPrefs,
+                                 void* aData,
+                                 MatchKind aMatchKind)
+{
+  return UnregisterCallbackImpl(aCallback, aPrefs, aData, aMatchKind);
 }
 
 static void

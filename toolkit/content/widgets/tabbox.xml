@@ -9,14 +9,11 @@
           xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
           xmlns:xbl="http://www.mozilla.org/xbl">
 
-  <binding id="tab-base">
+  <binding id="tabbox">
     <resources>
       <stylesheet src="chrome://global/skin/tabbox.css"/>
     </resources>
-  </binding>
 
-  <binding id="tabbox"
-           extends="chrome://global/content/bindings/tabbox.xml#tab-base">
     <implementation>
       <property name="handleCtrlTab">
         <setter>
@@ -536,8 +533,11 @@
 #endif
   </binding>
 
-  <binding id="tabpanels"
-           extends="chrome://global/content/bindings/tabbox.xml#tab-base">
+  <binding id="tabpanels">
+    <resources>
+      <stylesheet src="chrome://global/skin/tabbox.css"/>
+    </resources>
+
     <implementation implements="nsIDOMXULRelatedElement">
       <!-- nsIDOMXULRelatedElement -->
       <method name="getRelatedElement">
@@ -614,6 +614,12 @@
         <![CDATA[
           if (val < 0 || val >= this.childNodes.length)
             return val;
+
+          // Give the tabbrowser a chance to run logic regardless of
+          // whether the panel is going to change:
+          this.dispatchEvent(new CustomEvent("preselect",
+            { detail: this.getRelatedElement(this.childNodes[val]) }));
+
           var panel = this._selectedPanel;
           this._selectedPanel = this.childNodes[val];
           this.setAttribute("selectedIndex", val);

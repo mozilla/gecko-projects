@@ -80,12 +80,10 @@ HTMLMetaElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
 
 nsresult
 HTMLMetaElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                            nsIContent* aBindingParent,
-                            bool aCompileEventHandlers)
+                            nsIContent* aBindingParent)
 {
   nsresult rv = nsGenericHTMLElement::BindToTree(aDocument, aParent,
-                                                 aBindingParent,
-                                                 aCompileEventHandlers);
+                                                 aBindingParent);
   NS_ENSURE_SUCCESS(rv, rv);
   if (aDocument &&
       AttrValueIs(kNameSpaceID_None, nsGkAtoms::name, nsGkAtoms::viewport, eIgnoreCase)) {
@@ -94,7 +92,8 @@ HTMLMetaElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     nsContentUtils::ProcessViewportInfo(aDocument, content);
   }
 
-  if (CSPService::sCSPEnabled && aDocument && !aDocument->IsLoadedAsData() &&
+  if (StaticPrefs::security_csp_enable() && aDocument &&
+      !aDocument->IsLoadedAsData() &&
       AttrValueIs(kNameSpaceID_None, nsGkAtoms::httpEquiv, nsGkAtoms::headerCSP, eIgnoreCase)) {
 
     // only accept <meta http-equiv="Content-Security-Policy" content=""> if it appears

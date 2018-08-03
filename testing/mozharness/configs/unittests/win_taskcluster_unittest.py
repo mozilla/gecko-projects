@@ -41,7 +41,6 @@ config = {
         "cppunittest": "runcppunittests.py",
         "gtest": "rungtests.py",
         "jittest": "jit_test.py",
-        "mozbase": "test.py",
         "mozmill": "runtestlist.py",
     },
     "minimum_tests_zip_dirs": [
@@ -94,14 +93,6 @@ config = {
             ],
             "run_filename": "runtests.py",
             "testsdir": "mochitest"
-        },
-        "mozbase": {
-            "options": [
-                "-b",
-                "%(binary_path)s"
-            ],
-            "run_filename": "test.py",
-            "testsdir": "mozbase"
         },
         "mozmill": {
             "options": [
@@ -228,9 +219,6 @@ config = {
         "jittest": [],
         "jittest-chunked": [],
     },
-    "all_mozbase_suites": {
-        "mozbase": []
-    },
     "run_cmd_checks_enabled": True,
     "preflight_run_cmd_suites": [
         {
@@ -297,7 +285,12 @@ config = {
     ],
     "vcs_output_timeout": 1000,
     "minidump_save_path": "%(abs_work_dir)s/../minidumps",
-    "structured_suites": ["reftest"],
+    "unstructured_flavors": {"xpcshell": [],
+                             "gtest": [],
+                             "mozmill": [],
+                             "cppunittest": [],
+                             "jittest": [],
+                             },
     "download_minidump_stackwalk": True,
     "minidump_stackwalk_path": "win32-minidump_stackwalk.exe",
     "minidump_tooltool_manifest_path": "config/tooltool-manifests/win32/releng.manifest",

@@ -30,7 +30,6 @@ class Output(object):
 
     def summarize(self):
         suites = []
-        vals = []
         test_results = {
             'framework': {
                 'name': 'raptor',
@@ -44,6 +43,7 @@ class Output(object):
             return
 
         for test in self.results:
+            vals = []
             subtests = []
             suite = {
                 'name': test.name,
@@ -71,10 +71,10 @@ class Output(object):
                 # u'https://www.amazon.com/s/url=search-alias%3Daps&field-keywords=laptop',
                 # u'unit': u'ms', u'alert_threshold': 2}
 
-                for key, values in test.measurements.iteritems():
+                for measurement_name, replicates in test.measurements.iteritems():
                     new_subtest = {}
-                    new_subtest['name'] = test.name + "-" + key
-                    new_subtest['replicates'] = values
+                    new_subtest['name'] = test.name + "-" + measurement_name
+                    new_subtest['replicates'] = replicates
                     new_subtest['lowerIsBetter'] = test.lower_is_better
                     new_subtest['alertThreshold'] = float(test.alert_threshold)
                     new_subtest['value'] = 0
@@ -82,8 +82,8 @@ class Output(object):
 
                     filtered_values = filter.ignore_first(new_subtest['replicates'], 1)
                     new_subtest['value'] = filter.median(filtered_values)
-                    vals.append(new_subtest['value'])
 
+                    vals.append([new_subtest['value'], new_subtest['name']])
                     subtests.append(new_subtest)
 
             elif test.type == "benchmark":
@@ -91,14 +91,27 @@ class Output(object):
                     subtests, vals = self.parseSpeedometerOutput(test)
                 elif 'motionmark' in test.measurements:
                     subtests, vals = self.parseMotionmarkOutput(test)
+                elif 'sunspider' in test.measurements:
+                    subtests, vals = self.parseSunspiderOutput(test)
+                elif 'webaudio' in test.measurements:
+                    subtests, vals = self.parseWebaudioOutput(test)
                 suite['subtests'] = subtests
+
             else:
                 LOG.error("output.summarize received unsupported test results type")
                 return
 
-        # if there is more than one subtest, calculate a summary result
-        if len(subtests) > 1:
-            suite['value'] = self.construct_results(vals, testname=test.name)
+            # for pageload tests, if there are > 1 subtests here, that means there
+            # were multiple measurements captured in each single pageload; we want
+            # to get the mean of those values and report 1 overall 'suite' value
+            # for the page; so that each test page/URL only has 1 line output
+            # on treeherder/perfherder (all replicates available in the JSON)
+
+            # for benchmarks there is generally  more than one subtest in each cycle
+            # and a benchmark-specific formula is needed to calculate the final score
+
+            if len(subtests) > 1:
+                suite['value'] = self.construct_summary(vals, testname=test.name)
 
         self.summarized_results = test_results
 
@@ -143,6 +156,54 @@ class Output(object):
             subtests.append(_subtests[name])
             vals.append([_subtests[name]['value'], name])
 
+        return subtests, vals
+
+    def parseWebaudioOutput(self, test):
+        # each benchmark 'index' becomes a subtest; each pagecycle / iteration
+        # of the test has multiple values per index/subtest
+
+        # this is the format we receive the results in from the benchmark
+        # i.e. this is ONE pagecycle of speedometer:
+
+        # {u'name': u'raptor-webaudio-firefox', u'type': u'benchmark', u'measurements':
+        # {u'webaudio': [[u'[{"name":"Empty testcase","duration":26,"buffer":{}},{"name"
+        # :"Simple gain test without resampling","duration":66,"buffer":{}},{"name":"Simple
+        # gain test without resampling (Stereo)","duration":71,"buffer":{}},{"name":"Simple
+        # gain test without resampling (Stereo and positional)","duration":67,"buffer":{}},
+        # {"name":"Simple gain test","duration":41,"buffer":{}},{"name":"Simple gain test
+        # (Stereo)","duration":59,"buffer":{}},{"name":"Simple gain test (Stereo and positional)",
+        # "duration":68,"buffer":{}},{"name":"Upmix without resampling (Mono -> Stereo)",
+        # "duration":53,"buffer":{}},{"name":"Downmix without resampling (Mono -> Stereo)",
+        # "duration":44,"buffer":{}},{"name":"Simple mixing (same buffer)",
+        # "duration":288,"buffer":{}}
+
+        _subtests = {}
+        data = test.measurements['webaudio']
+        for page_cycle in data:
+            data = json.loads(page_cycle[0])
+            for item in data:
+                # for each pagecycle, build a list of subtests and append all related replicates
+                sub = item['name']
+                replicates = [item['duration']]
+                if sub not in _subtests.keys():
+                    # subtest not added yet, first pagecycle, so add new one
+                    _subtests[sub] = {'unit': test.unit,
+                                      'alertThreshold': float(test.alert_threshold),
+                                      'lowerIsBetter': test.lower_is_better,
+                                      'name': sub,
+                                      'replicates': []}
+                _subtests[sub]['replicates'].extend([round(x, 3) for x in replicates])
+
+        vals = []
+        subtests = []
+        names = _subtests.keys()
+        names.sort(reverse=True)
+        for name in names:
+            _subtests[name]['value'] = filter.median(_subtests[name]['replicates'])
+            subtests.append(_subtests[name])
+            vals.append([_subtests[name]['value'], name])
+
+        print subtests
         return subtests, vals
 
     def parseMotionmarkOutput(self, test):
@@ -195,6 +256,42 @@ class Output(object):
         for name in names:
             _subtests[name]['value'] = filter.median(_subtests[name]['replicates'])
             subtests.append(_subtests[name])
+            vals.append([_subtests[name]['value'], name])
+
+        return subtests, vals
+
+    def parseSunspiderOutput(self, test):
+        _subtests = {}
+        data = test.measurements['sunspider']
+        for page_cycle in data:
+            for sub, replicates in page_cycle[0].iteritems():
+                # for each pagecycle, build a list of subtests and append all related replicates
+                if sub not in _subtests.keys():
+                    # subtest not added yet, first pagecycle, so add new one
+                    _subtests[sub] = {'unit': test.unit,
+                                      'alertThreshold': float(test.alert_threshold),
+                                      'lowerIsBetter': test.lower_is_better,
+                                      'name': sub,
+                                      'replicates': []}
+                _subtests[sub]['replicates'].extend([round(x, 3) for x in replicates])
+
+        total_subtest = {
+            'unit': test.unit,
+            'alertThreshold': float(test.alert_threshold),
+            'lowerIsBetter': test.lower_is_better,
+            'replicates': [],
+            'name': 'benchmark_score',
+            'value': 0
+        }
+        subtests = [total_subtest]
+        vals = []
+
+        names = _subtests.keys()
+        names.sort(reverse=True)
+        for name in names:
+            _subtests[name]['value'] = filter.mean(_subtests[name]['replicates'])
+            subtests.append(_subtests[name])
+
             vals.append([_subtests[name]['value'], name])
 
         return subtests, vals
@@ -267,6 +364,14 @@ class Output(object):
         return filter.mean(results)
 
     @classmethod
+    def webaudio_score(cls, val_list):
+        """
+        webaudio_score: self reported as 'Geometric Mean'
+        """
+        results = [i for i, j in val_list if j == 'Geometric Mean']
+        return filter.mean(results)
+
+    @classmethod
     def stylebench_score(cls, val_list):
         """
         stylebench_score: https://bug-172968-attachments.webkit.org/attachment.cgi?id=319888
@@ -283,7 +388,12 @@ class Output(object):
         score = 60 * 1000 / filter.geometric_mean(results) / correctionFactor
         return score
 
-    def construct_results(self, vals, testname):
+    @classmethod
+    def sunspider_score(cls, val_list):
+        results = [i for i, j in val_list]
+        return sum(results)
+
+    def construct_summary(self, vals, testname):
         if testname.startswith('raptor-v8_7'):
             return self.v8_Metric(vals)
         elif testname.startswith('raptor-kraken'):
@@ -294,7 +404,11 @@ class Output(object):
             return self.speedometer_score(vals)
         elif testname.startswith('raptor-stylebench'):
             return self.stylebench_score(vals)
+        elif testname.startswith('raptor-sunspider'):
+            return self.sunspider_score(vals)
+        elif testname.startswith('raptor-webaudio'):
+            return self.webaudio_score(vals)
         elif len(vals) > 1:
-            return filter.geometric_mean([i for i, j in vals])
+            return round(filter.geometric_mean([i for i, j in vals]), 2)
         else:
-            return filter.mean([i for i, j in vals])
+            return round(filter.mean([i for i, j in vals]), 2)

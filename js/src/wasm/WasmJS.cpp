@@ -45,16 +45,6 @@
 #include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
 
-#define WASM_CRASH_IF_SIMD_TYPES \
-    case ValType::I8x16: \
-    case ValType::B8x16: \
-    case ValType::I16x8: \
-    case ValType::B16x8: \
-    case ValType::I32x4: \
-    case ValType::B32x4: \
-    case ValType::F32x4: \
-      MOZ_CRASH("unexpected SIMD type")
-
 using namespace js;
 using namespace js::jit;
 using namespace js::wasm;
@@ -156,7 +146,6 @@ ToWebAssemblyValue(JSContext* cx, ValType targetType, HandleValue v, MutableHand
         }
         return true;
       }
-      WASM_CRASH_IF_SIMD_TYPES;
       case ValType::Ref:
       case ValType::I64: {
         break;
@@ -179,7 +168,6 @@ ToJSValue(const Val& val)
         if (!val.ptr())
             return NullValue();
         return ObjectValue(*(JSObject*)val.ptr());
-      WASM_CRASH_IF_SIMD_TYPES;
       case ValType::Ref:
       case ValType::I64:
         break;
@@ -2155,6 +2143,12 @@ const Class WasmGlobalObject::class_ =
 WasmGlobalObject::trace(JSTracer* trc, JSObject* obj)
 {
     WasmGlobalObject* global = reinterpret_cast<WasmGlobalObject*>(obj);
+    if (global->isNewborn()) {
+        // This can happen while we're allocating the object, in which case
+        // every single slot of the object is not defined yet. In particular,
+        // there's nothing to trace yet.
+        return;
+    }
     switch (global->type().code()) {
       case ValType::AnyRef:
         if (global->cell()->ptr)
@@ -2165,7 +2159,6 @@ WasmGlobalObject::trace(JSTracer* trc, JSObject* obj)
       case ValType::I64:
       case ValType::F64:
         break;
-      WASM_CRASH_IF_SIMD_TYPES;
       case ValType::Ref:
         MOZ_CRASH("Ref NYI");
     }
@@ -2175,7 +2168,8 @@ WasmGlobalObject::trace(JSTracer* trc, JSObject* obj)
 WasmGlobalObject::finalize(FreeOp*, JSObject* obj)
 {
     WasmGlobalObject* global = reinterpret_cast<WasmGlobalObject*>(obj);
-    js_delete(global->cell());
+    if (!global->isNewborn())
+        js_delete(global->cell());
 }
 
 /* static */ WasmGlobalObject*
@@ -2188,14 +2182,17 @@ WasmGlobalObject::create(JSContext* cx, HandleVal hval, bool isMutable)
     if (!obj)
         return nullptr;
 
+    MOZ_ASSERT(obj->isNewborn());
     MOZ_ASSERT(obj->isTenured(), "assumed by set_global post barriers");
 
     // It's simpler to initialize the cell after the object has been created,
     // to avoid needing to root the cell before the object creation.
 
     Cell* cell = js_new<Cell>();
-    if (!cell)
+    if (!cell) {
+        ReportOutOfMemory(cx);
         return nullptr;
+    }
 
     const Val& val = hval.get();
     switch (val.type().code()) {
@@ -2217,7 +2214,6 @@ WasmGlobalObject::create(JSContext* cx, HandleVal hval, bool isMutable)
         if (cell->ptr)
             JSObject::writeBarrierPost(&cell->ptr, nullptr, cell->ptr);
         break;
-      WASM_CRASH_IF_SIMD_TYPES;
       case ValType::Ref:
         MOZ_CRASH("Ref NYI");
     }
@@ -2225,6 +2221,8 @@ WasmGlobalObject::create(JSContext* cx, HandleVal hval, bool isMutable)
     obj->initReservedSlot(TYPE_SLOT, Int32Value(int32_t(val.type().bitsUnsafe())));
     obj->initReservedSlot(MUTABLE_SLOT, JS::BooleanValue(isMutable));
     obj->initReservedSlot(CELL_SLOT, PrivateValue(cell));
+
+    MOZ_ASSERT(!obj->isNewborn());
 
     return obj;
 }
@@ -2298,7 +2296,6 @@ WasmGlobalObject::construct(JSContext* cx, unsigned argc, Value* vp)
           case ValType::F32:    globalVal = Val(float(0.0));  break;
           case ValType::F64:    globalVal = Val(double(0.0)); break;
           case ValType::AnyRef: globalVal = Val(nullptr);     break;
-          WASM_CRASH_IF_SIMD_TYPES;
           case ValType::Ref:    MOZ_CRASH("Ref NYI");
         }
     }
@@ -2330,7 +2327,6 @@ WasmGlobalObject::valueGetterImpl(JSContext* cx, const CallArgs& args)
       case ValType::I64:
         JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_I64_TYPE);
         return false;
-      WASM_CRASH_IF_SIMD_TYPES;
       case ValType::Ref:
         MOZ_CRASH("Ref NYI");
     }
@@ -2381,7 +2377,6 @@ WasmGlobalObject::valueSetterImpl(JSContext* cx, const CallArgs& args)
             JSObject::writeBarrierPost(&cell->ptr, prevPtr, cell->ptr);
         break;
       }
-      WASM_CRASH_IF_SIMD_TYPES;
       case ValType::I64:
         MOZ_CRASH("unexpected i64 when setting global's value");
       case ValType::Ref:
@@ -2437,7 +2432,6 @@ WasmGlobalObject::val(MutableHandleVal outval) const
       case ValType::F32:    outval.set(Val(cell->f32));           return;
       case ValType::F64:    outval.set(Val(cell->f64));           return;
       case ValType::AnyRef: outval.set(Val(cell->ptr));           return;
-      WASM_CRASH_IF_SIMD_TYPES;
       case ValType::Ref:    MOZ_CRASH("Ref NYI");
     }
     MOZ_CRASH("unexpected Global type");

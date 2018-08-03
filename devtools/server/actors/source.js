@@ -364,6 +364,14 @@ const SourceActor = ActorClassWithSpec(sourceSpec, {
         return toResolvedContent(buffer);
       }
 
+      // If we are replaying then we can only use source saved during the
+      // original recording. If we try to fetch it now it may have changed or
+      // may no longer exist.
+      if (this.dbg.replaying) {
+        assert(!this._contentType);
+        return this.dbg.replayingContent(this.url);
+      }
+
       // Use `source.text` if it exists, is not the "no source" string, and
       // the content type of the source is JavaScript or it is synthesized
       // wasm. It will be "no source" if the Debugger API wasn't able to load
@@ -394,16 +402,15 @@ const SourceActor = ActorClassWithSpec(sourceSpec, {
       let principal, cacheKey;
       // On xpcshell, we don't have a window but a Sandbox
       if (!isWorker && win instanceof Ci.nsIDOMWindow) {
-        const webNav = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIWebNavigation);
-        const channel = webNav.currentDocumentChannel;
+        const docShell = win.docShell;
+        const channel = docShell.currentDocumentChannel;
         principal = channel.loadInfo.loadingPrincipal;
 
         // Retrieve the cacheKey in order to load POST requests from cache
         // Note that chrome:// URLs don't support this interface.
         if (loadFromCache &&
-          webNav.currentDocumentChannel instanceof Ci.nsICacheInfoChannel) {
-          cacheKey = webNav.currentDocumentChannel.cacheKey;
+          docShell.currentDocumentChannel instanceof Ci.nsICacheInfoChannel) {
+          cacheKey = docShell.currentDocumentChannel.cacheKey;
         }
       }
 

@@ -12,7 +12,7 @@
 #include "nsStyleStruct.h"
 #include "nsStyleStructInlines.h"
 #include "nsStyleConsts.h"
-#include "nsThemeConstants.h"
+#include "nsStyleConsts.h"
 #include "nsString.h"
 #include "nsPresContext.h"
 #include "nsIAppShellService.h"
@@ -753,14 +753,12 @@ nsStyleXUL::CalcDifference(const nsStyleXUL& aNewData) const
 // nsStyleColumn
 //
 /* static */ const uint32_t nsStyleColumn::kMaxColumnCount;
+/* static */ const uint32_t nsStyleColumn::kColumnCountAuto;
 
 nsStyleColumn::nsStyleColumn(const nsPresContext* aContext)
-  : mColumnCount(NS_STYLE_COLUMN_COUNT_AUTO)
-  , mColumnWidth(eStyleUnit_Auto)
+  : mColumnWidth(eStyleUnit_Auto)
   , mColumnRuleColor(StyleComplexColor::CurrentColor())
   , mColumnRuleStyle(NS_STYLE_BORDER_STYLE_NONE)
-  , mColumnFill(NS_STYLE_COLUMN_FILL_BALANCE)
-  , mColumnSpan(NS_STYLE_COLUMN_SPAN_NONE)
   , mColumnRuleWidth((StaticPresData::Get()
                         ->GetBorderWidthTable())[NS_STYLE_BORDER_WIDTH_MEDIUM])
   , mTwipsPerPixel(aContext->AppUnitsPerDevPixel())
@@ -3486,7 +3484,7 @@ nsStyleDisplay::nsStyleDisplay(const nsPresContext* aContext)
   : mDisplay(StyleDisplay::Inline)
   , mOriginalDisplay(StyleDisplay::Inline)
   , mContain(NS_STYLE_CONTAIN_NONE)
-  , mAppearance(NS_THEME_NONE)
+  , mAppearance(StyleAppearance::None)
   , mPosition(NS_STYLE_POSITION_STATIC)
   , mFloat(StyleFloat::None)
   , mOriginalFloat(StyleFloat::None)
@@ -3725,10 +3723,10 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
     return nsChangeHint_ReconstructFrame;
   }
 
-  if ((mAppearance == NS_THEME_TEXTFIELD &&
-       aNewData.mAppearance != NS_THEME_TEXTFIELD) ||
-      (mAppearance != NS_THEME_TEXTFIELD &&
-       aNewData.mAppearance == NS_THEME_TEXTFIELD)) {
+  if ((mAppearance == StyleAppearance::Textfield &&
+       aNewData.mAppearance != StyleAppearance::Textfield) ||
+      (mAppearance != StyleAppearance::Textfield &&
+       aNewData.mAppearance == StyleAppearance::Textfield)) {
     // This is for <input type=number> where we allow authors to specify a
     // |-moz-appearance:textfield| to get a control without a spinner. (The
     // spinner is present for |-moz-appearance:number-input| but also other
@@ -3813,17 +3811,7 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
    * or remove the view object, and also to handle abs-pos and fixed-pos containers.
    */
   if (HasTransformStyle() != aNewData.HasTransformStyle()) {
-    // We do not need to apply nsChangeHint_UpdateTransformLayer since
-    // nsChangeHint_RepaintFrame will forcibly invalidate the frame area and
-    // ensure layers are rebuilt (or removed).
-    //
-    // Note: If we add a new change hint for transform changes here or in
-    // CompareTransformValues(), we have to modify
-    // KeyframeEffect::CalculateCumulativeChangeHint too!
-    hint |= nsChangeHint_UpdateContainingBlock |
-            nsChangeHint_AddOrRemoveTransform |
-            nsChangeHint_UpdateOverflow |
-            nsChangeHint_RepaintFrame;
+    hint |= nsChangeHint_ComprehensiveAddOrRemoveTransform;
   } else {
     /* Otherwise, if we've kept the property lying around and we already had a
      * transform, we need to see whether or not we've changed the transform.

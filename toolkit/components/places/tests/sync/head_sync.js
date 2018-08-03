@@ -251,38 +251,20 @@ BookmarkObserver.prototype = {
   },
   onItemVisited() {},
   onItemMoved(itemId, oldParentId, oldIndex, newParentId, newIndex, type, guid,
-              oldParentGuid, newParentGuid, source, uri) {
+              oldParentGuid, newParentGuid, source, urlHref) {
     this.notifications.push({
       name: "onItemMoved",
       params: { itemId, oldParentId, oldIndex, newParentId, newIndex, type,
-                guid, oldParentGuid, newParentGuid, source, uri },
-    });
-  },
-
-  onPageAnnotationSet() {},
-  onItemAnnotationSet(itemId, name, source, dontUpdateLastModified) {
-    this.notifications.push({
-      name: "onItemAnnotationSet",
-      params: { itemId, name, source, dontUpdateLastModified },
-    });
-  },
-
-  onPageAnnotationRemoved() {},
-  onItemAnnotationRemoved(itemId, name, source) {
-    this.notifications.push({
-      name: "onItemAnnotationRemoved",
-      params: { itemId, name, source },
+                guid, oldParentGuid, newParentGuid, source, urlHref },
     });
   },
 
   QueryInterface: ChromeUtils.generateQI([
     Ci.nsINavBookmarkObserver,
-    Ci.nsIAnnotationObserver,
   ]),
 
   check(expectedNotifications) {
     PlacesUtils.bookmarks.removeObserver(this);
-    PlacesUtils.annotations.removeObserver(this);
     if (!ObjectUtils.deepEqual(this.notifications, expectedNotifications)) {
       info(`Expected notifications: ${JSON.stringify(expectedNotifications)}`);
       info(`Actual notifications: ${JSON.stringify(this.notifications)}`);
@@ -297,7 +279,6 @@ BookmarkObserver.prototype = {
 function expectBookmarkChangeNotifications(options) {
   let observer = new BookmarkObserver(options);
   PlacesUtils.bookmarks.addObserver(observer);
-  PlacesUtils.annotations.addObserver(observer);
   return observer;
 }
 

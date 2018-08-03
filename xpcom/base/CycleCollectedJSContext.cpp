@@ -24,6 +24,7 @@
 #include "mozilla/dom/PromiseBinding.h"
 #include "mozilla/dom/PromiseDebugging.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "jsapi.h"
 #include "js/Debug.h"
 #include "js/GCAPI.h"
 #include "js/Utility.h"
@@ -209,6 +210,7 @@ public:
     :mCallback(
        new PromiseJobCallback(aCallback, aAllocationSite, aIncumbentGlobal))
   {
+    MOZ_ASSERT(js::IsFunctionObject(aCallback));
   }
 
   virtual ~PromiseJobRunnable()
@@ -486,6 +488,7 @@ CycleCollectedJSContext::DispatchToMicroTask(
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(runnable);
 
+  JS::JobQueueMayNotBeEmpty(Context());
   mPendingMicroTaskRunnables.push(runnable.forget());
 }
 
@@ -505,7 +508,7 @@ public:
 };
 
 bool
-CycleCollectedJSContext::PerformMicroTaskCheckPoint()
+CycleCollectedJSContext::PerformMicroTaskCheckPoint(bool aForce)
 {
   if (mPendingMicroTaskRunnables.empty() && mDebuggerMicroTaskQueue.empty()) {
     AfterProcessMicrotasks();
@@ -514,7 +517,7 @@ CycleCollectedJSContext::PerformMicroTaskCheckPoint()
   }
 
   uint32_t currentDepth = RecursionDepth();
-  if (mMicroTaskRecursionDepth >= currentDepth) {
+  if (mMicroTaskRecursionDepth >= currentDepth && !aForce) {
     // We are already executing microtasks for the current recursion depth.
     return false;
   }
@@ -532,7 +535,7 @@ CycleCollectedJSContext::PerformMicroTaskCheckPoint()
   }
 
   mozilla::AutoRestore<uint32_t> restore(mMicroTaskRecursionDepth);
-  MOZ_ASSERT(currentDepth > 0);
+  MOZ_ASSERT(aForce ? currentDepth == 0 : currentDepth > 0);
   mMicroTaskRecursionDepth = currentDepth;
 
   bool didProcess = false;
@@ -556,8 +559,13 @@ CycleCollectedJSContext::PerformMicroTaskCheckPoint()
       // Otherwise, mPendingMicroTaskRunnables will be replaced later with
       // all suppressed tasks in mDebuggerMicroTaskQueue unexpectedly.
       MOZ_ASSERT(NS_IsMainThread());
+      JS::JobQueueMayNotBeEmpty(Context());
       suppressed.push(runnable);
     } else {
+      if (mPendingMicroTaskRunnables.empty() &&
+          mDebuggerMicroTaskQueue.empty() && suppressed.empty()) {
+        JS::JobQueueIsEmpty(Context());
+      }
       didProcess = true;
       runnable->Run(aso);
     }
@@ -596,6 +604,10 @@ CycleCollectedJSContext::PerformDebuggerMicroTaskCheckpoint()
 
     // This function can re-enter, so we remove the element before calling.
     microtaskQueue->pop();
+
+    if (mPendingMicroTaskRunnables.empty() && mDebuggerMicroTaskQueue.empty()) {
+      JS::JobQueueIsEmpty(Context());
+    }
     runnable->Run(aso);
   }
 

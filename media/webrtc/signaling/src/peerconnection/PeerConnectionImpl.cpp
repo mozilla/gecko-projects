@@ -66,6 +66,7 @@
 #include "nsDOMDataChannel.h"
 #include "mozilla/dom/Location.h"
 #include "mozilla/dom/Performance.h"
+#include "mozilla/NullPrincipal.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Preferences.h"
@@ -78,7 +79,6 @@
 #include "nsURLHelper.h"
 #include "nsNetUtil.h"
 #include "nsIURLParser.h"
-#include "NullPrincipal.h"
 #include "js/GCAnnotations.h"
 #include "mozilla/PeerIdentity.h"
 #include "mozilla/dom/RTCCertificate.h"
@@ -1340,6 +1340,11 @@ PeerConnectionImpl::CreateDataChannel(const nsAString& aLabel,
   PC_AUTO_ENTER_API_CALL(false);
   MOZ_ASSERT(aRetval);
 
+  // WebRTC is not enabled when recording/replaying. See bug 1304149.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
   RefPtr<DataChannel> dataChannel;
   DataChannelConnection::Type theType =
     static_cast<DataChannelConnection::Type>(aType);
@@ -1404,8 +1409,8 @@ do_QueryObjectReferent(nsIWeakReference* aRawPtr) {
 
 
 // Not a member function so that we don't need to keep the PC live.
-static void NotifyDataChannel_m(RefPtr<nsDOMDataChannel> aChannel,
-                                RefPtr<PeerConnectionObserver> aObserver)
+static void NotifyDataChannel_m(const RefPtr<nsDOMDataChannel>& aChannel,
+                                const RefPtr<PeerConnectionObserver>& aObserver)
 {
   MOZ_ASSERT(NS_IsMainThread());
   JSErrorResult rv;
@@ -3043,7 +3048,7 @@ PeerConnectionImpl::CandidateReady(const std::string& candidate,
 }
 
 static void
-SendLocalIceCandidateToContentImpl(nsWeakPtr weakPCObserver,
+SendLocalIceCandidateToContentImpl(const nsWeakPtr& weakPCObserver,
                                    uint16_t level,
                                    const std::string& mid,
                                    const std::string& candidate) {
@@ -3441,10 +3446,10 @@ PeerConnectionImpl::ExecuteStatsQuery_s(RTCStatsQuery *query) {
       case MediaPipeline::DirectionType::TRANSMIT: {
         nsString localId = NS_LITERAL_STRING("outbound_rtp_") + idstr;
         nsString remoteId;
-        nsString ssrc;
+        Maybe<uint32_t> ssrc;
         std::vector<unsigned int> ssrcvals = mp.Conduit()->GetLocalSSRCs();
         if (!ssrcvals.empty()) {
-          ssrc.AppendInt(ssrcvals[0]);
+          ssrc = Some(ssrcvals[0]);
         }
         {
           // First, fill in remote stat with rtcp receiver data, if present.
@@ -3466,9 +3471,7 @@ PeerConnectionImpl::ExecuteStatsQuery_s(RTCStatsQuery *query) {
             s.mTimestamp.Construct(timestamp);
             s.mId.Construct(remoteId);
             s.mType.Construct(RTCStatsType::Inbound_rtp);
-            if (ssrc.Length()) {
-              s.mSsrc.Construct(ssrc);
-            }
+            ssrc.apply([&s](uint32_t aSsrc){s.mSsrc.Construct(aSsrc);});
             s.mMediaType.Construct(mediaType);
             s.mJitter.Construct(double(jitterMs)/1000);
             s.mRemoteId.Construct(localId);
@@ -3489,9 +3492,7 @@ PeerConnectionImpl::ExecuteStatsQuery_s(RTCStatsQuery *query) {
           s.mTimestamp.Construct(query->now);
           s.mId.Construct(localId);
           s.mType.Construct(RTCStatsType::Outbound_rtp);
-          if (ssrc.Length()) {
-            s.mSsrc.Construct(ssrc);
-          }
+          ssrc.apply([&s](uint32_t aSsrc){s.mSsrc.Construct(aSsrc);});
           s.mMediaType.Construct(mediaType);
           s.mRemoteId.Construct(remoteId);
           s.mIsRemote = false;
@@ -3539,10 +3540,10 @@ PeerConnectionImpl::ExecuteStatsQuery_s(RTCStatsQuery *query) {
       case MediaPipeline::DirectionType::RECEIVE: {
         nsString localId = NS_LITERAL_STRING("inbound_rtp_") + idstr;
         nsString remoteId;
-        nsString ssrc;
+        Maybe<uint32_t> ssrc;
         unsigned int ssrcval;
         if (mp.Conduit()->GetRemoteSSRC(&ssrcval)) {
-          ssrc.AppendInt(ssrcval);
+          ssrc = Some(ssrcval);
         }
         {
           // First, fill in remote stat with rtcp sender data, if present.
@@ -3556,9 +3557,7 @@ PeerConnectionImpl::ExecuteStatsQuery_s(RTCStatsQuery *query) {
             s.mTimestamp.Construct(timestamp);
             s.mId.Construct(remoteId);
             s.mType.Construct(RTCStatsType::Outbound_rtp);
-            if (ssrc.Length()) {
-              s.mSsrc.Construct(ssrc);
-            }
+            ssrc.apply([&s](uint32_t aSsrc){s.mSsrc.Construct(aSsrc);});
             s.mMediaType.Construct(mediaType);
             s.mRemoteId.Construct(localId);
             s.mIsRemote = true;
@@ -3573,9 +3572,7 @@ PeerConnectionImpl::ExecuteStatsQuery_s(RTCStatsQuery *query) {
         s.mTimestamp.Construct(query->now);
         s.mId.Construct(localId);
         s.mType.Construct(RTCStatsType::Inbound_rtp);
-        if (ssrc.Length()) {
-          s.mSsrc.Construct(ssrc);
-        }
+        ssrc.apply([&s](uint32_t aSsrc){s.mSsrc.Construct(aSsrc);});
         s.mMediaType.Construct(mediaType);
         unsigned int jitterMs, packetsLost;
         if (mp.Conduit()->GetRTPStats(&jitterMs, &packetsLost)) {
@@ -3692,7 +3689,7 @@ void PeerConnectionImpl::GetStatsForPCObserver_s(
 void PeerConnectionImpl::DeliverStatsReportToPCObserver_m(
     const std::string& pcHandle,
     nsresult result,
-    nsAutoPtr<RTCStatsQuery> query) {
+    const nsAutoPtr<RTCStatsQuery>& query) {
 
   // Is the PeerConnectionImpl still around?
   PeerConnectionWrapper pcw(pcHandle);

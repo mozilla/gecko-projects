@@ -1,0 +1,31 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+.sidebar-item {
+  --sidebar-item-icon-color: var(--grey-30);
+  --sidebar-item-selected-color: var(--blue-55);
+}
+
+.sidebar-item {
+  align-items: center;
+  display: flex;
+  font-size: 20px;
+  margin-inline-start: 24px;
+}
+
+.sidebar-item__icon {
+  fill: var(--sidebar-item-icon-color);
+  height: 24px;
+  margin-inline-end: 9px;
+  width: 24px;
+  -moz-context-properties: fill;
+}
+
+.sidebar-item--selected {
+  color: var(--sidebar-item-selected-color);
+}
+
+.sidebar-item__icon--selected {
+  fill: var(--sidebar-item-selected-color);
+}

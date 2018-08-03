@@ -16,7 +16,6 @@
 #include "frontend/BytecodeEmitter.h"
 #include "frontend/ErrorReporter.h"
 #include "frontend/FoldConstants.h"
-#include "frontend/NameFunctions.h"
 #include "frontend/Parser.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSContext.h"
@@ -25,6 +24,7 @@
 #include "wasm/AsmJS.h"
 
 #include "vm/EnvironmentObject-inl.h"
+#include "vm/GeckoProfiler-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/JSScript-inl.h"
 
@@ -212,7 +212,11 @@ BytecodeCompiler::canLazilyParse()
            !cx->realm()->behaviors().disableLazyParsing() &&
            !cx->realm()->behaviors().discardSource() &&
            !options.sourceIsLazy &&
-           !cx->lcovEnabled();
+           !cx->lcovEnabled() &&
+           // Disabled during record/replay. The replay debugger requires
+           // scripts to be constructed in a consistent order, which might not
+           // happen with lazy parsing.
+           !mozilla::recordreplay::IsRecordingOrReplaying();
 }
 
 bool
@@ -330,12 +334,16 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
 
     for (;;) {
         ParseNode* pn;
-        if (sc->isEvalContext())
-            pn = parser->evalBody(sc->asEvalContext());
-        else
-            pn = parser->globalBody(sc->asGlobalContext());
+        {
+            AutoGeckoProfilerEntry pseudoFrame(cx, "script parsing");
+            if (sc->isEvalContext())
+                pn = parser->evalBody(sc->asEvalContext());
+            else
+                pn = parser->globalBody(sc->asGlobalContext());
+        }
 
         // Successfully parsed. Emit the script.
+        AutoGeckoProfilerEntry pseudoFrame(cx, "script emit");
         if (pn) {
             if (sc->isEvalContext() && sc->hasDebuggerStatement() && !cx->helperThread()) {
                 // If the eval'ed script contains any debugger statement, force construction
@@ -347,9 +355,6 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
             }
             if (!emitter->emitScript(pn))
                 return nullptr;
-            if (!NameFunctions(cx, pn))
-                return nullptr;
-
             break;
         }
 
@@ -419,9 +424,6 @@ BytecodeCompiler::compileModule()
     if (!emitter->emitScript(pn->pn_body))
         return nullptr;
 
-    if (!NameFunctions(cx, pn))
-        return nullptr;
-
     if (!builder.initModule())
         return nullptr;
 
@@ -479,15 +481,12 @@ BytecodeCompiler::compileStandaloneFunction(MutableHandleFunction fun,
         Maybe<BytecodeEmitter> emitter;
         if (!emplaceEmitter(emitter, fn->pn_funbox))
             return false;
-        if (!emitter->emitFunctionScript(fn->pn_body))
+        if (!emitter->emitFunctionScript(fn, BytecodeEmitter::TopLevelFunction::Yes))
             return false;
     } else {
         fun.set(fn->pn_funbox->function());
         MOZ_ASSERT(IsAsmJSModule(fun));
     }
-
-    if (!NameFunctions(cx, fn))
-        return false;
 
     // Enqueue an off-thread source compression task after finishing parsing.
     if (!scriptSource->tryCompressOffThread(cx))
@@ -661,9 +660,6 @@ frontend::CompileGlobalBinASTScript(JSContext* cx, LifoAlloc& alloc, const ReadO
     if (!bce.emitScript(pn))
         return nullptr;
 
-    if (!NameFunctions(cx, pn))
-        return nullptr;
-
     if (sourceObjectOut)
         *sourceObjectOut = sourceObj;
 
@@ -740,14 +736,60 @@ frontend::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
     return module;
 }
 
+// When leaving this scope, the given function should either:
+//   * be linked to a fully compiled script
+//   * remain linking to a lazy script
+class MOZ_STACK_CLASS AutoAssertFunctionDelazificationCompletion
+{
+#ifdef DEBUG
+    RootedFunction fun_;
+#endif
+
+  public:
+    AutoAssertFunctionDelazificationCompletion(JSContext* cx, HandleFunction fun)
+#ifdef DEBUG
+      : fun_(cx, fun)
+#endif
+    {
+        MOZ_ASSERT(fun_->isInterpretedLazy());
+        MOZ_ASSERT(!fun_->lazyScript()->hasScript());
+    }
+
+    ~AutoAssertFunctionDelazificationCompletion() {
+#ifdef DEBUG
+        if (!fun_)
+            return;
+#endif
+
+        // If fun_ is not nullptr, it means delazification doesn't complete.
+        // Assert that the function keeps linking to lazy script
+        MOZ_ASSERT(fun_->isInterpretedLazy());
+        MOZ_ASSERT(!fun_->lazyScript()->hasScript());
+    }
+
+    void complete() {
+        // Assert the completion of delazification and forget the function.
+        MOZ_ASSERT(fun_->hasScript());
+        MOZ_ASSERT(!fun_->hasUncompletedScript());
+
+#ifdef DEBUG
+        fun_ = nullptr;
+#endif
+    }
+};
+
 bool
 frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const char16_t* chars, size_t length)
 {
     MOZ_ASSERT(cx->compartment() == lazy->functionNonDelazifying()->compartment());
-    // We can't be running this script unless we've run its parent.
-    MOZ_ASSERT(!lazy->isEnclosingScriptLazy());
+    // We can only compile functions whose parents have previously been
+    // compiled, because compilation requires full information about the
+    // function's immediately enclosing scope.
+    MOZ_ASSERT(lazy->enclosingScriptHasEverBeenCompiled());
 
     AutoAssertReportedException assertException(cx);
+    Rooted<JSFunction*> fun(cx, lazy->functionNonDelazifying());
+    AutoAssertFunctionDelazificationCompletion delazificationCompletion(cx, fun);
 
     CompileOptions options(cx);
     options.setMutedErrors(lazy->mutedErrors())
@@ -762,7 +804,7 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
     // syntax parsing and start of full parsing, so we do this now rather than
     // after parsing below.
     if (!lazy->scriptSource()->parseEnded().IsNull()) {
-        const mozilla::TimeDuration delta = mozilla::TimeStamp::Now() -
+        const mozilla::TimeDuration delta = ReallyNow() -
             lazy->scriptSource()->parseEnded();
 
         // Differentiate between web-facing and privileged code, to aid
@@ -786,7 +828,6 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
     if (!parser.checkOptions())
         return false;
 
-    Rooted<JSFunction*> fun(cx, lazy->functionNonDelazifying());
     ParseNode* pn = parser.standaloneLazyFunction(fun, lazy->toStringStart(),
                                                   lazy->strict(), lazy->generatorKind(),
                                                   lazy->asyncKind());
@@ -809,12 +850,10 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
     if (!bce.init())
         return false;
 
-    if (!bce.emitFunctionScript(pn->pn_body))
+    if (!bce.emitFunctionScript(pn, BytecodeEmitter::TopLevelFunction::Yes))
         return false;
 
-    if (!NameFunctions(cx, pn))
-        return false;
-
+    delazificationCompletion.complete();
     assertException.reset();
     return true;
 }

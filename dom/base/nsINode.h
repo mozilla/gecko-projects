@@ -42,6 +42,7 @@ class nsIAnimationObserver;
 class nsIContent;
 class nsIDocument;
 class nsIFrame;
+class nsIHTMLCollection;
 class nsIMutationObserver;
 class nsINode;
 class nsINodeList;
@@ -86,6 +87,7 @@ template<typename T> class Optional;
 class OwningNodeOrString;
 class Promise;
 template<typename> class Sequence;
+class SVGUseElement;
 class Text;
 class TextOrElementOrDocument;
 struct DOMPointInit;
@@ -453,6 +455,12 @@ public:
   inline const mozilla::dom::DocumentFragment* AsDocumentFragment() const;
 
   virtual JSObject* WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
+
+  /**
+  * Hook for constructing JS::ubi::Concrete specializations for memory reporting.
+  * Specializations are defined in NodeUbiReporting.h.
+  */
+  virtual void ConstructUbiNode(void* storage) = 0;
 
   /**
    * returns true if we are in priviliged code or
@@ -972,6 +980,8 @@ public:
    */
   inline nsINode* GetFlattenedTreeParentNode() const;
 
+  nsINode* GetFlattenedTreeParentNodeNonInline() const;
+
   /**
    * Like GetFlattenedTreeParentNode, but returns the document for any native
    * anonymous content that was generated for ancestor frames of the document
@@ -1230,8 +1240,18 @@ public:
 
   bool IsInAnonymousSubtree() const;
 
-  // Note: This asserts |IsInAnonymousSubtree()|.
-  bool IsAnonymousContentInSVGUseSubtree() const;
+  bool IsInSVGUseShadowTree() const
+  {
+    return !!GetContainingSVGUseShadowHost();
+  }
+
+  mozilla::dom::SVGUseElement* GetContainingSVGUseShadowHost() const
+  {
+    if (!IsInShadowTree()) {
+      return nullptr;
+    }
+    return DoGetContainingSVGUseShadowHost();
+  }
 
   // True for native anonymous content and for XBL content if the binding
   // has chromeOnlyContent="true".
@@ -1401,6 +1421,8 @@ public:
   bool UnoptimizableCCNode() const;
 
 private:
+
+  mozilla::dom::SVGUseElement* DoGetContainingSVGUseShadowHost() const;
 
   nsIDocument* GetComposedDocInternal() const;
 
@@ -1839,6 +1861,16 @@ public:
   // ParentNode methods
   mozilla::dom::Element* GetFirstElementChild() const;
   mozilla::dom::Element* GetLastElementChild() const;
+
+  already_AddRefed<nsIHTMLCollection>
+    GetElementsByAttribute(const nsAString& aAttribute,
+                           const nsAString& aValue);
+  already_AddRefed<nsIHTMLCollection>
+    GetElementsByAttributeNS(const nsAString& aNamespaceURI,
+                             const nsAString& aAttribute,
+                             const nsAString& aValue,
+                             ErrorResult& aRv);
+
 
   MOZ_CAN_RUN_SCRIPT void Prepend(const Sequence<OwningNodeOrString>& aNodes,
                                   ErrorResult& aRv);

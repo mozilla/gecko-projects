@@ -65,8 +65,7 @@ function webNavigation() {
 }
 
 function windowUtilsForWindow(w) {
-    return w.QueryInterface(Ci.nsIInterfaceRequestor)
-            .getInterface(Ci.nsIDOMWindowUtils);
+    return w.windowUtils;
 }
 
 function windowUtils() {
@@ -266,8 +265,7 @@ function printToPdf(callback) {
         ps.endPageRange = +range[1] || 1;
     }
 
-    let webBrowserPrint = content.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIWebBrowserPrint);
+    let webBrowserPrint = content.getInterface(Ci.nsIWebBrowserPrint);
     webBrowserPrint.print(ps, {
         onStateChange: function(webProgress, request, stateFlags, status) {
             if (stateFlags & Ci.nsIWebProgressListener.STATE_STOP &&
@@ -497,8 +495,7 @@ function FlushRendering(aFlushMode) {
     var anyPendingPaintsGeneratedInDescendants = false;
 
     function flushWindow(win) {
-        var utils = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIDOMWindowUtils);
+        var utils = win.windowUtils;
         var afterPaintWasPending = utils.isMozAfterPaintPending;
 
         var root = win.document.documentElement;

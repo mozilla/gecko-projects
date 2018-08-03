@@ -497,11 +497,6 @@ class BaseShape : public gc::TenuredCell
     /* For owned BaseShapes, the shape's shape table. */
     ShapeTable*      table_;
 
-#if JS_BITS_PER_WORD == 32
-    // Ensure sizeof(BaseShape) is a multiple of gc::CellAlignBytes.
-    uint32_t padding_;
-#endif
-
     BaseShape(const BaseShape& base) = delete;
     BaseShape& operator=(const BaseShape& other) = delete;
 
@@ -668,17 +663,25 @@ HashId(jsid id)
     return mozilla::HashGeneric(JSID_BITS(id));
 }
 
+} // namespace js
+
+namespace mozilla {
+
 template <>
 struct DefaultHasher<jsid>
 {
     typedef jsid Lookup;
     static HashNumber hash(jsid id) {
-        return HashId(id);
+        return js::HashId(id);
     }
     static bool match(jsid id1, jsid id2) {
         return id1 == id2;
     }
 };
+
+} // namespace mozilla
+
+namespace js {
 
 using BaseShapeSet = JS::WeakCache<JS::GCHashSet<ReadBarriered<UnownedBaseShape*>,
                                                  StackBaseShape,
@@ -842,7 +845,8 @@ class Shape : public gc::TenuredCell
         }
 
         if (!inDictionary() && kids.isHash())
-            info->shapesMallocHeapTreeKids += kids.toHash()->sizeOfIncludingThis(mallocSizeOf);
+            info->shapesMallocHeapTreeKids +=
+                kids.toHash()->shallowSizeOfIncludingThis(mallocSizeOf);
     }
 
     bool isAccessorShape() const {

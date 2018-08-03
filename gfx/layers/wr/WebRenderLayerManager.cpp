@@ -26,10 +26,6 @@
 #include "gfxDWriteFonts.h"
 #endif
 
-// Useful for debugging, it dumps the Gecko display list *before* we try to
-// build WR commands from it, and dumps the WR display list after building it.
-#define DUMP_LISTS 0
-
 namespace mozilla {
 
 using namespace gfx;
@@ -249,12 +245,6 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
 {
   AUTO_PROFILER_TRACING("Paint", "RenderLayers");
 
-#if DUMP_LISTS
-  // Useful for debugging, it dumps the display list *before* we try to build
-  // WR commands from it
-  if (XRE_IsContentProcess() && aDisplayList) nsFrame::PrintDisplayList(aDisplayListBuilder, *aDisplayList);
-#endif
-
 #ifdef XP_WIN
   gfxDWriteFont::UpdateClearTypeUsage();
 #endif
@@ -268,6 +258,11 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   wr::LayoutSize contentSize { (float)size.width, (float)size.height };
   wr::DisplayListBuilder builder(WrBridge()->GetPipeline(), contentSize, mLastDisplayListSize);
   wr::IpcResourceUpdateQueue resourceUpdates(WrBridge());
+  wr::usize builderDumpIndex = 0;
+  bool dumpEnabled = mWebRenderCommandBuilder.ShouldDumpDisplayList();
+  if (dumpEnabled) {
+    printf_stderr("-- WebRender display list build --\n");
+  }
 
   if (aDisplayList) {
     MOZ_ASSERT(aDisplayListBuilder && !aBackground);
@@ -282,20 +277,26 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
                                                     mScrollData,
                                                     contentSize,
                                                     aFilters);
+    builderDumpIndex = mWebRenderCommandBuilder.GetBuilderDumpIndex();
   } else {
     // ViewToPaint does not have frame yet, then render only background clolor.
     MOZ_ASSERT(!aDisplayListBuilder && aBackground);
     aBackground->AddWebRenderCommands(builder);
+    if (dumpEnabled) {
+      printf_stderr("(no display list; background only)\n");
+      builderDumpIndex = builder.Dump(/*indent*/ 1, Some(builderDumpIndex), Nothing());
+    }
   }
 
   DiscardCompositorAnimations();
 
   mWidget->AddWindowOverlayWebRenderCommands(WrBridge(), builder, resourceUpdates);
   mWindowOverlayChanged = false;
+  if (dumpEnabled) {
+    printf_stderr("(window overlay)\n");
+    Unused << builder.Dump(/*indent*/ 1, Some(builderDumpIndex), Nothing());
+  }
 
-#if DUMP_LISTS
-  if (XRE_IsContentProcess()) mScrollData.Dump();
-#endif
   if (AsyncPanZoomEnabled()) {
     mScrollData.SetFocusTarget(mFocusTarget);
     mFocusTarget = FocusTarget();
@@ -329,10 +330,6 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
       WrBridge()->GetSyncObject()->Synchronize();
     }
   }
-
-#if DUMP_LISTS
-  if (XRE_IsContentProcess()) builder.Dump();
-#endif
 
   wr::BuiltDisplayList dl;
   builder.Finalize(contentSize, dl);
@@ -483,10 +480,10 @@ WebRenderLayerManager::DiscardLocalImages()
 }
 
 void
-WebRenderLayerManager::SetLayerObserverEpoch(uint64_t aLayerObserverEpoch)
+WebRenderLayerManager::SetLayersObserverEpoch(LayersObserverEpoch aEpoch)
 {
   if (WrBridge()->IPCOpen()) {
-    WrBridge()->SendSetLayerObserverEpoch(aLayerObserverEpoch);
+    WrBridge()->SendSetLayersObserverEpoch(aEpoch);
   }
 }
 
@@ -618,7 +615,10 @@ WebRenderLayerManager::FlushRendering()
   }
   MOZ_ASSERT(mWidget);
 
-  if (mWidget->SynchronouslyRepaintOnResize() || gfxPrefs::LayersForceSynchronousResize()) {
+  // When DirectComposition and compositor window are used, we do not need to do sync FlushRendering.
+  if (WrBridge()->GetCompositorUseDComp()) {
+    cBridge->SendFlushRenderingAsync();
+  } else if (mWidget->SynchronouslyRepaintOnResize() || gfxPrefs::LayersForceSynchronousResize()) {
     cBridge->SendFlushRendering();
   } else {
     cBridge->SendFlushRenderingAsync();

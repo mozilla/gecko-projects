@@ -584,7 +584,8 @@ public:
 
 
   WritingMode GetWritingMode() const { return mWM; }
-  uint8_t GetAlignSelf() const     { return mAlignSelf; }
+  uint8_t GetAlignSelf() const { return mAlignSelf; }
+  uint8_t GetAlignSelfFlags() const { return mAlignSelfFlags; }
 
   // Returns the flex factor (flex-grow or flex-shrink), depending on
   // 'aIsUsingFlexGrow'.
@@ -878,6 +879,7 @@ protected:
   uint8_t mAlignSelf; // My "align-self" computed value (with "auto"
                       // swapped out for parent"s "align-items" value,
                       // in our constructor).
+  uint8_t mAlignSelfFlags; // Flags for 'align-self' (safe/unsafe/legacy)
 };
 
 /**
@@ -1057,6 +1059,8 @@ public:
     return mMainGapSize;
   }
 
+  inline void SetMainGapSize (nscoord aNewSize) { mMainGapSize = aNewSize; }
+
   // Runs the "Resolving Flexible Lengths" algorithm from section 9.7 of the
   // CSS flexbox spec to distribute aFlexContainerMainSize among our flex items.
   void ResolveFlexibleLengths(nscoord aFlexContainerMainSize,
@@ -1105,7 +1109,7 @@ private:
   nscoord mLastBaselineOffset;
 
   // Maintain size of each {row,column}-gap in the main axis
-  const nscoord mMainGapSize;
+  nscoord mMainGapSize;
 };
 
 // Information about a strut left behind by a FlexItem that's been collapsed
@@ -1215,6 +1219,7 @@ nsFlexContainerFrame::CSSAlignmentForAbsPosChild(
                                          : axisTracker.IsCrossAxisReversed();
 
   uint8_t alignment;
+  uint8_t alignmentFlags = 0;
   if (isMainAxis) {
     alignment = SimplifyAlignOrJustifyContentForOneItem(
                   containerStylePos->mJustifyContent,
@@ -1232,8 +1237,8 @@ nsFlexContainerFrame::CSSAlignmentForAbsPosChild(
       // Single-line, or multi-line but the (one) line stretches to fill
       // container. Respect align-self.
       alignment = aChildRI.mStylePosition->UsedAlignSelf(Style());
-      // XXX strip off <overflow-position> bits until we implement it
-      // (bug 1311892)
+      // Extract and strip align flag bits
+      alignmentFlags = alignment & NS_STYLE_ALIGN_FLAG_BITS;
       alignment &= ~NS_STYLE_ALIGN_FLAG_BITS;
 
       if (alignment == NS_STYLE_ALIGN_NORMAL) {
@@ -1267,7 +1272,7 @@ nsFlexContainerFrame::CSSAlignmentForAbsPosChild(
     alignment = NS_STYLE_ALIGN_END;
   }
 
-  return alignment;
+  return (alignment | alignmentFlags);
 }
 
 UniquePtr<FlexItem>
@@ -1941,7 +1946,8 @@ FlexItem::FlexItem(ReflowInput& aFlexItemReflowInput,
       mAlignSelf = NS_STYLE_ALIGN_STRETCH;
     }
 
-    // XXX strip off the <overflow-position> bit until we implement that
+    // Store and strip off the <overflow-position> bits
+    mAlignSelfFlags = mAlignSelf & NS_STYLE_ALIGN_FLAG_BITS;
     mAlignSelf &= ~NS_STYLE_ALIGN_FLAG_BITS;
   }
 
@@ -2305,6 +2311,8 @@ public:
 
   // Advances past the given FlexLine
   void TraverseLine(FlexLine& aLine) { mPosition += aLine.GetLineCrossSize(); }
+
+  inline void SetCrossGapSize(nscoord aNewSize) { mCrossGapSize = aNewSize; }
 
 private:
   // Redeclare the frame-related methods from PositionTracker as private with
@@ -2923,6 +2931,10 @@ MainAxisPositionTracker::
     mNumPackingSpacesRemaining(0),
     mJustifyContent(aJustifyContent)
 {
+  // Extract the flag portion of mJustifyContent and strip off the flag bits
+  uint8_t justifyContentFlags = mJustifyContent & NS_STYLE_JUSTIFY_FLAG_BITS;
+  mJustifyContent &= ~NS_STYLE_JUSTIFY_FLAG_BITS;
+
   // 'normal' behaves as 'stretch', and 'stretch' behaves as 'flex-start',
   // in the main axis
   // https://drafts.csswg.org/css-align-3/#propdef-justify-content
@@ -2930,9 +2942,6 @@ MainAxisPositionTracker::
       mJustifyContent == NS_STYLE_JUSTIFY_STRETCH) {
     mJustifyContent = NS_STYLE_JUSTIFY_FLEX_START;
   }
-
-  // XXX strip off the <overflow-position> bit until we implement that
-  mJustifyContent &= ~NS_STYLE_JUSTIFY_FLAG_BITS;
 
   // mPackingSpaceRemaining is initialized to the container's main size.  Now
   // we'll subtract out the main sizes of our flex items, so that it ends up
@@ -2949,6 +2958,11 @@ MainAxisPositionTracker::
   if (mPackingSpaceRemaining <= 0) {
     // No available packing space to use for resolving auto margins.
     mNumAutoMarginsInMainAxis = 0;
+    // If packing space is negative and <overflow-position> is set to 'safe'
+    // all justify options fall back to 'start'
+    if (justifyContentFlags & NS_STYLE_JUSTIFY_SAFE) {
+      mJustifyContent = NS_STYLE_JUSTIFY_START;
+    }
   }
 
   // If packing space is negative or we only have one item, 'space-between'
@@ -3104,13 +3118,14 @@ CrossAxisPositionTracker::
 {
   MOZ_ASSERT(aFirstLine, "null first line pointer");
 
+  // Extract and strip the flag bits from alignContent
+  uint8_t alignContentFlags = mAlignContent & NS_STYLE_ALIGN_FLAG_BITS;
+  mAlignContent &= ~NS_STYLE_ALIGN_FLAG_BITS;
+
   // 'normal' behaves as 'stretch'
   if (mAlignContent == NS_STYLE_ALIGN_NORMAL) {
     mAlignContent = NS_STYLE_ALIGN_STRETCH;
   }
-
-  // XXX strip of the <overflow-position> bit until we implement that
-  mAlignContent &= ~NS_STYLE_ALIGN_FLAG_BITS;
 
   const bool isSingleLine =
     NS_STYLE_FLEX_WRAP_NOWRAP == aReflowInput.mStylePosition->mFlexWrap;
@@ -3157,6 +3172,13 @@ CrossAxisPositionTracker::
   MOZ_ASSERT(numLines >= 1,
              "GenerateFlexLines should've produced at least 1 line");
   mPackingSpaceRemaining -= aCrossGapSize * (numLines - 1);
+
+  // If <overflow-position> is 'safe' and packing space is negative
+  // all align options fall back to 'start'
+  if ((alignContentFlags & NS_STYLE_ALIGN_SAFE) &&
+      mPackingSpaceRemaining < 0) {
+    mAlignContent = NS_STYLE_ALIGN_START;
+  }
 
   // If packing space is negative, 'space-between' and 'stretch' behave like
   // 'flex-start', and 'space-around' and 'space-evenly' behave like 'center'.
@@ -3514,6 +3536,14 @@ SingleLineCrossAxisPositionTracker::
     } else if (alignSelf == NS_STYLE_ALIGN_FLEX_END) {
       alignSelf = NS_STYLE_ALIGN_FLEX_START;
     }
+  }
+
+  // 'align-self' falls back to 'flex-start' if it is 'center'/'flex-end' and we
+  // have cross axis overflow
+  // XXX we should really be falling back to 'start' as of bug 1472843
+  if (aLine.GetLineCrossSize() < aItem.GetOuterCrossSize(mAxis) &&
+      (aItem.GetAlignSelfFlags() & NS_STYLE_ALIGN_SAFE)) {
+    alignSelf = NS_STYLE_ALIGN_FLEX_START;
   }
 
   switch (alignSelf) {
@@ -4828,6 +4858,25 @@ nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
     ConvertLegacyStyleToJustifyContent(StyleXUL()) :
     aReflowInput.mStylePosition->mJustifyContent;
 
+  // Recalculate the gap sizes if necessary now that the container size has
+  // been determined.
+  if (aReflowInput.ComputedBSize() == NS_INTRINSICSIZE &&
+      aReflowInput.mStylePosition->mRowGap.HasPercent()) {
+    bool rowIsCross = aAxisTracker.IsRowOriented();
+    nscoord newBlockGapSize =
+      nsLayoutUtils::ResolveGapToLength(aReflowInput.mStylePosition->mRowGap,
+                                        rowIsCross
+                                        ? contentBoxCrossSize
+                                        : aContentBoxMainSize);
+    if (rowIsCross) {
+      crossAxisPosnTracker.SetCrossGapSize(newBlockGapSize);
+    } else {
+      for (FlexLine* line = lines.getFirst(); line; line = line->getNext(),
+                                                    ++lineIndex) {
+        line->SetMainGapSize(newBlockGapSize);
+      }
+    }
+  }
 
   lineIndex = 0;
   for (FlexLine* line = lines.getFirst(); line; line = line->getNext(),

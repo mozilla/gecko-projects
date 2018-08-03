@@ -312,10 +312,9 @@ var PermissionPromptPrototype = {
           }
 
           if (this.permissionKey) {
-
-            // Permanently store permission.
-            if ((state && state.checkboxChecked) ||
+            if ((state && state.checkboxChecked && state.source != "esc-press") ||
                 promptAction.scope == SitePermissions.SCOPE_PERSISTENT) {
+              // Permanently store permission.
               let scope = SitePermissions.SCOPE_PERSISTENT;
               // Only remember permission for session if in PB mode.
               if (PrivateBrowsingUtils.isBrowserPrivate(this.browser)) {
@@ -409,12 +408,7 @@ var PermissionPromptForRequestPrototype = {
     if (this.request.element) {
       return this.request.element;
     }
-    return this.request
-               .window
-               .QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIWebNavigation)
-               .QueryInterface(Ci.nsIDocShell)
-               .chromeEventHandler;
+    return this.request.window.docShell.chromeEventHandler;
   },
 
   get principal() {
@@ -809,7 +803,7 @@ AutoplayPermissionPrompt.prototype = {
   },
 
   get anchorID() {
-    return "autoplay-media-icon";
+    return "autoplay-media-notification-icon";
   },
 
   get message() {
@@ -821,8 +815,8 @@ AutoplayPermissionPrompt.prototype = {
 
   get promptActions() {
     return [{
-        label: gBrowserBundle.GetStringFromName("autoplay.Allow.label"),
-        accessKey: gBrowserBundle.GetStringFromName("autoplay.Allow.accesskey"),
+        label: gBrowserBundle.GetStringFromName("autoplay.Allow2.label"),
+        accessKey: gBrowserBundle.GetStringFromName("autoplay.Allow2.accesskey"),
         action: Ci.nsIPermissionManager.ALLOW_ACTION,
       },
       {

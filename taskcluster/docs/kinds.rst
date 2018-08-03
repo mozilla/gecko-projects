@@ -471,8 +471,8 @@ in order to update its state in some way.
 
 pipfile-update
 --------------
-Repo-Update tasks are tasks that perform some action on the project repo itself,
-in order to update its state in some way.
+Pipfile-update tasks generate update Pipfile.lock for in-tree Pipfiles, and attach
+patches with the updates to Phabricator.
 
 partials
 --------

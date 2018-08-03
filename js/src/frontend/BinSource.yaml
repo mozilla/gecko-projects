@@ -2,6 +2,19 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+parser:
+    class-template:
+        template<typename Tok>
+    class-name:
+        BinASTParser<Tok>
+    type-ok:
+        ParseNode*
+    default-value:
+        nullptr
+    list:
+        append: |
+            result->appendWithoutOrderAssumption(item);
+
 # Rules for generating BinSource-auto.cpp
 cpp:
     header: |
@@ -196,7 +209,7 @@ Arguments:
     init:
         BINJS_TRY_DECL(result, factory_.newList(ParseNodeKind::ParamsBody, tokenizer_->pos(start)));
     append:
-        factory_.addList(/* list = */ result, /* child = */ item);
+        factory_.addList(/* list = */ result, /* kid = */ item);
 
 ArrayExpression:
     build:
@@ -731,7 +744,7 @@ ListOfParameter:
     init: |
         BINJS_TRY_DECL(result, new_<ListNode>(ParseNodeKind::ParamsBody, tokenizer_->pos(start)));
     append:
-        factory_.addList(/* list = */ result, /* item = */ item);
+        factory_.addList(/* list = */ result, /* kid = */ item);
 
 ListOfStatement:
     init:
@@ -892,7 +905,7 @@ SwitchDefault:
 SwitchStatement:
     build: |
         BINJS_TRY_DECL(scope, factory_.newLexicalScope(nullptr, cases));
-        BINJS_TRY_DECL(result, factory_.newSwitchStatement(start, discriminant, scope));
+        BINJS_TRY_DECL(result, factory_.newSwitchStatement(start, discriminant, scope, false));
 
 SwitchStatementWithDefault:
     build: |
@@ -906,7 +919,7 @@ SwitchStatementWithDefault:
             iter = next;
         }
         BINJS_TRY_DECL(scope, factory_.newLexicalScope(nullptr, cases));
-        BINJS_TRY_DECL(result, factory_.newSwitchStatement(start, discriminant, scope));
+        BINJS_TRY_DECL(result, factory_.newSwitchStatement(start, discriminant, scope, true));
 
 StaticMemberAssignmentTarget:
     build: |
@@ -946,7 +959,7 @@ TryCatchStatement:
                     ParseContext::Scope scope(cx_, parseContext_, usedNames_);
                     BINJS_TRY(scope.init(parseContext_));
     build:
-        BINJS_TRY_DECL(result, factory_.newTryStatement(start, body, catchClause, /* finally = */ nullptr));
+        BINJS_TRY_DECL(result, factory_.newTryStatement(start, body, catchClause, /* finallyBlock = */ nullptr));
 
 TryFinallyStatement:
     fields:

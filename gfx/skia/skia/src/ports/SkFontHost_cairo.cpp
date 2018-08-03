@@ -13,6 +13,7 @@
 
 #include "SkAdvancedTypefaceMetrics.h"
 #include "SkFDot6.h"
+#include "SkMutex.h"
 #include "SkPath.h"
 #include "SkScalerContext.h"
 #include "SkTypefaceCache.h"
@@ -169,25 +170,10 @@ static bool isAxisAligned(const SkScalerContextRec& rec) {
             bothZero(rec.fPost2x2[0][0], rec.fPost2x2[1][1]));
 }
 
+SK_DECLARE_STATIC_MUTEX(gTypefaceMutex);
+
 class SkCairoFTTypeface : public SkTypeface {
 public:
-    static SkTypeface* CreateTypeface(cairo_font_face_t* fontFace, FT_Face face,
-                                      FcPattern* pattern = nullptr) {
-        SkASSERT(fontFace != nullptr);
-        SkASSERT(cairo_font_face_get_type(fontFace) == CAIRO_FONT_TYPE_FT);
-        SkASSERT(face != nullptr);
-
-        SkFontStyle style(face->style_flags & FT_STYLE_FLAG_BOLD ?
-                              SkFontStyle::kBold_Weight : SkFontStyle::kNormal_Weight,
-                          SkFontStyle::kNormal_Width,
-                          face->style_flags & FT_STYLE_FLAG_ITALIC ?
-                              SkFontStyle::kItalic_Slant : SkFontStyle::kUpright_Slant);
-
-        bool isFixedWidth = face->face_flags & FT_FACE_FLAG_FIXED_WIDTH;
-
-        return new SkCairoFTTypeface(style, isFixedWidth, fontFace, pattern);
-    }
-
     virtual SkStreamAsset* onOpenStream(int*) const override { return nullptr; }
 
     virtual std::unique_ptr<SkAdvancedTypefaceMetrics> onGetAdvancedMetrics() const override
@@ -271,11 +257,8 @@ public:
         return 0;
     }
 
-private:
-
-    SkCairoFTTypeface(const SkFontStyle& style, bool isFixedWidth,
-                      cairo_font_face_t* fontFace, FcPattern* pattern)
-        : SkTypeface(style, isFixedWidth)
+    SkCairoFTTypeface(cairo_font_face_t* fontFace, FcPattern* pattern)
+        : SkTypeface(SkFontStyle::Normal())
         , fFontFace(fontFace)
         , fPattern(pattern)
     {
@@ -288,9 +271,20 @@ private:
 #endif
     }
 
+private:
+
+    void internal_dispose() const override
+    {
+        SkAutoMutexAcquire lock(gTypefaceMutex);
+        internal_dispose_restore_refcnt_to_1();
+        delete this;
+    }
+
     ~SkCairoFTTypeface()
     {
-        cairo_font_face_set_user_data(fFontFace, &kSkTypefaceKey, nullptr, nullptr);
+        if (cairo_font_face_get_user_data(fFontFace, &kSkTypefaceKey) == this) {
+            cairo_font_face_set_user_data(fFontFace, &kSkTypefaceKey, nullptr, nullptr);
+        }
         cairo_font_face_destroy(fFontFace);
 #ifdef CAIRO_HAS_FC_FONT
         if (fPattern) {
@@ -307,16 +301,15 @@ SkTypeface* SkCreateTypefaceFromCairoFTFontWithFontconfig(cairo_scaled_font_t* s
 {
     cairo_font_face_t* fontFace = cairo_scaled_font_get_font_face(scaledFont);
     SkASSERT(cairo_font_face_status(fontFace) == CAIRO_STATUS_SUCCESS);
+    SkASSERT(cairo_font_face_get_type(fontFace) == CAIRO_FONT_TYPE_FT);
+
+    SkAutoMutexAcquire lock(gTypefaceMutex);
 
     SkTypeface* typeface = reinterpret_cast<SkTypeface*>(cairo_font_face_get_user_data(fontFace, &kSkTypefaceKey));
-    if (typeface) {
+    if (typeface && typeface->getRefCnt() > 0) {
         typeface->ref();
     } else {
-        CairoLockedFTFace faceLock(scaledFont);
-        if (FT_Face face = faceLock.getFace()) {
-            typeface = SkCairoFTTypeface::CreateTypeface(fontFace, face, pattern);
-            SkTypefaceCache::Add(typeface);
-        }
+        typeface = new SkCairoFTTypeface(fontFace, pattern);
     }
 
     return typeface;

@@ -199,8 +199,8 @@
 #include "nsXULAppAPI.h"
 
 #include "GeckoProfiler.h"
+#include "mozilla/NullPrincipal.h"
 #include "Navigator.h"
-#include "NullPrincipal.h"
 #include "prenv.h"
 #include "URIUtils.h"
 
@@ -475,6 +475,8 @@ nsDocShell::Init()
   rv = nsDocLoader::AddDocLoaderAsChildOfRoot(this);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  mBrowsingContext = new BrowsingContext(this);
+
   // Add as |this| a progress listener to itself.  A little weird, but
   // simpler than reproducing all the listener-notification logic in
   // overrides of the various methods via which nsDocLoader can be
@@ -505,7 +507,8 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(nsDocShell,
                                    mSessionStorageManager,
                                    mScriptGlobal,
                                    mInitialClientSource,
-                                   mSessionHistory)
+                                   mSessionHistory,
+                                   mBrowsingContext)
 
 NS_IMPL_ADDREF_INHERITED(nsDocShell, nsDocLoader)
 NS_IMPL_RELEASE_INHERITED(nsDocShell, nsDocLoader)
@@ -677,6 +680,7 @@ nsDocShell::LoadURI(nsIURI* aURI,
   nsCOMPtr<nsIURI> referrer;
   nsCOMPtr<nsIURI> originalURI;
   Maybe<nsCOMPtr<nsIURI>> resultPrincipalURI;
+  bool keepResultPrincipalURIIfSet = false;
   bool loadReplace = false;
   nsCOMPtr<nsIInputStream> postStream;
   nsCOMPtr<nsIInputStream> headersStream;
@@ -708,6 +712,7 @@ nsDocShell::LoadURI(nsIURI* aURI,
     referrer = aLoadInfo->Referrer();
     originalURI = aLoadInfo->OriginalURI();
     aLoadInfo->GetMaybeResultPrincipalURI(resultPrincipalURI);
+    keepResultPrincipalURIIfSet = aLoadInfo->KeepResultPrincipalURIIfSet();
     loadReplace = aLoadInfo->LoadReplace();
     // Get the appropriate loadType from nsIDocShellLoadInfo type
     loadType = aLoadInfo->LoadType();
@@ -1001,6 +1006,7 @@ nsDocShell::LoadURI(nsIURI* aURI,
   return InternalLoad(aURI,
                       originalURI,
                       resultPrincipalURI,
+                      keepResultPrincipalURIIfSet,
                       loadReplace,
                       referrer,
                       referrerPolicy,
@@ -2536,14 +2542,14 @@ nsDocShell::NotifyScrollObservers()
 NS_IMETHODIMP
 nsDocShell::GetName(nsAString& aName)
 {
-  aName = mName;
+  mBrowsingContext->GetName(aName);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsDocShell::SetName(const nsAString& aName)
 {
-  mName = aName;
+  mBrowsingContext->SetName(aName);
   return NS_OK;
 }
 
@@ -2551,7 +2557,7 @@ NS_IMETHODIMP
 nsDocShell::NameEquals(const nsAString& aName, bool* aResult)
 {
   NS_ENSURE_ARG_POINTER(aResult);
-  *aResult = mName.Equals(aName);
+  *aResult = mBrowsingContext->NameEquals(aName);
   return NS_OK;
 }
 
@@ -2848,6 +2854,7 @@ nsDocShell::SetDocLoaderParent(nsDocLoader* aParent)
   bool value;
   nsString customUserAgent;
   nsCOMPtr<nsIDocShell> parentAsDocShell(do_QueryInterface(parent));
+
   if (parentAsDocShell) {
     if (mAllowPlugins && NS_SUCCEEDED(parentAsDocShell->GetAllowPlugins(&value))) {
       SetAllowPlugins(value);
@@ -3256,7 +3263,7 @@ nsDocShell::DoFindItemWithName(const nsAString& aName,
                                nsIDocShellTreeItem** aResult)
 {
   // First we check our name.
-  if (mName.Equals(aName) && ItemIsActive(this) &&
+  if (mBrowsingContext->NameEquals(aName) && ItemIsActive(this) &&
       CanAccessItem(this, aOriginalRequestor)) {
     NS_ADDREF(*aResult = this);
     return NS_OK;
@@ -3547,6 +3554,8 @@ nsDocShell::AddChild(nsIDocShellTreeItem* aChild)
     return NS_OK;
   }
 
+  childAsDocShell->AttachBrowsingContext(this);
+
   // charset, style-disabling, and zoom will be inherited in SetupNewViewer()
 
   // Now take this document's charset and set the child's parentCharset field
@@ -3608,6 +3617,11 @@ nsDocShell::RemoveChild(nsIDocShellTreeItem* aChild)
 
   nsresult rv = RemoveChildLoader(childAsDocLoader);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIDocShell> childAsDocShell(do_QueryInterface(aChild));
+  if (childAsDocShell) {
+    childAsDocShell->DetachBrowsingContext();
+  }
 
   aChild->SetTreeOwner(nullptr);
 
@@ -3950,6 +3964,19 @@ nsDocShell::GetWindow()
 }
 
 NS_IMETHODIMP
+nsDocShell::GetDomWindow(mozIDOMWindowProxy** aWindow)
+{
+  NS_ENSURE_ARG_POINTER(aWindow);
+
+  nsresult rv = EnsureScriptEnvironment();
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsPIDOMWindowOuter> window = mScriptGlobal->AsOuter();
+  window.forget(aWindow);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDocShell::SetDeviceSizeIsPageSize(bool aValue)
 {
   if (mDeviceSizeIsPageSize != aValue) {
@@ -4281,6 +4308,18 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
   nsAutoCString errorPage;
 
   errorPage.AssignLiteral("neterror");
+
+  if (mLoadURIDelegate) {
+    bool loadErrorHandled = false;
+    rv = mLoadURIDelegate->HandleLoadError(aURI, aError,
+                                           NS_ERROR_GET_MODULE(aError),
+                                           &loadErrorHandled);
+    if (NS_SUCCEEDED(rv) && loadErrorHandled) {
+      // The request has been handled, nothing to do here.
+      *aDisplayedErrorPage = false;
+      return NS_OK;
+    }
+  }
 
   // Turn the error code into a human readable error message.
   if (NS_ERROR_UNKNOWN_PROTOCOL == aError) {
@@ -4798,7 +4837,7 @@ nsDocShell::LoadErrorPage(nsIURI* aURI, const char16_t* aURL,
   nsresult rv = NS_NewURI(getter_AddRefs(errorPageURI), errorPageUrl);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return InternalLoad(errorPageURI, nullptr, Nothing(), false, nullptr, RP_Unset,
+  return InternalLoad(errorPageURI, nullptr, Nothing(), false, false, nullptr, RP_Unset,
                       nsContentUtils::GetSystemPrincipal(), nullptr,
                       INTERNAL_LOAD_FLAGS_NONE, EmptyString(),
                       nullptr, VoidString(), nullptr, nullptr,
@@ -4893,6 +4932,7 @@ nsDocShell::Reload(uint32_t aReloadFlags)
     rv = InternalLoad(currentURI,
                       originalURI,
                       emplacedResultPrincipalURI,
+                      false,
                       loadReplace,
                       referrerURI,
                       referrerPolicy,
@@ -5285,6 +5325,8 @@ nsDocShell::Destroy()
     mSessionHistory->EvictLocalContentViewers();
     mSessionHistory = nullptr;
   }
+
+  mBrowsingContext->Detach();
 
   SetTreeOwner(nullptr);
 
@@ -5977,7 +6019,7 @@ nsDocShell::SetCurScrollPosEx(int32_t aCurHorizontalPos,
   NS_ENSURE_TRUE(sf, NS_ERROR_FAILURE);
 
   nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
-  if (sf->GetScrollbarStyles().mScrollBehavior ==
+  if (sf->GetScrollStyles().mScrollBehavior ==
         NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
     scrollMode = nsIScrollableFrame::SMOOTH_MSD;
   }
@@ -6183,6 +6225,11 @@ nsDocShell::ForceRefreshURI(nsIURI* aURI, nsIPrincipal* aPrincipal, int32_t aDel
    * internal referrer
    */
   loadInfo->SetReferrer(mCurrentURI);
+
+  loadInfo->SetOriginalURI(mCurrentURI);
+  loadInfo->SetResultPrincipalURI(aURI);
+  loadInfo->SetResultPrincipalURIIsSome(true);
+  loadInfo->SetKeepResultPrincipalURIIfSet(true);
 
   // Set the triggering pricipal to aPrincipal if available, or current
   // document's principal otherwise.
@@ -7741,6 +7788,8 @@ nsDocShell::CaptureState()
     mOSHE->AddChildShell(childShell);
   }
 
+  mBrowsingContext->CacheChildren();
+
   return NS_OK;
 }
 
@@ -9003,6 +9052,7 @@ public:
                     nsIURI* aURI,
                     nsIURI* aOriginalURI,
                     Maybe<nsCOMPtr<nsIURI>> const& aResultPrincipalURI,
+                    bool aKeepResultPrincipalURIIfSet,
                     bool aLoadReplace,
                     nsIURI* aReferrer, uint32_t aReferrerPolicy,
                     nsIPrincipal* aTriggeringPrincipal,
@@ -9023,6 +9073,7 @@ public:
     , mURI(aURI)
     , mOriginalURI(aOriginalURI)
     , mResultPrincipalURI(aResultPrincipalURI)
+    , mKeepResultPrincipalURIIfSet(aKeepResultPrincipalURIIfSet)
     , mLoadReplace(aLoadReplace)
     , mReferrer(aReferrer)
     , mReferrerPolicy(aReferrerPolicy)
@@ -9049,6 +9100,7 @@ public:
   Run() override
   {
     return mDocShell->InternalLoad(mURI, mOriginalURI, mResultPrincipalURI,
+                                   mKeepResultPrincipalURIIfSet,
                                    mLoadReplace,
                                    mReferrer,
                                    mReferrerPolicy,
@@ -9071,6 +9123,7 @@ private:
   nsCOMPtr<nsIURI> mURI;
   nsCOMPtr<nsIURI> mOriginalURI;
   Maybe<nsCOMPtr<nsIURI>> mResultPrincipalURI;
+  bool mKeepResultPrincipalURIIfSet;
   bool mLoadReplace;
   nsCOMPtr<nsIURI> mReferrer;
   uint32_t mReferrerPolicy;
@@ -9117,6 +9170,7 @@ NS_IMETHODIMP
 nsDocShell::InternalLoad(nsIURI* aURI,
                          nsIURI* aOriginalURI,
                          Maybe<nsCOMPtr<nsIURI>> const& aResultPrincipalURI,
+                         bool aKeepResultPrincipalURIIfSet,
                          bool aLoadReplace,
                          nsIURI* aReferrer,
                          uint32_t aReferrerPolicy,
@@ -9415,6 +9469,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
                                     INTERNAL_LOAD_FLAGS_DONT_SEND_REFERRER));
         loadInfo->SetOriginalURI(aOriginalURI);
         loadInfo->SetMaybeResultPrincipalURI(aResultPrincipalURI);
+        loadInfo->SetKeepResultPrincipalURIIfSet(aKeepResultPrincipalURIIfSet);
         loadInfo->SetLoadReplace(aLoadReplace);
         loadInfo->SetTriggeringPrincipal(aTriggeringPrincipal);
         loadInfo->SetInheritPrincipal(
@@ -9464,6 +9519,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       rv = targetDocShell->InternalLoad(aURI,
                                         aOriginalURI,
                                         aResultPrincipalURI,
+                                        aKeepResultPrincipalURIIfSet,
                                         aLoadReplace,
                                         aReferrer,
                                         aReferrerPolicy,
@@ -9562,6 +9618,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       // Do this asynchronously
       nsCOMPtr<nsIRunnable> ev =
         new InternalLoadEvent(this, aURI, aOriginalURI, aResultPrincipalURI,
+                              aKeepResultPrincipalURIIfSet,
                               aLoadReplace, aReferrer, aReferrerPolicy,
                               aTriggeringPrincipal, principalToInherit,
                               aFlags, aTypeHint, aPostData,
@@ -10079,7 +10136,8 @@ nsDocShell::InternalLoad(nsIURI* aURI,
                    nsINetworkPredictor::PREDICT_LOAD, attrs, nullptr);
 
   nsCOMPtr<nsIRequest> req;
-  rv = DoURILoad(aURI, aOriginalURI, aResultPrincipalURI, aLoadReplace,
+  rv = DoURILoad(aURI, aOriginalURI, aResultPrincipalURI,
+                 aKeepResultPrincipalURIIfSet, aLoadReplace,
                  loadFromExternal,
                  (aFlags & INTERNAL_LOAD_FLAGS_FORCE_ALLOW_DATA_URI),
                  (aFlags & INTERNAL_LOAD_FLAGS_ORIGINAL_FRAME_SRC),
@@ -10219,6 +10277,7 @@ nsresult
 nsDocShell::DoURILoad(nsIURI* aURI,
                       nsIURI* aOriginalURI,
                       Maybe<nsCOMPtr<nsIURI>> const& aResultPrincipalURI,
+                      bool aKeepResultPrincipalURIIfSet,
                       bool aLoadReplace,
                       bool aLoadFromExternal,
                       bool aForceAllowDataURI,
@@ -10568,7 +10627,10 @@ nsDocShell::DoURILoad(nsIURI* aURI,
     channel->SetOriginalURI(aURI);
   }
 
-  if (aResultPrincipalURI) {
+  nsCOMPtr<nsIURI> rpURI;
+  loadInfo->GetResultPrincipalURI(getter_AddRefs(rpURI));
+  if (aResultPrincipalURI &&
+      (!aKeepResultPrincipalURIIfSet || !rpURI)) {
     // Unconditionally override, we want the replay to be equal to what has
     // been captured.
     loadInfo->SetResultPrincipalURI(aResultPrincipalURI.ref());
@@ -11689,7 +11751,10 @@ nsDocShell::AddState(JS::Handle<JS::Value> aData, const nsAString& aTitle,
   // notification is allowed only when we know docshell is not loading a new
   // document and it requires LOCATION_CHANGE_SAME_DOCUMENT flag. Otherwise,
   // FireOnLocationChange(...) breaks security UI.
-  if (!equalURIs) {
+  //
+  // If the docshell is shutting down, don't update the document URI, as we
+  // can't load into a docshell that is being destroyed.
+  if (!equalURIs && !mIsBeingDestroyed) {
     document->SetDocumentURI(newURI);
     // We can't trust SetCurrentURI to do always fire locationchange events
     // when we expect it to, so we hack around that by doing it ourselves...
@@ -12145,6 +12210,7 @@ nsDocShell::LoadHistoryEntry(nsISHEntry* aEntry, uint32_t aLoadType)
   rv = InternalLoad(uri,
                     originalURI,
                     emplacedResultPrincipalURI,
+                    false,
                     loadReplace,
                     referrerURI,
                     referrerPolicy,
@@ -13424,6 +13490,7 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent,
   nsresult rv = InternalLoad(aURI,                      // New URI
                              nullptr,                   // Original URI
                              Nothing(),                 // Let the protocol handler assign it
+                             false,
                              false,                     // LoadReplace
                              referer,                   // Referer URI
                              refererPolicy,             // Referer policy
@@ -14198,4 +14265,32 @@ bool
 nsDocShell::IsForceReloading()
 {
   return IsForceReloadType(mLoadType);
+}
+
+already_AddRefed<BrowsingContext>
+nsDocShell::GetBrowsingContext() const
+{
+  RefPtr<BrowsingContext> browsingContext = mBrowsingContext;
+  return browsingContext.forget();
+}
+
+void
+nsIDocShell::AttachBrowsingContext(nsIDocShell* aParentDocShell)
+{
+  RefPtr<BrowsingContext> childContext =
+    nsDocShell::Cast(this)->GetBrowsingContext();
+  RefPtr<BrowsingContext> parentContext;
+  if (aParentDocShell) {
+    parentContext =
+      nsDocShell::Cast(aParentDocShell)->GetBrowsingContext();
+  }
+  childContext->Attach(parentContext);
+}
+
+void
+nsIDocShell::DetachBrowsingContext()
+{
+  RefPtr<BrowsingContext> browsingContext =
+    nsDocShell::Cast(this)->GetBrowsingContext();
+  browsingContext->Detach();
 }

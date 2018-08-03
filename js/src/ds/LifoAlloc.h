@@ -224,7 +224,7 @@ class BumpChunk : public SingleLinkedListElement<BumpChunk>
     static constexpr uintptr_t magicNumber = uintptr_t(0x4c6966);
 #endif
 
-#if defined(DEBUG) || defined(MOZ_DIAGNOSTIC_ASSERT_ENABLED)
+#if defined(DEBUG) || defined(MOZ_ASAN)
 # define LIFO_CHUNK_PROTECT 1
 #endif
 
@@ -1033,7 +1033,8 @@ class LifoAllocPolicy
     T* pod_realloc(T* p, size_t oldSize, size_t newSize) {
         return maybe_pod_realloc<T>(p, oldSize, newSize);
     }
-    void free_(void* p) {
+    template <typename T>
+    void free_(T* p, size_t numElems) {
     }
     void reportAllocOverflow() const {
     }

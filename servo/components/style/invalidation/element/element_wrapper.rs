@@ -43,6 +43,11 @@ pub trait ElementSnapshot: Sized {
     /// If this snapshot contains attribute information.
     fn has_attrs(&self) -> bool;
 
+    /// Gets the attribute information of the snapshot as a string.
+    ///
+    /// Only for debugging purposes.
+    fn debug_list_attributes(&self) -> String { String::new() }
+
     /// The ID attribute per this snapshot. Should only be called if
     /// `has_attrs()` returns true.
     fn id_attr(&self) -> Option<&WeakAtom>;
@@ -366,9 +371,5 @@ where
         self.element
             .assigned_slot()
             .map(|e| ElementWrapper::new(e, self.snapshot_map))
-    }
-
-    fn blocks_ancestor_combinators(&self) -> bool {
-        self.element.blocks_ancestor_combinators()
     }
 }

@@ -944,8 +944,8 @@ public:
   /**
    * Notifies the builder that a particular themed widget exists
    * at the given rectangle within the currently built display list.
-   * For certain appearance values (currently only NS_THEME_TOOLBAR and
-   * NS_THEME_WINDOW_TITLEBAR) this gets called during every display list
+   * For certain appearance values (currently only StyleAppearance::Toolbar and
+   * StyleAppearance::WindowTitlebar) this gets called during every display list
    * construction, for every themed widget of the right type within the
    * display list, except for themed widgets which are transformed or have
    * effects applied to them (e.g. CSS opacity or filters).
@@ -2636,7 +2636,7 @@ public:
    * system as this item (i.e., they have the same reference frame),
    * return the list.
    */
-  virtual nsDisplayList* GetSameCoordinateSystemChildren() const
+  virtual RetainedDisplayList* GetSameCoordinateSystemChildren() const
   {
     return nullptr;
   }
@@ -2729,8 +2729,7 @@ public:
    * -- Subtracts bounds from aVisibleRegion if the item is opaque
    */
   bool RecomputeVisibility(nsDisplayListBuilder* aBuilder,
-                           nsRegion* aVisibleRegion,
-                           bool aUseClipBounds = true);
+                           nsRegion* aVisibleRegion);
 
   /**
    * Returns the result of aBuilder->ToReferenceFrame(GetUnderlyingFrame())
@@ -3280,92 +3279,6 @@ private:
   bool mForceTransparentSurface;
 };
 
-class FlattenedDisplayItemIterator
-{
-public:
-  FlattenedDisplayItemIterator(nsDisplayListBuilder* aBuilder,
-                               nsDisplayList* aList,
-                               const bool aResolveFlattening = true)
-    : mBuilder(aBuilder)
-    , mNext(aList->GetBottom())
-  {
-    if (aResolveFlattening) {
-      // This is done conditionally in case subclass overrides
-      // ShouldFlattenNextItem().
-      ResolveFlattening();
-    }
-  }
-
-  virtual ~FlattenedDisplayItemIterator()
-  {
-    MOZ_ASSERT(!HasNext());
-  }
-
-  nsDisplayItem* GetNext()
-  {
-    nsDisplayItem* next = mNext;
-
-    // Advance mNext to the following item
-    if (next) {
-      mNext = mNext->GetAbove();
-      ResolveFlattening();
-    }
-    return next;
-  }
-
-  bool HasNext() const
-  {
-    return mNext || !mStack.IsEmpty();
-  }
-
-  nsDisplayItem* PeekNext()
-  {
-    return mNext;
-  }
-
-protected:
-  bool AtEndOfNestedList() const
-  {
-    return !mNext && mStack.Length() > 0;
-  }
-
-  virtual bool ShouldFlattenNextItem()
-  {
-    return mNext && mNext->ShouldFlattenAway(mBuilder);
-  }
-
-  void ResolveFlattening()
-  {
-    // Handle the case where we reach the end of a nested list, or the current
-    // item should start a new nested list. Repeat this until we find an actual
-    // item, or the very end of the outer list.
-    while (AtEndOfNestedList() || ShouldFlattenNextItem()) {
-      if (AtEndOfNestedList()) {
-        // Pop the last item off the stack.
-        mNext = mStack.LastElement();
-        EndNested(mNext);
-        mStack.RemoveElementAt(mStack.Length() - 1);
-        // We stored the item that was flattened, so advance to the next.
-        mNext = mNext->GetAbove();
-      } else {
-        // This item wants to be flattened. Store the current item on the stack,
-        // and use the first item in the child list instead.
-        mStack.AppendElement(mNext);
-        StartNested(mNext);
-        nsDisplayList* childItems = mNext->GetSameCoordinateSystemChildren();
-        mNext = childItems->GetBottom();
-      }
-    }
-  }
-
-  virtual void EndNested(nsDisplayItem* aItem) {}
-  virtual void StartNested(nsDisplayItem* aItem) {}
-
-  nsDisplayListBuilder* mBuilder;
-  nsDisplayItem* mNext;
-  AutoTArray<nsDisplayItem*, 10> mStack;
-};
-
 /**
  * This is passed as a parameter to nsIFrame::BuildDisplayList. That method
  * will put any generated items onto the appropriate list given here. It's
@@ -3540,6 +3453,97 @@ public:
   // Temporary state initialized during the preprocess pass
   // of RetainedDisplayListBuilder and then used during merging.
   nsTArray<OldItemInfo> mOldItems;
+};
+
+class FlattenedDisplayItemIterator
+{
+public:
+  FlattenedDisplayItemIterator(nsDisplayListBuilder* aBuilder,
+                               nsDisplayList* aList,
+                               const bool aResolveFlattening = true)
+    : mBuilder(aBuilder)
+    , mNext(aList->GetBottom())
+  {
+    if (aResolveFlattening) {
+      // This is done conditionally in case subclass overrides
+      // ShouldFlattenNextItem().
+      ResolveFlattening();
+    }
+  }
+
+  virtual ~FlattenedDisplayItemIterator()
+  {
+    MOZ_ASSERT(!HasNext());
+  }
+
+  nsDisplayItem* GetNext()
+  {
+    nsDisplayItem* next = mNext;
+
+    // Advance mNext to the following item
+    if (next) {
+      mNext = mNext->GetAbove();
+      ResolveFlattening();
+    }
+    return next;
+  }
+
+  bool HasNext() const
+  {
+    return mNext || !mStack.IsEmpty();
+  }
+
+  nsDisplayItem* PeekNext()
+  {
+    return mNext;
+  }
+
+protected:
+  bool AtEndOfNestedList() const
+  {
+    return !mNext && mStack.Length() > 0;
+  }
+
+  virtual bool ShouldFlattenNextItem()
+  {
+    return mNext && mNext->ShouldFlattenAway(mBuilder);
+  }
+
+  void ResolveFlattening()
+  {
+    // Handle the case where we reach the end of a nested list, or the current
+    // item should start a new nested list. Repeat this until we find an actual
+    // item, or the very end of the outer list.
+    while (AtEndOfNestedList() || ShouldFlattenNextItem()) {
+      if (AtEndOfNestedList()) {
+        // Pop the last item off the stack.
+        mNext = mStack.LastElement();
+        EndNested(mNext);
+        mStack.RemoveElementAt(mStack.Length() - 1);
+        // We stored the item that was flattened, so advance to the next.
+        mNext = mNext->GetAbove();
+      } else {
+        // This item wants to be flattened. Store the current item on the stack,
+        // and use the first item in the child list instead.
+        mStack.AppendElement(mNext);
+        StartNested(mNext);
+
+        nsDisplayList* childItems =
+          mNext->GetType() != DisplayItemType::TYPE_TRANSFORM
+          ? mNext->GetSameCoordinateSystemChildren()
+          : mNext->GetChildren();
+
+        mNext = childItems->GetBottom();
+      }
+    }
+  }
+
+  virtual void EndNested(nsDisplayItem* aItem) {}
+  virtual void StartNested(nsDisplayItem* aItem) {}
+
+  nsDisplayListBuilder* mBuilder;
+  nsDisplayItem* mNext;
+  AutoTArray<nsDisplayItem*, 10> mStack;
 };
 
 class nsDisplayImageContainer : public nsDisplayItem {
@@ -4354,7 +4358,7 @@ protected:
   nsRect mBackgroundRect;
   nsRect mBounds;
   nsITheme::Transparency mThemeTransparency;
-  uint8_t mAppearance;
+  mozilla::StyleAppearance mAppearance;
 };
 
 class nsDisplayTableThemedBackground : public nsDisplayThemedBackground {
@@ -5050,7 +5054,7 @@ public:
 
   virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) const override;
 
-  virtual nsDisplayList* GetSameCoordinateSystemChildren() const override
+  virtual RetainedDisplayList* GetSameCoordinateSystemChildren() const override
   {
     NS_ASSERTION(mListPtr->IsEmpty() || !ReferenceFrame() ||
                  !mListPtr->GetBottom()->ReferenceFrame() ||
@@ -6344,6 +6348,11 @@ public:
   }
 #endif
 
+  virtual void RestoreState() override
+  {
+    mShouldFlatten = false;
+  }
+
   virtual void UpdateBounds(nsDisplayListBuilder* aBuilder) override
   {
     mHasBounds = false;
@@ -6375,6 +6384,8 @@ public:
   {
     return mStoredList.GetChildren();
   }
+
+  virtual bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder) override;
 
   virtual void SetActiveScrolledRoot(const ActiveScrolledRoot* aActiveScrolledRoot) override
   {
@@ -6414,11 +6425,32 @@ public:
     return (mIndex << TYPE_BITS) | nsDisplayItem::GetPerFrameKey();
   }
 
+  nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
+  {
+    return new nsDisplayTransformGeometry(this, aBuilder,
+                                          GetTransformForRendering(),
+                                          mFrame->PresContext()->AppUnitsPerDevPixel());
+  }
+
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
                                          nsRegion* aInvalidRegion) const override
   {
-    // We don't need to compute an invalidation region since we have LayerTreeInvalidation
+    const nsDisplayTransformGeometry* geometry =
+      static_cast<const nsDisplayTransformGeometry*>(aGeometry);
+
+    // This code is only called for flattened, inactive transform items.
+    // Only check if the transform has changed. The bounds invalidation should
+    // be handled by the children themselves.
+    if (!geometry->mTransform.FuzzyEqual(GetTransformForRendering())) {
+      bool snap;
+      aInvalidRegion->Or(GetBounds(aBuilder, &snap), geometry->mBounds);
+    }
+  }
+
+  bool NeedsGeometryUpdates() const override
+  {
+    return mShouldFlatten;
   }
 
   virtual const nsIFrame* ReferenceFrameForChildren() const override {
@@ -6453,7 +6485,8 @@ public:
   const Matrix4x4Flagged& GetTransform() const;
   const Matrix4x4Flagged& GetInverseTransform() const;
 
-  Matrix4x4 GetTransformForRendering(mozilla::LayoutDevicePoint* aOutOrigin = nullptr);
+  bool ShouldSkipTransform(nsDisplayListBuilder* aBuilder) const;
+  Matrix4x4 GetTransformForRendering(mozilla::LayoutDevicePoint* aOutOrigin = nullptr) const;
 
   /**
    * Return the transform that is aggregation of all transform on the
@@ -6697,6 +6730,8 @@ private:
   bool mTransformPreserves3DInited;
   // True if async animation of the transform is allowed.
   bool mAllowAsyncAnimation;
+  // True if this nsDisplayTransform should get flattened
+  bool mShouldFlatten;
 };
 
 /* A display item that applies a perspective transformation to a single
@@ -6778,7 +6813,7 @@ public:
     return true;
   }
 
-  virtual nsDisplayList* GetSameCoordinateSystemChildren() const override
+  virtual RetainedDisplayList* GetSameCoordinateSystemChildren() const override
   {
     return mList.GetChildren();
   }

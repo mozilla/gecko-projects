@@ -94,11 +94,12 @@ nsJSUtils::CompileFunction(AutoJSAPI& jsapi,
 
   // Compile.
   JS::Rooted<JSFunction*> fun(cx);
+  JS::SourceBufferHolder source(PromiseFlatString(aBody).get(), aBody.Length(),
+                                JS::SourceBufferHolder::NoOwnership);
   if (!JS::CompileFunction(cx, aScopeChain, aOptions,
                            PromiseFlatCString(aName).get(),
                            aArgCount, aArgArray,
-                           PromiseFlatString(aBody).get(),
-                           aBody.Length(), &fun))
+                           source, &fun))
   {
     return NS_ERROR_FAILURE;
   }
@@ -411,6 +412,21 @@ nsJSUtils::ExecutionContext::DecodeBinASTAndExec(JS::CompileOptions& aCompileOpt
 #endif
 }
 
+static bool
+IsPromiseValue(JSContext* aCx, JS::Handle<JS::Value> aValue)
+{
+  if (!aValue.isObject()) {
+    return false;
+  }
+
+  JS::Rooted<JSObject*> obj(aCx, js::CheckedUnwrap(&aValue.toObject()));
+  if (!obj) {
+    return false;
+  }
+
+  return JS::IsPromiseObject(obj);
+}
+
 nsresult
 nsJSUtils::ExecutionContext::ExtractReturnValue(JS::MutableHandle<JS::Value> aRetValue)
 {
@@ -428,6 +444,15 @@ nsJSUtils::ExecutionContext::ExtractReturnValue(JS::MutableHandle<JS::Value> aRe
 #ifdef DEBUG
   mWantsReturnValue = false;
 #endif
+  if (mCoerceToString && IsPromiseValue(mCx, mRetValue)) {
+    // We're a javascript: url and we should treat Promise return values as
+    // undefined.
+    //
+    // Once bug 1477821 is fixed this code might be able to go away, or will
+    // become enshrined in the spec, depending.
+    mRetValue.setUndefined();
+  }
+
   if (mCoerceToString && !mRetValue.isUndefined()) {
     JSString* str = JS::ToString(mCx, mRetValue);
     if (!str) {

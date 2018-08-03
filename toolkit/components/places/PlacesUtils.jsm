@@ -252,7 +252,8 @@ const BOOKMARK_VALIDATORS = Object.freeze({
   keyword: simpleValidateFunc(v => (typeof(v) == "string") && v.length),
   charset: simpleValidateFunc(v => (typeof(v) == "string") && v.length),
   postData: simpleValidateFunc(v => (typeof(v) == "string") && v.length),
-  tags: simpleValidateFunc(v => Array.isArray(v) && v.length),
+  tags: simpleValidateFunc(v => Array.isArray(v) && v.length &&
+                                v.every(item => item && typeof item == "string")),
 });
 
 // Sync bookmark records can contain additional properties.
@@ -267,7 +268,7 @@ const SYNC_BOOKMARK_VALIDATORS = Object.freeze({
                                 Object.values(PlacesSyncUtils.bookmarks.KINDS).includes(v)),
   query: simpleValidateFunc(v => v === null || (typeof v == "string" && v)),
   folder: simpleValidateFunc(v => typeof v == "string" && v &&
-                                  v.length <= Ci.nsITaggingService.MAX_TAG_LENGTH),
+                                  v.length <= PlacesUtils.bookmarks.MAX_TAG_LENGTH),
   tags: v => {
     if (v === null) {
       return [];
@@ -277,7 +278,7 @@ const SYNC_BOOKMARK_VALIDATORS = Object.freeze({
     }
     for (let tag of v) {
       if (typeof tag != "string" || !tag ||
-          tag.length > Ci.nsITaggingService.MAX_TAG_LENGTH) {
+          tag.length > PlacesUtils.bookmarks.MAX_TAG_LENGTH) {
         throw new Error(`Invalid tag: ${tag}`);
       }
     }
@@ -1083,6 +1084,32 @@ var PlacesUtils = {
       }
     }
 
+    if (pageInfo.annotations) {
+      if (typeof pageInfo.annotations != "object" ||
+          pageInfo.annotations.constructor.name != "Map") {
+        throw new TypeError("annotations must be a Map");
+      }
+
+      if (pageInfo.annotations.size == 0) {
+        throw new TypeError("there must be at least one annotation");
+      }
+
+      for (let [key, value] of pageInfo.annotations.entries()) {
+        if (typeof key != "string") {
+          throw new TypeError("all annotation keys must be strings");
+        }
+        if (typeof value != "string" &&
+            typeof value != "number" &&
+            typeof value != "boolean" &&
+            value !== null &&
+            value !== undefined) {
+          throw new TypeError("all annotation values must be Boolean, Numbers or Strings");
+        }
+      }
+
+      info.annotations = pageInfo.annotations;
+    }
+
     if (!validateVisits) {
       return info;
     }
@@ -1455,51 +1482,6 @@ var PlacesUtils = {
     }
     let db = await gAsyncDBWrapperPromised;
     return db.executeBeforeShutdown(name, task);
-  },
-
-  /**
-   * Sets the character-set for a URI.
-   *
-   * @param {nsIURI} aURI
-   * @param {String} aCharset character-set value.
-   * @return {Promise}
-   */
-  setCharsetForURI: function PU_setCharsetForURI(aURI, aCharset) {
-    return new Promise(resolve => {
-      // Delaying to catch issues with asynchronous behavior while waiting
-      // to implement asynchronous annotations in bug 699844.
-      Services.tm.dispatchToMainThread(function() {
-        if (aCharset && aCharset.length > 0) {
-          PlacesUtils.annotations.setPageAnnotation(
-            aURI, PlacesUtils.CHARSET_ANNO, aCharset, 0,
-            Ci.nsIAnnotationService.EXPIRE_NEVER);
-        } else {
-          PlacesUtils.annotations.removePageAnnotation(
-            aURI, PlacesUtils.CHARSET_ANNO);
-        }
-        resolve();
-      });
-    });
-  },
-
-  /**
-   * Gets the last saved character-set for a URI.
-   *
-   * @param aURI nsIURI
-   * @return {Promise}
-   * @resolve a character-set or null.
-   */
-  getCharsetForURI: function PU_getCharsetForURI(aURI) {
-    return new Promise(resolve => {
-      Services.tm.dispatchToMainThread(function() {
-        let charset = null;
-        try {
-          charset = PlacesUtils.annotations.getPageAnnotation(aURI,
-                                                              PlacesUtils.CHARSET_ANNO);
-        } catch (ex) { }
-        resolve(charset);
-      });
-    });
   },
 
   /**

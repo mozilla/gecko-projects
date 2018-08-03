@@ -8,9 +8,7 @@ add_task(async function test_windowlessBrowserTroubleshootCrash() {
                          .getInterface(Ci.nsIDocShell);
     let listener = {
       observe(contentWindow, topic, data) {
-        let observedDocShell = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                            .getInterface(Ci.nsIWebNavigation)
-                                            .QueryInterface(Ci.nsIDocShellTreeItem)
+        let observedDocShell = contentWindow.docShell
                                             .sameTypeRootTreeItem
                                             .QueryInterface(Ci.nsIDocShell);
           if (docShell === observedDocShell) {
@@ -25,9 +23,7 @@ add_task(async function test_windowlessBrowserTroubleshootCrash() {
 
   await onLoaded;
 
-  let winUtils = webNav.document.defaultView.
-                        QueryInterface(Ci.nsIInterfaceRequestor).
-                        getInterface(Ci.nsIDOMWindowUtils);
+  let winUtils = webNav.document.defaultView.windowUtils;
   try {
     is(winUtils.layerManagerType, "Basic", "windowless browser's layerManagerType should be 'Basic'");
   } catch (e) {

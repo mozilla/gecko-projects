@@ -475,8 +475,9 @@ impl AlphaBatchBuilder {
 
         // Add each run in this picture to the batch.
         for run in &pic.runs {
-            let scroll_node = &ctx.clip_scroll_tree.nodes[run.clip_and_scroll.scroll_node_id.0];
-            let transform_id = ctx.transforms.get_id(scroll_node.transform_index);
+            let transform_id = ctx
+                .transforms
+                .get_id(run.clip_and_scroll.spatial_node_index);
             self.add_run_to_batch(
                 run,
                 transform_id,
@@ -496,6 +497,9 @@ impl AlphaBatchBuilder {
         // Z axis is directed at the screen, `sort` is ascending, and we need back-to-front order.
         for poly in splitter.sort(vec3(0.0, 0.0, 1.0)) {
             let prim_index = PrimitiveIndex(poly.anchor);
+            if cfg!(debug_assertions) && ctx.prim_store.chase_id == Some(prim_index) {
+                println!("\t\tsplit polygon {:?}", poly.points);
+            }
             debug!("process sorted poly {:?} {:?}", prim_index, poly.points);
             let pp = &poly.points;
             let gpu_blocks = [
@@ -653,14 +657,18 @@ impl AlphaBatchBuilder {
             transform_id,
         };
 
+        if cfg!(debug_assertions) && ctx.prim_store.chase_id == Some(prim_index) {
+            println!("\ttask target {:?}", self.target_rect);
+            println!("\t{:?}", prim_header);
+        }
+
         match prim_metadata.prim_kind {
             PrimitiveKind::Brush => {
                 let brush = &ctx.prim_store.cpu_brushes[prim_metadata.cpu_prim_index.0];
 
                 match brush.kind {
                     BrushKind::Picture { pic_index, .. } => {
-                        let picture =
-                            &ctx.prim_store.pictures[pic_index.0];
+                        let picture = &ctx.prim_store.pictures[pic_index.0];
 
                         // If this picture is participating in a 3D rendering context,
                         // then don't add it to any batches here. Instead, create a polygon
@@ -669,17 +677,20 @@ impl AlphaBatchBuilder {
                             // Push into parent plane splitter.
                             debug_assert!(picture.surface.is_some());
 
-                            let real_xf = &ctx.clip_scroll_tree
-                                .nodes[picture.reference_frame_index.0]
-                                .world_content_transform
-                                .into();
-                            let polygon = make_polygon(
+                            let real_xf = &ctx
+                                .transforms
+                                .get_transform(picture.reference_frame_index);
+                            match make_polygon(
                                 picture.real_local_rect,
-                                real_xf,
+                                &real_xf.m,
                                 prim_index.0,
-                            );
-
-                            splitter.add(polygon);
+                            ) {
+                                Some(polygon) => splitter.add(polygon),
+                                None => {
+                                    // this shouldn't happen, the path will ultimately be
+                                    // turned into `expect` when the splitting code is fixed
+                                }
+                            }
 
                             return;
                         }
@@ -1052,8 +1063,13 @@ impl AlphaBatchBuilder {
                                 ctx.resource_cache,
                                 gpu_cache,
                                 deferred_resolves,
+                                ctx.prim_store.chase_id == Some(prim_index),
                         ) {
                             let prim_header_index = prim_headers.push(&prim_header, user_data);
+                            if cfg!(debug_assertions) && ctx.prim_store.chase_id == Some(prim_index) {
+                                println!("\t{:?} {:?}, task relative bounds {:?}",
+                                    batch_kind, prim_header_index, task_relative_bounding_rect);
+                            }
 
                             self.add_brush_to_batch(
                                 brush,
@@ -1381,6 +1397,7 @@ impl BrushPrimitive {
         resource_cache: &ResourceCache,
         gpu_cache: &mut GpuCache,
         deferred_resolves: &mut Vec<DeferredResolve>,
+        is_chased: bool,
     ) -> Option<(BrushBatchKind, BatchTextures, [i32; 3])> {
         match self.kind {
             BrushKind::Image { request, ref source, .. } => {
@@ -1402,6 +1419,9 @@ impl BrushPrimitive {
                         resource_cache.get_texture_cache_item(&rt_cache_entry.handle)
                     }
                 };
+                if cfg!(debug_assertions) && is_chased {
+                    println!("\tsource {:?}", cache_item);
+                }
 
                 if cache_item.texture_id == SourceTexture::Invalid {
                     None
@@ -1696,7 +1716,7 @@ fn make_polygon(
     rect: LayoutRect,
     transform: &LayoutToWorldTransform,
     anchor: usize,
-) -> Polygon<f64, WorldPixel> {
+) -> Option<Polygon<f64, WorldPixel>> {
     let mat = TypedTransform3D::row_major(
         transform.m11 as f64,
         transform.m12 as f64,
@@ -1714,7 +1734,7 @@ fn make_polygon(
         transform.m42 as f64,
         transform.m43 as f64,
         transform.m44 as f64);
-    Polygon::from_transformed_rect(rect.cast().unwrap(), mat, anchor)
+    Polygon::from_transformed_rect(rect.cast(), mat, anchor)
 }
 
 /// Batcher managing draw calls into the clip mask (in the RT cache).
@@ -1747,7 +1767,7 @@ impl ClipBatcher {
     ) {
         let instance = ClipMaskInstance {
             render_task_address: task_address,
-            transform_id: TransformPaletteId::identity(),
+            transform_id: TransformPaletteId::IDENTITY,
             segment: 0,
             clip_data_address,
             resource_address: GpuCacheAddress::invalid(),
@@ -1768,16 +1788,14 @@ impl ClipBatcher {
     ) {
         let mut coordinate_system_id = coordinate_system_id;
         for work_item in clips.iter() {
+            let info = &clip_store[work_item.clip_sources_index];
             let instance = ClipMaskInstance {
                 render_task_address: task_address,
-                transform_id: transforms.get_id(work_item.transform_index),
+                transform_id: transforms.get_id(info.spatial_node_index),
                 segment: 0,
                 clip_data_address: GpuCacheAddress::invalid(),
                 resource_address: GpuCacheAddress::invalid(),
             };
-            let info = clip_store
-                .get_opt(&work_item.clip_sources)
-                .expect("bug: clip handle should be valid");
 
             for &(ref source, ref handle) in &info.clips {
                 let gpu_address = gpu_cache.get_address(handle);

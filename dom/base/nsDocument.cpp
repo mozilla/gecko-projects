@@ -65,6 +65,7 @@
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/FramingChecker.h"
 #include "mozilla/dom/HTMLSharedElement.h"
+#include "mozilla/dom/SVGUseElement.h"
 #include "nsGenericHTMLElement.h"
 #include "mozilla/dom/CDATASection.h"
 #include "mozilla/dom/ProcessingInstruction.h"
@@ -110,7 +111,7 @@
 #include "nsIPermissionManager.h"
 #include "nsIPrincipal.h"
 #include "ExpandedPrincipal.h"
-#include "NullPrincipal.h"
+#include "mozilla/NullPrincipal.h"
 
 #include "nsIDOMWindow.h"
 #include "nsPIDOMWindow.h"
@@ -255,7 +256,6 @@
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/TabGroup.h"
 #ifdef MOZ_XUL
-#include "mozilla/dom/ListBoxObject.h"
 #include "mozilla/dom/MenuBoxObject.h"
 #include "mozilla/dom/TreeBoxObject.h"
 #include "nsIXULWindow.h"
@@ -275,6 +275,7 @@
 #include "mozilla/RestyleManager.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "nsHTMLTags.h"
+#include "NodeUbiReporting.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -827,7 +828,7 @@ nsExternalResourceMap::RequestResource(nsIURI* aURI,
 
   // First, make sure we strip the ref from aURI.
   nsCOMPtr<nsIURI> clone;
-  nsresult rv = aURI->CloneIgnoringRef(getter_AddRefs(clone));
+  nsresult rv = NS_GetURIWithoutRef(aURI, getter_AddRefs(clone));
   if (NS_FAILED(rv) || !clone) {
     return nullptr;
   }
@@ -1089,8 +1090,8 @@ nsExternalResourceMap::PendingLoad::SetupViewer(nsIRequest* aRequest,
     do_GetService(NS_CATEGORYMANAGER_CONTRACTID);
   NS_ENSURE_TRUE(catMan, NS_ERROR_NOT_AVAILABLE);
   nsCString contractId;
-  nsresult rv = catMan->GetCategoryEntry("Gecko-Content-Viewers", type.get(),
-                                         getter_Copies(contractId));
+  nsresult rv = catMan->GetCategoryEntry("Gecko-Content-Viewers", type,
+                                         contractId);
   NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsIDocumentLoaderFactory> docLoaderFactory =
     do_GetService(contractId.get());
@@ -1459,6 +1460,8 @@ nsIDocument::nsIDocument()
     mParserAborted(false),
     mReportedUseCounters(false),
     mHasReportedShadowDOMUsage(false),
+    mDocTreeHadAudibleMedia(false),
+    mDocTreeHadPlayRevoked(false),
 #ifdef DEBUG
     mWillReparent(false),
 #endif
@@ -1574,6 +1577,13 @@ nsIDocument::IsAboutPage() const
   return isAboutScheme;
 }
 
+void
+nsIDocument::ConstructUbiNode(void* storage)
+{
+  JS::ubi::Concrete<nsIDocument>::construct(storage, this);
+}
+
+
 nsDocument::~nsDocument()
 {
   MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug, ("DOCUMENT %p destroyed", this));
@@ -1635,6 +1645,14 @@ nsDocument::~nsDocument()
 
       if (MOZ_UNLIKELY(mMathMLEnabled)) {
         ScalarAdd(Telemetry::ScalarID::MATHML_DOC_COUNT, 1);
+      }
+
+      ScalarAdd(Telemetry::ScalarID::MEDIA_PAGE_COUNT, 1);
+      if (mDocTreeHadAudibleMedia) {
+        ScalarAdd(Telemetry::ScalarID::MEDIA_PAGE_HAD_MEDIA_COUNT, 1);
+      }
+      if (mDocTreeHadPlayRevoked) {
+        ScalarAdd(Telemetry::ScalarID::MEDIA_PAGE_HAD_PLAY_REVOKED_COUNT, 1);
       }
     }
   }
@@ -2844,7 +2862,7 @@ nsIDocument::InitCSP(nsIChannel* aChannel)
 {
   MOZ_ASSERT(!mScriptGlobalObject,
              "CSP must be initialized before mScriptGlobalObject is set!");
-  if (!CSPService::sCSPEnabled) {
+  if (!StaticPrefs::security_csp_enable()) {
     MOZ_LOG(gCspPRLog, LogLevel::Debug,
            ("CSP is disabled, skipping CSP init for document %p", this));
     return NS_OK;
@@ -3305,6 +3323,39 @@ nsDocument::IsWebAnimationsEnabled(CallerType aCallerType)
 
   return aCallerType == dom::CallerType::System ||
          nsContentUtils::AnimationsAPICoreEnabled();
+}
+
+bool
+nsDocument::IsWebAnimationsGetAnimationsEnabled(JSContext* aCx,
+                                                JSObject* /*unused*/
+)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  return nsContentUtils::IsSystemCaller(aCx) ||
+         StaticPrefs::dom_animations_api_getAnimations_enabled();
+}
+
+bool
+nsDocument::AreWebAnimationsImplicitKeyframesEnabled(JSContext* aCx,
+                                                     JSObject* /*unused*/
+)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  return nsContentUtils::IsSystemCaller(aCx) ||
+         StaticPrefs::dom_animations_api_implicit_keyframes_enabled();
+}
+
+bool
+nsDocument::AreWebAnimationsTimelinesEnabled(JSContext* aCx,
+                                             JSObject* /*unused*/
+)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  return nsContentUtils::IsSystemCaller(aCx) ||
+         StaticPrefs::dom_animations_api_timelines_enabled();
 }
 
 DocumentTimeline*
@@ -5583,6 +5634,33 @@ nsIDocument::CreateElementNS(const nsAString& aNamespaceURI,
   return element.forget();
 }
 
+already_AddRefed<Element>
+nsIDocument::CreateXULElement(const nsAString& aTagName,
+                              const ElementCreationOptionsOrString& aOptions,
+                              ErrorResult& aRv)
+{
+  aRv = nsContentUtils::CheckQName(aTagName, false);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  const nsString* is = nullptr;
+  if (CustomElementRegistry::IsCustomElementEnabled(this) &&
+      aOptions.IsElementCreationOptions()) {
+    const ElementCreationOptions& options = aOptions.GetAsElementCreationOptions();
+    if (options.mIs.WasPassed()) {
+      is = &options.mIs.Value();
+    }
+  }
+
+  RefPtr<Element> elem = CreateElem(aTagName, nullptr, kNameSpaceID_XUL, is);
+  if (!elem) {
+    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
+    return nullptr;
+  }
+  return elem.forget();
+}
+
 already_AddRefed<nsTextNode>
 nsIDocument::CreateEmptyTextNode() const
 {
@@ -6328,8 +6406,6 @@ nsIDocument::GetBoxObjectFor(Element* aElement, ErrorResult& aRv)
       boxObject = new MenuBoxObject();
     } else if (tag == nsGkAtoms::tree) {
       boxObject = new TreeBoxObject();
-    } else if (tag == nsGkAtoms::listbox) {
-      boxObject = new ListBoxObject();
     } else {
       boxObject = new BoxObject();
     }
@@ -7215,7 +7291,7 @@ nsIDocument::UpdateViewportOverflowType(nscoord aScrolledWidth,
 #ifdef DEBUG
   MOZ_ASSERT(mPresShell);
   nsPresContext* pc = GetPresContext();
-  MOZ_ASSERT(pc->GetViewportScrollbarStylesOverride().mHorizontal ==
+  MOZ_ASSERT(pc->GetViewportScrollStylesOverride().mHorizontal ==
              NS_STYLE_OVERFLOW_HIDDEN,
              "Should only be called when viewport has overflow-x: hidden");
   MOZ_ASSERT(aScrolledWidth > aScrollportWidth,
@@ -7391,8 +7467,7 @@ nsIDocument::FlushPendingNotifications(mozilla::ChangesToFlush aFlush)
 static bool
 Copy(nsIDocument* aDocument, void* aData)
 {
-  nsTArray<nsCOMPtr<nsIDocument> >* resources =
-    static_cast<nsTArray<nsCOMPtr<nsIDocument> >* >(aData);
+  auto* resources = static_cast<nsTArray<nsCOMPtr<nsIDocument>>*>(aData);
   resources->AppendElement(aDocument);
   return true;
 }
@@ -7405,7 +7480,8 @@ nsIDocument::FlushExternalResources(FlushType aType)
   if (GetDisplayDocument()) {
     return;
   }
-  nsTArray<nsCOMPtr<nsIDocument> > resources;
+
+  nsTArray<nsCOMPtr<nsIDocument>> resources;
   EnumerateExternalResources(Copy, &resources);
 
   for (uint32_t i = 0; i < resources.Length(); i++) {
@@ -9506,6 +9582,13 @@ nsIDocument::CreateStaticClone(nsIDocShell* aCloneContainer)
           }
         }
       }
+
+      // Font faces created with the JS API will not be reflected in the
+      // stylesheets and need to be copied over to the cloned document.
+      if (const FontFaceSet* set = GetFonts()) {
+        set->CopyNonRuleFacesTo(clonedDoc->Fonts());
+      }
+
     }
   }
   mCreatingStaticClone = false;
@@ -9707,6 +9790,43 @@ nsIDocument::GetPlugins(nsTArray<nsIObjectLoadingContent*>& aPlugins)
     aPlugins.AppendElement(iter.Get()->GetKey());
   }
   EnumerateSubDocuments(AllSubDocumentPluginEnum, &aPlugins);
+}
+
+void
+nsIDocument::ScheduleSVGUseElementShadowTreeUpdate(SVGUseElement& aUseElement)
+{
+  MOZ_ASSERT(aUseElement.IsInComposedDoc());
+
+  mSVGUseElementsNeedingShadowTreeUpdate.PutEntry(&aUseElement);
+
+  if (nsIPresShell* shell = GetShell()) {
+    shell->EnsureStyleFlush();
+  }
+}
+
+void
+nsIDocument::DoUpdateSVGUseElementShadowTrees()
+{
+  MOZ_ASSERT(!mSVGUseElementsNeedingShadowTreeUpdate.IsEmpty());
+  nsTArray<RefPtr<SVGUseElement>> useElementsToUpdate;
+
+  do {
+    useElementsToUpdate.Clear();
+    useElementsToUpdate.SetCapacity(mSVGUseElementsNeedingShadowTreeUpdate.Count());
+
+    {
+      for (auto iter = mSVGUseElementsNeedingShadowTreeUpdate.ConstIter();
+           !iter.Done();
+           iter.Next()) {
+        useElementsToUpdate.AppendElement(iter.Get()->GetKey());
+      }
+      mSVGUseElementsNeedingShadowTreeUpdate.Clear();
+    }
+
+    for (auto& useElement : useElementsToUpdate) {
+      useElement->UpdateShadowTree();
+    }
+  } while (!mSVGUseElementsNeedingShadowTreeUpdate.IsEmpty());
 }
 
 void
@@ -9917,30 +10037,6 @@ nsIDocument::IsScrollingElement(Element* aElement)
   // scrollable.
   RefPtr<HTMLBodyElement> strongBody(body);
   return !IsPotentiallyScrollable(strongBody);
-}
-
-void
-nsIDocument::ObsoleteSheet(nsIURI *aSheetURI, ErrorResult& rv)
-{
-  nsresult res = CSSLoader()->ObsoleteSheet(aSheetURI);
-  if (NS_FAILED(res)) {
-    rv.Throw(res);
-  }
-}
-
-void
-nsIDocument::ObsoleteSheet(const nsAString& aSheetURI, ErrorResult& rv)
-{
-  nsCOMPtr<nsIURI> uri;
-  nsresult res = NS_NewURI(getter_AddRefs(uri), aSheetURI);
-  if (NS_FAILED(res)) {
-    rv.Throw(res);
-    return;
-  }
-  res = CSSLoader()->ObsoleteSheet(uri);
-  if (NS_FAILED(res)) {
-    rv.Throw(res);
-  }
 }
 
 class UnblockParsingPromiseHandler final : public PromiseNativeHandler
@@ -10600,7 +10696,7 @@ static void
 UpdateViewportScrollbarOverrideForFullscreen(nsIDocument* aDoc)
 {
   if (nsPresContext* presContext = aDoc->GetPresContext()) {
-    presContext->UpdateViewportScrollbarStylesOverride();
+    presContext->UpdateViewportScrollStylesOverride();
   }
 }
 
@@ -12400,6 +12496,10 @@ nsIDocument::SetUserHasInteracted(bool aUserHasInteracted)
   MOZ_LOG(gUserInteractionPRLog, LogLevel::Debug,
           ("Document %p has been interacted by user.", this));
   mUserHasInteracted = aUserHasInteracted;
+
+  if (aUserHasInteracted) {
+    MaybeAllowStorageForOpener();
+  }
 }
 
 void
@@ -12413,8 +12513,35 @@ nsIDocument::NotifyUserGestureActivation()
             LogLevel::Debug,
             ("Document %p has been activated by user.", this));
     doc->mUserGestureActivated = true;
-    doc->MaybeAllowStorageForOpener();
     doc = doc->GetSameTypeParentDocument();
+  }
+}
+
+void
+nsIDocument::SetDocTreeHadAudibleMedia()
+{
+  nsIDocument* topLevelDoc = GetTopLevelContentDocument();
+  if (!topLevelDoc) {
+    return;
+  }
+
+  if (!topLevelDoc->mDocTreeHadAudibleMedia) {
+    RefPtr<AsyncEventDispatcher> asyncDispatcher =
+      new AsyncEventDispatcher(topLevelDoc,
+                               NS_LITERAL_STRING("AudibleAutoplayMediaOccurred"),
+                               CanBubble::eYes,
+                               ChromeOnlyDispatch::eYes);
+    asyncDispatcher->PostDOMEvent();
+  }
+  topLevelDoc->mDocTreeHadAudibleMedia = true;
+}
+
+void
+nsIDocument::SetDocTreeHadPlayRevoked()
+{
+  nsIDocument* topLevelDoc = GetTopLevelContentDocument();
+  if (topLevelDoc) {
+    topLevelDoc->mDocTreeHadPlayRevoked = true;
   }
 }
 
@@ -12440,7 +12567,7 @@ nsIDocument::MaybeAllowStorageForOpener()
   }
 
   nsCOMPtr<nsPIDOMWindowOuter> outerOpener = outer->GetOpener();
-  if (NS_WARN_IF(!outerOpener)) {
+  if (!outerOpener) {
     return;
   }
 
@@ -12449,10 +12576,27 @@ nsIDocument::MaybeAllowStorageForOpener()
     return;
   }
 
-  // No 3rd party or no tracking resource.
-  if (!nsContentUtils::IsThirdPartyWindowOrChannel(openerInner, nullptr,
-                                                   nullptr) ||
-      !nsContentUtils::IsTrackingResourceWindow(openerInner)) {
+  // Let's take the principal from the opener.
+  nsIDocument* openerDocument = openerInner->GetExtantDoc();
+  if (NS_WARN_IF(!openerDocument)) {
+    return;
+  }
+
+  nsCOMPtr<nsIURI> openerURI = openerDocument->GetDocumentURI();
+  if (NS_WARN_IF(!openerURI)) {
+    return;
+  }
+
+  // No tracking resource.
+  if (!nsContentUtils::IsTrackingResourceWindow(inner)) {
+    return;
+  }
+
+  // If the opener is not a 3rd party and if this window is not a 3rd party, we
+  // should not continue.
+  if (!nsContentUtils::IsThirdPartyWindowOrChannel(inner, nullptr, openerURI) &&
+      !nsContentUtils::IsThirdPartyWindowOrChannel(openerInner, nullptr,
+                                                   nullptr)) {
     return;
   }
 
@@ -12467,8 +12611,9 @@ nsIDocument::MaybeAllowStorageForOpener()
     return;
   }
 
-  AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(origin,
-                                                           openerInner);
+  // We don't care when the asynchronous work finishes here.
+  Unused << AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(origin,
+                                                                     openerInner);
 }
 
 bool
@@ -12491,6 +12636,13 @@ nsIDocument::HasBeenUserGestureActivated()
   }
 
   return mUserGestureActivated;
+}
+
+bool
+nsIDocument::IsExtensionPage() const
+{
+  return  Preferences::GetBool("media.autoplay.allow-extension-background-pages", true) &&
+          BasePrincipal::Cast(NodePrincipal())->AddonPolicy();
 }
 
 nsIDocument*
@@ -12569,6 +12721,17 @@ ArrayContainsTable(const nsTArray<nsCString>& aTableArray,
 
 namespace {
 
+static const char* gCallbackPrefs[] = {
+  // We only need to register string-typed preferences.
+  "urlclassifier.flashAllowTable",
+  "urlclassifier.flashAllowExceptTable",
+  "urlclassifier.flashTable",
+  "urlclassifier.flashExceptTable",
+  "urlclassifier.flashSubDocTable",
+  "urlclassifier.flashSubDocExceptTable",
+  nullptr,
+};
+
 // An object to store all preferences we need for flash blocking feature.
 struct PrefStore
 {
@@ -12581,28 +12744,21 @@ struct PrefStore
     Preferences::AddBoolVarCache(&mPluginsHttpOnly,
                                  "plugins.http_https_only");
 
-    // We only need to register string-typed preferences.
-    Preferences::RegisterCallback(UpdateStringPrefs, "urlclassifier.flashAllowTable", this);
-    Preferences::RegisterCallback(UpdateStringPrefs, "urlclassifier.flashAllowExceptTable", this);
-    Preferences::RegisterCallback(UpdateStringPrefs, "urlclassifier.flashTable", this);
-    Preferences::RegisterCallback(UpdateStringPrefs, "urlclassifier.flashExceptTable", this);
-    Preferences::RegisterCallback(UpdateStringPrefs, "urlclassifier.flashSubDocTable", this);
-    Preferences::RegisterCallback(UpdateStringPrefs, "urlclassifier.flashSubDocExceptTable", this);
+    Preferences::RegisterCallbacks(
+      PREF_CHANGE_METHOD(PrefStore::UpdateStringPrefs),
+      gCallbackPrefs, this);
 
     UpdateStringPrefs();
   }
 
   ~PrefStore()
   {
-    Preferences::UnregisterCallback(UpdateStringPrefs, "urlclassifier.flashAllowTable", this);
-    Preferences::UnregisterCallback(UpdateStringPrefs, "urlclassifier.flashAllowExceptTable", this);
-    Preferences::UnregisterCallback(UpdateStringPrefs, "urlclassifier.flashTable", this);
-    Preferences::UnregisterCallback(UpdateStringPrefs, "urlclassifier.flashExceptTable", this);
-    Preferences::UnregisterCallback(UpdateStringPrefs, "urlclassifier.flashSubDocTable", this);
-    Preferences::UnregisterCallback(UpdateStringPrefs, "urlclassifier.flashSubDocExceptTable", this);
+    Preferences::UnregisterCallbacks(
+      PREF_CHANGE_METHOD(PrefStore::UpdateStringPrefs),
+      gCallbackPrefs, this);
   }
 
-  void UpdateStringPrefs()
+  void UpdateStringPrefs(const char* aPref = nullptr)
   {
     Preferences::GetCString("urlclassifier.flashAllowTable", mAllowTables);
     Preferences::GetCString("urlclassifier.flashAllowExceptTable", mAllowExceptionsTables);
@@ -12610,11 +12766,6 @@ struct PrefStore
     Preferences::GetCString("urlclassifier.flashExceptTable", mDenyExceptionsTables);
     Preferences::GetCString("urlclassifier.flashSubDocTable", mSubDocDenyTables);
     Preferences::GetCString("urlclassifier.flashSubDocExceptTable", mSubDocDenyExceptionsTables);
-  }
-
-  static void UpdateStringPrefs(const char*, void* aClosure)
-  {
-    static_cast<PrefStore*>(aClosure)->UpdateStringPrefs();
   }
 
   bool mFlashBlockEnabled;

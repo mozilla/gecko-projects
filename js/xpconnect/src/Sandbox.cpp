@@ -20,7 +20,6 @@
 #include "nsIURI.h"
 #include "nsJSUtils.h"
 #include "nsNetUtil.h"
-#include "NullPrincipal.h"
 #include "ExpandedPrincipal.h"
 #include "WrapperFactory.h"
 #include "xpcprivate.h"
@@ -62,6 +61,7 @@
 #include "mozilla/dom/XMLSerializerBinding.h"
 #include "mozilla/dom/FormDataBinding.h"
 #include "mozilla/DeferredFinalize.h"
+#include "mozilla/NullPrincipal.h"
 
 using namespace mozilla;
 using namespace JS;
@@ -1112,6 +1112,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
     priv->allowWaivers = options.allowWaivers;
     priv->isWebExtensionContentScript = options.isWebExtensionContentScript;
     priv->isContentXBLCompartment = options.isContentXBLScope;
+    priv->isSandboxCompartment = true;
 
     // Set up the wantXrays flag, which indicates whether xrays are desired even
     // for same-origin access.
@@ -1848,8 +1849,9 @@ xpc::EvalInSandbox(JSContext* cx, HandleObject sandboxArg, const nsAString& sour
         JS::CompileOptions options(sandcx);
         options.setFileAndLine(filenameBuf.get(), lineNo);
         MOZ_ASSERT(JS_IsGlobalObject(sandbox));
-        ok = JS::Evaluate(sandcx, options,
-                          PromiseFlatString(source).get(), source.Length(), &v);
+        JS::SourceBufferHolder buffer(PromiseFlatString(source).get(), source.Length(),
+                                      JS::SourceBufferHolder::NoOwnership);
+        ok = JS::Evaluate(sandcx, options, buffer, &v);
 
         // If the sandbox threw an exception, grab it off the context.
         if (aes.HasException()) {

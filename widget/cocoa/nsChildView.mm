@@ -38,7 +38,7 @@
 #include "nsIFile.h"
 #include "nsILocalFileMac.h"
 #include "nsGfxCIID.h"
-#include "nsThemeConstants.h"
+#include "nsStyleConsts.h"
 #include "nsIWidgetListener.h"
 #include "nsIPresShell.h"
 #include "nsIScreen.h"
@@ -2094,6 +2094,10 @@ nsChildView::AddWindowOverlayWebRenderCommands(layers::WebRenderBridgeChild* aWr
                                                wr::IpcResourceUpdateQueue& aResources)
 {
   PrepareWindowEffects();
+
+  if (!mIsCoveringTitlebar || mIsFullscreen || mTitlebarRect.IsEmpty()) {
+    return;
+  }
 
   bool needUpdate = mUpdatedTitlebarRegion.Intersects(mTitlebarRect);
   mUpdatedTitlebarRegion.SetEmpty();

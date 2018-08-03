@@ -6,7 +6,6 @@
 var EXPORTED_SYMBOLS = ["PrintingContent"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "ReaderMode",
   "resource://gre/modules/ReaderMode.jsm");
@@ -31,8 +30,7 @@ var PrintingContent = {
     switch (event.type) {
       case "PrintingError": {
         let win = event.target.defaultView;
-        let wbp = win.QueryInterface(Ci.nsIInterfaceRequestor)
-                     .getInterface(Ci.nsIWebBrowserPrint);
+        let wbp = win.getInterface(Ci.nsIWebBrowserPrint);
         let nsresult = event.detail;
         global.sendAsyncMessage("Printing:Error", {
           isPrinting: wbp.doingPrint,
@@ -144,8 +142,7 @@ var PrintingContent = {
         onStateChange(webProgress, req, flags, status) {
           if (flags & Ci.nsIWebProgressListener.STATE_STOP) {
             webProgress.removeProgressListener(webProgressListener);
-            let domUtils = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                        .getInterface(Ci.nsIDOMWindowUtils);
+            let domUtils = contentWindow.windowUtils;
             // Here we tell the parent that we have parsed the document successfully
             // using ReaderMode primitives and we are able to enter on preview mode.
             if (domUtils.isMozAfterPaintPending) {
@@ -337,8 +334,7 @@ var PrintingContent = {
     }
 
     try {
-      let print = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIWebBrowserPrint);
+      let print = contentWindow.getInterface(Ci.nsIWebBrowserPrint);
 
       if (print.doingPrintPreview) {
         this.logKeyedTelemetry("PRINT_DIALOG_OPENED_COUNT", "FROM_PREVIEW");

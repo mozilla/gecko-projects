@@ -311,8 +311,16 @@ const NodeFront = FrontClassWithSpec(nodeSpec, {
     return this._form.isShadowRoot;
   },
 
+  get shadowRootMode() {
+    return this._form.shadowRootMode;
+  },
+
   get isShadowHost() {
     return this._form.isShadowHost;
+  },
+
+  get customElementLocation() {
+    return this._form.customElementLocation;
   },
 
   get isDirectShadowHostChild() {

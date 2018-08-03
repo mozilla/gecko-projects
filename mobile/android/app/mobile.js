@@ -365,7 +365,7 @@ pref("dom.max_script_run_time", 20);
 
 // Absolute path to the devtools unix domain socket file used
 // to communicate with a usb cable via adb forward.
-pref("devtools.debugger.unix-domain-socket", "/data/data/@ANDROID_PACKAGE_NAME@/firefox-debugger-socket");
+pref("devtools.debugger.unix-domain-socket", "@ANDROID_PACKAGE_NAME@/firefox-debugger-socket");
 
 pref("devtools.remote.usb.enabled", false);
 pref("devtools.remote.wifi.enabled", false);
@@ -492,7 +492,6 @@ pref("app.update.url.android", "https://aus5.mozilla.org/update/4/%PRODUCT%/%VER
 
 #ifdef MOZ_UPDATER
 /* prefs used specifically for updating the app */
-pref("app.update.enabled", false);
 pref("app.update.channel", "@MOZ_UPDATE_CHANNEL@");
 
 #endif
@@ -574,6 +573,19 @@ pref("media.video-queue.send-to-compositor-size", 1);
 pref("media.mediasource.enabled", true);
 
 pref("media.mediadrm-widevinecdm.visible", true);
+
+#ifdef NIGHTLY_BUILD
+// Switch block autoplay logic to v2.
+pref("media.autoplay.enabled.user-gestures-needed", true);
+// UI/prompting for permission isn't implemented for Fennec, so disable.
+pref("media.autoplay.ask-permission", false);
+// Set Fennec to block autoplay by default.
+pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked, 2=Prompt
+#else
+pref("media.autoplay.default", 0); // 0=Allowed, 1=Blocked, 2=Prompt
+pref("media.autoplay.enabled.user-gestures-needed", false);
+pref("media.autoplay.ask-permission", false);
+#endif
 
 // Enable WebSpeech speech synthesis
 pref("media.webspeech.synth.enabled", true);
@@ -769,10 +781,13 @@ pref("media.gmp-provider.enabled", true);
 // The default color scheme in reader mode (light, dark, auto)
 // auto = color automatically adjusts according to ambient light level
 // (auto only works on platforms where the 'devicelight' event is enabled)
-pref("reader.color_scheme", "auto");
+// auto doesn't work: https://bugzilla.mozilla.org/show_bug.cgi?id=1472957
+// pref("reader.color_scheme", "auto");
+pref("reader.color_scheme", "light");
 
 // Color scheme values available in reader mode UI.
-pref("reader.color_scheme.values", "[\"dark\",\"auto\",\"light\"]");
+// pref("reader.color_scheme.values", "[\"dark\",\"auto\",\"light\"]");
+pref("reader.color_scheme.values", "[\"dark\",\"sepia\",\"light\"]");
 
 // Whether to use a vertical or horizontal toolbar.
 pref("reader.toolbar.vertical", false);

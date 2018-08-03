@@ -112,11 +112,14 @@ EXPORTS.mozilla += [
     'IntentionalCrash.h',
     'JSObjectHolder.h',
     'Logging.h',
+    'MemoryInfo.h',
+    'MemoryMapping.h',
     'MemoryReportingProcess.h',
     'nsMemoryInfoDumper.h',
     'NSPRLogModulesParser.h',
     'OwningNonNull.h',
     'SizeOfState.h',
+    'StaticMonitor.h',
     'StaticMutex.h',
     'StaticPtr.h',
 ]
@@ -172,6 +175,16 @@ UNIFIED_SOURCES += [
     'nsVersionComparatorImpl.cpp',
     'nsWeakReference.cpp',
 ]
+
+if CONFIG['OS_TARGET'] in ('Linux', 'Android'):
+    UNIFIED_SOURCES += [
+        'MemoryMapping.cpp',
+    ]
+
+if CONFIG['OS_TARGET'] == 'WINNT':
+    UNIFIED_SOURCES += [
+        'MemoryInfo.cpp',
+    ]
 
 GENERATED_FILES += [
     "error_list.rs",

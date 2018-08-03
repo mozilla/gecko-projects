@@ -3,12 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
+const Services = require("Services");
 const { createElement, createFactory } = require("devtools/client/shared/vendor/react");
 const ReactDOM = require("devtools/client/shared/vendor/react-dom");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
 
 const actions = require("devtools/client/webconsole/actions/index");
-const { createContextMenu } = require("devtools/client/webconsole/utils/context-menu");
+const { createContextMenu, createEditContextMenu } = require("devtools/client/webconsole/utils/context-menu");
 const { configureStore } = require("devtools/client/webconsole/store");
 const { isPacketPrivate } = require("devtools/client/webconsole/utils/messages");
 const { getAllMessagesById, getMessage } = require("devtools/client/webconsole/selectors/messages");
@@ -37,7 +38,11 @@ function WebConsoleOutputWrapper(parentNode, hud, toolbox, owner, document) {
 
   this.telemetry = new Telemetry();
 
-  store = configureStore(this.hud);
+  store = configureStore(this.hud, {
+    // We may not have access to the toolbox (e.g. in the browser console).
+    sessionId: this.toolbox && this.toolbox.sessionId || -1,
+    telemetry: this.telemetry,
+  });
 }
 
 WebConsoleOutputWrapper.prototype = {
@@ -109,6 +114,12 @@ WebConsoleOutputWrapper.prototype = {
           if (hud && hud.owner && hud.owner.viewSource) {
             hud.owner.viewSource(frame.url, frame.line);
           }
+        },
+        recordTelemetryEvent: (eventName, extra = {}) => {
+          this.telemetry.recordEvent("devtools.main", eventName, "webconsole", null, {
+            ...extra,
+            "session_id": this.toolbox && this.toolbox.sessionId || -1
+          });
         }
       };
 
@@ -153,6 +164,16 @@ WebConsoleOutputWrapper.prototype = {
           rootActorId
         });
 
+        // Emit the "menu-open" event for testing.
+        menu.once("open", () => this.emit("menu-open"));
+        menu.popup(screenX, screenY, { doc: this.owner.chromeWindow.document });
+
+        return menu;
+      };
+
+      serviceContainer.openEditContextMenu = (e) => {
+        const { screenX, screenY } = e;
+        const menu = createEditContextMenu();
         // Emit the "menu-open" event for testing.
         menu.once("open", () => this.emit("menu-open"));
         menu.popup(screenX, screenY, { doc: this.owner.chromeWindow.document });
@@ -225,7 +246,8 @@ WebConsoleOutputWrapper.prototype = {
         hud,
         onFirstMeaningfulPaint: resolve,
         closeSplitConsole: this.closeSplitConsole.bind(this),
-        jstermCodeMirror: store.getState().prefs.jstermCodeMirror,
+        jstermCodeMirror: store.getState().prefs.jstermCodeMirror
+          && !Services.appinfo.accessibilityEnabled,
       });
 
       // Render the root Application component.
@@ -409,8 +431,13 @@ WebConsoleOutputWrapper.prototype = {
         store.dispatch(actions.messagesAdd(this.queuedMessageAdds));
 
         const length = this.queuedMessageAdds.length;
-        this.telemetry.addEventProperty(
-          "devtools.main", "enter", "webconsole", null, "message_count", length);
+
+        // This telemetry event is only useful when we have a toolbox so only
+        // send it when we have one.
+        if (this.toolbox) {
+          this.telemetry.addEventProperty(
+            "devtools.main", "enter", "webconsole", null, "message_count", length);
+        }
 
         this.queuedMessageAdds = [];
 

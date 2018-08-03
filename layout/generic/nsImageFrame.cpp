@@ -18,6 +18,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Helpers.h"
 #include "mozilla/gfx/PathHelpers.h"
+#include "mozilla/dom/GeneratedImageContent.h"
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/ResponsiveImageSelector.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
@@ -139,7 +140,15 @@ NS_NewImageFrameForContentProperty(nsIPresShell* aPresShell,
                                    ComputedStyle* aStyle)
 {
   return new (aPresShell) nsImageFrame(
-    aStyle, nsImageFrame::Kind::NonGeneratedContentProperty);
+    aStyle, nsImageFrame::Kind::ContentProperty);
+}
+
+nsIFrame*
+NS_NewImageFrameForGeneratedContentIndex(nsIPresShell* aPresShell,
+                                         ComputedStyle* aStyle)
+{
+  return new (aPresShell) nsImageFrame(
+    aStyle, nsImageFrame::Kind::ContentPropertyAtIndex);
 }
 
 nsImageFrame*
@@ -316,7 +325,25 @@ nsImageFrame::Init(nsIContent* aContent,
     // that it can register images.
     imageLoader->FrameCreated(this);
   } else {
-    if (auto* proxy = StyleContent()->ContentAt(0).GetImage()) {
+    uint32_t contentIndex = 0;
+    const nsStyleContent* styleContent = StyleContent();
+    if (mKind == Kind::ContentPropertyAtIndex) {
+      MOZ_RELEASE_ASSERT(
+        aParent->GetContent()->IsGeneratedContentContainerForAfter() ||
+        aParent->GetContent()->IsGeneratedContentContainerForBefore());
+      MOZ_RELEASE_ASSERT(aContent->IsHTMLElement(nsGkAtoms::mozgeneratedcontentimage));
+      nsIFrame* nonAnonymousParent = aParent;
+      while (nonAnonymousParent->Style()->IsAnonBox()) {
+        nonAnonymousParent = nonAnonymousParent->GetParent();
+      }
+      MOZ_RELEASE_ASSERT(aParent->GetContent() == nonAnonymousParent->GetContent());
+      styleContent = nonAnonymousParent->StyleContent();
+      contentIndex = static_cast<GeneratedImageContent*>(aContent)->Index();
+    }
+    MOZ_RELEASE_ASSERT(contentIndex < styleContent->ContentCount());
+    MOZ_RELEASE_ASSERT(styleContent->ContentAt(contentIndex).GetType() ==
+                       StyleContentType::Image);
+    if (auto* proxy = styleContent->ContentAt(contentIndex).GetImage()) {
       proxy->Clone(mListener,
                    mContent->OwnerDoc(),
                    getter_AddRefs(mContentURLRequest));
@@ -487,7 +514,7 @@ bool
 nsImageFrame::IsPendingLoad(imgIRequest* aRequest) const
 {
   // Default to pending load in case of errors
-  if (mKind == Kind::NonGeneratedContentProperty) {
+  if (mKind != Kind::ImageElement) {
     MOZ_ASSERT(aRequest == mContentURLRequest);
     return false;
   }
@@ -554,12 +581,11 @@ nsImageFrame::SourceRectToDest(const nsIntRect& aRect)
 
 /* static */
 bool
-nsImageFrame::ShouldCreateImageFrameFor(Element* aElement,
-                                        ComputedStyle* aComputedStyle)
+nsImageFrame::ShouldCreateImageFrameFor(const Element& aElement,
+                                        ComputedStyle& aStyle)
 {
-  EventStates state = aElement->State();
-  if (IMAGE_OK(state,
-               HaveSpecifiedSize(aComputedStyle->StylePosition()))) {
+  EventStates state = aElement.State();
+  if (IMAGE_OK(state, HaveSpecifiedSize(aStyle.StylePosition()))) {
     // Image is fine; do the image frame thing
     return true;
   }
@@ -577,28 +603,28 @@ nsImageFrame::ShouldCreateImageFrameFor(Element* aElement,
   //  - otherwise, skip the icon
   bool useSizedBox;
 
-  if (aComputedStyle->StyleUIReset()->mForceBrokenImageIcon) {
+  if (aStyle.StyleUIReset()->mForceBrokenImageIcon) {
     useSizedBox = true;
   }
   else if (gIconLoad && gIconLoad->mPrefForceInlineAltText) {
     useSizedBox = false;
   }
-  else if (aElement->HasAttr(kNameSpaceID_None, nsGkAtoms::src) &&
-           !aElement->HasAttr(kNameSpaceID_None, nsGkAtoms::alt) &&
-           !aElement->IsHTMLElement(nsGkAtoms::object) &&
-           !aElement->IsHTMLElement(nsGkAtoms::input)) {
+  else if (aElement.HasAttr(kNameSpaceID_None, nsGkAtoms::src) &&
+           !aElement.HasAttr(kNameSpaceID_None, nsGkAtoms::alt) &&
+           !aElement.IsHTMLElement(nsGkAtoms::object) &&
+           !aElement.IsHTMLElement(nsGkAtoms::input)) {
     // Use a sized box if we have no alt text.  This means no alt attribute
     // and the node is not an object or an input (since those always have alt
     // text).
     useSizedBox = true;
   }
-  else if (aElement->OwnerDoc()->GetCompatibilityMode() !=
+  else if (aElement.OwnerDoc()->GetCompatibilityMode() !=
            eCompatibility_NavQuirks) {
     useSizedBox = false;
   }
   else {
     // check whether we have specified size
-    useSizedBox = HaveSpecifiedSize(aComputedStyle->StylePosition());
+    useSizedBox = HaveSpecifiedSize(aStyle.StylePosition());
   }
 
   return useSizedBox;
@@ -921,7 +947,7 @@ nsImageFrame::EnsureIntrinsicSizeAndRatio()
   // NOTE(emilio, https://github.com/w3c/csswg-drafts/issues/2832): WebKit
   // and Blink behave differently here for content: url(..), for now adapt to
   // Blink's behavior.
-  const bool mayDisplayBrokenIcon = IsForNonGeneratedImageElement();
+  const bool mayDisplayBrokenIcon = mKind == Kind::ImageElement;
   if (!mayDisplayBrokenIcon) {
     return;
   }
@@ -1868,7 +1894,7 @@ nsImageFrame::PaintImage(gfxContext& aRenderingContext, nsPoint aPt,
 already_AddRefed<imgIRequest>
 nsImageFrame::GetCurrentRequest() const
 {
-  if (mKind == Kind::NonGeneratedContentProperty) {
+  if (mKind != Kind::ImageElement) {
     return do_AddRef(mContentURLRequest);
   }
 

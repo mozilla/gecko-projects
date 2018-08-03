@@ -75,14 +75,14 @@
 #include "jit/InlinableNatives.h"
 #include "jit/Ion.h"
 #include "jit/JitcodeMap.h"
-#include "jit/OptimizationTracking.h"
+#include "jit/JitRealm.h"
+#include "jit/shared/CodeGenerator-shared.h"
 #include "js/Debug.h"
 #include "js/GCVector.h"
 #include "js/Initialization.h"
 #include "js/Printf.h"
 #include "js/StructuredClone.h"
 #include "js/SweepingAPI.h"
-#include "js/TrackedOptimizationInfo.h"
 #include "js/Wrapper.h"
 #include "perf/jsperf.h"
 #include "shell/jsoptparse.h"
@@ -127,14 +127,13 @@ using namespace js::shell;
 
 using js::shell::RCFile;
 
+using mozilla::ArrayEqual;
 using mozilla::ArrayLength;
 using mozilla::Atomic;
 using mozilla::MakeScopeExit;
 using mozilla::Maybe;
 using mozilla::Nothing;
 using mozilla::NumberEqualsInt32;
-using mozilla::PodCopy;
-using mozilla::PodEqual;
 using mozilla::TimeDuration;
 using mozilla::TimeStamp;
 
@@ -1986,10 +1985,12 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
                     return false;
             } else {
                 mozilla::Range<const char16_t> chars = codeChars.twoByteRange();
+                JS::SourceBufferHolder srcBuf(chars.begin().get(), chars.length(),
+                                              JS::SourceBufferHolder::NoOwnership);
                 if (envChain.length() == 0) {
-                    (void) JS::Compile(cx, options, chars.begin().get(), chars.length(), &script);
+                    (void) JS::Compile(cx, options, srcBuf, &script);
                 } else {
-                    (void) JS::CompileForNonSyntacticScope(cx, options, chars.begin().get(), chars.length(), &script);
+                    (void) JS::CompileForNonSyntacticScope(cx, options, srcBuf, &script);
                 }
             }
 
@@ -2074,7 +2075,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
                 return false;
             }
 
-            if (!PodEqual(loadBuffer.begin(), saveBuffer.begin(), loadBuffer.length())) {
+            if (!ArrayEqual(loadBuffer.begin(), saveBuffer.begin(), loadBuffer.length())) {
                 JS_ReportErrorNumberASCII(cx, my_GetErrorMessage, nullptr,
                                           JSSMSG_CACHE_EQ_CONTENT_FAILED);
                 return false;
@@ -2188,8 +2189,8 @@ Run(JSContext* cx, unsigned argc, Value* vp)
     if (!chars.initTwoByte(cx, str))
         return false;
 
-    const char16_t* ucbuf = chars.twoByteRange().begin().get();
-    size_t buflen = str->length();
+    JS::SourceBufferHolder srcBuf(chars.twoByteRange().begin().get(), str->length(),
+                                  JS::SourceBufferHolder::NoOwnership);
 
     RootedScript script(cx);
     int64_t startClock = PRMJ_Now();
@@ -2204,7 +2205,7 @@ Run(JSContext* cx, unsigned argc, Value* vp)
                .setFileAndLine(filename.ptr(), 1)
                .setIsRunOnce(true)
                .setNoScriptRval(true);
-        if (!JS_CompileUCScript(cx, ucbuf, buflen, options, &script))
+        if (!JS_CompileUCScript(cx, srcBuf, options, &script))
             return false;
     }
 
@@ -2725,13 +2726,13 @@ SrcNotes(JSContext* cx, HandleScript script, Sprinter* sp)
             break;
 
           case SRC_COLSPAN:
-            colspan = SN_OFFSET_TO_COLSPAN(GetSrcNoteOffset(sn, 0));
+            colspan = SN_OFFSET_TO_COLSPAN(GetSrcNoteOffset(sn, SrcNote::ColSpan::Span));
             if (!sp->jsprintf("%d", colspan))
                 return false;
             break;
 
           case SRC_SETLINE:
-            lineno = GetSrcNoteOffset(sn, 0);
+            lineno = GetSrcNoteOffset(sn, SrcNote::SetLine::Line);
             if (!sp->jsprintf(" lineno %u", lineno))
                 return false;
             break;
@@ -2757,16 +2758,26 @@ SrcNotes(JSContext* cx, HandleScript script, Sprinter* sp)
             break;
 
           case SRC_WHILE:
-          case SRC_NEXTCASE:
             if (!sp->jsprintf(" offset %u", unsigned(GetSrcNoteOffset(sn, 0))))
                 return false;
+            break;
+
+          case SRC_NEXTCASE:
+            if (!sp->jsprintf(" next case offset %u",
+                              unsigned(GetSrcNoteOffset(sn, SrcNote::NextCase::NextCaseOffset))))
+            {
+                return false;
+            }
             break;
 
           case SRC_TABLESWITCH: {
             mozilla::DebugOnly<JSOp> op = JSOp(script->code()[offset]);
             MOZ_ASSERT(op == JSOP_TABLESWITCH);
-            if (!sp->jsprintf(" length %u", unsigned(GetSrcNoteOffset(sn, 0))))
+            if (!sp->jsprintf(" end offset %u",
+                              unsigned(GetSrcNoteOffset(sn, SrcNote::TableSwitch::EndOffset))))
+            {
                 return false;
+            }
             UpdateSwitchTableBounds(cx, script, offset,
                                     &switchTableStart, &switchTableEnd);
             break;
@@ -2774,9 +2785,14 @@ SrcNotes(JSContext* cx, HandleScript script, Sprinter* sp)
           case SRC_CONDSWITCH: {
             mozilla::DebugOnly<JSOp> op = JSOp(script->code()[offset]);
             MOZ_ASSERT(op == JSOP_CONDSWITCH);
-            if (!sp->jsprintf(" length %u", unsigned(GetSrcNoteOffset(sn, 0))))
+            if (!sp->jsprintf(" end offset %u",
+                              unsigned(GetSrcNoteOffset(sn, SrcNote::CondSwitch::EndOffset))))
+            {
                 return false;
-            if (unsigned caseOff = (unsigned) GetSrcNoteOffset(sn, 1)) {
+            }
+            if (unsigned caseOff =
+                unsigned(GetSrcNoteOffset(sn, SrcNote::CondSwitch::FirstCaseOffset)))
+            {
                 if (!sp->jsprintf(" first case offset %u", caseOff))
                     return false;
             }
@@ -2787,8 +2803,11 @@ SrcNotes(JSContext* cx, HandleScript script, Sprinter* sp)
 
           case SRC_TRY:
             MOZ_ASSERT(JSOp(script->code()[offset]) == JSOP_TRY);
-            if (!sp->jsprintf(" offset to jump %u", unsigned(GetSrcNoteOffset(sn, 0))))
+            if (!sp->jsprintf(" offset to jump %u",
+                              unsigned(GetSrcNoteOffset(sn, SrcNote::Try::EndOfTryJumpOffset))))
+            {
                 return false;
+            }
             break;
 
           case SRC_CLASS_SPAN: {
@@ -3532,7 +3551,8 @@ EvalInContext(JSContext* cx, unsigned argc, Value* vp)
         }
         JS::CompileOptions opts(cx);
         opts.setFileAndLine(filename.get(), lineno);
-        if (!JS::Evaluate(cx, opts, src, srclen, args.rval())) {
+        JS::SourceBufferHolder srcBuf(src, srclen, JS::SourceBufferHolder::NoOwnership);
+        if (!JS::Evaluate(cx, opts, srcBuf, args.rval())) {
             return false;
         }
     }
@@ -3635,7 +3655,9 @@ WorkerMain(WorkerInput* input)
 
         AutoReportException are(cx);
         RootedScript script(cx);
-        if (!JS::Compile(cx, options, input->chars.get(), input->length, &script))
+        JS::SourceBufferHolder srcBuf(input->chars.get(), input->length,
+                                      JS::SourceBufferHolder::NoOwnership);
+        if (!JS::Compile(cx, options, srcBuf, &script))
             break;
         RootedValue result(cx);
         JS_ExecuteScript(cx, script, &result);
@@ -4221,8 +4243,10 @@ Compile(JSContext* cx, unsigned argc, Value* vp)
            .setIsRunOnce(true)
            .setNoScriptRval(true);
     RootedScript script(cx);
-    const char16_t* chars = stableChars.twoByteRange().begin().get();
-    bool ok = JS_CompileUCScript(cx, chars, scriptContents->length(), options, &script);
+    JS::SourceBufferHolder srcBuf(stableChars.twoByteRange().begin().get(),
+                                  scriptContents->length(),
+                                  JS::SourceBufferHolder::NoOwnership);
+    bool ok = JS_CompileUCScript(cx, srcBuf, options, &script);
     args.rval().setUndefined();
     return ok;
 }
@@ -4719,7 +4743,9 @@ OffThreadCompileScript(JSContext* cx, unsigned argc, Value* vp)
     if (!job)
         return false;
 
-    if (!JS::CompileOffThread(cx, options, job->sourceChars(), length,
+    JS::SourceBufferHolder srcBuf(job->sourceChars(), length,
+                                  JS::SourceBufferHolder::NoOwnership);
+    if (!JS::CompileOffThread(cx, options, srcBuf,
                               OffThreadCompileScriptCallback, job))
     {
         job->cancel();
@@ -4805,7 +4831,9 @@ OffThreadCompileModule(JSContext* cx, unsigned argc, Value* vp)
     if (!job)
         return false;
 
-    if (!JS::CompileOffThreadModule(cx, options, job->sourceChars(), length,
+    JS::SourceBufferHolder srcBuf(job->sourceChars(), length,
+                                  JS::SourceBufferHolder::NoOwnership);
+    if (!JS::CompileOffThreadModule(cx, options, srcBuf,
                                     OffThreadCompileScriptCallback, job))
     {
         job->cancel();
@@ -5564,7 +5592,7 @@ SingleStepCallback(void* arg, jit::Simulator* sim, void* pc)
     // Only append the stack if it differs from the last stack.
     if (sc->stacks.empty() ||
         sc->stacks.back().length() != stack.length() ||
-        !PodEqual(sc->stacks.back().begin(), stack.begin(), stack.length()))
+        !ArrayEqual(sc->stacks.back().begin(), stack.begin(), stack.length()))
     {
         if (!sc->stacks.append(std::move(stack)))
             oomUnsafe.crash("stacks.append");
@@ -6669,15 +6697,16 @@ EntryPoints(JSContext* cx, unsigned argc, Value* vp)
             AutoStableStringChars stableChars(cx);
             if (!stableChars.initTwoByte(cx, codeString))
                 return false;
-            const char16_t* chars = stableChars.twoByteRange().begin().get();
-            size_t length = codeString->length();
+            JS::SourceBufferHolder srcBuf(stableChars.twoByteRange().begin().get(),
+                                          codeString->length(),
+                                          JS::SourceBufferHolder::NoOwnership);
 
             CompileOptions options(cx);
             options.setIntroductionType("entryPoint eval")
                    .setFileAndLine("entryPoint eval", 1);
 
             js::shell::ShellAutoEntryMonitor sarep(cx);
-            if (!JS::Evaluate(cx, options, chars, length, &dummy))
+            if (!JS::Evaluate(cx, options, srcBuf, &dummy))
                 return false;
             return sarep.buildResult(cx, args.rval());
         }
@@ -7686,8 +7715,9 @@ PrintStackTrace(JSContext* cx, HandleValue exn)
     if (!stackObj)
         return true;
 
+    JSPrincipals* principals = exnObj->as<ErrorObject>().realm()->principals();
     RootedString stackStr(cx);
-    if (!BuildStackString(cx, stackObj, &stackStr, 2))
+    if (!BuildStackString(cx, principals, stackObj, &stackStr, 2))
         return false;
 
     UniqueChars stack(JS_EncodeStringToUTF8(cx, stackStr));
@@ -8644,6 +8674,8 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
             jit::JitOptions.disableCacheIR = false;
         else if (strcmp(str, "off") == 0)
             jit::JitOptions.disableCacheIR = true;
+        else if (strcmp(str, "nobinary") == 0)
+            jit::JitOptions.disableCacheIRBinaryArith = true;
         else
             return OptionFailure("cache-ir-stubs", str);
     }
@@ -9198,8 +9230,9 @@ main(int argc, char** argv, char** envp)
 #endif
         || !op.addStringOption('\0', "spectre-mitigations", "on/off",
                                "Whether Spectre mitigations are enabled (default: off, on to enable)")
-        || !op.addStringOption('\0', "cache-ir-stubs", "on/off",
-                               "Use CacheIR stubs (default: on, off to disable)")
+        || !op.addStringOption('\0', "cache-ir-stubs", "on/off/nobinary",
+                               "Use CacheIR stubs (default: on, off to disable, nobinary to"
+                               "just disable binary arith)")
         || !op.addStringOption('\0', "ion-shared-stubs", "on/off",
                                "Use shared stubs (default: on, off to disable)")
         || !op.addStringOption('\0', "ion-scalar-replacement", "on/off",

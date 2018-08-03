@@ -48,6 +48,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/ProcessHangMonitor.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/SystemPrincipal.h"
 #include "mozilla/ThreadLocal.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/Unused.h"
@@ -60,7 +61,6 @@
 #include "nsIXULRuntime.h"
 #include "nsJSPrincipals.h"
 #include "ExpandedPrincipal.h"
-#include "SystemPrincipal.h"
 
 #if defined(XP_LINUX) && !defined(ANDROID)
 // For getrlimit and min/max.
@@ -78,6 +78,10 @@ using namespace mozilla;
 using namespace xpc;
 using namespace JS;
 using mozilla::dom::AutoEntryScript;
+
+// The watchdog thread loop is pretty trivial, and should not require much stack
+// space to do its job. So only give it 32KiB.
+static constexpr size_t kWatchdogStackSize = 32 * 1024;
 
 static void WatchdogMain(void* arg);
 class Watchdog;
@@ -143,7 +147,7 @@ class Watchdog
             // join it on shutdown.
             mThread = PR_CreateThread(PR_USER_THREAD, WatchdogMain, this,
                                       PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD,
-                                      PR_JOINABLE_THREAD, 0);
+                                      PR_JOINABLE_THREAD, kWatchdogStackSize);
             if (!mThread)
                 MOZ_CRASH("PR_CreateThread failed!");
 
@@ -234,24 +238,25 @@ class Watchdog
 #define PREF_MAX_SCRIPT_RUN_TIME_CHROME "dom.max_chrome_script_run_time"
 #define PREF_MAX_SCRIPT_RUN_TIME_EXT_CONTENT "dom.max_ext_content_script_run_time"
 
-class WatchdogManager : public nsIObserver
+static const char* gCallbackPrefs[] = {
+    "dom.use_watchdog",
+    PREF_MAX_SCRIPT_RUN_TIME_CONTENT,
+    PREF_MAX_SCRIPT_RUN_TIME_CHROME,
+    PREF_MAX_SCRIPT_RUN_TIME_EXT_CONTENT,
+    nullptr,
+};
+
+class WatchdogManager
 {
   public:
-
-    NS_DECL_ISUPPORTS
     explicit WatchdogManager()
     {
         // All the timestamps start at zero.
         PodArrayZero(mTimestamps);
 
         // Register ourselves as an observer to get updates on the pref.
-        mozilla::Preferences::AddStrongObserver(this, "dom.use_watchdog");
-        mozilla::Preferences::AddStrongObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CONTENT);
-        mozilla::Preferences::AddStrongObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CHROME);
-        mozilla::Preferences::AddStrongObserver(this, PREF_MAX_SCRIPT_RUN_TIME_EXT_CONTENT);
+        Preferences::RegisterCallbacks(PrefsChanged, gCallbackPrefs, this);
     }
-
-  protected:
 
     virtual ~WatchdogManager()
     {
@@ -261,21 +266,18 @@ class WatchdogManager : public nsIObserver
         MOZ_ASSERT(!mWatchdog);
     }
 
+  private:
+
+    static void PrefsChanged(const char* aPref, WatchdogManager* aSelf)
+    {
+        aSelf->RefreshWatchdog();
+    }
+
   public:
 
     void Shutdown()
     {
-        mozilla::Preferences::RemoveObserver(this, "dom.use_watchdog");
-        mozilla::Preferences::RemoveObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CONTENT);
-        mozilla::Preferences::RemoveObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CHROME);
-        mozilla::Preferences::RemoveObserver(this, PREF_MAX_SCRIPT_RUN_TIME_EXT_CONTENT);
-    }
-
-    NS_IMETHOD Observe(nsISupports* aSubject, const char* aTopic,
-                       const char16_t* aData) override
-    {
-        RefreshWatchdog();
-        return NS_OK;
+        Preferences::UnregisterCallbacks(PrefsChanged, gCallbackPrefs, this);
     }
 
     void
@@ -454,8 +456,6 @@ class WatchdogManager : public nsIObserver
     PRTime mTimestamps[kWatchdogTimestampCategoryCount - 1];
 };
 
-NS_IMPL_ISUPPORTS(WatchdogManager, nsIObserver)
-
 AutoLockWatchdog::AutoLockWatchdog(Watchdog* aWatchdog MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
   : mWatchdog(aWatchdog)
 {
@@ -476,6 +476,8 @@ static void
 WatchdogMain(void* arg)
 {
     AUTO_PROFILER_REGISTER_THREAD("JS Watchdog");
+    // Create an nsThread wrapper for the thread and register it with the thread manager.
+    Unused << NS_GetCurrentThread();
     NS_SetCurrentThreadName("JS Watchdog");
 
     Watchdog* self = static_cast<Watchdog*>(arg);
@@ -559,6 +561,12 @@ xpc::SimulateActivityCallback(bool aActive)
 void
 XPCJSContext::ActivityCallback(void* arg, bool active)
 {
+    // Since the slow script dialog never activates if we are recording or
+    // replaying, don't record/replay JS activity notifications.
+    if (recordreplay::IsRecordingOrReplaying()) {
+        return;
+    }
+
     if (!active) {
         ProcessHangMonitor::ClearHang();
     }
@@ -571,6 +579,12 @@ XPCJSContext::ActivityCallback(void* arg, bool active)
 bool
 XPCJSContext::InterruptCallback(JSContext* cx)
 {
+    // The slow script dialog never activates if we are recording or replaying,
+    // since the precise timing of the dialog cannot be replayed.
+    if (recordreplay::IsRecordingOrReplaying()) {
+        return true;
+    }
+
     XPCJSContext* self = XPCJSContext::Get();
 
     // Now is a good time to turn on profiling if it's pending.
@@ -733,9 +747,8 @@ bool
 xpc::SharedMemoryEnabled() { return sSharedMemoryEnabled; }
 
 static void
-ReloadPrefsCallback(const char* pref, void* data)
+ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx)
 {
-    XPCJSContext* xpccx = static_cast<XPCJSContext*>(data);
     JSContext* cx = xpccx->Context();
 
     bool useBaseline = Preferences::GetBool(JS_OPTIONS_DOT_STR "baselinejit");
@@ -1147,7 +1160,7 @@ uint32_t
 XPCJSContext::sInstanceCount;
 
 // static
-StaticRefPtr<WatchdogManager>
+StaticAutoPtr<WatchdogManager>
 XPCJSContext::sWatchdogInstance;
 
 // static

@@ -261,8 +261,6 @@ WasmHandleTrap()
         return ReportError(cx, JSMSG_WASM_IND_CALL_TO_NULL);
       case Trap::IndirectCallBadSig:
         return ReportError(cx, JSMSG_WASM_IND_CALL_BAD_SIG);
-      case Trap::ImpreciseSimdConversion:
-        return ReportError(cx, JSMSG_SIMD_FAILED_CONVERSION);
       case Trap::OutOfBounds:
         return ReportError(cx, JSMSG_WASM_OUT_OF_BOUNDS);
       case Trap::UnalignedAccess:
@@ -680,7 +678,6 @@ AddressOf(SymbolicAddress imm, ABIFunctionType* abiType)
 #ifdef ENABLE_WASM_GC
       case SymbolicAddress::PostBarrier:
         *abiType = Args_General2;
-        static_assert(sizeof(PostBarrierArg) == sizeof(uint32_t), "passed arg is a u32");
         return FuncCast(Instance::postBarrier, *abiType);
 #endif
 #if defined(JS_CODEGEN_MIPS32)

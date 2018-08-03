@@ -11,9 +11,7 @@
 ChromeUtils.import("resource://gre/modules/DeferredTask.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/DownloadUtils.jsm");
 ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/addons/AddonRepository.jsm");
 ChromeUtils.import("resource://gre/modules/addons/AddonSettings.jsm");
 
@@ -278,18 +276,11 @@ function isDiscoverEnabled() {
  * Obtain the main DOMWindow for the current context.
  */
 function getMainWindow() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIWebNavigation)
-               .QueryInterface(Ci.nsIDocShellTreeItem)
-               .rootTreeItem
-               .QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDOMWindow);
+  return window.docShell.rootTreeItem.domWindow;
 }
 
 function getBrowserElement() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDocShell)
-               .chromeEventHandler;
+  return window.docShell.chromeEventHandler;
 }
 
 /**
@@ -298,20 +289,20 @@ function getBrowserElement() {
  */
 var HTML5History = {
   get index() {
-    return window.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIWebNavigation)
+    return window.docShell
+                 .QueryInterface(Ci.nsIWebNavigation)
                  .sessionHistory.index;
   },
 
   get canGoBack() {
-    return window.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIWebNavigation)
+    return window.docShell
+                 .QueryInterface(Ci.nsIWebNavigation)
                  .canGoBack;
   },
 
   get canGoForward() {
-    return window.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIWebNavigation)
+    return window.docShell
+                 .QueryInterface(Ci.nsIWebNavigation)
                  .canGoForward;
   },
 
@@ -414,8 +405,8 @@ var FakeHistory = {
 
 // If the window has a session history then use the HTML5 History wrapper
 // otherwise use our fake history implementation
-if (window.QueryInterface(Ci.nsIInterfaceRequestor)
-          .getInterface(Ci.nsIWebNavigation)
+if (window.docShell
+          .QueryInterface(Ci.nsIWebNavigation)
           .sessionHistory) {
   var gHistory = HTML5History;
 } else {
@@ -1902,16 +1893,13 @@ var gHeader = {
   },
 
   get shouldShowNavButtons() {
-    var docshellItem = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                             .getInterface(Ci.nsIWebNavigation)
-                             .QueryInterface(Ci.nsIDocShellTreeItem);
+    var docshellItem = window.docShell;
 
     // If there is no outer frame then make the buttons visible
     if (docshellItem.rootTreeItem == docshellItem)
       return true;
 
-    var outerWin = docshellItem.rootTreeItem.QueryInterface(Ci.nsIInterfaceRequestor)
-                                            .getInterface(Ci.nsIDOMWindow);
+    var outerWin = docshellItem.rootTreeItem.domWindow;
     var outerDoc = outerWin.document;
     var node = outerDoc.getElementById("back-button");
     // If the outer frame has no back-button then make the buttons visible
@@ -3456,7 +3444,7 @@ var gDragDrop = {
 // (See Bug 1385548 for rationale).
 var gBrowser = {
   getTabModalPromptBox(browser) {
-    const parentWindow = document.docShell.chromeEventHandler.ownerGlobal;
+    const parentWindow = window.docShell.chromeEventHandler.ownerGlobal;
 
     if (parentWindow.gBrowser) {
       return parentWindow.gBrowser.getTabModalPromptBox(browser);

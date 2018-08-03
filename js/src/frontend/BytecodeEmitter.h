@@ -15,6 +15,7 @@
 #include "frontend/BCEParserHandle.h"
 #include "frontend/EitherParser.h"
 #include "frontend/JumpList.h"
+#include "frontend/NameFunctions.h"
 #include "frontend/SharedContext.h"
 #include "frontend/SourceNotes.h"
 #include "vm/BytecodeUtil.h"
@@ -418,7 +419,11 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     }
 
     void reportError(ParseNode* pn, unsigned errorNumber, ...);
+    void reportError(const mozilla::Maybe<uint32_t>& maybeOffset,
+                     unsigned errorNumber, ...);
     bool reportExtraWarning(ParseNode* pn, unsigned errorNumber, ...);
+    bool reportExtraWarning(const mozilla::Maybe<uint32_t>& maybeOffset,
+                            unsigned errorNumber, ...);
 
     // If pn contains a useful expression, return true with *answer set to true.
     // If pn contains a useless expression, return true with *answer set to
@@ -473,7 +478,11 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitScript(ParseNode* body);
 
     // Emit function code for the tree rooted at body.
-    MOZ_MUST_USE bool emitFunctionScript(ParseNode* body);
+    enum class TopLevelFunction {
+        No,
+        Yes
+    };
+    MOZ_MUST_USE bool emitFunctionScript(ParseNode* fn, TopLevelFunction isTopLevel);
 
     // If op is JOF_TYPESET (see the type barriers comment in TypeInference.h),
     // reserve a type set to store its result.
@@ -679,7 +688,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_NEVER_INLINE MOZ_MUST_USE bool emitLexicalScope(ParseNode* pn);
     MOZ_MUST_USE bool emitLexicalScopeBody(ParseNode* body,
                                            EmitLineNumberNote emitLineNote = EMIT_LINENOTE);
-    MOZ_NEVER_INLINE MOZ_MUST_USE bool emitSwitch(ParseNode* pn);
+    MOZ_NEVER_INLINE MOZ_MUST_USE bool emitSwitch(SwitchStatement* pn);
     MOZ_NEVER_INLINE MOZ_MUST_USE bool emitTry(ParseNode* pn);
 
     enum DestructuringFlavor {

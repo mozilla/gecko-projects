@@ -125,6 +125,7 @@ EXPORTS.mozilla.layers += [
     'basic/MacIOSurfaceTextureHostBasic.h',
     'basic/TextureHostBasic.h',
     'BSPTree.h',
+    'BufferEdgePad.h',
     'BufferTexture.h',
     'CanvasRenderer.h',
     'client/CanvasClient.h',
@@ -250,6 +251,7 @@ EXPORTS.mozilla.layers += [
     'wr/WebRenderScrollData.h',
     'wr/WebRenderScrollDataWrapper.h',
     'wr/WebRenderTextureHost.h',
+    'wr/WebRenderTextureHostWrapper.h',
     'wr/WebRenderUserData.h',
 ]
 
@@ -273,6 +275,7 @@ if CONFIG['MOZ_X11']:
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     EXPORTS.mozilla.layers += [
         'opengl/GLManager.h',
+        'TextureSync.h',
     ]
     EXPORTS += [
         'MacIOSurfaceHelpers.h',
@@ -280,6 +283,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     ]
     UNIFIED_SOURCES += [
         'opengl/GLManager.cpp',
+        'TextureSync.cpp',
     ]
     SOURCES += [
         'ipc/ShadowLayerUtilsMac.cpp',
@@ -350,6 +354,7 @@ UNIFIED_SOURCES += [
     'basic/BasicPaintedLayer.cpp',
     'basic/TextureHostBasic.cpp',
     'BSPTree.cpp',
+    'BufferEdgePad.cpp',
     'BufferTexture.cpp',
     'BufferUnrotate.cpp',
     'CanvasRenderer.cpp',
@@ -485,6 +490,7 @@ UNIFIED_SOURCES += [
     'wr/WebRenderLayerManager.cpp',
     'wr/WebRenderLayersLogging.cpp',
     'wr/WebRenderScrollData.cpp',
+    'wr/WebRenderTextureHostWrapper.cpp',
     'wr/WebRenderUserData.cpp',
     # XXX here are some unified build error.
     #'wr/WebRenderTextureHost.cpp'

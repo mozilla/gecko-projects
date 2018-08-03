@@ -22,11 +22,13 @@ async function add_link(aOptions = {}) {
         merchantTaskFn: PTU.ContentTasks.createAndShowRequest,
       }
     );
-
+    info("add_link, aOptions: " + JSON.stringify(aOptions, null, 2));
     await navigateToAddCardPage(frame);
+    info(`add_link, from the add card page,
+          verifyPersistCheckbox with expectPersist: ${aOptions.expectDefaultCardPersist}`);
     await verifyPersistCheckbox(frame, {
       checkboxSelector: "basic-card-form .persist-checkbox",
-      expectPersist: !aOptions.isPrivate,
+      expectPersist: aOptions.expectDefaultCardPersist,
     });
     await spawnPaymentDialogTask(frame, async (testArgs = {}) => {
       let {
@@ -45,10 +47,16 @@ async function add_link(aOptions = {}) {
          "isPrivate flag has expected value when shown from a private/non-private session");
     }, aOptions);
 
-    await fillInCardForm(frame, PTU.BasicCards.JaneMasterCard, {
-      isTemporary: aOptions.isPrivate,
+    let cardOptions = Object.assign({}, {
       checkboxSelector: "basic-card-form .persist-checkbox",
+      expectPersist: aOptions.expectCardPersist,
     });
+    if (aOptions.hasOwnProperty("setCardPersistCheckedValue")) {
+      cardOptions.setPersistCheckedValue = aOptions.setCardPersistCheckedValue;
+    }
+    await fillInCardForm(frame, PTU.BasicCards.JaneMasterCard, cardOptions);
+
+    await verifyPersistCheckbox(frame, cardOptions);
 
     await spawnPaymentDialogTask(frame, async (testArgs = {}) => {
       let billingAddressSelect = content.document.querySelector("#billingAddressGUID");
@@ -66,8 +74,12 @@ async function add_link(aOptions = {}) {
       addLinkSelector: ".billingAddressRow .add-link",
       checkboxSelector: "#address-page .persist-checkbox",
       initialPageId: "basic-card-page",
-      expectPersist: !aOptions.isPrivate,
+      expectPersist: aOptions.expectDefaultAddressPersist,
     });
+    if (aOptions.hasOwnProperty("setAddressPersistCheckedValue")) {
+      addressOptions.setPersistCheckedValue = aOptions.setAddressPersistCheckedValue;
+    }
+
     await navigateToAddAddressPage(frame, addressOptions);
 
     await spawnPaymentDialogTask(frame, async (testArgs = {}) => {
@@ -96,7 +108,7 @@ async function add_link(aOptions = {}) {
                     Object.keys(state.tempBasicCards).length;
         return state.page.id == "basic-card-page" && !state["basic-card-page"].guid &&
                total == 1;
-      }, "Check basic-card page, but card should not be saved and no addresses present");
+      }, "Check basic-card page, but card should not be saved and no new addresses present");
 
       is(title.textContent, "Add Credit Card", "Add title should be still be on credit card page");
 
@@ -113,12 +125,12 @@ async function add_link(aOptions = {}) {
 
     await verifyPersistCheckbox(frame, addressOptions);
 
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.clickPrimaryButton);
+
     await spawnPaymentDialogTask(frame, async (testArgs = {}) => {
       let {
         PaymentTestUtils: PTU,
       } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
-
-      content.document.querySelector("address-form button:last-of-type").click();
 
       let state = await PTU.DialogContentUtils.waitForState(content, (state) => {
         return state.page.id == "basic-card-page" && !state["basic-card-page"].guid;
@@ -128,7 +140,7 @@ async function add_link(aOptions = {}) {
                          Object.keys(state.tempAddresses).length;
       is(addressCount, 2, "Check address was added");
 
-      let addressColn = testArgs.isPrivate ? state.tempAddresses : state.savedAddresses;
+      let addressColn = testArgs.expectAddressPersist ? state.savedAddresses : state.tempAddresses;
 
       ok(state["basic-card-page"].preserveFieldValues,
          "preserveFieldValues should be set when coming back from address-page");
@@ -144,19 +156,30 @@ async function add_link(aOptions = {}) {
         billingAddressSelect.children[billingAddressSelect.selectedIndex];
       let selectedAddressGuid = selectedOption.value;
       let lastAddress = Object.values(addressColn)[Object.keys(addressColn).length - 1];
-      if (testArgs.isPrivate) {
-        // guid property is added in later patch on bug 1463608
-        is(selectedAddressGuid, lastAddress.guid,
-           "The select should have the new address selected");
-      } else {
-        is(selectedAddressGuid, lastAddress.guid,
-           "The select should have the new address selected");
-      }
+      is(selectedAddressGuid, lastAddress.guid, "The select should have the new address selected");
     }, aOptions);
 
-    await fillInCardForm(frame, PTU.BasicCards.JaneMasterCard, {
-      isTemporary: aOptions.isPrivate,
+    cardOptions = Object.assign({}, {
       checkboxSelector: "basic-card-form .persist-checkbox",
+      expectPersist: aOptions.expectCardPersist,
+    });
+
+    await verifyPersistCheckbox(frame, cardOptions);
+
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.clickPrimaryButton);
+
+    await spawnPaymentDialogTask(frame, async (testArgs = {}) => {
+      let {
+        PaymentTestUtils: PTU,
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+
+      await PTU.DialogContentUtils.waitForState(content, (state) => {
+        return state.page.id == "payment-summary";
+      }, "Check we are back on the summary page");
+    });
+
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.setSecurityCode, {
+      securityCode: "123",
     });
 
     await spawnPaymentDialogTask(frame, async (testArgs = {}) => {
@@ -166,71 +189,177 @@ async function add_link(aOptions = {}) {
 
       let {prefilledGuids} = testArgs;
       let card = Object.assign({}, PTU.BasicCards.JaneMasterCard);
-
-      content.document.querySelector("basic-card-form button:last-of-type").click();
-
-      let state = await PTU.DialogContentUtils.waitForState(content, (state) => {
-        return state.page.id == "payment-summary";
-      }, "Check we are back on the sumamry page");
+      let state = await PTU.DialogContentUtils.getCurrentState(content);
 
       let cardCount = Object.keys(state.savedBasicCards).length +
                          Object.keys(state.tempBasicCards).length;
       is(cardCount, 2, "Card was added");
-      if (testArgs.isPrivate) {
-        is(Object.keys(state.tempBasicCards).length, 1, "Card was added temporarily");
-        is(Object.keys(state.savedBasicCards).length, 1, "No change to saved cards");
-      } else {
+      if (testArgs.expectCardPersist) {
         is(Object.keys(state.tempBasicCards).length, 0, "No temporary cards addded");
         is(Object.keys(state.savedBasicCards).length, 2, "New card was saved");
+      } else {
+        is(Object.keys(state.tempBasicCards).length, 1, "Card was added temporarily");
+        is(Object.keys(state.savedBasicCards).length, 1, "No change to saved cards");
       }
 
-      let cardCollection = testArgs.isPrivate ? state.tempBasicCards : state.savedBasicCards;
-      let addressCollection = testArgs.isPrivate ? state.tempAddresses : state.savedAddresses;
+      let cardCollection = testArgs.expectCardPersist ? state.savedBasicCards :
+                                                        state.tempBasicCards;
+      let addressCollection = testArgs.expectAddressPersist ? state.savedAddresses :
+                                                              state.tempAddresses;
       let savedCardGUID =
         Object.keys(cardCollection).find(key => key != prefilledGuids.card1GUID);
       let savedAddressGUID =
         Object.keys(addressCollection).find(key => key != prefilledGuids.address1GUID);
       let savedCard = savedCardGUID && cardCollection[savedCardGUID];
 
-      card["cc-number"] = "************4444"; // Card should be masked
-
+      // we should never have an un-masked cc-number in the state:
+      ok(Object.values(cardCollection).every(card => card["cc-number"].startsWith("************")),
+         "All cc-numbers in state are masked");
+      card["cc-number"] = "************4444"; // Expect card number to be masked at this point
       for (let [key, val] of Object.entries(card)) {
-        if (key == "cc-number" && testArgs.isPrivate) {
-          // cc-number is not yet masked for private/temporary cards
-          is(savedCard[key], val, "Check " + key);
-        } else {
-          is(savedCard[key], val, "Check " + key);
-        }
+        is(savedCard[key], val, "Check " + key);
       }
-      if (testArgs.isPrivate) {
-        ok(testArgs.isPrivate,
-           "Checking card/address from private window relies on guid property " +
-           "which isnt available yet");
-      } else {
-        is(savedCard.billingAddressGUID, savedAddressGUID,
-           "The saved card should be associated with the billing address");
-      }
+
+      is(savedCard.billingAddressGUID, savedAddressGUID,
+         "The saved card should be associated with the billing address");
     }, aOptions);
 
-    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.manuallyClickCancel);
+    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.completePayment);
+
+    // Add a handler to complete the payment above.
+    info("acknowledging the completion from the merchant page");
+    let result = await ContentTask.spawn(browser, {}, PTU.ContentTasks.addCompletionHandler);
+
+    // Verify response has the expected properties
+    let expectedDetails = Object.assign({
+      "cc-security-code": "123",
+    }, PTU.BasicCards.JaneMasterCard);
+    let expectedBillingAddress = PTU.Addresses.TimBL2;
+    let cardDetails = result.response.details;
+
+    checkPaymentMethodDetailsMatchesCard(cardDetails, expectedDetails,
+                                         "Check response payment details");
+    checkPaymentAddressMatchesStorageAddress(cardDetails.billingAddress, expectedBillingAddress,
+                                             "Check response billing address");
+
     await BrowserTestUtils.waitForCondition(() => win.closed, "dialog should be closed");
   });
 }
 
 add_task(async function test_add_link() {
   let prefilledGuids = await setup([PTU.Addresses.TimBL], [PTU.BasicCards.JohnDoe]);
+  let defaultPersist = Services.prefs.getBoolPref(SAVE_CREDITCARD_DEFAULT_PREF);
+
+  is(defaultPersist, false, `Expect ${SAVE_CREDITCARD_DEFAULT_PREF} to default to false`);
+  info("Calling add_link from test_add_link");
   await add_link({
     isPrivate: false,
+    expectDefaultCardPersist: false,
+    expectCardPersist: false,
+    expectDefaultAddressPersist: true,
+    expectAddressPersist: true,
     prefilledGuids,
   });
-}).skip();
+});
 
 add_task(async function test_private_add_link() {
   let prefilledGuids = await setup([PTU.Addresses.TimBL], [PTU.BasicCards.JohnDoe]);
+  info("Calling add_link from test_private_add_link");
   await add_link({
     isPrivate: true,
+    expectDefaultCardPersist: false,
+    expectCardPersist: false,
+    expectDefaultAddressPersist: false,
+    expectAddressPersist: false,
     prefilledGuids,
   });
+});
+
+add_task(async function test_persist_prefd_on_add_link() {
+  let prefilledGuids = await setup([PTU.Addresses.TimBL], [PTU.BasicCards.JohnDoe]);
+  Services.prefs.setBoolPref(SAVE_CREDITCARD_DEFAULT_PREF, true);
+
+  info("Calling add_link from test_persist_prefd_on_add_link");
+  await add_link({
+    isPrivate: false,
+    expectDefaultCardPersist: true,
+    expectCardPersist: true,
+    expectDefaultAddressPersist: true,
+    expectAddressPersist: true,
+    prefilledGuids,
+  });
+  Services.prefs.clearUserPref(SAVE_CREDITCARD_DEFAULT_PREF);
+});
+
+add_task(async function test_private_persist_prefd_on_add_link() {
+  let prefilledGuids = await setup([PTU.Addresses.TimBL], [PTU.BasicCards.JohnDoe]);
+  Services.prefs.setBoolPref(SAVE_CREDITCARD_DEFAULT_PREF, true);
+
+  info("Calling add_link from test_private_persist_prefd_on_add_link");
+  // in private window, even when the pref is set true,
+  // we should still default to not saving credit-card info
+  await add_link({
+    isPrivate: true,
+    expectDefaultCardPersist: false,
+    expectCardPersist: false,
+    expectDefaultAddressPersist: false,
+    expectAddressPersist: false,
+    prefilledGuids,
+  });
+  Services.prefs.clearUserPref(SAVE_CREDITCARD_DEFAULT_PREF);
+});
+
+add_task(async function test_optin_persist_add_link() {
+  let prefilledGuids = await setup([PTU.Addresses.TimBL], [PTU.BasicCards.JohnDoe]);
+  let defaultPersist = Services.prefs.getBoolPref(SAVE_CREDITCARD_DEFAULT_PREF);
+
+  is(defaultPersist, false, `Expect ${SAVE_CREDITCARD_DEFAULT_PREF} to default to false`);
+  info("Calling add_link from test_add_link");
+  // verify that explicit opt-in by checking the box results in the record being saved
+  await add_link({
+    isPrivate: false,
+    expectDefaultCardPersist: false,
+    setCardPersistCheckedValue: true,
+    expectCardPersist: true,
+    expectDefaultAddressPersist: true,
+    expectAddressPersist: true,
+    prefilledGuids,
+  });
+});
+
+add_task(async function test_optin_private_persist_add_link() {
+  let prefilledGuids = await setup([PTU.Addresses.TimBL], [PTU.BasicCards.JohnDoe]);
+  let defaultPersist = Services.prefs.getBoolPref(SAVE_CREDITCARD_DEFAULT_PREF);
+
+  is(defaultPersist, false, `Expect ${SAVE_CREDITCARD_DEFAULT_PREF} to default to false`);
+  // verify that explicit opt-in for the card only from a private window results
+  // in the record being saved
+  await add_link({
+    isPrivate: true,
+    expectDefaultCardPersist: false,
+    setCardPersistCheckedValue: true,
+    expectCardPersist: true,
+    expectDefaultAddressPersist: false,
+    expectAddressPersist: false,
+    prefilledGuids,
+  });
+});
+
+add_task(async function test_opt_out_persist_prefd_on_add_link() {
+  let prefilledGuids = await setup([PTU.Addresses.TimBL], [PTU.BasicCards.JohnDoe]);
+  Services.prefs.setBoolPref(SAVE_CREDITCARD_DEFAULT_PREF, true);
+
+  // set the pref to default to persist creditcards, but manually uncheck the checkbox
+  await add_link({
+    isPrivate: false,
+    expectDefaultCardPersist: true,
+    setCardPersistCheckedValue: false,
+    expectCardPersist: false,
+    expectDefaultAddressPersist: true,
+    expectAddressPersist: true,
+    prefilledGuids,
+  });
+  Services.prefs.clearUserPref(SAVE_CREDITCARD_DEFAULT_PREF);
 });
 
 add_task(async function test_edit_link() {
@@ -357,7 +486,7 @@ add_task(async function test_edit_link() {
       ok(!field.disabled, `Field #${key} shouldn't be disabled`);
     }
 
-    content.document.querySelector("address-form button:last-of-type").click();
+    content.document.querySelector("address-form button.save-button").click();
     state = await PTU.DialogContentUtils.waitForState(content, (state) => {
       return state.page.id == "basic-card-page" && state["basic-card-page"].guid &&
              Object.keys(state.savedAddresses).length == 1;
@@ -366,7 +495,7 @@ add_task(async function test_edit_link() {
     is(Object.values(state.savedAddresses)[0].tel, PTU.Addresses.TimBL.tel.slice(0, -1) + "7",
        "Check that address was edited and saved");
 
-    content.document.querySelector("basic-card-form button:last-of-type").click();
+    content.document.querySelector("basic-card-form button.save-button").click();
 
     state = await PTU.DialogContentUtils.waitForState(content, (state) => {
       let cards = Object.entries(state.savedBasicCards);
@@ -386,69 +515,77 @@ add_task(async function test_edit_link() {
       return state.page.id == "payment-summary";
     }, "Switched back to payment-summary");
   }, args);
-}).skip();
+});
 
 add_task(async function test_private_card_adding() {
   await setup([PTU.Addresses.TimBL], [PTU.BasicCards.JohnDoe]);
-  const args = {
-    methodData: [PTU.MethodData.basicCard],
-    details: PTU.Details.total60USD,
-  };
   let privateWin = await BrowserTestUtils.openNewBrowserWindow({private: true});
-  await spawnInDialogForMerchantTask(PTU.ContentTasks.createAndShowRequest, async function check() {
-    let {
-      PaymentTestUtils: PTU,
-    } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
 
-    let addLink = content.document.querySelector("payment-method-picker .add-link");
-    is(addLink.textContent, "Add", "Add link text");
+  await BrowserTestUtils.withNewTab({
+    gBrowser: privateWin.gBrowser,
+    url: BLANK_PAGE_URL,
+  }, async browser => {
+    let {win, frame} = await setupPaymentDialog(browser, {
+      methodData: [PTU.MethodData.basicCard],
+      details: PTU.Details.total60USD,
+      merchantTaskFn: PTU.ContentTasks.createAndShowRequest,
+    });
 
-    addLink.click();
+    await spawnPaymentDialogTask(frame, async function check() {
+      let {
+        PaymentTestUtils: PTU,
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
 
-    let state = await PTU.DialogContentUtils.waitForState(content, (state) => {
-      return state.page.id == "basic-card-page" && !state["basic-card-page"].guid;
-    },
-                                                          "Check add page state");
+      let addLink = content.document.querySelector("payment-method-picker .add-link");
+      is(addLink.textContent, "Add", "Add link text");
 
-    let savedCardCount = Object.keys(state.savedBasicCards).length;
-    let tempCardCount = Object.keys(state.tempBasicCards).length;
+      addLink.click();
 
-    let card = Object.assign({}, PTU.BasicCards.JohnDoe);
+      await PTU.DialogContentUtils.waitForState(content, (state) => {
+        return state.page.id == "basic-card-page" && !state["basic-card-page"].guid;
+      },
+                                                "Check card page state");
+    });
 
-    info("filling fields");
-    for (let [key, val] of Object.entries(card)) {
-      let field = content.document.getElementById(key);
-      field.value = val;
-      ok(!field.disabled, `Field #${key} shouldn't be disabled`);
-    }
+    await fillInCardForm(frame, PTU.BasicCards.JohnDoe);
 
-    content.document.querySelector("basic-card-form button:last-of-type").click();
+    await spawnPaymentDialogTask(frame, async function() {
+      let {
+        PaymentTestUtils: PTU,
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
 
-    state = await PTU.DialogContentUtils.waitForState(content, (state) => {
-      return Object.keys(state.tempBasicCards).length > tempCardCount;
-    },
-                                                      "Check card was added to temp collection");
+      let card = Object.assign({}, PTU.BasicCards.JohnDoe);
+      let state = await PTU.DialogContentUtils.getCurrentState(content);
+      let savedCardCount = Object.keys(state.savedBasicCards).length;
+      let tempCardCount = Object.keys(state.tempBasicCards).length;
+      content.document.querySelector("basic-card-form button.save-button").click();
 
-    is(savedCardCount, Object.keys(state.savedBasicCards).length, "No card was saved in state");
-    is(Object.keys(state.tempBasicCards).length, 1, "Card was added temporarily");
+      state = await PTU.DialogContentUtils.waitForState(content, (state) => {
+        return Object.keys(state.tempBasicCards).length > tempCardCount;
+      },
+                                                        "Check card was added to temp collection");
 
-    let cardGUIDs = Object.keys(state.tempBasicCards);
-    is(cardGUIDs.length, 1, "Check there is one card");
+      is(savedCardCount, Object.keys(state.savedBasicCards).length, "No card was saved in state");
+      is(Object.keys(state.tempBasicCards).length, 1, "Card was added temporarily");
 
-    let tempCard = state.tempBasicCards[cardGUIDs[0]];
-    // Card number should be masked, so skip cc-number in the compare loop below
-    delete card["cc-number"];
-    for (let [key, val] of Object.entries(card)) {
-      is(tempCard[key], val, "Check " + key + ` ${tempCard[key]} matches ${val}`);
-    }
-    // check computed fields
-    is(tempCard["cc-number"], "************1111", "cc-number is masked");
-    is(tempCard["cc-given-name"], "John", "cc-given-name was computed");
-    is(tempCard["cc-family-name"], "Doe", "cc-family-name was computed");
-    ok(tempCard["cc-exp"], "cc-exp was computed");
-    ok(tempCard["cc-number-encrypted"], "cc-number-encrypted was computed");
-  }, args, {
-    browser: privateWin.gBrowser,
+      let cardGUIDs = Object.keys(state.tempBasicCards);
+      is(cardGUIDs.length, 1, "Check there is one card");
+
+      let tempCard = state.tempBasicCards[cardGUIDs[0]];
+      // Card number should be masked, so skip cc-number in the compare loop below
+      delete card["cc-number"];
+      for (let [key, val] of Object.entries(card)) {
+        is(tempCard[key], val, "Check " + key + ` ${tempCard[key]} matches ${val}`);
+      }
+      // check computed fields
+      is(tempCard["cc-number"], "************1111", "cc-number is masked");
+      is(tempCard["cc-given-name"], "John", "cc-given-name was computed");
+      is(tempCard["cc-family-name"], "Doe", "cc-family-name was computed");
+      ok(tempCard["cc-exp"], "cc-exp was computed");
+      ok(tempCard["cc-number-encrypted"], "cc-number-encrypted was computed");
+    });
+    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.manuallyClickCancel);
+    await BrowserTestUtils.waitForCondition(() => win.closed, "dialog should be closed");
   });
   await BrowserTestUtils.closeWindow(privateWin);
-}).skip();
+});

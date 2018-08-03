@@ -175,6 +175,8 @@ partial interface Document {
    * etc.
    */
   [Func="IsChromeOrXBL"] readonly attribute boolean mozSyntheticDocument;
+  [Throws, Func="IsChromeOrXBL"]
+  BoxObject? getBoxObjectFor(Element? element);
   /**
    * Returns the script element whose script is currently being processed.
    *
@@ -323,9 +325,9 @@ partial interface Document {
 
 // https://drafts.csswg.org/web-animations/#extensions-to-the-document-interface
 partial interface Document {
-  [Func="nsDocument::IsWebAnimationsEnabled"]
+  [Func="nsDocument::AreWebAnimationsTimelinesEnabled"]
   readonly attribute DocumentTimeline timeline;
-  [Func="nsDocument::IsWebAnimationsEnabled"]
+  [Func="nsDocument::IsWebAnimationsGetAnimationsEnabled"]
   sequence<Animation> getAnimations();
 };
 
@@ -348,6 +350,9 @@ partial interface Document {
   Element? getBindingParent(Node node);
   [Throws, Func="IsChromeOrXBL", NeedsSubjectPrincipal]
   void loadBindingDocument(DOMString documentURL);
+  // Creates a new XUL element regardless of the document's default type.
+  [CEReactions, NewObject, Throws, Func="IsChromeOrXBL"]
+  Element createXULElement(DOMString localName, optional (ElementCreationOptions or DOMString) options);
 
   // Touch bits
   // XXXbz I can't find the sane spec for this stuff, so just cribbing
@@ -382,13 +387,6 @@ partial interface Document {
 
   [ChromeOnly]
   attribute boolean styleSheetChangeEventsEnabled;
-
-  [ChromeOnly, Throws]
-  void obsoleteSheet(URI sheetURI);
-  [ChromeOnly, Throws]
-  void obsoleteSheet(DOMString sheetURI);
-
-  [ChromeOnly] readonly attribute nsIDocShell? docShell;
 
   [ChromeOnly] readonly attribute DOMString contentLanguage;
 

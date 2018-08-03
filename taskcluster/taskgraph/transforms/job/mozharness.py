@@ -149,6 +149,7 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
 
     env = worker.setdefault('env', {})
     env.update({
+        'GECKO_PATH': '{workdir}/workspace/build/src'.format(**run),
         'MOZHARNESS_CONFIG': ' '.join(run['config']),
         'MOZHARNESS_SCRIPT': run['script'],
         'MH_BRANCH': config.params['project'],
@@ -204,7 +205,7 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
 
     command = [
         '{workdir}/bin/run-task'.format(**run),
-        '--vcs-checkout', '{workdir}/workspace/build/src'.format(**run),
+        '--vcs-checkout', env['GECKO_PATH'],
         '--tools-checkout', '{workdir}/workspace/build/tools'.format(**run),
     ]
     if run['comm-checkout']:
@@ -242,7 +243,8 @@ def mozharness_on_generic_worker(config, job, taskdesc):
 
     worker = taskdesc['worker']
 
-    generic_worker_add_artifacts(config, job, taskdesc)
+    if not worker.get('skip-artifacts', False):
+        generic_worker_add_artifacts(config, job, taskdesc)
     support_vcs_checkout(config, job, taskdesc)
 
     env = worker['env']

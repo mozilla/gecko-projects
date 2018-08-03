@@ -23,6 +23,7 @@
 
 #include "jit/JitFrames-inl.h"
 #include "jit/MacroAssembler-inl.h"
+#include "vm/JSScript-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -88,17 +89,10 @@ CodeGeneratorShared::CodeGeneratorShared(MIRGenerator* gen, LIRGraph* graph, Mac
         MOZ_ASSERT(graph->argumentSlotCount() == 0);
         frameDepth_ += gen->wasmMaxStackArgBytes();
 
-        if (gen->usesSimd()) {
-            // If the function uses any SIMD then we may need to insert padding
-            // so that local slots are aligned for SIMD.
-            frameInitialAdjustment_ = ComputeByteAlignment(sizeof(wasm::Frame), WasmStackAlignment);
-            frameDepth_ += frameInitialAdjustment_;
+        static_assert(!SupportsSimd, "we need padding so that local slots are SIMD-aligned and "
+                                     "the stack must be kept SIMD-aligned too.");
 
-            // Keep the stack aligned. Some SIMD sequences build values on the
-            // stack and need the stack aligned.
-            frameDepth_ += ComputeByteAlignment(sizeof(wasm::Frame) + frameDepth_,
-                                                WasmStackAlignment);
-        } else if (gen->needsStaticStackAlignment()) {
+        if (gen->needsStaticStackAlignment()) {
             // An MWasmCall does not align the stack pointer at calls sites but
             // instead relies on the a priori stack adjustment. This must be the
             // last adjustment of frameDepth_.
@@ -127,6 +121,9 @@ CodeGeneratorShared::generatePrologue()
     // If profiling, save the current frame pointer to a per-thread global field.
     if (isProfilerInstrumentationEnabled())
         masm.profilerEnterFrame(masm.getStackPointer(), CallTempReg0);
+
+    if (gen->info().script()->trackRecordReplayProgress())
+        masm.inc64(AbsoluteAddress(mozilla::recordreplay::ExecutionProgressCounter()));
 
     // Ensure that the Ion frame is properly aligned.
     masm.assertStackAlignment(JitStackAlignment, 0);

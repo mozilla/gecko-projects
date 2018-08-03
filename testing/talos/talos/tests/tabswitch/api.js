@@ -4,7 +4,7 @@
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/RemotePageManager.jsm");
+ChromeUtils.import("resource://gre/modules/remotepagemanager/RemotePageManagerParent.jsm");
 
 let context = {};
 let TalosParentProfiler;
@@ -160,9 +160,7 @@ function forceGC(win, browser) {
   // something into TalosPowers instead.
   browser.messageManager.loadFrameScript("chrome://pageloader/content/talos-content.js", false);
 
-  win.QueryInterface(Ci.nsIInterfaceRequestor)
-     .getInterface(Ci.nsIDOMWindowUtils)
-     .garbageCollect();
+  win.windowUtils.garbageCollect();
 
   return new Promise((resolve) => {
     let mm = browser.messageManager;

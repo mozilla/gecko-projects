@@ -319,11 +319,26 @@ xpc::ErrorReport::LogToStderr()
 void
 xpc::ErrorReport::LogToConsole()
 {
-  LogToConsoleWithStack(nullptr);
+    LogToConsoleWithStack(nullptr, nullptr);
 }
+
 void
-xpc::ErrorReport::LogToConsoleWithStack(JS::HandleObject aStack)
+xpc::ErrorReport::LogToConsoleWithStack(JS::HandleObject aStack,
+                                        JS::HandleObject aStackGlobal)
 {
+    // Don't log failures after diverging from a recording during replay, as
+    // this will cause the associated debugger operation to fail.
+    if (recordreplay::HasDivergedFromRecording())
+        return;
+
+    if (aStack) {
+        MOZ_ASSERT(aStackGlobal);
+        MOZ_ASSERT(JS_IsGlobalObject(aStackGlobal));
+        js::AssertSameCompartment(aStack, aStackGlobal);
+    } else {
+        MOZ_ASSERT(!aStackGlobal);
+    }
+
     LogToStderr();
 
     MOZ_LOG(gJSDiagnostics,
@@ -344,7 +359,7 @@ xpc::ErrorReport::LogToConsoleWithStack(JS::HandleObject aStack)
       // As we cache messages in the console service,
       // we have to ensure not leaking them after the related
       // context is destroyed and we only track document lifecycle for now.
-      errorObject = new nsScriptErrorWithStack(aStack);
+      errorObject = new nsScriptErrorWithStack(aStack, aStackGlobal);
     } else {
       errorObject = new nsScriptError();
     }
@@ -658,7 +673,6 @@ nsXPConnect::WrapJS(JSContext * aJSContext,
     *result = nullptr;
 
     RootedObject aJSObj(aJSContext, aJSObjArg);
-    JSAutoRealm ar(aJSContext, aJSObj);
 
     nsresult rv = NS_ERROR_UNEXPECTED;
     if (!XPCConvert::JSObject2NativeInterface(result, aJSObj,
@@ -784,36 +798,6 @@ nsXPConnect::EvalInSandboxObject(const nsAString& source, const char* filename,
         filenameStr = NS_LITERAL_CSTRING("x-bogus://XPConnect/Sandbox");
     }
     return EvalInSandbox(cx, sandbox, source, filenameStr, 1, rval);
-}
-
-NS_IMETHODIMP
-nsXPConnect::GetWrappedNativePrototype(JSContext* aJSContext,
-                                       JSObject* aScopeArg,
-                                       nsIClassInfo* aClassInfo,
-                                       JSObject** aRetVal)
-{
-    RootedObject aScope(aJSContext, aScopeArg);
-    JSAutoRealm ar(aJSContext, aScope);
-
-    XPCWrappedNativeScope* scope = ObjectScope(aScope);
-    if (!scope)
-        return UnexpectedFailure(NS_ERROR_FAILURE);
-
-    nsCOMPtr<nsIXPCScriptable> scrProto =
-        XPCWrappedNative::GatherProtoScriptable(aClassInfo);
-
-    AutoMarkingWrappedNativeProtoPtr proto(aJSContext);
-    proto = XPCWrappedNativeProto::GetNewOrUsed(scope, aClassInfo, scrProto);
-    if (!proto)
-        return UnexpectedFailure(NS_ERROR_FAILURE);
-
-    JSObject* protoObj = proto->GetJSProtoObject();
-    if (!protoObj)
-        return UnexpectedFailure(NS_ERROR_FAILURE);
-
-    *aRetVal = protoObj;
-
-    return NS_OK;
 }
 
 NS_IMETHODIMP

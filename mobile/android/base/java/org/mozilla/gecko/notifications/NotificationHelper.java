@@ -5,11 +5,22 @@
 
 package org.mozilla.gecko.notifications;
 
-import java.io.File;
-import java.io.UnsupportedEncodingException;
-import java.net.URLConnection;
-import java.net.URLDecoder;
-import java.util.List;
+import android.annotation.TargetApi;
+import android.app.Activity;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.graphics.Bitmap;
+import android.net.Uri;
+import android.os.StrictMode;
+import android.support.v4.app.NotificationCompat;
+import android.support.v4.util.SimpleArrayMap;
+import android.util.Log;
 
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.EventDispatcher;
@@ -23,19 +34,13 @@ import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.ThreadUtils;
 
-import android.app.Activity;
-import android.app.PendingIntent;
-import android.content.ComponentName;
-import android.content.Context;
-import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
-import android.graphics.Bitmap;
-import android.net.Uri;
-import android.os.StrictMode;
-import android.support.v4.app.NotificationCompat;
-import android.support.v4.util.SimpleArrayMap;
-import android.util.Log;
+import java.io.File;
+import java.io.UnsupportedEncodingException;
+import java.net.URLConnection;
+import java.net.URLDecoder;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public final class NotificationHelper implements BundleEventListener {
     public static final String HELPER_BROADCAST_ACTION = AppConstants.ANDROID_PACKAGE_NAME + ".helperBroadcastAction";
@@ -78,6 +83,26 @@ public final class NotificationHelper implements BundleEventListener {
 
     private final Context mContext;
 
+
+    public enum Channel {
+        /**
+         * Default notification channel.
+         */
+        DEFAULT,
+        /**
+         * Mozilla Location Services notification channel.
+         */
+        MLS
+    }
+
+    private final Map<Channel, String> mDefinedNotificationChannels = new HashMap<Channel, String>() {{
+        final String DEFAULT_CHANNEL_TAG = "default-notification-channel";
+        put(Channel.DEFAULT, DEFAULT_CHANNEL_TAG);
+
+        final String MLS_CHANNEL_TAG     = "mls-notification-channel";
+        put(Channel.MLS, MLS_CHANNEL_TAG);
+    }};
+
     // Holds a list of notifications that should be cleared if the Fennec Activity is shut down.
     // Will not include ongoing or persistent notifications that are tied to Gecko's lifecycle.
     private SimpleArrayMap<String, GeckoBundle> mClearableNotifications;
@@ -98,6 +123,11 @@ public final class NotificationHelper implements BundleEventListener {
         EventDispatcher.getInstance().registerUiThreadListener(this,
             "Notification:Show",
             "Notification:Hide");
+
+        if (!AppConstants.Versions.preO) {
+            initNotificationChannels();
+        }
+
         mInitialized = true;
     }
 
@@ -111,6 +141,44 @@ public final class NotificationHelper implements BundleEventListener {
             sInstance = new NotificationHelper(context.getApplicationContext());
         }
         return sInstance;
+    }
+
+    private void initNotificationChannels() {
+        for (Channel mozChannel : mDefinedNotificationChannels.keySet()) {
+            createChannel(mozChannel);
+        }
+    }
+
+    @TargetApi(26)
+    private void createChannel(Channel definedChannel) {
+        final NotificationManager notificationManager = (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
+        NotificationChannel channel = notificationManager.getNotificationChannel(mDefinedNotificationChannels.get(definedChannel));
+
+        if (channel == null) {
+            switch (definedChannel) {
+                case MLS: {
+                    channel = new NotificationChannel(mDefinedNotificationChannels.get(definedChannel),
+                            mContext.getString(R.string.mls_notification_channel), NotificationManager.IMPORTANCE_LOW);
+                }
+                break;
+
+                case DEFAULT:
+
+                default: {
+                    channel = new NotificationChannel(mDefinedNotificationChannels.get(definedChannel),
+                            mContext.getString(R.string.default_notification_channel), NotificationManager.IMPORTANCE_HIGH);
+                }
+                break;
+            }
+
+            notificationManager.createNotificationChannel(channel);
+        }
+    }
+
+    @TargetApi(26)
+    public NotificationChannel getNotificationChannel(Channel definedChannel) {
+        final NotificationManager notificationManager = (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
+        return notificationManager.getNotificationChannel(mDefinedNotificationChannels.get(definedChannel));
     }
 
     @Override // BundleEventListener
@@ -183,6 +251,7 @@ public final class NotificationHelper implements BundleEventListener {
 
     private Intent buildNotificationIntent(final GeckoBundle message, final Uri.Builder builder) {
         final Intent notificationIntent = new Intent(HELPER_BROADCAST_ACTION);
+        notificationIntent.setClass(mContext, NotificationReceiver.class);
         final boolean ongoing = message.getBoolean(ONGOING_ATTR);
         notificationIntent.putExtra(ONGOING_ATTR, ongoing);
 
@@ -231,6 +300,7 @@ public final class NotificationHelper implements BundleEventListener {
         return res;
     }
 
+    @SuppressWarnings("NewApi")
     private void showNotification(final GeckoBundle message) {
         ThreadUtils.assertOnUiThread();
 
@@ -247,6 +317,10 @@ public final class NotificationHelper implements BundleEventListener {
         final int[] light = message.getIntArray(LIGHT_ATTR);
         if (light != null && light.length == 3) {
             builder.setLights(light[0], light[1], light[2]);
+        }
+
+        if (!AppConstants.Versions.preO) {
+            builder.setChannelId(getNotificationChannel(Channel.DEFAULT).getId());
         }
 
         final boolean ongoing = message.getBoolean(ONGOING_ATTR);

@@ -830,9 +830,9 @@ XULDocument::AttributeChanged(Element* aElement, int32_t aNameSpaceID,
         persist.Find(nsDependentAtomString(aAttribute)) >= 0) {
       nsContentUtils::AddScriptRunner(
         NewRunnableMethod<Element*, int32_t, nsAtom*>(
-          "dom::XULDocument::DoPersist",
+          "dom::XULDocument::Persist",
           this,
-          &XULDocument::DoPersist,
+          &XULDocument::Persist,
           aElement,
           kNameSpaceID_None,
           aAttribute));
@@ -951,119 +951,19 @@ XULDocument::ResolveForwardReferences()
 // nsIDocument interface
 //
 
-already_AddRefed<nsINodeList>
-XULDocument::GetElementsByAttribute(const nsAString& aAttribute,
-                                    const nsAString& aValue)
-{
-    RefPtr<nsAtom> attrAtom(NS_Atomize(aAttribute));
-    nsAutoPtr<nsString> attrValue(new nsString(aValue));
-    RefPtr<nsContentList> list = new nsContentList(this,
-                                            MatchAttribute,
-                                            nsContentUtils::DestroyMatchString,
-                                            attrValue.forget(),
-                                            true,
-                                            attrAtom,
-                                            kNameSpaceID_Unknown);
-
-    return list.forget();
-}
-
-already_AddRefed<nsINodeList>
-XULDocument::GetElementsByAttributeNS(const nsAString& aNamespaceURI,
-                                      const nsAString& aAttribute,
-                                      const nsAString& aValue,
-                                      ErrorResult& aRv)
-{
-    RefPtr<nsAtom> attrAtom(NS_Atomize(aAttribute));
-    nsAutoPtr<nsString> attrValue(new nsString(aValue));
-
-    int32_t nameSpaceId = kNameSpaceID_Wildcard;
-    if (!aNamespaceURI.EqualsLiteral("*")) {
-      nsresult rv =
-        nsContentUtils::NameSpaceManager()->RegisterNameSpace(aNamespaceURI,
-                                                              nameSpaceId);
-      if (NS_FAILED(rv)) {
-          aRv.Throw(rv);
-          return nullptr;
-      }
-    }
-
-    RefPtr<nsContentList> list = new nsContentList(this,
-                                            MatchAttribute,
-                                            nsContentUtils::DestroyMatchString,
-                                            attrValue.forget(),
-                                            true,
-                                            attrAtom,
-                                            nameSpaceId);
-    return list.forget();
-}
 
 void
-XULDocument::Persist(const nsAString& aID,
-                     const nsAString& aAttr,
-                     ErrorResult& aRv)
-{
-    // If we're currently reading persisted attributes out of the
-    // localstore, _don't_ re-enter and try to set them again!
-    if (mApplyingPersistedAttrs) {
-        return;
-    }
-
-    Element* element = nsDocument::GetElementById(aID);
-    if (!element) {
-        return;
-    }
-
-    RefPtr<nsAtom> tag;
-    int32_t nameSpaceID;
-
-    RefPtr<mozilla::dom::NodeInfo> ni = element->GetExistingAttrNameFromQName(aAttr);
-    nsresult rv;
-    if (ni) {
-        tag = ni->NameAtom();
-        nameSpaceID = ni->NamespaceID();
-    }
-    else {
-        // Make sure that this QName is going to be valid.
-        const char16_t *colon;
-        rv = nsContentUtils::CheckQName(PromiseFlatString(aAttr), true, &colon);
-
-        if (NS_FAILED(rv)) {
-            // There was an invalid character or it was malformed.
-            aRv.Throw(NS_ERROR_INVALID_ARG);
-            return;
-        }
-
-        if (colon) {
-            // We don't really handle namespace qualifiers in attribute names.
-            aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
-            return;
-        }
-
-        tag = NS_Atomize(aAttr);
-        if (NS_WARN_IF(!tag)) {
-            aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
-            return;
-        }
-
-        nameSpaceID = kNameSpaceID_None;
-    }
-
-    aRv = Persist(element, nameSpaceID, tag);
-}
-
-nsresult
 XULDocument::Persist(Element* aElement, int32_t aNameSpaceID,
                      nsAtom* aAttribute)
 {
     // For non-chrome documents, persistance is simply broken
     if (!nsContentUtils::IsSystemPrincipal(NodePrincipal()))
-        return NS_ERROR_NOT_AVAILABLE;
+        return;
 
     if (!mLocalStore) {
         mLocalStore = do_GetService("@mozilla.org/xul/xulstore;1");
         if (NS_WARN_IF(!mLocalStore)) {
-            return NS_ERROR_NOT_INITIALIZED;
+            return;
         }
     }
 
@@ -1078,26 +978,29 @@ XULDocument::Persist(Element* aElement, int32_t aNameSpaceID,
     nsAutoCString utf8uri;
     nsresult rv = mDocumentURI->GetSpec(utf8uri);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
+        return;
     }
     NS_ConvertUTF8toUTF16 uri(utf8uri);
 
     bool hasAttr;
     rv = mLocalStore->HasValue(uri, id, attrstr, &hasAttr);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
+        return;
     }
 
     if (hasAttr && valuestr.IsEmpty()) {
-        return mLocalStore->RemoveValue(uri, id, attrstr);
+        mLocalStore->RemoveValue(uri, id, attrstr);
+        return;
     }
 
-    // Persisting attributes to windows is handled by nsXULWindow.
+    // Persisting attributes to top level windows is handled by nsXULWindow.
     if (aElement->IsXULElement(nsGkAtoms::window)) {
-        return NS_OK;
+        if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
+           return;
+        }
     }
 
-    return mLocalStore->SetValue(uri, id, attrstr, valuestr);
+    mLocalStore->SetValue(uri, id, attrstr, valuestr);
 }
 
 static JSObject*
@@ -1421,47 +1324,6 @@ XULDocument::StartLayout(void)
     return NS_OK;
 }
 
-/* static */
-bool
-XULDocument::MatchAttribute(Element* aElement,
-                            int32_t aNamespaceID,
-                            nsAtom* aAttrName,
-                            void* aData)
-{
-    MOZ_ASSERT(aElement, "Must have content node to work with!");
-    nsString* attrValue = static_cast<nsString*>(aData);
-    if (aNamespaceID != kNameSpaceID_Unknown &&
-        aNamespaceID != kNameSpaceID_Wildcard) {
-        return attrValue->EqualsLiteral("*") ?
-            aElement->HasAttr(aNamespaceID, aAttrName) :
-            aElement->AttrValueIs(aNamespaceID, aAttrName, *attrValue,
-                                  eCaseMatters);
-    }
-
-    // Qualified name match. This takes more work.
-
-    uint32_t count = aElement->GetAttrCount();
-    for (uint32_t i = 0; i < count; ++i) {
-        const nsAttrName* name = aElement->GetAttrNameAt(i);
-        bool nameMatch;
-        if (name->IsAtom()) {
-            nameMatch = name->Atom() == aAttrName;
-        } else if (aNamespaceID == kNameSpaceID_Wildcard) {
-            nameMatch = name->NodeInfo()->Equals(aAttrName);
-        } else {
-            nameMatch = name->NodeInfo()->QualifiedNameEquals(aAttrName);
-        }
-
-        if (nameMatch) {
-            return attrValue->EqualsLiteral("*") ||
-                aElement->AttrValueIs(name->NamespaceID(), name->LocalName(),
-                                      *attrValue, eCaseMatters);
-        }
-    }
-
-    return false;
-}
-
 nsresult
 XULDocument::PrepareToLoadPrototype(nsIURI* aURI, const char* aCommand,
                                     nsIPrincipal* aDocumentPrincipal,
@@ -1629,9 +1491,12 @@ XULDocument::ApplyPersistentAttributesToElements(const nsAString &aID,
                  continue;
             }
 
-            // Applying persistent attributes to windows is handled by nsXULWindow.
+            // Applying persistent attributes to top level windows is handled
+            // by nsXULWindow.
             if (element->IsXULElement(nsGkAtoms::window)) {
-                continue;
+                if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
+                    continue;
+                }
             }
 
             Unused << element->SetAttr(kNameSpaceID_None, attr, value, true);
@@ -2376,15 +2241,10 @@ XULDocument::OnStreamComplete(nsIStreamLoader* aLoader,
             rv = mCurrentScriptProto->Compile(srcBuf, uri, 1, this, this);
             if (NS_SUCCEEDED(rv) && !mCurrentScriptProto->HasScriptObject()) {
                 // We will be notified via OnOffThreadCompileComplete when the
-                // compile finishes. Keep the contents of the compiled script
-                // alive until the compilation finishes.
+                // compile finishes. The JS engine has taken ownership of the
+                // source buffer.
+                MOZ_RELEASE_ASSERT(!srcBuf.ownsChars());
                 mOffThreadCompiling = true;
-                // If the JS engine did not take the source buffer, then take
-                // it back here to ensure it remains alive.
-                mOffThreadCompileStringBuf = srcBuf.take();
-                if (mOffThreadCompileStringBuf) {
-                  mOffThreadCompileStringLength = srcBuf.length();
-                }
                 BlockOnload();
                 return NS_OK;
             }
@@ -2927,12 +2787,11 @@ XULDocument::ResetDocumentDirection()
 }
 
 void
-XULDocument::DirectionChanged(const char* aPrefName, void* aData)
+XULDocument::DirectionChanged(const char* aPrefName, XULDocument* aDoc)
 {
   // Reset the direction and restyle the document if necessary.
-  XULDocument* doc = (XULDocument *)aData;
-  if (doc) {
-      doc->ResetDocumentDirection();
+  if (aDoc) {
+      aDoc->ResetDocumentDirection();
   }
 }
 

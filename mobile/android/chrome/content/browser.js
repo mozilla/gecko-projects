@@ -7,6 +7,7 @@
 ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/DelayedInit.jsm");
+ChromeUtils.import("resource://gre/modules/L10nRegistry.jsm");
 ChromeUtils.import("resource://gre/modules/Messaging.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -349,7 +350,7 @@ var BrowserApp = {
   deck: null,
 
   startup: function startup() {
-    window.QueryInterface(Ci.nsIDOMChromeWindow).browserDOMWindow = new nsBrowserAccess();
+    window.browserDOMWindow = new nsBrowserAccess();
     Services.obs.notifyObservers(this.browser, "BrowserChrome:Ready");
 
     this.deck = document.getElementById("browsers");
@@ -388,6 +389,11 @@ var BrowserApp = {
       "Session:Stop",
       "Telemetry:CustomTabsPing",
     ]);
+
+    // Initialize the default l10n resource sources for L10nRegistry.
+    let locales = Services.locale.getPackagedLocales();
+    const greSource = new FileSource("toolkit", locales, "resource://gre/localization/{locale}/");
+    L10nRegistry.registerSource(greSource);
 
     // Provide compatibility for add-ons like QuitNow that send "Browser:Quit"
     // as an observer notification.
@@ -470,12 +476,6 @@ var BrowserApp = {
 
         let isHealthReportEnabled = ParentalControls.isAllowed(ParentalControls.HEALTH_REPORT);
         SharedPreferences.forApp().setBoolPref("android.not_a_preference.healthreport.uploadEnabled", isHealthReportEnabled);
-    }
-
-    let sysInfo = Cc["@mozilla.org/system-info;1"].getService(Ci.nsIPropertyBag2);
-    if (sysInfo.get("version") < 16) {
-      let defaults = Services.prefs.getDefaultBranch(null);
-      defaults.setBoolPref("media.autoplay.enabled", false);
     }
 
     InitLater(() => {
@@ -1087,7 +1087,7 @@ var BrowserApp = {
   },
 
   contentDocumentChanged: function() {
-    window.top.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils).isFirstPaint = true;
+    window.top.windowUtils.isFirstPaint = true;
     Services.androidBridge.contentDocumentChanged(window);
   },
 
@@ -1656,8 +1656,7 @@ var BrowserApp = {
       return;
     }
 
-    let dwu = aBrowser.contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                    .getInterface(Ci.nsIDOMWindowUtils);
+    let dwu = aBrowser.contentWindow.windowUtils;
     if (!dwu) {
       return;
     }
@@ -1840,7 +1839,8 @@ var BrowserApp = {
 
       case "Session:Navigate": {
         let index = data.index;
-        let webNav = BrowserApp.selectedTab.window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
+        let webNav = BrowserApp.selectedTab.window.docShell
+                               .QueryInterface(Ci.nsIWebNavigation);
         let historySize = webNav.sessionHistory.count;
 
         if (index < 0) {
@@ -2223,7 +2223,8 @@ var BrowserApp = {
   // optionally selecting selIndex (if fromIndex <= selIndex <= toIndex)
   getHistory: function(data) {
     let action = data.action;
-    let webNav = BrowserApp.getTabForId(data.tabId).window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
+    let webNav = BrowserApp.getTabForId(data.tabId).window.docShell
+                           .QueryInterface(Ci.nsIWebNavigation);
     let historyIndex = webNav.sessionHistory.index;
     let historySize = webNav.sessionHistory.count;
     let canGoBack = webNav.canGoBack;
@@ -3772,11 +3773,13 @@ Tab.prototype = {
 
     // Always initialise new tabs with basic session store data to avoid
     // problems with functions that always expect it to be present
+    let triggeringPrincipal_base64 = aParams.triggeringPrincipal ?
+      Utils.serializePrincipal(aParams.triggeringPrincipal) : Utils.SERIALIZED_SYSTEMPRINCIPAL;
     this.browser.__SS_data = {
       entries: [{
         url: uri,
         title: truncate(title, MAX_TITLE_LENGTH),
-        triggeringPrincipal_base64: Utils.SERIALIZED_SYSTEMPRINCIPAL
+        triggeringPrincipal_base64,
       }],
       index: 1,
       desktopMode: this.desktopMode,
@@ -3798,6 +3801,10 @@ Tab.prototype = {
       this.browser.setAttribute("pending", "true");
     } else {
       let flags = "flags" in aParams ? aParams.flags : Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
+      if (aParams.disallowInheritPrincipal) {
+        flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL;
+      }
+
       let postData = ("postData" in aParams && aParams.postData) ? aParams.postData.value : null;
       let referrerURI = "referrerURI" in aParams ? aParams.referrerURI : null;
       let charset = "charset" in aParams ? aParams.charset : null;
@@ -3812,6 +3819,7 @@ Tab.prototype = {
           referrerURI,
           charset,
           postData,
+          triggeringPrincipal: aParams.triggeringPrincipal,
         });
       } catch(e) {
         let message = {
@@ -3830,7 +3838,7 @@ Tab.prototype = {
   reloadWithMode: function (aDesktopMode) {
     // notify desktopmode for PIDOMWindow
     let win = this.browser.contentWindow;
-    let dwi = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+    let dwi = win.windowUtils;
     dwi.setDesktopModeViewport(aDesktopMode);
 
     // Set desktop mode for tab and send change to Java
@@ -4184,9 +4192,9 @@ Tab.prototype = {
           if (errorExtra == "fileAccessDenied") {
             // Check if we already have the permissions, then - if we do not have them, show the prompt and reload the page.
             // If we already have them, it means access to file was denied.
-            RuntimePermissions.checkPermission(RuntimePermissions.WRITE_EXTERNAL_STORAGE).then((permissionAlreadyGranted) => {
+            RuntimePermissions.checkPermission(RuntimePermissions.READ_EXTERNAL_STORAGE).then((permissionAlreadyGranted) => {
               if (!permissionAlreadyGranted) {
-                RuntimePermissions.waitForPermissions(RuntimePermissions.WRITE_EXTERNAL_STORAGE).then((permissionGranted) => {
+                RuntimePermissions.waitForPermissions(RuntimePermissions.READ_EXTERNAL_STORAGE).then((permissionGranted) => {
                   if (permissionGranted) {
                     this.browser.reload();
                   }
@@ -4496,7 +4504,7 @@ Tab.prototype = {
 
   onLocationChange: function(aWebProgress, aRequest, aLocationURI, aFlags) {
     let contentWin = aWebProgress.DOMWindow;
-    let webNav = contentWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
+    let webNav = contentWin.docShell.QueryInterface(Ci.nsIWebNavigation);
 
     // Browser webapps may load content inside iframes that can not reach across the app/frame boundary
     // i.e. even though the page is loaded in an iframe window.top != webapp
@@ -4787,7 +4795,7 @@ Tab.prototype = {
       case "audioFocusChanged":
       case "mediaControl":
         let win = this.browser.contentWindow;
-        let utils = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+        let utils = win.windowUtils;
         let suspendTypes = Ci.nsISuspendedTypes;
         switch (aData) {
           case "lostAudioFocus":
@@ -5694,9 +5702,8 @@ var IdentityHandler = {
    * (if available). Return the data needed to update the UI.
    */
   checkIdentity: function checkIdentity(aState, aBrowser) {
-    this._lastStatus = aBrowser.securityUI
-                               .QueryInterface(Ci.nsISSLStatusProvider)
-                               .SSLStatus;
+    this._lastStatus = aBrowser.securityUI.secInfo &&
+                       aBrowser.securityUI.secInfo.SSLStatus;
 
     // Don't pass in the actual location object, since it can cause us to
     // hold on to the window object too long.  Just pass in the fields we

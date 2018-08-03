@@ -1,4 +1,4 @@
-52817
+52853
 0/nm
 0th/pt
 1/n1
@@ -2436,6 +2436,7 @@ Charlie/M
 Charlot/M
 Charlotta/M
 Charlotte/M
+Charlottesville/M
 Charlottetown/M
 Charlton
 Charmaine/M
@@ -4556,6 +4557,7 @@ GATT/M
 GB/M
 GCC/M
 GDP/M
+GDPR
 GE/M
 GED
 GHQ/M
@@ -15835,6 +15837,7 @@ backhoe/MS
 backing/M
 backlash/MS
 backless
+backlit
 backlog/MS
 backlogged
 backlogging
@@ -16090,6 +16093,7 @@ barbie/S
 barbiturate/SM
 barbwire/M
 barcarole/SM
+barcode/SDG
 bard/SM
 bardic
 bare/DRSPYG
@@ -16713,6 +16717,7 @@ bigness/M
 bigot/MDS
 bigotry/SM
 bigwig/MS
+bijection/S
 bijou/M
 bijoux
 bike/DRSMZG
@@ -20260,6 +20265,7 @@ commode's
 commode/EIS
 commodification
 commodious/Y
+commoditization
 commodity/SM
 commodore/SM
 common's
@@ -22173,6 +22179,7 @@ dc
 dd/SDG
 dded/K
 dding/K
+de
 deacon/MS
 deaconess/MS
 dead/XTMNRY
@@ -23728,7 +23735,9 @@ downy/RT
 dowry/SM
 dowse/DRSZG
 dowser/M
+dox/SDG
 doxology/SM
+doxx/SDG
 doyen/SM
 doyenne/MS
 doz/XGDNS
@@ -24516,7 +24525,7 @@ elope/DSGL
 elopement/MS
 eloquence/M
 eloquent/Y
-else
+else/M
 elsewhere
 elucidate/DSGNX
 elucidation/M
@@ -25787,6 +25796,7 @@ factional
 factionalism/M
 factious
 factitious
+facto
 factoid/SM
 factor's
 factor/ASDG
@@ -27871,6 +27881,8 @@ genus/M
 geocache/DSG
 geocentric
 geocentrically
+geocentricism
+geocentrism
 geochemistry/M
 geode/SM
 geodesic/SM
@@ -29066,8 +29078,11 @@ handspring/MS
 handstand/SM
 handwork/M
 handwoven
+handwrite/GS
 handwriting/M
 handwritten
+handwritten
+handwrote
 handy/UTR
 handyman/M
 handymen
@@ -29453,6 +29468,9 @@ helical
 helices
 helicopter/SGMD
 heliocentric
+heliocentrically
+heliocentricism
+heliocentrism
 heliotrope/SM
 helipad/S
 heliport/MS
@@ -31173,6 +31191,7 @@ infinitesimal/SMY
 infinitival
 infinitive/MS
 infinitude/M
+infinitum
 infinity/SM
 infirm
 infirmary/SM
@@ -34732,7 +34751,7 @@ mercerize/GDS
 merchandise/MZGDRS
 merchandiser/M
 merchandising/M
-merchant/MBS
+merchant/MBSG
 merchantman/M
 merchantmen
 merciful/UY
@@ -39410,6 +39429,7 @@ photo/SGMD
 photocell/MS
 photocopier/M
 photocopy/DRSMZG
+photodetector/S
 photoelectric
 photoelectrically
 photoengrave/DRSJZG
@@ -39429,6 +39449,8 @@ photojournalist/SM
 photometer/MS
 photon/MS
 photosensitive
+photosensor/S
+photosensory
 photostat/SM
 photostatic
 photostatted
@@ -40429,6 +40451,7 @@ prawn/MDSG
 pray/ZGDRS
 prayer/M
 prayerful/Y
+pre-fill/SDG
 preach/DRSZGL
 preacher/M
 preachment/M
@@ -40537,6 +40560,7 @@ preferment/M
 preferred
 preferring
 prefigure/GDS
+prefill/SDG
 prefix/MDSG
 preform/GSD
 prefrontal
@@ -40564,6 +40588,7 @@ prelim/SM
 preliminarily
 preliminary/SM
 preliterate
+preload/SDG
 prelude/MS
 premarital
 premature/Y
@@ -40601,6 +40626,7 @@ prepared/UP
 preparedness/UM
 prepay/GSL
 prepayment/MS
+prepend/SDG
 preponderance/SM
 preponderant/Y
 preponderate/GDS
@@ -42028,6 +42054,7 @@ reasoner/M
 reasoning/M
 reassemble/DSG
 reassuring/Y
+rebar/S
 rebate/M
 rebel/MS
 rebellion/MS
@@ -42365,6 +42392,7 @@ rejuvenate/DSGN
 rejuvenation/M
 rel
 relate/DRSBXZGNV
+relatedly
 relatedness/M
 relater/M
 relation/M
@@ -43911,11 +43939,13 @@ scorch/MDRSZG
 scorcher/M
 score/MZGDRS
 scoreboard/SM
+scorebook/MS
 scorecard/MS
 scorekeeper/MS
 scoreless
 scoreline/S
 scorer/M
+scoresheet/MS
 scorn/MDRSZG
 scorner/M
 scornful/Y
@@ -44236,6 +44266,7 @@ segfault/S
 segment/GSMD
 segmentation/M
 segmented/U
+segregable
 segregate/CDSGN
 segregated/U
 segregation/CM
@@ -47686,6 +47717,7 @@ surge/DSMG
 surgeon/MS
 surgery/SM
 surgical/Y
+surjection/S
 surliness/M
 surly/PTR
 surmise/MGDS
@@ -49192,6 +49224,7 @@ tonsorial
 tonsure/DSMG
 tony/RT
 too
+toodles
 took/A
 tool's
 tool/ADGS
@@ -50550,6 +50583,8 @@ unpolitical
 unpopular
 unpractical
 unprecedented/Y
+unpressured
+unpressurized
 unprofessional/Y
 unpromising
 unpropitious
@@ -50568,6 +50603,7 @@ unremitting/Y
 unrepentant
 unreported
 unrepresentative
+unrequest/D
 unrest/M
 unrevealing
 unripe/TR

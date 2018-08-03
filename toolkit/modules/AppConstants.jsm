@@ -8,6 +8,7 @@
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "Services", "resource://gre/modules/Services.jsm");
+ChromeUtils.defineModuleGetter(this, "AddonManager", "resource://gre/modules/AddonManager.jsm");
 
 this.EXPORTED_SYMBOLS = ["AppConstants"];
 
@@ -229,6 +230,17 @@ this.AppConstants = Object.freeze({
   false,
 #endif
 
+  get MOZ_UNSIGNED_SCOPES() {
+    let result = 0;
+#ifdef MOZ_UNSIGNED_APP_SCOPE
+    result |= AddonManager.SCOPE_APPLICATION;
+#endif
+#ifdef MOZ_UNSIGNED_SYSTEM_SCOPE
+    result |= AddonManager.SCOPE_SYSTEM;
+#endif
+    return result;
+  },
+
   MOZ_ALLOW_LEGACY_EXTENSIONS:
 #ifdef MOZ_ALLOW_LEGACY_EXTENSIONS
   true,
@@ -298,6 +310,8 @@ this.AppConstants = Object.freeze({
   MOZ_GOOGLE_API_KEY: "@MOZ_GOOGLE_API_KEY@",
   MOZ_MOZILLA_API_KEY: "@MOZ_MOZILLA_API_KEY@",
 
+  BROWSER_CHROME_URL: "@BROWSER_CHROME_URL@",
+
   // URL to the hg revision this was built from (e.g.
   // "https://hg.mozilla.org/mozilla-central/rev/6256ec9113c1")
   // On unofficial builds, this is an empty string.
@@ -315,6 +329,13 @@ this.AppConstants = Object.freeze({
 
   HAVE_SHELL_SERVICE:
 #ifdef HAVE_SHELL_SERVICE
+    true,
+#else
+    false,
+#endif
+
+  MOZ_CODE_COVERAGE:
+#ifdef MOZ_CODE_COVERAGE
     true,
 #else
     false,

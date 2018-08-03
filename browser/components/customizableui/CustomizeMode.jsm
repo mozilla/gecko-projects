@@ -1074,7 +1074,7 @@ CustomizeMode.prototype = {
         toolbar.setAttribute("currentset", set);
       }
       // Persist the currentset attribute directly on hardcoded toolbars.
-      document.persist(toolbar.id, "currentset");
+      Services.xulStore.persist(toolbar, "currentset");
     }
   },
 
@@ -1647,7 +1647,7 @@ CustomizeMode.prototype = {
 
   get _dwu() {
     if (!this.__dwu) {
-      this.__dwu = this.window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      this.__dwu = this.window.windowUtils;
     }
     return this.__dwu;
   },
@@ -1919,10 +1919,7 @@ CustomizeMode.prototype = {
         // The items in the palette are wrapped, so we need the target node's parent here:
         this.visiblePalette.insertBefore(draggedItem, aTargetNode.parentNode);
       }
-      if (aOriginArea.id !== kPaletteId) {
-        // The dragend event already fires when the item moves within the palette.
-        this._onDragEnd(aEvent);
-      }
+      this._onDragEnd(aEvent);
       return;
     }
 
@@ -2025,6 +2022,8 @@ CustomizeMode.prototype = {
 
   /**
    * To workaround bug 460801 we manually forward the drop event here when dragend wouldn't be fired.
+   *
+   * Note that that means that this function may be called multiple times by a single drag operation.
    */
   _onDragEnd(aEvent) {
     if (this._isUnwantedDragDrop(aEvent)) {

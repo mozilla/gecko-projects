@@ -103,7 +103,7 @@ function run_test() {
                                "/foo/self");
 
   // test that inline script violations cause a report.
-  makeTest(0, {"blocked-uri": ""}, false,
+  makeTest(0, {"blocked-uri": "inline"}, false,
       function(csp) {
         let inlineOK = true;
         inlineOK = csp.getAllowsInline(Ci.nsIContentPolicy.TYPE_SCRIPT,
@@ -119,7 +119,7 @@ function run_test() {
       });
 
   // test that eval violations cause a report.
-  makeTest(1, {"blocked-uri": "",
+  makeTest(1, {"blocked-uri": "eval",
                // JSON script-sample is UTF8 encoded
                "script-sample" : "\xc2\xa3\xc2\xa5\xc2\xb5\xe5\x8c\x97\xf0\xa0\x9d\xb9",
                "line-number": 1,
@@ -147,16 +147,16 @@ function run_test() {
         }
       });
 
-  makeTest(2, {"blocked-uri": "http://blocked.test"}, false,
+  makeTest(2, {"blocked-uri": "http://blocked.test/foo.js"}, false,
       function(csp) {
         // shouldLoad creates and sends out the report here.
         csp.shouldLoad(Ci.nsIContentPolicy.TYPE_SCRIPT,
                       NetUtil.newURI("http://blocked.test/foo.js"),
-                      null, null, null, null);
+                      null, null, null, null, true);
       });
 
   // test that inline script violations cause a report in report-only policy
-  makeTest(3, {"blocked-uri": ""}, true,
+  makeTest(3, {"blocked-uri": "inline"}, true,
       function(csp) {
         let inlineOK = true;
         inlineOK = csp.getAllowsInline(Ci.nsIContentPolicy.TYPE_SCRIPT,
@@ -172,7 +172,7 @@ function run_test() {
       });
 
   // test that eval violations cause a report in report-only policy
-  makeTest(4, {"blocked-uri": ""}, true,
+  makeTest(4, {"blocked-uri": "inline"}, true,
       function(csp) {
         let evalOK = true, oReportViolation = {'value': false};
         evalOK = csp.getAllowsEval(oReportViolation);
@@ -202,7 +202,7 @@ function run_test() {
       // shouldLoad creates and sends out the report here.
       csp.shouldLoad(Ci.nsIContentPolicy.TYPE_IMAGE,
                      NetUtil.newURI("data:image/png;base64," + base64data),
-                     null, null, null, null);
+                     null, null, null, null, true);
       });
 
   // test that only the uri's scheme is reported for globally unique identifiers
@@ -211,7 +211,7 @@ function run_test() {
       // shouldLoad creates and sends out the report here.
       csp.shouldLoad(Ci.nsIContentPolicy.TYPE_SUBDOCUMENT,
                      NetUtil.newURI("intent://mymaps.com/maps?um=1&ie=UTF-8&fb=1&sll"),
-                     null, null, null, null);
+                     null, null, null, null, true);
       });
 
   // test fragment removal
@@ -222,15 +222,15 @@ function run_test() {
       // shouldLoad creates and sends out the report here.
       csp.shouldLoad(Ci.nsIContentPolicy.TYPE_SCRIPT,
                      NetUtil.newURI(selfSpec + "#bar"),
-                     null, null, null, null);
+                     null, null, null, null, true);
       });
 
   // test scheme of ftp:
-  makeTest(8, {"blocked-uri": "ftp://blocked.test"}, false,
+  makeTest(8, {"blocked-uri": "ftp://blocked.test/profile.png"}, false,
     function(csp) {
       // shouldLoad creates and sends out the report here.
       csp.shouldLoad(Ci.nsIContentPolicy.TYPE_SCRIPT,
                     NetUtil.newURI("ftp://blocked.test/profile.png"),
-                    null, null, null, null);
+                    null, null, null, null, true);
     });
 }

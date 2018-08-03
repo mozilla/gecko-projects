@@ -382,6 +382,25 @@ TEST(TArray, test_move_array) {
   differentAllocatorMoveableArray2 = std::move(autoMoveableArray2);
 
   ASSERT_EQ(Moveable::Count(), 8);
+
+  AutoTArray<Moveable, 8> moveableAutoArray;
+  for (uint32_t i = 0; i < 4; ++i) {
+    ASSERT_TRUE(moveableAutoArray.AppendElement(Moveable()));
+  }
+
+  ASSERT_EQ(Moveable::Count(), 12);
+
+  const AutoTArray<Moveable, 8>& constRefMoveableAutoArray = moveableAutoArray;
+
+  ASSERT_EQ(Moveable::Count(), 12);
+
+  AutoTArray<Moveable, 8> copyMoveableAutoArray(constRefMoveableAutoArray);
+
+  ASSERT_EQ(Moveable::Count(), 16);
+
+  AutoTArray<Moveable, 8> movedMoveableAutoArray(std::move(moveableAutoArray));
+
+  ASSERT_EQ(Moveable::Count(), 16);
 }
 
 //----
@@ -1084,6 +1103,31 @@ struct IntComparator
 TEST(TArray, test_comparator_objects) {
   ASSERT_TRUE(TestCompareMethods(IntComparator()));
   ASSERT_TRUE(TestCompareMethods([] (int aLeft, int aRight) { return aLeft - aRight; }));
+}
+
+struct Big
+{
+  uint64_t size[40] = {};
+};
+
+TEST(TArray, test_AutoTArray_SwapElements) {
+  AutoTArray<Big, 40> oneArray;
+  AutoTArray<Big, 40> another;
+
+  for (size_t i = 0; i < 8; ++i) {
+    oneArray.AppendElement(Big());
+  }
+  oneArray[0].size[10] = 1;
+  for (size_t i = 0; i < 9; ++i) {
+    another.AppendElement(Big());
+  }
+  oneArray.SwapElements(another);
+
+  ASSERT_EQ(oneArray.Length(), 9u);
+  ASSERT_EQ(another.Length(), 8u);
+
+  ASSERT_EQ(oneArray[0].size[10], 0u);
+  ASSERT_EQ(another[0].size[10], 1u);
 }
 
 } // namespace TestTArray

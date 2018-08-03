@@ -79,7 +79,7 @@ add_task(async function startup() {
     },
     "layout.css.prefixes.webkit": {
       min: 135,
-      max: 150,
+      max: 170,
     },
     "browser.search.log": {
       min: 100,
@@ -93,7 +93,7 @@ add_task(async function startup() {
       max: 650,
     },
     "extensions.getAddons.cache.enabled": {
-      min: 9,
+      min: 8,
       max: 55,
     },
   };

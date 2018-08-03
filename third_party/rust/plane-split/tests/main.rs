@@ -65,7 +65,7 @@ fn from_transformed_rect() {
         TypedTransform3D::create_rotation(0.5f32.sqrt(), 0.0, 0.5f32.sqrt(), Angle::radians(5.0))
         .pre_translate(vec3(0.0, 0.0, 10.0));
     let poly = Polygon::from_transformed_rect(rect, transform, 0);
-    assert!(poly.is_valid());
+    assert!(poly.is_some() && poly.unwrap().is_valid());
 }
 
 #[test]
@@ -244,4 +244,15 @@ fn split() {
         origin: point3(0.5, 1.0, 0.0),
         dir: vec3(-0.5f32.sqrt(), 0.0, 0.5f32.sqrt()),
     });
+}
+
+#[test]
+fn plane_unnormalized() {
+    let mut plane: Option<Plane<f32, ()>> = Plane::from_unnormalized(vec3(0.0, 0.0, 0.0), 1.0);
+    assert_eq!(plane, None);
+    plane = Plane::from_unnormalized(vec3(-3.0, 4.0, 0.0), 2.0);
+    assert_eq!(plane, Some(Plane {
+        normal: vec3(-3.0/5.0, 4.0/5.0, 0.0),
+        offset: 2.0/5.0,
+    }));
 }

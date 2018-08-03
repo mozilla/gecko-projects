@@ -26,7 +26,7 @@ var PaymentDialogUtils = {
     return `${address.name} (${address.guid})`;
   },
   isCCNumber(str) {
-    return str.length > 0;
+    return !!str.replace(/[-\s]/g, "").match(/^\d{9,}$/);
   },
   DEFAULT_REGION: "US",
   supportedCountries: ["US", "CA"],
@@ -46,5 +46,12 @@ var PaymentDialogUtils = {
       /* eslint-disable-next-line max-len */
       "postalCodePattern": country == "US" ? "(\\d{5})(?:[ \\-](\\d{4}))?" : "[ABCEGHJKLMNPRSTVXY]\\d[ABCEGHJ-NPRSTV-Z] ?\\d[ABCEGHJ-NPRSTV-Z]\\d",
     };
+  },
+  getDefaultPreferences() {
+    let prefValues = {
+      saveCreditCardDefaultChecked: false,
+      saveAddressDefaultChecked: true,
+    };
+    return prefValues;
   },
 };

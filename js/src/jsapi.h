@@ -378,7 +378,7 @@ namespace JS {
  *    JS::SourceBufferHolder srcBuf(chars, length, JS::SourceBufferHolder::GiveOwnership);
  *    JS::Compile(cx, options, srcBuf);
  */
-class MOZ_STACK_CLASS SourceBufferHolder final
+class SourceBufferHolder final
 {
   public:
     enum Ownership {
@@ -391,14 +391,15 @@ class MOZ_STACK_CLASS SourceBufferHolder final
         length_(dataLength),
         ownsChars_(ownership == GiveOwnership)
     {
-        // Ensure that null buffers properly return an unowned, empty,
-        // null-terminated string.
-        static const char16_t NullChar_ = 0;
-        if (!get()) {
-            data_ = &NullChar_;
-            length_ = 0;
-            ownsChars_ = false;
-        }
+        fixEmptyBuffer();
+    }
+
+    SourceBufferHolder(UniqueTwoByteChars&& data, size_t dataLength)
+      : data_(data.release()),
+        length_(dataLength),
+        ownsChars_(true)
+    {
+        fixEmptyBuffer();
     }
 
     SourceBufferHolder(SourceBufferHolder&& other)
@@ -447,6 +448,17 @@ class MOZ_STACK_CLASS SourceBufferHolder final
   private:
     SourceBufferHolder(SourceBufferHolder&) = delete;
     SourceBufferHolder& operator=(SourceBufferHolder&) = delete;
+
+    void fixEmptyBuffer() {
+        // Ensure that null buffers properly return an unowned, empty,
+        // null-terminated string.
+        static const char16_t NullChar_ = 0;
+        if (!get()) {
+            data_ = &NullChar_;
+            length_ = 0;
+            ownsChars_ = false;
+        }
+    }
 
     const char16_t* data_;
     size_t length_;
@@ -1037,14 +1049,27 @@ JS_RefreshCrossCompartmentWrappers(JSContext* cx, JS::Handle<JSObject*> obj);
  * the JSAutoRealm.
  */
 
-class MOZ_RAII JS_PUBLIC_API(JSAutoRealm)
+// JSAutoRealmAllowCCW is deprecated and will be removed soon, because entering
+// the realm of a CCW doesn't make sense when CCWs are shared by all realms in
+// the compartment. New code should prefer JSAutoRealm below instead (it asserts
+// the object is not a CCW).
+class MOZ_RAII JS_PUBLIC_API(JSAutoRealmAllowCCW)
 {
     JSContext* cx_;
     JS::Realm* oldRealm_;
   public:
+    JSAutoRealmAllowCCW(JSContext* cx, JSObject* target MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+    JSAutoRealmAllowCCW(JSContext* cx, JSScript* target MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+    ~JSAutoRealmAllowCCW();
+
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
+class MOZ_RAII JS_PUBLIC_API(JSAutoRealm) : public JSAutoRealmAllowCCW
+{
+  public:
     JSAutoRealm(JSContext* cx, JSObject* target MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
     JSAutoRealm(JSContext* cx, JSScript* target MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
-    ~JSAutoRealm();
 
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
@@ -1303,6 +1328,24 @@ JS_freeop(JSFreeOp* fop, void* p);
 
 extern JS_PUBLIC_API(void)
 JS_updateMallocCounter(JSContext* cx, size_t nbytes);
+
+/*
+ * A replacement for MallocAllocPolicy that allocates in the JS heap and adds no
+ * extra behaviours.
+ *
+ * This is currently used for allocating source buffers for parsing. Since these
+ * are temporary and will not be freed by GC, the memory is not tracked by the
+ * usual accounting.
+ */
+class JS_PUBLIC_API(JSMallocAllocPolicy) : public js::AllocPolicyBase
+{
+public:
+    void reportAllocOverflow() const {}
+
+    MOZ_MUST_USE bool checkSimulatedOOM() const {
+        return true;
+    }
+};
 
 /**
  * Set the size of the native stack that should not be exceed. To disable
@@ -3173,7 +3216,7 @@ JS_CompileScript(JSContext* cx, const char* ascii, size_t length,
  * |script| will always be set. On failure, it will be set to nullptr.
  */
 extern JS_PUBLIC_API(bool)
-JS_CompileUCScript(JSContext* cx, const char16_t* chars, size_t length,
+JS_CompileUCScript(JSContext* cx, JS::SourceBufferHolder& srcBuf,
                    const JS::CompileOptions& options,
                    JS::MutableHandleScript script);
 
@@ -3588,10 +3631,6 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
 
 extern JS_PUBLIC_API(bool)
 Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
-        const char16_t* chars, size_t length, JS::MutableHandleScript script);
-
-extern JS_PUBLIC_API(bool)
-Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
         FILE* file, JS::MutableHandleScript script);
 
 extern JS_PUBLIC_API(bool)
@@ -3605,10 +3644,6 @@ CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options
 extern JS_PUBLIC_API(bool)
 CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
                             const char* bytes, size_t length, JS::MutableHandleScript script);
-
-extern JS_PUBLIC_API(bool)
-CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
-                            const char16_t* chars, size_t length, JS::MutableHandleScript script);
 
 extern JS_PUBLIC_API(bool)
 CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
@@ -3643,7 +3678,7 @@ CanDecodeOffThread(JSContext* cx, const ReadOnlyCompileOptions& options, size_t 
 
 extern JS_PUBLIC_API(bool)
 CompileOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
-                 const char16_t* chars, size_t length,
+                 JS::SourceBufferHolder& srcBuf,
                  OffThreadCompileCallback callback, void* callbackData);
 
 extern JS_PUBLIC_API(JSScript*)
@@ -3654,7 +3689,7 @@ CancelOffThreadScript(JSContext* cx, OffThreadToken* token);
 
 extern JS_PUBLIC_API(bool)
 CompileOffThreadModule(JSContext* cx, const ReadOnlyCompileOptions& options,
-                       const char16_t* chars, size_t length,
+                       JS::SourceBufferHolder& srcBuf,
                        OffThreadCompileCallback callback, void* callbackData);
 
 extern JS_PUBLIC_API(JSObject*)
@@ -3697,15 +3732,6 @@ CancelMultiOffThreadScriptsDecoder(JSContext* cx, OffThreadToken* token);
  * scope chain used for the function will consist of With wrappers for those
  * objects, followed by the current global of the compartment cx is in.  This
  * global must not be explicitly included in the scope chain.
- */
-extern JS_PUBLIC_API(bool)
-CompileFunction(JSContext* cx, AutoObjectVector& envChain,
-                const ReadOnlyCompileOptions& options,
-                const char* name, unsigned nargs, const char* const* argnames,
-                const char16_t* chars, size_t length, JS::MutableHandleFunction fun);
-
-/**
- * Same as above, but taking a SourceBufferHolder for the function body.
  */
 extern JS_PUBLIC_API(bool)
 CompileFunction(JSContext* cx, AutoObjectVector& envChain,
@@ -3823,22 +3849,6 @@ Evaluate(JSContext* cx, const ReadOnlyCompileOptions& options,
 extern JS_PUBLIC_API(bool)
 Evaluate(JSContext* cx, AutoObjectVector& envChain, const ReadOnlyCompileOptions& options,
          SourceBufferHolder& srcBuf, JS::MutableHandleValue rval);
-
-/**
- * Evaluate the given character buffer in the scope of the current global of cx.
- */
-extern JS_PUBLIC_API(bool)
-Evaluate(JSContext* cx, const ReadOnlyCompileOptions& options,
-         const char16_t* chars, size_t length, JS::MutableHandleValue rval);
-
-/**
- * As above, but providing an explicit scope chain.  envChain must not include
- * the global object on it; that's implicit.  It needs to contain the other
- * objects that should end up on the script's scope chain.
- */
-extern JS_PUBLIC_API(bool)
-Evaluate(JSContext* cx, AutoObjectVector& envChain, const ReadOnlyCompileOptions& options,
-         const char16_t* chars, size_t length, JS::MutableHandleValue rval);
 
 /**
  * Evaluate the given byte buffer in the scope of the current global of cx.
@@ -4049,6 +4059,34 @@ SetEnqueuePromiseJobCallback(JSContext* cx, JSEnqueuePromiseJobCallback callback
 extern JS_PUBLIC_API(void)
 SetPromiseRejectionTrackerCallback(JSContext* cx, JSPromiseRejectionTrackerCallback callback,
                                    void* data = nullptr);
+
+/**
+ * Inform the runtime that the job queue is empty and the embedding is going to
+ * execute its last promise job. The runtime may now choose to skip creating
+ * promise jobs for asynchronous execution and instead continue execution
+ * synchronously. More specifically, this optimization is used to skip the
+ * standard job queuing behavior for `await` operations in async functions.
+ *
+ * This function may be called before executing the last job in the job queue.
+ * When it was called, JobQueueMayNotBeEmpty must be called in order to restore
+ * the default job queuing behavior before the embedding enqueues its next job
+ * into the job queue.
+ */
+extern JS_PUBLIC_API(void)
+JobQueueIsEmpty(JSContext* cx);
+
+/**
+ * Inform the runtime that job queue is no longer empty. The runtime can now no
+ * longer skip creating promise jobs for asynchronous execution, because
+ * pending jobs in the job queue must be executed first to preserve the FIFO
+ * (first in - first out) property of the queue. This effectively undoes
+ * JobQueueIsEmpty and re-enables the standard job queuing behavior.
+ *
+ * This function must be called whenever enqueuing a job to the job queue when
+ * JobQueueIsEmpty was called previously.
+ */
+extern JS_PUBLIC_API(void)
+JobQueueMayNotBeEmpty(JSContext* cx);
 
 /**
  * Returns a new instance of the Promise builtin class in the current
@@ -6243,23 +6281,24 @@ CopyAsyncStack(JSContext* cx, HandleObject asyncStack,
  * and the object is not the SavedFrame.prototype object.
  *
  * Each of these functions will find the first SavedFrame object in the chain
- * whose underlying stack frame principals are subsumed by the cx's current
- * compartment's principals, and operate on that SavedFrame object. This
- * prevents leaking information about privileged frames to un-privileged
- * callers. As a result, the SavedFrame in parameters do _NOT_ need to be in the
- * same compartment as the cx, and the various out parameters are _NOT_
- * guaranteed to be in the same compartment as cx.
+ * whose underlying stack frame principals are subsumed by the given
+ * |principals|, and operate on that SavedFrame object. This prevents leaking
+ * information about privileged frames to un-privileged callers
+ *
+ * The SavedFrame in parameters do _NOT_ need to be in the same compartment as
+ * the cx, and the various out parameters are _NOT_ guaranteed to be in the same
+ * compartment as cx.
  *
  * You may consider or skip over self-hosted frames by passing
  * `SavedFrameSelfHosted::Include` or `SavedFrameSelfHosted::Exclude`
  * respectively.
  *
  * Additionally, it may be the case that there is no such SavedFrame object
- * whose captured frame's principals are subsumed by the caller's compartment's
- * principals! If the `HandleObject savedFrame` argument is null, or the
- * caller's principals do not subsume any of the chained SavedFrame object's
- * principals, `SavedFrameResult::AccessDenied` is returned and a (hopefully)
- * sane default value is chosen for the out param.
+ * whose captured frame's principals are subsumed by |principals|! If the
+ * `HandleObject savedFrame` argument is null, or the |principals| do not
+ * subsume any of the chained SavedFrame object's principals,
+ * `SavedFrameResult::AccessDenied` is returned and a (hopefully) sane default
+ * value is chosen for the out param.
  *
  * See also `js/src/doc/SavedFrame/SavedFrame.md`.
  */
@@ -6279,21 +6318,24 @@ enum class SavedFrameSelfHosted {
  * string.
  */
 extern JS_PUBLIC_API(SavedFrameResult)
-GetSavedFrameSource(JSContext* cx, HandleObject savedFrame, MutableHandleString sourcep,
+GetSavedFrameSource(JSContext* cx, JSPrincipals* principals, HandleObject savedFrame,
+                    MutableHandleString sourcep,
                     SavedFrameSelfHosted selfHosted = SavedFrameSelfHosted::Include);
 
 /**
  * Given a SavedFrame JSObject, get its line property. Defaults to 0.
  */
 extern JS_PUBLIC_API(SavedFrameResult)
-GetSavedFrameLine(JSContext* cx, HandleObject savedFrame, uint32_t* linep,
+GetSavedFrameLine(JSContext* cx, JSPrincipals* principals, HandleObject savedFrame,
+                  uint32_t* linep,
                   SavedFrameSelfHosted selfHosted = SavedFrameSelfHosted::Include);
 
 /**
  * Given a SavedFrame JSObject, get its column property. Defaults to 0.
  */
 extern JS_PUBLIC_API(SavedFrameResult)
-GetSavedFrameColumn(JSContext* cx, HandleObject savedFrame, uint32_t* columnp,
+GetSavedFrameColumn(JSContext* cx, JSPrincipals* principals, HandleObject savedFrame,
+                    uint32_t* columnp,
                     SavedFrameSelfHosted selfHosted = SavedFrameSelfHosted::Include);
 
 /**
@@ -6302,14 +6344,16 @@ GetSavedFrameColumn(JSContext* cx, HandleObject savedFrame, uint32_t* columnp,
  * function. Defaults to nullptr.
  */
 extern JS_PUBLIC_API(SavedFrameResult)
-GetSavedFrameFunctionDisplayName(JSContext* cx, HandleObject savedFrame, MutableHandleString namep,
+GetSavedFrameFunctionDisplayName(JSContext* cx, JSPrincipals* principals, HandleObject savedFrame,
+                                 MutableHandleString namep,
                                  SavedFrameSelfHosted selfHosted = SavedFrameSelfHosted::Include);
 
 /**
  * Given a SavedFrame JSObject, get its asyncCause string. Defaults to nullptr.
  */
 extern JS_PUBLIC_API(SavedFrameResult)
-GetSavedFrameAsyncCause(JSContext* cx, HandleObject savedFrame, MutableHandleString asyncCausep,
+GetSavedFrameAsyncCause(JSContext* cx, JSPrincipals* principals, HandleObject savedFrame,
+                        MutableHandleString asyncCausep,
                         SavedFrameSelfHosted selfHosted = SavedFrameSelfHosted::Include);
 
 /**
@@ -6318,8 +6362,9 @@ GetSavedFrameAsyncCause(JSContext* cx, HandleObject savedFrame, MutableHandleStr
  * guaranteed to be in the cx's compartment. Defaults to nullptr.
  */
 extern JS_PUBLIC_API(SavedFrameResult)
-GetSavedFrameAsyncParent(JSContext* cx, HandleObject savedFrame, MutableHandleObject asyncParentp,
-                SavedFrameSelfHosted selfHosted = SavedFrameSelfHosted::Include);
+GetSavedFrameAsyncParent(JSContext* cx, JSPrincipals* principals, HandleObject savedFrame,
+                         MutableHandleObject asyncParentp,
+                         SavedFrameSelfHosted selfHosted = SavedFrameSelfHosted::Include);
 
 /**
  * Given a SavedFrame JSObject, get its parent SavedFrame object or nullptr if
@@ -6327,7 +6372,8 @@ GetSavedFrameAsyncParent(JSContext* cx, HandleObject savedFrame, MutableHandleOb
  * guaranteed to be in the cx's compartment. Defaults to nullptr.
  */
 extern JS_PUBLIC_API(SavedFrameResult)
-GetSavedFrameParent(JSContext* cx, HandleObject savedFrame, MutableHandleObject parentp,
+GetSavedFrameParent(JSContext* cx, JSPrincipals* principals, HandleObject savedFrame,
+                    MutableHandleObject parentp,
                     SavedFrameSelfHosted selfHosted = SavedFrameSelfHosted::Include);
 
 /**
@@ -6338,20 +6384,29 @@ GetSavedFrameParent(JSContext* cx, HandleObject savedFrame, MutableHandleObject 
  * The same notes above about SavedFrame accessors applies here as well: cx
  * doesn't need to be in stack's compartment, and stack can be null, a
  * SavedFrame object, or a wrapper (CCW or Xray) around a SavedFrame object.
+ * SavedFrames not subsumed by |principals| are skipped.
  *
  * Optional indent parameter specifies the number of white spaces to indent
  * each line.
  */
 extern JS_PUBLIC_API(bool)
-BuildStackString(JSContext* cx, HandleObject stack, MutableHandleString stringp,
-                 size_t indent = 0, js::StackFormat stackFormat = js::StackFormat::Default);
+BuildStackString(JSContext* cx, JSPrincipals* principals, HandleObject stack,
+                 MutableHandleString stringp, size_t indent = 0,
+                 js::StackFormat stackFormat = js::StackFormat::Default);
 
 /**
  * Return true iff the given object is either a SavedFrame object or wrapper
  * around a SavedFrame object, and it is not the SavedFrame.prototype object.
  */
 extern JS_PUBLIC_API(bool)
-IsSavedFrame(JSObject* obj);
+IsMaybeWrappedSavedFrame(JSObject* obj);
+
+/**
+ * Return true iff the given object is a SavedFrame object and not the
+ * SavedFrame.prototype object.
+ */
+extern JS_PUBLIC_API(bool)
+IsUnwrappedSavedFrame(JSObject* obj);
 
 } /* namespace JS */
 

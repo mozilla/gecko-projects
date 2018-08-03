@@ -194,8 +194,8 @@ WebRenderBridgeParent::WebRenderBridgeParent(CompositorBridgeParentBase* aCompos
   , mCompositorScheduler(aScheduler)
   , mAnimStorage(aAnimStorage)
   , mVsyncRate(aVsyncRate)
-  , mChildLayerObserverEpoch(0)
-  , mParentLayerObserverEpoch(0)
+  , mChildLayersObserverEpoch{0}
+  , mParentLayersObserverEpoch{0}
   , mWrEpoch{0}
   , mIdNamespace(aApi->GetNamespace())
   , mPaused(false)
@@ -215,8 +215,8 @@ WebRenderBridgeParent::WebRenderBridgeParent(CompositorBridgeParentBase* aCompos
 WebRenderBridgeParent::WebRenderBridgeParent(const wr::PipelineId& aPipelineId)
   : mCompositorBridge(nullptr)
   , mPipelineId(aPipelineId)
-  , mChildLayerObserverEpoch(0)
-  , mParentLayerObserverEpoch(0)
+  , mChildLayersObserverEpoch{0}
+  , mParentLayersObserverEpoch{0}
   , mWrEpoch{0}
   , mIdNamespace{0}
   , mPaused(false)
@@ -335,6 +335,16 @@ WebRenderBridgeParent::UpdateResources(const nsTArray<OpUpdateResource>& aResour
           return false;
         }
         aUpdates.UpdateBlobImage(op.key(), op.descriptor(), bytes, wr::ToDeviceUintRect(op.dirtyRect()));
+        break;
+      }
+      case OpUpdateResource::TOpSetImageVisibleArea: {
+        const auto& op = cmd.get_OpSetImageVisibleArea();
+        wr::NormalizedRect area;
+        area.origin.x = op.area().x;
+        area.origin.y = op.area().y;
+        area.size.width = op.area().width;
+        area.size.height = op.area().height;
+        aUpdates.SetImageVisibleArea(op.key(), area);
         break;
       }
       case OpUpdateResource::TOpAddExternalImage: {
@@ -800,13 +810,6 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
     txn.SetDisplayList(clearColor, wrEpoch, LayerSize(aSize.width, aSize.height),
                        mPipelineId, aContentSize,
                        dlDesc, dlData);
-    // The display list that we're sending to WR might contain references to
-    // other pipelines that we just added to the async image manager in the
-    // ProcessWebRenderParentCommands call above. If we send the display list
-    // alone then WR will not yet have the content for those other pipelines
-    // and so it will emit errors; the ApplyAsyncImages call below ensure that
-    // we provide the pipeline content to WR as part of the same transaction.
-    mAsyncImageManager->ApplyAsyncImages(txn);
 
     mApi->SendTransaction(txn);
 
@@ -819,12 +822,14 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
   if (mIdNamespace != aIdNamespace) {
     // Pretend we composited since someone is wating for this event,
     // though DisplayList was not pushed to webrender.
-    TimeStamp now = TimeStamp::Now();
-    mCompositorBridge->DidComposite(GetLayersId(), now, now);
+    if (CompositorBridgeParent* cbp = GetRootCompositorBridgeParent()) {
+      TimeStamp now = TimeStamp::Now();
+      cbp->NotifyPipelineRendered(mPipelineId, wrEpoch, now, now);
+    }
   }
 
   if (ShouldParentObserveEpoch()) {
-    mCompositorBridge->ObserveLayerUpdate(GetLayersId(), GetChildLayerObserverEpoch(), true);
+    mCompositorBridge->ObserveLayersUpdate(GetLayersId(), mChildLayersObserverEpoch, true);
   }
 
   wr::IpcResourceUpdateQueue::ReleaseShmems(this, aSmallShmems);
@@ -893,17 +898,22 @@ WebRenderBridgeParent::RecvEmptyTransaction(const FocusTarget& aFocusTarget,
     sendDidComposite = false;
   }
 
-  HoldPendingTransactionId(WrEpoch(), aTransactionId, aRefreshStartTime, aTxnStartTime, aFwdTime);
+  HoldPendingTransactionId(mWrEpoch, aTransactionId, aRefreshStartTime, aTxnStartTime, aFwdTime);
 
   if (scheduleComposite) {
     ScheduleGenerateFrame();
   } else if (sendDidComposite) {
-    TimeStamp now = TimeStamp::Now();
-    mCompositorBridge->DidComposite(GetLayersId(), now, now);
+    // The only thing in the pending transaction id queue should be the entry
+    // we just added, and now we're going to pretend we rendered it
+    MOZ_ASSERT(mPendingTransactionIds.size() == 1);
+    if (CompositorBridgeParent* cbp = GetRootCompositorBridgeParent()) {
+      TimeStamp now = TimeStamp::Now();
+      cbp->NotifyPipelineRendered(mPipelineId, mWrEpoch, now, now);
+    }
   }
 
   if (ShouldParentObserveEpoch()) {
-    mCompositorBridge->ObserveLayerUpdate(GetLayersId(), GetChildLayerObserverEpoch(), true);
+    mCompositorBridge->ObserveLayersUpdate(GetLayersId(), mChildLayersObserverEpoch, true);
   }
 
   return IPC_OK();
@@ -939,7 +949,8 @@ WebRenderBridgeParent::ProcessWebRenderParentCommands(const InfallibleTArray<Web
         const OpAddPipelineIdForCompositable& op = cmd.get_OpAddPipelineIdForCompositable();
         AddPipelineIdForCompositable(op.pipelineId(),
                                      op.handle(),
-                                     op.isAsync());
+                                     op.isAsync(),
+                                     aTxn);
         break;
       }
       case WebRenderParentCommand::TOpRemovePipelineIdForCompositable: {
@@ -965,6 +976,12 @@ WebRenderBridgeParent::ProcessWebRenderParentCommands(const InfallibleTArray<Web
                                                      op.scaleToSize(),
                                                      op.filter(),
                                                      op.mixBlendMode());
+        mAsyncImageManager->ApplyAsyncImageForPipeline(op.pipelineId(), aTxn);
+        break;
+      }
+      case WebRenderParentCommand::TOpUpdatedAsyncImagePipeline: {
+        const OpUpdatedAsyncImagePipeline& op = cmd.get_OpUpdatedAsyncImagePipeline();
+        mAsyncImageManager->ApplyAsyncImageForPipeline(op.pipelineId(), aTxn);
         break;
       }
       case WebRenderParentCommand::TCompositableOperation: {
@@ -1099,7 +1116,8 @@ WebRenderBridgeParent::RecvGetSnapshot(PTextureParent* aTexture)
 void
 WebRenderBridgeParent::AddPipelineIdForCompositable(const wr::PipelineId& aPipelineId,
                                                     const CompositableHandle& aHandle,
-                                                    const bool& aAsync)
+                                                    const bool& aAsync,
+                                                    wr::TransactionBuilder& aTxn)
 {
   if (mDestroyed) {
     return;
@@ -1136,6 +1154,13 @@ WebRenderBridgeParent::AddPipelineIdForCompositable(const wr::PipelineId& aPipel
   mAsyncCompositables.emplace(wr::AsUint64(aPipelineId), wrHost);
   mAsyncImageManager->AddAsyncImagePipeline(aPipelineId, wrHost);
 
+  // If this is being called from WebRenderBridgeParent::RecvSetDisplayList,
+  // then aTxn might contain a display list that references pipelines that
+  // we just added to the async image manager.
+  // If we send the display list alone then WR will not yet have the content for
+  // the pipelines and so it will emit errors; the SetEmptyDisplayList call
+  // below ensure that we provide its content to WR as part of the same transaction.
+  mAsyncImageManager->SetEmptyDisplayList(aPipelineId, aTxn);
   return;
 }
 
@@ -1196,12 +1221,12 @@ WebRenderBridgeParent::ReleaseTextureOfImage(const wr::ImageKey& aKey)
 }
 
 mozilla::ipc::IPCResult
-WebRenderBridgeParent::RecvSetLayerObserverEpoch(const uint64_t& aLayerObserverEpoch)
+WebRenderBridgeParent::RecvSetLayersObserverEpoch(const LayersObserverEpoch& aChildEpoch)
 {
   if (mDestroyed) {
     return IPC_OK();
   }
-  mChildLayerObserverEpoch = aLayerObserverEpoch;
+  mChildLayersObserverEpoch = aChildEpoch;
   return IPC_OK();
 }
 
@@ -1211,7 +1236,7 @@ WebRenderBridgeParent::RecvClearCachedResources()
   if (mDestroyed) {
     return IPC_OK();
   }
-  mCompositorBridge->ObserveLayerUpdate(GetLayersId(), GetChildLayerObserverEpoch(), false);
+  mCompositorBridge->ObserveLayersUpdate(GetLayersId(), mChildLayersObserverEpoch, false);
 
   // Clear resources
   wr::TransactionBuilder txn;
@@ -1228,7 +1253,7 @@ WebRenderBridgeParent::RecvClearCachedResources()
   return IPC_OK();
 }
 
-void
+wr::Epoch
 WebRenderBridgeParent::UpdateWebRender(CompositorVsyncScheduler* aScheduler,
                                        wr::WebRenderAPI* aApi,
                                        AsyncImagePipelineManager* aImageMgr,
@@ -1242,7 +1267,7 @@ WebRenderBridgeParent::UpdateWebRender(CompositorVsyncScheduler* aScheduler,
   MOZ_ASSERT(aAnimStorage);
 
   if (mDestroyed) {
-    return;
+    return mWrEpoch;
   }
 
   // Update id name space to identify obsoleted keys.
@@ -1266,9 +1291,10 @@ WebRenderBridgeParent::UpdateWebRender(CompositorVsyncScheduler* aScheduler,
   mAsyncImageManager = aImageMgr;
   mAnimStorage = aAnimStorage;
 
-  Unused << GetNextWrEpoch(); // Update webrender epoch
   // Register pipeline to updated AsyncImageManager.
   mAsyncImageManager->AddPipeline(mPipelineId);
+
+  return GetNextWrEpoch(); // Update webrender epoch
 }
 
 mozilla::ipc::IPCResult
@@ -1335,9 +1361,8 @@ WebRenderBridgeParent::RecvLeaveTestMode()
 }
 
 mozilla::ipc::IPCResult
-WebRenderBridgeParent::RecvGetAnimationOpacity(const uint64_t& aCompositorAnimationsId,
-                                               float* aOpacity,
-                                               bool* aHasAnimationOpacity)
+WebRenderBridgeParent::RecvGetAnimationValue(const uint64_t& aCompositorAnimationsId,
+                                             OMTAValue* aValue)
 {
   if (mDestroyed) {
     return IPC_FAIL_NO_REASON(this);
@@ -1350,37 +1375,7 @@ WebRenderBridgeParent::RecvGetAnimationOpacity(const uint64_t& aCompositorAnimat
     AdvanceAnimations();
   }
 
-  Maybe<float> opacity = mAnimStorage->GetAnimationOpacity(aCompositorAnimationsId);
-  if (opacity) {
-    *aOpacity = *opacity;
-    *aHasAnimationOpacity = true;
-  } else {
-    *aHasAnimationOpacity = false;
-  }
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-WebRenderBridgeParent::RecvGetAnimationTransform(const uint64_t& aCompositorAnimationsId,
-                                                 MaybeTransform* aTransform)
-{
-  if (mDestroyed) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-
-  MOZ_ASSERT(mAnimStorage);
-  if (RefPtr<WebRenderBridgeParent> root = GetRootWebRenderBridgeParent()) {
-    root->AdvanceAnimations();
-  } else {
-    AdvanceAnimations();
-  }
-
-  Maybe<Matrix4x4> transform = mAnimStorage->GetAnimationTransform(aCompositorAnimationsId);
-  if (transform) {
-    *aTransform = *transform;
-  } else {
-    *aTransform = mozilla::void_t();
-  }
+  *aValue = mAnimStorage->GetOMTAValue(aCompositorAnimationsId);
   return IPC_OK();
 }
 
@@ -1521,7 +1516,7 @@ WebRenderBridgeParent::CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::In
     // building. Those other async pipelines can go in the other transaction that
     // we create below.
     wr::TransactionBuilder txn;
-    mAsyncImageManager->ApplyAsyncImages(txn);
+    mAsyncImageManager->ApplyAsyncImagesOfImageBridge(txn);
     mApi->SendTransaction(txn);
   }
 
@@ -1594,17 +1589,6 @@ WebRenderBridgeParent::LastPendingTransactionId()
 }
 
 TransactionId
-WebRenderBridgeParent::FlushPendingTransactionIds()
-{
-  TransactionId id{0};
-  if (!mPendingTransactionIds.empty()) {
-    id = mPendingTransactionIds.back().mId;
-    std::queue<PendingTransactionId>().swap(mPendingTransactionIds); // clear queue
-  }
-  return id;
-}
-
-TransactionId
 WebRenderBridgeParent::FlushTransactionIdsForEpoch(const wr::Epoch& aEpoch, const TimeStamp& aEndTime)
 {
   TransactionId id{0};
@@ -1652,25 +1636,19 @@ WebRenderBridgeParent::ScheduleGenerateFrame()
 }
 
 void
-WebRenderBridgeParent::FlushRendering()
+WebRenderBridgeParent::FlushRendering(bool aWaitForPresent)
 {
   if (mDestroyed) {
     return;
   }
 
-  // XXX: do we need to flush any scene building here?
+  // This gets called during e.g. window resizes, so we need to flush the
+  // scene (which has the display list at the new window size).
+  FlushSceneBuilds();
   FlushFrameGeneration();
-  FlushFramePresentation();
-}
-
-void
-WebRenderBridgeParent::FlushRenderingAsync()
-{
-  if (mDestroyed) {
-    return;
+  if (aWaitForPresent) {
+    FlushFramePresentation();
   }
-
-  mCompositorScheduler->FlushPendingComposite();
 }
 
 void
@@ -1772,11 +1750,11 @@ WebRenderBridgeParent::ClearResources()
 bool
 WebRenderBridgeParent::ShouldParentObserveEpoch()
 {
-  if (mParentLayerObserverEpoch == mChildLayerObserverEpoch) {
+  if (mParentLayersObserverEpoch == mChildLayersObserverEpoch) {
     return false;
   }
 
-  mParentLayerObserverEpoch = mChildLayerObserverEpoch;
+  mParentLayersObserverEpoch = mChildLayersObserverEpoch;
   return true;
 }
 
@@ -1849,7 +1827,9 @@ WebRenderBridgeParent::GetTextureFactoryIdentifier()
   return TextureFactoryIdentifier(LayersBackend::LAYERS_WR,
                                   XRE_GetProcessType(),
                                   mApi->GetMaxTextureSize(),
+                                  false,
                                   mApi->GetUseANGLE(),
+                                  mApi->GetUseDComp(),
                                   false,
                                   false,
                                   false,

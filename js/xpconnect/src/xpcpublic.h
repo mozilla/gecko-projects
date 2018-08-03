@@ -11,6 +11,7 @@
 #include "js/HeapAPI.h"
 #include "js/GCAPI.h"
 #include "js/Proxy.h"
+#include "js/Wrapper.h"
 
 #include "nsAtom.h"
 #include "nsISupports.h"
@@ -84,6 +85,8 @@ bool IsContentXBLCompartment(JS::Compartment* compartment);
 bool IsContentXBLScope(JS::Realm* realm);
 bool IsInContentXBLScope(JSObject* obj);
 
+bool IsInSandboxCompartment(JSObject* obj);
+
 // Return a raw XBL scope object corresponding to contentScope, which must
 // be an object whose global is a DOM window.
 //
@@ -103,8 +106,9 @@ GetXBLScope(JSContext* cx, JSObject* contentScope);
 inline JSObject*
 GetXBLScopeOrGlobal(JSContext* cx, JSObject* obj)
 {
+    MOZ_ASSERT(!js::IsCrossCompartmentWrapper(obj));
     if (IsInContentXBLScope(obj))
-        return js::GetGlobalForObjectCrossCompartment(obj);
+        return JS::GetNonCCWObjectGlobal(obj);
     return GetXBLScope(cx, obj);
 }
 
@@ -499,10 +503,12 @@ JSObject*
 CompilationScope();
 
 /**
- * Returns the nsIGlobalObject corresponding to |aObj|'s JS global.
+ * Returns the nsIGlobalObject corresponding to |obj|'s JS global. |obj| must
+ * not be a cross-compartment wrapper: CCWs are not associated with a single
+ * global.
  */
 nsIGlobalObject*
-NativeGlobal(JSObject* aObj);
+NativeGlobal(JSObject* obj);
 
 /**
  * Returns the nsIGlobalObject corresponding to |cx|'s JS global. Must not be
@@ -605,8 +611,10 @@ class ErrorReport : public ErrorBase {
     void LogToConsole();
     // Log to console, using the given stack object (which should be a stack of
     // the sort that JS::CaptureCurrentStack produces).  aStack is allowed to be
-    // null.
-    void LogToConsoleWithStack(JS::HandleObject aStack);
+    // null. If aStack is non-null, aStackGlobal must be a non-null global
+    // object that's same-compartment with aStack. Note that aStack might be a
+    // CCW.
+    void LogToConsoleWithStack(JS::HandleObject aStack, JS::HandleObject aStackGlobal);
 
     // Produce an error event message string from the given JSErrorReport.  Note
     // that this may produce an empty string if aReport doesn't have a
@@ -625,9 +633,9 @@ void
 DispatchScriptErrorEvent(nsPIDOMWindowInner* win, JS::RootingContext* rootingCx,
                          xpc::ErrorReport* xpcReport, JS::Handle<JS::Value> exception);
 
-// Get a stack of the sort that can be passed to
+// Get a stack (as stackObj outparam) of the sort that can be passed to
 // xpc::ErrorReport::LogToConsoleWithStack from the given exception value.  Can
-// return null if the exception value doesn't have an associated stack.  The
+// be nullptr if the exception value doesn't have an associated stack.  The
 // returned stack, if any, may also not be in the same compartment as
 // exceptionValue.
 //
@@ -636,9 +644,16 @@ DispatchScriptErrorEvent(nsPIDOMWindowInner* win, JS::RootingContext* rootingCx,
 // course.  If it's not null, this function may return a null stack object if
 // the window is far enough gone, because in those cases we don't want to have
 // the stack in the console message keeping the window alive.
-JSObject*
+//
+// If this function sets stackObj to a non-null value, stackGlobal is set to
+// either the JS exception object's global or the global of the SavedFrame we
+// got from a DOM or XPConnect exception. In all cases, stackGlobal is an
+// unwrapped global object and is same-compartment with stackObj.
+void
 FindExceptionStackForConsoleReport(nsPIDOMWindowInner* win,
-                                   JS::HandleValue exceptionValue);
+                                   JS::HandleValue exceptionValue,
+                                   JS::MutableHandleObject stackObj,
+                                   JS::MutableHandleObject stackGlobal);
 
 // Return a name for the realm.
 // This function makes reasonable efforts to make this name both mostly human-readable

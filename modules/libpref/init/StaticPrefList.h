@@ -91,6 +91,66 @@ VARCACHE_PREF(
 // DOM prefs
 //---------------------------------------------------------------------------
 
+// Is support for composite operations from the Web Animations API enabled?
+#ifdef RELEASE_OR_BETA
+# define PREF_VALUE false
+#else
+# define PREF_VALUE true
+#endif
+VARCACHE_PREF(
+  "dom.animations-api.compositing.enabled",
+   dom_animations_api_compositing_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
+// Is support for Document.getAnimations() and Element.getAnimations()
+// supported?
+//
+// Before enabling this by default, make sure also CSSPseudoElement interface
+// has been spec'ed properly, or we should add a separate pref for
+// CSSPseudoElement interface. See Bug 1174575 for further details.
+#ifdef RELEASE_OR_BETA
+# define PREF_VALUE false
+#else
+# define PREF_VALUE true
+#endif
+VARCACHE_PREF(
+  "dom.animations-api.getAnimations.enabled",
+   dom_animations_api_getAnimations_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
+// Is support for animations from the Web Animations API without 0%/100%
+// keyframes enabled?
+#ifdef RELEASE_OR_BETA
+# define PREF_VALUE false
+#else
+# define PREF_VALUE true
+#endif
+VARCACHE_PREF(
+  "dom.animations-api.implicit-keyframes.enabled",
+   dom_animations_api_implicit_keyframes_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
+// Is support for timelines from the Web Animations API enabled?
+#ifdef RELEASE_OR_BETA
+# define PREF_VALUE false
+#else
+# define PREF_VALUE true
+#endif
+VARCACHE_PREF(
+  "dom.animations-api.timelines.enabled",
+   dom_animations_api_timelines_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
+// NOTE: This preference is used in unit tests. If it is removed or its default
+// value changes, please update test_sharedMap_var_caches.js accordingly.
 VARCACHE_PREF(
   "dom.webcomponents.shadowdom.report_usage",
    dom_webcomponents_shadowdom_report_usage,
@@ -99,6 +159,8 @@ VARCACHE_PREF(
 
 // Whether we disable triggering mutation events for changes to style
 // attribute via CSSOM.
+// NOTE: This preference is used in unit tests. If it is removed or its default
+// value changes, please update test_sharedMap_var_caches.js accordingly.
 VARCACHE_PREF(
   "dom.mutation-events.cssom.disabled",
    dom_mutation_events_cssom_disabled,
@@ -128,17 +190,11 @@ VARCACHE_PREF(
 // Clear-Site-Data prefs
 //---------------------------------------------------------------------------
 
-#ifdef NIGHTLY
-# define PREF_VALUE true
-#else
-# define PREF_VALUE false
-#endif
 VARCACHE_PREF(
   "dom.clearSiteData.enabled",
    dom_clearSiteData_enabled,
-  bool, PREF_VALUE
+  bool, true
 )
-#undef PREF_VALUE
 
 //---------------------------------------------------------------------------
 // Full-screen prefs
@@ -275,24 +331,6 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
-// When the pref is true, CSSStyleDeclaration.setProperty always appends
-// new declarations (and discards old ones if they exist), otherwise, it
-// will update in-place when given property exists in the block, and
-// avoid updating at all when the existing property declaration is
-// identical to the new one.
-// See bug 1415330, bug 1460295, and bug 1461285 for some background.
-#ifdef RELEASE_OR_BETA
-# define PREF_VALUE false
-#else
-# define PREF_VALUE true
-#endif
-VARCACHE_PREF(
-  "layout.css.property-append-only",
-   layout_css_property_append_only,
-   bool, PREF_VALUE
-)
-#undef PREF_VALUE
-
 // Should the :visited selector ever match (otherwise :link matches instead)?
 VARCACHE_PREF(
   "layout.css.visited_links_enabled",
@@ -326,6 +364,20 @@ VARCACHE_PREF(
    layout_css_xul_display_values_content_enabled,
   bool, false
 )
+
+// Pref to control whether display: -moz-box and display: -moz-inline-box are
+// parsed in content pages.
+#ifdef EARLY_BETA_OR_EARLIER
+#define PREF_VALUE false
+#else
+#define PREF_VALUE true
+#endif
+VARCACHE_PREF(
+  "layout.css.xul-box-display-values.content.enabled",
+   layout_css_xul_box_display_values_content_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
 
 // Is support for CSS "grid-template-{columns,rows}: subgrid X" enabled?
 VARCACHE_PREF(
@@ -434,17 +486,11 @@ VARCACHE_PREF(
 
 // Don't create more memory-backed MediaCaches if their combined size would go
 // above this absolute size limit.
-#ifdef ANDROID
-# define PREF_VALUE  32768    // Measured in KiB
-#else
-# define PREF_VALUE 524288    // Measured in KiB
-#endif
 VARCACHE_PREF(
   "media.memory_caches_combined_limit_kb",
    MediaMemoryCachesCombinedLimitKb,
-  uint32_t, PREF_VALUE
+  uint32_t, 524288
 )
-#undef PREF_VALUE
 
 // Don't create more memory-backed MediaCaches if their combined size would go
 // above this relative size limit (a percentage of physical memory).
@@ -824,7 +870,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.av1.enabled",
    MediaAv1Enabled,
-  RelaxedAtomicBool, true
+  RelaxedAtomicBool, false
 )
 
 VARCACHE_PREF(
@@ -972,6 +1018,14 @@ VARCACHE_PREF(
   bool, false
 )
 
+// 0-Accept, 1-dontAcceptForeign, 2-dontAcceptAny, 3-limitForeign
+// Keep the old default of accepting all cookies
+VARCACHE_PREF(
+  "network.cookie.cookieBehavior",
+  network_cookie_cookieBehavior,
+  int32_t, 0
+)
+
 // Enables the predictive service.
 VARCACHE_PREF(
   "network.predictor.enabled",
@@ -1101,17 +1155,7 @@ VARCACHE_PREF(
 PREF("preferences.allow.omt-write", bool, true)
 
 //---------------------------------------------------------------------------
-// View source prefs
-//---------------------------------------------------------------------------
-
-VARCACHE_PREF(
-  "view_source.editor.external",
-   view_source_editor_external,
-  bool, false
-)
-
-//---------------------------------------------------------------------------
-// Anti-Tracking prefs
+// Privacy prefs
 //---------------------------------------------------------------------------
 
 VARCACHE_PREF(
@@ -1120,11 +1164,61 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+VARCACHE_PREF(
+  "privacy.restrict3rdpartystorage.ui.enabled",
+   privacy_restrict3rdpartystorage_ui_enabled,
+  RelaxedAtomicBool, false
+)
+
 // Anti-tracking permission expiration
 VARCACHE_PREF(
   "privacy.restrict3rdpartystorage.expiration",
    privacy_restrict3rdpartystorage_expiration,
-  uint32_t, 2592000000 // 30 days
+  uint32_t, 2592000 // 30 days (in seconds)
+)
+
+//---------------------------------------------------------------------------
+// Security prefs
+//---------------------------------------------------------------------------
+
+VARCACHE_PREF(
+  "security.csp.enable",
+   security_csp_enable,
+  bool, true
+)
+
+VARCACHE_PREF(
+  "security.csp.experimentalEnabled",
+   security_csp_experimentalEnabled,
+  bool, false
+)
+
+VARCACHE_PREF(
+  "security.csp.enableStrictDynamic",
+   security_csp_enableStrictDynamic,
+  bool, true
+)
+
+VARCACHE_PREF(
+  "security.csp.enable_violation_events",
+   security_csp_enable_violation_events,
+  bool, true
+)
+
+VARCACHE_PREF(
+  "security.csp.reporting.script-sample.max-length",
+   security_csp_reporting_script_sample_max_length,
+  int32_t, 40
+)
+
+//---------------------------------------------------------------------------
+// View source prefs
+//---------------------------------------------------------------------------
+
+VARCACHE_PREF(
+  "view_source.editor.external",
+   view_source_editor_external,
+  bool, false
 )
 
 //---------------------------------------------------------------------------
