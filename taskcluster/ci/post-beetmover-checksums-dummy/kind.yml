@@ -12,7 +12,6 @@ kind-dependencies:
    - beetmover-checksums
    - release-beetmover-source-checksums
    - release-eme-free-repack-beetmover-checksums
-   - release-beetmover-signed-langpacks-checksums
 
 jobs:
    firefox-promote:
