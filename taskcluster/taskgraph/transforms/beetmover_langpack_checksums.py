@@ -120,13 +120,14 @@ def generate_upstream_artifacts(refs, platform, locales=None):
         "public/target-langpack.checksums",
     ]
 
+    upstream_artifacts = []
     for locale in locales:
-        upstream_artifacts = [{
+        upstream_artifacts.append({
             "taskId": {"task-reference": refs["beetmover"]},
             "taskType": "signing",
             "paths": common_paths,
             "locale": locale or "en-US",
-        }]
+        })
 
     return upstream_artifacts
 
