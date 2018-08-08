@@ -17,7 +17,8 @@ job-defaults:
    description: Generates flatpak image
    run-on-projects: []  # to make sure this never runs as part of CI
    shipping-phase: promote
-   scopes: []
+   scopes:
+      - docker-worker:capability:privileged
    treeherder:
       platform: linux64/opt
       kind: build
