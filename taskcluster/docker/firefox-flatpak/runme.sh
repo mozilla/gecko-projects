@@ -6,6 +6,7 @@ set -xe
 test "$VERSION"
 test "$BUILD_NUMBER"
 test "$CANDIDATES_DIR"
+test "$L10N_CHANGESETS"
 
 # Optional env variables
 : WORKSPACE                     "${WORKSPACE:=/home/worker/workspace}"
@@ -26,18 +27,38 @@ CURL="curl --location --retry 10 --retry-delay 10"
 $CURL -o "${WORKSPACE}/firefox.tar.bz2" \
     "${CANDIDATES_DIR}/${VERSION}-candidates/build${BUILD_NUMBER}/linux-x86_64/en-US/firefox-${VERSION}.tar.bz2"
 
-# Use list of locales to fetch L10N XPIs
-#$CURL -o "${WORKSPACE}/l10n_changesets.json" "$L10N_CHANGESETS"
-#locales=$(python3 "$SCRIPT_DIRECTORY/extract_locales_from_l10n_json.py" "${WORKSPACE}/l10n_changesets.json")
+# Make sure the downloaded bits are correct
+$CURL -o "${WORKSPACE}/SHA512SUMS" \
+    "${CANDIDATES_DIR}/${VERSION}-candidates/build${BUILD_NUMBER}/SHA512SUMS"
+UPSTREAM_SHA=`cat $WORKSPACE/SHA512SUMS | grep linux-x86_64/en-US/firefox-${VERSION}.tar.bz2 | cut -d\  -f1`
+LOCAL_SHA=$(sha512sum "$WORKSPACE/firefox.tar.bz2" | awk '{print $1}')
 
-#mkdir -p "$DISTRIBUTION_DIR/extensions"
-#for locale in $locales; do
-    #$CURL -o "$SOURCE_DEST/distribution/extensions/langpack-${locale}@firefox.mozilla.org.xpi" \
-        #"$CANDIDATES_DIR/${VERSION}-candidates/build${BUILD_NUMBER}/linux-x86_64/xpi/${locale}.xpi"
-#done
+if [ "$UPSTREAM_SHA" != "$LOCAL_SHA" ]; then
+    echo 'Local sha512 of the en-US binary differs from the upstream one, bailing ...'
+    exit 1
+fi
+
+# Use list of locales to fetch L10N XPIs
+$CURL -o "${WORKSPACE}/l10n_changesets.json" "$L10N_CHANGESETS"
+locales=$(python3 "$SCRIPT_DIRECTORY/extract_locales_from_l10n_json.py" "${WORKSPACE}/l10n_changesets.json")
+
+DISTRIBUTION_DIR="$SOURCE_DEST/distribution"
+mkdir -p "$DISTRIBUTION_DIR/extensions"
+for locale in $locales; do
+    $CURL -o "$DISTRIBUTION_DIR/extensions/langpack-${locale}@firefox.mozilla.org.xpi" \
+        "$CANDIDATES_DIR/${VERSION}-candidates/build${BUILD_NUMBER}/linux-x86_64/xpi/${locale}.xpi"
+
+    LANGPACKS="$LANGPACKS
+              {
+                  'type': 'file',
+                  'path': '$DISTRIBUTION_DIR/extensions/langpack-${locale}@firefox.mozilla.org.xpi',
+                  'dest': 'langpacks/'
+              },"
+done
+export LANGPACKS
 
 # Generate flatpak manifest
-cat flatpak.json.in | envsubst > "${WORKSPACE}/org.mozilla.Firefox.json"
+envsubst < "$SCRIPT_DIRECTORY/flatpak.json.in" > "${WORKSPACE}/org.mozilla.Firefox.json"
 cp -v "$SCRIPT_DIRECTORY/Makefile" "$WORKSPACE"
 cp -v "$SCRIPT_DIRECTORY/org.mozilla.Firefox.appdata.xml" "$WORKSPACE"
 cp -v "$SCRIPT_DIRECTORY/org.mozilla.Firefox.desktop" "$WORKSPACE"

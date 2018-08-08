@@ -33,4 +33,6 @@ def format(config, tasks):
             resolve_keyed_by(env, k, 'flatpak envs', project=config.params['project'])
             task['worker']['env'][k] = env[k].format(**format_params)
 
+        task['worker']["privileged"] = True
+
         yield task

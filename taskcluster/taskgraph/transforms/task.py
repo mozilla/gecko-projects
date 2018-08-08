@@ -239,6 +239,7 @@ task_description_schema = Schema({
         Required('loopback-video'): bool,
         Required('loopback-audio'): bool,
         Required('docker-in-docker'): bool,  # (aka 'dind')
+        Optional('privileged'): bool,
 
         # Paths to Docker volumes.
         #
@@ -845,6 +846,9 @@ def build_docker_worker_payload(config, task, task_def):
             devices = capabilities.setdefault('devices', {})
             devices[capitalized] = True
             task_def['scopes'].append('docker-worker:capability:device:' + capitalized)
+
+    if worker.get('privileged'):
+         capabilities.setdefault('privileged', True)
 
     task_def['payload'] = payload = {
         'image': image,

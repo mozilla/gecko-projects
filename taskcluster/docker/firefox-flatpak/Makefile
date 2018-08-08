@@ -9,7 +9,7 @@ install:
 	mkdir -p $(prefix)/share/icons/hicolor/128x128/apps/ $(prefix)/share/appdata
 	cp -p firefox/browser/chrome/icons/default/default128.png $(prefix)/share/icons/hicolor/128x128/apps/org.mozilla.Firefox.png
 	mkdir -p $(prefix)/lib/firefox/distribution/extensions
-	#cp -rp langpacks/* $(prefix)/lib/firefox/distribution/extensions
+	cp -rp langpacks/* $(prefix)/lib/firefox/distribution/extensions
 	cp distribution.ini $(prefix)/lib/firefox/distribution
 	mkdir -p $(prefix)/lib/firefox/browser/defaults/preferences
 	cp default-preferences.js $(prefix)/lib/firefox/browser/defaults/preferences
