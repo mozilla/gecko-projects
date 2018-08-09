@@ -848,12 +848,8 @@ def build_docker_worker_payload(config, task, task_def):
             task_def['scopes'].append('docker-worker:capability:device:' + capitalized)
 
     if worker.get('privileged'):
-<<<<<<< working copy
-         capabilities.setdefault('privileged', True)
-=======
         capabilities['privileged'] = True
         task_def['scopes'].append('docker-worker:capability:privileged')
->>>>>>> merge rev
 
     task_def['payload'] = payload = {
         'image': image,
