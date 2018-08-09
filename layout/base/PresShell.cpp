@@ -777,7 +777,7 @@ nsIPresShell::nsIPresShell()
     , mIsFirstPaint(false)
     , mObservesMutationsForPrint(false)
     , mWasLastReflowInterrupted(false)
-    , mScrollPositionClampingScrollPortSizeSet(false)
+    , mVisualViewportSizeSet(false)
     , mNeedLayoutFlush(true)
     , mNeedStyleFlush(true)
     , mObservingStyleFlushes(false)
@@ -850,7 +850,7 @@ PresShell::PresShell()
   mFrozen = false;
   mRenderFlags = 0;
 
-  mScrollPositionClampingScrollPortSizeSet = false;
+  mVisualViewportSizeSet = false;
 
   static bool addedSynthMouseMove = false;
   if (!addedSynthMouseMove) {
@@ -1685,8 +1685,13 @@ PresShell::ScrollSelectionIntoView(RawSelectionType aRawSelectionType,
 NS_IMETHODIMP
 PresShell::RepaintSelection(RawSelectionType aRawSelectionType)
 {
-  if (!mSelection)
+  if (!mSelection) {
     return NS_ERROR_NULL_POINTER;
+  }
+
+  if (MOZ_UNLIKELY(mIsDestroying)) {
+    return NS_OK;
+  }
 
   RefPtr<nsFrameSelection> frameSelection = mSelection;
   return frameSelection->RepaintSelection(ToSelectionType(aRawSelectionType));
@@ -3445,7 +3450,7 @@ static void ScrollToShowRect(nsIScrollableFrame*      aFrameAsScrollable,
 {
   nsPoint scrollPt = aFrameAsScrollable->GetScrollPosition();
   nsRect visibleRect(scrollPt,
-                     aFrameAsScrollable->GetScrollPositionClampingScrollPortSize());
+                     aFrameAsScrollable->GetVisualViewportSize());
 
   nsSize lineSize;
   // Don't call GetLineScrollAmount unless we actually need it. Not only
@@ -4971,7 +4976,7 @@ PresShell::CreateRangePaintInfo(nsRange* aRange,
 already_AddRefed<SourceSurface>
 PresShell::PaintRangePaintInfo(const nsTArray<UniquePtr<RangePaintInfo>>& aItems,
                                Selection* aSelection,
-                               nsIntRegion* aRegion,
+                               const Maybe<CSSIntRegion>& aRegion,
                                nsRect aArea,
                                const LayoutDeviceIntPoint aPoint,
                                LayoutDeviceIntRect* aScreenRect,
@@ -5068,10 +5073,10 @@ PresShell::PaintRangePaintInfo(const nsTArray<UniquePtr<RangePaintInfo>>& aItems
 
     // Convert aRegion from CSS pixels to dev pixels
     nsIntRegion region =
-      aRegion->ToAppUnits(nsPresContext::AppUnitsPerCSSPixel())
-        .ToOutsidePixels(pc->AppUnitsPerDevPixel());
+        aRegion->ToAppUnits(nsPresContext::AppUnitsPerCSSPixel())
+          .ToOutsidePixels(pc->AppUnitsPerDevPixel());
     for (auto iter = region.RectIter(); !iter.Done(); iter.Next()) {
-      const nsIntRect& rect = iter.Get();
+      const IntRect& rect = iter.Get();
 
       builder->MoveTo(rect.TopLeft());
       builder->LineTo(rect.TopRight());
@@ -5131,7 +5136,7 @@ PresShell::PaintRangePaintInfo(const nsTArray<UniquePtr<RangePaintInfo>>& aItems
 
 already_AddRefed<SourceSurface>
 PresShell::RenderNode(nsINode* aNode,
-                      nsIntRegion* aRegion,
+                      const Maybe<CSSIntRegion>& aRegion,
                       const LayoutDeviceIntPoint aPoint,
                       LayoutDeviceIntRect* aScreenRect,
                       uint32_t aFlags)
@@ -5158,9 +5163,10 @@ PresShell::RenderNode(nsINode* aNode,
     return nullptr;
   }
 
-  if (aRegion) {
+  Maybe<CSSIntRegion> region = aRegion;
+  if (region) {
     // combine the area with the supplied region
-    nsIntRect rrectPixels = aRegion->GetBounds();
+    CSSIntRect rrectPixels = region->GetBounds();
 
     nsRect rrect = ToAppUnits(rrectPixels, nsPresContext::AppUnitsPerCSSPixel());
     area.IntersectRect(area, rrect);
@@ -5170,11 +5176,11 @@ PresShell::RenderNode(nsINode* aNode,
       return nullptr;
 
     // move the region so that it is offset from the topleft corner of the surface
-    aRegion->MoveBy(-nsPresContext::AppUnitsToIntCSSPixels(area.x),
-                    -nsPresContext::AppUnitsToIntCSSPixels(area.y));
+    region->MoveBy(-nsPresContext::AppUnitsToIntCSSPixels(area.x),
+                   -nsPresContext::AppUnitsToIntCSSPixels(area.y));
   }
 
-  return PaintRangePaintInfo(rangeItems, nullptr, aRegion, area, aPoint,
+  return PaintRangePaintInfo(rangeItems, nullptr, region, area, aPoint,
                              aScreenRect, aFlags);
 }
 
@@ -5205,7 +5211,7 @@ PresShell::RenderSelection(Selection* aSelection,
     }
   }
 
-  return PaintRangePaintInfo(rangeItems, aSelection, nullptr, area, aPoint,
+  return PaintRangePaintInfo(rangeItems, aSelection, Nothing(), area, aPoint,
                              aScreenRect, aFlags);
 }
 
@@ -10590,14 +10596,14 @@ nsIPresShell::MarkFixedFramesForReflow(IntrinsicDirty aIntrinsicDirty)
 }
 
 void
-nsIPresShell::SetScrollPositionClampingScrollPortSize(nscoord aWidth, nscoord aHeight)
+nsIPresShell::SetVisualViewportSize(nscoord aWidth, nscoord aHeight)
 {
-  if (!mScrollPositionClampingScrollPortSizeSet ||
-      mScrollPositionClampingScrollPortSize.width != aWidth ||
-      mScrollPositionClampingScrollPortSize.height != aHeight) {
-    mScrollPositionClampingScrollPortSizeSet = true;
-    mScrollPositionClampingScrollPortSize.width = aWidth;
-    mScrollPositionClampingScrollPortSize.height = aHeight;
+  if (!mVisualViewportSizeSet ||
+      mVisualViewportSize.width != aWidth ||
+      mVisualViewportSize.height != aHeight) {
+    mVisualViewportSizeSet = true;
+    mVisualViewportSize.width = aWidth;
+    mVisualViewportSize.height = aHeight;
 
     if (nsIScrollableFrame* rootScrollFrame = GetRootScrollFrameAsScrollable()) {
       rootScrollFrame->MarkScrollbarsDirtyForReflow();

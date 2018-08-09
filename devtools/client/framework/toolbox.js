@@ -1846,6 +1846,8 @@ Toolbox.prototype = {
    *        Reason the tool was opened
    */
   selectTool: function(id, reason = "unknown") {
+    this.emit("panel-changed");
+
     if (this.currentToolId == id) {
       const panel = this._toolPanels.get(id);
       if (panel) {
@@ -3217,8 +3219,8 @@ Toolbox.prototype = {
    * Opens source in debugger. Falls back to plain "view-source:".
    * @see devtools/client/shared/source-utils.js
    */
-  viewSourceInDebugger: function(sourceURL, sourceLine) {
-    return viewSource.viewSourceInDebugger(this, sourceURL, sourceLine);
+  viewSourceInDebugger: function(sourceURL, sourceLine, reason) {
+    return viewSource.viewSourceInDebugger(this, sourceURL, sourceLine, reason);
   },
 
   /**

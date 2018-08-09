@@ -2426,6 +2426,24 @@ MacroAssemblerARMCompat::cmp32(Register lhs, Register rhs)
 }
 
 void
+MacroAssemblerARMCompat::cmp32(const Address& lhs, Imm32 rhs)
+{
+    ScratchRegisterScope scratch(asMasm());
+    SecondScratchRegisterScope scratch2(asMasm());
+    ma_ldr(lhs, scratch, scratch2);
+    ma_cmp(scratch, rhs, scratch2);
+}
+
+void
+MacroAssemblerARMCompat::cmp32(const Address& lhs, Register rhs)
+{
+    ScratchRegisterScope scratch(asMasm());
+    SecondScratchRegisterScope scratch2(asMasm());
+    ma_ldr(lhs, scratch, scratch2);
+    ma_cmp(scratch, rhs);
+}
+
+void
 MacroAssemblerARMCompat::cmpPtr(Register lhs, ImmWord rhs)
 {
     cmp32(lhs, Imm32(rhs.value));
@@ -3968,7 +3986,7 @@ CodeOffset
 MacroAssemblerARMCompat::toggledCall(JitCode* target, bool enabled)
 {
     BufferOffset bo = nextOffset();
-    addPendingJump(bo, ImmPtr(target->raw()), Relocation::JITCODE);
+    addPendingJump(bo, ImmPtr(target->raw()), RelocationKind::JITCODE);
     ScratchRegisterScope scratch(asMasm());
     ma_movPatchable(ImmPtr(target->raw()), scratch, Always);
     if (enabled)
@@ -4541,7 +4559,7 @@ void
 MacroAssembler::call(ImmPtr imm)
 {
     BufferOffset bo = m_buffer.nextOffset();
-    addPendingJump(bo, imm, Relocation::HARDCODED);
+    addPendingJump(bo, imm, RelocationKind::HARDCODED);
     ma_call(imm);
 }
 
@@ -4563,7 +4581,7 @@ void
 MacroAssembler::call(JitCode* c)
 {
     BufferOffset bo = m_buffer.nextOffset();
-    addPendingJump(bo, ImmPtr(c->raw()), Relocation::JITCODE);
+    addPendingJump(bo, ImmPtr(c->raw()), RelocationKind::JITCODE);
     ScratchRegisterScope scratch(*this);
     ma_movPatchable(ImmPtr(c->raw()), scratch, Always);
     callJitNoProfiler(scratch);
@@ -5023,7 +5041,7 @@ MacroAssembler::storeUnboxedValue(const ConstantOrRegister& value, MIRType value
                                   const Address& dest, MIRType slotType);
 template void
 MacroAssembler::storeUnboxedValue(const ConstantOrRegister& value, MIRType valueType,
-                                  const BaseIndex& dest, MIRType slotType);
+                                  const BaseObjectElementIndex& dest, MIRType slotType);
 
 CodeOffset
 MacroAssembler::wasmTrapInstruction()

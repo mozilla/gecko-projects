@@ -565,6 +565,7 @@ public:
   // Inner windows only.
   // Called to inform that the set of active VR displays has changed.
   void NotifyActiveVRDisplaysChanged();
+  void NotifyPresentationGenerationChanged(uint32_t aDisplayID);
 
   void DispatchVRDisplayActivate(uint32_t aDisplayID,
                                  mozilla::dom::VRDisplayEventReason aReason);
@@ -1207,10 +1208,6 @@ public:
 
   // Inner windows only.
   void UpdateCanvasFocus(bool aFocusChanged, nsIContent* aNewContent);
-
-  // See PromiseWindowProxy.h for an explanation.
-  void AddPendingPromise(mozilla::dom::Promise* aPromise);
-  void RemovePendingPromise(mozilla::dom::Promise* aPromise);
 
 public:
   virtual already_AddRefed<nsPIWindowRoot> GetTopWindowRoot() override;

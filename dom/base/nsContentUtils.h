@@ -124,6 +124,7 @@ class EventListenerManager;
 class HTMLEditor;
 
 namespace dom {
+class ContentFrameMessageManager;
 struct CustomElementDefinition;
 class DocumentFragment;
 class Element;
@@ -3242,8 +3243,8 @@ public:
 
   static bool ContentIsLink(nsIContent* aContent);
 
-  static already_AddRefed<mozilla::dom::EventTarget>
-  TryGetTabChildGlobalAsEventTarget(nsISupports* aFrom);
+  static already_AddRefed<mozilla::dom::ContentFrameMessageManager>
+  TryGetTabChildGlobal(nsISupports* aFrom);
 
   static PopupControlState
   PushPopupControlState(PopupControlState aState, bool aForce)
@@ -3273,6 +3274,15 @@ public:
   static int32_t GetCurrentInnerOrOuterWindowCount() { return sInnerOrOuterWindowCount; }
 
   static bool CanShowPopup(nsIPrincipal* aPrincipal);
+
+  /**
+   * Serializes a JSON-like JS::Value into a string.
+   *
+   * Usage:
+   *   nsAutoString serializedValue;
+   *   nsContentUtils::StringifyJSON(cx, &value, serializedValue);
+   */
+  static bool StringifyJSON(JSContext* aCx, JS::MutableHandle<JS::Value> vp, nsAString& aOutStr);
 
 private:
   static bool InitializeEventTable();

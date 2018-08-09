@@ -3083,8 +3083,8 @@ END_CASE(JSOP_GETELEM)
 
 CASE(JSOP_GETELEM_SUPER)
 {
-    ReservedRooted<Value> rval(&rootValue0, REGS.sp[-3]);
-    ReservedRooted<Value> receiver(&rootValue1, REGS.sp[-2]);
+    ReservedRooted<Value> receiver(&rootValue1, REGS.sp[-3]);
+    ReservedRooted<Value> rval(&rootValue0, REGS.sp[-2]);
     ReservedRooted<JSObject*> obj(&rootObject1, &REGS.sp[-1].toObject());
 
     MutableHandleValue res = REGS.stackHandleAt(-3);
@@ -3126,8 +3126,8 @@ CASE(JSOP_STRICTSETELEM_SUPER)
     static_assert(JSOP_SETELEM_SUPER_LENGTH == JSOP_STRICTSETELEM_SUPER_LENGTH,
                   "setelem-super and strictsetelem-super must be the same size");
 
-    ReservedRooted<Value> index(&rootValue1, REGS.sp[-4]);
-    ReservedRooted<Value> receiver(&rootValue0, REGS.sp[-3]);
+    ReservedRooted<Value> receiver(&rootValue0, REGS.sp[-4]);
+    ReservedRooted<Value> index(&rootValue1, REGS.sp[-3]);
     ReservedRooted<JSObject*> obj(&rootObject1, &REGS.sp[-2].toObject());
     HandleValue value = REGS.stackHandleAt(-1);
 
@@ -3906,14 +3906,7 @@ END_CASE(JSOP_HOLE)
 
 CASE(JSOP_NEWINIT)
 {
-    uint8_t i = GET_UINT8(REGS.pc);
-    MOZ_ASSERT(i == JSProto_Array || i == JSProto_Object);
-
-    JSObject* obj;
-    if (i == JSProto_Array)
-        obj = NewArrayOperation(cx, script, REGS.pc, 0);
-    else
-        obj = NewObjectOperation(cx, script, REGS.pc);
+    JSObject* obj = NewObjectOperation(cx, script, REGS.pc);
 
     if (!obj)
         goto error;
@@ -4403,7 +4396,8 @@ CASE(JSOP_IMPORTMETA)
     ReservedRooted<JSObject*> module(&rootObject0, GetModuleObjectForScript(script));
     MOZ_ASSERT(module);
 
-    JSObject* metaObject = GetOrCreateModuleMetaObject(cx, module);
+    ReservedRooted<JSScript*> script(&rootScript0, module->as<ModuleObject>().script());
+    JSObject* metaObject = GetOrCreateModuleMetaObject(cx, script);
     if (!metaObject)
         goto error;
 
@@ -5161,8 +5155,13 @@ js::NewObjectOperation(JSContext* cx, HandleScript script, jsbytecode* pc,
             AutoSweepObjectGroup sweep(group);
             if (group->maybePreliminaryObjects(sweep)) {
                 group->maybePreliminaryObjects(sweep)->maybeAnalyze(cx, group);
-                if (group->maybeUnboxedLayout(sweep))
+                if (group->maybeUnboxedLayout(sweep)) {
+                    // This sets the allocation site so that the template object
+                    // can be read back but if op is NEWINIT, then the template
+                    // is null. 
+                    MOZ_ASSERT(JSOp(*pc) != JSOP_NEWINIT);
                     group->maybeUnboxedLayout(sweep)->setAllocationSite(script, pc);
+                }
             }
 
             if (group->shouldPreTenure(sweep) || group->maybePreliminaryObjects(sweep))
@@ -5180,7 +5179,6 @@ js::NewObjectOperation(JSContext* cx, HandleScript script, jsbytecode* pc,
         obj = CopyInitializerObject(cx, baseObject, newKind);
     } else {
         MOZ_ASSERT(*pc == JSOP_NEWINIT);
-        MOZ_ASSERT(GET_UINT8(pc) == JSProto_Object);
         obj = NewBuiltinClassInstance<PlainObject>(cx, newKind);
     }
 

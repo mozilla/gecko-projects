@@ -18,6 +18,7 @@
 #include "nsDOMNavigationTiming.h"
 #include "nsIDOMStorageManager.h"
 #include "mozilla/AutoplayPermissionManager.h"
+#include "mozilla/dom/ContentFrameMessageManager.h"
 #include "mozilla/dom/DOMJSProxyHandler.h"
 #include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/EventTarget.h"
@@ -1691,10 +1692,16 @@ nsGlobalWindowInner::InnerSetNewDocument(JSContext* aCx, nsIDocument* aDocument)
   }
 
   mDoc = aDocument;
-  ClearDocumentDependentSlots(aCx);
   mFocusedElement = nullptr;
   mLocalStorage = nullptr;
   mSessionStorage = nullptr;
+  mPerformance = nullptr;
+
+  // This must be called after nullifying the internal objects because here we
+  // could recreate them, calling the getter methods, and store them into the JS
+  // slots. If we nullify them after, the slot values and the objects will be
+  // out of sync.
+  ClearDocumentDependentSlots(aCx);
 
 #ifdef DEBUG
   mLastOpenedURI = aDocument->GetDocumentURI();
@@ -1910,20 +1917,18 @@ nsGlobalWindowInner::UpdateParentTarget()
 
   nsCOMPtr<Element> frameElement = GetOuterWindow()->GetFrameElementInternal();
   nsCOMPtr<EventTarget> eventTarget =
-    nsContentUtils::TryGetTabChildGlobalAsEventTarget(frameElement);
+    nsContentUtils::TryGetTabChildGlobal(frameElement);
 
   if (!eventTarget) {
     nsGlobalWindowOuter* topWin = GetScriptableTopInternal();
     if (topWin) {
       frameElement = topWin->AsOuter()->GetFrameElementInternal();
-      eventTarget =
-        nsContentUtils::TryGetTabChildGlobalAsEventTarget(frameElement);
+      eventTarget = nsContentUtils::TryGetTabChildGlobal(frameElement);
     }
   }
 
   if (!eventTarget) {
-    eventTarget =
-      nsContentUtils::TryGetTabChildGlobalAsEventTarget(mChromeEventHandler);
+    eventTarget = nsContentUtils::TryGetTabChildGlobal(mChromeEventHandler);
   }
 
   if (!eventTarget) {
@@ -2254,6 +2259,15 @@ nsPIDOMWindowInner::GetPerformance()
 }
 
 void
+nsPIDOMWindowInner::QueuePerformanceNavigationTiming()
+{
+  CreatePerformanceObjectIfNeeded();
+  if (mPerformance) {
+    mPerformance->QueueNavigationTimingEntry();
+  }
+}
+
+void
 nsPIDOMWindowInner::CreatePerformanceObjectIfNeeded()
 {
   if (mPerformance || !mDoc) {
@@ -2355,7 +2369,10 @@ nsGlobalWindowInner::GetInstallTrigger()
       rv.SuppressException();
       return nullptr;
     }
-    mInstallTrigger = new InstallTriggerImpl(jsImplObj, this);
+    MOZ_RELEASE_ASSERT(!js::IsWrapper(jsImplObj));
+    JS::Rooted<JSObject*> jsImplGlobal(RootingCx(),
+                                       JS::GetNonCCWObjectGlobal(jsImplObj));
+    mInstallTrigger = new InstallTriggerImpl(jsImplObj, jsImplGlobal, this);
   }
 
   return do_AddRef(mInstallTrigger);
@@ -4889,19 +4906,6 @@ nsGlobalWindowInner::GetIndexedDB(ErrorResult& aError)
   return mIndexedDB;
 }
 
-void
-nsGlobalWindowInner::AddPendingPromise(mozilla::dom::Promise* aPromise)
-{
-  mPendingPromises.AppendElement(aPromise);
-}
-
-void
-nsGlobalWindowInner::RemovePendingPromise(mozilla::dom::Promise* aPromise)
-{
-  DebugOnly<bool> foundIt = mPendingPromises.RemoveElement(aPromise);
-  MOZ_ASSERT(foundIt, "tried to remove a non-existent element from mPendingPromises");
-}
-
 //*****************************************************************************
 // nsGlobalWindowInner::nsIInterfaceRequestor
 //*****************************************************************************
@@ -6859,6 +6863,15 @@ nsGlobalWindowInner::NotifyActiveVRDisplaysChanged()
 }
 
 void
+nsGlobalWindowInner::NotifyPresentationGenerationChanged(uint32_t aDisplayID) {
+  for (const auto& display : mVRDisplays) {
+    if (display->DisplayId() == aDisplayID) {
+      display->OnPresentationGenerationChanged();
+    }
+  }
+}
+
+void
 nsGlobalWindowInner::DispatchVRDisplayActivate(uint32_t aDisplayID,
                                                mozilla::dom::VRDisplayEventReason aReason)
 {
@@ -7446,7 +7459,10 @@ nsGlobalWindowInner::GetExternal(ErrorResult& aRv)
     if (aRv.Failed()) {
       return nullptr;
     }
-    mExternal = new External(jsImplObj, this);
+    MOZ_RELEASE_ASSERT(!js::IsWrapper(jsImplObj));
+    JS::Rooted<JSObject*> jsImplGlobal(RootingCx(),
+                                       JS::GetNonCCWObjectGlobal(jsImplObj));
+    mExternal = new External(jsImplObj, jsImplGlobal, this);
   }
 
   RefPtr<External> external = static_cast<External*>(mExternal.get());

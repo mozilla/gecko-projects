@@ -20,11 +20,19 @@ var _actions = require("../actions/index");
 
 var _actions2 = _interopRequireDefault(_actions);
 
+var _A11yIntention = require("./A11yIntention");
+
+var _A11yIntention2 = _interopRequireDefault(_A11yIntention);
+
 var _ShortcutsModal = require("./ShortcutsModal");
 
 var _selectors = require("../selectors/index");
 
 var _devtoolsModules = require("devtools/client/debugger/new/dist/vendors").vendored["devtools-modules"];
+
+var _devtoolsServices = require("Services");
+
+var _devtoolsServices2 = _interopRequireDefault(_devtoolsServices);
 
 var _devtoolsSplitter = require("devtools/client/debugger/new/dist/vendors").vendored["devtools-splitter"];
 
@@ -68,7 +76,7 @@ const shortcuts = new _devtoolsModules.KeyShortcuts({
 });
 const {
   appinfo
-} = _devtoolsModules.Services;
+} = _devtoolsServices2.default;
 const isMacOS = appinfo.OS === "Darwin";
 const horizontalLayoutBreakpoint = window.matchMedia("(min-width: 800px)");
 const verticalLayoutBreakpoint = window.matchMedia("(min-width: 10px) and (max-width: 800px)");
@@ -273,10 +281,10 @@ class App extends _react.Component {
     } = this.props;
     return _react2.default.createElement("div", {
       className: "debugger"
-    }, this.renderLayout(), quickOpenEnabled === true && _react2.default.createElement(_QuickOpenModal2.default, {
+    }, _react2.default.createElement(_A11yIntention2.default, null, this.renderLayout(), quickOpenEnabled === true && _react2.default.createElement(_QuickOpenModal2.default, {
       shortcutsModalEnabled: this.state.shortcutsModalEnabled,
       toggleShortcutsModal: () => this.toggleShortcutsModal()
-    }), this.renderShortcutsModal());
+    }), this.renderShortcutsModal()));
   }
 
 }

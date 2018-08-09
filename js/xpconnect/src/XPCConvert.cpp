@@ -440,7 +440,8 @@ bool ConvertToPrimitive(JSContext* cx, HandleValue v, T* retval)
 
 // static
 bool
-XPCConvert::JSData2Native(void* d, HandleValue s,
+XPCConvert::JSData2Native(JSContext* cx,
+                          void* d, HandleValue s,
                           const nsXPTType& type,
                           const nsID* iid,
                           uint32_t arrlen,
@@ -448,7 +449,8 @@ XPCConvert::JSData2Native(void* d, HandleValue s,
 {
     MOZ_ASSERT(d, "bad param");
 
-    AutoJSContext cx;
+    js::AssertSameCompartment(cx, s);
+
     if (pErr)
         *pErr = NS_ERROR_XPC_BAD_CONVERT_JS;
 
@@ -796,7 +798,7 @@ XPCConvert::JSData2Native(void* d, HandleValue s,
         }
 
         RootedObject src(cx, &s.toObject());
-        return JSObject2NativeInterface((void**)d, src, iid, nullptr, pErr);
+        return JSObject2NativeInterface(cx, (void**)d, src, iid, nullptr, pErr);
     }
 
     case nsXPTType::T_DOMOBJECT:
@@ -1034,7 +1036,8 @@ XPCConvert::NativeInterface2JSObject(MutableHandleValue d,
 
 // static
 bool
-XPCConvert::JSObject2NativeInterface(void** dest, HandleObject src,
+XPCConvert::JSObject2NativeInterface(JSContext* cx,
+                                     void** dest, HandleObject src,
                                      const nsID* iid,
                                      nsISupports* aOuter,
                                      nsresult* pErr)
@@ -1042,6 +1045,8 @@ XPCConvert::JSObject2NativeInterface(void** dest, HandleObject src,
     MOZ_ASSERT(dest, "bad param");
     MOZ_ASSERT(src, "bad param");
     MOZ_ASSERT(iid, "bad param");
+
+    js::AssertSameCompartment(cx, src);
 
     *dest = nullptr;
      if (pErr)
@@ -1116,7 +1121,7 @@ XPCConvert::JSObject2NativeInterface(void** dest, HandleObject src,
     }
 
     RefPtr<nsXPCWrappedJS> wrapper;
-    nsresult rv = nsXPCWrappedJS::GetNewOrUsed(src, *iid, getter_AddRefs(wrapper));
+    nsresult rv = nsXPCWrappedJS::GetNewOrUsed(cx, src, *iid, getter_AddRefs(wrapper));
     if (pErr)
         *pErr = rv;
 
@@ -1534,12 +1539,12 @@ XPCConvert::JSArray2Native(JS::HandleValue aJSVal,
     RootedValue current(cx);
     for (uint32_t i = 0; i < length; ++i) {
         if (!JS_GetElement(cx, jsarray, i, &current) ||
-            !JSData2Native(aEltType.ElementPtr(buf, i), current,
+            !JSData2Native(cx, aEltType.ElementPtr(buf, i), current,
                            aEltType, aIID, 0, pErr)) {
             // Array element conversion failed. Clean up all elements converted
             // before the error. Caller handles freeing 'buf'.
             for (uint32_t j = 0; j < i; ++j) {
-                CleanupValue(aEltType, aEltType.ElementPtr(buf, j));
+                DestructValue(aEltType, aEltType.ElementPtr(buf, j));
             }
             return false;
         }
@@ -1604,7 +1609,7 @@ xpc::InnerCleanupValue(const nsXPTType& aType, void* aValue, uint32_t aArrayLen)
             void* elements = *(void**)aValue;
 
             for (uint32_t i = 0; i < aArrayLen; ++i) {
-                CleanupValue(elty, elty.ElementPtr(elements, i));
+                DestructValue(elty, elty.ElementPtr(elements, i));
             }
             free(elements);
             break;
@@ -1617,7 +1622,7 @@ xpc::InnerCleanupValue(const nsXPTType& aType, void* aValue, uint32_t aArrayLen)
             auto* array = (xpt::detail::UntypedTArray*)aValue;
 
             for (uint32_t i = 0; i < array->Length(); ++i) {
-                CleanupValue(elty, elty.ElementPtr(array->Elements(), i));
+                DestructValue(elty, elty.ElementPtr(array->Elements(), i));
             }
             array->Clear();
             break;
@@ -1650,28 +1655,44 @@ void
 xpc::InitializeValue(const nsXPTType& aType, void* aValue)
 {
     switch (aType.Tag()) {
-        // Types which require custom, specific initialization.
-        case nsXPTType::T_JSVAL:
-            new (aValue) JS::Value();
-            MOZ_ASSERT(reinterpret_cast<JS::Value*>(aValue)->isUndefined());
-            break;
+        // Use placement-new to initialize complex values
+#define XPT_INIT_TYPE(tag, type) \
+    case tag: new (aValue) type(); break;
+XPT_FOR_EACH_COMPLEX_TYPE(XPT_INIT_TYPE)
+#undef XPT_INIT_TYPE
 
-        case nsXPTType::T_ASTRING:
-        case nsXPTType::T_DOMSTRING:
-            new (aValue) nsString();
-            break;
-        case nsXPTType::T_CSTRING:
-        case nsXPTType::T_UTF8STRING:
-            new (aValue) nsCString();
-            break;
-
-        case nsXPTType::T_ARRAY:
-            new (aValue) xpt::detail::UntypedTArray();
-            break;
-
-        // The remaining types all have valid states where all bytes are '0'.
+        // The remaining types have valid states where all bytes are '0'.
         default:
             aType.ZeroValue(aValue);
             break;
+    }
+}
+
+// In XPT_FOR_EACH_COMPLEX_TYPE, typenames may be namespaced (such as
+// xpt::UntypedTArray). Namespaced typenames cannot be used to explicitly invoke
+// destructors, so this method acts as a helper to let us call the destructor of
+// these objects.
+template<typename T>
+static void
+_DestructValueHelper(void* aValue)
+{
+    static_cast<T*>(aValue)->~T();
+}
+
+void
+xpc::DestructValue(const nsXPTType& aType,
+                   void* aValue,
+                   uint32_t aArrayLen)
+{
+    // Get aValue into an clean, empty state.
+    xpc::CleanupValue(aType, aValue, aArrayLen);
+
+    // Run destructors on complex types.
+    switch (aType.Tag()) {
+#define XPT_RUN_DESTRUCTOR(tag, type) \
+    case tag: _DestructValueHelper<type>(aValue); break;
+XPT_FOR_EACH_COMPLEX_TYPE(XPT_RUN_DESTRUCTOR)
+#undef XPT_RUN_DESTRUCTOR
+        default: break; // dtor is a no-op on other types.
     }
 }

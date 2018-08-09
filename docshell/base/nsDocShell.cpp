@@ -39,6 +39,7 @@
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ClientSource.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/ContentFrameMessageManager.h"
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLAnchorElement.h"
@@ -519,16 +520,13 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDocShell)
   NS_INTERFACE_MAP_ENTRY(nsIWebNavigation)
   NS_INTERFACE_MAP_ENTRY(nsIBaseWindow)
   NS_INTERFACE_MAP_ENTRY(nsIScrollable)
-  NS_INTERFACE_MAP_ENTRY(nsITextScroll)
   NS_INTERFACE_MAP_ENTRY(nsIRefreshURI)
   NS_INTERFACE_MAP_ENTRY(nsIWebProgressListener)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_INTERFACE_MAP_ENTRY(nsIWebPageDescriptor)
   NS_INTERFACE_MAP_ENTRY(nsIAuthPromptProvider)
   NS_INTERFACE_MAP_ENTRY(nsILoadContext)
-  NS_INTERFACE_MAP_ENTRY(nsIWebShellServices)
   NS_INTERFACE_MAP_ENTRY(nsILinkHandler)
-  NS_INTERFACE_MAP_ENTRY(nsIClipboardCommands)
   NS_INTERFACE_MAP_ENTRY(nsIDOMStorageManager)
   NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsINetworkInterceptController,
                                      mInterceptController)
@@ -619,11 +617,6 @@ nsDocShell::GetInterface(const nsIID& aIID, void** aSink)
     *aSink = mFind;
     NS_ADDREF((nsISupports*)*aSink);
     return NS_OK;
-  } else if (aIID.Equals(NS_GET_IID(nsIEditingSession))) {
-    nsCOMPtr<nsIEditingSession> es;
-    GetEditingSession(getter_AddRefs(es));
-    es.forget(aSink);
-    return *aSink ? NS_OK : NS_NOINTERFACE;
   } else if (aIID.Equals(NS_GET_IID(nsISelectionDisplay))) {
     nsIPresShell* shell = GetPresShell();
     if (shell) {
@@ -638,17 +631,6 @@ nsDocShell::GetInterface(const nsIID& aIID, void** aSink)
   } else if (aIID.Equals(NS_GET_IID(nsITabChild))) {
     *aSink = GetTabChild().take();
     return *aSink ? NS_OK : NS_ERROR_FAILURE;
-  } else if (aIID.Equals(NS_GET_IID(nsIContentFrameMessageManager))) {
-    RefPtr<TabChild> tabChild = TabChild::GetFrom(this);
-    nsCOMPtr<nsIContentFrameMessageManager> mm;
-    if (tabChild) {
-      mm = tabChild->GetMessageManager();
-    } else {
-      if (nsPIDOMWindowOuter* win = GetWindow()) {
-        mm = do_QueryInterface(win->GetParentTarget());
-      }
-    }
-    *aSink = mm.get();
   } else {
     return nsDocLoader::GetInterface(aIID, aSink);
   }
@@ -3977,6 +3959,19 @@ nsDocShell::GetDomWindow(mozIDOMWindowProxy** aWindow)
 }
 
 NS_IMETHODIMP
+nsDocShell::GetMessageManager(ContentFrameMessageManager** aMessageManager)
+{
+  RefPtr<ContentFrameMessageManager> mm;
+  if (RefPtr<TabChild> tabChild = TabChild::GetFrom(this)) {
+    mm = tabChild->GetMessageManager();
+  } else if (nsPIDOMWindowOuter* win = GetWindow()) {
+    mm = win->GetMessageManager();
+  }
+  mm.forget(aMessageManager);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDocShell::SetDeviceSizeIsPageSize(bool aValue)
 {
   if (mDeviceSizeIsPageSize != aValue) {
@@ -6088,32 +6083,6 @@ nsDocShell::GetScrollbarVisibility(bool* aVerticalVisible,
       (scrollbarVisibility & nsIScrollableFrame::HORIZONTAL) != 0;
   }
 
-  return NS_OK;
-}
-
-//*****************************************************************************
-// nsDocShell::nsITextScroll
-//*****************************************************************************
-
-NS_IMETHODIMP
-nsDocShell::ScrollByLines(int32_t aNumLines)
-{
-  nsIScrollableFrame* sf = GetRootScrollFrame();
-  NS_ENSURE_TRUE(sf, NS_ERROR_FAILURE);
-
-  sf->ScrollBy(nsIntPoint(0, aNumLines), nsIScrollableFrame::LINES,
-               nsIScrollableFrame::SMOOTH);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDocShell::ScrollByPages(int32_t aNumPages)
-{
-  nsIScrollableFrame* sf = GetRootScrollFrame();
-  NS_ENSURE_TRUE(sf, NS_ERROR_FAILURE);
-
-  sf->ScrollBy(nsIntPoint(0, aNumPages), nsIScrollableFrame::PAGES,
-               nsIScrollableFrame::SMOOTH);
   return NS_OK;
 }
 
@@ -9045,30 +9014,33 @@ nsDocShell::CopyFavicon(nsIURI* aOldURI,
 #endif
 }
 
-class InternalLoadEvent : public Runnable
+struct InternalLoadData 
 {
 public:
-  InternalLoadEvent(nsDocShell* aDocShell,
-                    nsIURI* aURI,
-                    nsIURI* aOriginalURI,
-                    Maybe<nsCOMPtr<nsIURI>> const& aResultPrincipalURI,
-                    bool aKeepResultPrincipalURIIfSet,
-                    bool aLoadReplace,
-                    nsIURI* aReferrer, uint32_t aReferrerPolicy,
-                    nsIPrincipal* aTriggeringPrincipal,
-                    nsIPrincipal* aPrincipalToInherit,
-                    uint32_t aFlags,
-                    const char* aTypeHint,
-                    nsIInputStream* aPostData,
-                    nsIInputStream* aHeadersData,
-                    uint32_t aLoadType,
-                    nsISHEntry* aSHEntry,
-                    bool aFirstParty,
-                    const nsAString& aSrcdoc,
-                    nsIDocShell* aSourceDocShell,
-                    nsIURI* aBaseURI)
-    : mozilla::Runnable("InternalLoadEvent")
-    , mSrcdoc(aSrcdoc)
+  InternalLoadData(nsDocShell* aDocShell,
+                   nsIURI* aURI,
+                   nsIURI* aOriginalURI,
+                   Maybe<nsCOMPtr<nsIURI>> const& aResultPrincipalURI,
+                   bool aKeepResultPrincipalURIIfSet,
+                   bool aLoadReplace,
+                   nsIURI* aReferrer, uint32_t aReferrerPolicy,
+                   nsIPrincipal* aTriggeringPrincipal,
+                   nsIPrincipal* aPrincipalToInherit,
+                   uint32_t aFlags,
+                   const nsAString& aWindowTarget,
+                   const char* aTypeHint,
+                   const nsAString& aFileName,
+                   nsIInputStream* aPostData,
+                   nsIInputStream* aHeadersData,
+                   uint32_t aLoadType,
+                   nsISHEntry* aSHEntry,
+                   bool aFirstParty,
+                   const nsAString& aSrcdoc,
+                   nsIDocShell* aSourceDocShell,
+                   nsIURI* aBaseURI,
+                   nsIDocShell** aDocShell2,
+                   nsIRequest** aRequest)
+    : mSrcdoc(aSrcdoc)
     , mDocShell(aDocShell)
     , mURI(aURI)
     , mOriginalURI(aOriginalURI)
@@ -9083,10 +9055,14 @@ public:
     , mHeadersData(aHeadersData)
     , mSHEntry(aSHEntry)
     , mFlags(aFlags)
+    , mWindowTarget(aWindowTarget)
+    , mFileName(aFileName)
     , mLoadType(aLoadType)
     , mFirstParty(aFirstParty)
     , mSourceDocShell(aSourceDocShell)
     , mBaseURI(aBaseURI)
+    , mDocShell2(aDocShell2)
+    , mRequest(aRequest)
   {
     // Make sure to keep null things null as needed
     if (aTypeHint) {
@@ -9096,8 +9072,7 @@ public:
     }
   }
 
-  NS_IMETHOD
-  Run() override
+  nsresult Run()
   {
     return mDocShell->InternalLoad(mURI, mOriginalURI, mResultPrincipalURI,
                                    mKeepResultPrincipalURIIfSet,
@@ -9105,17 +9080,16 @@ public:
                                    mReferrer,
                                    mReferrerPolicy,
                                    mTriggeringPrincipal, mPrincipalToInherit,
-                                   mFlags, EmptyString(),
+                                   mFlags, mWindowTarget,
                                    mTypeHint.IsVoid() ? nullptr
                                                       : mTypeHint.get(),
-                                   VoidString(), mPostData,
+                                   mFileName, mPostData,
                                    mHeadersData, mLoadType, mSHEntry,
                                    mFirstParty, mSrcdoc, mSourceDocShell,
-                                   mBaseURI, nullptr,
-                                   nullptr);
+                                   mBaseURI, mDocShell2,
+                                   mRequest);
   }
 
-private:
   nsCString mTypeHint;
   nsString mSrcdoc;
 
@@ -9133,11 +9107,173 @@ private:
   nsCOMPtr<nsIInputStream> mHeadersData;
   nsCOMPtr<nsISHEntry> mSHEntry;
   uint32_t mFlags;
+  nsString mWindowTarget;
+  nsString mFileName;
   uint32_t mLoadType;
   bool mFirstParty;
   nsCOMPtr<nsIDocShell> mSourceDocShell;
   nsCOMPtr<nsIURI> mBaseURI;
+  nsIDocShell** mDocShell2;
+  nsIRequest** mRequest;
 };
+
+class InternalLoadEvent : public Runnable
+{
+public:
+  InternalLoadEvent(nsDocShell* aDocShell,
+                    nsIURI* aURI,
+                    nsIURI* aOriginalURI,
+                    Maybe<nsCOMPtr<nsIURI>> const& aResultPrincipalURI,
+                    bool aKeepResultPrincipalURIIfSet,
+                    bool aLoadReplace,
+                    nsIURI* aReferrer,
+                    uint32_t aReferrerPolicy,
+                    nsIPrincipal* aTriggeringPrincipal,
+                    nsIPrincipal* aPrincipalToInherit,
+                    uint32_t aFlags,
+                    const char* aTypeHint,
+                    nsIInputStream* aPostData,
+                    nsIInputStream* aHeadersData,
+                    uint32_t aLoadType,
+                    nsISHEntry* aSHEntry,
+                    bool aFirstParty,
+                    const nsAString& aSrcdoc,
+                    nsIDocShell* aSourceDocShell,
+                    nsIURI* aBaseURI)
+    : mozilla::Runnable("InternalLoadEvent")
+    , mLoadData(aDocShell,
+                aURI,
+                aOriginalURI,
+                aResultPrincipalURI,
+                aKeepResultPrincipalURIIfSet,
+                aLoadReplace,
+                aReferrer,
+                aReferrerPolicy,
+                aTriggeringPrincipal,
+                aPrincipalToInherit,
+                aFlags,
+                EmptyString(),
+                aTypeHint,
+                VoidString(),
+                aPostData,
+                aHeadersData,
+                aLoadType,
+                aSHEntry,
+                aFirstParty,
+                aSrcdoc,
+                aSourceDocShell,
+                aBaseURI,
+                nullptr,
+                nullptr) 
+  {}
+
+  NS_IMETHOD
+  Run() override
+  {
+    return mLoadData.Run();
+  }
+
+private:
+  InternalLoadData mLoadData;
+};
+
+class LoadURIDelegateHandler final : public PromiseNativeHandler
+{
+public:
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS(LoadURIDelegateHandler)
+
+  LoadURIDelegateHandler(nsDocShell* aDocShell,
+                         nsIURI* aURI,
+                         nsIURI* aOriginalURI,
+                         Maybe<nsCOMPtr<nsIURI>> const& aResultPrincipalURI,
+                         bool aKeepResultPrincipalURIIfSet,
+                         bool aLoadReplace,
+                         nsIURI* aReferrer,
+                         uint32_t aReferrerPolicy,
+                         nsIPrincipal* aTriggeringPrincipal,
+                         nsIPrincipal* aPrincipalToInherit,
+                         uint32_t aFlags,
+                         const nsAString& aWindowTarget,
+                         const char* aTypeHint,
+                         const nsAString& aFileName,
+                         nsIInputStream* aPostData,
+                         nsIInputStream* aHeadersData,
+                         uint32_t aLoadType,
+                         nsISHEntry* aSHEntry,
+                         bool aFirstParty,
+                         const nsAString& aSrcdoc,
+                         nsIDocShell* aSourceDocShell,
+                         nsIURI* aBaseURI,
+                         nsIDocShell** aDocShell2,
+                         nsIRequest** aRequest)
+    : mLoadData(aDocShell,
+                aURI,
+                aOriginalURI,
+                aResultPrincipalURI,
+                aKeepResultPrincipalURIIfSet,
+                aLoadReplace,
+                aReferrer,
+                aReferrerPolicy,
+                aTriggeringPrincipal,
+                aPrincipalToInherit,
+                aFlags,
+                aWindowTarget,
+                aTypeHint,
+                aFileName,
+                aPostData,
+                aHeadersData,
+                aLoadType,
+                aSHEntry,
+                aFirstParty,
+                aSrcdoc,
+                aSourceDocShell,
+                aBaseURI,
+                aDocShell2,
+                aRequest)
+  {}
+
+  void
+  ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override
+  {
+    if (aValue.isBoolean() && !aValue.toBoolean()) {
+      // Things went fine, not handled by app, let Gecko do its thing
+      mLoadData.Run();
+    } else if (!aValue.isBoolean()) {
+      // If the promise resolves to a non-boolean, let Gecko handle the load
+      mLoadData.Run();
+    }
+  }
+
+  void
+  RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override
+  {
+    // In the event of a rejected callback, let Gecko handle the load
+    mLoadData.Run();
+  }
+
+private:
+  ~LoadURIDelegateHandler()
+  {}
+
+  InternalLoadData mLoadData;
+};
+
+NS_IMPL_CYCLE_COLLECTION(LoadURIDelegateHandler, mLoadData.mDocShell,
+                         mLoadData.mURI, mLoadData.mOriginalURI,
+                         mLoadData.mResultPrincipalURI, mLoadData.mReferrer,
+                         mLoadData.mTriggeringPrincipal,
+                         mLoadData.mPrincipalToInherit, 
+                         mLoadData.mPostData, mLoadData.mHeadersData,
+                         mLoadData.mSHEntry, mLoadData.mSourceDocShell,
+                         mLoadData.mBaseURI)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(LoadURIDelegateHandler)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(LoadURIDelegateHandler)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(LoadURIDelegateHandler)
 
 /**
  * Returns true if we started an asynchronous load (i.e., from the network), but
@@ -9386,7 +9522,10 @@ nsDocShell::InternalLoad(nsIURI* aURI,
   const bool isDocumentAuxSandboxed = doc &&
     (doc->GetSandboxFlags() & SANDBOXED_AUXILIARY_NAVIGATION);
 
-  if (aURI && mLoadURIDelegate &&
+  const bool checkLoadDelegates = !(aFlags & INTERNAL_LOAD_FLAGS_DELEGATES_CHECKED);
+  aFlags = aFlags & ~INTERNAL_LOAD_FLAGS_DELEGATES_CHECKED;
+
+  if (aURI && mLoadURIDelegate && checkLoadDelegates &&
       (!targetDocShell || targetDocShell == static_cast<nsIDocShell*>(this))) {
     // Dispatch only load requests for the current or a new window to the
     // delegate, e.g., to allow for GeckoView apps to handle the load event
@@ -9399,11 +9538,24 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       return NS_ERROR_DOM_INVALID_ACCESS_ERR;
     }
 
-    bool loadURIHandled = false;
+    RefPtr<dom::Promise> promise;
     rv = mLoadURIDelegate->LoadURI(aURI, where, aFlags, aTriggeringPrincipal,
-                                   &loadURIHandled);
-    if (NS_SUCCEEDED(rv) && loadURIHandled) {
-      // The request has been handled, nothing to do here.
+                                   getter_AddRefs(promise));
+    if (NS_SUCCEEDED(rv) && promise) {
+      const uint32_t flags = aFlags | INTERNAL_LOAD_FLAGS_DELEGATES_CHECKED;
+
+      RefPtr<LoadURIDelegateHandler> handler = 
+        new LoadURIDelegateHandler(this, aURI, aOriginalURI, aResultPrincipalURI,
+                                   aKeepResultPrincipalURIIfSet,
+                                   aLoadReplace, aReferrer, aReferrerPolicy,
+                                   aTriggeringPrincipal, aPrincipalToInherit,
+                                   flags, aWindowTarget, aTypeHint, aFileName, aPostData,
+                                   aHeadersData, aLoadType, aSHEntry, aFirstParty,
+                                   aSrcdoc, aSourceDocShell, aBaseURI, nullptr, nullptr);
+
+      promise->AppendNativeHandler(handler);
+
+      // Checking for load delegates; InternalLoad will be re-called if needed.
       return NS_OK;
     }
   }
@@ -13109,96 +13261,6 @@ nsDocShell::EnsureCommandHandler()
   return mCommandManager ? NS_OK : NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
-nsDocShell::CanCutSelection(bool* aResult)
-{
-  return IsCommandEnabled("cmd_cut", aResult);
-}
-
-NS_IMETHODIMP
-nsDocShell::CanCopySelection(bool* aResult)
-{
-  return IsCommandEnabled("cmd_copy", aResult);
-}
-
-NS_IMETHODIMP
-nsDocShell::CanCopyLinkLocation(bool* aResult)
-{
-  return IsCommandEnabled("cmd_copyLink", aResult);
-}
-
-NS_IMETHODIMP
-nsDocShell::CanCopyImageLocation(bool* aResult)
-{
-  return IsCommandEnabled("cmd_copyImageLocation", aResult);
-}
-
-NS_IMETHODIMP
-nsDocShell::CanCopyImageContents(bool* aResult)
-{
-  return IsCommandEnabled("cmd_copyImageContents", aResult);
-}
-
-NS_IMETHODIMP
-nsDocShell::CanPaste(bool* aResult)
-{
-  return IsCommandEnabled("cmd_paste", aResult);
-}
-
-NS_IMETHODIMP
-nsDocShell::CutSelection(void)
-{
-  return DoCommand("cmd_cut");
-}
-
-NS_IMETHODIMP
-nsDocShell::CopySelection(void)
-{
-  return DoCommand("cmd_copy");
-}
-
-NS_IMETHODIMP
-nsDocShell::CopyLinkLocation(void)
-{
-  return DoCommand("cmd_copyLink");
-}
-
-NS_IMETHODIMP
-nsDocShell::CopyImageLocation(void)
-{
-  return DoCommand("cmd_copyImageLocation");
-}
-
-NS_IMETHODIMP
-nsDocShell::CopyImageContents(void)
-{
-  return DoCommand("cmd_copyImageContents");
-}
-
-NS_IMETHODIMP
-nsDocShell::Paste(void)
-{
-  return DoCommand("cmd_paste");
-}
-
-NS_IMETHODIMP
-nsDocShell::SelectAll(void)
-{
-  return DoCommand("cmd_selectAll");
-}
-
-//
-// SelectNone
-//
-// Collapses the current selection, insertion point ends up at beginning
-// of previous selection.
-//
-NS_IMETHODIMP
-nsDocShell::SelectNone(void)
-{
-  return DoCommand("cmd_selectNone");
-}
-
 // link handling
 
 class OnLinkClickEvent : public Runnable
@@ -13603,9 +13665,9 @@ nsDocShell::PluginsAllowedInCurrentDoc()
 // Web Shell Services API
 
 // This functions is only called when a new charset is detected in loading a
-// document. Its name should be changed to "CharsetReloadDocument"
-NS_IMETHODIMP
-nsDocShell::ReloadDocument(const char* aCharset, int32_t aSource)
+// document.
+nsresult
+nsDocShell::CharsetChangeReloadDocument(const char* aCharset, int32_t aSource)
 {
   // XXX hack. keep the aCharset and aSource wait to pick it up
   nsCOMPtr<nsIContentViewer> cv;
@@ -13637,8 +13699,8 @@ nsDocShell::ReloadDocument(const char* aCharset, int32_t aSource)
   return NS_ERROR_DOCSHELL_REQUEST_REJECTED;
 }
 
-NS_IMETHODIMP
-nsDocShell::StopDocumentLoad(void)
+nsresult
+nsDocShell::CharsetChangeStopDocumentLoad()
 {
   if (eCharsetReloadRequested != mCharsetReloadState) {
     Stop(nsIWebNavigation::STOP_ALL);

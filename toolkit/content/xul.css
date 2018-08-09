@@ -174,10 +174,6 @@ browser[remote=true]:not(.lightweight) {
   -moz-binding: url("chrome://global/content/bindings/remote-browser.xml#remote-browser");
 }
 
-editor {
-  -moz-binding: url("chrome://global/content/bindings/editor.xml#editor");
-}
-
 /********** notifications **********/
 
 notificationbox {
@@ -619,20 +615,12 @@ textbox[multiline="true"] {
   -moz-binding: url("chrome://global/content/bindings/textbox.xml#textarea");
 }
 
-.textbox-input-box {
-  -moz-binding: url("chrome://global/content/bindings/textbox.xml#input-box");
-}
-
 html|textarea.textbox-textarea {
   resize: none;
 }
 
-textbox[resizable="true"] > .textbox-input-box > html|textarea.textbox-textarea {
+textbox[resizable="true"] > moz-input-box > html|textarea.textbox-textarea {
   resize: both;
-}
-
-.textbox-input-box[spellcheck="true"] {
-  -moz-binding: url("chrome://global/content/bindings/textbox.xml#input-box-spell");
 }
 
 textbox[type="search"] {

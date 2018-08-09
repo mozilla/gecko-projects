@@ -35,8 +35,8 @@ namespace dom {
 bool Attr::sInitialized;
 
 Attr::Attr(nsDOMAttributeMap *aAttrMap,
-           already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
-           const nsAString  &aValue)
+           already_AddRefed<dom::NodeInfo>&& aNodeInfo,
+           const nsAString& aValue)
   : nsINode(aNodeInfo), mAttrMap(aAttrMap), mValue(aValue)
 {
   MOZ_ASSERT(mNodeInfo, "We must get a nodeinfo here!");
@@ -131,10 +131,10 @@ Attr::SetOwnerDocument(nsIDocument* aDocument)
   NS_ASSERTION(doc != aDocument, "bad call to Attr::SetOwnerDocument");
   doc->DeleteAllPropertiesFor(this);
 
-  RefPtr<mozilla::dom::NodeInfo> newNodeInfo;
-  newNodeInfo = aDocument->NodeInfoManager()->
-    GetNodeInfo(mNodeInfo->NameAtom(), mNodeInfo->GetPrefixAtom(),
-                mNodeInfo->NamespaceID(), ATTRIBUTE_NODE);
+  RefPtr<dom::NodeInfo> newNodeInfo =
+    aDocument->NodeInfoManager()->
+      GetNodeInfo(mNodeInfo->NameAtom(), mNodeInfo->GetPrefixAtom(),
+                  mNodeInfo->NamespaceID(), ATTRIBUTE_NODE);
   NS_ASSERTION(newNodeInfo, "GetNodeInfo lies");
   mNodeInfo.swap(newNodeInfo);
 
@@ -209,14 +209,12 @@ Attr::SetNodeValueInternal(const nsAString& aNodeValue, ErrorResult& aError)
 }
 
 nsresult
-Attr::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
-            bool aPreallocateChildren) const
+Attr::Clone(dom::NodeInfo* aNodeInfo, nsINode** aResult) const
 {
   nsAutoString value;
   const_cast<Attr*>(this)->GetValue(value);
 
-  RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
-  *aResult = new Attr(nullptr, ni.forget(), value);
+  *aResult = new Attr(nullptr, do_AddRef(aNodeInfo), value);
   if (!*aResult) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -253,36 +251,6 @@ bool
 Attr::IsNodeOfType(uint32_t aFlags) const
 {
     return false;
-}
-
-uint32_t
-Attr::GetChildCount() const
-{
-  return 0;
-}
-
-nsIContent *
-Attr::GetChildAt_Deprecated(uint32_t aIndex) const
-{
-  return nullptr;
-}
-
-int32_t
-Attr::ComputeIndexOf(const nsINode* aPossibleChild) const
-{
-  return -1;
-}
-
-nsresult
-Attr::InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
-                        bool aNotify)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-void
-Attr::RemoveChildNode(nsIContent* aKid, bool aNotify)
-{
 }
 
 void

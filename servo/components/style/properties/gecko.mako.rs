@@ -3106,6 +3106,9 @@ fn static_assert() {
     ) %>
     ${impl_keyword('clear', 'mBreakType', clear_keyword)}
 
+    <% resize_keyword = Keyword("resize", "None Both Horizontal Vertical") %>
+    ${impl_keyword('resize', 'mResize', resize_keyword)}
+
     <% overflow_x = data.longhands_by_name["overflow-x"] %>
     pub fn set_overflow_y(&mut self, v: longhands::overflow_y::computed_value::T) {
         use properties::longhands::overflow_x::computed_value::T as BaseType;
@@ -4960,7 +4963,7 @@ fn static_assert() {
             ShapeSource::ImageOrUrl(image) => {
                 unsafe {
                     bindings::Gecko_NewShapeImage(${ident});
-                    let style_image = &mut *${ident}.mShapeImage.mPtr;
+                    let style_image = &mut *${ident}.__bindgen_anon_1.mShapeImage.as_mut().mPtr;
                     style_image.set(image);
                 }
             }
@@ -4980,7 +4983,7 @@ fn static_assert() {
                         // Create StyleBasicShape in StyleShapeSource. mReferenceBox and mType
                         // will be set manually later.
                         Gecko_NewBasicShape(${ident}, basic_shape_type);
-                        &mut *${ident}.mBasicShape.mPtr
+                        &mut *${ident}.__bindgen_anon_1.mBasicShape.as_mut().mPtr
                     }
                 }
                 match servo_shape {

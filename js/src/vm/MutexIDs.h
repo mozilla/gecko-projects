@@ -18,7 +18,7 @@
   _(TestMutex,                   100) \
   _(ShellContextWatchdog,        100) \
   _(ShellWorkerThreads,          100) \
-  _(ShellArrayBufferMailbox,     100) \
+  _(ShellObjectMailbox,          100) \
                                       \
   _(AtomsTable,                  200) \
                                       \
@@ -50,7 +50,6 @@
   _(RuntimeScriptData,           500) \
   _(WasmFuncTypeIdSet,           500) \
   _(WasmCodeProfilingLabels,     500) \
-  _(WasmModuleTieringLock,       500) \
   _(WasmCompileTaskState,        500) \
   _(WasmCodeStreamEnd,           500) \
   _(WasmTailBytesPtr,            500) \

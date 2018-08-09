@@ -324,7 +324,8 @@ xpc::ErrorReport::LogToConsole()
 
 void
 xpc::ErrorReport::LogToConsoleWithStack(JS::HandleObject aStack,
-                                        JS::HandleObject aStackGlobal)
+                                        JS::HandleObject aStackGlobal,
+                                        uint64_t aTimeWarpTarget /* = 0 */)
 {
     // Don't log failures after diverging from a recording during replay, as
     // this will cause the associated debugger operation to fail.
@@ -364,6 +365,7 @@ xpc::ErrorReport::LogToConsoleWithStack(JS::HandleObject aStack,
       errorObject = new nsScriptError();
     }
     errorObject->SetErrorMessageName(mErrorMsgName);
+    errorObject->SetTimeWarpTarget(aTimeWarpTarget);
 
     nsresult rv = errorObject->InitWithWindowID(mErrorMsg, mFileName, mSourceLine,
                                                 mLineNumber, mColumn, mFlags,
@@ -675,7 +677,7 @@ nsXPConnect::WrapJS(JSContext * aJSContext,
     RootedObject aJSObj(aJSContext, aJSObjArg);
 
     nsresult rv = NS_ERROR_UNEXPECTED;
-    if (!XPCConvert::JSObject2NativeInterface(result, aJSObj,
+    if (!XPCConvert::JSObject2NativeInterface(aJSContext, result, aJSObj,
                                               &aIID, nullptr, &rv))
         return rv;
     return NS_OK;
@@ -711,7 +713,7 @@ nsXPConnect::WrapJSAggregatedToNative(nsISupports* aOuter,
 
     RootedObject aJSObj(aJSContext, aJSObjArg);
     nsresult rv;
-    if (!XPCConvert::JSObject2NativeInterface(result, aJSObj,
+    if (!XPCConvert::JSObject2NativeInterface(aJSContext, result, aJSObj,
                                               &aIID, aOuter, &rv))
         return rv;
     return NS_OK;

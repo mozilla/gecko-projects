@@ -52,6 +52,7 @@
 #include "DrawTargetCapture.h"
 #include "DrawTargetDual.h"
 #include "DrawTargetTiled.h"
+#include "DrawTargetOffset.h"
 #include "DrawTargetWrapAndRecord.h"
 #include "DrawTargetRecording.h"
 
@@ -543,6 +544,19 @@ Factory::CreateTiledDrawTarget(const TileSet& aTileSet)
   return dt.forget();
 }
 
+already_AddRefed<DrawTarget>
+Factory::CreateOffsetDrawTarget(DrawTarget *aDrawTarget, IntPoint aTileOrigin)
+{
+  RefPtr<DrawTargetOffset> dt = new DrawTargetOffset();
+
+  if (!dt->Init(aDrawTarget, aTileOrigin)) {
+    return nullptr;
+  }
+
+  return dt.forget();
+}
+
+
 bool
 Factory::DoesBackendSupportDataDrawtarget(BackendType aType)
 {
@@ -621,15 +635,17 @@ Factory::CreateNativeFontResource(uint8_t *aData, uint32_t aSize, BackendType aB
 #ifdef WIN32
   case FontType::DWRITE:
     {
-      bool needsCairo = aBackendType == BackendType::CAIRO ||
-                        aBackendType == BackendType::SKIA;
+      bool needsCairo = aBackendType == BackendType::CAIRO;
       return NativeFontResourceDWrite::Create(aData, aSize, needsCairo);
     }
   case FontType::GDI:
     return NativeFontResourceGDI::Create(aData, aSize);
 #elif defined(XP_DARWIN)
   case FontType::MAC:
-    return NativeFontResourceMac::Create(aData, aSize);
+    {
+      bool needsCairo = aBackendType == BackendType::CAIRO;
+      return NativeFontResourceMac::Create(aData, aSize, needsCairo);
+    }
 #elif defined(MOZ_WIDGET_GTK)
   case FontType::FONTCONFIG:
     return NativeFontResourceFontconfig::Create(aData, aSize,

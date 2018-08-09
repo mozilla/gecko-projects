@@ -35,7 +35,6 @@
 #include "nsDocShellLoadTypes.h"
 #include "nsIWebNavigation.h"
 #include "nsIBaseWindow.h"
-#include "nsIWebShellServices.h"
 #include "nsIScriptContext.h"
 #include "nsIXPConnect.h"
 #include "nsContentList.h"
@@ -3280,14 +3279,13 @@ nsHTMLDocument::QueryCommandValue(const nsAString& commandID,
 }
 
 nsresult
-nsHTMLDocument::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
-                      bool aPreallocateChildren) const
+nsHTMLDocument::Clone(dom::NodeInfo* aNodeInfo, nsINode** aResult) const
 {
   NS_ASSERTION(aNodeInfo->NodeInfoManager() == mNodeInfoManager,
                "Can't import this document into another document!");
 
   RefPtr<nsHTMLDocument> clone = new nsHTMLDocument();
-  nsresult rv = CloneDocHelper(clone.get(), aPreallocateChildren);
+  nsresult rv = CloneDocHelper(clone.get());
   NS_ENSURE_SUCCESS(rv, rv);
 
   // State from nsHTMLDocument

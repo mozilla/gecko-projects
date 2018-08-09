@@ -15,7 +15,6 @@
 #include "mozilla/StyleSheet.h"
 #include "nsForwardReference.h"
 #include "nsIContent.h"
-#include "nsIDOMXULCommandDispatcher.h"
 #include "nsCOMArray.h"
 #include "nsIURI.h"
 #include "nsIStreamListener.h"
@@ -108,8 +107,7 @@ public:
     nsresult OnPrototypeLoadDone(bool aResumeWalk);
 
     // nsINode interface overrides
-    virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
-                           bool aPreallocateChildren) const override;
+    virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 
     // nsICSSLoaderObserver
     NS_IMETHOD StyleSheetLoaded(mozilla::StyleSheet* aSheet,
@@ -137,16 +135,6 @@ public:
     void TraceProtos(JSTracer* aTrc);
 
     // WebIDL API
-    already_AddRefed<nsINode> GetPopupNode();
-    void SetPopupNode(nsINode* aNode);
-    nsINode* GetPopupRangeParent(ErrorResult& aRv);
-    int32_t GetPopupRangeOffset(ErrorResult& aRv);
-    already_AddRefed<nsINode> GetTooltipNode();
-    void SetTooltipNode(nsINode* aNode) { /* do nothing */ }
-    nsIDOMXULCommandDispatcher* GetCommandDispatcher() const
-    {
-        return mCommandDispatcher;
-    }
     void AddBroadcastListenerFor(Element& aBroadcaster, Element& aListener,
                                  const nsAString& aAttr, ErrorResult& aRv);
     void RemoveBroadcastListenerFor(Element& aBroadcaster, Element& aListener,
@@ -190,8 +178,6 @@ protected:
                                  Element* aListener,
                                  nsAtom* aAttr);
 
-    already_AddRefed<nsPIWindowRoot> GetWindowRoot();
-
     static void DirectionChanged(const char* aPrefName, XULDocument* aData);
 
     // pseudo constants
@@ -228,8 +214,6 @@ protected:
      * called in this situation.
      */
     bool                       mStillWalking;
-
-    nsCOMPtr<nsIDOMXULCommandDispatcher>     mCommandDispatcher; // [OWNER] of the focus tracker
 
     uint32_t mPendingSheets;
 

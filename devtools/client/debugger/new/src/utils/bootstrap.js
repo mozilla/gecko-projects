@@ -83,7 +83,7 @@ function renderPanel(component, store) {
 function bootstrapStore(client, {
   services,
   toolboxActions
-}) {
+}, initialState) {
   const createStore = (0, _createStore2.default)({
     log: (0, _devtoolsEnvironment.isTesting)(),
     timing: (0, _devtoolsEnvironment.isDevelopment)(),
@@ -95,7 +95,7 @@ function bootstrapStore(client, {
       };
     }
   });
-  const store = createStore((0, _redux.combineReducers)(_reducers2.default));
+  const store = createStore((0, _redux.combineReducers)(_reducers2.default), initialState);
   store.subscribe(() => updatePrefs(store.getState()));
   const actions = (0, _redux.bindActionCreators)(require("../actions/index").default, store.dispatch);
   return {
@@ -149,10 +149,10 @@ function bootstrapApp(store) {
 let currentPendingBreakpoints;
 
 function updatePrefs(state) {
-  let previousPendingBreakpoints = currentPendingBreakpoints;
+  const previousPendingBreakpoints = currentPendingBreakpoints;
   currentPendingBreakpoints = selectors.getPendingBreakpoints(state);
 
   if (previousPendingBreakpoints && currentPendingBreakpoints !== previousPendingBreakpoints) {
-    _prefs.prefs.pendingBreakpoints = currentPendingBreakpoints;
+    _prefs.asyncStore.pendingBreakpoints = currentPendingBreakpoints;
   }
 }

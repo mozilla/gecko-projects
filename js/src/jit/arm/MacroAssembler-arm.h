@@ -572,7 +572,7 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
 
     void branch(JitCode* c) {
         BufferOffset bo = m_buffer.nextOffset();
-        addPendingJump(bo, ImmPtr(c->raw()), Relocation::JITCODE);
+        addPendingJump(bo, ImmPtr(c->raw()), RelocationKind::JITCODE);
         ScratchRegisterScope scratch(asMasm());
         ma_movPatchable(ImmPtr(c->raw()), scratch, Always);
         ma_bx(scratch);
@@ -1116,12 +1116,8 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
 
     void cmp32(Register lhs, Imm32 rhs);
     void cmp32(Register lhs, Register rhs);
-    void cmp32(const Address& lhs, Imm32 rhs) {
-        MOZ_CRASH("NYI");
-    }
-    void cmp32(const Address& lhs, Register rhs) {
-        MOZ_CRASH("NYI");
-    }
+    void cmp32(const Address& lhs, Imm32 rhs);
+    void cmp32(const Address& lhs, Register rhs);
 
     void cmpPtr(Register lhs, Register rhs);
     void cmpPtr(Register lhs, ImmWord rhs);

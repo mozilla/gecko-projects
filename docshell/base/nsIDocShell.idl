@@ -65,6 +65,7 @@ interface nsILoadURIDelegate;
 native TabChildRef(already_AddRefed<nsITabChild>);
 native nsDocShellLoadInfoPtr(nsDocShellLoadInfo*);
 
+webidl ContentFrameMessageManager;
 webidl EventTarget;
 
 [scriptable, builtinclass, uuid(049234fe-da10-478b-bc5d-bc6f9a1ba63d)]
@@ -116,6 +117,9 @@ interface nsIDocShell : nsIDocShellTreeItem
 
   // Whether a top-level data URI navigation is allowed for that load
   const long INTERNAL_LOAD_FLAGS_FORCE_ALLOW_DATA_URI    = 0x200;
+
+  // Whether load delegates have already been checked for this load
+  const long INTERNAL_LOAD_FLAGS_DELEGATES_CHECKED       = 0x400;
 
   // Whether the load was triggered by user interaction.
   const long INTERNAL_LOAD_FLAGS_IS_USER_TRIGGERED       = 0x1000;
@@ -1200,4 +1204,10 @@ interface nsIDocShell : nsIDocShellTreeItem
    * Media queries only look at the value in the top-most docshell.
    */
   attribute unsigned long displayMode;
+
+  /**
+   * The message manager for this docshell.  This does not throw, but
+   * can return null if the docshell has no message manager.
+   */
+  [infallible] readonly attribute ContentFrameMessageManager messageManager;
 };

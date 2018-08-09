@@ -242,13 +242,17 @@ export default class PaymentDialog extends PaymentStateSubscriberMixin(HTMLEleme
       case "": {
         // initial/default state
         this._payButton.textContent = this._payButton.dataset.label;
+        const INVALID_CLASS_NAME = "invalid-selected-option";
         this._payButton.disabled =
           (state.request.paymentOptions.requestShipping &&
-           (!this._shippingAddressPicker.value ||
-            !this._shippingOptionPicker.value)) ||
+           (!this._shippingAddressPicker.selectedOption ||
+            this._shippingAddressPicker.classList.contains(INVALID_CLASS_NAME) ||
+            !this._shippingOptionPicker.selectedOption)) ||
           (this._isPayerRequested(state.request.paymentOptions) &&
-            !this._payerAddressPicker.value) ||
-          !this._paymentMethodPicker.value ||
+           (!this._payerAddressPicker.selectedOption ||
+            this._payerAddressPicker.classList.contains(INVALID_CLASS_NAME))) ||
+          !this._paymentMethodPicker.selectedOption ||
+          this._paymentMethodPicker.classList.contains(INVALID_CLASS_NAME) ||
           state.changesPrevented;
         break;
       }
@@ -300,6 +304,8 @@ export default class PaymentDialog extends PaymentStateSubscriberMixin(HTMLEleme
       this.dataset[shippingType + "AddressTitleEdit"];
     let addressPickerLabel = this._shippingAddressPicker.dataset[shippingType + "AddressLabel"];
     this._shippingAddressPicker.setAttribute("label", addressPickerLabel);
+    let optionPickerLabel = this._shippingOptionPicker.dataset[shippingType + "OptionsLabel"];
+    this._shippingOptionPicker.setAttribute("label", optionPickerLabel);
 
     let totalItem = paymentRequest.getTotalItem(state);
     let totalAmountEl = this.querySelector("#total > currency-amount");
@@ -311,7 +317,13 @@ export default class PaymentDialog extends PaymentStateSubscriberMixin(HTMLEleme
     this._header.hidden = !state.page.onboardingWizard && state.page.id != "payment-summary";
 
     this._orderDetailsOverlay.hidden = !state.orderDetailsShowing;
-    this._errorText.textContent = paymentDetails.error;
+    let genericError = "";
+    if (this._shippingAddressPicker.selectedOption &&
+        (!request.paymentDetails.shippingOptions ||
+         !request.paymentDetails.shippingOptions.length)) {
+      genericError = this._errorText.dataset[shippingType + "GenericError"];
+    }
+    this._errorText.textContent = paymentDetails.error || genericError;
 
     let paymentOptions = request.paymentOptions;
     for (let element of this._shippingRelatedEls) {

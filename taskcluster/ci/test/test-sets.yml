@@ -101,6 +101,14 @@ raptor-chrome:
     - raptor-gdocs-chrome
     - raptor-sunspider-chrome
 
+# Fetch tasks are only supported on Linux for now,
+# so these need to be separate sets.
+raptor-fetch-firefox:
+    - raptor-unity-webgl-firefox
+
+raptor-fetch-chrome:
+    - raptor-unity-webgl-chrome
+
 awsy:
     - awsy
     - awsy-base
@@ -390,6 +398,9 @@ android-x86-kvm-tests:
     # - mochitest-webgl1-core
     - reftest
     - test-verify
+
+android-ccov-tests:
+    - geckoview-junit
 
 devtools-tests:
     - mochitest-devtools-chrome

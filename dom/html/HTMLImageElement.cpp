@@ -222,6 +222,12 @@ HTMLImageElement::Y()
   return GetXY().y;
 }
 
+void
+HTMLImageElement::GetDecoding(nsAString& aValue)
+{
+  GetEnumAttr(nsGkAtoms::decoding, kDecodingTableDefault->tag, aValue);
+}
+
 bool
 HTMLImageElement::ParseAttribute(int32_t aNamespaceID,
                                  nsAtom* aAttribute,
@@ -236,6 +242,10 @@ HTMLImageElement::ParseAttribute(int32_t aNamespaceID,
     if (aAttribute == nsGkAtoms::crossorigin) {
       ParseCORSValue(aValue, aResult);
       return true;
+    }
+    if (aAttribute == nsGkAtoms::decoding) {
+      return aResult.ParseEnumValue(aValue, kDecodingTable, false,
+                                    kDecodingTableDefault);
     }
     if (ParseImageAttribute(aAttribute, aValue, aResult)) {
       return true;
@@ -378,6 +388,12 @@ HTMLImageElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
     mUseUrgentStartForChannel = EventStateManager::IsHandlingUserInput();
 
     PictureSourceSizesChanged(this, attrVal.String(), aNotify);
+  } else if (aName == nsGkAtoms::decoding &&
+             aNameSpaceID == kNameSpaceID_None) {
+    // Request sync or async image decoding.
+    SetSyncDecodingHint(aValue &&
+                        static_cast<ImageDecodingType>(aValue->GetEnumValue()) ==
+                          ImageDecodingType::Sync);
   }
 
   return nsGenericHTMLElement::AfterSetAttr(aNameSpaceID, aName,
@@ -797,34 +813,33 @@ HTMLImageElement::NaturalWidth()
 }
 
 nsresult
-HTMLImageElement::CopyInnerTo(Element* aDest, bool aPreallocateChildren)
+HTMLImageElement::CopyInnerTo(HTMLImageElement* aDest)
 {
   bool destIsStatic = aDest->OwnerDoc()->IsStaticDocument();
-  auto dest = static_cast<HTMLImageElement*>(aDest);
   if (destIsStatic) {
-    CreateStaticImageClone(dest);
+    CreateStaticImageClone(aDest);
   }
 
-  nsresult rv = nsGenericHTMLElement::CopyInnerTo(aDest, aPreallocateChildren);
+  nsresult rv = nsGenericHTMLElement::CopyInnerTo(aDest);
   if (NS_FAILED(rv)) {
     return rv;
   }
 
   if (!destIsStatic) {
-    // In SetAttr (called from nsGenericHTMLElement::CopyInnerTo), dest skipped
+    // In SetAttr (called from nsGenericHTMLElement::CopyInnerTo), aDest skipped
     // doing the image load because we passed in false for aNotify.  But we
     // really do want it to do the load, so set it up to happen once the cloning
     // reaches a stable state.
-    if (!dest->InResponsiveMode() &&
-        dest->HasAttr(kNameSpaceID_None, nsGkAtoms::src) &&
-        dest->OwnerDoc()->ShouldLoadImages()) {
+    if (!aDest->InResponsiveMode() &&
+        aDest->HasAttr(kNameSpaceID_None, nsGkAtoms::src) &&
+        aDest->OwnerDoc()->ShouldLoadImages()) {
       // Mark channel as urgent-start before load image if the image load is
       // initaiated by a user interaction.
       mUseUrgentStartForChannel = EventStateManager::IsHandlingUserInput();
 
       nsContentUtils::AddScriptRunner(
         NewRunnableMethod<bool>("dom::HTMLImageElement::MaybeLoadImage",
-                                dest,
+                                aDest,
                                 &HTMLImageElement::MaybeLoadImage,
                                 false));
     }

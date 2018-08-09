@@ -704,6 +704,7 @@ MOZ_DEFINE_MALLOC_SIZE_OF_ON_ALLOC(UserFontMallocSizeOfOnAlloc)
 bool
 gfxUserFontEntry::LoadPlatformFont(const uint8_t* aFontData, uint32_t& aLength)
 {
+    AUTO_PROFILER_LABEL("gfxUserFontEntry::LoadPlatformFont", OTHER);
     NS_ASSERTION((mUserFontLoadState == STATUS_NOT_LOADED ||
                   mUserFontLoadState == STATUS_LOAD_PENDING ||
                   mUserFontLoadState == STATUS_LOADING) &&
@@ -920,6 +921,7 @@ gfxUserFontEntry::GetUserFontSets(nsTArray<gfxUserFontSet*>& aResult)
 
 gfxUserFontSet::gfxUserFontSet()
     : mFontFamilies(4),
+      mRebuildGeneration(0),
       mLocalRulesUsed(false),
       mRebuildLocalRules(false),
       mDownloadCount(0),

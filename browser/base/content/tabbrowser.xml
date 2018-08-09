@@ -1402,10 +1402,15 @@
         if (draggedTab && dropEffect == "copy") {
           // copy the dropped tab (wherever it's from)
           let newIndex = this._getDropIndex(event, false);
-          let newTab = gBrowser.duplicateTab(draggedTab);
-          gBrowser.moveTabTo(newTab, newIndex);
+          let draggedTabCopy;
+          for (let tab of movingTabs) {
+            let newTab = gBrowser.duplicateTab(tab);
+            gBrowser.moveTabTo(newTab, newIndex++);
+            if (tab == draggedTab)
+              draggedTabCopy = newTab;
+          }
           if (draggedTab.parentNode != this || event.shiftKey) {
-            this.selectedItem = newTab;
+            this.selectedItem = draggedTabCopy;
           }
         } else if (draggedTab && draggedTab.parentNode == this) {
           let oldTranslateX = Math.round(draggedTab._dragData.translateX);
@@ -2082,11 +2087,11 @@
           if (accelKey) {
             // Ctrl (Cmd for mac) key is pressed
             if (this.multiselected) {
-              gBrowser.removeFromMultiSelectedTabs(this);
+              gBrowser.removeFromMultiSelectedTabs(this, true);
               if (this == gBrowser.selectedTab) {
                 gBrowser.switchToNextMultiSelectedTab();
               }
-              gBrowser.updateActiveTabMultiSelectState();
+              gBrowser.avoidSingleSelectedTab();
             } else if (this != gBrowser.selectedTab) {
               for (let tab of [this, gBrowser.selectedTab]) {
                 gBrowser.addToMultiSelectedTabs(tab, true);

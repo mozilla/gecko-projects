@@ -1127,8 +1127,7 @@ NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(HTMLInputElement,
 // nsINode
 
 nsresult
-HTMLInputElement::Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult,
-                        bool aPreallocateArrays) const
+HTMLInputElement::Clone(dom::NodeInfo* aNodeInfo, nsINode** aResult) const
 {
   *aResult = nullptr;
 
@@ -1136,7 +1135,7 @@ HTMLInputElement::Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult,
   RefPtr<HTMLInputElement> it = new HTMLInputElement(ni, NOT_FROM_PARSER,
                                                      FromClone::yes);
 
-  nsresult rv = const_cast<HTMLInputElement*>(this)->CopyInnerTo(it, aPreallocateArrays);
+  nsresult rv = const_cast<HTMLInputElement*>(this)->CopyInnerTo(it);
   NS_ENSURE_SUCCESS(rv, rv);
 
   switch (GetValueMode()) {
@@ -4831,7 +4830,7 @@ HTMLInputElement::HandleTypeChange(uint8_t aNewType, bool aNotify)
     CancelImageRequests(aNotify);
 
     // And we should update our mapped attribute mapping function.
-    mAttrsAndChildren.UpdateMappedAttrRuleMapper(*this);
+    mAttrs.UpdateMappedAttrRuleMapper(*this);
   } else if (mType == NS_FORM_INPUT_IMAGE) {
     if (aNotify) {
       // We just got switched to be an image input; we should see
@@ -4848,7 +4847,7 @@ HTMLInputElement::HandleTypeChange(uint8_t aNewType, bool aNotify)
     }
 
     // And we should update our mapped attribute mapping function.
-    mAttrsAndChildren.UpdateMappedAttrRuleMapper(*this);
+    mAttrs.UpdateMappedAttrRuleMapper(*this);
   }
 
   if (mType == NS_FORM_INPUT_PASSWORD && IsInComposedDoc()) {

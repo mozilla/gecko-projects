@@ -54,7 +54,8 @@ linux64/opt:
         - linux-talos-flex
         - raptor-firefox
         - raptor-chrome
-
+        - raptor-fetch-firefox
+        - raptor-fetch-chrome
 linux64-nightly/opt:
     build-platform: linux64-nightly/opt
     test-sets:
@@ -80,6 +81,7 @@ linux64-pgo/opt:
         - web-platform-tests
         - talos
         - raptor-firefox
+        - raptor-fetch-firefox
 
 linux64-asan/opt:
     build-platform: linux64-asan/opt
@@ -102,7 +104,7 @@ linux64-qr/opt:
         - awsy
         - web-platform-tests
         - raptor-firefox
-
+        - raptor-fetch-firefox
 linux64-qr/debug:
     build-platform: linux64/debug
     test-sets:
@@ -321,6 +323,11 @@ android-em-4.3-arm7-api-16/debug:
     test-sets:
         - android-common-tests
         - android-gradle-tests
+
+android-em-4.3-arm7-api-16-ccov/debug:
+    build-platform: android-api-16-ccov/debug
+    test-sets:
+        - android-ccov-tests
 
 android-em-4.3-arm7-api-16/opt:
     build-platform: android-api-16/opt

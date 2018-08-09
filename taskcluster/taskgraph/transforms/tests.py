@@ -560,6 +560,7 @@ def set_treeherder_machine_platform(config, tests):
         # The build names for Android platforms have partially evolved over the
         # years and need to be translated.
         'android-api-16/debug': 'android-em-4-3-armv7-api16/debug',
+        'android-api-16-ccov/debug': 'android-em-4-3-armv7-api16-ccov/debug',
         'android-api-16/opt': 'android-em-4-3-armv7-api16/opt',
         'android-x86/opt': 'android-em-4-2-x86/opt',
         'android-api-16-gradle/opt': 'android-api-16-gradle/opt',
@@ -576,6 +577,8 @@ def set_treeherder_machine_platform(config, tests):
             test['treeherder-machine-platform'] = test['test-platform']
         elif 'android-hw' in test['test-platform']:
             test['treeherder-machine-platform'] = test['test-platform']
+        elif 'android-em-7.0-x86' in test['test-platform']:
+            test['treeherder-machine-platform'] = 'android-em-7-0-x86/opt'
         else:
             test['treeherder-machine-platform'] = translation.get(
                 test['build-platform'], test['test-platform'])
@@ -730,6 +733,12 @@ def enable_code_coverage(config, tests):
             # do not run tests on fuzzing or opt build
             if 'opt' in test['build-platform'] or 'fuzzing' in test['build-platform']:
                 test['run-on-projects'] = []
+                continue
+            # Skip this transform for android code coverage builds.
+            if 'android' in test['build-platform']:
+                test.setdefault('fetches', {}).setdefault('fetch', []).append('grcov-linux-x86_64')
+                test['mozharness'].setdefault('extra-options', []).append('--java-code-coverage')
+                yield test
                 continue
             test['mozharness'].setdefault('extra-options', []).append('--code-coverage')
             test['instance-size'] = 'xlarge'
@@ -979,6 +988,8 @@ def set_worker_type(config, tests):
                 test['worker-type'] = 'proj-autophone/gecko-t-ap-perf-p2'
             else:
                 test['worker-type'] = 'proj-autophone/gecko-t-ap-unit-p2'
+        elif test_platform.startswith('android-em-7.0-x86'):
+            test['worker-type'] = 'terraform-packet/gecko-t-linux'
         elif test_platform.startswith('linux') or test_platform.startswith('android'):
             if test.get('suite', '') == 'talos' and \
                  not test['build-platform'].startswith('linux64-ccov'):
@@ -1030,6 +1041,9 @@ def make_job_description(config, tests):
         jobdesc['attributes'] = attributes
         jobdesc['dependencies'] = {'build': build_label}
         jobdesc['job-from'] = test['job-from']
+
+        if test.get('fetches'):
+            jobdesc['fetches'] = test['fetches']
 
         if test['mozharness']['requires-signed-builds'] is True:
             jobdesc['dependencies']['build-signing'] = test['build-signing-label']

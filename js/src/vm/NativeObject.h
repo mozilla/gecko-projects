@@ -367,7 +367,7 @@ class ObjectElements
         return int(offsetof(ObjectElements, length)) - int(sizeof(ObjectElements));
     }
 
-    static bool ConvertElementsToDoubles(JSContext* cx, uintptr_t elements);
+    static void ConvertElementsToDoubles(JSContext* cx, uintptr_t elements);
     static bool MakeElementsCopyOnWrite(JSContext* cx, NativeObject* obj);
 
     static MOZ_MUST_USE bool PreventExtensions(JSContext* cx, NativeObject* obj);
@@ -1251,12 +1251,25 @@ class NativeObject : public ShapedObject
         }
     }
 
-    void setDenseInitializedLength(uint32_t length) {
+  private:
+    void setDenseInitializedLengthInternal(uint32_t length) {
         MOZ_ASSERT(length <= getDenseCapacity());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
         MOZ_ASSERT(!denseElementsAreFrozen());
         prepareElementRangeForOverwrite(length, getElementsHeader()->initializedLength);
         getElementsHeader()->initializedLength = length;
+    }
+
+  public:
+    void setDenseInitializedLength(uint32_t length) {
+        MOZ_ASSERT(isExtensible());
+        setDenseInitializedLengthInternal(length);
+    }
+
+    void setDenseInitializedLengthMaybeNonExtensible(JSContext* cx, uint32_t length) {
+        setDenseInitializedLengthInternal(length);
+        if (!isExtensible())
+            shrinkCapacityToInitializedLength(cx);
     }
 
     inline void ensureDenseInitializedLength(JSContext* cx,

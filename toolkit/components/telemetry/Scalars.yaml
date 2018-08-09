@@ -769,7 +769,7 @@ mediarecorder:
       - 1400757
     description: >
       The number of times a MediaRecorder has been started. Recorded when a MediaRecorder starts
-    expires: "64"
+    expires: "68"
     kind: uint
     notification_emails:
       - bvandyk@mozilla.com
@@ -832,6 +832,22 @@ media:
       - 1476456
     description: >
       The number of HTMLMediaElement autoplays on audible HTMLMediaElements which would not be allowed to play if block autoplay was enabled; we'd either prompt for permission to play or block outright depending on user preferences.
+    expires: "68"
+    kind: uint
+    notification_emails:
+      - cpearce@mozilla.com
+      - alwu@mozilla.com
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - main
+      - content
+
+  blocked_autoplay_no_audio_track_count:
+    bug_numbers:
+      - 1480484
+    description: >
+      The number of HTMLMediaElement autoplays on HTMLMediaElements without an audio track which would not be allowed to play if block autoplay was enabled; we'd either prompt for permission to play or block outright depending on user preferences.
     expires: "68"
     kind: uint
     notification_emails:
@@ -1458,6 +1474,21 @@ telemetry:
     record_in_processes:
       - 'main'
 
+  os_shutting_down:
+    bug_numbers:
+      - 1480826
+    description: >
+      Records true if there is a signal that Firefox was quitting because
+      the OS was shutting down. Only available on Windows.
+    expires: "64"
+    kind: boolean
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+      - agashlin@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
 telemetry.discarded:
   accumulations:
     bug_numbers:
@@ -1821,9 +1852,10 @@ sw:
   synthesized_res_count:
     bug_numbers:
       - 1416629
+      - 1433916
     description: >
       The count of number of synthesize response made by service workers.
-    expires: "61"
+    expires: "68"
     kind: uint
     notification_emails:
       - sw-telemetry@mozilla.com
@@ -1852,9 +1884,10 @@ sw:
   alternative_body_used_count:
     bug_numbers:
       - 1423623
+      - 1433916
     description: >
       The count of number of synthesize response using alternative body.
-    expires: "61"
+    expires: "68"
     kind: uint
     notification_emails:
       - sw-telemetry@mozilla.com

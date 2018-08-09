@@ -366,7 +366,7 @@ HTMLObjectElement::IsHTMLFocusable(bool aWithMouse,
 
   // TODO: this should probably be managed directly by IsHTMLFocusable.
   // See bug 597242.
-  const nsAttrValue* attrVal = mAttrsAndChildren.GetAttr(nsGkAtoms::tabindex);
+  const nsAttrValue* attrVal = mAttrs.GetAttr(nsGkAtoms::tabindex);
 
   *aIsFocusable = attrVal && attrVal->Type() == nsAttrValue::eInteger;
 
@@ -526,10 +526,9 @@ HTMLObjectElement::DestroyContent()
 }
 
 nsresult
-HTMLObjectElement::CopyInnerTo(Element* aDest, bool aPreallocateChildren)
+HTMLObjectElement::CopyInnerTo(Element* aDest)
 {
-  nsresult rv = nsGenericHTMLFormElement::CopyInnerTo(aDest,
-                                                      aPreallocateChildren);
+  nsresult rv = nsGenericHTMLFormElement::CopyInnerTo(aDest);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (aDest->OwnerDoc()->IsStaticDocument()) {

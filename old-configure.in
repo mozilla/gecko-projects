@@ -274,6 +274,9 @@ case "$target" in
         x86_64-*)
             MIDL_FLAGS="${MIDL_FLAGS} -env x64"
             ;;
+        aarch64-*)
+            MIDL_FLAGS="${MIDL_FLAGS} -env arm64"
+            ;;
         esac
 
         unset _MSVC_VER_FILTER
@@ -1041,12 +1044,7 @@ case "$target" in
         CXXFLAGS="$CXXFLAGS -D_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING"
         LIBS="$LIBS kernel32.lib user32.lib gdi32.lib winmm.lib wsock32.lib advapi32.lib secur32.lib"
         MOZ_DEBUG_LDFLAGS='-DEBUG -DEBUGTYPE:CV'
-        # -Werror is disabled on clang-cl until bug 1090497 cleans up the noise.
-        if test -n "$CLANG_CL"; then
-            WARNINGS_AS_ERRORS=''
-        else
-            WARNINGS_AS_ERRORS='-WX'
-        fi
+        WARNINGS_AS_ERRORS='-WX'
         # Use a higher optimization level for clang-cl, so we can come closer
         # to MSVC's performance numbers (see bug 1443590).
         if test -n "$CLANG_CL"; then
@@ -1103,6 +1101,12 @@ case "$target" in
             DSO_LDOPTS="$DSO_LDOPTS -MACHINE:X64"
         fi
         AC_DEFINE(_AMD64_)
+        ;;
+    aarch64-*)
+        if test -n "$_WIN32_MSVC"; then
+            DSO_LDOPTS="$DSO_LDOPTS -MACHINE:ARM64"
+        fi
+        AC_DEFINE(_ARM64_)
         ;;
     *)
         AC_DEFINE(_CPU_ARCH_NOT_DEFINED)

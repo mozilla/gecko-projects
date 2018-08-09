@@ -38,6 +38,7 @@ import urlparse
 import hashlib
 import zlib
 if os.name == 'nt':
+    import locale
     try:
         import win32file
         import win32api
@@ -1229,6 +1230,13 @@ class ScriptMixin(PlatformMixin):
         for k in purge_env:
             if k in env:
                 del env[k]
+        if os.name == 'nt':
+            pref_encoding = locale.getpreferredencoding()
+            for k, v in env.iteritems():
+                # When run locally on Windows machines, some environment
+                # variables may be unicode.
+                if isinstance(v, unicode):
+                    env[k] = v.encode(pref_encoding)
         if set_self_env:
             self.env = env
         return env
@@ -2202,17 +2210,6 @@ class BaseScript(ScriptMixin, LogMixin, object):
         # TODO write to a summary-only log?
         # Summaries need a lot more love.
         self.log(message, level=level)
-
-    def add_failure(self, key, message="%(key)s failed.", level=ERROR,
-                    increment_return_code=True):
-        if key not in self.failures:
-            self.failures.append(key)
-            self.add_summary(message % {'key': key}, level=level)
-            if increment_return_code:
-                self.return_code += 1
-
-    def query_failure(self, key):
-        return key in self.failures
 
     def summarize_success_count(self, success_count, total_count,
                                 message="%d of %d successful.",

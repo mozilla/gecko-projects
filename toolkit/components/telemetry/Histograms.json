@@ -88,6 +88,26 @@
     "bug_numbers": [1245901],
     "alert_emails": ["benjamin@smedbergs.us"]
   },
+  "APPLICATION_REPUTATION_BINARY": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["francois@mozilla.com", "safebrowsing-telemetry@mozilla.org"],
+    "bug_numbers": [1480639],
+    "expires_in_version": "never",
+    "releaseChannelCollection": "opt-out",
+    "kind": "categorical",
+    "labels": ["BinaryFile", "NonBinaryFile", "MissingFilename"],
+    "description": "Whether or not the file examined by download protection is a binary type (or it's not possible to tell because the filename is missing)."
+  },
+  "APPLICATION_REPUTATION_BINARY_ARCHIVE": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["francois@mozilla.com", "safebrowsing-telemetry@mozilla.org"],
+    "bug_numbers": [1480639],
+    "expires_in_version": "never",
+    "releaseChannelCollection": "opt-out",
+    "kind": "categorical",
+    "labels": ["OtherBinaryFile", "DmgFile", "RarFile", "ZipFile"],
+    "description": "Whether a binary file examined by download protection is one of the common archive formats."
+  },
   "APPLICATION_REPUTATION_SHOULD_BLOCK": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["francois@mozilla.com", "safebrowsing-telemetry@mozilla.org"],
@@ -1236,17 +1256,6 @@
     "n_buckets": 100,
     "description": "Time spent decoding an image (us)"
   },
-  "IMAGE_ANIMATED_DECODE_TIME": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
-    "bug_numbers": [1347302],
-    "expires_in_version": "57",
-    "kind": "exponential",
-    "low": 50,
-    "high": 50000000,
-    "n_buckets": 100,
-    "description": "Time spent decoding an animated image (us)"
-  },
   "IMAGE_DECODE_ON_DRAW_LATENCY": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
@@ -1256,17 +1265,6 @@
     "high": 50000000,
     "n_buckets": 100,
     "description": "Time from starting a decode to it showing up on the screen (us)"
-  },
-  "IMAGE_ANIMATED_DECODE_ON_DRAW_LATENCY": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
-    "bug_numbers": [1347302],
-    "expires_in_version": "57",
-    "kind": "exponential",
-    "low": 50,
-    "high": 50000000,
-    "n_buckets": 100,
-    "description": "Time from starting a decode of an animated image to it showing up on the screen (us)"
   },
   "IMAGE_DECODE_CHUNKS": {
     "record_in_processes": ["main", "content"],
@@ -1285,16 +1283,6 @@
     "high": 500,
     "n_buckets": 50,
     "description": "Decode count"
-  },
-  "IMAGE_ANIMATED_DECODE_COUNT": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
-    "bug_numbers": [1347302],
-    "expires_in_version": "57",
-    "kind": "exponential",
-    "high": 500,
-    "n_buckets": 50,
-    "description": "Decode count of animated images"
   },
   "IMAGE_DECODE_SPEED_JPEG": {
     "record_in_processes": ["main", "content"],
@@ -4142,15 +4130,6 @@
     "high": 3000,
     "n_buckets": 10,
     "description": "Time spent on SQLite read() (ms) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "MOZ_SQLITE_COOKIES_OLD_SCHEMA": {
-    "record_in_processes": ["main"],
-    "expires_in_version": "62",
-    "kind": "enumerated",
-    "n_values": 10,
-    "bug_numbers": [1412218],
-    "alert_emails": ["necko@mozilla.com", "junior@mozilla.com"],
-    "description": "Old schema version of the cookie database. 0 for having legacy cookies.txt."
   },
   "MOZ_SQLITE_COOKIES_BLOCK_MAIN_THREAD_MS_V2": {
     "record_in_processes": ["main"],
@@ -7220,6 +7199,37 @@
     ],
     "description": "Number of 'event' pings sent, by reason"
   },
+  "TELEMETRY_EVENT_REGISTRATION_ERROR": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com", "chutten@mozilla.com"],
+    "bug_numbers": [1480204],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "labels": [
+      "Other",
+      "Name",
+      "Category",
+      "Method",
+      "Object",
+      "ExtraKeys"
+    ],
+    "description": "Number of event registration failures, by field causing the failure"
+  },
+  "TELEMETRY_EVENT_RECORDING_ERROR": {
+    "record_in_processes": ["all"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com", "chutten@mozilla.com"],
+    "bug_numbers": [1480204],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "labels": [
+      "UnknownEvent",
+      "Expired",
+      "ExtraKey",
+      "Value",
+      "Extra"
+    ],
+    "description": "Number of event recording failures, by type of failure"
+  },
   "TELEMETRY_TEST_FLAG": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["telemetry-client-dev@mozilla.com"],
@@ -7796,7 +7806,7 @@
     "kind": "count",
     "keyed": true,
     "releaseChannelCollection": "opt-out",
-    "description": "Record the search counts for search engines"
+    "description": "Records search counts for search access points and in content searches. For search access points, the format is: <engine-name>.<search-access-point> For in content searches, the format is <provider>.in-content:[sap|sap-follow-on|organic]:[code|none]"
   },
   "SEARCH_RESET_RESULT": {
     "record_in_processes": ["main", "content"],
@@ -9208,7 +9218,7 @@
   "MEDIA_RECORDER_RECORDING_DURATION": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["bvandyk@mozilla.com"],
-    "expires_in_version": "64",
+    "expires_in_version": "68",
     "kind": "exponential",
     "high": 3600,
     "n_buckets": 100,
@@ -9218,7 +9228,7 @@
   "MEDIA_RECORDER_TRACK_ENCODER_INIT_TIMEOUT_TYPE": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["bvandyk@mozilla.com"],
-    "expires_in_version": "64",
+    "expires_in_version": "68",
     "kind": "enumerated",
     "n_values": 4,
     "bug_numbers": [1400757],
@@ -11179,10 +11189,10 @@
     "description": "Tracking how ServiceWorkerRegistrar loads data before the first content is shown. File bugs in Core::DOM in case of a Telemetry regression."
   },
   "SERVICE_WORKER_FETCH_INTERCEPTION_DURATION_MS": {
-    "expires_in_version": "61",
+    "expires_in_version": "68",
     "record_in_processes": ["main", "content"],
     "kind": "exponential",
-    "bug_numbers": [1359610],
+    "bug_numbers": [1359610, 1433916],
     "high": 6000,
     "keyed": true,
     "n_buckets": 25,
@@ -11191,9 +11201,9 @@
     "description": "Time delta (ms) between when a network request is intercepted and the service worker provides a response. This includes: possible SW startup, worker thread dispatch, time until the respondWith() promise resolves, time to synthesize the response (including the body), worker thread to main thread dispatch. In the future this should include the IPC roundtrips involved in fetch interception."
   },
   "SERVICE_WORKER_FETCH_EVENT_DISPATCH_MS": {
-    "expires_in_version": "61",
+    "expires_in_version": "68",
     "record_in_processes": ["main", "content"],
-    "bug_numbers": [1359610],
+    "bug_numbers": [1359610, 1433916],
     "kind": "exponential",
     "high": 2000,
     "n_buckets": 25,
@@ -11204,9 +11214,9 @@
   },
 
   "SERVICE_WORKER_FETCH_EVENT_FINISH_SYNTHESIZED_RESPONSE_MS": {
-    "expires_in_version": "61",
+    "expires_in_version": "68",
     "record_in_processes": ["main", "content"],
-    "bug_numbers": [1359610],
+    "bug_numbers": [1359610, 1433916],
     "kind": "exponential",
     "high": 2000,
     "n_buckets": 25,
@@ -11217,9 +11227,9 @@
   },
 
   "SERVICE_WORKER_FETCH_EVENT_CHANNEL_RESET_MS": {
-    "expires_in_version": "61",
+    "expires_in_version": "68",
     "record_in_processes": ["main", "content"],
-    "bug_numbers": [1359610],
+    "bug_numbers": [1359610, 1433916],
     "kind": "exponential",
     "high": 2000,
     "n_buckets": 25,

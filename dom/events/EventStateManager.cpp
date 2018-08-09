@@ -2017,8 +2017,7 @@ EventStateManager::DetermineDragTargetAndDefaultData(nsPIDOMWindowOuter* aWindow
         if (htmlElement->Draggable()) {
           break;
         }
-      }
-      else {
+      } else {
         if (dragContent->IsXULElement()) {
           // All XUL elements are draggable, so if a XUL element is
           // encountered, stop looking for draggable nodes and just use the
@@ -2032,7 +2031,7 @@ EventStateManager::DetermineDragTargetAndDefaultData(nsPIDOMWindowOuter* aWindow
         }
         // otherwise, it's not an HTML or XUL element, so just keep looking
       }
-      dragContent = dragContent->GetParent();
+      dragContent = dragContent->GetFlattenedTreeParent();
     }
   }
 
@@ -2140,29 +2139,9 @@ EventStateManager::DoDefaultDragStart(nsPresContext* aPresContext,
                                                 action, event, dataTransfer);
   }
   else {
-    // if dragging within a XUL tree and no custom drag image was
-    // set, the region argument to InvokeDragSessionWithImage needs
-    // to be set to the area encompassing the selected rows of the
-    // tree to ensure that the drag feedback gets clipped to those
-    // rows. For other content, region should be null.
-    nsCOMPtr<nsIScriptableRegion> region;
-#ifdef MOZ_XUL
-    if (dragTarget && !dragImage) {
-      if (dragTarget->NodeInfo()->Equals(nsGkAtoms::treechildren,
-                                         kNameSpaceID_XUL)) {
-        nsTreeBodyFrame* treeBody =
-          do_QueryFrame(dragTarget->GetPrimaryFrame());
-        if (treeBody) {
-          treeBody->GetSelectionRegion(getter_AddRefs(region));
-        }
-      }
-    }
-#endif
-
     dragService->InvokeDragSessionWithImage(dragTarget,
                                             aPrincipalURISpec, transArray,
-                                            region, action,
-                                            dragImage,
+                                            action, dragImage,
                                             imageX, imageY, event,
                                             dataTransfer);
   }
@@ -2451,7 +2430,7 @@ EventStateManager::SendLineScrollEvent(nsIFrame* aTargetFrame,
     return;
 
   while (targetContent->IsText()) {
-    targetContent = targetContent->GetParent();
+    targetContent = targetContent->GetFlattenedTreeParent();
   }
 
   WidgetMouseScrollEvent event(aEvent->IsTrusted(),
@@ -2490,7 +2469,7 @@ EventStateManager::SendPixelScrollEvent(nsIFrame* aTargetFrame,
   }
 
   while (targetContent->IsText()) {
-    targetContent = targetContent->GetParent();
+    targetContent = targetContent->GetFlattenedTreeParent();
   }
 
   WidgetMouseScrollEvent event(aEvent->IsTrusted(),
@@ -2753,7 +2732,7 @@ EventStateManager::GetScrollAmount(nsPresContext* aPresContext,
                     aScrollableFrame->GetLineScrollAmount();
   }
 
-  // If there is no scrollable frame and page scrolling, use view port size.
+  // If there is no scrollable frame and page scrolling, use viewport size.
   if (isPage) {
     return aPresContext->GetVisibleArea().Size();
   }
@@ -3341,14 +3320,12 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
           break;
         }
 
-        if (activeContent) {
-          // The nearest enclosing element goes into the :active state.  If
-          // we're not an element (so we're text or something) we need to obtain
-          // our parent element and put it into :active instead.
-          if (!activeContent->IsElement()) {
-            nsIContent* par = activeContent->GetParent();
-            if (par)
-              activeContent = par;
+        // The nearest enclosing element goes into the :active state.  If we're
+        // not an element (so we're text or something) we need to obtain
+        // our parent element and put it into :active instead.
+        if (activeContent && !activeContent->IsElement()) {
+          if (nsIContent* par = activeContent->GetFlattenedTreeParent()) {
+            activeContent = par;
           }
         }
       }
@@ -4297,6 +4274,15 @@ EventStateManager::DispatchMouseOrPointerEvent(WidgetMouseEvent* aMouseEvent,
   return targetFrame;
 }
 
+static nsIContent*
+FindCommonAncestor(nsIContent* aNode1, nsIContent* aNode2)
+{
+  if (!aNode1 || !aNode2) {
+    return nullptr;
+  }
+  return nsContentUtils::GetCommonFlattenedTreeAncestor(aNode1, aNode2);
+}
+
 class EnterLeaveDispatcher
 {
 public:
@@ -4314,11 +4300,7 @@ public:
                                         win && win->HasMouseEnterLeaveEventListeners()) {
       mRelatedTarget = aRelatedTarget ?
         aRelatedTarget->FindFirstNonChromeOnlyAccessContent() : nullptr;
-      nsINode* commonParent = nullptr;
-      if (aTarget && aRelatedTarget) {
-        commonParent =
-          nsContentUtils::GetCommonAncestor(aTarget, aRelatedTarget);
-      }
+      nsINode* commonParent = FindCommonAncestor(aTarget, aRelatedTarget);
       nsIContent* current = aTarget;
       // Note, it is ok if commonParent is null!
       while (current && current != commonParent) {
@@ -4326,7 +4308,7 @@ public:
           mTargets.AppendObject(current);
         }
         // mouseenter/leave is fired only on elements.
-        current = current->GetParent();
+        current = current->GetFlattenedTreeParent();
       }
     }
   }
@@ -4913,7 +4895,7 @@ EventStateManager::SetClickCount(WidgetMouseEvent* aEvent,
   }
   if (mouseContent) {
     if (mouseContent->IsText()) {
-      mouseContent = mouseContent->GetParent();
+      mouseContent = mouseContent->GetFlattenedTreeParent();
     }
     if (mouseContent && mouseContent->IsRootOfNativeAnonymousSubtree()) {
       mouseContentParent = mouseContent->GetParent();
@@ -5043,7 +5025,7 @@ EventStateManager::CheckForAndDispatchClick(WidgetMouseEvent* aEvent,
       // to walk up the closest ancestor element, just like we do in
       // nsPresShell::HandleEvent.
       while (mouseContent && !mouseContent->IsElement()) {
-        mouseContent = mouseContent->GetParent();
+        mouseContent = mouseContent->GetFlattenedTreeParent();
       }
 
       if (!mouseContent && !mCurrentTarget && !aOverrideClickTarget) {
@@ -5136,15 +5118,6 @@ GetLabelTarget(nsIContent* aPossibleLabel)
     return nullptr;
 
   return label->GetLabeledElement();
-}
-
-static nsIContent*
-FindCommonAncestor(nsIContent* aNode1, nsIContent* aNode2)
-{
-  if (!aNode1 || !aNode2) {
-    return nullptr;
-  }
-  return nsContentUtils::GetCommonFlattenedTreeAncestor(aNode1, aNode2);
 }
 
 /* static */
@@ -5363,8 +5336,8 @@ EventStateManager::ResetLastOverForContent(
                      nsIContent* aContent)
 {
   if (aElemWrapper && aElemWrapper->mLastOverElement &&
-      nsContentUtils::ContentIsDescendantOf(aElemWrapper->mLastOverElement,
-                                            aContent)) {
+      nsContentUtils::ContentIsFlattenedTreeDescendantOf(
+        aElemWrapper->mLastOverElement, aContent)) {
     aElemWrapper->mLastOverElement = nullptr;
   }
 }

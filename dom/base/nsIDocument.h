@@ -7,7 +7,6 @@
 #define nsIDocument_h___
 
 #include "mozilla/FlushType.h"           // for enum
-#include "nsAttrAndChildArray.h"
 #include "nsAutoPtr.h"                   // for member
 #include "nsCOMArray.h"                  // for member
 #include "nsCompatibility.h"             // for member
@@ -16,6 +15,7 @@
 #include "nsIApplicationCache.h"
 #include "nsIApplicationCacheContainer.h"
 #include "nsIContentViewer.h"
+#include "nsIDOMXULCommandDispatcher.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsILoadContext.h"
 #include "nsILoadGroup.h"                // for member (in nsCOMPtr)
@@ -532,27 +532,11 @@ public:
 
   // nsINode
   bool IsNodeOfType(uint32_t aFlags) const final;
-  nsIContent* GetChildAt_Deprecated(uint32_t aIndex) const final
-  {
-    return mChildren.GetSafeChildAt(aIndex);
-  }
-
-  int32_t ComputeIndexOf(const nsINode* aPossibleChild) const final
-  {
-    return mChildren.IndexOfChild(aPossibleChild);
-  }
-
-  uint32_t GetChildCount() const final
-  {
-    return mChildren.ChildCount();
-  }
-
   nsresult InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
                              bool aNotify) override;
   void RemoveChildNode(nsIContent* aKid, bool aNotify) final;
   nsresult Clone(mozilla::dom::NodeInfo* aNodeInfo,
-                 nsINode **aResult,
-                 bool aPreallocateChildren) const override
+                 nsINode **aResult) const override
   {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -1382,6 +1366,11 @@ protected:
    * Clears any Servo element data stored on Elements in the document.
    */
   void ClearStaleServoData();
+
+  /**
+   * Returns the top window root from the outer window.
+   */
+  already_AddRefed<nsPIWindowRoot> GetWindowRoot();
 
 private:
   class SelectorCacheKey
@@ -3336,6 +3325,14 @@ public:
 
   mozilla::dom::Promise* GetDocumentReadyForIdle(mozilla::ErrorResult& aRv);
 
+  nsIDOMXULCommandDispatcher* GetCommandDispatcher();
+  already_AddRefed<nsINode> GetPopupNode();
+  void SetPopupNode(nsINode* aNode);
+  nsINode* GetPopupRangeParent(ErrorResult& aRv);
+  int32_t GetPopupRangeOffset(ErrorResult& aRv);
+  already_AddRefed<nsINode> GetTooltipNode();
+  void SetTooltipNode(nsINode* aNode) { /* do nothing */ }
+
   // ParentNode
   nsIHTMLCollection* Children();
   uint32_t ChildElementCount();
@@ -4423,9 +4420,6 @@ protected:
   // Tracking for plugins in the document.
   nsTHashtable<nsPtrHashKey<nsIObjectLoadingContent>> mPlugins;
 
-  // Array of owning references to all children
-  nsAttrAndChildArray mChildren;
-
   RefPtr<mozilla::dom::DocumentTimeline> mDocumentTimeline;
   mozilla::LinkedList<mozilla::dom::DocumentTimeline> mTimelines;
 
@@ -4505,6 +4499,8 @@ protected:
 
   // Count of unload/beforeunload/pagehide operations in progress.
   uint32_t mIgnoreOpensDuringUnloadCounter;
+
+  nsCOMPtr<nsIDOMXULCommandDispatcher> mCommandDispatcher; // [OWNER] of the focus tracker
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIDocument, NS_IDOCUMENT_IID)

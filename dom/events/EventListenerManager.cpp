@@ -1054,17 +1054,27 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
   NS_ENSURE_SUCCESS(result, result);
   NS_ENSURE_TRUE(handler, NS_ERROR_FAILURE);
 
+  MOZ_ASSERT(js::IsObjectInContextCompartment(handler, cx));
+  JS::Rooted<JSObject*> handlerGlobal(cx, JS::CurrentGlobalOrNull(cx));
+
   if (jsEventHandler->EventName() == nsGkAtoms::onerror && win) {
     RefPtr<OnErrorEventHandlerNonNull> handlerCallback =
-      new OnErrorEventHandlerNonNull(nullptr, handler, /* aIncumbentGlobal = */ nullptr);
+      new OnErrorEventHandlerNonNull(static_cast<JSContext*>(nullptr), handler,
+                                     handlerGlobal,
+                                     /* aIncumbentGlobal = */ nullptr);
     jsEventHandler->SetHandler(handlerCallback);
   } else if (jsEventHandler->EventName() == nsGkAtoms::onbeforeunload && win) {
     RefPtr<OnBeforeUnloadEventHandlerNonNull> handlerCallback =
-      new OnBeforeUnloadEventHandlerNonNull(nullptr, handler, /* aIncumbentGlobal = */ nullptr);
+      new OnBeforeUnloadEventHandlerNonNull(static_cast<JSContext*>(nullptr),
+                                            handler,
+                                            handlerGlobal,
+                                            /* aIncumbentGlobal = */ nullptr);
     jsEventHandler->SetHandler(handlerCallback);
   } else {
     RefPtr<EventHandlerNonNull> handlerCallback =
-      new EventHandlerNonNull(nullptr, handler, /* aIncumbentGlobal = */ nullptr);
+      new EventHandlerNonNull(static_cast<JSContext*>(nullptr), handler,
+                              handlerGlobal,
+                              /* aIncumbentGlobal = */ nullptr);
     jsEventHandler->SetHandler(handlerCallback);
   }
 
@@ -1605,9 +1615,12 @@ EventListenerManager::GetListenerInfo(nsCOMArray<nsIEventListenerInfo>* aList)
     }
 
     JS::Rooted<JSObject*> callback(RootingCx());
+    JS::Rooted<JSObject*> callbackGlobal(RootingCx());
     if (JSEventHandler* handler = listener.GetJSEventHandler()) {
       if (handler->GetTypedEventHandler().HasEventHandler()) {
-        callback = handler->GetTypedEventHandler().Ptr()->CallableOrNull();
+        CallbackFunction* callbackFun = handler->GetTypedEventHandler().Ptr();
+        callback = callbackFun->CallableOrNull();
+        callbackGlobal = callbackFun->CallbackGlobalOrNull();
         if (!callback) {
           // This will be null for cross-compartment event listeners
           // which have been destroyed.
@@ -1615,7 +1628,9 @@ EventListenerManager::GetListenerInfo(nsCOMArray<nsIEventListenerInfo>* aList)
         }
       }
     } else if (listener.mListenerType == Listener::eWebIDLListener) {
-      callback = listener.mListener.GetWebIDLCallback()->CallbackOrNull();
+      EventListener* listenerCallback = listener.mListener.GetWebIDLCallback();
+      callback = listenerCallback->CallbackOrNull();
+      callbackGlobal = listenerCallback->CallbackGlobalOrNull();
       if (!callback) {
         // This will be null for cross-compartment event listeners
         // which have been destroyed.
@@ -1624,7 +1639,7 @@ EventListenerManager::GetListenerInfo(nsCOMArray<nsIEventListenerInfo>* aList)
     }
 
     RefPtr<EventListenerInfo> info =
-      new EventListenerInfo(eventType, callback,
+      new EventListenerInfo(eventType, callback, callbackGlobal,
                             listener.mFlags.mCapture,
                             listener.mFlags.mAllowUntrustedEvents,
                             listener.mFlags.mInSystemGroup);

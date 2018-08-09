@@ -76,11 +76,11 @@ NativeObject::canHaveNonEmptyElements()
 
 #endif // DEBUG
 
-/* static */ bool
+/* static */ void
 ObjectElements::ConvertElementsToDoubles(JSContext* cx, uintptr_t elementsPtr)
 {
     /*
-     * This function is infallible, but has a fallible interface so that it can
+     * This function has an otherwise unused JSContext argument so that it can
      * be called directly from Ion code. Only arrays can have their dense
      * elements converted to doubles, and arrays never have empty elements.
      */
@@ -100,7 +100,6 @@ ObjectElements::ConvertElementsToDoubles(JSContext* cx, uintptr_t elementsPtr)
     }
 
     header->setShouldConvertDoubleElements();
-    return true;
 }
 
 /* static */ bool
@@ -660,6 +659,8 @@ NativeObject::maybeDensifySparseElements(JSContext* cx, HandleNativeObject obj)
 void
 NativeObject::moveShiftedElements()
 {
+    MOZ_ASSERT(isExtensible());
+
     ObjectElements* header = getElementsHeader();
     uint32_t numShifted = header->numShiftedElements();
     MOZ_ASSERT(numShifted > 0);
@@ -692,6 +693,8 @@ NativeObject::moveShiftedElements()
 void
 NativeObject::maybeMoveShiftedElements()
 {
+    MOZ_ASSERT(isExtensible());
+
     ObjectElements* header = getElementsHeader();
     MOZ_ASSERT(header->numShiftedElements() > 0);
 
@@ -703,6 +706,7 @@ NativeObject::maybeMoveShiftedElements()
 bool
 NativeObject::tryUnshiftDenseElements(uint32_t count)
 {
+    MOZ_ASSERT(isExtensible());
     MOZ_ASSERT(count > 0);
 
     ObjectElements* header = getElementsHeader();
@@ -718,7 +722,6 @@ NativeObject::tryUnshiftDenseElements(uint32_t count)
         // limit.
         if (header->initializedLength <= 10 ||
             header->isCopyOnWrite() ||
-            !isExtensible() ||
             header->hasNonwritableArrayLength() ||
             MOZ_UNLIKELY(count > ObjectElements::MaxShiftedElements))
         {

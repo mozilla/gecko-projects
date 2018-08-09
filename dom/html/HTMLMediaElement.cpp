@@ -127,6 +127,10 @@
 mozilla::LazyLogModule gMediaElementLog("nsMediaElement");
 static mozilla::LazyLogModule gMediaElementEventsLog("nsMediaElementEvents");
 
+extern mozilla::LazyLogModule gAutoplayPermissionLog;
+#define AUTOPLAY_LOG(msg, ...)                                             \
+  MOZ_LOG(gAutoplayPermissionLog, LogLevel::Debug, (msg, ##__VA_ARGS__))
+
 #define LOG(type, msg) MOZ_LOG(gMediaElementLog, type, msg)
 #define LOG_EVENT(type, msg) MOZ_LOG(gMediaElementEventsLog, type, msg)
 
@@ -2541,7 +2545,7 @@ HTMLMediaElement::UpdatePreloadAction()
   } else {
     // Find the appropriate preload action by looking at the attribute.
     const nsAttrValue* val =
-      mAttrsAndChildren.GetAttr(nsGkAtoms::preload, kNameSpaceID_None);
+      mAttrs.GetAttr(nsGkAtoms::preload, kNameSpaceID_None);
     // MSE doesn't work if preload is none, so it ignores the pref when src is
     // from MSE.
     uint32_t preloadDefault =
@@ -3068,6 +3072,7 @@ HTMLMediaElement::PauseIfShouldNotBePlaying()
     return;
   }
   if (AutoplayPolicy::IsAllowedToPlay(*this) != nsIAutoplay::ALLOWED) {
+    AUTOPLAY_LOG("pause because not allowed to play, element=%p", this);
     ErrorResult rv;
     Pause(rv);
     OwnerDoc()->SetDocTreeHadPlayRevoked();
@@ -4028,6 +4033,9 @@ HTMLMediaElement::UpdateHadAudibleAutoplayState() const
     if (AutoplayPolicy::WouldBeAllowedToPlayIfAutoplayDisabled(*this)) {
       ScalarAdd(Telemetry::ScalarID::MEDIA_AUTOPLAY_WOULD_BE_ALLOWED_COUNT, 1);
     } else {
+      if (mReadyState >= HAVE_METADATA && !HasAudio()) {
+        ScalarAdd(Telemetry::ScalarID::MEDIA_BLOCKED_AUTOPLAY_NO_AUDIO_TRACK_COUNT, 1);
+      }
       ScalarAdd(Telemetry::ScalarID::MEDIA_AUTOPLAY_WOULD_NOT_BE_ALLOWED_COUNT, 1);
     }
   }
@@ -4103,7 +4111,7 @@ HTMLMediaElement::Play(ErrorResult& aRv)
       break;
     }
     case nsIAutoplay::BLOCKED: {
-      LOG(LogLevel::Debug, ("%p play not blocked.", this));
+      AUTOPLAY_LOG("%p play blocked.", this);
       promise->MaybeReject(NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR);
       if (StaticPrefs::MediaBlockEventEnabled()) {
         DispatchAsyncEvent(NS_LITERAL_STRING("blocked"));
@@ -4128,8 +4136,7 @@ HTMLMediaElement::EnsureAutoplayRequested(bool aHandlingUserInput)
     // Await for the previous request to be approved or denied. This
     // play request's promise will be fulfilled with all other pending
     // promises when the permission prompt is resolved.
-    LOG(LogLevel::Debug,
-        ("%p EnsureAutoplayRequested() existing request, bailing.", this));
+    AUTOPLAY_LOG("%p EnsureAutoplayRequested() existing request, bailing.", this);
     return;
   }
 
@@ -4146,19 +4153,17 @@ HTMLMediaElement::EnsureAutoplayRequested(bool aHandlingUserInput)
            [ self, handlingUserInput = aHandlingUserInput, request ](
              bool aApproved) {
              self->mAutoplayPermissionRequest.Complete();
-             LOG(LogLevel::Debug,
-                 ("%p Autoplay request approved request=%p",
-                  self.get(),
-                  request.get()));
+             AUTOPLAY_LOG("%p Autoplay request approved request=%p",
+                          self.get(),
+                          request.get());
              self->PlayInternal(handlingUserInput);
              self->UpdateCustomPolicyAfterPlayed();
            },
            [self, request](nsresult aError) {
              self->mAutoplayPermissionRequest.Complete();
-             LOG(LogLevel::Debug,
-                 ("%p Autoplay request denied request=%p",
-                  self.get(),
-                  request.get()));
+             AUTOPLAY_LOG("%p Autoplay request denied request=%p",
+                          self.get(),
+                          request.get());
              LOG(LogLevel::Debug, ("%s rejecting play promimses", __func__));
              self->AsyncRejectPendingPlayPromises(
                NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR);
@@ -5501,6 +5506,13 @@ HTMLMediaElement::MetadataLoaded(const MediaInfo* aInfo,
                                mMediaInfo.mVideo.mDisplay.height > 0),
                "Video resolution must be known on 'loadedmetadata'");
   DispatchAsyncEvent(NS_LITERAL_STRING("loadedmetadata"));
+  // The play invocation which was call by script had happened before media
+  // element loaded metadata.
+  if ((!mPaused && OwnerDoc() && !OwnerDoc()->HasBeenUserGestureActivated()) &&
+      !HasAudio() &&
+      (Volume() != 0 && !Muted())) {
+    ScalarAdd(Telemetry::ScalarID::MEDIA_BLOCKED_AUTOPLAY_NO_AUDIO_TRACK_COUNT, 1);
+  }
   if (mDecoder && mDecoder->IsTransportSeekable() &&
       mDecoder->IsMediaSeekable()) {
     ProcessMediaFragmentURI();
@@ -6846,9 +6858,9 @@ HTMLMediaElement::GetDocumentLoadGroup()
 }
 
 nsresult
-HTMLMediaElement::CopyInnerTo(Element* aDest, bool aPreallocateChildren)
+HTMLMediaElement::CopyInnerTo(Element* aDest)
 {
-  nsresult rv = nsGenericHTMLElement::CopyInnerTo(aDest, aPreallocateChildren);
+  nsresult rv = nsGenericHTMLElement::CopyInnerTo(aDest);
   NS_ENSURE_SUCCESS(rv, rv);
   if (aDest->OwnerDoc()->IsStaticDocument()) {
     HTMLMediaElement* dest = static_cast<HTMLMediaElement*>(aDest);

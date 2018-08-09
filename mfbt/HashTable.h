@@ -4,8 +4,51 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// A note on the differences between mozilla::HashTable and PLDHashTable (and
-// its subclasses, such as nsTHashtable).
+//---------------------------------------------------------------------------
+// Overview
+//---------------------------------------------------------------------------
+//
+// This file defines HashMap<Key, Value> and HashSet<T>, hash tables that are
+// fast and have a nice API.
+//
+// Both hash tables have two optional template parameters.
+//
+// - HashPolicy. This defines the operations for hashing and matching keys. The
+//   default HashPolicy is appropriate when both of the following two
+//   conditions are true.
+//
+//   - The key type stored in the table (|Key| for |HashMap<Key, Value>|, |T|
+//     for |HashSet<T>|) is an integer, pointer, UniquePtr, float, or double.
+//
+//   - The type used for lookups (|Lookup|) is the same as the key type. This
+//     is usually the case, but not always.
+//
+//   There is also a |CStringHasher| policy for |char*| keys. If your keys
+//   don't match any of the above cases, you must provide your own hash policy;
+//   see the "Hash Policy" section below.
+//
+// - AllocPolicy. This defines how allocations are done by the table.
+//
+//   - |MallocAllocPolicy| is the default and is usually appropriate; note that
+//     operations (such as insertions) that might cause allocations are
+//     fallible and must be checked for OOM. These checks are enforced by the
+//     use of MOZ_MUST_USE.
+//
+//   - |InfallibleAllocPolicy| is another possibility; it allows the
+//     abovementioned OOM checks to be done with MOZ_ALWAYS_TRUE().
+//
+//  See AllocPolicy.h for more details.
+//
+// Documentation on how to use HashMap and HashSet, including examples, is
+// present within those classes. Search for "class HashMap" and "class
+// HashSet".
+//
+// Both HashMap and HashSet are implemented on top of a third class, HashTable.
+// You only need to look at HashTable if you want to understand the
+// implementation.
+//
+// How does mozilla::HashTable (this file) compare with PLDHashTable (and its
+// subclasses, such as nsTHashtable)?
 //
 // - mozilla::HashTable is a lot faster, largely because it uses templates
 //   throughout *and* inlines everything. PLDHashTable inlines operations much
@@ -18,11 +61,8 @@
 // - mozilla::HashTable has a nicer API, with a proper HashSet vs. HashMap
 //   distinction.
 //
-// - mozilla::HashTable requires more explicit OOM checking. Use
-//   mozilla::InfallibleAllocPolicy to make allocations infallible; note that
-//   return values of possibly-allocating methods such as add() will still need
-//   checking in some fashion -- e.g. with MOZ_ALWAYS_TRUE() -- due to the use
-//   of MOZ_MUST_USE.
+// - mozilla::HashTable requires more explicit OOM checking. As mentioned
+//   above, the use of |InfallibleAllocPolicy| can simplify things.
 //
 // - mozilla::HashTable has a default capacity on creation of 32 and a minimum
 //   capacity of 4. PLDHashTable has a default capacity on creation of 8 and a
@@ -67,8 +107,6 @@ class HashTable;
 
 } // namespace detail
 
-/*****************************************************************************/
-
 // The "generation" of a hash table is an opaque value indicating the state of
 // modification of the hash table through its lifetime.  If the generation of
 // a hash table compares equal at times T1 and T2, then lookups in the hash
@@ -81,27 +119,34 @@ class HashTable;
 // tables H1 and H2.
 using Generation = Opaque<uint64_t>;
 
-// A performant, STL-like container providing a hash-based map from keys to
-// values. In particular, HashMap calls constructors and destructors of all
-// objects added so non-PODs may be used safely.
+//---------------------------------------------------------------------------
+// HashMap
+//---------------------------------------------------------------------------
+
+// HashMap is a fast hash-based map from keys to values.
 //
-// Key/Value requirements:
-//  - movable, destructible, assignable
-// HashPolicy requirements:
-//  - see Hash Policy section below
-// AllocPolicy:
-//  - see AllocPolicy.h
+// Template parameter requirements:
+// - Key/Value: movable, destructible, assignable.
+// - HashPolicy: see the "Hash Policy" section below.
+// - AllocPolicy: see AllocPolicy.h.
 //
 // Note:
 // - HashMap is not reentrant: Key/Value/HashPolicy/AllocPolicy members
 //   called by HashMap must not call back into the same HashMap object.
 // - Due to the lack of exception handling, the user must call |init()|.
+//
 template<class Key,
          class Value,
          class HashPolicy = DefaultHasher<Key>,
          class AllocPolicy = MallocAllocPolicy>
 class HashMap
 {
+  // -- Implementation details -----------------------------------------------
+
+  // HashMap is not copyable or assignable.
+  HashMap(const HashMap& hm) = delete;
+  HashMap& operator=(const HashMap& hm) = delete;
+
   using TableEntry = HashMapEntry<Key, Value>;
 
   struct MapHashPolicy : HashPolicy
@@ -120,169 +165,56 @@ class HashMap
   using Impl = detail::HashTable<TableEntry, MapHashPolicy, AllocPolicy>;
   Impl mImpl;
 
+  friend class Impl::Enum;
+
 public:
   using Lookup = typename HashPolicy::Lookup;
   using Entry = TableEntry;
 
-  // HashMap construction is fallible (due to OOM); thus the user must call
-  // init after constructing a HashMap and check the return value.
+  // -- Initialization -------------------------------------------------------
+
+  // HashMap construction is fallible (due to possible OOM). The user must
+  // call init() after construction and check the return value.
   explicit HashMap(AllocPolicy aPolicy = AllocPolicy())
     : mImpl(aPolicy)
   {
   }
 
+  // HashMap is movable.
+  HashMap(HashMap&& aRhs)
+    : mImpl(std::move(aRhs.mImpl))
+  {
+  }
+  void operator=(HashMap&& aRhs)
+  {
+    MOZ_ASSERT(this != &aRhs, "self-move assignment is prohibited");
+    mImpl = std::move(aRhs.mImpl);
+  }
+
+  // Initialize the map for use. Must be called after construction, before
+  // any other operations (other than initialized()).
   MOZ_MUST_USE bool init(uint32_t aLen = 16) { return mImpl.init(aLen); }
 
+  // -- Status and sizing ----------------------------------------------------
+
+  // Has the map been initialized?
   bool initialized() const { return mImpl.initialized(); }
 
-  // Return whether the given lookup value is present in the map. E.g.:
-  //
-  //   using HM = HashMap<int,char>;
-  //   HM h;
-  //   if (HM::Ptr p = h.lookup(3)) {
-  //     const HM::Entry& e = *p; // p acts like a pointer to Entry
-  //     assert(p->key == 3);     // Entry contains the key
-  //     char val = p->value;     // and value
-  //   }
-  //
-  // Also see the definition of Ptr in HashTable above (with T = Entry).
-  using Ptr = typename Impl::Ptr;
-  MOZ_ALWAYS_INLINE Ptr lookup(const Lookup& aLookup) const
-  {
-    return mImpl.lookup(aLookup);
-  }
+  // The map's current generation.
+  Generation generation() const { return mImpl.generation(); }
 
-  // Like lookup, but does not assert if two threads call lookup at the same
-  // time. Only use this method when none of the threads will modify the map.
-  MOZ_ALWAYS_INLINE Ptr readonlyThreadsafeLookup(const Lookup& aLookup) const
-  {
-    return mImpl.readonlyThreadsafeLookup(aLookup);
-  }
-
-  // Assuming |p.found()|, remove |*p|.
-  void remove(Ptr aPtr) { mImpl.remove(aPtr); }
-
-  // Like |lookup(l)|, but on miss, |p = lookupForAdd(l)| allows efficient
-  // insertion of Key |k| (where |HashPolicy::match(k,l) == true|) using
-  // |add(p,k,v)|. After |add(p,k,v)|, |p| points to the new Entry. E.g.:
-  //
-  //   using HM = HashMap<int,char>;
-  //   HM h;
-  //   HM::AddPtr p = h.lookupForAdd(3);
-  //   if (!p) {
-  //     if (!h.add(p, 3, 'a')) {
-  //       return false;
-  //     }
-  //   }
-  //   const HM::Entry& e = *p;   // p acts like a pointer to Entry
-  //   assert(p->key == 3);       // Entry contains the key
-  //   char val = p->value;       // and value
-  //
-  // Also see the definition of AddPtr in HashTable above (with T = Entry).
-  //
-  // N.B. The caller must ensure that no mutating hash table operations
-  // occur between a pair of |lookupForAdd| and |add| calls. To avoid
-  // looking up the key a second time, the caller may use the more efficient
-  // relookupOrAdd method. This method reuses part of the hashing computation
-  // to more efficiently insert the key if it has not been added. For
-  // example, a mutation-handling version of the previous example:
-  //
-  //    HM::AddPtr p = h.lookupForAdd(3);
-  //    if (!p) {
-  //      call_that_may_mutate_h();
-  //      if (!h.relookupOrAdd(p, 3, 'a')) {
-  //        return false;
-  //      }
-  //    }
-  //    const HM::Entry& e = *p;
-  //    assert(p->key == 3);
-  //    char val = p->value;
-  //
-  using AddPtr = typename Impl::AddPtr;
-  MOZ_ALWAYS_INLINE AddPtr lookupForAdd(const Lookup& aLookup) const
-  {
-    return mImpl.lookupForAdd(aLookup);
-  }
-
-  template<typename KeyInput, typename ValueInput>
-  MOZ_MUST_USE bool add(AddPtr& aPtr, KeyInput&& aKey, ValueInput&& aValue)
-  {
-    return mImpl.add(
-      aPtr, std::forward<KeyInput>(aKey), std::forward<ValueInput>(aValue));
-  }
-
-  template<typename KeyInput>
-  MOZ_MUST_USE bool add(AddPtr& aPtr, KeyInput&& aKey)
-  {
-    return mImpl.add(aPtr, std::forward<KeyInput>(aKey), Value());
-  }
-
-  template<typename KeyInput, typename ValueInput>
-  MOZ_MUST_USE bool relookupOrAdd(AddPtr& aPtr,
-                                  KeyInput&& aKey,
-                                  ValueInput&& aValue)
-  {
-    return mImpl.relookupOrAdd(aPtr,
-                               aKey,
-                               std::forward<KeyInput>(aKey),
-                               std::forward<ValueInput>(aValue));
-  }
-
-  // |iter()| returns an Iterator:
-  //
-  //   HashMap<int, char> h;
-  //   for (auto iter = h.iter(); !iter.done(); iter.next()) {
-  //     char c = iter.get().value();
-  //   }
-  //
-  // Also see the definition of Iterator in HashTable above (with T = Entry).
-  using Iterator = typename Impl::Iterator;
-  Iterator iter() const { return mImpl.iter(); }
-
-  // |modIter()| returns a ModIterator:
-  //
-  //   HashMap<int, char> h;
-  //   for (auto iter = h.modIter(); !iter.done(); iter.next()) {
-  //     if (iter.get().value() == 'l') {
-  //       iter.remove();
-  //     }
-  //   }
-  //
-  // Table resize may occur in ModIterator's destructor. Also see the
-  // definition of ModIterator in HashTable above (with T = Entry).
-  using ModIterator = typename Impl::ModIterator;
-  ModIterator modIter() { return mImpl.modIter(); }
-
-  // These are similar to Iterator/ModIterator/iter(), but use less common
-  // terminology.
-  using Range = typename Impl::Range;
-  using Enum = typename Impl::Enum;
-  Range all() const { return mImpl.all(); }
-
-  // Remove all entries. This does not shrink the table. For that consider
-  // using the finish() method.
-  void clear() { mImpl.clear(); }
-
-  // Remove all entries. Unlike clear() this method tries to shrink the table.
-  // Unlike finish() it does not require the map to be initialized again.
-  void clearAndShrink() { mImpl.clearAndShrink(); }
-
-  // Remove all the entries and release all internal buffers. The map must
-  // be initialized again before any use.
-  void finish() { mImpl.finish(); }
-
-  // Does the table contain any entries?
+  // Is the map empty?
   bool empty() const { return mImpl.empty(); }
 
-  // Number of live elements in the map.
+  // Number of keys/values in the map.
   uint32_t count() const { return mImpl.count(); }
 
-  // Total number of allocation in the dynamic table. Note: resize will
-  // happen well before count() == capacity().
+  // Number of key/value slots in the map. Note: resize will happen well before
+  // count() == capacity().
   size_t capacity() const { return mImpl.capacity(); }
 
-  // Measure the size of the HashMap's entry storage. If the entries contain
-  // pointers to other heap blocks, you must iterate over the table and measure
+  // The size of the map's entry storage, in bytes. If the keys/values contain
+  // pointers to other heap blocks, you must iterate over the map and measure
   // them separately; hence the "shallow" prefix.
   size_t shallowSizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
   {
@@ -294,16 +226,41 @@ public:
            mImpl.shallowSizeOfExcludingThis(aMallocSizeOf);
   }
 
-  Generation generation() const { return mImpl.generation(); }
+  // -- Lookups --------------------------------------------------------------
 
-  /************************************************** Shorthand operations */
-
+  // Does the map contain a key/value matching |aLookup|?
   bool has(const Lookup& aLookup) const
   {
     return mImpl.lookup(aLookup).found();
   }
 
-  // Overwrite existing value with aValue. Return false on oom.
+  // Return a Ptr indicating whether a key/value matching |aLookup| is
+  // present in the map. E.g.:
+  //
+  //   using HM = HashMap<int,char>;
+  //   HM h;
+  //   if (HM::Ptr p = h.lookup(3)) {
+  //     assert(p->key() == 3);
+  //     char val = p->value();
+  //   }
+  //
+  using Ptr = typename Impl::Ptr;
+  MOZ_ALWAYS_INLINE Ptr lookup(const Lookup& aLookup) const
+  {
+    return mImpl.lookup(aLookup);
+  }
+
+  // Like lookup(), but does not assert if two threads call it at the same
+  // time. Only use this method when none of the threads will modify the map.
+  MOZ_ALWAYS_INLINE Ptr readonlyThreadsafeLookup(const Lookup& aLookup) const
+  {
+    return mImpl.readonlyThreadsafeLookup(aLookup);
+  }
+
+  // -- Insertions -----------------------------------------------------------
+
+  // Overwrite existing value with |aValue|, or add it if not present. Returns
+  // false on OOM.
   template<typename KeyInput, typename ValueInput>
   MOZ_MUST_USE bool put(KeyInput&& aKey, ValueInput&& aValue)
   {
@@ -316,7 +273,8 @@ public:
       p, std::forward<KeyInput>(aKey), std::forward<ValueInput>(aValue));
   }
 
-  // Like put, but assert that the given key is not already present.
+  // Like put(), but slightly faster. Must only be used when the given key is
+  // not already present. (In debug builds, assertions check this.)
   template<typename KeyInput, typename ValueInput>
   MOZ_MUST_USE bool putNew(KeyInput&& aKey, ValueInput&& aValue)
   {
@@ -324,7 +282,20 @@ public:
       aKey, std::forward<KeyInput>(aKey), std::forward<ValueInput>(aValue));
   }
 
-  // Only call this to populate an empty map after reserving space with init().
+  // Like putNew(), but should be only used when the table is known to be big
+  // enough for the insertion, and hashing cannot fail. Typically this is used
+  // to populate an empty map with known-unique keys after reserving space with
+  // init(), e.g.
+  //
+  //   using HM = HashMap<int,char>;
+  //   HM h;
+  //   if (!h.init(3)) {
+  //     MOZ_CRASH("OOM");
+  //   }
+  //   h.putNewInfallible(1, 'a');    // unique key
+  //   h.putNewInfallible(2, 'b');    // unique key
+  //   h.putNewInfallible(3, 'c');    // unique key
+  //
   template<typename KeyInput, typename ValueInput>
   void putNewInfallible(KeyInput&& aKey, ValueInput&& aValue)
   {
@@ -332,21 +303,67 @@ public:
       aKey, std::forward<KeyInput>(aKey), std::forward<ValueInput>(aValue));
   }
 
-  // Add (aKey,aDefaultValue) if |aKey| is not found. Return a false-y Ptr on
-  // oom.
-  Ptr lookupWithDefault(const Key& aKey, const Value& aDefaultValue)
+  // Like |lookup(l)|, but on miss, |p = lookupForAdd(l)| allows efficient
+  // insertion of Key |k| (where |HashPolicy::match(k,l) == true|) using
+  // |add(p,k,v)|. After |add(p,k,v)|, |p| points to the new key/value. E.g.:
+  //
+  //   using HM = HashMap<int,char>;
+  //   HM h;
+  //   HM::AddPtr p = h.lookupForAdd(3);
+  //   if (!p) {
+  //     if (!h.add(p, 3, 'a')) {
+  //       return false;
+  //     }
+  //   }
+  //   assert(p->key() == 3);
+  //   char val = p->value();
+  //
+  // N.B. The caller must ensure that no mutating hash table operations occur
+  // between a pair of lookupForAdd() and add() calls. To avoid looking up the
+  // key a second time, the caller may use the more efficient relookupOrAdd()
+  // method. This method reuses part of the hashing computation to more
+  // efficiently insert the key if it has not been added. For example, a
+  // mutation-handling version of the previous example:
+  //
+  //    HM::AddPtr p = h.lookupForAdd(3);
+  //    if (!p) {
+  //      call_that_may_mutate_h();
+  //      if (!h.relookupOrAdd(p, 3, 'a')) {
+  //        return false;
+  //      }
+  //    }
+  //    assert(p->key() == 3);
+  //    char val = p->value();
+  //
+  using AddPtr = typename Impl::AddPtr;
+  MOZ_ALWAYS_INLINE AddPtr lookupForAdd(const Lookup& aLookup) const
   {
-    AddPtr p = lookupForAdd(aKey);
-    if (p) {
-      return p;
-    }
-    bool ok = add(p, aKey, aDefaultValue);
-    MOZ_ASSERT_IF(!ok, !p); // p is left false-y on oom.
-    (void)ok;
-    return p;
+    return mImpl.lookupForAdd(aLookup);
   }
 
-  // Remove if present.
+  // Add a key/value. Returns false on OOM.
+  template<typename KeyInput, typename ValueInput>
+  MOZ_MUST_USE bool add(AddPtr& aPtr, KeyInput&& aKey, ValueInput&& aValue)
+  {
+    return mImpl.add(
+      aPtr, std::forward<KeyInput>(aKey), std::forward<ValueInput>(aValue));
+  }
+
+  // See the comment above lookupForAdd() for details.
+  template<typename KeyInput, typename ValueInput>
+  MOZ_MUST_USE bool relookupOrAdd(AddPtr& aPtr,
+                                  KeyInput&& aKey,
+                                  ValueInput&& aValue)
+  {
+    return mImpl.relookupOrAdd(aPtr,
+                               aKey,
+                               std::forward<KeyInput>(aKey),
+                               std::forward<ValueInput>(aValue));
+  }
+
+  // -- Removal --------------------------------------------------------------
+
+  // Lookup and remove the key/value matching |aLookup|, if present.
   void remove(const Lookup& aLookup)
   {
     if (Ptr p = lookup(aLookup)) {
@@ -354,9 +371,14 @@ public:
     }
   }
 
-  // Infallibly rekey one entry, if necessary.
-  // Requires template parameters Key and HashPolicy::Lookup to be the same
-  // type.
+  // Remove a previously found key/value (assuming aPtr.found()). The map must
+  // not have been mutated in the interim.
+  void remove(Ptr aPtr) { mImpl.remove(aPtr); }
+
+  // -- Rekeying -------------------------------------------------------------
+
+  // Infallibly rekey one entry, if necessary. Requires that template
+  // parameters Key and HashPolicy::Lookup are the same type.
   void rekeyIfMoved(const Key& aOldKey, const Key& aNewKey)
   {
     if (aOldKey != aNewKey) {
@@ -376,75 +398,161 @@ public:
     return false;
   }
 
-  // HashMap is movable
-  HashMap(HashMap&& aRhs)
-    : mImpl(std::move(aRhs.mImpl))
-  {
-  }
-  void operator=(HashMap&& aRhs)
-  {
-    MOZ_ASSERT(this != &aRhs, "self-move assignment is prohibited");
-    mImpl = std::move(aRhs.mImpl);
-  }
+  // -- Iteration ------------------------------------------------------------
 
-private:
-  // HashMap is not copyable or assignable
-  HashMap(const HashMap& hm) = delete;
-  HashMap& operator=(const HashMap& hm) = delete;
+  // |iter()| returns an Iterator:
+  //
+  //   HashMap<int, char> h;
+  //   for (auto iter = h.iter(); !iter.done(); iter.next()) {
+  //     char c = iter.get().value();
+  //   }
+  //
+  using Iterator = typename Impl::Iterator;
+  Iterator iter() const { return mImpl.iter(); }
 
-  friend class Impl::Enum;
+  // |modIter()| returns a ModIterator:
+  //
+  //   HashMap<int, char> h;
+  //   for (auto iter = h.modIter(); !iter.done(); iter.next()) {
+  //     if (iter.get().value() == 'l') {
+  //       iter.remove();
+  //     }
+  //   }
+  //
+  // Table resize may occur in ModIterator's destructor.
+  using ModIterator = typename Impl::ModIterator;
+  ModIterator modIter() { return mImpl.modIter(); }
+
+  // These are similar to Iterator/ModIterator/iter(), but use different
+  // terminology.
+  using Range = typename Impl::Range;
+  using Enum = typename Impl::Enum;
+  Range all() const { return mImpl.all(); }
+
+  // -- Clearing -------------------------------------------------------------
+
+  // Remove all keys/values without changing the capacity.
+  void clear() { mImpl.clear(); }
+
+  // Remove all keys/values and attempt to minimize the capacity.
+  void clearAndShrink() { mImpl.clearAndShrink(); }
+
+  // Remove all keys/values and release entry storage. The map must be
+  // initialized via init() again before further use.
+  void finish() { mImpl.finish(); }
 };
 
-/*****************************************************************************/
+//---------------------------------------------------------------------------
+// HashSet
+//---------------------------------------------------------------------------
 
-// A performant, STL-like container providing a hash-based set of values. In
-// particular, HashSet calls constructors and destructors of all objects added
-// so non-PODs may be used safely.
+// HashSet is a fast hash-based set of values.
 //
-// T requirements:
-//  - movable, destructible, assignable
-// HashPolicy requirements:
-//  - see Hash Policy section below
-// AllocPolicy:
-//  - see AllocPolicy.h
+// Template parameter requirements:
+// - T: movable, destructible, assignable.
+// - HashPolicy: see the "Hash Policy" section below.
+// - AllocPolicy: see AllocPolicy.h
 //
 // Note:
 // - HashSet is not reentrant: T/HashPolicy/AllocPolicy members called by
 //   HashSet must not call back into the same HashSet object.
 // - Due to the lack of exception handling, the user must call |init()|.
+//
 template<class T,
          class HashPolicy = DefaultHasher<T>,
          class AllocPolicy = MallocAllocPolicy>
 class HashSet
 {
-  struct SetOps : HashPolicy
+  // -- Implementation details -----------------------------------------------
+
+  // HashSet is not copyable or assignable.
+  HashSet(const HashSet& hs) = delete;
+  HashSet& operator=(const HashSet& hs) = delete;
+
+  struct SetHashPolicy : HashPolicy
   {
     using Base = HashPolicy;
     using KeyType = T;
 
     static const KeyType& getKey(const T& aT) { return aT; }
+
     static void setKey(T& aT, KeyType& aKey) { HashPolicy::rekey(aT, aKey); }
   };
 
-  using Impl = detail::HashTable<const T, SetOps, AllocPolicy>;
+  using Impl = detail::HashTable<const T, SetHashPolicy, AllocPolicy>;
   Impl mImpl;
+
+  friend class Impl::Enum;
 
 public:
   using Lookup = typename HashPolicy::Lookup;
   using Entry = T;
 
-  // HashSet construction is fallible (due to OOM); thus the user must call
-  // init after constructing a HashSet and check the return value.
+  // -- Initialization -------------------------------------------------------
+
+  // HashSet construction is fallible (due to possible OOM). The user must call
+  // init() after construction and check the return value.
   explicit HashSet(AllocPolicy a = AllocPolicy())
     : mImpl(a)
   {
   }
 
+  // HashSet is movable.
+  HashSet(HashSet&& aRhs)
+    : mImpl(std::move(aRhs.mImpl))
+  {
+  }
+  void operator=(HashSet&& aRhs)
+  {
+    MOZ_ASSERT(this != &aRhs, "self-move assignment is prohibited");
+    mImpl = std::move(aRhs.mImpl);
+  }
+
+  // Initialize the set for use. Must be called after construction, before
+  // any other operations (other than initialized()).
   MOZ_MUST_USE bool init(uint32_t aLen = 16) { return mImpl.init(aLen); }
 
+  // -- Status and sizing ----------------------------------------------------
+
+  // Has the set been initialized?
   bool initialized() const { return mImpl.initialized(); }
 
-  // Return whether the given lookup value is present in the map. E.g.:
+  // The set's current generation.
+  Generation generation() const { return mImpl.generation(); }
+
+  // Is the set empty?
+  bool empty() const { return mImpl.empty(); }
+
+  // Number of elements in the set.
+  uint32_t count() const { return mImpl.count(); }
+
+  // Number of element slots in the set. Note: resize will happen well before
+  // count() == capacity().
+  size_t capacity() const { return mImpl.capacity(); }
+
+  // The size of the set's entry storage, in bytes. If the elements contain
+  // pointers to other heap blocks, you must iterate over the set and measure
+  // them separately; hence the "shallow" prefix.
+  size_t shallowSizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+  {
+    return mImpl.shallowSizeOfExcludingThis(aMallocSizeOf);
+  }
+  size_t shallowSizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+  {
+    return aMallocSizeOf(this) +
+           mImpl.shallowSizeOfExcludingThis(aMallocSizeOf);
+  }
+
+  // -- Lookups --------------------------------------------------------------
+
+  // Does the set contain an element matching |aLookup|?
+  bool has(const Lookup& aLookup) const
+  {
+    return mImpl.lookup(aLookup).found();
+  }
+
+  // Return a Ptr indicating whether an element matching |aLookup| is present
+  // in the set. E.g.:
   //
   //   using HS = HashSet<int>;
   //   HS h;
@@ -452,22 +560,63 @@ public:
   //     assert(*p == 3);   // p acts like a pointer to int
   //   }
   //
-  // Also see the definition of Ptr in HashTable above.
   using Ptr = typename Impl::Ptr;
   MOZ_ALWAYS_INLINE Ptr lookup(const Lookup& aLookup) const
   {
     return mImpl.lookup(aLookup);
   }
 
-  // Like lookup, but does not assert if two threads call lookup at the same
-  // time. Only use this method when none of the threads will modify the map.
+  // Like lookup(), but does not assert if two threads call it at the same
+  // time. Only use this method when none of the threads will modify the set.
   MOZ_ALWAYS_INLINE Ptr readonlyThreadsafeLookup(const Lookup& aLookup) const
   {
     return mImpl.readonlyThreadsafeLookup(aLookup);
   }
 
-  // Assuming |aPtr.found()|, remove |*aPtr|.
-  void remove(Ptr aPtr) { mImpl.remove(aPtr); }
+  // -- Insertions -----------------------------------------------------------
+
+  // Add |aU| if it is not present already. Returns false on OOM.
+  template<typename U>
+  MOZ_MUST_USE bool put(U&& aU)
+  {
+    AddPtr p = lookupForAdd(aU);
+    return p ? true : add(p, std::forward<U>(aU));
+  }
+
+  // Like put(), but slightly faster. Must only be used when the given element
+  // is not already present. (In debug builds, assertions check this.)
+  template<typename U>
+  MOZ_MUST_USE bool putNew(U&& aU)
+  {
+    return mImpl.putNew(aU, std::forward<U>(aU));
+  }
+
+  // Like the other putNew(), but for when |Lookup| is different to |T|.
+  template<typename U>
+  MOZ_MUST_USE bool putNew(const Lookup& aLookup, U&& aU)
+  {
+    return mImpl.putNew(aLookup, std::forward<U>(aU));
+  }
+
+  // Like putNew(), but should be only used when the table is known to be big
+  // enough for the insertion, and hashing cannot fail. Typically this is used
+  // to populate an empty set with known-unique elements after reserving space
+  // with init(), e.g.
+  //
+  //   using HS = HashMap<int>;
+  //   HS h;
+  //   if (!h.init(3)) {
+  //     MOZ_CRASH("OOM");
+  //   }
+  //   h.putNewInfallible(1);     // unique element
+  //   h.putNewInfallible(2);     // unique element
+  //   h.putNewInfallible(3);     // unique element
+  //
+  template<typename U>
+  void putNewInfallible(const Lookup& aLookup, U&& aU)
+  {
+    mImpl.putNewInfallible(aLookup, std::forward<U>(aU));
+  }
 
   // Like |lookup(l)|, but on miss, |p = lookupForAdd(l)| allows efficient
   // insertion of T value |t| (where |HashPolicy::match(t,l) == true|) using
@@ -483,14 +632,12 @@ public:
   //   }
   //   assert(*p == 3);   // p acts like a pointer to int
   //
-  // Also see the definition of AddPtr in HashTable above.
-  //
-  // N.B. The caller must ensure that no mutating hash table operations
-  // occur between a pair of |lookupForAdd| and |add| calls. To avoid
-  // looking up the key a second time, the caller may use the more efficient
-  // relookupOrAdd method. This method reuses part of the hashing computation
-  // to more efficiently insert the key if it has not been added. For
-  // example, a mutation-handling version of the previous example:
+  // N.B. The caller must ensure that no mutating hash table operations occur
+  // between a pair of lookupForAdd() and add() calls. To avoid looking up the
+  // key a second time, the caller may use the more efficient relookupOrAdd()
+  // method. This method reuses part of the hashing computation to more
+  // efficiently insert the key if it has not been added. For example, a
+  // mutation-handling version of the previous example:
   //
   //    HS::AddPtr p = h.lookupForAdd(3);
   //    if (!p) {
@@ -509,121 +656,23 @@ public:
     return mImpl.lookupForAdd(aLookup);
   }
 
+  // Add an element. Returns false on OOM.
   template<typename U>
   MOZ_MUST_USE bool add(AddPtr& aPtr, U&& aU)
   {
     return mImpl.add(aPtr, std::forward<U>(aU));
   }
 
+  // See the comment above lookupForAdd() for details.
   template<typename U>
   MOZ_MUST_USE bool relookupOrAdd(AddPtr& aPtr, const Lookup& aLookup, U&& aU)
   {
     return mImpl.relookupOrAdd(aPtr, aLookup, std::forward<U>(aU));
   }
 
-  // |iter()| returns an Iterator:
-  //
-  //   HashSet<int> h;
-  //   for (auto iter = h.iter(); !iter.done(); iter.next()) {
-  //     int i = iter.get();
-  //   }
-  //
-  // Also see the definition of Iterator in HashTable above.
-  typedef typename Impl::Iterator Iterator;
-  Iterator iter() const { return mImpl.iter(); }
+  // -- Removal --------------------------------------------------------------
 
-  // |modIter()| returns a ModIterator:
-  //
-  //   HashSet<int> h;
-  //   for (auto iter = h.modIter(); !iter.done(); iter.next()) {
-  //     if (iter.get() == 42) {
-  //       iter.remove();
-  //     }
-  //   }
-  //
-  // Table resize may occur in ModIterator's destructor. Also see the
-  // definition of ModIterator in HashTable above.
-  typedef typename Impl::ModIterator ModIterator;
-  ModIterator modIter() { return mImpl.modIter(); }
-
-  // These are similar to Iterator/ModIterator/iter(), but use different
-  // terminology.
-  using Range = typename Impl::Range;
-  using Enum = typename Impl::Enum;
-  Range all() const { return mImpl.all(); }
-
-  // Remove all entries. This does not shrink the table. For that consider
-  // using the finish() method.
-  void clear() { mImpl.clear(); }
-
-  // Remove all entries. Unlike clear() this method tries to shrink the table.
-  // Unlike finish() it does not require the set to be initialized again.
-  void clearAndShrink() { mImpl.clearAndShrink(); }
-
-  // Remove all the entries and release all internal buffers. The set must
-  // be initialized again before any use.
-  void finish() { mImpl.finish(); }
-
-  // Does the table contain any entries?
-  bool empty() const { return mImpl.empty(); }
-
-  // Number of live elements in the map.
-  uint32_t count() const { return mImpl.count(); }
-
-  // Total number of allocation in the dynamic table. Note: resize will
-  // happen well before count() == capacity().
-  size_t capacity() const { return mImpl.capacity(); }
-
-  // Measure the size of the HashSet's entry storage. If the entries contain
-  // pointers to other heap blocks, you must iterate over the table and measure
-  // them separately; hence the "shallow" prefix.
-  size_t shallowSizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
-  {
-    return mImpl.shallowSizeOfExcludingThis(aMallocSizeOf);
-  }
-  size_t shallowSizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
-  {
-    return aMallocSizeOf(this) +
-           mImpl.shallowSizeOfExcludingThis(aMallocSizeOf);
-  }
-
-  Generation generation() const { return mImpl.generation(); }
-
-  /************************************************** Shorthand operations */
-
-  bool has(const Lookup& aLookup) const
-  {
-    return mImpl.lookup(aLookup).found();
-  }
-
-  // Add |aU| if it is not present already. Return false on oom.
-  template<typename U>
-  MOZ_MUST_USE bool put(U&& aU)
-  {
-    AddPtr p = lookupForAdd(aU);
-    return p ? true : add(p, std::forward<U>(aU));
-  }
-
-  // Like put, but assert that the given key is not already present.
-  template<typename U>
-  MOZ_MUST_USE bool putNew(U&& aU)
-  {
-    return mImpl.putNew(aU, std::forward<U>(aU));
-  }
-
-  template<typename U>
-  MOZ_MUST_USE bool putNew(const Lookup& aLookup, U&& aU)
-  {
-    return mImpl.putNew(aLookup, std::forward<U>(aU));
-  }
-
-  // Only call this to populate an empty set after reserving space with init().
-  template<typename U>
-  void putNewInfallible(const Lookup& aLookup, U&& aU)
-  {
-    mImpl.putNewInfallible(aLookup, std::forward<U>(aU));
-  }
-
+  // Lookup and remove the element matching |aLookup|, if present.
   void remove(const Lookup& aLookup)
   {
     if (Ptr p = lookup(aLookup)) {
@@ -631,8 +680,14 @@ public:
     }
   }
 
-  // Infallibly rekey one entry, if present.
-  // Requires template parameters T and HashPolicy::Lookup to be the same type.
+  // Remove a previously found element (assuming aPtr.found()). The set must
+  // not have been mutated in the interim.
+  void remove(Ptr aPtr) { mImpl.remove(aPtr); }
+
+  // -- Rekeying -------------------------------------------------------------
+
+  // Infallibly rekey one entry, if present. Requires that template parameters
+  // T and HashPolicy::Lookup are the same type.
   void rekeyIfMoved(const Lookup& aOldValue, const T& aNewValue)
   {
     if (aOldValue != aNewValue) {
@@ -652,7 +707,7 @@ public:
     return false;
   }
 
-  // Infallibly replace the current key at |p| with an equivalent key.
+  // Infallibly replace the current key at |aPtr| with an equivalent key.
   // Specifically, both HashPolicy::hash and HashPolicy::match must return
   // identical results for the new and old key when applied against all
   // possible matching values.
@@ -665,55 +720,81 @@ public:
     const_cast<T&>(*aPtr) = aNewValue;
   }
 
-  // HashSet is movable
-  HashSet(HashSet&& aRhs)
-    : mImpl(std::move(aRhs.mImpl))
-  {
-  }
-  void operator=(HashSet&& aRhs)
-  {
-    MOZ_ASSERT(this != &aRhs, "self-move assignment is prohibited");
-    mImpl = std::move(aRhs.mImpl);
-  }
+  // -- Iteration ------------------------------------------------------------
 
-private:
-  // HashSet is not copyable or assignable.
-  HashSet(const HashSet& hs) = delete;
-  HashSet& operator=(const HashSet& hs) = delete;
+  // |iter()| returns an Iterator:
+  //
+  //   HashSet<int> h;
+  //   for (auto iter = h.iter(); !iter.done(); iter.next()) {
+  //     int i = iter.get();
+  //   }
+  //
+  using Iterator = typename Impl::Iterator;
+  Iterator iter() const { return mImpl.iter(); }
 
-  friend class Impl::Enum;
+  // |modIter()| returns a ModIterator:
+  //
+  //   HashSet<int> h;
+  //   for (auto iter = h.modIter(); !iter.done(); iter.next()) {
+  //     if (iter.get() == 42) {
+  //       iter.remove();
+  //     }
+  //   }
+  //
+  // Table resize may occur in ModIterator's destructor.
+  using ModIterator = typename Impl::ModIterator;
+  ModIterator modIter() { return mImpl.modIter(); }
+
+  // These are similar to Iterator/ModIterator/iter(), but use different
+  // terminology.
+  using Range = typename Impl::Range;
+  using Enum = typename Impl::Enum;
+  Range all() const { return mImpl.all(); }
+
+  // -- Clearing -------------------------------------------------------------
+
+  // Remove all elements without changing the capacity.
+  void clear() { mImpl.clear(); }
+
+  // Remove all elements and attempt to minimize the capacity.
+  void clearAndShrink() { mImpl.clearAndShrink(); }
+
+  // Remove all keys/values and release entry storage. The set must be
+  // initialized via init() again before further use.
+  void finish() { mImpl.finish(); }
 };
 
-/*****************************************************************************/
-
+//---------------------------------------------------------------------------
 // Hash Policy
+//---------------------------------------------------------------------------
+
+// A hash policy |HP| for a hash table with key-type |Key| must provide:
 //
-// A hash policy P for a hash table with key-type Key must provide:
-//  - a type |P::Lookup| to use to lookup table entries;
-//  - a static member function |P::hash| with signature
+//  - a type |HP::Lookup| to use to lookup table entries;
 //
-//      static mozilla::HashNumber hash(Lookup)
+//  - a static member function |HP::hash| that hashes lookup values:
 //
-//    to use to hash the lookup type; and
-//  - a static member function |P::match| with signature
+//      static mozilla::HashNumber hash(const Lookup&);
 //
-//      static bool match(Key, Lookup)
+//  - a static member function |HP::match| that tests equality of key and
+//    lookup values:
 //
-//    to use to test equality of key and lookup values.
+//      static bool match(const Key&, const Lookup&);
 //
 // Normally, Lookup = Key. In general, though, different values and types of
-// values can be used to lookup and store. If a Lookup value |l| is != to the
-// added Key value |k|, the user must ensure that |P::match(k,l)|. E.g.:
+// values can be used to lookup and store. If a Lookup value |l| is not equal
+// to the added Key value |k|, the user must ensure that |HP::match(k,l)| is
+// true. E.g.:
 //
-//   mozilla::HashSet<Key, P>::AddPtr p = h.lookup(l);
+//   mozilla::HashSet<Key, HP>::AddPtr p = h.lookup(l);
 //   if (!p) {
-//     assert(P::match(k, l));  // must hold
+//     assert(HP::match(k, l));  // must hold
 //     h.add(p, k);
 //   }
 
-// Pointer hashing policy that uses HashGeneric() to create good hashes for
-// pointers.  Note that we don't shift out the lowest k bits to generate a
-// good distribution for arena allocated pointers.
+// A pointer hashing policy that uses HashGeneric() to create good hashes for
+// pointers. Note that we don't shift out the lowest k bits because we don't
+// want to assume anything about the alignment of the pointers.
 template<typename Key>
 struct PointerHasher
 {
@@ -733,10 +814,7 @@ struct PointerHasher
   static void rekey(Key& aKey, const Key& aNewKey) { aKey = aNewKey; }
 };
 
-// Default hash policy: just use the 'lookup' value. This of course only
-// works if the lookup value is integral. HashTable applies ScrambleHashCode to
-// the result of the 'hash' which means that it is 'ok' if the lookup value is
-// not well distributed over the HashNumber domain.
+// The default hash policy, which only works with integers.
 template<class Key>
 struct DefaultHasher
 {
@@ -744,7 +822,9 @@ struct DefaultHasher
 
   static HashNumber hash(const Lookup& aLookup)
   {
-    // Hash if can implicitly cast to hash number type.
+    // Just convert the integer to a HashNumber and use that as is. (This
+    // discards the high 32-bits of 64-bit integers!) ScrambleHashCode() is
+    // subsequently called on the value to improve the distribution.
     return aLookup;
   }
 
@@ -757,19 +837,18 @@ struct DefaultHasher
   static void rekey(Key& aKey, const Key& aNewKey) { aKey = aNewKey; }
 };
 
-// Specialize hashing policy for pointer types. It assumes that the type is
-// at least word-aligned. For types with smaller size use PointerHasher.
+// A DefaultHasher specialization for pointers.
 template<class T>
 struct DefaultHasher<T*> : PointerHasher<T*>
 {
 };
 
-// Specialize hashing policy for mozilla::UniquePtr to proxy the UniquePtr's
-// raw pointer to PointerHasher.
+// A DefaultHasher specialization for mozilla::UniquePtr.
 template<class T, class D>
 struct DefaultHasher<UniquePtr<T, D>>
 {
-  using Lookup = UniquePtr<T, D>;
+  using Key = UniquePtr<T, D>;
+  using Lookup = Key;
   using PtrHasher = PointerHasher<T*>;
 
   static HashNumber hash(const Lookup& aLookup)
@@ -777,7 +856,7 @@ struct DefaultHasher<UniquePtr<T, D>>
     return PtrHasher::hash(aLookup.get());
   }
 
-  static bool match(const UniquePtr<T, D>& aKey, const Lookup& aLookup)
+  static bool match(const Key& aKey, const Lookup& aLookup)
   {
     return PtrHasher::match(aKey.get(), aLookup.get());
   }
@@ -788,59 +867,69 @@ struct DefaultHasher<UniquePtr<T, D>>
   }
 };
 
-// For doubles, we can xor the two uint32s.
+// A DefaultHasher specialization for doubles.
 template<>
 struct DefaultHasher<double>
 {
-  using Lookup = double;
+  using Key = double;
+  using Lookup = Key;
 
-  static HashNumber hash(double aVal)
+  static HashNumber hash(const Lookup& aLookup)
   {
+    // Just xor the high bits with the low bits, and then treat the bits of the
+    // result as a uint32_t.
     static_assert(sizeof(HashNumber) == 4,
                   "subsequent code assumes a four-byte hash");
-    uint64_t u = BitwiseCast<uint64_t>(aVal);
+    uint64_t u = BitwiseCast<uint64_t>(aLookup);
     return HashNumber(u ^ (u >> 32));
   }
 
-  static bool match(double aLhs, double aRhs)
+  static bool match(const Key& aKey, const Lookup& aLookup)
   {
-    return BitwiseCast<uint64_t>(aLhs) == BitwiseCast<uint64_t>(aRhs);
+    return BitwiseCast<uint64_t>(aKey) == BitwiseCast<uint64_t>(aLookup);
   }
 };
 
+// A DefaultHasher specialization for floats.
 template<>
 struct DefaultHasher<float>
 {
-  using Lookup = float;
+  using Key = float;
+  using Lookup = Key;
 
-  static HashNumber hash(float aVal)
+  static HashNumber hash(const Lookup& aLookup)
   {
+    // Just use the value as if its bits form an integer. ScrambleHashCode() is
+    // subsequently called on the value to improve the distribution.
     static_assert(sizeof(HashNumber) == 4,
                   "subsequent code assumes a four-byte hash");
-    return HashNumber(BitwiseCast<uint32_t>(aVal));
+    return HashNumber(BitwiseCast<uint32_t>(aLookup));
   }
 
-  static bool match(float aLhs, float aRhs)
+  static bool match(const Key& aKey, const Lookup& aLookup)
   {
-    return BitwiseCast<uint32_t>(aLhs) == BitwiseCast<uint32_t>(aRhs);
+    return BitwiseCast<uint32_t>(aKey) == BitwiseCast<uint32_t>(aLookup);
   }
 };
 
-// A hash policy that compares C strings.
+// A hash policy for C strings.
 struct CStringHasher
 {
+  using Key = const char*;
   using Lookup = const char*;
 
-  static HashNumber hash(Lookup aLookup) { return HashString(aLookup); }
+  static HashNumber hash(const Lookup& aLookup) { return HashString(aLookup); }
 
-  static bool match(const char* key, Lookup lookup)
+  static bool match(const Key& aKey, const Lookup& aLookup)
   {
-    return strcmp(key, lookup) == 0;
+    return strcmp(aKey, aLookup) == 0;
   }
 };
 
-// Fallible hashing interface.
-//
+//---------------------------------------------------------------------------
+// Fallible Hashing Interface
+//---------------------------------------------------------------------------
+
 // Most of the time generating a hash code is infallible so this class provides
 // default methods that always succeed.  Specialize this class for your own hash
 // policy to provide fallible hashing.
@@ -883,7 +972,9 @@ EnsureHash(Lookup&& aLookup)
     std::forward<Lookup>(aLookup));
 }
 
-/*****************************************************************************/
+//---------------------------------------------------------------------------
+// Implementation Details (HashMapEntry, HashTableEntry, HashTable)
+//---------------------------------------------------------------------------
 
 // Both HashMap and HashSet are implemented by a single HashTable that is even
 // more heavily parameterized than the other two. This leaves HashTable gnarly
@@ -927,6 +1018,9 @@ public:
   using ValueType = Value;
 
   const Key& key() const { return key_; }
+
+  // Use this method with caution! If the key is changed such that its hash
+  // value also changes, the map will be left in an invalid state.
   Key& mutableKey() { return key_; }
 
   const Value& value() const { return value_; }
@@ -1457,26 +1551,6 @@ public:
 #ifdef DEBUG
   uint64_t mMutationCount;
   mutable bool mEntered;
-
-  // Note that some updates to these stats are not thread-safe. See the
-  // comment on the three-argument overloading of HashTable::lookup().
-  mutable struct Stats
-  {
-    uint32_t mSearches;       // total number of table searches
-    uint32_t mSteps;          // hash chain links traversed
-    uint32_t mHits;           // searches that found key
-    uint32_t mMisses;         // searches that didn't find key
-    uint32_t mAddOverRemoved; // adds that recycled a removed entry
-    uint32_t mRemoves;        // calls to remove
-    uint32_t mRemoveFrees;    // calls to remove that freed the entry
-    uint32_t mGrows;          // table expansions
-    uint32_t mShrinks;        // table contractions
-    uint32_t mCompresses;     // table compressions
-    uint32_t mRehashes;       // tombstone decontaminations
-  } mStats;
-#define METER(x) x
-#else
-#define METER(x)
 #endif
 
   // The default initial capacity is 32 (enough to hold 16 elements), but it
@@ -1611,7 +1685,6 @@ public:
       return false;
     }
     setTableSizeLog2(log2);
-    METER(memset(&mStats, 0, sizeof(mStats)));
     return true;
   }
 
@@ -1671,20 +1744,21 @@ private:
     return HashPolicy::match(HashPolicy::getKey(aEntry.get()), aLookup);
   }
 
+  enum LookupReason
+  {
+    ForNonAdd,
+    ForAdd
+  };
+
   // Warning: in order for readonlyThreadsafeLookup() to be safe this
-  // function must not modify the table in any way when |collisionBit| is 0.
-  // (The use of the METER() macro to increment stats violates this
-  // restriction but we will live with that for now because it's enabled so
-  // rarely.)
+  // function must not modify the table in any way when Reason==ForNonAdd.
+  template<LookupReason Reason>
   MOZ_ALWAYS_INLINE Entry& lookup(const Lookup& aLookup,
-                                  HashNumber aKeyHash,
-                                  uint32_t aCollisionBit) const
+                                  HashNumber aKeyHash) const
   {
     MOZ_ASSERT(isLiveHash(aKeyHash));
     MOZ_ASSERT(!(aKeyHash & sCollisionBit));
-    MOZ_ASSERT(aCollisionBit == 0 || aCollisionBit == sCollisionBit);
     MOZ_ASSERT(mTable);
-    METER(mStats.mSearches++);
 
     // Compute the primary hash address.
     HashNumber h1 = hash1(aKeyHash);
@@ -1692,13 +1766,11 @@ private:
 
     // Miss: return space for a new entry.
     if (entry->isFree()) {
-      METER(mStats.mMisses++);
       return *entry;
     }
 
     // Hit: return entry.
     if (entry->matchHash(aKeyHash) && match(*entry, aLookup)) {
-      METER(mStats.mHits++);
       return *entry;
     }
 
@@ -1709,43 +1781,34 @@ private:
     Entry* firstRemoved = nullptr;
 
     while (true) {
-      if (MOZ_UNLIKELY(entry->isRemoved())) {
-        if (!firstRemoved) {
+      if (Reason == ForAdd && !firstRemoved) {
+        if (MOZ_UNLIKELY(entry->isRemoved())) {
           firstRemoved = entry;
-        }
-      } else {
-        if (aCollisionBit == sCollisionBit) {
+        } else {
           entry->setCollision();
         }
       }
 
-      METER(mStats.mSteps++);
       h1 = applyDoubleHash(h1, dh);
 
       entry = &mTable[h1];
       if (entry->isFree()) {
-        METER(mStats.mMisses++);
         return firstRemoved ? *firstRemoved : *entry;
       }
 
       if (entry->matchHash(aKeyHash) && match(*entry, aLookup)) {
-        METER(mStats.mHits++);
         return *entry;
       }
     }
   }
 
-  // This is a copy of lookup hardcoded to the assumptions:
-  //   1. the lookup is a lookupForAdd
-  //   2. the key, whose |keyHash| has been passed is not in the table,
-  //   3. no entries have been removed from the table.
-  // This specialized search avoids the need for recovering lookup values
-  // from entries, which allows more flexible Lookup/Key types.
+  // This is a copy of lookup() hardcoded to the assumptions:
+  //   1. the lookup is for an add;
+  //   2. the key, whose |keyHash| has been passed is not in the table.
   Entry& findFreeEntry(HashNumber aKeyHash)
   {
     MOZ_ASSERT(!(aKeyHash & sCollisionBit));
     MOZ_ASSERT(mTable);
-    METER(mStats.mSearches++);
 
     // We assume 'aKeyHash' has already been distributed.
 
@@ -1755,7 +1818,6 @@ private:
 
     // Miss: return space for a new entry.
     if (!entry->isLive()) {
-      METER(mStats.mMisses++);
       return *entry;
     }
 
@@ -1763,15 +1825,12 @@ private:
     DoubleHash dh = hash2(aKeyHash);
 
     while (true) {
-      MOZ_ASSERT(!entry->isRemoved());
       entry->setCollision();
 
-      METER(mStats.mSteps++);
       h1 = applyDoubleHash(h1, dh);
 
       entry = &mTable[h1];
       if (!entry->isLive()) {
-        METER(mStats.mMisses++);
         return *entry;
       }
     }
@@ -1839,15 +1898,7 @@ private:
       return NotOverloaded;
     }
 
-    int deltaLog2;
-    if (shouldCompressTable()) {
-      METER(mStats.mCompresses++);
-      deltaLog2 = 0;
-    } else {
-      METER(mStats.mGrows++);
-      deltaLog2 = 1;
-    }
-
+    int deltaLog2 = shouldCompressTable() ? 0 : 1;
     return changeTableSize(deltaLog2, aReportFailure);
   }
 
@@ -1864,13 +1915,11 @@ private:
   void remove(Entry& aEntry)
   {
     MOZ_ASSERT(mTable);
-    METER(mStats.mRemoves++);
 
     if (aEntry.hasCollision()) {
       aEntry.removeLive();
       mRemovedCount++;
     } else {
-      METER(mStats.mRemoveFrees++);
       aEntry.clearLive();
     }
     mEntryCount--;
@@ -1882,7 +1931,6 @@ private:
   void checkUnderloaded()
   {
     if (underloaded()) {
-      METER(mStats.mShrinks++);
       (void)changeTableSize(-1, DontReportFailure);
     }
   }
@@ -1911,7 +1959,6 @@ private:
   // would have gotten through random insertion order.
   void rehashTableInPlace()
   {
-    METER(mStats.mRehashes++);
     mRemovedCount = 0;
     mGen++;
     for (size_t i = 0; i < capacity(); ++i) {
@@ -1963,7 +2010,6 @@ private:
     MOZ_ASSERT(entry);
 
     if (entry->isRemoved()) {
-      METER(mStats.mAddOverRemoved++);
       mRemovedCount--;
       keyHash |= sCollisionBit;
     }
@@ -2073,7 +2119,7 @@ public:
       return Ptr();
     }
     HashNumber keyHash = prepareHash(aLookup);
-    return Ptr(lookup(aLookup, keyHash, 0), *this);
+    return Ptr(lookup<ForNonAdd>(aLookup, keyHash), *this);
   }
 
   MOZ_ALWAYS_INLINE Ptr readonlyThreadsafeLookup(const Lookup& aLookup) const
@@ -2082,7 +2128,7 @@ public:
       return Ptr();
     }
     HashNumber keyHash = prepareHash(aLookup);
-    return Ptr(lookup(aLookup, keyHash, 0), *this);
+    return Ptr(lookup<ForNonAdd>(aLookup, keyHash), *this);
   }
 
   MOZ_ALWAYS_INLINE AddPtr lookupForAdd(const Lookup& aLookup) const
@@ -2095,7 +2141,7 @@ public:
     // Directly call the constructor in the return statement to avoid
     // excess copying when building with Visual Studio 2017.
     // See bug 1385181.
-    return AddPtr(lookup(aLookup, keyHash, sCollisionBit), *this, keyHash);
+    return AddPtr(lookup<ForAdd>(aLookup, keyHash), *this, keyHash);
   }
 
   template<typename... Args>
@@ -2123,7 +2169,6 @@ public:
       if (!this->checkSimulatedOOM()) {
         return false;
       }
-      METER(mStats.mAddOverRemoved++);
       mRemovedCount--;
       aPtr.mKeyHash |= sCollisionBit;
     } else {
@@ -2197,7 +2242,7 @@ public:
       ReentrancyGuard g(*this);
       // Check that aLookup has not been destroyed.
       MOZ_ASSERT(prepareHash(aLookup) == aPtr.mKeyHash);
-      aPtr.mEntry = &lookup(aLookup, aPtr.mKeyHash, sCollisionBit);
+      aPtr.mEntry = &lookup<ForAdd>(aLookup, aPtr.mKeyHash);
     }
     return aPtr.found() || add(aPtr, std::forward<Args>(aArgs)...);
   }
@@ -2229,8 +2274,6 @@ public:
     rekeyWithoutRehash(aPtr, aLookup, aKey);
     checkOverRemoved();
   }
-
-#undef METER
 };
 
 } // namespace detail

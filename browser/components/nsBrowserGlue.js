@@ -132,6 +132,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
   Sanitizer: "resource:///modules/Sanitizer.jsm",
   SavantShieldStudy: "resource:///modules/SavantShieldStudy.jsm",
+  SessionStartup: "resource:///modules/sessionstore/SessionStartup.jsm",
   SessionStore: "resource:///modules/sessionstore/SessionStore.jsm",
   ShellService: "resource:///modules/ShellService.jsm",
   TabCrashHandler: "resource:///modules/ContentCrashHandlers.jsm",
@@ -702,6 +703,8 @@ BrowserGlue.prototype = {
   // runs on startup, before the first command line handler is invoked
   // (i.e. before the first window is opened)
   _beforeUIStartup: function BG__beforeUIStartup() {
+    SessionStartup.init();
+
     // check if we're in safe mode
     if (Services.appinfo.inSafeMode) {
       Services.ww.openWindow(null, "chrome://browser/content/safeMode.xul",
@@ -1802,7 +1805,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 72;
+    const UI_VERSION = 73;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
@@ -2139,6 +2142,19 @@ BrowserGlue.prototype = {
       Services.prefs.setIntPref(pref, Services.prefs.getIntPref(pref, 1) * 1000);
     }
 
+    if (currentUIVersion < 73) {
+      // Remove blocklist JSON local dumps in profile.
+      OS.File.removeDir(OS.Path.join(OS.Constants.Path.profileDir, "blocklists"),
+                        { ignoreAbsent: true });
+      OS.File.removeDir(OS.Path.join(OS.Constants.Path.profileDir, "blocklists-preview"),
+                        { ignoreAbsent: true });
+      for (const filename of ["addons.json", "plugins.json", "gfx.json"]) {
+        // Some old versions used to dump without subfolders. Clean them while we are at it.
+        const path = OS.Path.join(OS.Constants.Path.profileDir, `blocklists-${filename}`);
+        OS.File.remove(path, { ignoreAbsent: true });
+      }
+    }
+
     // Update the migration version.
     Services.prefs.setIntPref("browser.migration.version", UI_VERSION);
   },
@@ -2160,13 +2176,8 @@ BrowserGlue.prototype = {
     let promptCount =
       usePromptLimit ? Services.prefs.getIntPref("browser.shell.defaultBrowserCheckCount") : 0;
 
-    let willRecoverSession = false;
-    try {
-      let ss = Cc["@mozilla.org/browser/sessionstartup;1"].
-               getService(Ci.nsISessionStartup);
-      willRecoverSession =
-        (ss.sessionType == Ci.nsISessionStartup.RECOVER_SESSION);
-    } catch (ex) { /* never mind; suppose SessionStore is broken */ }
+    let willRecoverSession =
+      (SessionStartup.sessionType == SessionStartup.RECOVER_SESSION);
 
     // startup check, check all assoc
     let isDefault = false;

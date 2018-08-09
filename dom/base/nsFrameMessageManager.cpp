@@ -145,7 +145,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsFrameMessageManager)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIContentFrameMessageManager)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
 
   /* Message managers in child process implement nsIMessageSender.
      Message managers in the chrome process are
@@ -153,9 +153,6 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsFrameMessageManager)
      managers) or they're simple message senders. */
   NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIMessageSender, !mChrome || !mIsBroadcaster)
 
-  /* nsIContentFrameMessageManager is accessible only in TabChildGlobal. */
-  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIContentFrameMessageManager,
-                                     !mChrome && !mIsProcessManager)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFrameMessageManager)
@@ -412,15 +409,6 @@ nsFrameMessageManager::GetDelayedScripts(JSContext* aCx,
 }
 
 static bool
-JSONCreator(const char16_t* aBuf, uint32_t aLen, void* aData)
-{
-  nsAString* result = static_cast<nsAString*>(aData);
-  result->Append(static_cast<const char16_t*>(aBuf),
-                 static_cast<uint32_t>(aLen));
-  return true;
-}
-
-static bool
 GetParamsForMessage(JSContext* aCx,
                     const JS::Value& aValue,
                     const JS::Value& aTransfer,
@@ -456,8 +444,7 @@ GetParamsForMessage(JSContext* aCx,
   //    properly cases when interface is implemented in JS and used
   //    as a dictionary.
   nsAutoString json;
-  NS_ENSURE_TRUE(JS_Stringify(aCx, &v, nullptr, JS::NullHandleValue,
-                              JSONCreator, &json), false);
+  NS_ENSURE_TRUE(nsContentUtils::StringifyJSON(aCx, &v, json), false);
   NS_ENSURE_TRUE(!json.IsEmpty(), false);
 
   JS::Rooted<JS::Value> val(aCx, JS::NullValue());
@@ -730,11 +717,13 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
 
       JS::RootingContext* rcx = RootingCx();
       JS::Rooted<JSObject*> object(rcx);
+      JS::Rooted<JSObject*> objectGlobal(rcx);
 
       RefPtr<MessageListener> webIDLListener;
       if (!weakListener) {
         webIDLListener = listener.mStrongListener;
         object = webIDLListener->CallbackOrNull();
+        objectGlobal = webIDLListener->CallbackGlobalOrNull();
       } else {
         nsCOMPtr<nsIXPConnectWrappedJS> wrappedJS = do_QueryInterface(weakListener);
         if (!wrappedJS) {
@@ -742,6 +731,7 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
         }
 
         object = wrappedJS->GetJSObject();
+        objectGlobal = wrappedJS->GetJSObjectGlobal();
       }
 
       if (!object) {
@@ -752,10 +742,9 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
       JSContext* cx = aes.cx();
 
       // We passed the unwrapped object to AutoEntryScript so we now need to
-      // enter the (maybe wrapper) object's realm. We will have to revisit this
-      // later because CCWs are not associated with a single realm so this
-      // doesn't make much sense. See bug 1477923.
-      JSAutoRealmAllowCCW ar(cx, object);
+      // enter the realm of the global object that represents the realm of our
+      // callback.
+      JSAutoRealm ar(cx, objectGlobal);
 
       RootedDictionary<ReceiveMessageArgument> argument(cx);
 

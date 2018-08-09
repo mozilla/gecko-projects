@@ -30,7 +30,7 @@ use gecko::selector_parser::{NonTSPseudoClass, PseudoElement, SelectorImpl};
 use gecko::snapshot_helpers;
 use gecko_bindings::bindings;
 use gecko_bindings::bindings::{Gecko_ElementState, Gecko_GetDocumentLWTheme};
-use gecko_bindings::bindings::{Gecko_GetLastChild, Gecko_GetNextStyleChild};
+use gecko_bindings::bindings::{Gecko_GetLastChild, Gecko_GetPreviousSibling, Gecko_GetNextStyleChild};
 use gecko_bindings::bindings::{Gecko_SetNodeFlags, Gecko_UnsetNodeFlags};
 use gecko_bindings::bindings::Gecko_ClassOrClassList;
 use gecko_bindings::bindings::Gecko_ElementHasAnimations;
@@ -375,7 +375,12 @@ impl<'ln> TNode for GeckoNode<'ln> {
 
     #[inline]
     fn first_child(&self) -> Option<Self> {
-        unsafe { self.0.mFirstChild.as_ref().map(GeckoNode::from_content) }
+        unsafe {
+            self.0
+                .mFirstChild.raw::<nsIContent>()
+                .as_ref()
+                .map(GeckoNode::from_content)
+        }
     }
 
     #[inline]
@@ -385,17 +390,17 @@ impl<'ln> TNode for GeckoNode<'ln> {
 
     #[inline]
     fn prev_sibling(&self) -> Option<Self> {
-        unsafe {
-            self.0
-                .mPreviousSibling
-                .as_ref()
-                .map(GeckoNode::from_content)
-        }
+        unsafe { Gecko_GetPreviousSibling(self.0).map(GeckoNode) }
     }
 
     #[inline]
     fn next_sibling(&self) -> Option<Self> {
-        unsafe { self.0.mNextSibling.as_ref().map(GeckoNode::from_content) }
+        unsafe {
+            self.0
+                .mNextSibling.raw::<nsIContent>()
+                .as_ref()
+                .map(GeckoNode::from_content)
+        }
     }
 
     #[inline]
@@ -1952,30 +1957,6 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
         let slot = self.extended_slots()?._base.mAssignedSlot.mRawPtr;
 
         unsafe { Some(GeckoElement(&slot.as_ref()?._base._base._base._base)) }
-    }
-
-    #[inline]
-    fn first_child_element(&self) -> Option<Self> {
-        let mut child = self.as_node().first_child();
-        while let Some(child_node) = child {
-            if let Some(el) = child_node.as_element() {
-                return Some(el);
-            }
-            child = child_node.next_sibling();
-        }
-        None
-    }
-
-    #[inline]
-    fn last_child_element(&self) -> Option<Self> {
-        let mut child = self.as_node().last_child();
-        while let Some(child_node) = child {
-            if let Some(el) = child_node.as_element() {
-                return Some(el);
-            }
-            child = child_node.prev_sibling();
-        }
-        None
     }
 
     #[inline]

@@ -20,7 +20,7 @@ const EXPECTED_REFLOWS_FIRST_OPEN = [
     stack: [
       "_rebuild@chrome://browser/content/search/search.xml",
       "set_popup@chrome://browser/content/search/search.xml",
-      "enableOneOffSearches@chrome://browser/content/urlbarBindings.xml",
+      "set_oneOffSearchesEnabled@chrome://browser/content/urlbarBindings.xml",
       "_enableOrDisableOneOffSearches@chrome://browser/content/urlbarBindings.xml",
       "urlbar_XBL_Constructor/<@chrome://browser/content/urlbarBindings.xml",
       "_openAutocompletePopup@chrome://browser/content/urlbarBindings.xml",
@@ -143,7 +143,7 @@ add_task(async function() {
   let dropmarkerRect = document.getAnonymousElementByAttribute(gURLBar,
     "anonid", "historydropmarker").getBoundingClientRect();
   let textBoxRect = document.getAnonymousElementByAttribute(gURLBar,
-    "anonid", "textbox-input-box").getBoundingClientRect();
+    "anonid", "moz-input-box").getBoundingClientRect();
 
   await withPerfObserver(async function() {
     let oldInvalidate = popup.invalidate.bind(popup);

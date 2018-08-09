@@ -45,6 +45,12 @@ code_coverage_config_options = [
       "default": False,
       "help": "Whether JSDebugger code coverage should be run."
       }],
+    [["--java-code-coverage"],
+     {"action": "store_true",
+      "dest": "java_code_coverage",
+      "default": False,
+      "help": "Whether Java code coverage should be run."
+      }],
 ]
 
 
@@ -89,11 +95,14 @@ class CodeCoverageMixin(SingleTestMixin):
         except (AttributeError, KeyError, TypeError):
             return False
 
-    @PostScriptAction('download-and-extract')
-    def setup_coverage_tools(self, action, success=None):
-        if not self.code_coverage_enabled:
-            return
+    @property
+    def java_code_coverage_enabled(self):
+        try:
+            return bool(self.config.get('java_code_coverage'))
+        except (AttributeError, KeyError, TypeError):
+            return False
 
+    def _setup_cpp_js_coverage_tools(self):
         if mozinfo.os == 'linux' or mozinfo.os == 'mac':
             self.prefix = '/builds/worker/workspace/build/src/'
             strip_count = self.prefix.count('/')
@@ -107,11 +116,34 @@ class CodeCoverageMixin(SingleTestMixin):
 
         os.environ['GCOV_PREFIX_STRIP'] = str(strip_count)
 
-        # Install grcov on the test machine
-        # Get the path to the build machines gcno files.
-        self.url_to_gcno = self.query_build_dir_url('target.code-coverage-gcno.zip')
-        self.url_to_chrome_map = self.query_build_dir_url('chrome-map.json')
+        # Download the gcno archive from the build machine.
+        url_to_gcno = self.query_build_dir_url('target.code-coverage-gcno.zip')
+        self.download_file(url_to_gcno, parent_dir=self.grcov_dir)
 
+        # Download the chrome-map.json file from the build machine.
+        url_to_chrome_map = self.query_build_dir_url('chrome-map.json')
+        self.download_file(url_to_chrome_map, parent_dir=self.grcov_dir)
+
+    def _setup_java_coverage_tools(self):
+        # Download and extract jacoco-cli from the build task.
+        url_to_jacoco = self.query_build_dir_url('target.jacoco-cli.jar')
+        self.jacoco_jar = os.path.join(tempfile.mkdtemp(), 'target.jacoco-cli.jar')
+        self.download_file(url_to_jacoco, self.jacoco_jar)
+
+        # Download and extract class files from the build task.
+        self.classfiles_dir = tempfile.mkdtemp()
+        url_to_classfiles = self.query_build_dir_url('target.geckoview_classfiles.zip')
+        classfiles_zip_path = os.path.join(self.classfiles_dir, 'target.geckoview_classfiles.zip')
+        self.download_file(url_to_classfiles, classfiles_zip_path)
+        with zipfile.ZipFile(classfiles_zip_path, 'r') as z:
+            z.extractall(self.classfiles_dir)
+        os.remove(classfiles_zip_path)
+
+        # Create the directory where the emulator coverage file will be placed.
+        self.java_coverage_output_path = os.path.join(tempfile.mkdtemp(),
+                                                      'junit-coverage.ec')
+
+    def _download_grcov(self):
         fetches_dir = os.environ.get('MOZ_FETCHES_DIR')
         if fetches_dir and os.path.isfile(os.path.join(fetches_dir, 'grcov')):
             self.grcov_dir = fetches_dir
@@ -130,11 +162,18 @@ class CodeCoverageMixin(SingleTestMixin):
                     tar.extractall(self.grcov_dir)
                 os.remove(os.path.join(self.grcov_dir, filename))
 
-        # Download the gcno archive from the build machine.
-        self.download_file(self.url_to_gcno, parent_dir=self.grcov_dir)
+    @PostScriptAction('download-and-extract')
+    def setup_coverage_tools(self, action, success=None):
+        if not self.code_coverage_enabled and not self.java_code_coverage_enabled:
+            return
 
-        # Download the chrome-map.json file from the build machine.
-        self.download_file(self.url_to_chrome_map, parent_dir=self.grcov_dir)
+        self._download_grcov()
+
+        if self.code_coverage_enabled:
+            self._setup_cpp_js_coverage_tools()
+
+        if self.java_code_coverage_enabled:
+            self._setup_java_coverage_tools()
 
     @PostScriptAction('download-and-extract')
     def find_tests_for_coverage(self, action, success=None):
@@ -154,7 +193,7 @@ class CodeCoverageMixin(SingleTestMixin):
         # TODO: Add tests that haven't been run for a while (a week? N pushes?)
 
         # Add baseline code coverage collection tests
-        baseline_tests = {
+        baseline_tests_by_ext = {
             '.html': {
                 'test': 'testing/mochitest/baselinecoverage/plain/test_baselinecoverage.html',
                 'suite': 'plain'
@@ -169,6 +208,11 @@ class CodeCoverageMixin(SingleTestMixin):
             }
         }
 
+        baseline_tests_by_suite = {
+            'browser-chrome': 'testing/mochitest/baselinecoverage/browser_chrome/'
+                              'browser_baselinecoverage_browser-chrome.js'
+        }
+
         wpt_baseline_test = 'tests/web-platform/mozilla/tests/baselinecoverage/wpt_baselinecoverage.html'  # NOQA: E501
         if self.config.get('per_test_category') == "web-platform":
             if 'testharness' not in self.suites:
@@ -181,15 +225,24 @@ class CodeCoverageMixin(SingleTestMixin):
         # the baseline tests that are needed.
         tests_to_add = {}
         for suite in self.suites:
+            if len(self.suites[suite]) == 0:
+                continue
+            if suite in baseline_tests_by_suite:
+                if suite not in tests_to_add:
+                    tests_to_add[suite] = []
+                tests_to_add[suite].append(baseline_tests_by_suite[suite])
+                continue
+
+            # Default to file types if the suite has no baseline
             for test in self.suites[suite]:
                 _, test_ext = os.path.splitext(test)
 
-                if test_ext not in baseline_tests:
+                if test_ext not in baseline_tests_by_ext:
                     # Add the '.js' test as a default baseline
                     # if none other exists.
                     test_ext = '.js'
-                baseline_test_suite = baseline_tests[test_ext]['suite']
-                baseline_test_name = baseline_tests[test_ext]['test']
+                baseline_test_suite = baseline_tests_by_ext[test_ext]['suite']
+                baseline_test_name = baseline_tests_by_ext[test_ext]['test']
 
                 if baseline_test_suite not in tests_to_add:
                     tests_to_add[baseline_test_suite] = []
@@ -362,7 +415,8 @@ class CodeCoverageMixin(SingleTestMixin):
                 return
 
             # Get the baseline tests that were run.
-            baseline_tests_cov = {}
+            baseline_tests_ext_cov = {}
+            baseline_tests_suite_cov = {}
             for suite, data in self.per_test_reports.items():
                 for test, grcov_file in data.items():
                     if 'baselinecoverage' not in test:
@@ -371,9 +425,14 @@ class CodeCoverageMixin(SingleTestMixin):
                     # TODO: Optimize this part which loads JSONs
                     # with a size of about 40Mb into memory for diffing later.
                     # Bug 1460064 is filed for this.
-                    _, baseline_filetype = os.path.splitext(test)
                     with open(grcov_file, 'r') as f:
-                        baseline_tests_cov[baseline_filetype] = json.load(f)
+                        data = json.load(f)
+
+                    if suite in test:
+                        baseline_tests_suite_cov[suite] = data
+                    else:
+                        _, baseline_filetype = os.path.splitext(test)
+                        baseline_tests_ext_cov[baseline_filetype] = data
 
             dest = os.path.join(dirs['abs_blob_upload_dir'], 'per-test-coverage-reports.zip')
             with zipfile.ZipFile(dest, 'w', zipfile.ZIP_DEFLATED) as z:
@@ -394,19 +453,21 @@ class CodeCoverageMixin(SingleTestMixin):
 
                             # Get baseline coverage
                             baseline_coverage = {}
-                            if self.config.get('per_test_category') == "web-platform":
-                                baseline_coverage = baseline_tests_cov['.html']
+                            if suite in baseline_tests_suite_cov:
+                                baseline_coverage = baseline_tests_suite_cov[suite]
+                            elif self.config.get('per_test_category') == "web-platform":
+                                baseline_coverage = baseline_tests_ext_cov['.html']
                             else:
-                                for file_type in baseline_tests_cov:
+                                for file_type in baseline_tests_ext_cov:
                                     if not test.endswith(file_type):
                                         continue
-                                    baseline_coverage = baseline_tests_cov[file_type]
+                                    baseline_coverage = baseline_tests_ext_cov[file_type]
                                     break
 
                             if not baseline_coverage:
                                 # Default to the '.js' baseline as it is the largest
                                 self.info("Did not find a baseline test for: " + test)
-                                baseline_coverage = baseline_tests_cov['.js']
+                                baseline_coverage = baseline_tests_ext_cov['.js']
 
                             unique_coverage = rm_baseline_cov(baseline_coverage, report)
 
@@ -439,6 +500,49 @@ class CodeCoverageMixin(SingleTestMixin):
                 z.write(jsvm_output_file)
 
         shutil.rmtree(self.grcov_dir)
+
+    @PostScriptAction('run-tests')
+    def process_java_coverage_data(self, action, success=None):
+        '''
+        Run JaCoCo on the coverage.ec file in order to get a XML report.
+        After that, run grcov on the XML report to get a lcov report.
+        Finally, archive the lcov file and upload it, as process_coverage_data is doing.
+        '''
+        if not self.java_code_coverage_enabled:
+            return
+
+        # If the emulator became unresponsive, the task has failed and we don't
+        # have the coverage report file, so stop running this function and
+        # allow the task to be retried automatically.
+        if not success and not os.path.exists(self.java_coverage_output_path):
+            return
+
+        dirs = self.query_abs_dirs()
+        xml_path = tempfile.mkdtemp()
+        jacoco_command = ['java', '-jar', self.jacoco_jar, 'report',
+                          self.java_coverage_output_path,
+                          '--classfiles', self.classfiles_dir,
+                          '--name', 'geckoview-junit',
+                          '--xml', os.path.join(xml_path, 'geckoview-junit.xml')]
+        self.run_command(jacoco_command, halt_on_failure=True)
+
+        grcov_command = [
+            os.path.join(self.grcov_dir, 'grcov'),
+            '-t', 'lcov',
+            xml_path,
+        ]
+        tmp_output_file, _ = self.get_output_from_command(
+            grcov_command,
+            silent=True,
+            save_tmpfiles=True,
+            return_type='files',
+            throw_exception=True,
+        )
+
+        if not self.ccov_upload_disabled:
+            grcov_zip_path = os.path.join(dirs['abs_blob_upload_dir'], 'code-coverage-grcov.zip')
+            with zipfile.ZipFile(grcov_zip_path, 'w', zipfile.ZIP_DEFLATED) as z:
+                z.write(tmp_output_file, 'grcov_lcov_output.info')
 
 
 def rm_baseline_cov(baseline_coverage, test_coverage):

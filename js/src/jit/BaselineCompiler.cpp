@@ -2167,26 +2167,10 @@ bool
 BaselineCompiler::emit_JSOP_NEWINIT()
 {
     frame.syncStack(0);
-    JSProtoKey key = JSProtoKey(GET_UINT8(pc));
 
-    if (key == JSProto_Array) {
-        // Pass length in R0.
-        masm.move32(Imm32(0), R0.scratchReg());
-
-        ObjectGroup* group = ObjectGroup::allocationSiteGroup(cx, script, pc, JSProto_Array);
-        if (!group)
-            return false;
-
-        ICNewArray_Fallback::Compiler stubCompiler(cx, group, ICStubCompiler::Engine::Baseline);
-        if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
-            return false;
-    } else {
-        MOZ_ASSERT(key == JSProto_Object);
-
-        ICNewObject_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
-        if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
-            return false;
-    }
+    ICNewObject_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
+    if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
+        return false;
 
     frame.push(R0);
     return true;
@@ -2303,7 +2287,7 @@ BaselineCompiler::emit_JSOP_GETELEM_SUPER()
     storeValue(frame.peek(-1), frame.addressOfScratchValue(), R2);
     frame.pop();
 
-    // Keep index and receiver in R0 and R1.
+    // Keep receiver and index in R0 and R1.
     frame.popRegsAndSync(2);
 
     // Keep obj on the stack.
@@ -2356,10 +2340,10 @@ BaselineCompiler::emit_JSOP_SETELEM_SUPER()
 {
     bool strict = IsCheckStrictOp(JSOp(*pc));
 
-    // Incoming stack is |propval, receiver, obj, rval|. We need to shuffle
+    // Incoming stack is |receiver, propval, obj, rval|. We need to shuffle
     // stack to leave rval when operation is complete.
 
-    // Pop rval into R0, then load propval into R1 and replace with rval.
+    // Pop rval into R0, then load receiver into R1 and replace with rval.
     frame.popRegsAndSync(1);
     masm.loadValue(frame.addressOfStackValue(frame.peek(-3)), R1);
     masm.storeValue(R0, frame.addressOfStackValue(frame.peek(-3)));
@@ -2367,10 +2351,10 @@ BaselineCompiler::emit_JSOP_SETELEM_SUPER()
     prepareVMCall();
 
     pushArg(Imm32(strict));
-    masm.loadValue(frame.addressOfStackValue(frame.peek(-2)), R2);
-    pushArg(R2); // receiver
+    pushArg(R1); // receiver
     pushArg(R0); // rval
-    pushArg(R1); // propval
+    masm.loadValue(frame.addressOfStackValue(frame.peek(-2)), R0);
+    pushArg(R0); // propval
     masm.unboxObject(frame.addressOfStackValue(frame.peek(-1)), R0.scratchReg());
     pushArg(R0.scratchReg()); // obj
 
@@ -2727,7 +2711,6 @@ BaselineCompiler::getEnvironmentCoordinateAddressFromObject(Register objReg, Reg
     EnvironmentCoordinate ec(pc);
     Shape* shape = EnvironmentCoordinateToEnvironmentShape(script, pc);
 
-    Address addr;
     if (shape->numFixedSlots() <= ec.slot()) {
         masm.loadPtr(Address(objReg, NativeObject::offsetOfSlots()), reg);
         return Address(reg, (ec.slot() - shape->numFixedSlots()) * sizeof(Value));
@@ -5139,7 +5122,8 @@ BaselineCompiler::emit_JSOP_IMPORTMETA()
     RootedModuleObject module(cx, GetModuleObjectForScript(script));
     MOZ_ASSERT(module);
 
-    JSObject* metaObject = GetOrCreateModuleMetaObject(cx, module);
+    RootedScript moduleScript(cx, module->script());
+    JSObject* metaObject = GetOrCreateModuleMetaObject(cx, moduleScript);
     if (!metaObject)
         return false;
 

@@ -45,6 +45,11 @@ public:
   virtual void AsyncEventRunning(AsyncEventDispatcher* aEvent) override;
 
   // nsIContent interface
+  bool ParseAttribute(int32_t aNamespaceID,
+                      nsAtom* aAttribute,
+                      const nsAString& aValue,
+                      nsIPrincipal* aMaybeScriptedPrincipal,
+                      nsAttrValue& aResult) override;
   virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
                                 const nsAttrValue* aValue,
                                 const nsAttrValue* aOldValue,
@@ -67,10 +72,9 @@ public:
   // nsSVGSVGElement methods:
   virtual bool HasValidDimensions() const override;
 
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
-                         bool aPreallocateChildren) const override;
+  virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 
-  nsresult CopyInnerTo(mozilla::dom::Element* aDest, bool aPreallocateChildren);
+  nsresult CopyInnerTo(mozilla::dom::Element* aDest);
 
   void MaybeLoadSVGImage();
 
@@ -81,6 +85,12 @@ public:
   already_AddRefed<SVGAnimatedLength> Height();
   already_AddRefed<DOMSVGAnimatedPreserveAspectRatio> PreserveAspectRatio();
   already_AddRefed<SVGAnimatedString> Href();
+
+  void SetDecoding(const nsAString& aDecoding, ErrorResult& aError)
+  {
+    SetAttr(nsGkAtoms::decoding, aDecoding, aError);
+  }
+  void GetDecoding(nsAString& aValue);
 
 protected:
   nsresult LoadSVGImage(bool aForce, bool aNotify);

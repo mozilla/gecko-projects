@@ -95,6 +95,8 @@ class Output(object):
                     subtests, vals = self.parseSunspiderOutput(test)
                 elif 'webaudio' in test.measurements:
                     subtests, vals = self.parseWebaudioOutput(test)
+                elif 'unity-webgl' in test.measurements:
+                    subtests, vals = self.parseUnityWebGLOutput(test)
                 suite['subtests'] = subtests
 
             else:
@@ -296,6 +298,50 @@ class Output(object):
 
         return subtests, vals
 
+    def parseUnityWebGLOutput(self, test):
+        """
+        Example output (this is one page cycle):
+
+        {'name': 'raptor-unity-webgl-firefox',
+         'type': 'benchmark',
+         'measurements': {
+            'unity-webgl': [
+                [
+                    '[{"benchmark":"Mandelbrot GPU","result":1035361},...}]'
+                ]
+            ]
+         },
+         'lower_is_better': False,
+         'unit': 'score'
+        }
+        """
+        _subtests = {}
+        data = test.measurements['unity-webgl']
+        for page_cycle in data:
+            data = json.loads(page_cycle[0])
+            for item in data:
+                # for each pagecycle, build a list of subtests and append all related replicates
+                sub = item['benchmark']
+                if sub not in _subtests.keys():
+                    # subtest not added yet, first pagecycle, so add new one
+                    _subtests[sub] = {'unit': test.unit,
+                                      'alertThreshold': float(test.alert_threshold),
+                                      'lowerIsBetter': test.lower_is_better,
+                                      'name': sub,
+                                      'replicates': []}
+                _subtests[sub]['replicates'].append(item['result'])
+
+        vals = []
+        subtests = []
+        names = _subtests.keys()
+        names.sort(reverse=True)
+        for name in names:
+            _subtests[name]['value'] = filter.median(_subtests[name]['replicates'])
+            subtests.append(_subtests[name])
+            vals.append([_subtests[name]['value'], name])
+
+        return subtests, vals
+
     def output(self):
         """output to file and perfherder data json """
         if self.summarized_results == {}:
@@ -372,19 +418,57 @@ class Output(object):
         return filter.mean(results)
 
     @classmethod
+    def unity_webgl_score(cls, val_list):
+        """
+        unity_webgl_score: self reported as 'Geometric Mean'
+        """
+        results = [i for i, j in val_list if j == 'Geometric Mean']
+        return filter.mean(results)
+
+    @classmethod
     def stylebench_score(cls, val_list):
         """
         stylebench_score: https://bug-172968-attachments.webkit.org/attachment.cgi?id=319888
         """
         correctionFactor = 3
         results = [i for i, j in val_list]
-        # stylebench has 4 tests, each of these are made of up 12 subtests
-        # and a sum of the 12 values.  We receive 52 values, and want to use
-        # the 4 test values, not the sub test values.
-        if len(results) != 52:
-            raise Exception("StyleBench has 52 subtests, found: %s instead" % len(results))
 
-        results = results[12::13]
+        # stylebench has 5 tests, each of these are made of up 5 subtests
+        #
+        #   * Adding classes.
+        #   * Removing classes.
+        #   * Mutating attributes.
+        #   * Adding leaf elements.
+        #   * Removing leaf elements.
+        #
+        # which are made of two subtests each (sync/async) and repeated 5 times
+        # each, thus, the list here looks like:
+        #
+        #   [Test name/Adding classes - 0/ Sync; <x>]
+        #   [Test name/Adding classes - 0/ Async; <y>]
+        #   [Test name/Adding classes - 0; <x> + <y>]
+        #   [Test name/Removing classes - 0/ Sync; <x>]
+        #   [Test name/Removing classes - 0/ Async; <y>]
+        #   [Test name/Removing classes - 0; <x> + <y>]
+        #   ...
+        #   [Test name/Adding classes - 1 / Sync; <x>]
+        #   [Test name/Adding classes - 1 / Async; <y>]
+        #   [Test name/Adding classes - 1 ; <x> + <y>]
+        #   ...
+        #   [Test name/Removing leaf elements - 4; <x> + <y>]
+        #   [Test name; <sum>] <- This is what we want.
+        #
+        # So, 5 (subtests) *
+        #     5 (repetitions) *
+        #     3 (entries per repetition (sync/async/sum)) =
+        #     75 entries for test before the sum.
+        #
+        # We receive 76 entries per test, which ads up to 380. We want to use
+        # the 5 test entries, not the rest.
+        if len(results) != 380:
+            raise Exception("StyleBench has 380 entries, found: %s instead" % len(results))
+
+        results = results[75::76]
         score = 60 * 1000 / filter.geometric_mean(results) / correctionFactor
         return score
 
@@ -406,6 +490,8 @@ class Output(object):
             return self.stylebench_score(vals)
         elif testname.startswith('raptor-sunspider'):
             return self.sunspider_score(vals)
+        elif testname.startswith('raptor-unity-webgl'):
+            return self.unity_webgl_score(vals)
         elif testname.startswith('raptor-webaudio'):
             return self.webaudio_score(vals)
         elif len(vals) > 1:

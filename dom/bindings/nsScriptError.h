@@ -74,6 +74,7 @@ protected:
   uint64_t mOuterWindowID;
   uint64_t mInnerWindowID;
   int64_t mTimeStamp;
+  uint64_t mTimeWarpTarget;
   // mInitializedOnMainThread and mIsFromPrivateWindow are set on the main
   // thread from InitializeOnMainThread().
   mozilla::Atomic<bool> mInitializedOnMainThread;
@@ -97,6 +98,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsScriptErrorWithStack)
 
   NS_IMETHOD GetStack(JS::MutableHandleValue) override;
+  NS_IMETHOD GetStackGlobal(JS::MutableHandleValue) override;
   NS_IMETHOD ToString(nsACString& aResult) override;
 
 private:

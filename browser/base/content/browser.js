@@ -53,6 +53,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ReaderParent: "resource:///modules/ReaderParent.jsm",
   SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
   Sanitizer: "resource:///modules/Sanitizer.jsm",
+  SessionStartup: "resource:///modules/sessionstore/SessionStartup.jsm",
   SessionStore: "resource:///modules/sessionstore/SessionStore.jsm",
   SchedulePressure: "resource:///modules/SchedulePressure.jsm",
   ShortcutUtils: "resource://gre/modules/ShortcutUtils.jsm",
@@ -141,7 +142,6 @@ XPCOMUtils.defineLazyServiceGetters(this, {
   gDNSService: ["@mozilla.org/network/dns-service;1", "nsIDNSService"],
   gSerializationHelper: ["@mozilla.org/network/serialization-helper;1", "nsISerializationHelper"],
   Marionette: ["@mozilla.org/remote/marionette;1", "nsIMarionette"],
-  SessionStartup: ["@mozilla.org/browser/sessionstartup;1", "nsISessionStartup"],
   WindowsUIUtils: ["@mozilla.org/windows-ui-utils;1", "nsIWindowsUIUtils"],
 });
 
@@ -7710,11 +7710,6 @@ var MousePosTracker = {
   _y: 0,
   _mostRecentEvent: null,
 
-  get _windowUtils() {
-    delete this._windowUtils;
-    return this._windowUtils = window.windowUtils;
-  },
-
   /**
    * Registers a listener, and then waits for the next refresh
    * driver tick before running the listener to see if the
@@ -7788,7 +7783,7 @@ var MousePosTracker = {
     let event = this._mostRecentEvent;
 
     if (event) {
-      let fullZoom = this._windowUtils.fullZoom;
+      let fullZoom = window.windowUtils.fullZoom;
       this._x = event.screenX / fullZoom - window.mozInnerScreenX;
       this._y = event.screenY / fullZoom - window.mozInnerScreenY;
 

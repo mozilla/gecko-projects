@@ -121,6 +121,7 @@
 #include "nsHtml5StringParser.h"
 #include "nsHTMLDocument.h"
 #include "nsHTMLTags.h"
+#include "nsInProcessTabChildGlobal.h"
 #include "nsIAddonPolicyService.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
@@ -6423,40 +6424,7 @@ nsContentUtils::CheckMayLoad(nsIPrincipal* aPrincipal, nsIChannel* aChannel, boo
   return NS_SUCCEEDED(aPrincipal->CheckMayLoad(channelURI, false, aAllowIfInheritsPrincipal));
 }
 
-nsContentTypeParser::nsContentTypeParser(const nsAString& aString)
-  : mString(aString), mService(nullptr)
-{
-  CallGetService("@mozilla.org/network/mime-hdrparam;1", &mService);
-}
-
-nsContentTypeParser::~nsContentTypeParser()
-{
-  NS_IF_RELEASE(mService);
-}
-
-nsresult
-nsContentTypeParser::GetParameter(const char* aParameterName,
-                                  nsAString& aResult) const
-{
-  NS_ENSURE_TRUE(mService, NS_ERROR_FAILURE);
-  return mService->GetParameterHTTP(mString, aParameterName,
-                                    EmptyCString(), false, nullptr,
-                                    aResult);
-}
-
-nsresult
-nsContentTypeParser::GetType(nsAString& aResult) const
-{
-  nsresult rv = GetParameter(nullptr, aResult);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-  nsContentUtils::ASCIIToLower(aResult);
-  return NS_OK;
-}
-
 /* static */
-
 bool
 nsContentUtils::CanAccessNativeAnon()
 {
@@ -11087,8 +11055,8 @@ nsContentUtils::ContentIsLink(nsIContent* aContent)
       kNameSpaceID_XLink, nsGkAtoms::type, nsGkAtoms::simple, eCaseMatters);
 }
 
-/* static */ already_AddRefed<EventTarget>
-nsContentUtils::TryGetTabChildGlobalAsEventTarget(nsISupports* aFrom)
+/* static */ already_AddRefed<ContentFrameMessageManager>
+nsContentUtils::TryGetTabChildGlobal(nsISupports* aFrom)
 {
   nsCOMPtr<nsIFrameLoaderOwner> frameLoaderOwner = do_QueryInterface(aFrom);
   if (!frameLoaderOwner) {
@@ -11100,8 +11068,8 @@ nsContentUtils::TryGetTabChildGlobalAsEventTarget(nsISupports* aFrom)
     return nullptr;
   }
 
-  nsCOMPtr<EventTarget> target = frameLoader->GetTabChildGlobalAsEventTarget();
-  return target.forget();
+  RefPtr<ContentFrameMessageManager> manager = frameLoader->GetTabChildGlobal();
+  return manager.forget();
 }
 
 /* static */ uint32_t
@@ -11139,4 +11107,26 @@ nsContentUtils::CanShowPopup(nsIPrincipal* aPrincipal)
   }
 
   return !sDisablePopups;
+}
+
+static bool
+JSONCreator(const char16_t* aBuf, uint32_t aLen, void* aData)
+{
+  nsAString* result = static_cast<nsAString*>(aData);
+  result->Append(static_cast<const char16_t*>(aBuf),
+                 static_cast<uint32_t>(aLen));
+  return true;
+}
+
+/* static */ bool
+nsContentUtils::StringifyJSON(JSContext* aCx, JS::MutableHandle<JS::Value> aValue, nsAString& aOutStr)
+{
+  MOZ_ASSERT(aCx);
+  aOutStr.Truncate();
+  JS::RootedValue value(aCx, aValue.get());
+  nsAutoString serializedValue;
+  NS_ENSURE_TRUE(JS_Stringify(aCx, &value, nullptr, JS::NullHandleValue,
+                              JSONCreator, &serializedValue), false);
+  aOutStr = serializedValue;
+  return true;
 }

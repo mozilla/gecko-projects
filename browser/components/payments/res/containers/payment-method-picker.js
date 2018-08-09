@@ -18,7 +18,7 @@ export default class PaymentMethodPicker extends RichPicker {
     this.dropdown.setAttribute("option-type", "basic-card-option");
     this.securityCodeInput = document.createElement("input");
     this.securityCodeInput.autocomplete = "off";
-    this.securityCodeInput.placeholder = "CVV"; /* XXX Bug 1473772 */
+    this.securityCodeInput.placeholder = this.dataset.cvvPlaceholder;
     this.securityCodeInput.size = 3;
     this.securityCodeInput.classList.add("security-code");
     this.securityCodeInput.addEventListener("change", this);
@@ -27,6 +27,13 @@ export default class PaymentMethodPicker extends RichPicker {
   connectedCallback() {
     super.connectedCallback();
     this.dropdown.after(this.securityCodeInput);
+  }
+
+  get fieldNames() {
+    let fieldNames = [...BasicCardOption.recordAttributes];
+    // Type is not a required field though it may be present.
+    fieldNames.splice(fieldNames.indexOf("type"), 1);
+    return fieldNames;
   }
 
   render(state) {
@@ -65,6 +72,8 @@ export default class PaymentMethodPicker extends RichPicker {
       throw new Error(`The option ${selectedPaymentCardGUID} ` +
                       `does not exist in the payment method picker`);
     }
+
+    super.render(state);
   }
 
   get selectedStateKey() {

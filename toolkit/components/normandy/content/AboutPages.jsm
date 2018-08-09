@@ -20,6 +20,7 @@ var EXPORTED_SYMBOLS = ["AboutPages"];
 
 const SHIELD_LEARN_MORE_URL_PREF = "app.normandy.shieldLearnMoreUrl";
 
+
 /**
  * Class for managing an about: page that Normandy provides. Adapted from
  * browser/extensions/pocket/content/AboutPocket.jsm.

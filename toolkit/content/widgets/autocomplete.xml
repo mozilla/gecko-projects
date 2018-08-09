@@ -14,12 +14,12 @@
     <content sizetopopup="pref">
       <children includes="image|deck|stack|box"/>
 
-      <xul:hbox anonid="textbox-input-box" class="textbox-input-box" flex="1" xbl:inherits="tooltiptext=inputtooltiptext">
+      <xul:moz-input-box anonid="moz-input-box" flex="1" xbl:inherits="tooltiptext=inputtooltiptext">
         <children/>
         <html:input anonid="input" class="autocomplete-textbox textbox-input"
                     allowevents="true"
                     xbl:inherits="tooltiptext=inputtooltiptext,value,type=inputtype,maxlength,disabled,size,readonly,placeholder,tabindex,accesskey,mozactionhint"/>
-      </xul:hbox>
+      </xul:moz-input-box>
       <children includes="hbox"/>
 
       <xul:popupset anonid="popupset" class="autocomplete-result-popupset"/>
@@ -1793,7 +1793,7 @@
           }
 
           this.removeAttribute("actiontype");
-          this.classList.remove("overridable-action");
+          this.classList.remove("overridable-action", "emptySearchQuery");
 
           // If the type includes an action, set up the item appropriately.
           if (initialTypes.has("action") || action) {
@@ -1860,6 +1860,11 @@
                   ];
                 }
               } else {
+                // Add the emptySearchQuery class if the search query is the
+                // empty string.  We use it to hide .ac-separator in CSS.
+                if (!searchQuery) {
+                  this.classList.add("emptySearchQuery");
+                }
                 pairs = [
                   [searchQuery, ""],
                 ];

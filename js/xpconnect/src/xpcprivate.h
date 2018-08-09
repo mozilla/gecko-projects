@@ -1701,15 +1701,19 @@ public:
                           const nsXPTMethodInfo* info,
                           nsXPTCMiniVariant* params);
 
-    JSObject*  CallQueryInterfaceOnJSObject(JSContext* cx,
-                                            JSObject* jsobj, REFNSIID aIID);
+    JSObject* CallQueryInterfaceOnJSObject(JSContext* cx,
+                                           JSObject* jsobj,
+                                           JS::HandleObject scope,
+                                           REFNSIID aIID);
 
     static nsresult BuildPropertyEnumerator(XPCCallContext& ccx,
                                             JSObject* aJSObj,
+                                            JS::HandleObject scope,
                                             nsISimpleEnumerator** aEnumerate);
 
     static nsresult GetNamedPropertyAsVariant(XPCCallContext& ccx,
                                               JSObject* aJSObj,
+                                              JS::HandleObject scope,
                                               const nsAString& aName,
                                               nsIVariant** aResult);
 
@@ -1788,7 +1792,8 @@ public:
     */
 
     static nsresult
-    GetNewOrUsed(JS::HandleObject aJSObj,
+    GetNewOrUsed(JSContext* cx,
+                 JS::HandleObject aJSObj,
                  REFNSIID aIID,
                  nsXPCWrappedJS** wrapper);
 
@@ -1834,7 +1839,16 @@ public:
     // to find non-rooting wrappers for dying JS objects. See the top of
     // XPCWrappedJS.cpp for more details.
     bool IsSubjectToFinalization() const {return IsValid() && mRefCnt == 1;}
-    void UpdateObjectPointerAfterGC() {JS_UpdateWeakPointerAfterGC(&mJSObj);}
+
+    void UpdateObjectPointerAfterGC() {
+        MOZ_ASSERT(IsRootWrapper());
+        JS_UpdateWeakPointerAfterGC(&mJSObj);
+        JS_UpdateWeakPointerAfterGC(&mJSObjGlobal);
+        // Note: this is a root wrapper, so mJSObj is never a CCW. Therefore,
+        // if mJSObj is still alive, mJSObjGlobal must also still be alive,
+        // because marking a JSObject will also mark its global.
+        MOZ_ASSERT_IF(mJSObj, mJSObjGlobal);
+    }
 
     bool IsAggregatedToNative() const {return mRoot->mOuter != nullptr;}
     nsISupports* GetAggregatedNativeObject() const {return mRoot->mOuter;}
@@ -1857,6 +1871,7 @@ protected:
     nsXPCWrappedJS() = delete;
     nsXPCWrappedJS(JSContext* cx,
                    JSObject* aJSObj,
+                   JSObject* aJSObjGlobal,
                    nsXPCWrappedJSClass* aClass,
                    nsXPCWrappedJS* root,
                    nsresult* rv);
@@ -1871,6 +1886,13 @@ private:
     }
 
     JS::Heap<JSObject*> mJSObj;
+    // A global object that must be same-compartment with mJSObj. This is the
+    // global/realm we enter when making calls into JS. Note that we cannot
+    // simply use mJSObj's global here because mJSObj might be a
+    // cross-compartment wrapper and CCWs are not associated with a single
+    // global. After removing in-content XBL, we no longer need this field
+    // because we can then assert against CCWs. See bug 1480121.
+    JS::Heap<JSObject*> mJSObjGlobal;
     RefPtr<nsXPCWrappedJSClass> mClass;
     nsXPCWrappedJS* mRoot;    // If mRoot != this, it is an owning pointer.
     nsXPCWrappedJS* mNext;
@@ -1925,7 +1947,8 @@ public:
                               const nsID* iid, uint32_t arrlen,
                               nsresult* pErr);
 
-    static bool JSData2Native(void* d, JS::HandleValue s,
+    static bool JSData2Native(JSContext* cx,
+                              void* d, JS::HandleValue s,
                               const nsXPTType& type,
                               const nsID* iid,
                               uint32_t arrlen,
@@ -1954,7 +1977,8 @@ public:
     static bool GetNativeInterfaceFromJSObject(void** dest, JSObject* src,
                                                const nsID* iid,
                                                nsresult* pErr);
-    static bool JSObject2NativeInterface(void** dest, JS::HandleObject src,
+    static bool JSObject2NativeInterface(JSContext* cx,
+                                         void** dest, JS::HandleObject src,
                                          const nsID* iid,
                                          nsISupports* aOuter,
                                          nsresult* pErr);
@@ -2252,7 +2276,7 @@ private:
     JSContext* mJSContext;
     mozilla::Maybe<JS::AutoSaveExceptionState> mState;
     bool mEvaluated;
-    mozilla::Maybe<JSAutoRealmAllowCCW> mAutoRealm;
+    mozilla::Maybe<JSAutoRealm> mAutoRealm;
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
     // No copying or assignment allowed
@@ -2967,6 +2991,13 @@ public:
         return Get(realm);
     }
 
+    // Get the RealmPrivate for a given script.
+    static RealmPrivate* Get(JSScript* script)
+    {
+        JS::Realm* realm = JS::GetScriptRealm(script);
+        return Get(realm);
+    }
+
     // The scriptability of this realm.
     Scriptability scriptability;
 
@@ -3050,17 +3081,15 @@ nsIPrincipal* GetObjectPrincipal(JSObject* obj);
 //   TD_INTERFACE_TYPE, TD_INTERFACE_IS_TYPE
 //     value : nsISupports** (release)
 //   TD_LEGACY_ARRAY (NOTE: aArrayLen should be passed)
-//     value : void** (cleanup elements & free)
+//     value : void** (destroy elements & free)
+//   TD_ARRAY
+//     value : nsTArray<T>* (destroy elements & Clear)
 //   TD_DOMOBJECT
 //     value : T** (cleanup)
 //   TD_PROMISE
 //     value : dom::Promise** (release)
 //
 // Other types are ignored.
-//
-// Custom behaviour may be desired in some situations:
-//  - This method Truncate()s nsStrings, it does not free them.
-//  - This method does not unroot JSValues.
 inline void CleanupValue(const nsXPTType& aType,
                          void* aValue,
                          uint32_t aArrayLen = 0);
@@ -3080,6 +3109,17 @@ void InnerCleanupValue(const nsXPTType& aType,
 //
 // This method accepts the same types as xpc::CleanupValue.
 void InitializeValue(const nsXPTType& aType, void* aValue);
+
+// If a value was initialized with InitializeValue, it should be destroyed with
+// DestructValue. This method acts like CleanupValue, except that destructors
+// for complex types are also invoked, leaving them in an invalid state.
+//
+// This method should be called when destroying types initialized with
+// InitializeValue.
+//
+// The pointer 'aValue' must point to a valid value of type 'aType'.
+void DestructValue(const nsXPTType& aType, void* aValue,
+                   uint32_t aArrayLen = 0);
 
 } // namespace xpc
 

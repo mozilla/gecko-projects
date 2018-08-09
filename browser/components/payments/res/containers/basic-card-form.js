@@ -56,8 +56,6 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
     let url = "formautofill/editCreditCard.xhtml";
     this.promiseReady = this._fetchMarkup(url).then(doc => {
       this.form = doc.getElementById("form");
-      this.form.addEventListener("input", this);
-      this.form.addEventListener("invalid", this);
       return this.form;
     });
   }
@@ -87,6 +85,12 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
         isCCNumber: PaymentDialogUtils.isCCNumber,
         getAddressLabel: PaymentDialogUtils.getAddressLabel,
       });
+
+      // The EditCreditCard constructor adds input event listeners on the same element,
+      // which update field validity. By adding our event listeners after this constructor,
+      // validity will be updated before our handlers get the event
+      form.addEventListener("input", this);
+      form.addEventListener("invalid", this);
 
       let fragment = document.createDocumentFragment();
       fragment.append(this.addressAddLink);
@@ -181,6 +185,7 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
       }
     }
 
+    this.updateRequiredState();
     this.updateSaveButtonState();
   }
 
@@ -297,6 +302,20 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
 
   updateSaveButtonState() {
     this.saveButton.disabled = !this.form.checkValidity();
+  }
+
+  updateRequiredState() {
+    for (let formElement of this.form.elements) {
+      let container = formElement.closest("label") || formElement.closest("div");
+      let span = container.querySelector("span");
+      span.setAttribute("fieldRequiredSymbol", this.dataset.fieldRequiredSymbol);
+      let required = formElement.required && !formElement.disabled;
+      if (required) {
+        container.setAttribute("required", "true");
+      } else {
+        container.removeAttribute("required");
+      }
+    }
   }
 
   async saveRecord() {

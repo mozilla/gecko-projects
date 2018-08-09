@@ -478,7 +478,13 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
       NS_ENSURE_SUCCESS(rv, rv);
 
       if (stack.isObject()) {
-        JSAutoRealmAllowCCW ar(cx, &stack.toObject());
+        // Because |stack| might be a cross-compartment wrapper, we can't use it
+        // with JSAutoRealm. Use the stackGlobal for that.
+        JS::RootedValue stackGlobal(cx);
+        rv = scriptError->GetStackGlobal(&stackGlobal);
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        JSAutoRealm ar(cx, &stackGlobal.toObject());
 
         StructuredCloneData data;
         ErrorResult err;
@@ -1619,7 +1625,8 @@ GetDirectoryPath(const char *aPath) {
 #endif // DEBUG
 
 extern "C" {
-void CGSSetDenyWindowServerConnections(bool);
+CGError
+CGSSetDenyWindowServerConnections(bool);
 void CGSShutdownServerConnections();
 };
 
@@ -1631,13 +1638,15 @@ StartMacOSContentSandbox()
     return false;
   }
 
-  if (!XRE_UseNativeEventProcessing()) {
+  if (Preferences::GetBool(
+        "security.sandbox.content.mac.disconnect-windowserver")) {
     // If we've opened a connection to the window server, shut it down now. Forbid
     // future connections as well. We do this for sandboxing, but it also ensures
     // that the Activity Monitor will not label the content process as "Not
     // responding" because it's not running a native event loop. See bug 1384336.
-    CGSSetDenyWindowServerConnections(true);
     CGSShutdownServerConnections();
+    CGError result = CGSSetDenyWindowServerConnections(true);
+    MOZ_DIAGNOSTIC_ASSERT(result == kCGErrorSuccess);
   }
 
   nsAutoCString appPath, appBinaryPath, appDir;

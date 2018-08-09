@@ -259,6 +259,8 @@
 #include "mozilla/dom/MenuBoxObject.h"
 #include "mozilla/dom/TreeBoxObject.h"
 #include "nsIXULWindow.h"
+#include "nsXULCommandDispatcher.h"
+#include "nsXULPopupManager.h"
 #include "nsIDocShellTreeOwner.h"
 #endif
 #include "nsIPresShellInlines.h"
@@ -1695,11 +1697,10 @@ nsDocument::~nsDocument()
   // Invalidate cached array of child nodes
   InvalidateChildNodes();
 
-  for (uint32_t indx = mChildren.ChildCount(); indx-- != 0; ) {
-    mChildren.ChildAt(indx)->UnbindFromTree();
-    mChildren.RemoveChildAt(indx);
-  }
-  mFirstChild = nullptr;
+  // We should not have child nodes when destructor is called,
+  // since child nodes keep their owner document alive.
+  MOZ_ASSERT(!HasChildren());
+
   mCachedRootElement = nullptr;
 
   for (auto& sheets : mAdditionalSheets) {
@@ -1865,12 +1866,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsDocument)
 
   tmp->mExternalResourceMap.Traverse(&cb);
 
-  // Traverse the mChildren nsAttrAndChildArray.
-  for (int32_t indx = int32_t(tmp->mChildren.ChildCount()); indx > 0; --indx) {
-    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mChildren[i]");
-    cb.NoteXPCOMChild(tmp->mChildren.ChildAt(indx - 1));
-  }
-
   // Traverse all nsIDocument pointer members.
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSecurityInfo)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDisplayDocument)
@@ -1930,6 +1925,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsDocument)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mApplets);
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAnchors);
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAnonymousContents)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCommandDispatcher)
 
   // Traverse all our nsCOMArrays.
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStyleSheets)
@@ -1965,7 +1961,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsDocument)
   // methods.
   for (MediaQueryList* mql = tmp->mDOMMediaQueryLists.getFirst(); mql;
        mql = static_cast<LinkedListElement<MediaQueryList>*>(mql)->getNext()) {
-    if (mql->HasListeners()) {
+    if (mql->HasListeners() &&
+        NS_SUCCEEDED(mql->CheckInnerWindowCorrectness())) {
       NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mDOMMediaQueryLists item");
       cb.NoteXPCOMChild(mql);
     }
@@ -1986,25 +1983,15 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
 
   nsINode::Unlink(tmp);
 
-  // Unlink the mChildren nsAttrAndChildArray.
-  uint32_t childCount = tmp->mChildren.ChildCount();
-  if (childCount) {
-    while (childCount-- > 0) {
-      // Hold a strong ref to the node when we remove it, because we may be
-      // the last reference to it.  We need to call TakeChildAt() and
-      // update mFirstChild before calling UnbindFromTree, since this last
-      // can notify various observers and they should really see consistent
-      // tree state.
-      // If this code changes, change the corresponding code in
-      // FragmentOrElement's unlink impl and ContentUnbinder::UnbindSubtree.
-      nsCOMPtr<nsIContent> child = tmp->mChildren.TakeChildAt(childCount);
-      if (childCount == 0) {
-        tmp->mFirstChild = nullptr;
-      }
-      child->UnbindFromTree();
-    }
+  while (tmp->HasChildren()) {
+    // Hold a strong ref to the node when we remove it, because we may be
+    // the last reference to it.
+    // If this code changes, change the corresponding code in nsDocument's
+    // unlink impl and ContentUnbinder::UnbindSubtree.
+    nsCOMPtr<nsIContent> child = tmp->GetLastChild();
+    tmp->DisconnectChild(child);
+    child->UnbindFromTree();
   }
-  tmp->mFirstChild = nullptr;
 
   tmp->UnlinkOriginalDocumentIfStatic();
 
@@ -2029,6 +2016,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mOrientationPendingPromise)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mFontFaceSet)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mReadyForIdle);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCommandDispatcher)
 
   tmp->mParentDocument = nullptr;
 
@@ -2252,22 +2240,16 @@ nsIDocument::ResetToURI(nsIURI* aURI,
 
   bool oldVal = mInUnlinkOrDeletion;
   mInUnlinkOrDeletion = true;
-  uint32_t count = mChildren.ChildCount();
   { // Scope for update
     MOZ_AUTO_DOC_UPDATE(this, true);
 
     // Invalidate cached array of child nodes
     InvalidateChildNodes();
 
-    for (int32_t i = int32_t(count) - 1; i >= 0; i--) {
-      nsCOMPtr<nsIContent> content = mChildren.ChildAt(i);
-
+    while (HasChildren()) {
+      nsCOMPtr<nsIContent> content = GetLastChild();
       nsIContent* previousSibling = content->GetPreviousSibling();
-
-      if (nsINode::GetFirstChild() == content) {
-        mFirstChild = content->GetNextSibling();
-      }
-      mChildren.RemoveChildAt(i);
+      DisconnectChild(content);
       if (content == mCachedRootElement) {
         // Immediately clear mCachedRootElement, now that it's been removed
         // from mChildren, so that GetRootElement() will stop returning this
@@ -4142,10 +4124,7 @@ nsIDocument::InsertChildBefore(nsIContent* aKid,
     return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
   }
 
-  int32_t index = aBeforeThis ? ComputeIndexOf(aBeforeThis) : GetChildCount();
-  MOZ_ASSERT(index >= 0);
-
-  return doInsertChildAt(aKid, index, aNotify, mChildren);
+  return nsINode::InsertChildBefore(aKid, aBeforeThis, aNotify);
 }
 
 void
@@ -4158,13 +4137,13 @@ nsIDocument::RemoveChildNode(nsIContent* aKid, bool aNotify)
 
   // Preemptively clear mCachedRootElement, since we may be about to remove it
   // from our child list, and we don't want to return this maybe-obsolete value
-  // from any GetRootElement() calls that happen inside of doRemoveChildAt().
-  // (NOTE: for this to be useful, doRemoveChildAt() must NOT trigger any
+  // from any GetRootElement() calls that happen inside of RemoveChildNode().
+  // (NOTE: for this to be useful, RemoveChildNode() must NOT trigger any
   // GetRootElement() calls until after it's removed the child from mChildren.
   // Any call before that point would restore this soon-to-be-obsolete cached
   // answer, and our clearing here would be fruitless.)
   mCachedRootElement = nullptr;
-  doRemoveChildAt(ComputeIndexOf(aKid), aNotify, aKid, mChildren);
+  nsINode::RemoveChildNode(aKid, aNotify);
   MOZ_ASSERT(mCachedRootElement != aKid,
              "Stale pointer in mCachedRootElement, after we tried to clear it "
              "(maybe somebody called GetRootElement() too early?)");
@@ -6270,13 +6249,13 @@ nsIDocument::SetTitle(const nsAString& aTitle, ErrorResult& aRv)
   }
 #endif
 
-  // Batch updates so that mutation events don't change "the title
-  // element" under us
-  mozAutoDocUpdate updateBatch(this, true);
-
+  Maybe<mozAutoDocUpdate> updateBatch;
   nsCOMPtr<Element> title = GetTitleElement();
   if (rootElement->IsSVGElement(nsGkAtoms::svg)) {
     if (!title) {
+      // Batch updates so that mutation events don't change "the title
+      // element" under us
+      updateBatch.emplace(this, true);
       RefPtr<mozilla::dom::NodeInfo> titleInfo =
         mNodeInfoManager->GetNodeInfo(nsGkAtoms::title, nullptr,
                                       kNameSpaceID_SVG,
@@ -6290,6 +6269,9 @@ nsIDocument::SetTitle(const nsAString& aTitle, ErrorResult& aRv)
     }
   } else if (rootElement->IsHTMLElement()) {
     if (!title) {
+      // Batch updates so that mutation events don't change "the title
+      // element" under us
+      updateBatch.emplace(this, true);
       Element* head = GetHeadElement();
       if (!head) {
         return;
@@ -8692,7 +8674,7 @@ nsIDocument::RefreshLinkHrefs()
 }
 
 nsresult
-nsDocument::CloneDocHelper(nsDocument* clone, bool aPreallocateChildren) const
+nsDocument::CloneDocHelper(nsDocument* clone) const
 {
   clone->mIsStaticDocument = mCreatingStaticClone;
 
@@ -8769,10 +8751,6 @@ nsDocument::CloneDocHelper(nsDocument* clone, bool aPreallocateChildren) const
   clone->mType = mType;
   clone->mXMLDeclarationBits = mXMLDeclarationBits;
   clone->mBaseTarget = mBaseTarget;
-
-  // Preallocate attributes and child arrays
-  rv = clone->mChildren.EnsureCapacityToClone(mChildren, aPreallocateChildren);
-  NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
 }
@@ -10172,6 +10150,126 @@ nsIDocument::MaybeResolveReadyForIdle()
   if (readyPromise) {
     readyPromise->MaybeResolve(this);
   }
+}
+
+nsIDOMXULCommandDispatcher*
+nsIDocument::GetCommandDispatcher()
+{
+  // Only chrome documents are allowed to use command dispatcher.
+  if (!nsContentUtils::IsChromeDoc(this)) {
+    return nullptr;
+  }
+  if (!mCommandDispatcher) {
+    // Create our command dispatcher and hook it up.
+    mCommandDispatcher = new nsXULCommandDispatcher(this);
+  }
+  return mCommandDispatcher;
+}
+
+static JSObject*
+GetScopeObjectOfNode(nsINode* node)
+{
+    MOZ_ASSERT(node, "Must not be called with null.");
+
+    // Window root occasionally keeps alive a node of a document whose
+    // window is already dead. If in this brief period someone calls
+    // GetPopupNode and we return that node, we can end up creating a
+    // reflector for the node in the wrong global (the current global,
+    // not the document global, because we won't know what the document
+    // global is).  Returning an orphan node like that to JS would be a
+    // bug anyway, so to avoid this, let's do the same check as fetching
+    // GetParentObjet() on the document does to determine the scope and
+    // if it returns null let's just return null in XULDocument::GetPopupNode.
+    nsIDocument* doc = node->OwnerDoc();
+    MOZ_ASSERT(doc, "This should never happen.");
+
+    nsIGlobalObject* global = doc->GetScopeObject();
+    return global ? global->GetGlobalJSObject() : nullptr;
+}
+
+
+already_AddRefed<nsPIWindowRoot>
+nsIDocument::GetWindowRoot()
+{
+  if (!mDocumentContainer) {
+    return nullptr;
+  }
+  // XXX It's unclear why this can't just use GetWindow().
+  nsCOMPtr<nsPIDOMWindowOuter> piWin = mDocumentContainer->GetWindow();
+  return piWin ? piWin->GetTopWindowRoot() : nullptr;
+}
+
+already_AddRefed<nsINode>
+nsIDocument::GetPopupNode()
+{
+    nsCOMPtr<nsINode> node;
+    nsCOMPtr<nsPIWindowRoot> rootWin = GetWindowRoot();
+    if (rootWin) {
+        node = rootWin->GetPopupNode(); // addref happens here
+    }
+
+    if (!node) {
+        nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
+        if (pm) {
+            node = pm->GetLastTriggerPopupNode(this);
+        }
+    }
+
+    if (node && GetScopeObjectOfNode(node)) {
+        return node.forget();
+    }
+
+    return nullptr;
+}
+
+void
+nsIDocument::SetPopupNode(nsINode* aNode)
+{
+    nsCOMPtr<nsPIWindowRoot> rootWin = GetWindowRoot();
+    if (rootWin) {
+        rootWin->SetPopupNode(aNode);
+    }
+}
+
+// Returns the rangeOffset element from the XUL Popup Manager. This is for
+// chrome callers only.
+nsINode*
+nsIDocument::GetPopupRangeParent(ErrorResult& aRv)
+{
+    nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
+    if (!pm) {
+        aRv.Throw(NS_ERROR_FAILURE);
+        return nullptr;
+    }
+
+    return pm->GetMouseLocationParent();
+}
+
+// Returns the rangeOffset element from the XUL Popup Manager.
+int32_t
+nsIDocument::GetPopupRangeOffset(ErrorResult& aRv)
+{
+    nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
+    if (!pm) {
+        aRv.Throw(NS_ERROR_FAILURE);
+        return 0;
+    }
+
+    return pm->MouseLocationOffset();
+}
+
+already_AddRefed<nsINode>
+nsIDocument::GetTooltipNode()
+{
+  nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
+  if (pm) {
+    nsCOMPtr<nsINode> node = pm->GetLastTriggerTooltipNode(this);
+    if (node) {
+      return node.forget();
+    }
+  }
+
+  return nullptr;
 }
 
 nsIHTMLCollection*

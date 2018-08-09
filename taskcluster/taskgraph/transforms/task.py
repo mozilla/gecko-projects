@@ -239,7 +239,7 @@ task_description_schema = Schema({
         Required('loopback-video'): bool,
         Required('loopback-audio'): bool,
         Required('docker-in-docker'): bool,  # (aka 'dind')
-        Optional('privileged'): bool,
+        Required('privileged'): bool,
 
         # Paths to Docker volumes.
         #
@@ -848,7 +848,12 @@ def build_docker_worker_payload(config, task, task_def):
             task_def['scopes'].append('docker-worker:capability:device:' + capitalized)
 
     if worker.get('privileged'):
+<<<<<<< working copy
          capabilities.setdefault('privileged', True)
+=======
+        capabilities['privileged'] = True
+        task_def['scopes'].append('docker-worker:capability:privileged')
+>>>>>>> merge rev
 
     task_def['payload'] = payload = {
         'image': image,
@@ -1369,6 +1374,7 @@ def set_defaults(config, tasks):
             worker.setdefault('loopback-video', False)
             worker.setdefault('loopback-audio', False)
             worker.setdefault('docker-in-docker', False)
+            worker.setdefault('privileged', False)
             worker.setdefault('volumes', [])
             worker.setdefault('env', {})
             if 'caches' in worker:

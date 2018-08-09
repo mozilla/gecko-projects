@@ -17,6 +17,15 @@ const {
   HTMLTooltip,
 } = require("devtools/client/shared/widgets/tooltip/HTMLTooltip");
 
+// Return a copy of |obj| minus |fields|.
+const omit = (obj, fields) => {
+  const objCopy = { ...obj };
+  for (const field of fields) {
+    delete objCopy[field];
+  }
+  return objCopy;
+};
+
 class MenuButton extends PureComponent {
   static get propTypes() {
     return {
@@ -188,6 +197,10 @@ class MenuButton extends PureComponent {
 
   async onClick(e) {
     if (e.target === this.buttonRef) {
+      // On Mac, even after clicking the button it doesn't get focus.
+      // Force focus to the button so that our keydown handlers get called.
+      this.buttonRef.focus();
+
       if (this.props.onClick) {
         this.props.onClick(e);
       }
@@ -266,7 +279,9 @@ class MenuButton extends PureComponent {
     );
 
     const buttonProps = {
-      ...this.props,
+      // Pass through any props set on the button, except the ones we handle
+      // here.
+      ...omit(this.props, Object.keys(MenuButton.propTypes)),
       onClick: this.onClick,
       "aria-expanded": this.state.expanded,
       "aria-haspopup": "menu",

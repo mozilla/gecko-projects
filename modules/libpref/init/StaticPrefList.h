@@ -338,6 +338,19 @@ VARCACHE_PREF(
   bool, true
 )
 
+// Is the '-webkit-appearance' alias for '-moz-appearance' enabled?
+#ifdef EARLY_BETA_OR_EARLIER
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "layout.css.webkit-appearance.enabled",
+   layout_css_webkit_appearance_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
 // Pref to control whether @-moz-document rules are enabled in content pages.
 VARCACHE_PREF(
   "layout.css.moz-document.content.enabled",
@@ -379,6 +392,20 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+// Pref to control whether ::xul-tree-* pseudo-elements are parsed in content
+// pages.
+#ifdef EARLY_BETA_OR_EARLIER
+#define PREF_VALUE false
+#else
+#define PREF_VALUE true
+#endif
+VARCACHE_PREF(
+  "layout.css.xul-tree-pseudos.content.enabled",
+   layout_css_xul_tree_pseudos_content_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
 // Is support for CSS "grid-template-{columns,rows}: subgrid X" enabled?
 VARCACHE_PREF(
   "layout.css.grid-template-subgrid-value.enabled",
@@ -397,6 +424,13 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "layout.css.emulate-moz-box-with-flex",
    layout_css_emulate_moz_box_with_flex,
+  bool, false
+)
+
+// Is overflow: -moz-scrollbars-* value enabled?
+VARCACHE_PREF(
+  "layout.css.overflow.moz-scrollbars.enabled",
+   layout_css_overflow_moz_scrollbars_enabled,
   bool, false
 )
 
@@ -859,10 +893,31 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+// Opus
+VARCACHE_PREF(
+  "media.opus.enabled",
+   MediaOpusEnabled,
+  RelaxedAtomicBool, true
+)
+
+// Wave
+VARCACHE_PREF(
+  "media.wave.enabled",
+   MediaWaveEnabled,
+  RelaxedAtomicBool, true
+)
+
 // Ogg
 VARCACHE_PREF(
   "media.ogg.enabled",
    MediaOggEnabled,
+  RelaxedAtomicBool, true
+)
+
+// WebM
+VARCACHE_PREF(
+  "media.webm.enabled",
+   MediaWebMEnabled,
   RelaxedAtomicBool, true
 )
 
@@ -899,7 +954,7 @@ VARCACHE_PREF(
 #endif
 VARCACHE_PREF(
   "media.mp4.enabled",
-   mediaMp4Enabled,
+   MediaMp4Enabled,
   RelaxedAtomicBool, PREF_VALUE
 )
 #undef PREF_VALUE

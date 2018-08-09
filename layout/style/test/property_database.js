@@ -2401,7 +2401,7 @@ var gCSSProperties = {
     // No applies_to_placeholder because we have a !important rule in forms.css.
     prerequisites: { "display": "block", "overflow": "auto" },
     initial_values: [ "none" ],
-    other_values: [ "both", "horizontal", "vertical" ],
+    other_values: [ "both", "horizontal", "vertical", "inline", "block" ],
     invalid_values: []
   },
   "-moz-stack-sizing": {
@@ -4179,7 +4179,7 @@ var gCSSProperties = {
     prerequisites: { "display": "block", "contain": "none" },
     subproperties: [ "overflow-x", "overflow-y" ],
     initial_values: [ "visible" ],
-    other_values: [ "auto", "scroll", "hidden", "-moz-hidden-unscrollable", "-moz-scrollbars-none",
+    other_values: [ "auto", "scroll", "hidden", "-moz-hidden-unscrollable",
                     "auto auto", "auto scroll", "hidden scroll", "auto hidden",
                     "-moz-hidden-unscrollable -moz-hidden-unscrollable" ],
     invalid_values: [ "-moz-hidden-unscrollable -moz-scrollbars-none" ]
@@ -7862,10 +7862,11 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
 
 if (IsCSSPropertyPrefEnabled("layout.css.webkit-appearance.enabled")) {
   gCSSProperties["-webkit-appearance"] = {
-    domProp: "WebkitAppearance",
+    domProp: "webkitAppearance",
     inherited: false,
-    type: CSS_TYPE_LONGHAND,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
     alias_for: "-moz-appearance",
+    subproperties: [ "-moz-appearance" ],
   };
 }
 
@@ -8159,4 +8160,15 @@ if (IsCSSPropertyPrefEnabled("layout.css.scrollbar-colors.enabled")) {
     other_values: [ "red", "blue", "#ffff00" ],
     invalid_values: [ "ffff00" ]
   };
+}
+
+const OVERFLOW_MOZKWS = [
+  "-moz-scrollbars-none",
+  "-moz-scrollbars-horizontal",
+  "-moz-scrollbars-vertical",
+];
+if (IsCSSPropertyPrefEnabled("layout.css.overflow.moz-scrollbars.enabled")) {
+  gCSSProperties["overflow"].other_values.push(...OVERFLOW_MOZKWS);
+} else {
+  gCSSProperties["overflow"].invalid_values.push(...OVERFLOW_MOZKWS);
 }

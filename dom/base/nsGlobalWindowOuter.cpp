@@ -20,6 +20,7 @@
 #include "nsISecureBrowserUI.h"
 #include "nsIWebProgressListener.h"
 #include "mozilla/AntiTrackingCommon.h"
+#include "mozilla/dom/ContentFrameMessageManager.h"
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/LocalStorage.h"
 #include "mozilla/dom/Storage.h"
@@ -1038,6 +1039,7 @@ nsGlobalWindowOuter::CleanUp()
   }
   mChromeEventHandler = nullptr; // Forces Release
   mParentTarget = nullptr;
+  mMessageManager = nullptr;
 
   mArguments = nullptr;
 
@@ -1144,6 +1146,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowOuter)
   // Traverse stuff from nsPIDOMWindow
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChromeEventHandler)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParentTarget)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMessageManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFrameElement)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOpenerForInitialContentBrowser)
 
@@ -1170,6 +1173,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowOuter)
   // Unlink stuff from nsPIDOMWindow
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChromeEventHandler)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mParentTarget)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mMessageManager)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mFrameElement)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mOpenerForInitialContentBrowser)
 
@@ -1920,7 +1924,12 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
         // recreate them when the innerWindow is reused.
         newInnerWindow->mLocalStorage = nullptr;
         newInnerWindow->mSessionStorage = nullptr;
+        newInnerWindow->mPerformance = nullptr;
 
+        // This must be called after nullifying the internal objects because
+        // here we could recreate them, calling the getter methods, and store
+        // them into the JS slots. If we nullify them after, the slot values and
+        // the objects will be out of sync.
         newInnerWindow->ClearDocumentDependentSlots(cx);
 
         // When replacing an initial about:blank document we call
@@ -2236,9 +2245,10 @@ nsGlobalWindowOuter::SetOpenerWindow(nsPIDOMWindowOuter* aOpener,
 void
 nsGlobalWindowOuter::UpdateParentTarget()
 {
-  // NOTE: This method is identical to
+  // NOTE: This method is nearly identical to
   // nsGlobalWindowInner::UpdateParentTarget(). IF YOU UPDATE THIS METHOD,
-  // UPDATE THE OTHER ONE TOO!
+  // UPDATE THE OTHER ONE TOO!  The one difference is that this method updates
+  // mMessageManager as well, which inner windows don't have.
 
   // Try to get our frame element's tab child global (its in-process message
   // manager).  If that fails, fall back to the chrome event handler's tab
@@ -2246,28 +2256,25 @@ nsGlobalWindowOuter::UpdateParentTarget()
   // handler itself.
 
   nsCOMPtr<Element> frameElement = GetOuterWindow()->GetFrameElementInternal();
-  nsCOMPtr<EventTarget> eventTarget =
-    nsContentUtils::TryGetTabChildGlobalAsEventTarget(frameElement);
+  mMessageManager = nsContentUtils::TryGetTabChildGlobal(frameElement);
 
-  if (!eventTarget) {
+  if (!mMessageManager) {
     nsGlobalWindowOuter* topWin = GetScriptableTopInternal();
     if (topWin) {
       frameElement = topWin->GetFrameElementInternal();
-      eventTarget =
-        nsContentUtils::TryGetTabChildGlobalAsEventTarget(frameElement);
+      mMessageManager = nsContentUtils::TryGetTabChildGlobal(frameElement);
     }
   }
 
-  if (!eventTarget) {
-    eventTarget =
-      nsContentUtils::TryGetTabChildGlobalAsEventTarget(mChromeEventHandler);
+  if (!mMessageManager) {
+    mMessageManager = nsContentUtils::TryGetTabChildGlobal(mChromeEventHandler);
   }
 
-  if (!eventTarget) {
-    eventTarget = mChromeEventHandler;
+  if (mMessageManager) {
+    mParentTarget = mMessageManager;
+  } else {
+    mParentTarget = mChromeEventHandler;
   }
-
-  mParentTarget = eventTarget;
 }
 
 EventTarget*
@@ -3130,9 +3137,9 @@ nsGlobalWindowOuter::GetInnerSize(CSSIntSize& aSize)
    * be the visual viewport, but we fall back to the CSS viewport
    * if it is not set.
    */
-  if (presShell->IsScrollPositionClampingScrollPortSizeSet()) {
+  if (presShell->IsVisualViewportSizeSet()) {
     aSize = CSSIntRect::FromAppUnitsRounded(
-      presShell->GetScrollPositionClampingScrollPortSize());
+      presShell->GetVisualViewportSize());
   } else {
     RefPtr<nsViewManager> viewManager = presShell->GetViewManager();
     if (viewManager) {
@@ -6260,8 +6267,8 @@ nsGlobalWindowOuter::UpdateCommands(const nsAString& anAction,
   }
 
   nsIDocument* doc = rootWindow->GetExtantDoc();
-  // See if we contain a XUL document.
-  if (!doc || !doc->IsXULDocument()) {
+
+  if (!doc) {
     return;
   }
   // selectionchange action is only used for mozbrowser, not for XUL. So we bypass
@@ -6269,7 +6276,7 @@ nsGlobalWindowOuter::UpdateCommands(const nsAString& anAction,
   if (!anAction.EqualsLiteral("selectionchange")) {
     // Retrieve the command dispatcher and call updateCommands on it.
     nsIDOMXULCommandDispatcher* xulCommandDispatcher =
-      doc->AsXULDocument()->GetCommandDispatcher();
+      doc->GetCommandDispatcher();
     if (xulCommandDispatcher) {
       nsContentUtils::AddScriptRunner(new CommandDispatcher(xulCommandDispatcher,
                                                             anAction));
@@ -6430,6 +6437,7 @@ nsGlobalWindowOuter::GetPrivateRoot()
   return top;
 }
 
+// This has a caller in Windows-only code (nsNativeAppSupportWin).
 Location*
 nsGlobalWindowOuter::GetLocation()
 {
@@ -7625,6 +7633,19 @@ nsPIDOMWindowOuter::MaybeCreateDoc()
     nsCOMPtr<nsIDocument> document = docShell->GetDocument();
     Unused << document;
   }
+}
+
+void
+nsPIDOMWindowOuter::SetChromeEventHandlerInternal(EventTarget* aChromeEventHandler)
+{
+  // Out-of-line so we don't need to include ContentFrameMessageManager.h in
+  // nsPIDOMWindow.h.
+  mChromeEventHandler = aChromeEventHandler;
+
+  // mParentTarget and mMessageManager will be set when the next event is
+  // dispatched or someone asks for our message manager.
+  mParentTarget = nullptr;
+  mMessageManager = nullptr;
 }
 
 mozilla::dom::DocGroup*

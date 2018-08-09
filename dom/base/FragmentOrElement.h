@@ -16,7 +16,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/UniquePtr.h"
-#include "nsAttrAndChildArray.h"          // member
+#include "AttrArray.h"                    // member
 #include "nsCycleCollectionParticipant.h" // NS_DECL_CYCLE_*
 #include "nsIContent.h"                   // base class
 #include "nsNodeUtils.h"                  // class member nsNodeUtils::CloneNodeImpl
@@ -93,12 +93,6 @@ public:
   NS_DECL_ADDSIZEOFEXCLUDINGTHIS
 
   // nsINode interface methods
-  virtual uint32_t GetChildCount() const override;
-  virtual nsIContent *GetChildAt_Deprecated(uint32_t aIndex) const override;
-  virtual int32_t ComputeIndexOf(const nsINode* aPossibleChild) const override;
-  virtual nsresult InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
-                                     bool aNotify) override;
-  virtual void RemoveChildNode(nsIContent* aKid, bool aNotify) override;
   virtual void GetTextContentInternal(nsAString& aTextContent,
                                       mozilla::OOMReporter& aError) override;
   virtual void SetTextContentInternal(const nsAString& aTextContent,
@@ -159,7 +153,7 @@ protected:
    * Copy attributes and state to another element
    * @param aDest the object to copy to
    */
-  nsresult CopyInnerTo(FragmentOrElement* aDest, bool aPreallocateChildren);
+  nsresult CopyInnerTo(FragmentOrElement* aDest);
 
 public:
   /**
@@ -334,9 +328,9 @@ protected:
 
   friend class ::ContentUnbinder;
   /**
-   * Array containing all attributes and children for this element
+   * Array containing all attributes for this element
    */
-  nsAttrAndChildArray mAttrsAndChildren;
+  AttrArray mAttrs;
 };
 
 } // namespace dom

@@ -835,6 +835,12 @@ public:
    */
   void SetInTransform(bool aInTransform) { mInTransform = aInTransform; }
 
+  /**
+   * Returns true if we're currently building a display list that's
+   * under an nsDisplayFilter.
+   */
+  bool IsInFilter() const { return mInFilter; }
+
   bool IsInPageSequence() const { return mInPageSequence; }
   void SetInPageSequence(bool aInPage) { mInPageSequence = aInPage; }
 
@@ -1170,23 +1176,29 @@ public:
   };
 
   /**
-   * A helper class to temporarily set the value of mFilterASR.
+   * A helper class to temporarily set the value of mFilterASR and
+   * mInFilter.
    */
-  class AutoFilterASRSetter {
+  class AutoEnterFilter {
   public:
-    AutoFilterASRSetter(nsDisplayListBuilder* aBuilder, bool aUsingFilter)
-      : mBuilder(aBuilder), mOldValue(aBuilder->mFilterASR)
+    AutoEnterFilter(nsDisplayListBuilder* aBuilder, bool aUsingFilter)
+      : mBuilder(aBuilder)
+      , mOldValue(aBuilder->mFilterASR)
+      , mOldInFilter(aBuilder->mInFilter)
     {
       if (!aBuilder->mFilterASR && aUsingFilter) {
         aBuilder->mFilterASR = aBuilder->CurrentActiveScrolledRoot();
+        aBuilder->mInFilter = true;
       }
     }
-    ~AutoFilterASRSetter() {
+    ~AutoEnterFilter() {
       mBuilder->mFilterASR = mOldValue;
+      mBuilder->mInFilter = mOldInFilter;
     }
   private:
     nsDisplayListBuilder* mBuilder;
     const ActiveScrolledRoot* mOldValue;
+    bool mOldInFilter;
   };
 
   /**
@@ -1465,12 +1477,11 @@ public:
       if (nsLayoutUtils::IsFixedPosFrameInDisplayPort(aFrame) &&
           aBuilder->IsPaintingToWindow()) {
         // position: fixed items are reflowed into and only drawn inside the
-        // viewport, or the scroll position clamping scrollport size, if one is
-        // set.
+        // viewport, or the visual viewport size, if one is set.
         nsIPresShell* ps = aFrame->PresShell();
-        if (ps->IsScrollPositionClampingScrollPortSizeSet()) {
+        if (ps->IsVisualViewportSizeSet()) {
           dirtyRectRelativeToDirtyFrame =
-            nsRect(nsPoint(0, 0), ps->GetScrollPositionClampingScrollPortSize());
+            nsRect(nsPoint(0, 0), ps->GetVisualViewportSize());
           visible = dirtyRectRelativeToDirtyFrame;
 #ifdef MOZ_WIDGET_ANDROID
         } else {
@@ -1949,6 +1960,7 @@ private:
   // True when we're building a display list that's directly or indirectly
   // under an nsDisplayTransform
   bool                           mInTransform;
+  bool                           mInFilter;
   bool                           mInPageSequence;
   bool                           mIsInChromePresContext;
   bool                           mSyncDecodeImages;

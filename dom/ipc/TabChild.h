@@ -48,6 +48,7 @@
 class nsIDOMWindowUtils;
 class nsIHttpChannel;
 class nsISerialEventTarget;
+class nsWebBrowser;
 
 template<typename T> class nsTHashtable;
 template<typename T> class nsPtrHashKey;
@@ -80,7 +81,7 @@ class CoalescedMouseData;
 class CoalescedWheelData;
 
 class TabChildGlobal : public ContentFrameMessageManager,
-                       public nsIContentFrameMessageManager,
+                       public nsIMessageSender,
                        public nsIScriptObjectPrincipal,
                        public nsIGlobalObject,
                        public nsSupportsWeakReference
@@ -108,7 +109,6 @@ public:
   virtual uint64_t ChromeOuterWindowID() override;
 
   NS_FORWARD_SAFE_NSIMESSAGESENDER(mMessageManager)
-  NS_DECL_NSICONTENTFRAMEMESSAGEMANAGER
 
   void
   GetEventTargetParent(EventChainPreVisitor& aVisitor) override
@@ -823,6 +823,7 @@ private:
   class DelayedDeleteRunnable;
 
   TextureFactoryIdentifier mTextureFactoryIdentifier;
+  RefPtr<nsWebBrowser> mWebBrowser;
   nsCOMPtr<nsIWebNavigation> mWebNav;
   RefPtr<mozilla::dom::TabGroup> mTabGroup;
   RefPtr<PuppetWidget> mPuppetWidget;

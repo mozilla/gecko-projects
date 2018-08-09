@@ -65,7 +65,7 @@ public:
   NS_IMPL_FROMNODE(nsGenericHTMLElement, kNameSpaceID_XHTML)
 
   // From Element
-  nsresult CopyInnerTo(mozilla::dom::Element* aDest, bool aPreallocateChildren);
+  nsresult CopyInnerTo(mozilla::dom::Element* aDest);
 
   void GetTitle(mozilla::dom::DOMString& aTitle)
   {
@@ -303,7 +303,7 @@ public:
   bool IsHTMLLink(nsIURI** aURI) const;
 
   // HTML element methods
-  void Compact() { mAttrsAndChildren.Compact(); }
+  void Compact() { mAttrs.Compact(); }
 
   virtual void UpdateEditableState(bool aNotify) override;
 

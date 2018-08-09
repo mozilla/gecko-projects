@@ -16,10 +16,12 @@
  */
 
 
-/* fluent-dom@aa95b1f (July 10, 2018) */
+/* fluent-dom@cab517f (July 31, 2018) */
 
 const { Localization } =
   ChromeUtils.import("resource://gre/modules/Localization.jsm", {});
+const { Services } =
+  ChromeUtils.import("resource://gre/modules/Services.jsm", {});
 
 // Match the opening angle bracket (<) in HTML tags, and HTML entities like
 // &amp;, &#0038;, &#x0026;.
@@ -58,10 +60,10 @@ const LOCALIZABLE_ATTRIBUTES = {
     th: ["abbr"]
   },
   "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul": {
-    description: ["value"],
     global: [
       "accesskey", "aria-label", "aria-valuetext", "aria-moz-hint", "label"
     ],
+    description: ["value"],
     key: ["key", "keycode"],
     label: ["value"],
     textbox: ["placeholder"],
@@ -521,7 +523,7 @@ class DOMLocalization extends Localization {
     if (this.windowElement) {
       if (this.windowElement !== newRoot.ownerGlobal) {
         throw new Error(`Cannot connect a root:
-          DOMLocalization already has a root from a different window`);
+          DOMLocalization already has a root from a different window.`);
       }
     } else {
       this.windowElement = newRoot.ownerGlobal;
@@ -572,7 +574,20 @@ class DOMLocalization extends Localization {
   translateRoots() {
     const roots = Array.from(this.roots);
     return Promise.all(
-      roots.map(root => this.translateFragment(root))
+      roots.map(async root => {
+        // We want to first retranslate the UI, and
+        // then (potentially) flip the directionality.
+        //
+        // This means that the DOM alternations and directionality
+        // are set in the same microtask.
+        await this.translateFragment(root);
+        let primaryLocale = Services.locale.getAppLocaleAsBCP47();
+        let direction = Services.locale.isAppLocaleRTL ? "rtl" : "ltr";
+        root.setAttribute("lang", primaryLocale);
+        root.setAttribute(root.namespaceURI ===
+          "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+          ? "localedir" : "dir", direction);
+      })
     );
   }
 

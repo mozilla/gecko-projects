@@ -13,6 +13,7 @@ DIRS += [
 DevToolsModules(
     'assert.js',
     'ast.js',
+    'asyncStoreHelper.js',
     'bootstrap.js',
     'build-query.js',
     'clipboard.js',
@@ -42,6 +43,7 @@ DevToolsModules(
     'text.js',
     'timings.js',
     'ui.js',
+    'url.js',
     'utils.js',
     'wasm.js',
     'worker.js',

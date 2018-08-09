@@ -2088,7 +2088,7 @@ pref("network.dns.offline-localhost", true);
 
 // Defines how much longer resolver threads should stay idle before are shut down.
 // A negative value will keep the thread alive forever.
-pref("network.dns.resolver-thread-extra-idle-time-seconds", 60);
+pref("network.dns.resolver-thread-extra-idle-time-seconds", -1);
 
 // The maximum allowed length for a URL - 1MB default
 pref("network.standard-url.max-length", 1048576);
@@ -3100,9 +3100,6 @@ pref("layout.idle_period.required_quiescent_frames", 2);
 // end and the start of the next tick to avoid jank.
 pref("layout.idle_period.time_limit", 1);
 
-// Whether -webkit-appearance is aliased to -moz-appearance
-pref("layout.css.webkit-appearance.enabled", false);
-
 // Is support for the core interfaces of Web Animations API enabled?
 pref("dom.animations-api.core.enabled", true);
 
@@ -3254,7 +3251,7 @@ pref("dom.ipc.processCount.privileged", 1);
 pref("dom.ipc.keepProcessesAlive.privileged", 1);
 
 // Whether a native event loop should be used in the content process.
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_MACOSX)
 pref("dom.ipc.useNativeEventProcessing.content", false);
 #else
 pref("dom.ipc.useNativeEventProcessing.content", true);
@@ -4989,7 +4986,11 @@ pref("extensions.webextensions.tabhide.enabled", true);
 pref("extensions.webextensions.background-delayed-startup", false);
 
 // Whether or not the installed extensions should be migrated to the storage.local IndexedDB backend.
+#ifdef NIGHTLY_BUILD
+pref("extensions.webextensions.ExtensionStorageIDB.enabled", true);
+#else
 pref("extensions.webextensions.ExtensionStorageIDB.enabled", false);
+#endif
 
 // if enabled, store execution times for API calls
 pref("extensions.webextensions.enablePerformanceCounters", false);

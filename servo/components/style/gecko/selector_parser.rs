@@ -13,8 +13,8 @@ use gecko_bindings::sugar::ownership::{HasBoxFFI, HasFFI, HasSimpleFFI};
 use invalidation::element::document_state::InvalidationMatchingData;
 use selector_parser::{Direction, SelectorParser};
 use selectors::SelectorList;
-use selectors::parser::{self as selector_parser, Selector};
 use selectors::parser::{SelectorParseErrorKind, Visit};
+use selectors::parser::{self as selector_parser, Selector};
 use selectors::visitor::SelectorVisitor;
 use std::fmt;
 use string_cache::{Atom, Namespace, WeakAtom, WeakNamespace};
@@ -488,7 +488,9 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
             }
             let args = args.into_boxed_slice();
             if let Some(pseudo) = PseudoElement::tree_pseudo_element(&name, args) {
-                return Ok(pseudo);
+                if self.is_pseudo_element_enabled(&pseudo) {
+                    return Ok(pseudo);
+                }
             }
         }
         Err(

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <Windows.h>
+#include <windows.h>
 #include <winternl.h>
 #include "gtest/gtest.h"
 #include "nsReadableUtils.h"
@@ -226,7 +226,6 @@ DoTest_CreateRemoteThread_LoadLibrary(TgetArgsProc aGetArgsProc)
   return;
 }
 
-#if defined(NIGHTLY_BUILD)
 TEST(TestInjectEject, CreateRemoteThread_LoadLibraryA)
 {
   DoTest_CreateRemoteThread_LoadLibrary([](const nsString& dllPath,
@@ -276,4 +275,3 @@ TEST(TestInjectEject, CreateRemoteThread_LoadLibraryExA)
     aThreadParam = (uintptr_t)dllPathC.get();
   });
 }
-#endif //  defined(NIGHTLY_BUILD)

@@ -2562,6 +2562,10 @@ nsFrameLoader::TryRemoteBrowser()
 {
   NS_ASSERTION(!mRemoteBrowser, "TryRemoteBrowser called with a remote browser already?");
 
+  if (!mOwnerContent) {
+    return false;
+  }
+
   //XXXsmaug Per spec (2014/08/21) frameloader should not work in case the
   //         element isn't in document, only in shadow dom, but that will change
   //         https://www.w3.org/Bugs/Public/show_bug.cgi?id=26365#c0
@@ -2820,8 +2824,7 @@ nsFrameLoader::DoLoadMessageManagerScript(const nsAString& aURL, bool aRunInGlob
   if (tabParent) {
     return tabParent->SendLoadRemoteScript(nsString(aURL), aRunInGlobalScope);
   }
-  RefPtr<nsInProcessTabChildGlobal> tabChild =
-    static_cast<nsInProcessTabChildGlobal*>(GetTabChildGlobalAsEventTarget());
+  RefPtr<nsInProcessTabChildGlobal> tabChild = GetTabChildGlobal();
   if (tabChild) {
     tabChild->LoadFrameScript(aURL, aRunInGlobalScope);
   }
@@ -2977,12 +2980,6 @@ nsFrameLoader::ReallyLoadFrameScripts()
     mMessageManager->InitWithCallback(this);
   }
   return NS_OK;
-}
-
-EventTarget*
-nsFrameLoader::GetTabChildGlobalAsEventTarget()
-{
-  return mChildMessageManager.get();
 }
 
 already_AddRefed<Element>

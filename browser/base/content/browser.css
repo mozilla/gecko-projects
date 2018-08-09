@@ -588,6 +588,7 @@ hbox.urlbar-input-box {
 html|input.urlbar-scheme {
   position: absolute;
   height: 100%;
+  left: 0;
   visibility: hidden;
   direction: ltr;
   pointer-events: none;
@@ -649,6 +650,15 @@ html|input.urlbar-input[textoverflow="start"]:not([focused]) {
 /* Only show the "Search with" label on hover or selection. */
 #PopupAutoCompleteRichResult > richlistbox > richlistitem:not([selected]):not(:hover) > .ac-action[actiontype=searchengine],
 #PopupAutoCompleteRichResult > richlistbox > richlistitem:not([selected]):not(:hover) > .ac-separator[actiontype=searchengine] {
+  display: none;
+}
+
+/* Hide the em-dash separator between the search query description (.ac-title)
+   and the "Search with Foo" description (.ac-url) if the search query is the
+   empty string.  Also hide .ac-title itself because it has a margin-inline-end;
+   alternatively we would need to remove that margin in this case. */
+#PopupAutoCompleteRichResult > richlistbox > richlistitem.emptySearchQuery > .ac-separator,
+#PopupAutoCompleteRichResult > richlistbox > richlistitem.emptySearchQuery > .ac-title {
   display: none;
 }
 
