@@ -15,6 +15,7 @@ class Repackage(BaseScript):
                 "download_input",
                 "setup",
                 "repackage",
+                "generate_checksums",
             ],
         }
         BaseScript.__init__(
@@ -91,6 +92,28 @@ class Repackage(BaseScript):
                 cwd=dirs['abs_mozilla_dir'],
                 halt_on_failure=True,
             )
+
+    def generate_checksums(self):
+        import hashlib
+
+        dirs = self.query_abs_dirs()
+        hash_algorithm = self.config.get("hash_algorithm", "sha512")
+        try:
+            hasher = getattr(hashlib, hash_algorithm)
+        except AttributeError:
+            self.fatal("Invalid hash_algorithm: %s" % hash_algorithm)
+
+        for root, _, files in os.walk(dirs['output_home']):
+            for f in files:
+                checksum = hashlib.sha512()
+                with open(os.path.join(root, f)) as fd:
+                    while True:
+                        block = fd.read(1024*1024)
+                        if not block:
+                            break
+                        checksum.update(block)
+                with open(os.path.join(root, "{}.{}".format(f, hash_algorithm)), "w+") as fd:
+                    fd.write(checksum.hexdigest())
 
     def _run_tooltool(self):
         config = self.config
