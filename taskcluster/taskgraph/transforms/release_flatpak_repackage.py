@@ -34,5 +34,8 @@ def format(config, tasks):
             task['worker']['env'][k] = env[k].format(**format_params)
 
         task['worker']["privileged"] = True
+        # experimental piggybacking on existing bare metal linux machines in
+        # packet.net
+        task['worker-type'] = 'terraform-packet/gecko-t-linux'
 
         yield task
