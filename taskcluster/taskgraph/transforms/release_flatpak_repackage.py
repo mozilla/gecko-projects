@@ -36,6 +36,6 @@ def format(config, tasks):
         task['worker']["privileged"] = True
         # experimental piggybacking on existing bare metal linux machines in
         # packet.net
-        task['worker-type'] = 'terraform-packet/gecko-t-linux'
+        task['worker-type'] = 'aws-provisioner-v1/fp-gecko-3-b-linux'
 
         yield task
