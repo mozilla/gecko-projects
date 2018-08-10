@@ -184,7 +184,7 @@ def make_job_description(config, jobs):
             'using': 'mozharness',
             'script': 'mozharness/scripts/repackage.py',
             'job-script': 'taskcluster/scripts/builder/repackage.sh',
-            'actions': ['download_input', 'setup', 'repackage'],
+            'actions': ['download_input', 'setup', 'repackage', 'generate_checksums'],
             'extra-workspace-cache-key': 'repackage',
         })
 
