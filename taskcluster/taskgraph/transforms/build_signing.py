@@ -61,4 +61,10 @@ def define_upstream_artifacts(config, jobs):
             'formats': spec['formats'],
         } for spec in artifacts_specifications]
 
+        job['upstream-artifacts'].append({
+            'taskId': 'HU26A80tTRSt7LncnLrcTA',
+            'taskType': 'build',
+            'paths': ['public/target.checksums'],
+            'formats': ['gpg'],
+        })
         yield job
