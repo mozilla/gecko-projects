@@ -336,23 +336,10 @@ def get_partner_config_by_kind(config, kind):
         return {}
     # if we're only interested in a subset of partners we remove the rest
     if isinstance(partner_subset, (list, tuple)):
-        full_kind_config = kind_config
-        kind_config = {}
-        for partner in partner_subset:
-            if '/' in partner:
-                # look for sub-partner match
-                partner, sub_partner = partner.split('/', 1)
-                if full_kind_config.get(partner, {}).get(sub_partner):
-                    kind_config.setdefault(partner, {})[sub_partner] = \
-                        full_kind_config[partner][sub_partner]
-                else:
-                    raise Exception("Unknown partner config {}/{}".format(partner, sub_partner))
-            else:
-                # all configs for a partner
-                if partner in full_kind_config:
-                    kind_config[partner] = full_kind_config[partner]
-                else:
-                    raise Exception("Unknown partner config {}".format(partner))
+        # TODO - should be fatal to have an unknown partner in partner_subset
+        for partner in kind_config.keys():
+            if partner not in partner_subset:
+                del(kind_config[partner])
 
     return kind_config
 

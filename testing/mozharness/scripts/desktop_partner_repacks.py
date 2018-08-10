@@ -48,7 +48,6 @@ class DesktopPartnerRepacks(ReleaseMixin, AutomationMixin,
           }],
         [["--partner", "-p"], {
           "dest": "partner",
-          "action": "extend",
           "help": "Limit repackaging to partners matching this string",
           }],
         [["--taskid", "-t"], {
@@ -162,10 +161,7 @@ class DesktopPartnerRepacks(ReleaseMixin, AutomationMixin,
         if self.config.get('platform'):
             repack_cmd.extend(["--platform", self.config['platform']])
         if self.config.get('partner'):
-            for partner in self.config['partner']:
-                # we pass only the sub_partner if asked for "partner/sub_partner" and the repack
-                # script will do the right thing.  Pass thru unchanged in the "partner" form.
-                repack_cmd.extend(["--partner", partner.split('/')[-1]])
+            repack_cmd.extend(["--partner", self.config['partner']])
         if self.config.get('taskIds'):
             for taskId in self.config['taskIds']:
                 repack_cmd.extend(["--taskid", taskId])
