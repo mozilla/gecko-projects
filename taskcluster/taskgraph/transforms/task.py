@@ -612,6 +612,14 @@ task_description_schema = Schema({
         Required('branch'): basestring,
         Required('locales'): basestring,
     }, {
+        Required('implementation'): 'shipit-mar-manifest',
+        Required('release-name'): basestring,
+        Required('upstream-artifacts'): [{
+            Required('taskId'): taskref_or_string,
+            Required('taskType'): basestring,
+            Required('paths'): [basestring],
+        }],
+    }, {
         Required('implementation'): 'treescript',
         Required('tags'): [Any('buildN', 'release', None)],
         Required('bump'): bool,
@@ -1232,6 +1240,23 @@ def build_ship_it_started_payload(config, task, task_def):
         'revision': get_branch_rev(config),
         'partials': release_config.get('partial_versions', ""),
         'l10n_changesets': worker['locales'],
+    }
+
+
+@payload_builder('shipit-mar-manifest')
+def build_ship_it_mar_manifest_payload(config, task, task_def):
+    worker = task['worker']
+
+    task_def['payload'] = {
+        'release_name': worker['release-name'],
+        # [
+        #   {
+        #     gotta support task references here, too
+        #     "taskId": "xxxx",
+        #     "path": "xxxx",
+        #   }
+        # ]
+        'upstreamArtifacts': worker['upstream-artifacts'],
     }
 
 
