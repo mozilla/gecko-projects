@@ -513,13 +513,7 @@ private:
   DECL_GFX_PREF(Once, "gfx.use-iosurface-textures",            UseIOSurfaceTextures, bool, false);
   DECL_GFX_PREF(Once, "gfx.use-mutex-on-present",              UseMutexOnPresent, bool, false);
   DECL_GFX_PREF(Once, "gfx.use-surfacetexture-textures",       UseSurfaceTextureTextures, bool, false);
-
-#if defined(RELEASE_OR_BETA)
-  DECL_GFX_PREF(Once, "gfx.allow-texture-direct-mapping",      AllowTextureDirectMapping, bool, false);
-#else
   DECL_GFX_PREF(Once, "gfx.allow-texture-direct-mapping",      AllowTextureDirectMapping, bool, true);
-#endif
-
   DECL_GFX_PREF(Live, "gfx.vsync.collect-scroll-transforms",   CollectScrollTransforms, bool, false);
   DECL_GFX_PREF(Once, "gfx.vsync.compositor.unobserve-count",  CompositorUnobserveCount, int32_t, 10);
 
@@ -634,6 +628,7 @@ private:
   DECL_GFX_PREF(Once, "layers.mlgpu.enable-container-resizing", AdvancedLayersEnableContainerResizing, bool, true);
   DECL_GFX_PREF(Once, "layers.offmainthreadcomposition.force-disabled", LayersOffMainThreadCompositionForceDisabled, bool, false);
   DECL_GFX_PREF(Live, "layers.offmainthreadcomposition.frame-rate", LayersCompositionFrameRate, int32_t,-1);
+  DECL_GFX_PREF(Once, "layers.omtp.capture-limit",             LayersOMTPCaptureLimit, uint32_t, 25 * 1024 * 1024);
   DECL_GFX_PREF(Live, "layers.omtp.dump-capture",              LayersOMTPDumpCapture, bool, false);
   DECL_GFX_PREF(Once, "layers.omtp.paint-workers",             LayersOMTPPaintWorkers, int32_t, 1);
   DECL_GFX_PREF(Live, "layers.omtp.release-capture-on-main-thread", LayersOMTPReleaseCaptureOnMainThread, bool, false);
@@ -793,8 +788,6 @@ private:
   DECL_GFX_PREF(Live, "webgl.perf.max-acceptable-fb-status-invals", WebGLMaxAcceptableFBStatusInvals, int32_t, 0);
   DECL_GFX_PREF(Live, "webgl.perf.spew-frame-allocs",          WebGLSpewFrameAllocs, bool, true);
 
-
-  DECL_GFX_PREF(Live, "webgl.webgl2-compat-mode",              WebGL2CompatMode, bool, false);
 
   DECL_GFX_PREF(Live, "widget.window-transforms.disabled",     WindowTransformsDisabled, bool, false);
 

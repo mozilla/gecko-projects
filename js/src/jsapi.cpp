@@ -279,6 +279,12 @@ JS::ObjectOpResult::failNoIndexedSetter()
     return fail(JSMSG_NO_INDEXED_SETTER);
 }
 
+JS_PUBLIC_API(bool)
+JS::ObjectOpResult::failNotDataDescriptor()
+{
+    return fail(JSMSG_NOT_DATA_DESCRIPTOR);
+}
+
 JS_PUBLIC_API(int64_t)
 JS_Now()
 {
@@ -3691,6 +3697,13 @@ JS_GetFunctionArity(JSFunction* fun)
 }
 
 JS_PUBLIC_API(bool)
+JS_GetFunctionLength(JSContext* cx, HandleFunction fun, uint16_t* length)
+{
+    assertSameCompartment(cx, fun);
+    return JSFunction::getLength(cx, fun, length);
+}
+
+JS_PUBLIC_API(bool)
 JS_ObjectIsFunction(JSContext* cx, JSObject* obj)
 {
     return obj->is<JSFunction>();
@@ -4372,8 +4385,6 @@ JS_BufferIsCompilableUnit(JSContext* cx, HandleObject obj, const char* utf8, siz
 
     CompileOptions options(cx);
     frontend::UsedNameTracker usedNames(cx);
-    if (!usedNames.init())
-        return false;
 
     RootedScriptSourceObject sourceObject(cx, frontend::CreateScriptSourceObject(cx, options,
                                                                                  mozilla::Nothing()));

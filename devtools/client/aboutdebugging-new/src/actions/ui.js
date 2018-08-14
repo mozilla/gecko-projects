@@ -5,16 +5,30 @@
 "use strict";
 
 const {
+  NETWORK_LOCATIONS_UPDATED,
   PAGE_SELECTED,
+  PAGES,
 } = require("../constants");
 
+const Actions = require("./index");
+
 function selectPage(page) {
-  return {
-    type: PAGE_SELECTED,
-    page,
+  return async (dispatch, getState) => {
+    dispatch({ type: PAGE_SELECTED, page });
+
+    if (page === PAGES.THIS_FIREFOX) {
+      dispatch(Actions.connectRuntime());
+    } else {
+      dispatch(Actions.disconnectRuntime());
+    }
   };
+}
+
+function updateNetworkLocations(locations) {
+  return { type: NETWORK_LOCATIONS_UPDATED, locations };
 }
 
 module.exports = {
   selectPage,
+  updateNetworkLocations,
 };

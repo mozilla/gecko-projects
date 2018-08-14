@@ -4,15 +4,29 @@
 
 "use strict";
 
-const { createStore } = require("devtools/client/shared/vendor/redux");
+const { applyMiddleware, createStore } = require("devtools/client/shared/vendor/redux");
+const { thunk } = require("devtools/client/shared/redux/middleware/thunk.js");
 
 const rootReducer = require("./reducers/index");
+const { RuntimeState } = require("./reducers/runtime-state");
 const { UiState } = require("./reducers/ui-state");
+const debugTargetListenerMiddleware = require("./middleware/debug-target-listener");
+const { getNetworkLocations } = require("./modules/network-locations");
 
-exports.configureStore = function() {
+function configureStore() {
   const initialState = {
-    ui: new UiState()
+    runtime: new RuntimeState(),
+    ui: getUiState()
   };
 
-  return createStore(rootReducer, initialState);
-};
+  const middleware = applyMiddleware(thunk, debugTargetListenerMiddleware);
+
+  return createStore(rootReducer, initialState, middleware);
+}
+
+function getUiState() {
+  const locations = getNetworkLocations();
+  return new UiState(locations);
+}
+
+exports.configureStore = configureStore;

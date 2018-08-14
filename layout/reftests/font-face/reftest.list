@@ -176,10 +176,12 @@ HTTP(..) == reflow-sanity-delay-1b.html reflow-sanity-1-ref.html
 HTTP(..) == reflow-sanity-delay-1c.html reflow-sanity-1-ref.html
 HTTP(..) == reflow-sanity-delay-1-metrics.html reflow-sanity-1-ref.html
 
+HTTP(..) == bug-1481905-cancel-load.html bug-1481905-cancel-load-ref.html
+
 # font-display
 skip-if(/^Linux\x20i686/.test(http.oscpu)) HTTP(..) == font-display-1.html font-display-1-ref.html # normal font load (~500ms)
 # ^ disabled due to intermittents due to timing issues -- Bug 1238222
-fuzzy-if(OSX==1010,3,5) HTTP(..) == font-display-2.html font-display-2-ref.html # font load takes 4500ms
+fuzzy-if(OSX==1010,0-3,0-5) HTTP(..) == font-display-2.html font-display-2-ref.html # font load takes 4500ms
 
 # Testing hack for Meiryo
 random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == meiryo-en.html meiryo-ja.html # Bug 1392106
@@ -206,4 +208,5 @@ fails-if(winWidget||gtkWidget||(cocoaWidget&&OSX<1012)) == variation-format-hint
 fails-if(winWidget||gtkWidget||(cocoaWidget&&OSX<1012)) == variation-format-hint-1b.html variation-format-hint-1B-otf-ref.html
 fails-if(winWidget||gtkWidget||(cocoaWidget&&OSX<1012)) == variation-format-hint-1c.html variation-format-hint-1B-woff-ref.html
 fails-if(winWidget||gtkWidget||(cocoaWidget&&OSX<1012)) == variation-format-hint-1d.html variation-format-hint-1B-woff2-ref.html
+
 default-preferences

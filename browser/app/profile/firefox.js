@@ -949,8 +949,12 @@ pref("app.productInfo.baseURL", "https://www.mozilla.org/firefox/features/");
 // Name of alternate about: page for certificate errors (when undefined, defaults to about:neterror)
 pref("security.alternate_certificate_error_page", "certerror");
 
-// Indicates if new certificate error page (enabled) or not
+// Enable the new certificate error page only for Nightly
+#if defined(NIGHTLY_BUILD)
+pref("browser.security.newcerterrorpage.enabled", true);
+#else
 pref("browser.security.newcerterrorpage.enabled", false);
+#endif
 
 // Whether to start the private browsing mode at application startup
 pref("browser.privatebrowsing.autostart", false);
@@ -1127,6 +1131,7 @@ pref("services.sync.prefs.sync.addons.ignoreUserEnabledChanges", true);
 // could weaken the pref locally, install an add-on from an untrusted
 // source, and this would propagate automatically to other,
 // uncompromised Sync-connected devices.
+pref("services.sync.prefs.sync.browser.contentblocking.enabled", true);
 pref("services.sync.prefs.sync.browser.ctrlTab.recentlyUsedOrder", true);
 pref("services.sync.prefs.sync.browser.download.useDownloadDir", true);
 pref("services.sync.prefs.sync.browser.formfill.enable", true);
@@ -1491,11 +1496,6 @@ pref("browser.contentblocking.ui.enabled", false);
 
 pref("privacy.trackingprotection.introCount", 0);
 pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/tracking-protection/start/");
-#ifdef NIGHTLY_BUILD
-pref("privacy.trackingprotection.appMenuToggle.enabled", true);
-#else
-pref("privacy.trackingprotection.appMenuToggle.enabled", false);
-#endif
 
 // Always enable newtab segregation using containers
 pref("privacy.usercontext.about_newtab_segregation.enabled", true);

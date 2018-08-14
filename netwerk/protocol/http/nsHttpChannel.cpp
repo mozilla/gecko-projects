@@ -22,6 +22,7 @@
 #include "nsICacheStorage.h"
 #include "nsICacheEntry.h"
 #include "nsICaptivePortalService.h"
+#include "nsICookieService.h"
 #include "nsICryptoHash.h"
 #include "nsINetworkInterceptController.h"
 #include "nsINSSErrorsService.h"
@@ -55,6 +56,7 @@
 #include "nsThreadUtils.h"
 #include "GeckoProfiler.h"
 #include "nsIConsoleService.h"
+#include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Preferences.h"
@@ -103,7 +105,6 @@
 #include "mozilla/net/Predictor.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/NullPrincipal.h"
-#include "mozilla/StaticPrefs.h"
 #include "CacheControlParser.h"
 #include "nsMixedContentBlocker.h"
 #include "CacheStorageService.h"
@@ -438,9 +439,69 @@ nsHttpChannel::LogBlockedCORSRequest(const nsAString& aMessage, const nsACString
 //-----------------------------------------------------------------------------
 
 nsresult
+nsHttpChannel::PrepareToConnect()
+{
+    LOG(("nsHttpChannel::PrepareToConnect [this=%p]\n", this));
+
+    AddCookiesToRequest();
+
+    // notify "http-on-modify-request" observers
+    CallOnModifyRequestObservers();
+
+    SetLoadGroupUserAgentOverride();
+
+    // Check if request was cancelled during on-modify-request or on-useragent.
+    if (mCanceled) {
+        return mStatus;
+    }
+
+    if (mSuspendCount) {
+        // We abandon the connection here if there was one.
+        LOG(("Waiting until resume OnBeforeConnect [this=%p]\n", this));
+        MOZ_ASSERT(!mCallOnResume);
+        mCallOnResume = &nsHttpChannel::HandleOnBeforeConnect;
+        return NS_OK;
+    }
+
+    return OnBeforeConnect();
+}
+
+void
+nsHttpChannel::HandleOnBeforeConnect()
+{
+    MOZ_ASSERT(!mCallOnResume, "How did that happen?");
+    nsresult rv;
+
+    if (mSuspendCount) {
+        LOG(("Waiting until resume OnBeforeConnect [this=%p]\n", this));
+        mCallOnResume = &nsHttpChannel::HandleOnBeforeConnect;
+        return;
+    }
+
+    LOG(("nsHttpChannel::HandleOnBeforeConnect [this=%p]\n", this));
+    rv = OnBeforeConnect();
+    if (NS_FAILED(rv)) {
+        CloseCacheEntry(false);
+        Unused << AsyncAbort(rv);
+    }
+}
+
+nsresult
 nsHttpChannel::OnBeforeConnect()
 {
     nsresult rv;
+
+    // Check if request was cancelled during suspend AFTER on-modify-request or
+    // on-useragent.
+    if (mCanceled) {
+        return mStatus;
+    }
+
+    // Check to see if we should redirect this channel elsewhere by
+    // nsIHttpChannel.redirectTo API request
+    if (mAPIRedirectToURI) {
+        return AsyncCall(&nsHttpChannel::HandleAsyncAPIRedirect);
+    }
 
     // Note that we are only setting the "Upgrade-Insecure-Requests" request
     // header for *all* navigational requests instead of all requests as
@@ -596,17 +657,44 @@ nsHttpChannel::Connect()
     return ConnectOnTailUnblock();
 }
 
+static bool
+IsContentPolicyTypeWhitelistedForFastBlock(nsILoadInfo* aLoadInfo)
+{
+  nsContentPolicyType type = aLoadInfo ?
+                             aLoadInfo->GetExternalContentPolicyType() :
+                             nsIContentPolicy::TYPE_OTHER;
+  switch (type) {
+  // images
+  case nsIContentPolicy::TYPE_IMAGE:
+  case nsIContentPolicy::TYPE_IMAGESET:
+  case nsIContentPolicy::TYPE_INTERNAL_IMAGE:
+  case nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD:
+  case nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON:
+  // fonts
+  case nsIContentPolicy::TYPE_FONT:
+  // stylesheets
+  case nsIContentPolicy::TYPE_STYLESHEET:
+  case nsIContentPolicy::TYPE_INTERNAL_STYLESHEET:
+  case nsIContentPolicy::TYPE_INTERNAL_STYLESHEET_PRELOAD:
+    return true;
+  default:
+    return false;
+  }
+}
+
 bool
 nsHttpChannel::CheckFastBlocked()
 {
     LOG(("nsHttpChannel::CheckFastBlocked [this=%p]\n", this));
 
     static bool sFastBlockInited = false;
+    static bool sIsContentBlockingEnabled = false;
     static bool sIsFastBlockEnabled = false;
     static uint32_t sFastBlockTimeout = 0;
 
     if (!sFastBlockInited) {
         sFastBlockInited = true;
+        Preferences::AddBoolVarCache(&sIsContentBlockingEnabled, "browser.contentblocking.enabled");
         Preferences::AddBoolVarCache(&sIsFastBlockEnabled, "browser.fastblock.enabled");
         Preferences::AddUintVarCache(&sFastBlockTimeout, "browser.fastblock.timeout");
     }
@@ -616,7 +704,9 @@ nsHttpChannel::CheckFastBlocked()
         return false;
     }
 
-    if (!sIsFastBlockEnabled || !timestamp) {
+    if (!sIsContentBlockingEnabled || !sIsFastBlockEnabled ||
+        IsContentPolicyTypeWhitelistedForFastBlock(mLoadInfo) ||
+        !timestamp) {
         return false;
     }
 
@@ -3800,28 +3890,26 @@ nsHttpChannel::OpenCacheEntryInternal(bool isHttps,
         extension.Append("TRR");
     }
 
-    if (StaticPrefs::privacy_restrict3rdpartystorage_enabled() &&
-        mIsTrackingResource) {
-        nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil =
-            services::GetThirdPartyUtil();
-        if (thirdPartyUtil) {
-            bool thirdParty = false;
-            Unused << thirdPartyUtil->IsThirdPartyChannel(this,
-                                                          nullptr,
-                                                          &thirdParty);
-            if (thirdParty) {
-                nsCOMPtr<nsIURI> topWindowURI;
-                rv = GetTopWindowURI(getter_AddRefs(topWindowURI));
-                NS_ENSURE_SUCCESS(rv, rv);
-
-                nsAutoString topWindowOrigin;
-                rv = nsContentUtils::GetUTFOrigin(topWindowURI, topWindowOrigin);
-                NS_ENSURE_SUCCESS(rv, rv);
-
-                extension.Append("-trackerFor:");
-                extension.Append(NS_ConvertUTF16toUTF8(topWindowOrigin));
-            }
+    if (!AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(this, mURI)) {
+        nsCOMPtr<nsIURI> topWindowURI;
+        rv = GetTopWindowURI(getter_AddRefs(topWindowURI));
+        bool isDocument = false;
+        if (NS_FAILED(rv) &&
+            NS_SUCCEEDED(GetIsMainDocumentChannel(&isDocument)) &&
+            isDocument) {
+          // For top-level documents, use the document channel's origin to compute
+          // the unique storage space identifier instead of the top Window URI.
+          rv = NS_GetFinalChannelURI(this, getter_AddRefs(topWindowURI));
+          NS_ENSURE_SUCCESS(rv, rv);
         }
+
+        nsAutoString topWindowOrigin;
+        rv = nsContentUtils::GetUTFOrigin(topWindowURI ? topWindowURI : mURI,
+                                          topWindowOrigin);
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        extension.Append("-unique:");
+        extension.Append(NS_ConvertUTF16toUTF8(topWindowOrigin));
     }
 
     mCacheOpenWithPriority = cacheEntryOpenFlags & nsICacheStorage::OPEN_PRIORITY;
@@ -6091,8 +6179,6 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
         mUserSetCookieHeader = cookieHeader;
     }
 
-    AddCookiesToRequest();
-
     // Set user agent override, do so before OnOpeningRequest notification
     // since we want to allow consumers of that notification change or remove
     // the User-Agent request header.
@@ -6259,15 +6345,15 @@ nsHttpChannel::BeginConnect()
             do_GetService(NS_CONSOLESERVICE_CONTRACTID);
         if (consoleService) {
             nsAutoString message(NS_LITERAL_STRING("Alternate Service Mapping found: "));
-            AppendASCIItoUTF16(scheme.get(), message);
+            AppendASCIItoUTF16(scheme, message);
             message.AppendLiteral(u"://");
-            AppendASCIItoUTF16(host.get(), message);
+            AppendASCIItoUTF16(host, message);
             message.AppendLiteral(u":");
             message.AppendInt(port);
             message.AppendLiteral(u" to ");
-            AppendASCIItoUTF16(scheme.get(), message);
+            AppendASCIItoUTF16(scheme, message);
             message.AppendLiteral(u"://");
-            AppendASCIItoUTF16(mapping->AlternateHost().get(), message);
+            AppendASCIItoUTF16(mapping->AlternateHost(), message);
             message.AppendLiteral(u":");
             message.AppendInt(mapping->AlternatePort());
             consoleService->LogStringMessage(message.get());
@@ -6303,63 +6389,6 @@ nsHttpChannel::BeginConnect()
     if (NS_FAILED(rv)) {
         LOG(("nsHttpChannel %p AddAuthorizationHeaders failed (%08x)",
              this, static_cast<uint32_t>(rv)));
-    }
-
-    // notify "http-on-modify-request" observers
-    CallOnModifyRequestObservers();
-
-    SetLoadGroupUserAgentOverride();
-
-    // Check if request was cancelled during on-modify-request or on-useragent.
-    if (mCanceled) {
-        return mStatus;
-    }
-
-    if (mSuspendCount) {
-        LOG(("Waiting until resume BeginConnect [this=%p]\n", this));
-        MOZ_ASSERT(!mCallOnResume);
-        mCallOnResume = &nsHttpChannel::HandleBeginConnectContinue;
-        return NS_OK;
-    }
-
-    return BeginConnectContinue();
-}
-
-void
-nsHttpChannel::HandleBeginConnectContinue()
-{
-    MOZ_ASSERT(!mCallOnResume, "How did that happen?");
-    nsresult rv;
-
-    if (mSuspendCount) {
-        LOG(("Waiting until resume BeginConnect [this=%p]\n", this));
-        mCallOnResume = &nsHttpChannel::HandleBeginConnectContinue;
-        return;
-    }
-
-    LOG(("nsHttpChannel::HandleBeginConnectContinue [this=%p]\n", this));
-    rv = BeginConnectContinue();
-    if (NS_FAILED(rv)) {
-        CloseCacheEntry(false);
-        Unused << AsyncAbort(rv);
-    }
-}
-
-nsresult
-nsHttpChannel::BeginConnectContinue()
-{
-    nsresult rv;
-
-    // Check if request was cancelled during suspend AFTER on-modify-request or
-    // on-useragent.
-    if (mCanceled) {
-        return mStatus;
-    }
-
-    // Check to see if we should redirect this channel elsewhere by
-    // nsIHttpChannel.redirectTo API request
-    if (mAPIRedirectToURI) {
-        return AsyncCall(&nsHttpChannel::HandleAsyncAPIRedirect);
     }
 
     // If mTimingEnabled flag is not set after OnModifyRequest() then
@@ -6633,7 +6662,7 @@ nsHttpChannel::ContinueBeginConnectWithResult()
         // case, we should not send the request to the server
         rv = mStatus;
     } else {
-        rv = OnBeforeConnect();
+        rv = PrepareToConnect();
     }
 
     LOG(("nsHttpChannel::ContinueBeginConnectWithResult result [this=%p rv=%" PRIx32

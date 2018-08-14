@@ -5014,6 +5014,180 @@ ICBinaryArith_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
     return tailCallVM(DoBinaryArithFallbackInfo, masm);
 }
 
+//
+// Compare_Fallback
+//
+static bool
+DoCompareFallback(JSContext* cx, BaselineFrame* frame, ICCompare_Fallback* stub_, HandleValue lhs,
+                  HandleValue rhs, MutableHandleValue ret)
+{
+    // This fallback stub may trigger debug mode toggling.
+    DebugModeOSRVolatileStub<ICCompare_Fallback*> stub(ICStubEngine::Baseline, frame, stub_);
+
+    RootedScript script(cx, frame->script());
+    jsbytecode* pc = stub->icEntry()->pc(script);
+    JSOp op = JSOp(*pc);
+
+    FallbackICSpew(cx, stub, "Compare(%s)", CodeName[op]);
+
+    // Case operations in a CONDSWITCH are performing strict equality.
+    if (op == JSOP_CASE)
+        op = JSOP_STRICTEQ;
+
+    // Don't pass lhs/rhs directly, we need the original values when
+    // generating stubs.
+    RootedValue lhsCopy(cx, lhs);
+    RootedValue rhsCopy(cx, rhs);
+
+    // Perform the compare operation.
+    bool out;
+    switch (op) {
+      case JSOP_LT:
+        if (!LessThan(cx, &lhsCopy, &rhsCopy, &out))
+            return false;
+        break;
+      case JSOP_LE:
+        if (!LessThanOrEqual(cx, &lhsCopy, &rhsCopy, &out))
+            return false;
+        break;
+      case JSOP_GT:
+        if (!GreaterThan(cx, &lhsCopy, &rhsCopy, &out))
+            return false;
+        break;
+      case JSOP_GE:
+        if (!GreaterThanOrEqual(cx, &lhsCopy, &rhsCopy, &out))
+            return false;
+        break;
+      case JSOP_EQ:
+        if (!LooselyEqual<true>(cx, &lhsCopy, &rhsCopy, &out))
+            return false;
+        break;
+      case JSOP_NE:
+        if (!LooselyEqual<false>(cx, &lhsCopy, &rhsCopy, &out))
+            return false;
+        break;
+      case JSOP_STRICTEQ:
+        if (!StrictlyEqual<true>(cx, &lhsCopy, &rhsCopy, &out))
+            return false;
+        break;
+      case JSOP_STRICTNE:
+        if (!StrictlyEqual<false>(cx, &lhsCopy, &rhsCopy, &out))
+            return false;
+        break;
+      default:
+        MOZ_ASSERT_UNREACHABLE("Unhandled baseline compare op");
+        return false;
+    }
+
+    ret.setBoolean(out);
+
+    // Check if debug mode toggling made the stub invalid.
+    if (stub.invalid())
+        return true;
+
+    // Check to see if a new stub should be generated.
+    if (stub->numOptimizedStubs() >= ICCompare_Fallback::MAX_OPTIMIZED_STUBS) {
+        // TODO: Discard all stubs in this IC and replace with inert megamorphic stub.
+        // But for now we just bail.
+        return true;
+    }
+
+    if (stub->state().canAttachStub()) {
+        CompareIRGenerator gen(cx, script, pc, stub->state().mode(), op, lhs, rhs);
+        bool attached = false;
+        if (gen.tryAttachStub()) {
+            ICStub* newStub = AttachBaselineCacheIRStub(cx, gen.writerRef(), gen.cacheKind(),
+                                                        BaselineCacheIRStubKind::Regular,
+                                                        ICStubEngine::Baseline, script, stub, &attached);
+            if (newStub)
+                    JitSpew(JitSpew_BaselineIC, "  Attached CacheIR stub");
+            return true;
+        }
+    }
+
+    stub->noteUnoptimizableAccess();
+    return true;
+}
+
+typedef bool (*DoCompareFallbackFn)(JSContext*, BaselineFrame*, ICCompare_Fallback*,
+                                    HandleValue, HandleValue, MutableHandleValue);
+static const VMFunction DoCompareFallbackInfo =
+    FunctionInfo<DoCompareFallbackFn>(DoCompareFallback, "DoCompareFallback", TailCall,
+                                      PopValues(2));
+
+bool
+ICCompare_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
+{
+    MOZ_ASSERT(R0 == JSReturnOperand);
+
+    // Restore the tail call register.
+    EmitRestoreTailCallReg(masm);
+
+    // Ensure stack is fully synced for the expression decompiler.
+    masm.pushValue(R0);
+    masm.pushValue(R1);
+
+    // Push arguments.
+    masm.pushValue(R1);
+    masm.pushValue(R0);
+    masm.push(ICStubReg);
+    pushStubPayload(masm, R0.scratchReg());
+    return tailCallVM(DoCompareFallbackInfo, masm);
+}
+
+//
+// NewArray_Fallback
+//
+
+static bool
+DoNewArray(JSContext* cx, BaselineFrame* frame, ICNewArray_Fallback* stub, uint32_t length,
+           MutableHandleValue res)
+{
+    FallbackICSpew(cx, stub, "NewArray");
+
+    RootedObject obj(cx);
+    if (stub->templateObject()) {
+        RootedObject templateObject(cx, stub->templateObject());
+        obj = NewArrayOperationWithTemplate(cx, templateObject);
+        if (!obj)
+            return false;
+    } else {
+        RootedScript script(cx, frame->script());
+        jsbytecode* pc = stub->icEntry()->pc(script);
+
+        obj = NewArrayOperation(cx, script, pc, length);
+        if (!obj)
+            return false;
+
+        if (!obj->isSingleton() && !obj->group()->maybePreliminaryObjectsDontCheckGeneration()) {
+            JSObject* templateObject = NewArrayOperation(cx, script, pc, length, TenuredObject);
+            if (!templateObject)
+                return false;
+            stub->setTemplateObject(templateObject);
+        }
+    }
+
+    res.setObject(*obj);
+    return true;
+}
+
+typedef bool(*DoNewArrayFn)(JSContext*, BaselineFrame*, ICNewArray_Fallback*, uint32_t,
+                            MutableHandleValue);
+static const VMFunction DoNewArrayInfo =
+    FunctionInfo<DoNewArrayFn>(DoNewArray, "DoNewArray", TailCall);
+
+bool
+ICNewArray_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
+{
+    EmitRestoreTailCallReg(masm);
+
+    masm.push(R0.scratchReg()); // length
+    masm.push(ICStubReg); // stub.
+    masm.pushBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
+
+    return tailCallVM(DoNewArrayInfo, masm);
+}
+
 
 } // namespace jit
 } // namespace js

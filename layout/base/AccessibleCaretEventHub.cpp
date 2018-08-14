@@ -383,8 +383,7 @@ AccessibleCaretEventHub::Init()
     mManager->OnFrameReconstruction();
   }
 
-  if (mInitialized || !mPresShell || !mPresShell->GetCanvasFrame() ||
-      !mPresShell->GetCanvasFrame()->GetCustomContentContainer()) {
+  if (mInitialized || !mPresShell || !mPresShell->GetCanvasFrame()) {
     return;
   }
 
@@ -620,7 +619,7 @@ AccessibleCaretEventHub::MoveDistanceIsLarge(const nsPoint& aPoint) const
 {
   nsPoint delta = aPoint - mPressPoint;
   return NS_hypot(delta.x, delta.y) >
-         nsPresContext::AppUnitsPerCSSPixel() * kMoveStartToleranceInPixel;
+         AppUnitsPerCSSPixel() * kMoveStartToleranceInPixel;
 }
 
 void

@@ -108,6 +108,7 @@ nsContextMenu.prototype = {
       let subject = {
         menu: aXulMenu,
         tab: gBrowser ? gBrowser.getTabForBrowser(this.browser) : undefined,
+        timeStamp: this.timeStamp,
         isContentSelected: this.isContentSelected,
         inFrame: this.inFrame,
         isTextSelected: this.isTextSelected,
@@ -163,6 +164,7 @@ nsContextMenu.prototype = {
     }
 
     this.shouldDisplay = context.shouldDisplay;
+    this.timeStamp = context.timeStamp;
 
     // Assign what's _possibly_ needed from `context` sent by ContextMenu.jsm
     // Keep this consistent with the similar code in ContextMenu's _setContext
@@ -503,7 +505,6 @@ nsContextMenu.prototype = {
                   !(this.isContentSelected || this.onTextInput || this.onLink ||
                     this.onImage || this.onVideo || this.onAudio ||
                     this.onCanvas || this.inWebExtBrowser));
-    bookmarkPage.setAttribute("tooltiptext", bookmarkPage.getAttribute("buttontooltiptext"));
 
     this.showItem("context-bookmarklink", (this.onLink && !this.onMailtoLink &&
                                            !this.onMozExtLink) || this.onPlainTextLink);
@@ -855,7 +856,6 @@ nsContextMenu.prototype = {
                      Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
     let referrer = gContextMenuContentData.referrer;
     openWebLinkIn(gContextMenuContentData.docLocation, "current", {
-      disallowInheritPrincipal: true,
       referrerURI: referrer ? makeURI(referrer) : null,
       triggeringPrincipal: this.browser.contentPrincipal,
     });
@@ -913,8 +913,7 @@ nsContextMenu.prototype = {
     urlSecurityCheck(this.imageDescURL,
                      this.principal,
                      Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
-    openUILink(this.imageDescURL, e, { disallowInheritPrincipal: true,
-                                       referrerURI: gContextMenuContentData.documentURIObject,
+    openUILink(this.imageDescURL, e, { referrerURI: gContextMenuContentData.documentURIObject,
                                        triggeringPrincipal: this.principal,
     });
   },
@@ -952,16 +951,14 @@ nsContextMenu.prototype = {
     let systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
     if (this.onCanvas) {
       this._canvasToBlobURL(this.target).then(function(blobURL) {
-        openUILink(blobURL, e, { disallowInheritPrincipal: true,
-                                 referrerURI,
+        openUILink(blobURL, e, { referrerURI,
                                  triggeringPrincipal: systemPrincipal});
       }, Cu.reportError);
     } else {
       urlSecurityCheck(this.mediaURL,
                        this.principal,
                        Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
-      openUILink(this.mediaURL, e, { disallowInheritPrincipal: true,
-                                     referrerURI,
+      openUILink(this.mediaURL, e, { referrerURI,
                                      forceAllowDataURI: true,
                                      triggeringPrincipal: this.principal,
       });
@@ -1018,8 +1015,7 @@ nsContextMenu.prototype = {
                      this.principal,
                      Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
 
-    openUILink(this.bgImageURL, e, { disallowInheritPrincipal: true,
-                                     referrerURI: gContextMenuContentData.documentURIObject,
+    openUILink(this.bgImageURL, e, { referrerURI: gContextMenuContentData.documentURIObject,
                                      triggeringPrincipal: this.principal,
     });
   },
@@ -1502,6 +1498,7 @@ nsContextMenu.prototype = {
 
     // Store searchTerms in context menu item so we know what to search onclick
     menuItem.searchTerms = selectedText;
+    menuItem.principal = this.principal;
 
     // Copied to alert.js' prefillAlertInfo().
     // If the JS character after our truncation point is a trail surrogate,

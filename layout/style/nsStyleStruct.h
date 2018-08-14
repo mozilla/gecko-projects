@@ -2347,6 +2347,19 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
            !IsInternalTableStyleExceptCell();
   }
 
+  bool IsContainLayout() const {
+    // Note: The spec for layout containment says it should
+    // have no effect on non-atomic, inline-level boxes. We
+    // don't check for these here because we don't know
+    // what type of element is involved. Callers are
+    // responsible for checking if the box in question is
+    // non-atomic and inline-level, and creating an
+    // exemption as necessary.
+    return (NS_STYLE_CONTAIN_LAYOUT & mContain) &&
+            !IsInternalRubyDisplayType() &&
+            !IsInternalTableStyleExceptCell();
+  }
+
   bool IsContainSize() const {
     // Note: The spec for size containment says it should
     // have no effect on non-atomic, inline-level boxes. We
@@ -2763,16 +2776,16 @@ struct nsCursorImage
   }
 };
 
-struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUserInterface
+struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUI
 {
-  explicit nsStyleUserInterface(const nsPresContext* aContext);
-  nsStyleUserInterface(const nsStyleUserInterface& aOther);
-  ~nsStyleUserInterface();
+  explicit nsStyleUI(const nsPresContext* aContext);
+  nsStyleUI(const nsStyleUI& aOther);
+  ~nsStyleUI();
 
-  void FinishStyle(nsPresContext*, const nsStyleUserInterface*);
+  void FinishStyle(nsPresContext*, const nsStyleUI*);
   const static bool kHasFinishStyle = true;
 
-  nsChangeHint CalcDifference(const nsStyleUserInterface& aNewData) const;
+  nsChangeHint CalcDifference(const nsStyleUI& aNewData) const;
 
   mozilla::StyleUserInput   mUserInput;
   mozilla::StyleUserModify  mUserModify;      // (modify-content)

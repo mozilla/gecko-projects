@@ -396,7 +396,6 @@
       <menuseparator id="organizeBookmarksSeparator"/>
       <menuitem id="menu_bookmarkThisPage"
                 command="Browser:AddBookmarkAs"
-                observes="bookmarkThisPageBroadcaster"
                 key="addBookmarkAsKb"/>
       <menuitem id="subscribeToPageMenuitem"
                 disabled="true"
@@ -544,7 +543,8 @@
                         oncommand="openPreferences(undefined, {origin: 'menubar'});"/>
 #endif
 #ifdef MOZ_DEBUG
-              <menuitem label="&ldbCmd.label;"
+              <menuitem id="menu_layout_debugger"
+                        label="&ldbCmd.label;"
                         accesskey="&ldbCmd.accesskey;"
                         oncommand="toOpenWindowByType('mozapp:layoutdebug',
                                           'chrome://layoutdebug/content/');"/>

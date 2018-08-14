@@ -542,7 +542,7 @@ function handleRequest(req, res) {
       // ... this sends an A 99.88.77.66 entry back for pointing-elsewhere.example.com
       content = new Buffer("00000100000100010000000012706F696E74696E672D656C73657768657265076578616D706C6503636F6D0000010001C00C0001000100000037000463584D42", "hex");
     }
-    res.setHeader('Content-Type', 'application/dns-udpwireformat');
+    res.setHeader('Content-Type', 'application/dns-message');
     res.setHeader('Content-Length', content.length);
     res.writeHead(200);
     res.write(content);
@@ -583,7 +583,7 @@ function handleRequest(req, res) {
                          "0004" + // RDLENGTH
                          "09080706", // IPv4 address
                          "hex");
-    res.setHeader('Content-Type', 'application/dns-udpwireformat');
+    res.setHeader('Content-Type', 'application/dns-message');
     res.setHeader('Content-Length', content.length);
     res.writeHead(200);
     res.write(content);
@@ -596,7 +596,7 @@ function handleRequest(req, res) {
     var content;
     // ... this always sends a CNAME back to pointing-elsewhere.example.com. Loop time!
     content = new Buffer("00000100000100010000000005636E616D65076578616D706C6503636F6D0000050001C00C0005000100000037002012706F696E74696E672D656C73657768657265076578616D706C65C01A00", "hex");
-    res.setHeader('Content-Type', 'application/dns-udpwireformat');
+    res.setHeader('Content-Type', 'application/dns-message');
     res.setHeader('Content-Length', content.length);
     res.writeHead(200);
     res.write(content);
@@ -604,13 +604,24 @@ function handleRequest(req, res) {
     return;
 
   }
-
+  // for use with test_trr.js, test8b
+  else if (u.path === "/dns-ecs?dns=AAABAAABAAAAAAABA2VjcwdleGFtcGxlA2NvbQAAAQABAAApEAAAAAAAAAgACAAEAAIAAA") {
+    // the query string asks for an A entry for ecs.example.com
+    // ecs.example.com has A entry 5.5.5.5
+    var content= new Buffer("00000100000100010000000003656373076578616D706C6503636F6D0000010001C00C0001000100000037000405050505", "hex");
+    res.setHeader('Content-Type', 'application/dns-message');
+    res.setHeader('Content-Length', content.length);
+    res.writeHead(200);
+    res.write(content);
+    res.end("");
+    return;
+  }
   // for use with test_trr.js
-  else if (u.path === "/dns-get?ct&dns=AAABAAABAAAAAAAAA2dldAdleGFtcGxlA2NvbQAAAQAB") {
+  else if (u.path === "/dns-get?dns=AAABAAABAAAAAAAAA2dldAdleGFtcGxlA2NvbQAAAQAB") {
     // the query string asks for an A entry for get.example.com
     // get.example.com has A entry 1.2.3.4
     var content= new Buffer("00000100000100010000000003676574076578616D706C6503636F6D0000010001C00C0001000100000037000401020304", "hex");
-    res.setHeader('Content-Type', 'application/dns-udpwireformat');
+    res.setHeader('Content-Type', 'application/dns-message');
     res.setHeader('Content-Length', content.length);
     res.writeHead(200);
     res.write(content);
@@ -623,7 +634,7 @@ function handleRequest(req, res) {
   else if (u.pathname === "/dns") {
     // bar.example.com has A entry 127.0.0.1
     var content= new Buffer("00000100000100010000000003626172076578616D706C6503636F6D0000010001C00C000100010000003700047F000001", "hex");
-    res.setHeader('Content-Type', 'application/dns-udpwireformat');
+    res.setHeader('Content-Type', 'application/dns-message');
     res.setHeader('Content-Length', content.length);
     // pass back a cookie here, check it in /dns-auth
     res.setHeader('Set-Cookie', 'trackyou=yes; path=/; max-age=100000;');
@@ -635,7 +646,7 @@ function handleRequest(req, res) {
   else if (u.pathname === "/dns-ns") {
     // confirm.example.com has NS entry ns.example.com
     var content= new Buffer("00000100000100010000000007636F6E6669726D076578616D706C6503636F6D0000020001C00C00020001000000370012026E73076578616D706C6503636F6D010A00", "hex");
-    res.setHeader('Content-Type', 'application/dns-udpwireformat');
+    res.setHeader('Content-Type', 'application/dns-message');
     res.setHeader('Content-Length', content.length);
     res.writeHead(200);
     res.write(content);
@@ -664,7 +675,7 @@ function handleRequest(req, res) {
       // everything else is just wrong
       return;
     }
-    res.setHeader('Content-Type', 'application/dns-udpwireformat');
+    res.setHeader('Content-Type', 'application/dns-message');
     res.setHeader('Content-Length', content.length);
     res.writeHead(200);
     res.write(content);
@@ -675,7 +686,7 @@ function handleRequest(req, res) {
   else if (u.pathname === "/dns-aaaa") {
     // aaaa.example.com has AAAA entry 2020:2020::2020
     var content= new Buffer("0000010000010001000000000461616161076578616D706C6503636F6D00001C0001C00C001C000100000037001020202020000000000000000000002020", "hex");
-    res.setHeader('Content-Type', 'application/dns-udpwireformat');
+    res.setHeader('Content-Type', 'application/dns-message');
     res.setHeader('Content-Length', content.length);
     res.writeHead(200);
     res.write(content);
@@ -685,7 +696,7 @@ function handleRequest(req, res) {
   else if (u.pathname === "/dns-rfc1918") {
     // rfc1918.example.com has A entry 192.168.0.1
     var content= new Buffer("0000010000010001000000000772666331393138076578616D706C6503636F6D0000010001C00C00010001000000370004C0A80001", "hex");
-    res.setHeader('Content-Type', 'application/dns-udpwireformat');
+    res.setHeader('Content-Type', 'application/dns-message');
     res.setHeader('Content-Length', content.length);
     res.writeHead(200);
     res.write(content);
@@ -701,20 +712,20 @@ function handleRequest(req, res) {
     push = res.push({
       hostname: 'foo.example.com:' + serverPort,
       port: serverPort,
-      path: '/dns-pushed-response?ct&dns=AAAAAAABAAAAAAAABHB1c2gHZXhhbXBsZQNjb20AABwAAQ',
+      path: '/dns-pushed-response?dns=AAAAAAABAAAAAAAABHB1c2gHZXhhbXBsZQNjb20AABwAAQ',
       method: 'GET',
       headers: {
-        'accept' : 'application/dns-udpwireformat'
+        'accept' : 'application/dns-message'
       }
     });
     push.writeHead(200, {
-      'content-type': 'application/dns-udpwireformat',
+      'content-type': 'application/dns-message',
       'pushed' : 'yes',
       'content-length' : pcontent.length,
       'X-Connection-Http2': 'yes'
     });
     push.end(pcontent);
-    res.setHeader('Content-Type', 'application/dns-udpwireformat');
+    res.setHeader('Content-Type', 'application/dns-message');
     res.setHeader('Content-Length', content.length);
     res.writeHead(200);
     res.write(content);
@@ -739,7 +750,7 @@ function handleRequest(req, res) {
     }
     // bar.example.com has A entry 127.0.0.1
     var content= new Buffer("00000100000100010000000003626172076578616D706C6503636F6D0000010001C00C000100010000003700047F000001", "hex");
-    res.setHeader('Content-Type', 'application/dns-udpwireformat');
+    res.setHeader('Content-Type', 'application/dns-message');
     res.setHeader('Content-Length', content.length);
     res.writeHead(200);
     res.write(content);

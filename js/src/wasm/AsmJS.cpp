@@ -416,22 +416,21 @@ static inline ParseNode*
 CallCallee(ParseNode* pn)
 {
     MOZ_ASSERT(pn->isKind(ParseNodeKind::Call));
-    return ListHead(pn);
+    return BinaryLeft(pn);
 }
 
 static inline unsigned
 CallArgListLength(ParseNode* pn)
 {
     MOZ_ASSERT(pn->isKind(ParseNodeKind::Call));
-    MOZ_ASSERT(ListLength(pn) >= 1);
-    return ListLength(pn) - 1;
+    return ListLength(BinaryRight(pn));
 }
 
 static inline ParseNode*
 CallArgList(ParseNode* pn)
 {
     MOZ_ASSERT(pn->isKind(ParseNodeKind::Call));
-    return NextNode(ListHead(pn));
+    return ListHead(BinaryRight(pn));
 }
 
 static inline ParseNode*
@@ -594,16 +593,16 @@ static ParseNode*
 DotBase(ParseNode* pn)
 {
     MOZ_ASSERT(pn->isKind(ParseNodeKind::Dot));
-    MOZ_ASSERT(pn->isArity(PN_NAME));
-    return pn->expr();
+    MOZ_ASSERT(pn->isArity(PN_BINARY));
+    return pn->pn_left;
 }
 
 static PropertyName*
 DotMember(ParseNode* pn)
 {
     MOZ_ASSERT(pn->isKind(ParseNodeKind::Dot));
-    MOZ_ASSERT(pn->isArity(PN_NAME));
-    return pn->pn_atom->asPropertyName();
+    MOZ_ASSERT(pn->isArity(PN_BINARY));
+    return pn->pn_right->pn_atom->asPropertyName();
 }
 
 static ParseNode*
@@ -1547,11 +1546,7 @@ class MOZ_STACK_CLASS JS_HAZ_ROOTED ModuleValidator
                                  !parser_.pc->sc()->hasExplicitUseStrict();
         asmJSMetadata_->scriptSource.reset(parser_.ss);
 
-        if (!globalMap_.init() || !sigSet_.init() || !funcImportMap_.init())
-            return false;
-
-        if (!standardLibraryMathNames_.init() ||
-            !addStandardLibraryMathName("sin", AsmJSMathBuiltin_sin) ||
+        if (!addStandardLibraryMathName("sin", AsmJSMathBuiltin_sin) ||
             !addStandardLibraryMathName("cos", AsmJSMathBuiltin_cos) ||
             !addStandardLibraryMathName("tan", AsmJSMathBuiltin_tan) ||
             !addStandardLibraryMathName("asin", AsmJSMathBuiltin_asin) ||
@@ -2343,12 +2338,6 @@ class MOZ_STACK_CLASS FunctionValidator
     JSContext* cx() const             { return m_.cx(); }
     ParseNode* fn() const             { return fn_; }
 
-    bool init() {
-        return locals_.init() &&
-               breakLabels_.init() &&
-               continueLabels_.init();
-    }
-
     void define(ModuleValidator::Func* func, unsigned line) {
         MOZ_ASSERT(!blockDepth_);
         MOZ_ASSERT(breakableStack_.empty());
@@ -2810,9 +2799,11 @@ IsArrayViewCtorName(ModuleValidator& m, PropertyName* name, Scalar::Type* type)
 }
 
 static bool
-CheckNewArrayViewArgs(ModuleValidator& m, ParseNode* ctorExpr, PropertyName* bufferName)
+CheckNewArrayViewArgs(ModuleValidator& m, ParseNode* newExpr, PropertyName* bufferName)
 {
-    ParseNode* bufArg = NextNode(ctorExpr);
+    ParseNode* ctorExpr = BinaryLeft(newExpr);
+    ParseNode* ctorArgs = BinaryRight(newExpr);
+    ParseNode* bufArg = ListHead(ctorArgs);
     if (!bufArg || NextNode(bufArg) != nullptr)
         return m.fail(ctorExpr, "array view constructor takes exactly one argument");
 
@@ -2833,7 +2824,7 @@ CheckNewArrayView(ModuleValidator& m, PropertyName* varName, ParseNode* newExpr)
     if (!bufferName)
         return m.fail(newExpr, "cannot create array view without an asm.js heap parameter");
 
-    ParseNode* ctorExpr = ListHead(newExpr);
+    ParseNode* ctorExpr = BinaryLeft(newExpr);
 
     PropertyName* field;
     Scalar::Type type;
@@ -2862,7 +2853,7 @@ CheckNewArrayView(ModuleValidator& m, PropertyName* varName, ParseNode* newExpr)
         type = global->viewType();
     }
 
-    if (!CheckNewArrayViewArgs(m, ctorExpr, bufferName))
+    if (!CheckNewArrayViewArgs(m, newExpr, bufferName))
         return false;
 
     return m.addArrayView(varName, type, field);
@@ -5416,8 +5407,6 @@ CheckFunction(ModuleValidator& m)
         return false;
 
     FunctionValidator f(m, fn);
-    if (!f.init())
-        return m.fail(fn, "internal compiler failure (probably out of memory)");
 
     ParseNode* stmtIter = ListHead(FunctionStatementList(fn));
 

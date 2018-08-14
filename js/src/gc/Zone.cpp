@@ -34,6 +34,7 @@ JS::Zone::Zone(JSRuntime* rt)
     uniqueIds_(this),
     suppressAllocationMetadataBuilder(this, false),
     arenas(this),
+    tenuredAllocsSinceMinorGC_(0),
     types(this),
     gcWeakMapList_(this),
     compartments_(),
@@ -105,13 +106,7 @@ bool
 Zone::init(bool isSystemArg)
 {
     isSystem = isSystemArg;
-    return uniqueIds().init() &&
-           gcSweepGroupEdges().init() &&
-           gcWeakKeys().init() &&
-           typeDescrObjects().init() &&
-           markedAtoms().init() &&
-           atomCache().init() &&
-           regExps.init();
+    return gcWeakKeys().init();
 }
 
 void
@@ -288,7 +283,7 @@ Zone::createJitZone(JSContext* cx)
         return nullptr;
 
     UniquePtr<jit::JitZone> jitZone(cx->new_<js::jit::JitZone>());
-    if (!jitZone || !jitZone->init(cx))
+    if (!jitZone)
         return nullptr;
 
     jitZone_ = jitZone.release();
@@ -364,10 +359,8 @@ Zone::clearTables()
 {
     MOZ_ASSERT(regExps.empty());
 
-    if (baseShapes().initialized())
-        baseShapes().clear();
-    if (initialShapes().initialized())
-        initialShapes().clear();
+    baseShapes().clear();
+    initialShapes().clear();
 }
 
 void
@@ -453,7 +446,7 @@ Zone::purgeAtomCache()
     MOZ_ASSERT(!hasKeptAtoms());
     MOZ_ASSERT(!purgeAtomsDeferred);
 
-    atomCache().clearAndShrink();
+    atomCache().clearAndCompact();
 
     // Also purge the dtoa caches so that subsequent lookups populate atom
     // cache too.

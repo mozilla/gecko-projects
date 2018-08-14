@@ -45,7 +45,7 @@ GetRealmPrincipal(JS::Realm* realm)
 nsIPrincipal*
 GetObjectPrincipal(JSObject* obj)
 {
-    return GetCompartmentPrincipal(js::GetObjectCompartment(obj));
+    return GetRealmPrincipal(js::GetNonCCWObjectRealm(obj));
 }
 
 // Does the principal of compartment a subsume the principal of compartment b?
@@ -96,20 +96,13 @@ AccessCheck::wrapperSubsumes(JSObject* wrapper)
 bool
 AccessCheck::isChrome(JS::Compartment* compartment)
 {
-    nsIPrincipal* principal = GetCompartmentPrincipal(compartment);
-    return nsXPConnect::SystemPrincipal() == principal;
+    return js::IsSystemCompartment(compartment);
 }
 
 bool
 AccessCheck::isChrome(JSObject* obj)
 {
     return isChrome(js::GetObjectCompartment(obj));
-}
-
-nsIPrincipal*
-AccessCheck::getPrincipal(JS::Compartment* compartment)
-{
-    return GetCompartmentPrincipal(compartment);
 }
 
 // Hardcoded policy for cross origin property access. See the HTML5 Spec.

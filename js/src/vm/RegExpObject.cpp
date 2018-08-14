@@ -1251,9 +1251,9 @@ RegExpRealm::createMatchResultTemplateObject(JSContext* cx)
 
     // Make sure that the properties are in the right slots.
     DebugOnly<Shape*> shape = templateObject->lastProperty();
-    MOZ_ASSERT(shape->previous()->slot() == 0 &&
+    MOZ_ASSERT(shape->previous()->slot() == MatchResultObjectIndexSlot &&
                shape->previous()->propidRef() == NameToId(cx->names().index));
-    MOZ_ASSERT(shape->slot() == 1 &&
+    MOZ_ASSERT(shape->slot() == MatchResultObjectInputSlot &&
                shape->propidRef() == NameToId(cx->names().input));
 
     // Make sure type information reflects the indexed properties which might
@@ -1264,15 +1264,6 @@ RegExpRealm::createMatchResultTemplateObject(JSContext* cx)
     matchResultTemplateObject_.set(templateObject);
 
     return matchResultTemplateObject_;
-}
-
-bool
-RegExpZone::init()
-{
-    if (!set_.init(0))
-        return false;
-
-    return true;
 }
 
 void

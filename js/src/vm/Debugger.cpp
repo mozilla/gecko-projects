@@ -697,11 +697,13 @@ Debugger::Debugger(JSContext* cx, NativeObject* dbg)
                                     &traceLoggerScriptedCallsLastDrainedSize);
     }
 #endif
+
+    cx->runtime()->debuggerList().insertBack(this);
 }
 
 Debugger::~Debugger()
 {
-    MOZ_ASSERT_IF(debuggees.initialized(), debuggees.empty());
+    MOZ_ASSERT(debuggees.empty());
     allocationsLog.clear();
 
     // We don't have to worry about locking here since Debugger is not
@@ -713,29 +715,6 @@ Debugger::~Debugger()
     {
         cx->runtime()->onNewGlobalObjectWatchers().remove(this);
     }
-}
-
-bool
-Debugger::init(JSContext* cx)
-{
-    if (!debuggees.init() ||
-        !debuggeeZones.init() ||
-        !frames.init() ||
-        !scripts.init() ||
-        !lazyScripts.init() ||
-        !sources.init() ||
-        !objects.init() ||
-        !observedGCs.init() ||
-        !environments.init() ||
-        !wasmInstanceScripts.init() ||
-        !wasmInstanceSources.init())
-    {
-        ReportOutOfMemory(cx);
-        return false;
-    }
-
-    cx->runtime()->debuggerList().insertBack(this);
-    return true;
 }
 
 JS_STATIC_ASSERT(unsigned(JSSLOT_DEBUGFRAME_OWNER) == unsigned(JSSLOT_DEBUGSCRIPT_OWNER));
@@ -2284,8 +2263,10 @@ Debugger::appendAllocationSite(JSContext* cx, HandleObject obj, HandleSavedFrame
     if (!cx->compartment()->wrap(cx, &wrappedFrame))
         return false;
 
+    // Try to get the constructor name from the ObjectGroup's TypeNewScript.
+    // This is only relevant for native objects.
     RootedAtom ctorName(cx);
-    {
+    if (obj->is<NativeObject>()) {
         AutoRealm ar(cx, obj);
         if (!JSObject::constructorDisplayAtom(cx, obj, &ctorName))
             return false;
@@ -2393,7 +2374,6 @@ class MOZ_RAII ExecutionObservableRealms : public Debugger::ExecutionObservableS
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
-    bool init() { return realms_.init() && zones_.init(); }
     bool add(Realm* realm) { return realms_.put(realm) && zones_.put(realm->zone()); }
 
     using RealmRange = HashSet<Realm*>::Range;
@@ -2758,7 +2738,7 @@ Debugger::ensureExecutionObservabilityOfRealm(JSContext* cx, Realm* realm)
     if (realm->debuggerObservesAllExecution())
         return true;
     ExecutionObservableRealms obs(cx);
-    if (!obs.init() || !obs.add(realm))
+    if (!obs.add(realm))
         return false;
     realm->updateDebuggerObservesAllExecution();
     return updateExecutionObservability(cx, obs, Observing);
@@ -2809,8 +2789,6 @@ bool
 Debugger::updateObservesAllExecutionOnDebuggees(JSContext* cx, IsObserving observing)
 {
     ExecutionObservableRealms obs(cx);
-    if (!obs.init())
-        return false;
 
     for (WeakGlobalObjectSet::Range r = debuggees.all(); !r.empty(); r.popFront()) {
         GlobalObject* global = r.front();
@@ -2839,8 +2817,6 @@ bool
 Debugger::updateObservesCoverageOnDebuggees(JSContext* cx, IsObserving observing)
 {
     ExecutionObservableRealms obs(cx);
-    if (!obs.init())
-        return false;
 
     for (WeakGlobalObjectSet::Range r = debuggees.all(); !r.empty(); r.popFront()) {
         GlobalObject* global = r.front();
@@ -3193,12 +3169,10 @@ Debugger::trace(JSTracer* trc)
     // (Once we support generator frames properly, we will need
     // weakly-referenced Debugger.Frame objects as well, for suspended generator
     // frames.)
-    if (frames.initialized()) {
-        for (FrameMap::Range r = frames.all(); !r.empty(); r.popFront()) {
-            HeapPtr<DebuggerFrame*>& frameobj = r.front().value();
-            TraceEdge(trc, &frameobj, "live Debugger.Frame");
-            MOZ_ASSERT(frameobj->getPrivate(frameobj->numFixedSlotsMaybeForwarded()));
-        }
+    for (FrameMap::Range r = frames.all(); !r.empty(); r.popFront()) {
+        HeapPtr<DebuggerFrame*>& frameobj = r.front().value();
+        TraceEdge(trc, &frameobj, "live Debugger.Frame");
+        MOZ_ASSERT(frameobj->getPrivate(frameobj->numFixedSlotsMaybeForwarded()));
     }
 
     allocationsLog.trace(trc);
@@ -3776,8 +3750,6 @@ Debugger::removeDebuggee(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     ExecutionObservableRealms obs(cx);
-    if (!obs.init())
-        return false;
 
     if (dbg->debuggees.has(global)) {
         dbg->removeDebuggeeGlobal(cx->runtime()->defaultFreeOp(), global, nullptr);
@@ -3801,8 +3773,6 @@ Debugger::removeAllDebuggees(JSContext* cx, unsigned argc, Value* vp)
     THIS_DEBUGGER(cx, argc, vp, "removeAllDebuggees", args, dbg);
 
     ExecutionObservableRealms obs(cx);
-    if (!obs.init())
-        return false;
 
     for (WeakGlobalObjectSet::Enum e(dbg->debuggees); !e.empty(); e.popFront()) {
         Rooted<GlobalObject*> global(cx, e.front());
@@ -3938,7 +3908,7 @@ Debugger::construct(JSContext* cx, unsigned argc, Value* vp)
     {
         // Construct the underlying C++ object.
         auto dbg = cx->make_unique<Debugger>(cx, obj.get());
-        if (!dbg || !dbg->init(cx))
+        if (!dbg)
             return false;
 
         debugger = dbg.release();
@@ -4224,21 +4194,6 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
         wasmInstanceVector(cx, WasmInstanceObjectVector(cx)),
         oom(false)
     {}
-
-    /*
-     * Initialize this ScriptQuery. Raise an error and return false if we
-     * haven't enough memory.
-     */
-    bool init() {
-        if (!realms.init() ||
-            !innermostForRealm.init())
-        {
-            ReportOutOfMemory(cx);
-            return false;
-        }
-
-        return true;
-    }
 
     /*
      * Parse the query object |query|, and prepare to match only the scripts
@@ -4739,8 +4694,6 @@ Debugger::findScripts(JSContext* cx, unsigned argc, Value* vp)
     }
 
     ScriptQuery query(cx, dbg);
-    if (!query.init())
-        return false;
 
     if (args.length() >= 1) {
         RootedObject queryObject(cx, NonNullObject(cx, args[0]));
@@ -4844,11 +4797,6 @@ class MOZ_STACK_CLASS Debugger::ObjectQuery
         if (!prepareQuery())
             return false;
 
-        if (!debuggeeCompartments.init()) {
-            ReportOutOfMemory(cx);
-            return false;
-        }
-
         for (WeakGlobalObjectSet::Range r = dbg->allDebuggees(); !r.empty(); r.popFront()) {
             if (!debuggeeCompartments.put(r.front()->compartment())) {
                 ReportOutOfMemory(cx);
@@ -4868,10 +4816,6 @@ class MOZ_STACK_CLASS Debugger::ObjectQuery
             }
 
             Traversal traversal(cx, *this, maybeNoGC.ref());
-            if (!traversal.init()) {
-                ReportOutOfMemory(cx);
-                return false;
-            }
             traversal.wantNames = false;
 
             return traversal.addStart(JS::ubi::Node(&rootList)) &&
@@ -5102,8 +5046,6 @@ Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp)
 
     CompileOptions options(cx);
     frontend::UsedNameTracker usedNames(cx);
-    if (!usedNames.init())
-        return false;
 
     RootedScriptSourceObject sourceObject(cx, frontend::CreateScriptSourceObject(cx, options,
                                                                                  Nothing()));
@@ -9770,6 +9712,15 @@ DebuggerObject::applyMethod(JSContext* cx, unsigned argc, Value* vp)
     return object->call(cx, object, thisv, args, callArgs.rval());
 }
 
+static void
+EnterDebuggeeObjectRealm(JSContext* cx, Maybe<AutoRealm>& ar, JSObject* referent)
+{
+    // |referent| may be a cross-compartment wrapper and CCWs normally
+    // shouldn't be used with AutoRealm, but here we use an arbitrary realm for
+    // now because we don't really have another option.
+    ar.emplace(cx, referent->maybeCCWRealm()->maybeGlobal());
+}
+
 /* static */ bool
 DebuggerObject::asEnvironmentMethod(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -10099,7 +10050,8 @@ DebuggerObject::getClassName(JSContext* cx, HandleDebuggerObject object,
 
     const char* className;
     {
-        AutoRealm ar(cx, referent);
+        Maybe<AutoRealm> ar;
+        EnterDebuggeeObjectRealm(cx, ar, referent);
         className = GetObjectClassName(cx, referent);
     }
 
@@ -10396,7 +10348,8 @@ DebuggerObject::isExtensible(JSContext* cx, HandleDebuggerObject object, bool& r
     RootedObject referent(cx, object->referent());
 
     Maybe<AutoRealm> ar;
-    ar.emplace(cx, referent);
+    EnterDebuggeeObjectRealm(cx, ar, referent);
+
     ErrorCopier ec(ar);
     return IsExtensible(cx, referent, &result);
 }
@@ -10407,7 +10360,7 @@ DebuggerObject::isSealed(JSContext* cx, HandleDebuggerObject object, bool& resul
     RootedObject referent(cx, object->referent());
 
     Maybe<AutoRealm> ar;
-    ar.emplace(cx, referent);
+    EnterDebuggeeObjectRealm(cx, ar, referent);
 
     ErrorCopier ec(ar);
     return TestIntegrityLevel(cx, referent, IntegrityLevel::Sealed, &result);
@@ -10419,7 +10372,7 @@ DebuggerObject::isFrozen(JSContext* cx, HandleDebuggerObject object, bool& resul
     RootedObject referent(cx, object->referent());
 
     Maybe<AutoRealm> ar;
-    ar.emplace(cx, referent);
+    EnterDebuggeeObjectRealm(cx, ar, referent);
 
     ErrorCopier ec(ar);
     return TestIntegrityLevel(cx, referent, IntegrityLevel::Frozen, &result);
@@ -10434,7 +10387,8 @@ DebuggerObject::getPrototypeOf(JSContext* cx, HandleDebuggerObject object,
 
     RootedObject proto(cx);
     {
-        AutoRealm ar(cx, referent);
+        Maybe<AutoRealm> ar;
+        EnterDebuggeeObjectRealm(cx, ar, referent);
         if (!GetPrototype(cx, referent, &proto))
             return false;
     }
@@ -10456,7 +10410,7 @@ DebuggerObject::getOwnPropertyNames(JSContext* cx, HandleDebuggerObject object,
     AutoIdVector ids(cx);
     {
         Maybe<AutoRealm> ar;
-        ar.emplace(cx, referent);
+        EnterDebuggeeObjectRealm(cx, ar, referent);
 
         ErrorCopier ec(ar);
         if (!GetPropertyKeys(cx, referent, JSITER_OWNONLY | JSITER_HIDDEN, &ids))
@@ -10478,7 +10432,7 @@ DebuggerObject::getOwnPropertySymbols(JSContext* cx, HandleDebuggerObject object
     AutoIdVector ids(cx);
     {
         Maybe<AutoRealm> ar;
-        ar.emplace(cx, referent);
+        EnterDebuggeeObjectRealm(cx, ar, referent);
 
         ErrorCopier ec(ar);
         if (!GetPropertyKeys(cx, referent,
@@ -10503,7 +10457,8 @@ DebuggerObject::getOwnPropertyDescriptor(JSContext* cx, HandleDebuggerObject obj
     // Bug: This can cause the debuggee to run!
     {
         Maybe<AutoRealm> ar;
-        ar.emplace(cx, referent);
+        EnterDebuggeeObjectRealm(cx, ar, referent);
+
         cx->markId(id);
 
         ErrorCopier ec(ar);
@@ -10542,7 +10497,7 @@ DebuggerObject::preventExtensions(JSContext* cx, HandleDebuggerObject object)
     RootedObject referent(cx, object->referent());
 
     Maybe<AutoRealm> ar;
-    ar.emplace(cx, referent);
+    EnterDebuggeeObjectRealm(cx, ar, referent);
 
     ErrorCopier ec(ar);
     return PreventExtensions(cx, referent);
@@ -10554,7 +10509,7 @@ DebuggerObject::seal(JSContext* cx, HandleDebuggerObject object)
     RootedObject referent(cx, object->referent());
 
     Maybe<AutoRealm> ar;
-    ar.emplace(cx, referent);
+    EnterDebuggeeObjectRealm(cx, ar, referent);
 
     ErrorCopier ec(ar);
     return SetIntegrityLevel(cx, referent, IntegrityLevel::Sealed);
@@ -10566,7 +10521,7 @@ DebuggerObject::freeze(JSContext* cx, HandleDebuggerObject object)
     RootedObject referent(cx, object->referent());
 
     Maybe<AutoRealm> ar;
-    ar.emplace(cx, referent);
+    EnterDebuggeeObjectRealm(cx, ar, referent);
 
     ErrorCopier ec(ar);
     return SetIntegrityLevel(cx, referent, IntegrityLevel::Frozen);
@@ -10585,7 +10540,8 @@ DebuggerObject::defineProperty(JSContext* cx, HandleDebuggerObject object, Handl
     JS_TRY_OR_RETURN_FALSE(cx, CheckPropertyDescriptorAccessors(cx, desc));
 
     Maybe<AutoRealm> ar;
-    ar.emplace(cx, referent);
+    EnterDebuggeeObjectRealm(cx, ar, referent);
+
     if (!cx->compartment()->wrap(cx, &desc))
         return false;
     cx->markId(id);
@@ -10615,7 +10571,8 @@ DebuggerObject::defineProperties(JSContext* cx, HandleDebuggerObject object,
     }
 
     Maybe<AutoRealm> ar;
-    ar.emplace(cx, referent);
+    EnterDebuggeeObjectRealm(cx, ar, referent);
+
     for (size_t i = 0; i < descs.length(); i++) {
         if (!cx->compartment()->wrap(cx, descs[i]))
             return false;
@@ -10638,7 +10595,7 @@ DebuggerObject::deleteProperty(JSContext* cx, HandleDebuggerObject object, Handl
     RootedObject referent(cx, object->referent());
 
     Maybe<AutoRealm> ar;
-    ar.emplace(cx, referent);
+    EnterDebuggeeObjectRealm(cx, ar, referent);
 
     cx->markId(id);
 
@@ -10678,7 +10635,7 @@ DebuggerObject::call(JSContext* cx, HandleDebuggerObject object, HandleValue thi
     // compartment. (Rewrapping always takes place in the destination
     // compartment.)
     Maybe<AutoRealm> ar;
-    ar.emplace(cx, referent);
+    EnterDebuggeeObjectRealm(cx, ar, referent);
     if (!cx->compartment()->wrap(cx, &calleev) || !cx->compartment()->wrap(cx, &thisv))
         return false;
     for (unsigned i = 0; i < args2.length(); ++i) {
@@ -10771,7 +10728,8 @@ DebuggerObject::makeDebuggeeValue(JSContext* cx, HandleDebuggerObject object,
         // Enter this Debugger.Object's referent's compartment, and wrap the
         // argument as appropriate for references from there.
         {
-            AutoRealm ar(cx, referent);
+            Maybe<AutoRealm> ar;
+            EnterDebuggeeObjectRealm(cx, ar, referent);
             if (!cx->compartment()->wrap(cx, &value))
                 return false;
         }

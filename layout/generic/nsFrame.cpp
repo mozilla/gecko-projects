@@ -2393,7 +2393,7 @@ nsIFrame::DisplayCaret(nsDisplayListBuilder* aBuilder,
 nscolor
 nsIFrame::GetCaretColorAt(int32_t aOffset)
 {
-  return nsLayoutUtils::GetColor(this, &nsStyleUserInterface::mCaretColor);
+  return nsLayoutUtils::GetColor(this, &nsStyleUI::mCaretColor);
 }
 
 bool
@@ -5202,7 +5202,7 @@ nsresult
 nsFrame::GetCursor(const nsPoint& aPoint,
                    nsIFrame::Cursor& aCursor)
 {
-  FillCursorInformationFromStyle(StyleUserInterface(), aCursor);
+  FillCursorInformationFromStyle(StyleUI(), aCursor);
   if (NS_STYLE_CURSOR_AUTO == aCursor.mCursor) {
     // If this is editable, I-beam cursor is better for most elements.
     aCursor.mCursor =
@@ -6503,7 +6503,7 @@ nsIFrame::IsContentDisabled() const
 {
   // FIXME(emilio): Doing this via CSS means callers must ensure the style is up
   // to date, and they don't!
-  if (StyleUserInterface()->mUserInput == StyleUserInput::None) {
+  if (StyleUI()->mUserInput == StyleUserInput::None) {
     return true;
   }
 
@@ -6832,7 +6832,7 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
      */
     NS_ASSERTION(nsLayoutUtils::GetCrossDocParentFrame(this),
                  "Cannot transform the viewport frame!");
-    int32_t scaleFactor = ((aFlags & IN_CSS_UNITS) ? PresContext()->AppUnitsPerCSSPixel()
+    int32_t scaleFactor = ((aFlags & IN_CSS_UNITS) ? AppUnitsPerCSSPixel()
                                                    : PresContext()->AppUnitsPerDevPixel());
 
     Matrix4x4 result = nsDisplayTransform::GetResultingTransformMatrix(this,
@@ -6922,7 +6922,7 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
    * entire transform, so we're done.
    */
   nsPoint delta = GetOffsetToCrossDoc(*aOutAncestor);
-  int32_t scaleFactor = ((aFlags & IN_CSS_UNITS) ? PresContext()->AppUnitsPerCSSPixel()
+  int32_t scaleFactor = ((aFlags & IN_CSS_UNITS) ? AppUnitsPerCSSPixel()
                                                  : PresContext()->AppUnitsPerDevPixel());
   return Matrix4x4::Translation(NSAppUnitsToFloatPixels(delta.x, scaleFactor),
                                 NSAppUnitsToFloatPixels(delta.y, scaleFactor),
@@ -9678,8 +9678,32 @@ void
 nsFrame::ConsiderChildOverflow(nsOverflowAreas& aOverflowAreas,
                                nsIFrame* aChildFrame)
 {
-  aOverflowAreas.UnionWith(aChildFrame->GetOverflowAreas() +
-                           aChildFrame->GetPosition());
+  const nsStyleDisplay* display = StyleDisplay();
+  if (mComputedStyle->GetPseudo() == nsCSSAnonBoxes::scrolledContent) {
+    // If we are a scrollframe's inner anonymous box, we'll want to check if
+    // our parent has contain:layout below, so we change the nsStyleDisplay we
+    // read from here.
+    display = mParent->StyleDisplay();
+  }
+  if (display->IsContainLayout() && IsFrameOfType(eSupportsContainLayoutAndPaint)) {
+    // If we have layout containment and are not a non-atomic, inline-level
+    // principal box (or, if we are a scrollframe's inner anonymous box and
+    // our parent has layout containment) we should only consider our child's
+    // visual (ink) overflow, leaving the scrollable regions of the parent
+    // unaffected.
+    // Note: scrollable overflow is a subset of visual overflow,
+    // so this has the same affect as unioning the child's visual and
+    // scrollable overflow with the parent's visual overflow.
+    // XXX doesn't work correctly for floats - bug 1481951
+    nsRect childVisual = aChildFrame->GetVisualOverflowRect();
+    nsOverflowAreas combined = nsOverflowAreas(
+      childVisual,
+      nsRect());
+    aOverflowAreas.UnionWith(combined + aChildFrame->GetPosition());
+  } else {
+    aOverflowAreas.UnionWith(aChildFrame->GetOverflowAreas() +
+                             aChildFrame->GetPosition());
+  }
 }
 
 bool
@@ -9973,7 +9997,7 @@ nsIFrame::IsFocusable(int32_t *aTabIndex, bool aWithMouse)
   if (mContent && mContent->IsElement() && IsVisibleConsideringAncestors() &&
       Style()->GetPseudo() != nsCSSAnonBoxes::anonymousFlexItem &&
       Style()->GetPseudo() != nsCSSAnonBoxes::anonymousGridItem) {
-    const nsStyleUserInterface* ui = StyleUserInterface();
+    const nsStyleUI* ui = StyleUI();
     if (ui->mUserFocus != StyleUserFocus::Ignore &&
         ui->mUserFocus != StyleUserFocus::None) {
       // Pass in default tabindex of -1 for nonfocusable and 0 for focusable
@@ -10073,7 +10097,7 @@ nsIFrame::VerticalAlignEnum() const
 }
 
 /* static */
-void nsFrame::FillCursorInformationFromStyle(const nsStyleUserInterface* ui,
+void nsFrame::FillCursorInformationFromStyle(const nsStyleUI* ui,
                                              nsIFrame::Cursor& aCursor)
 {
   aCursor.mCursor = ui->mCursor;
@@ -10951,6 +10975,7 @@ nsIFrame::IsStackingContext(EffectSet* aEffectSet,
   return HasOpacity(aEffectSet) ||
          IsTransformed(aStyleDisplay) ||
          aStyleDisplay->IsContainPaint() ||
+         aStyleDisplay->IsContainLayout() ||
          // strictly speaking, 'perspective' doesn't require visual atomicity,
          // but the spec says it acts like the rest of these
          ChildrenHavePerspective(aStyleDisplay) ||
@@ -11237,7 +11262,7 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
     // are the event targets for any regions viewport frames may cover.
     return result;
   }
-  const uint8_t pointerEvents = StyleUserInterface()->GetEffectivePointerEvents(this);
+  const uint8_t pointerEvents = StyleUI()->GetEffectivePointerEvents(this);
   if (pointerEvents == NS_STYLE_POINTER_EVENTS_NONE) {
     return result;
   }

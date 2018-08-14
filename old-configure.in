@@ -1033,9 +1033,6 @@ case "$target" in
             # warning insists on complaining about the latter case, which
             # is annoying, and rather noisy.
             CXXFLAGS="$CXXFLAGS -Wno-used-but-marked-unused"
-            # Work around until bug 1472254 is fixed.
-            CFLAGS="$CFLAGS -Wno-pragma-pack"
-            CXXFLAGS="$CXXFLAGS -Wno-pragma-pack"
         fi
         # make 'foo == bar;' error out
         CFLAGS="$CFLAGS -we4553"
@@ -2709,9 +2706,6 @@ if test -n "$MOZ_ANGLE_RENDERER"; then
   fi
 fi # MOZ_ANGLE_RENDERER
 
-fi # COMPILE_ENVIRONMENT
-
-
 dnl ========================================================
 dnl Gamepad support
 dnl ========================================================
@@ -2723,6 +2717,9 @@ if test "$OS_TARGET" = "Linux"; then
       AC_MSG_ERROR([Can't find header linux/joystick.h, needed for gamepad support. Please install Linux kernel headers.])
     fi
 fi
+
+fi # COMPILE_ENVIRONMENT
+
 
 dnl ========================================================
 dnl = Breakpad crash reporting (on by default on supported platforms)
@@ -3472,6 +3469,17 @@ if test -n "$MOZ_OPTIMIZE"; then
         AC_MSG_ERROR([These compiler flags for C are invalid: $MOZ_OPTIMIZE_FLAGS])
     fi
     CFLAGS=$_SAVE_CFLAGS
+    if test -n "$MOZ_LTO" -a -n "$CLANG_CC"; then
+        # When using llvm-based LTO, non numeric optimization levels are
+        # not supported by the linker, so force the linker to use -O2 (
+        # which doesn't influence the level compilation units are actually
+        # compiled at).
+        case " $MOZ_OPTIMIZE_FLAGS " in
+        *\ -Os\ *|*\ -Oz\ *)
+            MOZ_OPTIMIZE_LDFLAGS="$MOZ_OPTIMIZE_LDFLAGS -O2"
+            ;;
+        esac
+    fi
 fi
 fi # COMPILE_ENVIRONMENT
 

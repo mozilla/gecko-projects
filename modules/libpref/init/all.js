@@ -555,7 +555,8 @@ pref("media.benchmark.vp9.threshold", 150);
 pref("media.benchmark.frames", 300);
 pref("media.benchmark.timeout", 1000);
 
-pref("media.media-capabilities.enabled", false);
+pref("media.media-capabilities.enabled", true);
+pref("media.media-capabilities.screen.enabled", false);
 
 #ifdef MOZ_WEBSPEECH
 pref("media.webspeech.synth.enabled", false);
@@ -2048,11 +2049,7 @@ pref("network.dns.ipv4OnlyDomains", "");
 pref("network.dns.disableIPv6", false);
 
 // This is the number of dns cache entries allowed
-#ifdef ANDROID
 pref("network.dnsCacheEntries", 400);
-#else
-pref("network.dnsCacheEntries", 800);
-#endif
 
 // In the absence of OS TTLs, the DNS cache TTL value
 pref("network.dnsCacheExpiration", 60);
@@ -2088,7 +2085,7 @@ pref("network.dns.offline-localhost", true);
 
 // Defines how much longer resolver threads should stay idle before are shut down.
 // A negative value will keep the thread alive forever.
-pref("network.dns.resolver-thread-extra-idle-time-seconds", -1);
+pref("network.dns.resolver-thread-extra-idle-time-seconds", 60);
 
 // The maximum allowed length for a URL - 1MB default
 pref("network.standard-url.max-length", 1048576);
@@ -3843,6 +3840,21 @@ pref("intl.tsf.associate_imc_only_when_imm_ime_is_active", false);
 
 // Enables/Disables hack for specific TIP.
 
+// On Windows 10 Build 17643 (an Insider Preview build of RS5), Microsoft have
+// fixed the caller of ITextACPStore::GetTextExt() to return TS_E_NOLAYOUT to
+// TIP as-is, rather than converting to E_FAIL.  Therefore, if TIP supports
+// asynchronous layout computation perfectly, we can return TS_E_NOLAYOUT
+// and TIP waits next OnLayoutChange() notification.  However, some TIPs still
+// have some bugs of asynchronous layout support.  We keep hacking the result
+// of GetTextExt() like running on Windows 10, however, there could be unknown
+// TIP bugs if we stop hacking the result.  So, user can stop checking build ID
+// to make Gecko hack the result forcibly.
+#ifdef EARLY_BETA_OR_EARLIER
+pref("intl.tsf.hack.allow_to_stop_hacking_on_build_17643_or_later", true);
+#else
+pref("intl.tsf.hack.allow_to_stop_hacking_on_build_17643_or_later", false);
+#endif
+
 // Whether creates native caret for ATOK or not.
 pref("intl.tsf.hack.atok.create_native_caret", true);
 // Whether use available composition string rect for result of
@@ -4464,11 +4476,11 @@ pref("font.name-list.serif.he", "Droid Serif, Noto Serif");
 pref("font.name-list.sans-serif.he", "Roboto, Droid Sans Hebrew, Droid Sans, Arial");
 pref("font.name-list.monospace.he", "Droid Sans Mono");
 
-pref("font.name-list.serif.ja", "Charis SIL Compact, Noto Serif, Droid Serif");
+pref("font.name-list.serif.ja", "Charis SIL Compact, Noto Serif CJK JP, Noto Serif, Droid Serif");
 pref("font.name-list.sans-serif.ja", "Roboto, Droid Sans, MotoyaLMaru, MotoyaLCedar, Noto Sans JP, Noto Sans CJK JP, Droid Sans Japanese");
-pref("font.name-list.monospace.ja", "MotoyaLMaru, MotoyaLCedar, Droid Sans Mono CJK JP, Droid Sans Mono");
+pref("font.name-list.monospace.ja", "MotoyaLMaru, MotoyaLCedar, Noto Sans Mono CJK JP, Droid Sans Mono");
 
-pref("font.name-list.serif.ko", "Charis SIL Compact, Noto Serif, Droid Serif, HYSerif");
+pref("font.name-list.serif.ko", "Charis SIL Compact, Noto Serif CJK KR, Noto Serif, Droid Serif, HYSerif");
 pref("font.name-list.sans-serif.ko", "Roboto, SmartGothic, NanumGothic, Noto Sans KR, Noto Sans CJK KR, DroidSansFallback, Droid Sans Fallback");
 pref("font.name-list.monospace.ko", "Droid Sans Mono, Noto Sans Mono CJK KR");
 
@@ -4488,15 +4500,15 @@ pref("font.name-list.serif.x-western", "Charis SIL Compact, Noto Serif, Droid Se
 pref("font.name-list.sans-serif.x-western", "Roboto, Droid Sans");
 pref("font.name-list.monospace.x-western", "Droid Sans Mono");
 
-pref("font.name-list.serif.zh-CN", "Charis SIL Compact, Noto Serif, Droid Serif, Droid Sans Fallback");
+pref("font.name-list.serif.zh-CN", "Charis SIL Compact, Noto Serif CJK SC, Noto Serif, Droid Serif, Droid Sans Fallback");
 pref("font.name-list.sans-serif.zh-CN", "Roboto, Droid Sans, Noto Sans SC, Noto Sans CJK SC, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-CN", "Droid Sans Mono, Noto Sans Mono CJK SC, Droid Sans Fallback");
 
-pref("font.name-list.serif.zh-HK", "Charis SIL Compact, Noto Serif, Droid Serif, Droid Sans Fallback");
+pref("font.name-list.serif.zh-HK", "Charis SIL Compact, Noto Serif CJK TC, Noto Serif, Droid Serif, Droid Sans Fallback");
 pref("font.name-list.sans-serif.zh-HK", "Roboto, Droid Sans, Noto Sans TC, Noto Sans SC, Noto Sans CJK TC, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-HK", "Droid Sans Mono, Noto Sans Mono CJK TC, Droid Sans Fallback");
 
-pref("font.name-list.serif.zh-TW", "Charis SIL Compact, Noto Serif, Droid Serif, Droid Sans Fallback");
+pref("font.name-list.serif.zh-TW", "Charis SIL Compact, Noto Serif CJK TC, Noto Serif, Droid Serif, Droid Sans Fallback");
 pref("font.name-list.sans-serif.zh-TW", "Roboto, Droid Sans, Noto Sans TC, Noto Sans SC, Noto Sans CJK TC, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-TW", "Droid Sans Mono, Noto Sans Mono CJK TC, Droid Sans Fallback");
 
@@ -4725,7 +4737,6 @@ pref("webgl.bypass-shader-validation", false);
 pref("webgl.disable-fail-if-major-performance-caveat", false);
 pref("webgl.disable-DOM-blit-uploads", false);
 pref("webgl.allow-fb-invalidation", false);
-pref("webgl.webgl2-compat-mode", false);
 
 pref("webgl.perf.max-warnings", 0);
 pref("webgl.perf.max-acceptable-fb-status-invals", 0);
@@ -5367,6 +5378,8 @@ pref("network.trr.blacklist-duration", 60);
 pref("network.trr.request-timeout", 3000);
 // Allow AAAA entries to be used "early", before the A results are in
 pref("network.trr.early-AAAA", false);
+// Explicitly disable ECS (EDNS Client Subnet, RFC 7871)
+pref("network.trr.disable-ECS", true);
 
 pref("captivedetect.canonicalURL", "http://detectportal.firefox.com/success.txt");
 pref("captivedetect.canonicalContent", "success\n");
@@ -5879,8 +5892,9 @@ pref("browser.fastblock.enabled", false);
 // after this timeout will be canceled.
 pref("browser.fastblock.timeout", 5000);
 
-// Disables clipboard reads and writes by default.
-pref("dom.events.asyncClipboard", false);
+// Enable clipboard readText() and writeText() by default
+pref("dom.events.asyncClipboard", true);
+// Disable clipboard read() and write() by default
 pref("dom.events.asyncClipboard.dataTransfer", false);
 // Should only be enabled in tests
 pref("dom.events.testing.asyncClipboard", false);

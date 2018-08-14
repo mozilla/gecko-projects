@@ -157,9 +157,10 @@ MODERN_RUST_VERSION = LooseVersion('1.28.0')
 class BaseBootstrapper(object):
     """Base class for system bootstrappers."""
 
-    def __init__(self, no_interactive=False):
+    def __init__(self, no_interactive=False, no_system_changes=False):
         self.package_manager_updated = False
         self.no_interactive = no_interactive
+        self.no_system_changes = no_system_changes
         self.state_dir = None
 
     def install_system_packages(self):
@@ -259,6 +260,26 @@ class BaseBootstrapper(object):
         raise NotImplementedError(
             '%s does not yet implement ensure_stylo_packages()'
             % __name__)
+
+    def ensure_node_packages(self, state_dir, checkout_root):
+        '''
+        Install any necessary packages needed to supply NodeJS'''
+        raise NotImplementedError(
+            '%s does not yet implement ensure_node_packages()'
+            % __name__)
+
+    def ensure_rust_package(self, crate_name):
+        if self.which(crate_name):
+            return
+        cargo_home, cargo_bin = self.cargo_home()
+        cargo_bin_path = os.path.join(cargo_bin, crate_name)
+        if os.path.exists(cargo_bin_path) and os.access(cargo_bin_path, os.X_OK):
+            return
+        print('%s not found, installing via cargo install.' % crate_name)
+        cargo = self.which('cargo')
+        if not cargo:
+            cargo = os.path.join(cargo_bin, 'cargo')
+        subprocess.check_call([cargo, 'install', crate_name])
 
     def install_toolchain_artifact(self, state_dir, checkout_root, toolchain_job):
         mach_binary = os.path.join(checkout_root, 'mach')

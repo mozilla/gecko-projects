@@ -398,7 +398,7 @@ const gClickAndHoldListenersOnElement = {
       return;
 
     // Prevent the menupopup from opening immediately
-    aEvent.currentTarget.firstChild.hidden = true;
+    aEvent.currentTarget.firstElementChild.hidden = true;
 
     aEvent.currentTarget.addEventListener("mouseout", this);
     aEvent.currentTarget.addEventListener("mouseup", this);
@@ -425,7 +425,7 @@ const gClickAndHoldListenersOnElement = {
 
   _openMenu(aButton) {
     this._cancelHold(aButton);
-    aButton.firstChild.hidden = false;
+    aButton.firstElementChild.hidden = false;
     aButton.open = true;
   },
 
@@ -538,7 +538,8 @@ const gStoragePressureObserver = {
       accessKey: prefStrBundle.getString("spaceAlert.learnMoreButton.accesskey"),
       callback(notificationBar, button) {
         let learnMoreURL = Services.urlFormatter.formatURLPref("app.support.baseURL") + "storage-permissions";
-        gBrowser.selectedTab = gBrowser.addTab(learnMoreURL);
+        // This is a content URL, loaded from trusted UX.
+        gBrowser.selectedTab = gBrowser.addTrustedTab(learnMoreURL);
       }
     });
     if (usage < USAGE_THRESHOLD_BYTES) {
@@ -753,9 +754,9 @@ var gPopupBlockerObserver = {
   },
 
   onPopupHiding(aEvent) {
-    let item = aEvent.target.lastChild;
+    let item = aEvent.target.lastElementChild;
     while (item && item.id != "blockedPopupsSeparator") {
-      let next = item.previousSibling;
+      let next = item.previousElementSibling;
       item.remove();
       item = next;
     }
@@ -1312,7 +1313,7 @@ var gBrowserInit = {
     LanguageDetectionListener.init();
     BrowserOnClick.init();
     FeedHandler.init();
-    TrackingProtection.init();
+    ContentBlocking.init();
     CaptivePortalWatcher.init();
     ZoomUI.init(window);
 
@@ -1694,7 +1695,10 @@ var gBrowserInit = {
                 window.arguments[4] || false, referrerPolicy, userContextId,
                 // pass the origin principal (if any) and force its use to create
                 // an initial about:blank viewer if present:
-                window.arguments[7], !!window.arguments[7], window.arguments[8]);
+                window.arguments[7], !!window.arguments[7], window.arguments[8],
+                // TODO fix allowInheritPrincipal
+                // (this is required by javascript: drop to the new window) Bug 1475201
+                true);
         window.focus();
       } else {
         // Note: loadOneOrMoreURIs *must not* be called if window.arguments.length >= 3.
@@ -1873,7 +1877,7 @@ var gBrowserInit = {
 
     FeedHandler.uninit();
 
-    TrackingProtection.uninit();
+    ContentBlocking.uninit();
 
     CaptivePortalWatcher.uninit();
 
@@ -2383,7 +2387,7 @@ function BrowserTryToCloseWindow() {
 
 function loadURI(uri, referrer, postData, allowThirdPartyFixup, referrerPolicy,
                  userContextId, originPrincipal, forceAboutBlankViewerInCurrent,
-                 triggeringPrincipal) {
+                 triggeringPrincipal, allowInheritPrincipal = false) {
   try {
     openLinkIn(uri, "current",
                { referrerURI: referrer,
@@ -2394,6 +2398,7 @@ function loadURI(uri, referrer, postData, allowThirdPartyFixup, referrerPolicy,
                  originPrincipal,
                  triggeringPrincipal,
                  forceAboutBlankViewerInCurrent,
+                 allowInheritPrincipal,
                });
   } catch (e) {}
 }
@@ -2767,16 +2772,16 @@ function UpdateUrlbarSearchSplitterState() {
 
   // If the splitter is already in the right place, we don't need to do anything:
   if (splitter &&
-      ((splitter.nextSibling == searchbar && splitter.previousSibling == urlbar) ||
-       (splitter.nextSibling == urlbar && splitter.previousSibling == searchbar))) {
+      ((splitter.nextElementSibling == searchbar && splitter.previousElementSibling == urlbar) ||
+       (splitter.nextElementSibling == urlbar && splitter.previousElementSibling == searchbar))) {
     return;
   }
 
   var ibefore = null;
   if (urlbar && searchbar) {
-    if (urlbar.nextSibling == searchbar)
+    if (urlbar.nextElementSibling == searchbar)
       ibefore = searchbar;
-    else if (searchbar.nextSibling == urlbar)
+    else if (searchbar.nextElementSibling == urlbar)
       ibefore = urlbar;
   }
 
@@ -3008,6 +3013,7 @@ var BrowserOnClick = {
         break;
 
       case "advancedButton":
+      case "moreInformationButton":
         if (isTopFrame) {
           secHistogram.add(Ci.nsISecurityUITelemetry.WARNING_BAD_CERT_TOP_UNDERSTAND_RISKS);
         }
@@ -3562,6 +3568,9 @@ var newTabButtonObserver = {
         let data = await getShortcutOrURIAndPostData(link.url);
         // Allow third-party services to fixup this URL.
         openNewTabWith(data.url, shiftKey, {
+          // TODO fix allowInheritPrincipal
+          // (this is required by javascript: drop to the new window) Bug 1475201
+          allowInheritPrincipal: true,
           postData: data.postData,
           allowThirdPartyFixup: true,
           triggeringPrincipal,
@@ -3594,6 +3603,9 @@ var newWindowButtonObserver = {
         let data = await getShortcutOrURIAndPostData(link.url);
         // Allow third-party services to fixup this URL.
         openNewWindowWith(data.url, {
+          // TODO fix allowInheritPrincipal
+          // (this is required by javascript: drop to the new window) Bug 1475201
+          allowInheritPrincipal: true,
           postData: data.postData,
           allowThirdPartyFixup: true,
           triggeringPrincipal,
@@ -3971,8 +3983,11 @@ const BrowserSearch = {
    * @return engine The search engine used to perform a search, or null if no
    *                search was performed.
    */
-  _loadSearch(searchText, useNewTab, purpose) {
+  _loadSearch(searchText, useNewTab, purpose, triggeringPrincipal) {
     let engine;
+    if (!triggeringPrincipal) {
+      throw new Error("Required argument triggeringPrincipal missing within _loadSearch");
+    }
 
     // If the search bar is visible, use the current engine, otherwise, fall
     // back to the default engine.
@@ -3996,23 +4011,10 @@ const BrowserSearch = {
                useNewTab ? "tab" : "current",
                { postData: submission.postData,
                  inBackground,
-                 relatedToCurrent: true });
+                 relatedToCurrent: true,
+                 triggeringPrincipal });
 
     return engine;
-  },
-
-  /**
-   * Just like _loadSearch, but preserving an old API.
-   *
-   * @return string Name of the search engine used to perform a search or null
-   *         if a search was not performed.
-   */
-  loadSearch: function BrowserSearch_search(searchText, useNewTab, purpose) {
-    let engine = BrowserSearch._loadSearch(searchText, useNewTab, purpose);
-    if (!engine) {
-      return null;
-    }
-    return engine.name;
   },
 
   /**
@@ -4021,8 +4023,8 @@ const BrowserSearch = {
    * This should only be called from the context menu. See
    * BrowserSearch.loadSearch for the preferred API.
    */
-  loadSearchFromContext(terms) {
-    let engine = BrowserSearch._loadSearch(terms, true, "contextmenu");
+  loadSearchFromContext(terms, triggeringPrincipal) {
+    let engine = BrowserSearch._loadSearch(terms, true, "contextmenu", triggeringPrincipal);
     if (engine) {
       BrowserSearch.recordSearchInTelemetry(engine, "contextmenu");
     }
@@ -4120,7 +4122,7 @@ function FillHistoryMenu(aParent) {
   }
 
   // Remove old entries if any
-  let children = aParent.childNodes;
+  let children = aParent.children;
   for (var i = children.length - 1; i >= 0; --i) {
     if (children[i].hasAttribute("index"))
       aParent.removeChild(children[i]);
@@ -4204,7 +4206,7 @@ function FillHistoryMenu(aParent) {
     if (!initial) {
       let existingLength = children.length;
       while (existingIndex < existingLength) {
-        aParent.removeChild(aParent.lastChild);
+        aParent.removeChild(aParent.lastElementChild);
         existingIndex++;
       }
     }
@@ -4873,7 +4875,7 @@ var XULBrowserWindow = {
       uri = Services.uriFixup.createExposableURI(uri);
     } catch (e) {}
     gIdentityHandler.updateIdentity(this._state, uri);
-    TrackingProtection.onSecurityChange(this._state, aWebProgress, aIsSimulated);
+    ContentBlocking.onSecurityChange(this._state, aWebProgress, aIsSimulated);
   },
 
   // simulate all change notifications after switching tabs
@@ -5511,15 +5513,15 @@ function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
     return;
 
   // Empty the menu
-  for (var i = popup.childNodes.length - 1; i >= 0; --i) {
-    var deadItem = popup.childNodes[i];
+  for (var i = popup.children.length - 1; i >= 0; --i) {
+    var deadItem = popup.children[i];
     if (deadItem.hasAttribute("toolbarId"))
       popup.removeChild(deadItem);
   }
 
-  var firstMenuItem = aInsertPoint || popup.firstChild;
+  var firstMenuItem = aInsertPoint || popup.firstElementChild;
 
-  let toolbarNodes = gNavToolbox.childNodes;
+  let toolbarNodes = gNavToolbox.children;
 
   for (let toolbar of toolbarNodes) {
     if (!toolbar.hasAttribute("toolbarname")) {
@@ -5555,7 +5557,7 @@ function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
   let toolbarItem = popup.triggerNode;
 
   if (toolbarItem && toolbarItem.localName == "toolbarpaletteitem") {
-    toolbarItem = toolbarItem.firstChild;
+    toolbarItem = toolbarItem.firstElementChild;
   } else if (toolbarItem && toolbarItem.localName != "toolbar") {
     while (toolbarItem && toolbarItem.parentNode) {
       let parent = toolbarItem.parentNode;
@@ -6105,7 +6107,7 @@ function middleMousePaste(event) {
         lastLocationChange == gBrowser.selectedBrowser.lastLocationChange) {
       openUILink(data.url, event,
                  { ignoreButton: true,
-                   disallowInheritPrincipal: !data.mayInheritPrincipal,
+                   allowInheritPrincipal: data.mayInheritPrincipal,
                    triggeringPrincipal: gBrowser.selectedBrowser.contentPrincipal,
                  });
     }
@@ -6239,7 +6241,7 @@ function getUnwrappedTriggerNode(popup) {
   // Toolbar buttons are wrapped in customize mode. Unwrap if necessary.
   let {triggerNode} = popup;
   if (triggerNode && gCustomizeMode.isWrappedToolbarItem(triggerNode)) {
-    return triggerNode.firstChild;
+    return triggerNode.firstElementChild;
   }
   return triggerNode;
 }
@@ -6336,11 +6338,11 @@ var gPageStyleMenu = {
 
   fillPopup(menuPopup) {
     let styleSheetInfo = this._getStyleSheetInfo(gBrowser.selectedBrowser);
-    var noStyle = menuPopup.firstChild;
-    var persistentOnly = noStyle.nextSibling;
-    var sep = persistentOnly.nextSibling;
-    while (sep.nextSibling)
-      menuPopup.removeChild(sep.nextSibling);
+    var noStyle = menuPopup.firstElementChild;
+    var persistentOnly = noStyle.nextElementSibling;
+    var sep = persistentOnly.nextElementSibling;
+    while (sep.nextElementSibling)
+      menuPopup.removeChild(sep.nextElementSibling);
 
     let styleSheets = styleSheetInfo.filteredStyleSheets;
     var currentStyleSheets = {};
@@ -7097,7 +7099,7 @@ function BrowserOpenAddonsMgr(aView) {
 }
 
 function BeginRecordExecution() {
-  gBrowser.selectedTab = gBrowser.addTab("about:blank", { recordExecution: "*" });
+  gBrowser.selectedTab = gBrowser.addWebTab("about:blank", { recordExecution: "*" });
 }
 
 function SaveRecordedExecution() {
@@ -7120,7 +7122,7 @@ function BeginReplayExecution() {
   fp.init(window, null, Ci.nsIFilePicker.modeOpen);
   fp.open(rv => {
     if (rv == Ci.nsIFilePicker.returnOK || rv == Ci.nsIFilePicker.returnReplace) {
-      gBrowser.selectedTab = gBrowser.addTab(null, { replayExecution: fp.file.path });
+      gBrowser.selectedTab = gBrowser.addWebTab(null, { replayExecution: fp.file.path });
     }
   });
 }
@@ -7389,7 +7391,8 @@ const gAccessibilityServiceIndicator = {
          type === "click") {
       let a11yServicesSupportURL =
         Services.urlFormatter.formatURLPref("accessibility.support.url");
-      gBrowser.selectedTab = gBrowser.addTab(a11yServicesSupportURL);
+      // This is a known URL coming from trusted UI
+      gBrowser.selectedTab = gBrowser.addTrustedTab(a11yServicesSupportURL);
       Services.telemetry.scalarSet("a11y.indicator_acted_on", true);
     }
   },
@@ -8076,7 +8079,7 @@ TabModalPromptBox.prototype = {
     const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
     let newPrompt = document.createElementNS(XUL_NS, "tabmodalprompt");
     let browser = this.browser;
-    browser.parentNode.insertBefore(newPrompt, browser.nextSibling);
+    browser.parentNode.insertBefore(newPrompt, browser.nextElementSibling);
     browser.setAttribute("tabmodalPromptShowing", true);
 
     newPrompt.clientTop; // style flush to assure binding is attached

@@ -665,7 +665,9 @@ public:
   static nsIPrincipal* SubjectPrincipal();
 
   // Returns the prinipal of the given JS object. This may only be called on
-  // the main thread for objects from the main thread's JSRuntime.
+  // the main thread for objects from the main thread's JSRuntime. The object
+  // must not be a cross-compartment wrapper, because CCWs are not associated
+  // with a single realm.
   static nsIPrincipal* ObjectPrincipal(JSObject* aObj);
 
   static nsresult GenerateStateKey(nsIContent* aContent,
@@ -2949,11 +2951,13 @@ public:
   static StorageAccess StorageAllowedForPrincipal(nsIPrincipal* aPrincipal);
 
   /*
-   * Returns true if this window/channel should disable storages because of the
-   * anti-tracking feature.
+   * Returns true if this window/channel/aPrincipal should disable storages
+   * because of the anti-tracking feature.
+   * Note that either aWindow or aChannel may be null when calling this function.
    */
   static bool StorageDisabledByAntiTracking(nsPIDOMWindowInner* aWindow,
                                             nsIChannel* aChannel,
+                                            nsIPrincipal* aPrincipal,
                                             nsIURI* aURI);
 
   /*
@@ -3340,14 +3344,13 @@ private:
                                       void* aArg);
 
   /**
-   * Gets the current cookie lifetime policy and cookie behavior for a given
-   * principal by checking with preferences and the permission manager.
+   * Gets the current cookie lifetime policy for a given principal by checking
+   * with preferences and the permission manager.
    *
    * Used in the implementation of InternalStorageAllowedForPrincipal.
    */
-  static void GetCookieBehaviorForPrincipal(nsIPrincipal* aPrincipal,
-                                            uint32_t* aLifetimePolicy,
-                                            uint32_t* aBehavior);
+  static void GetCookieLifetimePolicyForPrincipal(nsIPrincipal* aPrincipal,
+                                                  uint32_t* aLifetimePolicy);
 
   /*
    * Checks if storage for a given principal is permitted by the user's

@@ -22,16 +22,19 @@ class App extends PureComponent {
       // From that point, components are responsible for forwarding the dispatch
       // property to all components who need to dispatch actions.
       dispatch: PropTypes.func.isRequired,
+      networkLocations: PropTypes.arrayOf(PropTypes.string).isRequired,
       selectedPage: PropTypes.string.isRequired,
     };
   }
 
   getSelectedPageComponent() {
-    switch (this.props.selectedPage) {
+    const { dispatch, networkLocations, selectedPage } = this.props;
+
+    switch (selectedPage) {
       case PAGES.THIS_FIREFOX:
-        return RuntimePage();
+        return RuntimePage({ dispatch });
       case PAGES.CONNECT:
-        return ConnectPage();
+        return ConnectPage({ networkLocations });
       default:
         // Invalid page, blank.
         return null;
@@ -53,6 +56,7 @@ class App extends PureComponent {
 
 const mapStateToProps = state => {
   return {
+    networkLocations: state.ui.networkLocations,
     selectedPage: state.ui.selectedPage,
   };
 };

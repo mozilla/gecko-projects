@@ -285,7 +285,6 @@ CustomElementRegistry::CustomElementRegistry(nsPIDOMWindowInner* aWindow)
  , mIsCustomDefinitionRunning(false)
 {
   MOZ_ASSERT(aWindow);
-  MOZ_ALWAYS_TRUE(mConstructors.init());
 
   mozilla::HoldJSObjects(this);
 }
@@ -302,7 +301,13 @@ CustomElementRegistry::IsCustomElementEnabled(JSContext* aCx, JSObject* aObject)
     return true;
   }
 
-  return XRE_IsParentProcess() && nsContentUtils::AllowXULXBLForPrincipal(nsContentUtils::ObjectPrincipal(aObject));
+  if (!XRE_IsParentProcess()) {
+    return false;
+  }
+
+  nsIPrincipal* principal =
+    nsContentUtils::ObjectPrincipal(js::UncheckedUnwrap(aObject));
+  return nsContentUtils::AllowXULXBLForPrincipal(principal);
 }
 
 bool

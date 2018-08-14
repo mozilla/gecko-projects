@@ -147,7 +147,6 @@
 #include "nsIObserverService.h"
 #include "nsIParentChannel.h"
 #include "nsIPresShell.h"
-#include "nsIPromptService.h"
 #include "nsIRemoteWindowContext.h"
 #include "nsIScriptError.h"
 #include "nsIScriptSecurityManager.h"
@@ -1054,9 +1053,8 @@ static nsIDocShell* GetOpenerDocShellHelper(Element* aFrameElement)
 {
   // Propagate the private-browsing status of the element's parent
   // docshell to the remote docshell, via the chrome flags.
-  nsCOMPtr<Element> frameElement = do_QueryInterface(aFrameElement);
-  MOZ_ASSERT(frameElement);
-  nsPIDOMWindowOuter* win = frameElement->OwnerDoc()->GetWindow();
+  MOZ_ASSERT(aFrameElement);
+  nsPIDOMWindowOuter* win = aFrameElement->OwnerDoc()->GetWindow();
   if (!win) {
     NS_WARNING("Remote frame has no window");
     return nullptr;
@@ -3370,13 +3368,11 @@ ContentParent::KillHard(const char* aReason)
     // minidump tagging along, so we have to tell the crash reporter that
     // it exists and is being appended.
     nsAutoCString additionalDumps("browser");
-    mCrashReporter->AddNote(
-      NS_LITERAL_CSTRING("additional_minidumps"),
-      additionalDumps);
+    mCrashReporter->AddAnnotation(
+      CrashReporter::Annotation::additional_minidumps, additionalDumps);
     nsDependentCString reason(aReason);
-    mCrashReporter->AddNote(
-      NS_LITERAL_CSTRING("ipc_channel_error"),
-      reason);
+    mCrashReporter->AddAnnotation(CrashReporter::Annotation::ipc_channel_error,
+                                  reason);
 
     Telemetry::Accumulate(Telemetry::SUBPROCESS_KILL_HARD, reason, 1);
 
@@ -5235,18 +5231,6 @@ ContentParent::RecvGraphicsError(const nsCString& aError)
     message << "CP+" << aError.get();
     lf->UpdateStringsVector(message.str());
   }
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-ContentParent::RecvRecordReplayFatalError(const nsCString& aError)
-{
-  nsCOMPtr<nsIPromptService> promptService(do_GetService(NS_PROMPTSERVICE_CONTRACTID));
-  MOZ_RELEASE_ASSERT(promptService);
-
-  nsAutoCString str(aError);
-  promptService->Alert(nullptr, u"Fatal Record/Replay Error", NS_ConvertUTF8toUTF16(str).get());
-
   return IPC_OK();
 }
 

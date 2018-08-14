@@ -212,6 +212,9 @@ function openWebLinkIn(url, where, params) {
   if (!params.triggeringPrincipal) {
     params.triggeringPrincipal = Services.scriptSecurityManager.createNullPrincipal({});
   }
+  if (Services.scriptSecurityManager.isSystemPrincipal(params.triggeringPrincipal)) {
+    throw new Error("System principal should never be passed into openWebLinkIn()");
+  }
 
   openUILinkIn(url, where, params);
 }
@@ -256,7 +259,8 @@ function openUILinkIn(url, where, aAllowThirdPartyFixup, aPostData, aReferrerURI
 
   if (arguments.length == 3 && typeof arguments[2] == "object") {
     params = aAllowThirdPartyFixup;
-  } else {
+  }
+  if (!params || !params.triggeringPrincipal) {
     throw new Error("Required argument triggeringPrincipal missing within openUILinkIn");
   }
 
@@ -278,10 +282,10 @@ function openLinkIn(url, where, params) {
   var aReferrerPolicy       = ("referrerPolicy" in params ?
       params.referrerPolicy : Ci.nsIHttpChannel.REFERRER_POLICY_UNSET);
   var aRelatedToCurrent     = params.relatedToCurrent;
+  var aAllowInheritPrincipal = !!params.allowInheritPrincipal;
   var aAllowMixedContent    = params.allowMixedContent;
   var aForceAllowDataURI    = params.forceAllowDataURI;
   var aInBackground         = params.inBackground;
-  var aDisallowInheritPrincipal = params.disallowInheritPrincipal;
   var aInitiatingDoc        = params.initiatingDoc;
   var aIsPrivate            = params.private;
   var aSkipTabAnimation     = params.skipTabAnimation;
@@ -478,12 +482,10 @@ function openLinkIn(url, where, params) {
       flags |= Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP;
       flags |= Ci.nsIWebNavigation.LOAD_FLAGS_FIXUP_SCHEME_TYPOS;
     }
-
     // LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL isn't supported for javascript URIs,
     // i.e. it causes them not to load at all. Callers should strip
-    // "javascript:" from pasted strings to protect users from malicious URIs
-    // (see stripUnsafeProtocolOnPaste).
-    if (aDisallowInheritPrincipal && !(uriObj && uriObj.schemeIs("javascript"))) {
+    // "javascript:" from pasted strings to prevent blank tabs
+    if (!aAllowInheritPrincipal) {
       flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL;
     }
 
@@ -541,6 +543,7 @@ function openLinkIn(url, where, params) {
       userContextId: aUserContextId,
       originPrincipal: aPrincipal,
       triggeringPrincipal: aTriggeringPrincipal,
+      allowInheritPrincipal: aAllowInheritPrincipal,
       focusUrlBar,
     });
     targetBrowser = tabUsedForLoad.linkedBrowser;

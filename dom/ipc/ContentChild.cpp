@@ -1638,15 +1638,24 @@ StartMacOSContentSandbox()
     return false;
   }
 
+  // Close all current connections to the WindowServer. This ensures that the
+  // Activity Monitor will not label the content process as "Not responding"
+  // because it's not running a native event loop. See bug 1384336.
+  if (!recordreplay::IsRecordingOrReplaying()) {
+    // Because of the WebReplay system for proxying system API calls, for the
+    // time being we skip this when running under WebReplay (bug 1482668).
+    CGSShutdownServerConnections();
+  }
+  // Actual security benefits are only acheived when we additionally deny
+  // future connections, however this currently breaks WebGL so it's not done
+  // by default.
   if (Preferences::GetBool(
         "security.sandbox.content.mac.disconnect-windowserver")) {
-    // If we've opened a connection to the window server, shut it down now. Forbid
-    // future connections as well. We do this for sandboxing, but it also ensures
-    // that the Activity Monitor will not label the content process as "Not
-    // responding" because it's not running a native event loop. See bug 1384336.
-    CGSShutdownServerConnections();
     CGError result = CGSSetDenyWindowServerConnections(true);
     MOZ_DIAGNOSTIC_ASSERT(result == kCGErrorSuccess);
+#if !MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    Unused << result;
+#endif
   }
 
   nsAutoCString appPath, appBinaryPath, appDir;
@@ -1777,16 +1786,13 @@ ContentChild::RecvSetProcessSandbox(const MaybeFileDesc& aBroker)
 #endif
 
   CrashReporter::AnnotateCrashReport(
-    NS_LITERAL_CSTRING("ContentSandboxEnabled"),
-    sandboxEnabled? NS_LITERAL_CSTRING("1") : NS_LITERAL_CSTRING("0"));
+    CrashReporter::Annotation::ContentSandboxEnabled, sandboxEnabled);
 #if defined(XP_LINUX) && !defined(OS_ANDROID)
-  nsAutoCString flagsString;
-  flagsString.AppendInt(SandboxInfo::Get().AsInteger());
-
   CrashReporter::AnnotateCrashReport(
-    NS_LITERAL_CSTRING("ContentSandboxCapabilities"), flagsString);
+    CrashReporter::Annotation::ContentSandboxCapabilities,
+    static_cast<int>(SandboxInfo::Get().AsInteger()));
 #endif /* XP_LINUX && !OS_ANDROID */
-  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("RemoteType"),
+  CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::RemoteType,
                                      NS_ConvertUTF16toUTF8(GetRemoteType()));
 #endif /* MOZ_CONTENT_SANDBOX */
 
@@ -2448,7 +2454,8 @@ ContentChild::ProcessingError(Result aCode, const char* aReason)
   }
 
   nsDependentCString reason(aReason);
-  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ipc_channel_error"), reason);
+  CrashReporter::AnnotateCrashReport(
+    CrashReporter::Annotation::ipc_channel_error, reason);
 
   MOZ_CRASH("Content child abort due to IPC error");
 }
@@ -3123,8 +3130,9 @@ ContentChild::ShutdownInternal()
   // to wait for that event loop to finish. Otherwise we could prematurely
   // terminate an "unload" or "pagehide" event handler (which might be doing a
   // sync XHR, for example).
-  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCShutdownState"),
-                                     NS_LITERAL_CSTRING("RecvShutdown"));
+  CrashReporter::AnnotateCrashReport(
+    CrashReporter::Annotation::IPCShutdownState,
+    NS_LITERAL_CSTRING("RecvShutdown"));
 
   MOZ_ASSERT(NS_IsMainThread());
   RefPtr<nsThread> mainThread = nsThreadManager::get().GetCurrentThread();
@@ -3182,10 +3190,11 @@ ContentChild::ShutdownInternal()
   // parent closes.
   StartForceKillTimer();
 
-  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCShutdownState"),
-                                     NS_LITERAL_CSTRING("SendFinishShutdown (sending)"));
+  CrashReporter::AnnotateCrashReport(
+    CrashReporter::Annotation::IPCShutdownState,
+    NS_LITERAL_CSTRING("SendFinishShutdown (sending)"));
   bool sent = SendFinishShutdown();
-  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCShutdownState"),
+  CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::IPCShutdownState,
                                      sent ? NS_LITERAL_CSTRING("SendFinishShutdown (sent)")
                                           : NS_LITERAL_CSTRING("SendFinishShutdown (failed)"));
 }

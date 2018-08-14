@@ -968,13 +968,12 @@ static bool
 HasVisibleAnonymousContents(nsIDocument* aDoc)
 {
   for (RefPtr<AnonymousContent>& ac : aDoc->GetAnonymousContents()) {
-    Element* elem = ac->GetContentNode();
     // We check to see if the anonymous content node has a frame. If it doesn't,
     // that means that's not visible to the user because e.g. it's display:none.
     // For now we assume that if it has a frame, it is visible. We might be able
     // to refine this further by adding complexity if it turns out this condition
     // results in a lot of false positives.
-    if (elem && elem->GetPrimaryFrame()) {
+    if (ac->ContentNode().GetPrimaryFrame()) {
       return true;
     }
   }
@@ -6888,7 +6887,7 @@ nsLayoutUtils::DrawSingleImage(gfxContext&            aContext,
                                const nsPoint*         aAnchorPoint,
                                const nsRect*          aSourceArea)
 {
-  nscoord appUnitsPerCSSPixel = nsDeviceContext::AppUnitsPerCSSPixel();
+  nscoord appUnitsPerCSSPixel = AppUnitsPerCSSPixel();
   CSSIntSize pixelImageSize(ComputeSizeForDrawingWithFallback(aImage, aDest.Size()));
   if (pixelImageSize.width < 1 || pixelImageSize.height < 1) {
     NS_ASSERTION(pixelImageSize.width >= 0 && pixelImageSize.height >= 0,
@@ -9851,7 +9850,7 @@ ComputeSVGReferenceRect(nsIFrame* aFrame,
       gfxRect bbox = nsSVGUtils::GetBBox(aFrame,
                 nsSVGUtils::eBBoxIncludeFill | nsSVGUtils::eBBoxIncludeStroke);
       r = nsLayoutUtils::RoundGfxRectToAppRect(bbox,
-                                         nsPresContext::AppUnitsPerCSSPixel());
+                                         AppUnitsPerCSSPixel());
       break;
     }
     case StyleGeometryBox::ViewBox: {
@@ -9893,7 +9892,7 @@ ComputeSVGReferenceRect(nsIFrame* aFrame,
       gfxRect bbox = nsSVGUtils::GetBBox(aFrame,
                                          nsSVGUtils::eBBoxIncludeFill);
       r = nsLayoutUtils::RoundGfxRectToAppRect(bbox,
-                                         nsPresContext::AppUnitsPerCSSPixel());
+                                         AppUnitsPerCSSPixel());
       break;
     }
     default:{
@@ -9901,7 +9900,7 @@ ComputeSVGReferenceRect(nsIFrame* aFrame,
       gfxRect bbox = nsSVGUtils::GetBBox(aFrame,
                                          nsSVGUtils::eBBoxIncludeFill);
       r = nsLayoutUtils::RoundGfxRectToAppRect(bbox,
-                                         nsPresContext::AppUnitsPerCSSPixel());
+                                         AppUnitsPerCSSPixel());
       break;
     }
   }
@@ -10085,7 +10084,7 @@ nsLayoutUtils::ComputeSystemFont(nsFont* aSystemFont, LookAndFeel::FontID aFontI
 {
   gfxFontStyle fontStyle;
   float devPerCSS =
-    (float)nsPresContext::AppUnitsPerCSSPixel() /
+    (float)AppUnitsPerCSSPixel() /
     aPresContext->DeviceContext()->AppUnitsPerDevPixelAtUnitFullZoom();
   nsAutoString systemFontName;
   if (LookAndFeel::GetFont(aFontID, systemFontName, fontStyle, devPerCSS)) {

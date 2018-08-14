@@ -491,10 +491,6 @@ struct JSStructuredCloneWriter {
     ~JSStructuredCloneWriter();
 
     bool init() {
-        if (!memory.init()) {
-            ReportOutOfMemory(context());
-            return false;
-        }
         return parseTransferable() && writeHeader() && writeTransferMap();
     }
 
@@ -1075,11 +1071,11 @@ JSStructuredCloneWriter::parseTransferable()
     // NOTE: The transferables set is tested for non-emptiness at various
     //       junctures in structured cloning, so this set must be initialized
     //       by this method in all non-error cases.
-    MOZ_ASSERT(!transferableObjects.initialized(),
+    MOZ_ASSERT(transferableObjects.empty(),
                "parseTransferable called with stale data");
 
     if (transferable.isNull() || transferable.isUndefined())
-        return transferableObjects.init(0);
+        return true;
 
     if (!transferable.isObject())
         return reportDataCloneError(JS_SCERR_TRANSFERABLE);
@@ -1097,7 +1093,7 @@ JSStructuredCloneWriter::parseTransferable()
         return false;
 
     // Initialize the set for the provided array's length.
-    if (!transferableObjects.init(length))
+    if (!transferableObjects.reserve(length))
         return false;
 
     if (length == 0)
@@ -1861,7 +1857,7 @@ JSStructuredCloneWriter::write(HandleValue v)
 
     while (!counts.empty()) {
         RootedObject obj(context(), &objs.back().toObject());
-        AutoRealm ar(context(), obj);
+        assertSameCompartment(context(), obj);
         if (counts.back()) {
             counts.back()--;
             RootedValue key(context(), entries.back());
@@ -2890,12 +2886,16 @@ JS_StructuredClone(JSContext* cx, HandleValue value, MutableHandleValue vp,
 
     JSAutoStructuredCloneBuffer buf(JS::StructuredCloneScope::SameProcessSameThread, callbacks, closure);
     {
-        // If we use Maybe<AutoRealm> here, G++ can't tell that the
-        // destructor is only called when Maybe::construct was called, and
-        // we get warnings about using uninitialized variables.
         if (value.isObject()) {
-            AutoRealm ar(cx, &value.toObject());
-            if (!buf.write(cx, value, callbacks, closure))
+            RootedObject obj(cx, &value.toObject());
+            obj = CheckedUnwrap(obj);
+            if (!obj) {
+                ReportAccessDenied(cx);
+                return false;
+            }
+            AutoRealm ar(cx, obj);
+            RootedValue unwrappedVal(cx, ObjectValue(*obj));
+            if (!buf.write(cx, unwrappedVal, callbacks, closure))
                 return false;
         } else {
             if (!buf.write(cx, value, callbacks, closure))
@@ -3059,6 +3059,16 @@ JS_WriteTypedArray(JSStructuredCloneWriter* w, HandleValue v)
     MOZ_ASSERT(v.isObject());
     assertSameCompartment(w->context(), v);
     RootedObject obj(w->context(), &v.toObject());
+
+    // Note: writeTypedArray also does a CheckedUnwrap but it assumes this
+    // returns non-null. This isn't guaranteed for JSAPI users so we do our
+    // own unwrapping here.
+    obj = CheckedUnwrap(obj);
+    if (!obj) {
+        ReportAccessDenied(w->context());
+        return false;
+    }
+
     return w->writeTypedArray(obj);
 }
 

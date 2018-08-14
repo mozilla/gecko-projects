@@ -3,6 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 ChromeUtils.import("resource://gre/modules/PlacesSearchAutocompleteProvider.jsm");
+ChromeUtils.import("resource://testing-common/AppInfo.jsm");
+updateAppInfo();
 
 add_task(async function() {
     // Tell the search service we are running in the US.  This also has the
@@ -117,11 +119,7 @@ add_task(async function test_parseSubmissionURL_basic() {
 add_task(async function test_builtin_aliased_search_engine_match() {
   let match = await PlacesSearchAutocompleteProvider.findMatchByAlias("@google");
   Assert.equal(match.engineName, "Google");
-
-  let match1 = await PlacesSearchAutocompleteProvider.findMatchByAlias("@amazon");
-  Assert.ok(match1.engineName.startsWith("Amazon"));
 });
-
 
 function promiseDefaultSearchEngine() {
   return new Promise(resolve => {

@@ -289,13 +289,6 @@ WasmHandleTrap()
 }
 
 static void
-WasmReportOutOfBounds()
-{
-    JSContext* cx = TlsContext.get();
-    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_WASM_OUT_OF_BOUNDS);
-}
-
-static void
 WasmReportUnalignedAccess()
 {
     JSContext* cx = TlsContext.get();
@@ -517,9 +510,6 @@ AddressOf(SymbolicAddress imm, ABIFunctionType* abiType)
       case SymbolicAddress::HandleTrap:
         *abiType = Args_General0;
         return FuncCast(WasmHandleTrap, *abiType);
-      case SymbolicAddress::ReportOutOfBounds:
-        *abiType = Args_General0;
-        return FuncCast(WasmReportOutOfBounds, *abiType);
       case SymbolicAddress::ReportUnalignedAccess:
         *abiType = Args_General0;
         return FuncCast(WasmReportUnalignedAccess, *abiType);
@@ -700,7 +690,6 @@ wasm::NeedsBuiltinThunk(SymbolicAddress sym)
       case SymbolicAddress::HandleDebugTrap:          // GenerateDebugTrapStub
       case SymbolicAddress::HandleThrow:              // GenerateThrowStub
       case SymbolicAddress::HandleTrap:               // GenerateTrapExit
-      case SymbolicAddress::ReportOutOfBounds:        // GenerateOutOfBoundsExit
       case SymbolicAddress::ReportUnalignedAccess:    // GenerateUnalignedExit
       case SymbolicAddress::CallImport_Void:          // GenerateImportInterpExit
       case SymbolicAddress::CallImport_I32:
@@ -848,9 +837,6 @@ using TypedNativeToFuncPtrMap =
 static bool
 PopulateTypedNatives(TypedNativeToFuncPtrMap* typedNatives)
 {
-    if (!typedNatives->init())
-        return false;
-
 #define ADD_OVERLOAD(funcName, native, abiType)                                           \
     if (!typedNatives->putNew(TypedNative(InlinableNative::native, abiType),              \
                               FuncCast(funcName, abiType)))                               \
@@ -965,9 +951,6 @@ wasm::EnsureBuiltinThunksInitialized()
 
     TypedNativeToFuncPtrMap typedNatives;
     if (!PopulateTypedNatives(&typedNatives))
-        return false;
-
-    if (!thunks->typedNativeToCodeRange.init())
         return false;
 
     for (TypedNativeToFuncPtrMap::Range r = typedNatives.all(); !r.empty(); r.popFront()) {

@@ -5,9 +5,12 @@
 @import "chrome://global/skin/in-content/common.css";
 @import "resource://devtools/client/aboutdebugging-new/src/components/App.css";
 @import "resource://devtools/client/aboutdebugging-new/src/components/ConnectPage.css";
+@import "resource://devtools/client/aboutdebugging-new/src/components/DebugTargetItem.css";
+@import "resource://devtools/client/aboutdebugging-new/src/components/DebugTargetList.css";
 @import "resource://devtools/client/aboutdebugging-new/src/components/RuntimeInfo.css";
 @import "resource://devtools/client/aboutdebugging-new/src/components/Sidebar.css";
 @import "resource://devtools/client/aboutdebugging-new/src/components/SidebarItem.css";
+@import "resource://devtools/client/aboutdebugging-new/src/components/debugtarget/ExtensionDetail.css";
 
 :root {
   /* Import css variables from common.css */
@@ -20,8 +23,30 @@ html, body {
   color: var(--text-color);
 }
 
+dd {
+  margin: 0;
+  padding: 0;
+}
+
 ul {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.ellipsis-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aboutdebugging-button {
+  height: 36px;
+  margin-block-start: 0;
+  margin-block-end: 0;
+  margin-inline-start: 4px;
+  margin-inline-end: 4px;
+  min-width: 100px;
+  padding-inline-start: 20px;
+  padding-inline-end: 20px;
 }

@@ -10,7 +10,7 @@ pref("devtools.toolbox.footer.height", 250);
 pref("devtools.toolbox.sidebar.width", 500);
 pref("devtools.toolbox.host", "bottom");
 pref("devtools.toolbox.previousHost", "right");
-pref("devtools.toolbox.selectedTool", "webconsole");
+pref("devtools.toolbox.selectedTool", "inspector");
 pref("devtools.toolbox.sideEnabled", true);
 pref("devtools.toolbox.zoomValue", "1");
 pref("devtools.toolbox.splitconsoleEnabled", false);
@@ -319,10 +319,18 @@ pref("devtools.responsive.reloadNotification.enabled", true);
 
 // Enable new about:debugging.
 pref("devtools.aboutdebugging.new-enabled", false);
+pref("devtools.aboutdebugging.network-locations", "[]");
 
 // about:debugging: only show system add-ons in local builds by default.
 #ifdef MOZILLA_OFFICIAL
   pref("devtools.aboutdebugging.showSystemAddons", false);
 #else
   pref("devtools.aboutdebugging.showSystemAddons", true);
+#endif
+
+// Map top-level await expressions in the console
+#if defined(RELEASE_OR_BETA)
+pref("devtools.debugger.features.map-await-expression", false);
+#else
+pref("devtools.debugger.features.map-await-expression", true);
 #endif

@@ -420,8 +420,6 @@ ModuleGenerator::linkCallSites()
     // all possible calls/traps have been emitted.
 
     OffsetMap existingCallFarJumps;
-    if (!existingCallFarJumps.init())
-        return false;
 
     TrapMaybeOffsetArray existingTrapFarJumps;
 
@@ -514,10 +512,6 @@ ModuleGenerator::noteCodeRange(uint32_t codeRangeIndex, const CodeRange& codeRan
       case CodeRange::DebugTrap:
         MOZ_ASSERT(!debugTrapCodeOffset_);
         debugTrapCodeOffset_ = codeRange.begin();
-        break;
-      case CodeRange::OutOfBoundsExit:
-        MOZ_ASSERT(!linkDataTier_->outOfBoundsOffset);
-        linkDataTier_->outOfBoundsOffset = codeRange.begin();
         break;
       case CodeRange::UnalignedExit:
         MOZ_ASSERT(!linkDataTier_->unalignedAccessOffset);

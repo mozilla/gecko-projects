@@ -411,23 +411,17 @@ this.tabs = class extends ExtensionAPI {
           },
         }).api(),
 
-        /**
-         * Since multiple tabs currently can't be highlighted, onHighlighted
-         * essentially acts an alias for self.tabs.onActivated but returns
-         * the tabId in an array to match the API.
-         * @see  https://developer.mozilla.org/en-US/Add-ons/WebExtensions/API/Tabs/onHighlighted
-        */
         onHighlighted: new EventManager({
           context,
           name: "tabs.onHighlighted",
           register: fire => {
             let listener = (eventName, event) => {
-              fire.async({tabIds: [event.tabId], windowId: event.windowId});
+              fire.async(event);
             };
 
-            tabTracker.on("tab-activated", listener);
+            tabTracker.on("tabs-highlighted", listener);
             return () => {
-              tabTracker.off("tab-activated", listener);
+              tabTracker.off("tabs-highlighted", listener);
             };
           },
         }).api(),
@@ -527,18 +521,8 @@ this.tabs = class extends ExtensionAPI {
             }
           }).then(window => {
             let url;
+            let principal = context.principal;
 
-            if (createProperties.url !== null) {
-              url = context.uri.resolve(createProperties.url);
-
-              if (!context.checkLoadURL(url, {dontReportErrors: true})) {
-                return Promise.reject({message: `Illegal URL: ${url}`});
-              }
-
-              if (createProperties.openInReaderMode) {
-                url = `about:reader?url=${encodeURIComponent(url)}`;
-              }
-            }
 
             if (createProperties.cookieStoreId && !extension.hasPermission("cookies")) {
               return Promise.reject({message: `No permission for cookieStoreId: ${createProperties.cookieStoreId}`});
@@ -569,7 +553,20 @@ this.tabs = class extends ExtensionAPI {
               }
             }
 
-            // Only set disallowInheritPrincipal on non-discardable urls as it
+            if (createProperties.url !== null) {
+              url = context.uri.resolve(createProperties.url);
+
+              if (!context.checkLoadURL(url, {dontReportErrors: true})) {
+                return Promise.reject({message: `Illegal URL: ${url}`});
+              }
+
+              if (createProperties.openInReaderMode) {
+                url = `about:reader?url=${encodeURIComponent(url)}`;
+              }
+            } else {
+              url = window.BROWSER_NEW_TAB_URL;
+            }
+            // Only set allowInheritPrincipal on discardable urls as it
             // will override creating a lazy browser.  Setting triggeringPrincipal
             // will ensure other cases are handled, but setting it may prevent
             // creating about and data urls.
@@ -577,8 +574,14 @@ this.tabs = class extends ExtensionAPI {
             if (!discardable) {
               // Make sure things like about:blank and data: URIs never inherit,
               // and instead always get a NullPrincipal.
-              options.disallowInheritPrincipal = true;
+              options.allowInheritPrincipal = false;
+              // Falling back to codebase here as about: requires it, however is safe.
+              principal = Services.scriptSecurityManager.createCodebasePrincipal(Services.io.newURI(url), {
+                userContextId: options.userContextId,
+                privateBrowsingId: PrivateBrowsingUtils.isBrowserPrivate(window.gBrowser) ? 1 : 0,
+              });
             } else {
+              options.allowInheritPrincipal = true;
               options.triggeringPrincipal = context.principal;
             }
 
@@ -618,13 +621,14 @@ this.tabs = class extends ExtensionAPI {
               return Promise.reject({message: `Title may only be set for discarded tabs.`});
             }
 
-            let nativeTab = window.gBrowser.addTab(url || window.BROWSER_NEW_TAB_URL, options);
+            options.triggeringPrincipal = principal;
+            let nativeTab = window.gBrowser.addTab(url, options);
             if (createProperties.discarded) {
               SessionStore.setTabState(nativeTab, {
                 entries: [{
                   url: url,
                   title: options.title,
-                  triggeringPrincipal_base64: Utils.serializePrincipal(context.principal),
+                  triggeringPrincipal_base64: Utils.serializePrincipal(principal),
                 }],
               });
             }

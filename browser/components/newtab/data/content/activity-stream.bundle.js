@@ -93,7 +93,7 @@ __webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
 /* harmony import */ var content_src_lib_snippets__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(3);
 /* harmony import */ var content_src_components_Base_Base__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(12);
-/* harmony import */ var content_src_lib_detect_user_session_start__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(37);
+/* harmony import */ var content_src_lib_detect_user_session_start__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(38);
 /* harmony import */ var content_src_lib_init_store__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(7);
 /* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(16);
 /* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_5___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_5__);
@@ -101,7 +101,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_6___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_6__);
 /* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(10);
 /* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_7___default = /*#__PURE__*/__webpack_require__.n(react_dom__WEBPACK_IMPORTED_MODULE_7__);
-/* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(41);
+/* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(42);
 
 
 
@@ -205,7 +205,7 @@ const globalImportContext = typeof Window === "undefined" ? BACKGROUND_PROCESS :
 // }
 const actionTypes = {};
 
-for (const type of ["ADDONS_INFO_REQUEST", "ADDONS_INFO_RESPONSE", "ARCHIVE_FROM_POCKET", "AS_ROUTER_TELEMETRY_USER_EVENT", "BLOCK_URL", "BOOKMARK_URL", "COPY_DOWNLOAD_LINK", "DELETE_BOOKMARK_BY_ID", "DELETE_FROM_POCKET", "DELETE_HISTORY_URL", "DIALOG_CANCEL", "DIALOG_OPEN", "DISABLE_ONBOARDING", "DOWNLOAD_CHANGED", "INIT", "MIGRATION_CANCEL", "MIGRATION_COMPLETED", "MIGRATION_START", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_REHYDRATED", "NEW_TAB_STATE_REQUEST", "NEW_TAB_UNLOAD", "OPEN_DOWNLOAD_FILE", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "OPEN_WEBEXT_SETTINGS", "PAGE_PRERENDERED", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINKS_CHANGED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PLACES_SAVED_TO_POCKET", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "PREVIEW_REQUEST", "PREVIEW_REQUEST_CANCEL", "PREVIEW_RESPONSE", "REMOVE_DOWNLOAD_FILE", "RICH_ICON_MISSING", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_DISABLE", "SECTION_ENABLE", "SECTION_MOVE", "SECTION_OPTIONS_CHANGED", "SECTION_REGISTER", "SECTION_UPDATE", "SECTION_UPDATE_CARD", "SETTINGS_CLOSE", "SETTINGS_OPEN", "SET_PREF", "SHOW_DOWNLOAD_FILE", "SHOW_FIREFOX_ACCOUNTS", "SKIPPED_SIGNIN", "SNIPPETS_BLOCKLIST_CLEARED", "SNIPPETS_BLOCKLIST_UPDATED", "SNIPPETS_DATA", "SNIPPETS_RESET", "SNIPPET_BLOCKED", "SUBMIT_EMAIL", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "TOP_SITES_CANCEL_EDIT", "TOP_SITES_EDIT", "TOP_SITES_INSERT", "TOP_SITES_PIN", "TOP_SITES_PREFS_UPDATED", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "TOTAL_BOOKMARKS_REQUEST", "TOTAL_BOOKMARKS_RESPONSE", "UNINIT", "UPDATE_SECTION_PREFS", "WEBEXT_CLICK", "WEBEXT_DISMISS"]) {
+for (const type of ["ADDONS_INFO_REQUEST", "ADDONS_INFO_RESPONSE", "ARCHIVE_FROM_POCKET", "AS_ROUTER_TELEMETRY_USER_EVENT", "BLOCK_URL", "BOOKMARK_URL", "COPY_DOWNLOAD_LINK", "DELETE_BOOKMARK_BY_ID", "DELETE_FROM_POCKET", "DELETE_HISTORY_URL", "DIALOG_CANCEL", "DIALOG_OPEN", "DISABLE_ONBOARDING", "DOWNLOAD_CHANGED", "FILL_SEARCH_TERM", "INIT", "MIGRATION_CANCEL", "MIGRATION_COMPLETED", "MIGRATION_START", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_REHYDRATED", "NEW_TAB_STATE_REQUEST", "NEW_TAB_UNLOAD", "OPEN_DOWNLOAD_FILE", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "OPEN_WEBEXT_SETTINGS", "PAGE_PRERENDERED", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINKS_CHANGED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PLACES_SAVED_TO_POCKET", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "PREVIEW_REQUEST", "PREVIEW_REQUEST_CANCEL", "PREVIEW_RESPONSE", "REMOVE_DOWNLOAD_FILE", "RICH_ICON_MISSING", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_DISABLE", "SECTION_ENABLE", "SECTION_MOVE", "SECTION_OPTIONS_CHANGED", "SECTION_REGISTER", "SECTION_UPDATE", "SECTION_UPDATE_CARD", "SETTINGS_CLOSE", "SETTINGS_OPEN", "SET_PREF", "SHOW_DOWNLOAD_FILE", "SHOW_FIREFOX_ACCOUNTS", "SKIPPED_SIGNIN", "SNIPPETS_BLOCKLIST_CLEARED", "SNIPPETS_BLOCKLIST_UPDATED", "SNIPPETS_DATA", "SNIPPETS_RESET", "SNIPPET_BLOCKED", "SUBMIT_EMAIL", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "TOP_SITES_CANCEL_EDIT", "TOP_SITES_CLOSE_SEARCH_SHORTCUTS_MODAL", "TOP_SITES_EDIT", "TOP_SITES_INSERT", "TOP_SITES_OPEN_SEARCH_SHORTCUTS_MODAL", "TOP_SITES_PIN", "TOP_SITES_PREFS_UPDATED", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "TOTAL_BOOKMARKS_REQUEST", "TOTAL_BOOKMARKS_RESPONSE", "UNINIT", "UPDATE_SEARCH_SHORTCUTS", "UPDATE_SECTION_PREFS", "WEBEXT_CLICK", "WEBEXT_DISMISS"]) {
   actionTypes[type] = type;
 }
 
@@ -923,17 +923,17 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ASRouterUISurface", function() { return ASRouterUISurface; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ASRouterContent", function() { return ASRouterContent; });
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
-/* harmony import */ var fluent_react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(39);
+/* harmony import */ var fluent_react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(40);
 /* harmony import */ var content_src_lib_init_store__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(7);
 /* harmony import */ var _components_ImpressionsWrapper_ImpressionsWrapper__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(9);
-/* harmony import */ var fluent__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(38);
-/* harmony import */ var _templates_OnboardingMessage_OnboardingMessage__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(42);
+/* harmony import */ var fluent__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(39);
+/* harmony import */ var _templates_OnboardingMessage_OnboardingMessage__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(43);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(5);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_6___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_6__);
 /* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(10);
 /* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_7___default = /*#__PURE__*/__webpack_require__.n(react_dom__WEBPACK_IMPORTED_MODULE_7__);
 /* harmony import */ var _template_utils__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(11);
-/* harmony import */ var _templates_SimpleSnippet_SimpleSnippet__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(40);
+/* harmony import */ var _templates_SimpleSnippet_SimpleSnippet__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(41);
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
 
@@ -1511,7 +1511,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_8___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_8__);
 /* harmony import */ var content_src_components_Search_Search__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(20);
 /* harmony import */ var content_src_components_Sections_Sections__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(22);
-/* harmony import */ var content_src_components_StartupOverlay_StartupOverlay__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(36);
+/* harmony import */ var content_src_components_StartupOverlay_StartupOverlay__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(37);
 
 
 
@@ -1538,6 +1538,24 @@ function addLocaleDataForReactIntl(locale) {
   Object(react_intl__WEBPACK_IMPORTED_MODULE_1__["addLocaleData"])([{ locale, parentLocale: "en" }]);
 }
 
+// Returns a function will not be continuously triggered when called. The
+// function will be triggered if called again after `wait` milliseconds.
+function debounce(func, wait) {
+  let timer;
+  return (...args) => {
+    if (timer) {
+      return;
+    }
+
+    let wakeUp = () => {
+      timer = null;
+    };
+
+    timer = setTimeout(wakeUp, wait);
+    func.apply(this, args);
+  };
+}
+
 class _Base extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureComponent {
   componentWillMount() {
     const { App, locale } = this.props;
@@ -1562,9 +1580,29 @@ class _Base extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureComponent {
     this.updateTheme();
   }
 
-  componentWillUpdate({ App }) {
+  hasTopStoriesSectionChanged(nextProps) {
+    const nPropsSections = nextProps.Sections.find(section => section.id === "topstories");
+    const tPropsSections = this.props.Sections.find(section => section.id === "topstories");
+    if (nPropsSections && nPropsSections.options) {
+      if (!tPropsSections || !tPropsSections.options) {
+        return true;
+      }
+      if (nPropsSections.options.show_spocs !== tPropsSections.options.show_spocs) {
+        return true;
+      }
+      if (nPropsSections.options.stories_endpoint !== tPropsSections.options.stories_endpoint) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  componentWillUpdate(nextProps) {
     this.updateTheme();
-    this.sendNewTabRehydrated(App);
+    if (this.hasTopStoriesSectionChanged(nextProps)) {
+      this.renderNotified = false;
+    }
+    this.sendNewTabRehydrated(nextProps.App);
   }
 
   updateTheme() {
@@ -1621,6 +1659,25 @@ class BaseContent extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureCompo
   constructor(props) {
     super(props);
     this.openPreferences = this.openPreferences.bind(this);
+    this.onWindowScroll = debounce(this.onWindowScroll.bind(this), 5);
+    this.state = { fixedSearch: false };
+  }
+
+  componentDidMount() {
+    global.addEventListener("scroll", this.onWindowScroll);
+  }
+
+  componentWillUnmount() {
+    global.removeEventListener("scroll", this.onWindowScroll);
+  }
+
+  onWindowScroll() {
+    const SCROLL_THRESHOLD = 34;
+    if (global.scrollY > SCROLL_THRESHOLD && !this.state.fixedSearch) {
+      this.setState({ fixedSearch: true });
+    } else if (global.scrollY <= SCROLL_THRESHOLD && this.state.fixedSearch) {
+      this.setState({ fixedSearch: false });
+    }
   }
 
   openPreferences() {
@@ -1636,7 +1693,7 @@ class BaseContent extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureCompo
 
     const shouldBeFixedToTop = common_PrerenderData_jsm__WEBPACK_IMPORTED_MODULE_7__["PrerenderData"].arePrefsValid(name => prefs[name]);
 
-    const outerClassName = ["outer-wrapper", shouldBeFixedToTop && "fixed-to-top"].filter(v => v).join(" ");
+    const outerClassName = ["outer-wrapper", shouldBeFixedToTop && "fixed-to-top", prefs.showSearch && this.state.fixedSearch && "fixed-search"].filter(v => v).join(" ");
 
     return react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(
       "div",
@@ -1675,7 +1732,7 @@ class BaseContent extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureCompo
   }
 }
 
-const Base = Object(react_redux__WEBPACK_IMPORTED_MODULE_4__["connect"])(state => ({ App: state.App, Prefs: state.Prefs }))(_Base);
+const Base = Object(react_redux__WEBPACK_IMPORTED_MODULE_4__["connect"])(state => ({ App: state.App, Prefs: state.Prefs, Sections: state.Sections }))(_Base);
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
@@ -2344,32 +2401,36 @@ class _Search extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent
       "div",
       { className: "search-wrapper" },
       react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(
-        "label",
-        { htmlFor: "newtab-search-text", className: "search-label" },
+        "div",
+        { className: "search-inner-wrapper" },
         react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(
-          "span",
-          { className: "sr-only" },
-          react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_0__["FormattedMessage"], { id: "search_web_placeholder" })
-        )
-      ),
-      react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("input", {
-        id: "newtab-search-text",
-        maxLength: "256",
-        placeholder: this.props.intl.formatMessage({ id: "search_web_placeholder" }),
-        ref: this.onInputMount,
-        title: this.props.intl.formatMessage({ id: "search_web_placeholder" }),
-        type: "search" }),
-      react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(
-        "button",
-        {
-          id: "searchSubmit",
-          className: "search-button",
-          onClick: this.onClick,
-          title: this.props.intl.formatMessage({ id: "search_button" }) },
+          "label",
+          { htmlFor: "newtab-search-text", className: "search-label" },
+          react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(
+            "span",
+            { className: "sr-only" },
+            react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_0__["FormattedMessage"], { id: "search_web_placeholder" })
+          )
+        ),
+        react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("input", {
+          id: "newtab-search-text",
+          maxLength: "256",
+          placeholder: this.props.intl.formatMessage({ id: "search_web_placeholder" }),
+          ref: this.onInputMount,
+          title: this.props.intl.formatMessage({ id: "search_web_placeholder" }),
+          type: "search" }),
         react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(
-          "span",
-          { className: "sr-only" },
-          react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_0__["FormattedMessage"], { id: "search_button" })
+          "button",
+          {
+            id: "searchSubmit",
+            className: "search-button",
+            onClick: this.onClick,
+            title: this.props.intl.formatMessage({ id: "search_button" }) },
+          react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(
+            "span",
+            { className: "sr-only" },
+            react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_0__["FormattedMessage"], { id: "search_button" })
+          )
         )
       )
     );
@@ -2398,7 +2459,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "SectionIntl", function() { return SectionIntl; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_Sections", function() { return _Sections; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Sections", function() { return Sections; });
-/* harmony import */ var content_src_components_Card_Card__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(43);
+/* harmony import */ var content_src_components_Card_Card__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(44);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(13);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_1__);
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(2);
@@ -2830,12 +2891,17 @@ const LinkMenuOptions = {
       data: { url: site.url }
     })
   }),
-  PinTopSite: (site, index) => ({
+  PinTopSite: ({ url, searchTopSite, label }, index) => ({
     id: "menu_action_pin",
     icon: "pin",
     action: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].AlsoToMain({
       type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TOP_SITES_PIN,
-      data: { site: { url: site.url }, index }
+      data: {
+        site: Object.assign({
+          url
+        }, searchTopSite && { searchTopSite, label }),
+        index
+      }
     }),
     userEvent: "PIN"
   }),
@@ -2927,7 +2993,7 @@ class _LinkMenu extends react__WEBPACK_IMPORTED_MODULE_5___default.a.PureCompone
     const { site, index, source, isPrivateBrowsingEnabled, siteInfo, platform } = props;
 
     // Handle special case of default site
-    const propOptions = !site.isDefault ? props.options : DEFAULT_SITE_MENU_OPTIONS;
+    const propOptions = !site.isDefault || site.searchTopSite ? props.options : DEFAULT_SITE_MENU_OPTIONS;
 
     const options = propOptions.map(o => content_src_lib_link_menu_options__WEBPACK_IMPORTED_MODULE_4__["LinkMenuOptions"][o](site, index, source, isPrivateBrowsingEnabled, siteInfo, platform)).map(option => {
       const { action, impression, id, string_id, type, userEvent } = option;
@@ -3527,6 +3593,12 @@ const SectionMenuOptions = {
     action: { type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TOP_SITES_EDIT, data: { index: -1 } },
     userEvent: "MENU_ADD_TOPSITE"
   }),
+  AddSearchShortcut: section => ({
+    id: "section_menu_action_add_search_engine",
+    icon: "search",
+    action: { type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TOP_SITES_OPEN_SEARCH_SHORTCUTS_MODAL },
+    userEvent: "MENU_ADD_SEARCH"
+  }),
   PrivacyNotice: section => ({
     id: "section_menu_action_privacy_notice",
     icon: "info",
@@ -3921,10 +3993,12 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_5___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_5__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(5);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_6___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_6__);
-/* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(41);
-/* harmony import */ var _TopSiteForm__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(44);
-/* harmony import */ var _TopSite__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(35);
+/* harmony import */ var _SearchShortcutsForm__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(35);
+/* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(42);
+/* harmony import */ var _TopSiteForm__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(45);
+/* harmony import */ var _TopSite__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(36);
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
 
 
 
@@ -3980,7 +4054,8 @@ function countTopSitesIconsTypes(topSites) {
 class _TopSites extends react__WEBPACK_IMPORTED_MODULE_6___default.a.PureComponent {
   constructor(props) {
     super(props);
-    this.onFormClose = this.onFormClose.bind(this);
+    this.onEditFormClose = this.onEditFormClose.bind(this);
+    this.onSearchShortcutsFormClose = this.onSearchShortcutsFormClose.bind(this);
   }
 
   /**
@@ -4002,7 +4077,7 @@ class _TopSites extends react__WEBPACK_IMPORTED_MODULE_6___default.a.PureCompone
    */
   _getVisibleTopSites() {
     // We hide 2 sites per row when not in the wide layout.
-    let sitesPerRow = common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_7__["TOP_SITES_MAX_SITES_PER_ROW"];
+    let sitesPerRow = common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_8__["TOP_SITES_MAX_SITES_PER_ROW"];
     // $break-point-widest = 1072px (from _variables.scss)
     if (!global.matchMedia(`(min-width: 1072px)`).matches) {
       sitesPerRow -= 2;
@@ -4018,7 +4093,7 @@ class _TopSites extends react__WEBPACK_IMPORTED_MODULE_6___default.a.PureCompone
     this._dispatchTopSitesStats();
   }
 
-  onFormClose() {
+  onEditFormClose() {
     this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].UserEvent({
       source: _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["TOP_SITES_SOURCE"],
       event: "TOP_SITES_EDIT_CLOSE"
@@ -4026,9 +4101,21 @@ class _TopSites extends react__WEBPACK_IMPORTED_MODULE_6___default.a.PureCompone
     this.props.dispatch({ type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TOP_SITES_CANCEL_EDIT });
   }
 
+  onSearchShortcutsFormClose() {
+    this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].UserEvent({
+      source: _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["TOP_SITES_SOURCE"],
+      event: "SEARCH_EDIT_CLOSE"
+    }));
+    this.props.dispatch({ type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TOP_SITES_CLOSE_SEARCH_SHORTCUTS_MODAL });
+  }
+
   render() {
     const { props } = this;
-    const { editForm } = props.TopSites;
+    const { editForm, showSearchShortcutsForm } = props.TopSites;
+    const extraMenuOptions = ["AddTopSite"];
+    if (props.Prefs.values["improvesearch.topSiteSearchShortcuts"]) {
+      extraMenuOptions.push("AddSearchShortcut");
+    }
 
     return react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(
       content_src_components_ComponentPerfTimer_ComponentPerfTimer__WEBPACK_IMPORTED_MODULE_3__["ComponentPerfTimer"],
@@ -4040,30 +4127,43 @@ class _TopSites extends react__WEBPACK_IMPORTED_MODULE_6___default.a.PureCompone
           icon: "topsites",
           id: "topsites",
           title: { id: "header_top_sites" },
-          extraMenuOptions: ["AddTopSite"],
+          extraMenuOptions: extraMenuOptions,
           showPrefName: "feeds.topsites",
           eventSource: _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["TOP_SITES_SOURCE"],
           collapsed: props.TopSites.pref ? props.TopSites.pref.collapsed : undefined,
           isFirst: props.isFirst,
           isLast: props.isLast,
           dispatch: props.dispatch },
-        react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(_TopSite__WEBPACK_IMPORTED_MODULE_9__["TopSiteList"], { TopSites: props.TopSites, TopSitesRows: props.TopSitesRows, dispatch: props.dispatch, intl: props.intl, topSiteIconType: topSiteIconType }),
+        react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(_TopSite__WEBPACK_IMPORTED_MODULE_10__["TopSiteList"], { TopSites: props.TopSites, TopSitesRows: props.TopSitesRows, dispatch: props.dispatch, intl: props.intl, topSiteIconType: topSiteIconType }),
         react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(
           "div",
           { className: "edit-topsites-wrapper" },
           editForm && react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(
             "div",
             { className: "edit-topsites" },
-            react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("div", { className: "modal-overlay", onClick: this.onFormClose }),
+            react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("div", { className: "modal-overlay", onClick: this.onEditFormClose }),
             react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(
               "div",
               { className: "modal" },
-              react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(_TopSiteForm__WEBPACK_IMPORTED_MODULE_8__["TopSiteForm"], _extends({
+              react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(_TopSiteForm__WEBPACK_IMPORTED_MODULE_9__["TopSiteForm"], _extends({
                 site: props.TopSites.rows[editForm.index],
-                onClose: this.onFormClose,
+                onClose: this.onEditFormClose,
                 dispatch: this.props.dispatch,
                 intl: this.props.intl
               }, editForm))
+            )
+          ),
+          showSearchShortcutsForm && react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(
+            "div",
+            { className: "edit-search-shortcuts" },
+            react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("div", { className: "modal-overlay", onClick: this.onSearchShortcutsFormClose }),
+            react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(
+              "div",
+              { className: "modal" },
+              react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(_SearchShortcutsForm__WEBPACK_IMPORTED_MODULE_7__["SearchShortcutsForm"], {
+                TopSites: props.TopSites,
+                onClose: this.onSearchShortcutsFormClose,
+                dispatch: this.props.dispatch })
             )
           )
         )
@@ -4087,10 +4187,13 @@ const TopSites = Object(react_redux__WEBPACK_IMPORTED_MODULE_4__["connect"])(sta
 __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TOP_SITES_SOURCE", function() { return TOP_SITES_SOURCE; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TOP_SITES_CONTEXT_MENU_OPTIONS", function() { return TOP_SITES_CONTEXT_MENU_OPTIONS; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TOP_SITES_SEARCH_SHORTCUTS_CONTEXT_MENU_OPTIONS", function() { return TOP_SITES_SEARCH_SHORTCUTS_CONTEXT_MENU_OPTIONS; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "MIN_RICH_FAVICON_SIZE", function() { return MIN_RICH_FAVICON_SIZE; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "MIN_CORNER_FAVICON_SIZE", function() { return MIN_CORNER_FAVICON_SIZE; });
 const TOP_SITES_SOURCE = "TOP_SITES";
 const TOP_SITES_CONTEXT_MENU_OPTIONS = ["CheckPinTopSite", "EditTopSite", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl", "DeleteUrl"];
+// the special top site for search shortcut experiment can only have the option to unpin (which removes) the topsite
+const TOP_SITES_SEARCH_SHORTCUTS_CONTEXT_MENU_OPTIONS = ["CheckPinTopSite", "Separator", "BlockUrl"];
 // minimum size necessary to show a rich icon instead of a screenshot
 const MIN_RICH_FAVICON_SIZE = 96;
 // minimum size necessary to show any icon in the top left corner with a screenshot
@@ -4098,6 +4201,188 @@ const MIN_CORNER_FAVICON_SIZE = 16;
 
 /***/ }),
 /* 35 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "SearchShortcutsForm", function() { return SearchShortcutsForm; });
+/* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(13);
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_1__);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(5);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_2__);
+
+
+
+
+class SelectableSearchShortcut extends react__WEBPACK_IMPORTED_MODULE_2___default.a.PureComponent {
+  render() {
+    const { shortcut, selected } = this.props;
+    const imageStyle = { backgroundImage: `url("${shortcut.tippyTopIcon}")` };
+    return react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+      "div",
+      { className: "top-site-outer search-shortcut" },
+      react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("input", { type: "checkbox", id: shortcut.keyword, name: shortcut.keyword, checked: selected, onChange: this.props.onChange }),
+      react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+        "label",
+        { htmlFor: shortcut.keyword },
+        react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+          "div",
+          { className: "top-site-inner" },
+          react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+            "span",
+            null,
+            react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+              "div",
+              { className: "tile" },
+              react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("div", { className: "top-site-icon rich-icon", style: imageStyle, "data-fallback": "@" }),
+              react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("div", { className: "top-site-icon search-topsite" })
+            ),
+            react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+              "div",
+              { className: "title" },
+              react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+                "span",
+                { dir: "auto" },
+                shortcut.keyword
+              )
+            )
+          )
+        )
+      )
+    );
+  }
+}
+
+class SearchShortcutsForm extends react__WEBPACK_IMPORTED_MODULE_2___default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.handleChange = this.handleChange.bind(this);
+    this.onCancelButtonClick = this.onCancelButtonClick.bind(this);
+    this.onSaveButtonClick = this.onSaveButtonClick.bind(this);
+
+    // clone the shortcuts and add them to the state so we can add isSelected property
+    const shortcuts = [];
+    const { rows, searchShortcuts } = props.TopSites;
+    searchShortcuts.forEach(shortcut => {
+      shortcuts.push(Object.assign({}, shortcut, {
+        isSelected: !!rows.find(row => row && row.isPinned && row.searchTopSite && row.label === shortcut.keyword)
+      }));
+    });
+    this.state = { shortcuts };
+  }
+
+  handleChange(event) {
+    const { target } = event;
+    const { name, checked } = target;
+    this.setState(prevState => {
+      const shortcuts = prevState.shortcuts.slice();
+      let shortcut = shortcuts.find(({ keyword }) => keyword === name);
+      shortcut.isSelected = checked;
+      return { shortcuts };
+    });
+  }
+
+  onCancelButtonClick(ev) {
+    ev.preventDefault();
+    this.props.onClose();
+  }
+
+  onSaveButtonClick(ev) {
+    ev.preventDefault();
+
+    // Check if there were any changes and act accordingly
+    const { rows } = this.props.TopSites;
+    const pinQueue = [];
+    const unpinQueue = [];
+    this.state.shortcuts.forEach(shortcut => {
+      const alreadyPinned = rows.find(row => row && row.isPinned && row.searchTopSite && row.label === shortcut.keyword);
+      if (shortcut.isSelected && !alreadyPinned) {
+        pinQueue.push(this._searchTopSite(shortcut));
+      } else if (!shortcut.isSelected && alreadyPinned) {
+        unpinQueue.push({ url: alreadyPinned.url });
+      }
+    });
+
+    // Pin the pinQueue
+    if (pinQueue.length > 0) {
+      // First find the available slots. A slot is available if it isn't pinned
+      // or if it's a pinned shortcut that we are about to unpin.
+      const availableSlots = [];
+      rows.forEach((row, index) => {
+        if (!row || !row.isPinned || row.searchTopSite && unpinQueue.find(site => row.url === site.url)) {
+          availableSlots.push(index);
+        }
+      });
+
+      pinQueue.forEach(shortcut => {
+        this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].OnlyToMain({
+          type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TOP_SITES_PIN,
+          data: {
+            site: shortcut,
+            index: availableSlots.shift()
+          }
+        }));
+      });
+    }
+
+    // Unpin the unpinQueue.
+    unpinQueue.forEach(shortcut => {
+      this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].OnlyToMain({
+        type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TOP_SITES_UNPIN,
+        data: { site: shortcut }
+      }));
+    });
+
+    this.props.onClose();
+  }
+
+  _searchTopSite(shortcut) {
+    return {
+      url: shortcut.url,
+      searchTopSite: true,
+      label: shortcut.keyword
+    };
+  }
+
+  render() {
+    return react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+      "form",
+      { className: "topsite-form" },
+      react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+        "div",
+        { className: "search-shortcuts-container" },
+        react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+          "h3",
+          { className: "section-title" },
+          react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_1__["FormattedMessage"], { id: "section_menu_action_add_search_engine" })
+        ),
+        react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+          "div",
+          null,
+          this.state.shortcuts.map(shortcut => react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(SelectableSearchShortcut, { key: shortcut.keyword, shortcut: shortcut, selected: shortcut.isSelected, onChange: this.handleChange }))
+        )
+      ),
+      react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+        "section",
+        { className: "actions" },
+        react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+          "button",
+          { className: "cancel", type: "button", onClick: this.onCancelButtonClick },
+          react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_1__["FormattedMessage"], { id: "topsites_form_cancel_button" })
+        ),
+        react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(
+          "button",
+          { className: "done", type: "submit", onClick: this.onSaveButtonClick },
+          react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_1__["FormattedMessage"], { id: "topsites_form_save_button" })
+        )
+      )
+    );
+  }
+}
+
+/***/ }),
+/* 36 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -4115,7 +4400,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(5);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_4__);
 /* harmony import */ var content_src_lib_screenshot_utils__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(26);
-/* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(41);
+/* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(42);
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
 
@@ -4168,6 +4453,10 @@ class TopSiteLink extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureCompo
         }
         break;
       case "mousedown":
+        // Block the scroll wheel from appearing for middle clicks on search top sites
+        if (event.button === 1 && this.props.link.searchTopSite) {
+          event.preventDefault();
+        }
         // Reset at the first mouse event of a potential drag
         this.dragged = false;
         break;
@@ -4224,7 +4513,7 @@ class TopSiteLink extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureCompo
 
   render() {
     const { children, className, defaultStyle, isDraggable, link, onClick, title } = this.props;
-    const topSiteOuterClassName = `top-site-outer${className ? ` ${className}` : ""}${link.isDragged ? " dragged" : ""}`;
+    const topSiteOuterClassName = `top-site-outer${className ? ` ${className}` : ""}${link.isDragged ? " dragged" : ""}${link.searchTopSite ? " search-shortcut" : ""}`;
     const { tippyTopIcon, faviconSize } = link;
     const [letterFallback] = title;
     let imageClassName;
@@ -4236,6 +4525,13 @@ class TopSiteLink extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureCompo
     if (defaultStyle) {
       // force no styles (letter fallback) even if the link has imagery
       smallFaviconFallback = false;
+    } else if (link.searchTopSite) {
+      imageClassName = "top-site-icon rich-icon";
+      imageStyle = {
+        backgroundColor: link.backgroundColor,
+        backgroundImage: `url(${tippyTopIcon})`
+      };
+      smallFaviconStyle = { backgroundImage: `url(${tippyTopIcon})` };
     } else if (link.customScreenshotURL) {
       // assume high quality custom screenshot and use rich icon styles and class names
       imageClassName = "top-site-icon rich-icon";
@@ -4283,11 +4579,12 @@ class TopSiteLink extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureCompo
         { className: "top-site-inner" },
         react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(
           "a",
-          { href: link.url, onClick: onClick },
+          { href: !link.searchTopSite && link.url, onClick: onClick, draggable: true },
           react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(
             "div",
             { className: "tile", "aria-hidden": true, "data-fallback": letterFallback },
             react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("div", { className: imageClassName, style: imageStyle }),
+            link.searchTopSite && react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("div", { className: "top-site-icon search-topsite" }),
             showSmallFavicon && react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("div", {
               className: "top-site-icon default-icon",
               "data-fallback": smallFaviconFallback && letterFallback,
@@ -4333,6 +4630,11 @@ class TopSite extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent
     if (this.props.link.isPinned) {
       value.card_type = "pinned";
     }
+    if (this.props.link.searchTopSite) {
+      // Set the card_type as "search" regardless of its pinning status
+      value.card_type = "search";
+      value.search_vendor = this.props.link.hostname;
+    }
     return { value };
   }
 
@@ -4351,10 +4653,17 @@ class TopSite extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent
     // specified as a property on the link.
     event.preventDefault();
     const { altKey, button, ctrlKey, metaKey, shiftKey } = event;
-    this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].OnlyToMain({
-      type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].OPEN_LINK,
-      data: Object.assign(this.props.link, { event: { altKey, button, ctrlKey, metaKey, shiftKey } })
-    }));
+    if (!this.props.link.searchTopSite) {
+      this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].OnlyToMain({
+        type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].OPEN_LINK,
+        data: Object.assign(this.props.link, { event: { altKey, button, ctrlKey, metaKey, shiftKey } })
+      }));
+    } else {
+      this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].OnlyToMain({
+        type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].FILL_SEARCH_TERM,
+        data: { label: this.props.link.label }
+      }));
+    }
   }
 
   onMenuButtonClick(event) {
@@ -4391,7 +4700,7 @@ class TopSite extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent
           dispatch: props.dispatch,
           index: props.index,
           onUpdate: this.onMenuUpdate,
-          options: _TopSitesConstants__WEBPACK_IMPORTED_MODULE_2__["TOP_SITES_CONTEXT_MENU_OPTIONS"],
+          options: link.searchTopSite ? _TopSitesConstants__WEBPACK_IMPORTED_MODULE_2__["TOP_SITES_SEARCH_SHORTCUTS_CONTEXT_MENU_OPTIONS"] : _TopSitesConstants__WEBPACK_IMPORTED_MODULE_2__["TOP_SITES_CONTEXT_MENU_OPTIONS"],
           site: link,
           siteInfo: this._getTelemetryInfo(),
           source: _TopSitesConstants__WEBPACK_IMPORTED_MODULE_2__["TOP_SITES_SOURCE"] })
@@ -4493,11 +4802,11 @@ class _TopSiteList extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComp
           this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].AlsoToMain({
             type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TOP_SITES_INSERT,
             data: {
-              site: {
+              site: Object.assign({
                 url: this.state.draggedSite.url,
                 label: this.state.draggedTitle,
                 customScreenshotURL: this.state.draggedSite.customScreenshotURL
-              },
+              }, this.state.draggedSite.searchTopSite && { searchTopSite: true }),
               index,
               draggedFromIndex: this.state.draggedIndex
             }
@@ -4606,7 +4915,7 @@ class _TopSiteList extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComp
 const TopSiteList = Object(react_intl__WEBPACK_IMPORTED_MODULE_1__["injectIntl"])(_TopSiteList);
 
 /***/ }),
-/* 36 */
+/* 37 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -4653,7 +4962,8 @@ class _StartupOverlay extends react__WEBPACK_IMPORTED_MODULE_3___default.a.PureC
       if (_this.props.fxa_endpoint && !_this.didFetch) {
         try {
           _this.didFetch = true;
-          const response = yield fetch(`${_this.props.fxa_endpoint}/metrics-flow`);
+          const response = yield fetch(`${_this.props.fxa_endpoint}/metrics-flow?entrypoint=
+          activity-stream-firstrun&utm_source=activity-stream&utm_campaign=firstrun&form_type=email`);
           if (response.status === 200) {
             const { flowId, flowBeginTime } = yield response.json();
             _this.setState({ flowId, flowBeginTime });
@@ -4822,7 +5132,7 @@ const getState = state => ({ fxa_endpoint: state.Prefs.values.fxa_endpoint });
 const StartupOverlay = Object(react_redux__WEBPACK_IMPORTED_MODULE_2__["connect"])(getState)(Object(react_intl__WEBPACK_IMPORTED_MODULE_1__["injectIntl"])(_StartupOverlay));
 
 /***/ }),
-/* 37 */
+/* 38 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -4897,7 +5207,7 @@ class DetectUserSessionStart {
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
-/* 38 */
+/* 39 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -6998,7 +7308,7 @@ function ftl(strings) {
 
 
 /***/ }),
-/* 39 */
+/* 40 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -7011,7 +7321,7 @@ var external_PropTypes_ = __webpack_require__(6);
 var external_PropTypes_default = /*#__PURE__*/__webpack_require__.n(external_PropTypes_);
 
 // EXTERNAL MODULE: ./node_modules/fluent/src/index.js + 8 modules
-var src = __webpack_require__(38);
+var src = __webpack_require__(39);
 
 // CONCATENATED MODULE: ./node_modules/fluent-react/src/localization.js
 
@@ -7513,7 +7823,7 @@ localized_Localized.propTypes = {
 
 
 /***/ }),
-/* 40 */
+/* 41 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -7668,7 +7978,7 @@ class SimpleSnippet_SimpleSnippet extends external_React_default.a.PureComponent
 }
 
 /***/ }),
-/* 41 */
+/* 42 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -7740,7 +8050,11 @@ const INITIAL_STATE = {
     // The history (and possibly default) links
     rows: [],
     // Used in content only to dispatch action to TopSiteForm.
-    editForm: null
+    editForm: null,
+    // Used in content only to open the SearchShortcutsForm modal.
+    showSearchShortcutsForm: false,
+    // The list of available search shortcuts.
+    searchShortcuts: []
   },
   Prefs: {
     initialized: false,
@@ -7819,6 +8133,10 @@ function TopSites(prevState = INITIAL_STATE.TopSites, action) {
       });
     case Actions["actionTypes"].TOP_SITES_CANCEL_EDIT:
       return Object.assign({}, prevState, { editForm: null });
+    case Actions["actionTypes"].TOP_SITES_OPEN_SEARCH_SHORTCUTS_MODAL:
+      return Object.assign({}, prevState, { showSearchShortcutsForm: true });
+    case Actions["actionTypes"].TOP_SITES_CLOSE_SEARCH_SHORTCUTS_MODAL:
+      return Object.assign({}, prevState, { showSearchShortcutsForm: false });
     case Actions["actionTypes"].PREVIEW_RESPONSE:
       if (!prevState.editForm || action.data.url !== prevState.editForm.previewUrl) {
         return prevState;
@@ -7893,6 +8211,8 @@ function TopSites(prevState = INITIAL_STATE.TopSites, action) {
       }
       newRows = prevState.rows.filter(site => action.data.url !== site.url);
       return Object.assign({}, prevState, { rows: newRows });
+    case Actions["actionTypes"].UPDATE_SEARCH_SHORTCUTS:
+      return Object.assign({}, prevState, { searchShortcuts: action.data.searchShortcuts });
     default:
       return prevState;
   }
@@ -8093,7 +8413,7 @@ function Snippets(prevState = INITIAL_STATE.Snippets, action) {
 var reducers = { TopSites, App, Snippets, Prefs, Dialog, Sections };
 
 /***/ }),
-/* 42 */
+/* 43 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -8231,7 +8551,7 @@ class OnboardingMessage_OnboardingMessage extends external_React_default.a.PureC
 }
 
 /***/ }),
-/* 43 */
+/* 44 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -8595,7 +8915,7 @@ const Card = Object(external_ReactRedux_["connect"])(state => ({ platform: state
 const PlaceholderCard = props => external_React_default.a.createElement(Card, { placeholder: true, className: props.className });
 
 /***/ }),
-/* 44 */
+/* 45 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -8689,7 +9009,7 @@ TopSiteFormInput_TopSiteFormInput.defaultProps = {
   validationError: false
 };
 // EXTERNAL MODULE: ./content-src/components/TopSites/TopSite.jsx
-var TopSite = __webpack_require__(35);
+var TopSite = __webpack_require__(36);
 
 // CONCATENATED MODULE: ./content-src/components/TopSites/TopSiteForm.jsx
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TopSiteForm", function() { return TopSiteForm_TopSiteForm; });

@@ -1630,7 +1630,7 @@ nsFocusManager::CheckIfFocusable(Element* aElement, uint32_t aFlags)
   // offscreen browsers can still be focused.
   nsIDocument* subdoc = doc->GetSubDocumentFor(aElement);
   if (subdoc && IsWindowVisible(subdoc->GetWindow())) {
-    const nsStyleUserInterface* ui = frame->StyleUserInterface();
+    const nsStyleUI* ui = frame->StyleUI();
     int32_t tabIndex = (ui->mUserFocus == StyleUserFocus::Ignore ||
                         ui->mUserFocus == StyleUserFocus::None) ? -1 : 0;
     return aElement->IsFocusable(&tabIndex, aFlags & FLAG_BYMOUSE) ? aElement : nullptr;
@@ -3207,9 +3207,20 @@ nsFocusManager::IsHostOrSlot(nsIContent* aContent)
 }
 
 int32_t
-nsFocusManager::HostOrSlotTabIndexValue(nsIContent* aContent)
+nsFocusManager::HostOrSlotTabIndexValue(nsIContent* aContent,
+                                        bool* aIsFocusable)
 {
   MOZ_ASSERT(IsHostOrSlot(aContent));
+
+  if (aIsFocusable) {
+    *aIsFocusable = false;
+    nsIFrame* frame = aContent->GetPrimaryFrame();
+    if (frame) {
+      int32_t tabIndex;
+      frame->IsFocusable(&tabIndex, 0);
+      *aIsFocusable = tabIndex >= 0;
+    }
+  }
 
   const nsAttrValue* attrVal =
     aContent->AsElement()->GetParsedAttr(nsGkAtoms::tabindex);
@@ -3598,10 +3609,13 @@ nsFocusManager::GetNextTabbableContent(nsIPresShell* aPresShell,
       // skip Shadow DOM in frame traversal.
       nsIContent* currentContent = frame->GetContent();
       nsIContent* oldTopLevelHost = currentTopLevelHost;
-      nsIContent* topLevel = GetTopLevelHost(currentContent);
-      currentTopLevelHost = topLevel;
-      if (topLevel) {
-        if (topLevel == oldTopLevelHost) {
+      if (oldTopLevelHost != currentContent) {
+        currentTopLevelHost = GetTopLevelHost(currentContent);
+      } else {
+        currentTopLevelHost = currentContent;
+      }
+      if (currentTopLevelHost) {
+        if (currentTopLevelHost == oldTopLevelHost) {
           // We're within Shadow DOM, continue.
           do {
             if (aForward) {
@@ -3615,7 +3629,7 @@ nsFocusManager::GetNextTabbableContent(nsIPresShell* aPresShell,
           } while (frame && frame->GetPrevContinuation());
           continue;
         }
-        currentContent = topLevel;
+        currentContent = currentTopLevelHost;
       }
 
       // For document navigation, check if this element is an open panel. Since
@@ -3670,8 +3684,12 @@ nsFocusManager::GetNextTabbableContent(nsIPresShell* aPresShell,
       // hosts and slots are handled before other elements.
       if (currentContent && nsDocument::IsShadowDOMEnabled(currentContent) &&
           IsHostOrSlot(currentContent)) {
-        int32_t tabIndex = HostOrSlotTabIndexValue(currentContent);
-        if (tabIndex >= 0 &&
+        bool focusableHostSlot;
+        int32_t tabIndex = HostOrSlotTabIndexValue(currentContent,
+                                                   &focusableHostSlot);
+        // Host or slot itself isn't focusable, enter its scope.
+        if (!focusableHostSlot &&
+            tabIndex >= 0 &&
             (aIgnoreTabIndex || aCurrentTabIndex == tabIndex)) {
           nsIContent* contentToFocus =
             GetNextTabbableContentInScope(currentContent, currentContent,
@@ -3878,7 +3896,7 @@ nsFocusManager::TryToMoveFocusToSubDocument(nsIContent* aCurrentContent,
   nsIDocument* subdoc = doc->GetSubDocumentFor(aCurrentContent);
   if (subdoc && !subdoc->EventHandlingSuppressed()) {
     if (aForward) {
-      // when tabbing forward into a frame, return the root
+      // When tabbing forward into a frame, return the root
       // frame so that the canvas becomes focused.
       nsCOMPtr<nsPIDOMWindowOuter> subframe = subdoc->GetWindow();
       if (subframe) {

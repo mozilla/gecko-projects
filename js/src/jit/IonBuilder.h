@@ -326,16 +326,15 @@ class IonBuilder
 
     // jsop_compare helpers.
     AbortReasonOr<Ok> compareTrySpecialized(bool* emitted, JSOp op, MDefinition* left,
-                                            MDefinition* right, bool canTrackOptimization);
+                                            MDefinition* right);
     AbortReasonOr<Ok> compareTryBitwise(bool* emitted, JSOp op, MDefinition* left,
                                         MDefinition* right);
     AbortReasonOr<Ok> compareTrySpecializedOnBaselineInspector(bool* emitted, JSOp op,
                                                                MDefinition* left,
                                                                MDefinition* right);
-    AbortReasonOr<Ok> compareTrySharedStub(bool* emitted, MDefinition* left, MDefinition* right);
+    AbortReasonOr<Ok> compareTryBinaryStub(bool* emitted, MDefinition* left, MDefinition* right);
 
     // jsop_newarray helpers.
-    AbortReasonOr<Ok> newArrayTrySharedStub(bool* emitted);
     AbortReasonOr<Ok> newArrayTryTemplateObject(bool* emitted, JSObject* templateObject,
                                                 uint32_t length);
     AbortReasonOr<Ok> newArrayTryVM(bool* emitted, JSObject* templateObject, uint32_t length);

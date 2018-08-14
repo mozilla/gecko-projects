@@ -963,6 +963,7 @@ GCRuntime::GCRuntime(JSRuntime* rt) :
     stats_(rt),
     marker(rt),
     usage(nullptr),
+    rootsHash(256),
     nextCellUniqueId_(LargestTaggedNullCellPointer + 1), // Ensure disjoint from null tagged pointers.
     numArenasFreeCommitted(0),
     verifyPreData(nullptr),
@@ -1286,9 +1287,6 @@ bool
 GCRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes)
 {
     MOZ_ASSERT(SystemPageSize());
-
-    if (!rootsHash.ref().init(256))
-        return false;
 
     {
         AutoLockGCBgAlloc lock(rt);
@@ -2780,9 +2778,21 @@ ForegroundUpdateKinds(AllocKinds kinds)
 void
 GCRuntime::updateTypeDescrObjects(MovingTracer* trc, Zone* zone)
 {
+    // We need to update each type descriptor object and any objects stored in
+    // its slots, since some of these contain array objects which also need to
+    // be updated.
+
     zone->typeDescrObjects().sweep();
-    for (auto r = zone->typeDescrObjects().all(); !r.empty(); r.popFront())
-        UpdateCellPointers(trc, r.front());
+
+    for (auto r = zone->typeDescrObjects().all(); !r.empty(); r.popFront()) {
+        NativeObject* obj = &r.front()->as<NativeObject>();
+        UpdateCellPointers(trc, obj);
+        for (size_t i = 0; i < obj->slotSpan(); i++) {
+            Value value = obj->getSlot(i);
+            if (value.isObject())
+                UpdateCellPointers(trc, &value.toObject());
+        }
+    }
 }
 
 void
@@ -4699,9 +4709,6 @@ js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session)
      * Currently this does not validate gray marking.
      */
 
-    if (!map.init())
-        return;
-
     JSRuntime* runtime = gc->rt;
     GCMarker* gcmarker = &gc->marker;
 
@@ -4732,8 +4739,6 @@ js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session)
      */
 
     WeakMapSet markedWeakMaps;
-    if (!markedWeakMaps.init())
-        return;
 
     /*
      * For saving, smush all of the keys into one big table and split them back
@@ -7947,6 +7952,14 @@ GCRuntime::minorGC(JS::gcreason::Reason reason, gcstats::PhaseKind phase)
     if (rt->mainContextFromOwnThread()->suppressGC)
         return;
 
+    // Note that we aren't collecting the updated alloc counts from any helper
+    // threads.  We should be but I'm not sure where to add that
+    // synchronisation.
+    uint32_t numAllocs = rt->mainContextFromOwnThread()->getAndResetAllocsThisZoneSinceMinorGC();
+    for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next())
+        numAllocs += zone->getAndResetTenuredAllocsSinceMinorGC();
+    rt->gc.stats().setAllocsSinceMinorGCTenured(numAllocs);
+
     gcstats::AutoPhase ap(rt->gc.stats(), phase);
 
     nursery().clearMinorGCRequest();
@@ -8077,18 +8090,20 @@ js::NewRealm(JSContext* cx, JSPrincipals* principals, const JS::RealmOptions& op
 
     if (!comp) {
         compHolder = cx->make_unique<JS::Compartment>(zone);
-        if (!compHolder || !compHolder->init(cx))
+        if (!compHolder)
             return nullptr;
 
         comp = compHolder.get();
     }
 
     UniquePtr<Realm> realm(cx->new_<Realm>(comp, options));
-    if (!realm || !realm->init(cx))
+    if (!realm || !realm->init(cx, principals))
         return nullptr;
 
-    // Set up the principals.
-    JS::SetRealmPrincipals(realm.get(), principals);
+    // Make sure we don't put system and non-system realms in the same
+    // compartment.
+    if (!compHolder)
+        MOZ_RELEASE_ASSERT(realm->isSystem() == IsSystemCompartment(comp));
 
     AutoLockGC lock(rt);
 
@@ -8232,6 +8247,8 @@ GCRuntime::mergeRealms(Realm* source, Realm* target)
 
     // Merge the allocator, stats and UIDs in source's zone into target's zone.
     target->zone()->arenas.adoptArenas(&source->zone()->arenas, targetZoneIsCollecting);
+    target->zone()->addTenuredAllocsSinceMinorGC(
+        source->zone()->getAndResetTenuredAllocsSinceMinorGC());
     target->zone()->usage.adopt(source->zone()->usage);
     target->zone()->adoptUniqueIds(source->zone());
     target->zone()->adoptMallocBytes(source->zone());
@@ -8252,9 +8269,6 @@ GCRuntime::mergeRealms(Realm* source, Realm* target)
 
             if (!target->scriptNameMap)
                 oomUnsafe.crash("Failed to create a script name map.");
-
-            if (!target->scriptNameMap->init())
-                oomUnsafe.crash("Failed to initialize a script name map.");
         }
 
         for (ScriptNameMap::Range r = source->scriptNameMap->all(); !r.empty(); r.popFront()) {

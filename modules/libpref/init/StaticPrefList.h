@@ -867,6 +867,18 @@ VARCACHE_PREF(
   bool, false
 )
 
+#if defined(MOZ_WEBM_ENCODER)
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "media.encoder.webm.enabled",
+   MediaEncoderWebMEnabled,
+  RelaxedAtomicBool, true
+)
+#undef PREF_VALUE
+
 #if defined(RELEASE_OR_BETA)
 # define PREF_VALUE 3
 #else
@@ -1004,6 +1016,12 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.media-capabilities.enabled",
    MediaCapabilitiesEnabled,
+  RelaxedAtomicBool, true
+)
+
+VARCACHE_PREF(
+  "media.media-capabilities.screen.enabled",
+   MediaCapabilitiesScreenEnabled,
   RelaxedAtomicBool, false
 )
 
@@ -1073,12 +1091,13 @@ VARCACHE_PREF(
   bool, false
 )
 
-// 0-Accept, 1-dontAcceptForeign, 2-dontAcceptAny, 3-limitForeign
+// 0-Accept, 1-dontAcceptForeign, 2-dontAcceptAny, 3-limitForeign,
+// 4-rejectTracker
 // Keep the old default of accepting all cookies
 VARCACHE_PREF(
   "network.cookie.cookieBehavior",
   network_cookie_cookieBehavior,
-  int32_t, 0
+  RelaxedAtomicInt32, 0
 )
 
 // Enables the predictive service.
@@ -1212,12 +1231,6 @@ PREF("preferences.allow.omt-write", bool, true)
 //---------------------------------------------------------------------------
 // Privacy prefs
 //---------------------------------------------------------------------------
-
-VARCACHE_PREF(
-  "privacy.restrict3rdpartystorage.enabled",
-   privacy_restrict3rdpartystorage_enabled,
-  RelaxedAtomicBool, false
-)
 
 VARCACHE_PREF(
   "privacy.restrict3rdpartystorage.ui.enabled",

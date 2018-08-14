@@ -193,7 +193,7 @@ xpc::ErrorBase::Init(JSErrorBase* aReport)
     if (!aReport->filename)
         mFileName.SetIsVoid(true);
     else
-        CopyASCIItoUTF16(aReport->filename, mFileName);
+      CopyUTF8toUTF16(mozilla::MakeStringSpan(aReport->filename), mFileName);
 
     mLineNumber = aReport->lineno;
     mColumn = aReport->column;
@@ -218,7 +218,7 @@ xpc::ErrorReport::Init(JSErrorReport* aReport, const char* aToStringResult,
 
     ErrorReportToMessageString(aReport, mErrorMsg);
     if (mErrorMsg.IsEmpty() && aToStringResult) {
-        AppendUTF8toUTF16(aToStringResult, mErrorMsg);
+      AppendUTF8toUTF16(mozilla::MakeStringSpan(aToStringResult), mErrorMsg);
     }
 
     mSourceLine.Assign(aReport->linebuf(), aReport->linebufLength());
@@ -270,11 +270,11 @@ static LazyLogModule gJSDiagnostics("JSDiagnostics");
 void
 xpc::ErrorBase::AppendErrorDetailsTo(nsCString& error)
 {
-    error.Append(NS_LossyConvertUTF16toASCII(mFileName));
+    AppendUTF16toUTF8(mFileName, error);
     error.AppendLiteral(", line ");
     error.AppendInt(mLineNumber, 10);
     error.AppendLiteral(": ");
-    error.Append(NS_LossyConvertUTF16toASCII(mErrorMsg));
+    AppendUTF16toUTF8(mErrorMsg, error);
 }
 
 void
@@ -344,8 +344,8 @@ xpc::ErrorReport::LogToConsoleWithStack(JS::HandleObject aStack,
 
     MOZ_LOG(gJSDiagnostics,
             JSREPORT_IS_WARNING(mFlags) ? LogLevel::Warning : LogLevel::Error,
-            ("file %s, line %u\n%s", NS_LossyConvertUTF16toASCII(mFileName).get(),
-             mLineNumber, NS_LossyConvertUTF16toASCII(mErrorMsg).get()));
+            ("file %s, line %u\n%s", NS_ConvertUTF16toUTF8(mFileName).get(),
+             mLineNumber, NS_ConvertUTF16toUTF8(mErrorMsg).get()));
 
     // Log to the console. We do this last so that we can simply return if
     // there's no console service without affecting the other reporting
@@ -1028,8 +1028,12 @@ ReadScriptOrFunction(nsIObjectInputStream* stream, JSContext* cx,
     // We don't serialize mutedError-ness of scripts, which is fine as long as
     // we only serialize system and XUL-y things. We can detect this by checking
     // where the caller wants us to deserialize.
+    //
+    // CompilationScope() could theoretically GC, so get that out of the way
+    // before comparing to the cx global.
+    JSObject* loaderGlobal = xpc::CompilationScope();
     MOZ_RELEASE_ASSERT(nsContentUtils::IsSystemCaller(cx) ||
-                       CurrentGlobalOrNull(cx) == xpc::CompilationScope());
+                       CurrentGlobalOrNull(cx) == loaderGlobal);
 
     uint32_t size;
     rv = stream->Read32(&size);

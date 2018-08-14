@@ -33,7 +33,6 @@
                   command="Browser:Stop"/>
         <menuitem id="context-bookmarkpage"
                   class="menuitem-iconic"
-                  observes="bookmarkThisPageBroadcaster"
                   aria-label="&bookmarkPageCmd2.label;"
                   accesskey="&bookmarkPageCmd2.accesskey;"
                   oncommand="gContextMenu.bookmarkThisPage();"/>
@@ -308,7 +307,7 @@
                 accesskey="&keywordfield.accesskey;"
                 oncommand="AddKeywordForSearchField();"/>
       <menuitem id="context-searchselect"
-                oncommand="BrowserSearch.loadSearchFromContext(this.searchTerms);"/>
+                oncommand="BrowserSearch.loadSearchFromContext(this.searchTerms, this.principal);"/>
       <menuseparator id="context-sep-sendlinktodevice" class="sync-ui-item"
                      hidden="true"/>
       <menu id="context-sendlinktodevice"

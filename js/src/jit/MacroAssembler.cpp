@@ -831,6 +831,13 @@ MacroAssembler::freeListAllocate(Register result, Register temp, gc::AllocKind a
     Pop(result);
 
     bind(&success);
+
+#ifdef NIGHTLY_BUILD
+    // Only burden the nightly population with this.
+    uint32_t* countAddress = GetJitContext()->runtime->addressOfTenuredAllocCount();
+    movePtr(ImmPtr(countAddress), temp);
+    add32(Imm32(1), Address(temp, 0));
+#endif
 }
 
 void
@@ -993,6 +1000,21 @@ MacroAssembler::bumpPointerAllocate(Register result, Register temp, Label* fail,
     branchPtr(Assembler::Below, Address(temp, endOffset.value()), result, fail);
     storePtr(result, Address(temp, 0));
     subPtr(Imm32(size), result);
+
+#if defined(NIGHTLY_BUILD)
+    // Only burden the nightly population with this,
+    // since this is the allocation fast path.
+    CompileZone* zone = GetJitContext()->realm->zone();
+    uint32_t* countAddress = zone->addressOfNurseryAllocCount();
+    CheckedInt<int32_t> counterOffset = (CheckedInt<uintptr_t>(uintptr_t(countAddress)) -
+        CheckedInt<uintptr_t>(uintptr_t(posAddr))).toChecked<int32_t>();
+    if (counterOffset.isValid()) {
+        add32(Imm32(1), Address(temp, counterOffset.value()));
+    } else {
+        movePtr(ImmPtr(countAddress), temp);
+        add32(Imm32(1), Address(temp, 0));
+    }
+#endif
 }
 
 // Inlined equivalent of gc::AllocateString, jumping to fail if nursery
@@ -1429,26 +1451,28 @@ MacroAssembler::compareStrings(JSOp op, Register left, Register right, Register 
 
     Label done;
     Label notPointerEqual;
-    // Fast path for identical strings.
+    // If operands point to the same instance, the strings are trivially equal.
     branchPtr(Assembler::NotEqual, left, right, &notPointerEqual);
     move32(Imm32(op == JSOP_EQ || op == JSOP_STRICTEQ), result);
     jump(&done);
 
     bind(&notPointerEqual);
 
-    Label notAtom;
-    // Optimize the equality operation to a pointer compare for two atoms.
+    Label leftIsNotAtom;
+    Label setNotEqualResult;
+    // Atoms cannot be equal to each other if they point to different strings.
     Imm32 nonAtomBit(JSString::NON_ATOM_BIT);
-    branchTest32(Assembler::NonZero, Address(left, JSString::offsetOfFlags()), nonAtomBit, &notAtom);
-    branchTest32(Assembler::NonZero, Address(right, JSString::offsetOfFlags()), nonAtomBit, &notAtom);
+    branchTest32(Assembler::NonZero, Address(left, JSString::offsetOfFlags()), nonAtomBit,
+                 &leftIsNotAtom);
+    branchTest32(Assembler::Zero, Address(right, JSString::offsetOfFlags()), nonAtomBit,
+                 &setNotEqualResult);
 
-    cmpPtrSet(JSOpToCondition(MCompare::Compare_String, op), left, right, result);
-    jump(&done);
-
-    bind(&notAtom);
+    bind(&leftIsNotAtom);
     // Strings of different length can never be equal.
     loadStringLength(left, result);
     branch32(Assembler::Equal, Address(right, JSString::offsetOfLength()), result, fail);
+
+    bind(&setNotEqualResult);
     move32(Imm32(op == JSOP_NE || op == JSOP_STRICTNE), result);
 
     bind(&done);
@@ -1601,16 +1625,6 @@ MacroAssembler::loadDependentStringBase(Register str, Register dest)
 }
 
 void
-MacroAssembler::leaNewDependentStringBase(Register str, Register dest)
-{
-    MOZ_ASSERT(str != dest);
-
-    // Spectre-safe because this is a newly allocated dependent string, thus we
-    // are certain of its type and the type of its base field.
-    computeEffectiveAddress(Address(str, JSDependentString::offsetOfBase()), dest);
-}
-
-void
 MacroAssembler::storeDependentStringBase(Register base, Register str)
 {
     storePtr(base, Address(str, JSDependentString::offsetOfBase()));
@@ -1647,12 +1661,12 @@ MacroAssembler::loadStringChar(Register str, Register index, Register output, Re
     // because a TwoByte rope might have a Latin1 child.
     branchLatin1String(output, &isLatin1);
     loadStringChars(output, scratch, CharEncoding::TwoByte);
-    load16ZeroExtend(BaseIndex(scratch, index, TimesTwo), output);
+    loadChar(scratch, index, output, CharEncoding::TwoByte);
     jump(&done);
 
     bind(&isLatin1);
     loadStringChars(output, scratch, CharEncoding::Latin1);
-    load8ZeroExtend(BaseIndex(scratch, index, TimesOne), output);
+    loadChar(scratch, index, output, CharEncoding::Latin1);
 
     bind(&done);
 }
@@ -1669,6 +1683,27 @@ MacroAssembler::loadStringIndexValue(Register str, Register dest, Label* fail)
 
     // Extract the index.
     rshift32(Imm32(JSString::INDEX_VALUE_SHIFT), dest);
+}
+
+void
+MacroAssembler::loadChar(Register chars, Register index, Register dest, CharEncoding encoding,
+                         int32_t offset/* = 0 */)
+{
+    if (encoding == CharEncoding::Latin1)
+        loadChar(BaseIndex(chars, index, TimesOne, offset), dest, encoding);
+    else
+        loadChar(BaseIndex(chars, index, TimesTwo, offset), dest, encoding);
+}
+
+void
+MacroAssembler::addToCharPtr(Register chars, Register index, CharEncoding encoding)
+{
+    if (encoding == CharEncoding::Latin1) {
+        static_assert(sizeof(char) == 1, "Latin-1 string index shouldn't need scaling");
+        addPtr(index, chars);
+    } else {
+        computeEffectiveAddress(BaseIndex(chars, index, TimesTwo), chars);
+    }
 }
 
 void

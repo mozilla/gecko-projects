@@ -685,7 +685,7 @@ protected:
                                     mozilla::TableSelection* aTarget);
 
   // Fills aCursor with the appropriate information from ui
-  static void FillCursorInformationFromStyle(const nsStyleUserInterface* ui,
+  static void FillCursorInformationFromStyle(const nsStyleUI* ui,
                                              nsIFrame::Cursor& aCursor);
   NS_IMETHOD DoXULLayout(nsBoxLayoutState& aBoxLayoutState) override;
 
@@ -896,12 +896,4 @@ public:
 #endif
 // End Display Reflow Debugging
 
-// similar to NS_ENSURE_TRUE but with no return value
-#define ENSURE_TRUE(x)                                        \
-  PR_BEGIN_MACRO                                              \
-    if (!(x)) {                                               \
-       NS_WARNING("ENSURE_TRUE(" #x ") failed");              \
-       return;                                                \
-    }                                                         \
-  PR_END_MACRO
 #endif /* nsFrame_h___ */

@@ -76,6 +76,8 @@ class TenuringTracer : public JSTracer
 
     // Amount of data moved to the tenured generation during collection.
     size_t tenuredSize;
+    // Number of cells moved to the tenured generation.
+    size_t tenuredCells;
 
     // These lists are threaded through the Nursery using the space from
     // already moved things. The lists are used to fix up the moved things and
@@ -288,8 +290,6 @@ class Nursery
         return allocatedChunkCount() * gc::ChunkSize;
     }
     size_t sizeOfMallocedBuffers(mozilla::MallocSizeOf mallocSizeOf) const {
-        if (!mallocedBuffers.initialized())
-            return 0;
         size_t total = 0;
         for (MallocedBuffersSet::Range r = mallocedBuffers.all(); !r.empty(); r.popFront())
             total += mallocSizeOf(r.front());
@@ -440,6 +440,7 @@ class Nursery
         size_t nurseryLazyCapacity = 0;
         size_t nurseryUsedBytes = 0;
         size_t tenuredBytes = 0;
+        size_t tenuredCells = 0;
     } previousGC;
 
     /*

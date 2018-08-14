@@ -1032,7 +1032,7 @@ HTMLEditor::InsertObject(const nsACString& aType,
       do_GetService("@mozilla.org/editor-utils;1");
     NS_ENSURE_TRUE(utils, NS_ERROR_FAILURE);
 
-    nsCOMPtr<nsINode> node = do_QueryInterface(aDestinationNode);
+    nsCOMPtr<nsINode> node = aDestinationNode;
     MOZ_ASSERT(node);
 
     RefPtr<Blob> domBlob = Blob::Create(node->GetOwnerGlobal(), blob);
@@ -1346,27 +1346,37 @@ HTMLEditor::HavePrivateHTMLFlavor(nsIClipboard* aClipboard)
   return false;
 }
 
-
-NS_IMETHODIMP
-HTMLEditor::Paste(int32_t aSelectionType)
+nsresult
+HTMLEditor::PasteInternal(int32_t aClipboardType)
 {
-  if (!FireClipboardEvent(ePaste, aSelectionType)) {
+  if (!FireClipboardEvent(ePaste, aClipboardType)) {
     return NS_OK;
   }
 
   // Get Clipboard Service
   nsresult rv;
-  nsCOMPtr<nsIClipboard> clipboard(do_GetService("@mozilla.org/widget/clipboard;1", &rv));
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIClipboard> clipboard =
+    do_GetService("@mozilla.org/widget/clipboard;1", &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   // Get the nsITransferable interface for getting the data from the clipboard
-  nsCOMPtr<nsITransferable> trans;
-  rv = PrepareHTMLTransferable(getter_AddRefs(trans));
-  NS_ENSURE_SUCCESS(rv, rv);
-  NS_ENSURE_TRUE(trans, NS_ERROR_FAILURE);
+  nsCOMPtr<nsITransferable> transferable;
+  rv = PrepareHTMLTransferable(getter_AddRefs(transferable));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  if (NS_WARN_IF(!transferable)) {
+    return NS_ERROR_FAILURE;
+  }
   // Get the Data from the clipboard
-  rv = clipboard->GetData(trans, aSelectionType);
-  NS_ENSURE_SUCCESS(rv, rv);
+  rv = clipboard->GetData(transferable, aClipboardType);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // XXX Why don't you check this first?
   if (!IsModifiable()) {
     return NS_OK;
   }
@@ -1382,27 +1392,35 @@ HTMLEditor::Paste(int32_t aSelectionType)
     uint32_t contextLen, infoLen;
     nsCOMPtr<nsISupportsString> textDataObj;
 
-    nsCOMPtr<nsITransferable> contextTrans =
-                  do_CreateInstance("@mozilla.org/widget/transferable;1");
-    NS_ENSURE_TRUE(contextTrans, NS_ERROR_NULL_POINTER);
-    contextTrans->Init(nullptr);
-    contextTrans->AddDataFlavor(kHTMLContext);
-    clipboard->GetData(contextTrans, aSelectionType);
-    contextTrans->GetTransferData(kHTMLContext, getter_AddRefs(contextDataObj), &contextLen);
+    nsCOMPtr<nsITransferable> contextTransferable =
+      do_CreateInstance("@mozilla.org/widget/transferable;1");
+    if (NS_WARN_IF(!contextTransferable)) {
+      return NS_ERROR_FAILURE;
+    }
+    contextTransferable->Init(nullptr);
+    contextTransferable->AddDataFlavor(kHTMLContext);
+    clipboard->GetData(contextTransferable, aClipboardType);
+    contextTransferable->GetTransferData(kHTMLContext,
+                                         getter_AddRefs(contextDataObj),
+                                         &contextLen);
 
-    nsCOMPtr<nsITransferable> infoTrans =
-                  do_CreateInstance("@mozilla.org/widget/transferable;1");
-    NS_ENSURE_TRUE(infoTrans, NS_ERROR_NULL_POINTER);
-    infoTrans->Init(nullptr);
-    infoTrans->AddDataFlavor(kHTMLInfo);
-    clipboard->GetData(infoTrans, aSelectionType);
-    infoTrans->GetTransferData(kHTMLInfo, getter_AddRefs(infoDataObj), &infoLen);
+    nsCOMPtr<nsITransferable> infoTransferable =
+      do_CreateInstance("@mozilla.org/widget/transferable;1");
+    if (NS_WARN_IF(!infoTransferable)) {
+      return NS_ERROR_FAILURE;
+    }
+    infoTransferable->Init(nullptr);
+    infoTransferable->AddDataFlavor(kHTMLInfo);
+    clipboard->GetData(infoTransferable, aClipboardType);
+    infoTransferable->GetTransferData(kHTMLInfo,
+                                      getter_AddRefs(infoDataObj),
+                                      &infoLen);
 
     if (contextDataObj) {
       nsAutoString text;
       textDataObj = do_QueryInterface(contextDataObj);
       textDataObj->GetData(text);
-      NS_ASSERTION(text.Length() <= (contextLen/2), "Invalid length!");
+      MOZ_ASSERT(text.Length() <= contextLen / 2);
       contextStr.Assign(text.get(), contextLen / 2);
     }
 
@@ -1410,13 +1428,17 @@ HTMLEditor::Paste(int32_t aSelectionType)
       nsAutoString text;
       textDataObj = do_QueryInterface(infoDataObj);
       textDataObj->GetData(text);
-      NS_ASSERTION(text.Length() <= (infoLen/2), "Invalid length!");
+      MOZ_ASSERT(text.Length() <= infoLen / 2);
       infoStr.Assign(text.get(), infoLen / 2);
     }
   }
 
-  return InsertFromTransferable(trans, nullptr, contextStr, infoStr,
-                                bHavePrivateHTMLFlavor, true);
+  rv = InsertFromTransferable(transferable, nullptr, contextStr, infoStr,
+                              bHavePrivateHTMLFlavor, true);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  return NS_OK;
 }
 
 nsresult
@@ -1619,7 +1641,7 @@ HTMLEditor::PasteAsQuotationAsAction(int32_t aClipboardType)
   }
 
   // XXX Why don't we call HTMLEditRules::DidDoAction() after Paste()?
-  rv = Paste(aClipboardType);
+  rv = PasteInternal(aClipboardType);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -1680,9 +1702,20 @@ NS_IMETHODIMP
 HTMLEditor::InsertTextWithQuotations(const nsAString& aStringToInsert)
 {
   // The whole operation should be undoable in one transaction:
-  BeginTransaction();
+  // XXX Why isn't enough to use only AutoPlaceholderBatch here?
+  AutoTransactionBatch bundleAllTransactions(*this);
   AutoPlaceholderBatch beginBatching(this);
 
+  nsresult rv = InsertTextWithQuotationsInternal(aStringToInsert);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  return NS_OK;
+}
+
+nsresult
+HTMLEditor::InsertTextWithQuotationsInternal(const nsAString& aStringToInsert)
+{
   // We're going to loop over the string, collecting up a "hunk"
   // that's all the same type (quoted or not),
   // Whenever the quotedness changes (or we reach the string's end)
@@ -1766,8 +1799,6 @@ HTMLEditor::InsertTextWithQuotations(const nsAString& aStringToInsert)
     curHunkIsQuoted = quoted;
     hunkStart = lineStart;
   }
-
-  EndTransaction();
 
   return rv;
 }
@@ -1919,7 +1950,16 @@ HTMLEditor::Rewrap(bool aRespectNewlines)
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),  "Failed to select all text");
   }
 
-  return InsertTextWithQuotations(wrapped);
+  // The whole operation in InsertTextWithQuotationsInternal() should be
+  // undoable in one transaction.
+  // XXX Why isn't enough to use only AutoPlaceholderBatch here?
+  AutoTransactionBatch bundleAllTransactions(*this);
+  AutoPlaceholderBatch beginBatching(this);
+  rv = InsertTextWithQuotationsInternal(wrapped);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  return NS_OK;
 }
 
 NS_IMETHODIMP

@@ -196,7 +196,7 @@ var BrowserTestUtils = {
             opening();
             tab = tabbrowser.selectedTab;
           } else {
-            tabbrowser.selectedTab = tab = tabbrowser.addTab(opening);
+            tabbrowser.selectedTab = tab = BrowserTestUtils.addTab(tabbrowser, opening);
           }
         })
       ];
@@ -1784,6 +1784,9 @@ var BrowserTestUtils = {
   addTab(tabbrowser, uri, params = {}, beforeLoadFunc = null) {
     if (!params.triggeringPrincipal) {
       params.triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+    }
+    if (!params.allowInheritPrincipal) {
+      params.allowInheritPrincipal = true;
     }
     if (beforeLoadFunc) {
       let window = tabbrowser.ownerGlobal;

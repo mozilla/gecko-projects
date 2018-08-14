@@ -174,23 +174,20 @@ void
 Bench_Cpp_MozHashSet(const Params* aParams, void** aVals, size_t aLen)
 {
   mozilla::HashSet<void*, mozilla::DefaultHasher<void*>, MallocAllocPolicy> hs;
-  MOZ_RELEASE_ASSERT(hs.init());
 
   for (size_t j = 0; j < aParams->mNumInserts; j++) {
-    auto p = hs.lookupForAdd(aVals[j]);
-    MOZ_RELEASE_ASSERT(!p);
-    MOZ_RELEASE_ASSERT(hs.add(p, aVals[j]));
+    MOZ_RELEASE_ASSERT(hs.put(aVals[j]));
   }
 
   for (size_t i = 0; i < aParams->mNumSuccessfulLookups; i++) {
     for (size_t j = 0; j < aParams->mNumInserts; j++) {
-      MOZ_RELEASE_ASSERT(hs.lookup(aVals[j]));
+      MOZ_RELEASE_ASSERT(hs.has(aVals[j]));
     }
   }
 
   for (size_t i = 0; i < aParams->mNumFailingLookups; i++) {
     for (size_t j = aParams->mNumInserts; j < aParams->mNumInserts*2; j++) {
-      MOZ_RELEASE_ASSERT(!hs.lookup(aVals[j]));
+      MOZ_RELEASE_ASSERT(!hs.has(aVals[j]));
     }
   }
 

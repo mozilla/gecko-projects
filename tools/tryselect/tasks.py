@@ -4,7 +4,9 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import hashlib
 import os
+import shutil
 import sys
 
 from mozboot.util import get_state_dir
@@ -49,7 +51,13 @@ def invalidate(cache, root):
 def generate_tasks(params, full, root):
     params = params or "project=mozilla-central"
 
-    cache_dir = os.path.join(get_state_dir()[0], 'cache', 'taskgraph')
+    # Try to delete the old taskgraph cache directory.
+    old_cache_dir = os.path.join(get_state_dir()[0], 'cache', 'taskgraph')
+    if os.path.isdir(old_cache_dir):
+        shutil.rmtree(old_cache_dir)
+
+    root_hash = hashlib.sha256(os.path.abspath(root)).hexdigest()
+    cache_dir = os.path.join(get_state_dir()[0], 'cache', root_hash, 'taskgraph')
     attr = 'full_task_set' if full else 'target_task_set'
     cache = os.path.join(cache_dir, attr)
 
@@ -63,7 +71,7 @@ def generate_tasks(params, full, root):
 
     print("Task configuration changed, generating {}".format(attr.replace('_', ' ')))
     try:
-        params = load_parameters_file(params, strict=False)
+        params = load_parameters_file(params, strict=False, overrides={'try_mode': 'try_select'})
         params.check()
     except ParameterMismatch as e:
         print(PARAMETER_MISMATCH.format(e.args[0]))

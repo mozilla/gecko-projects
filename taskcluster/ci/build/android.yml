@@ -3,6 +3,8 @@ android-api-16/debug:
     index:
         product: mobile
         job-name: android-api-16-debug
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: android-4-0-armv7-api16/debug
         symbol: B
@@ -45,6 +47,7 @@ android-api-16/debug:
         - linux64-clang
         - linux64-rust-android
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
         - linux64-node
 
@@ -102,6 +105,7 @@ android-api-16-ccov/debug:
         - linux64-clang
         - linux64-rust-android
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
         - linux64-node
 
@@ -110,6 +114,8 @@ android-x86/opt:
     index:
         product: mobile
         job-name: android-x86-opt
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: android-4-2-x86/opt
         symbol: B
@@ -152,6 +158,7 @@ android-x86/opt:
         - linux64-clang
         - linux64-rust-android
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
         - linux64-node
 
@@ -202,6 +209,7 @@ android-x86-fuzzing/debug:
         - linux64-clang
         - linux64-rust-android
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
         - linux64-node
 
@@ -209,6 +217,7 @@ android-x86-nightly/opt:
     description: "Android 4.2 x86 Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: promote
     shipping-product: fennec
     index:
@@ -258,6 +267,7 @@ android-x86-nightly/opt:
         - linux64-clang
         - linux64-rust-android
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
         - linux64-node
 
@@ -266,6 +276,8 @@ android-api-16/opt:
     index:
         product: mobile
         job-name: android-api-16-opt
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: android-4-0-armv7-api16/opt
         symbol: B
@@ -308,6 +320,7 @@ android-api-16/opt:
         - linux64-clang
         - linux64-rust-android
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
         - linux64-node
 
@@ -357,6 +370,7 @@ android-api-16-without-google-play-services/opt:
         - linux64-clang
         - linux64-rust-android
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
         - linux64-node
 
@@ -364,6 +378,7 @@ android-api-16-nightly/opt:
     description: "Android 4.0 api-16+ Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: promote
     shipping-product: fennec
     index:
@@ -413,6 +428,7 @@ android-api-16-nightly/opt:
         - linux64-clang
         - linux64-rust-android
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
         - linux64-node
 
@@ -421,6 +437,8 @@ android-aarch64/opt:
     index:
         product: mobile
         job-name: android-aarch64-opt
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: android-5-0-aarch64/opt
         symbol: B
@@ -463,6 +481,7 @@ android-aarch64/opt:
         - linux64-clang
         - linux64-rust-android
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
         - linux64-node
 
@@ -470,6 +489,7 @@ android-aarch64-nightly/opt:
     description: "Android 5.0 AArch64 Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: promote
     shipping-product: fennec
     index:
@@ -520,4 +540,5 @@ android-aarch64-nightly/opt:
         - linux64-rust-android
         - linux64-rust-size
         - linux64-sccache
+        - linux64-cbindgen
         - linux64-node

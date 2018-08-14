@@ -20,6 +20,7 @@
 #include "js/Printf.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
+#include "nsExceptionHandler.h"
 #include "nsIComponentManager.h"
 #include "mozilla/Module.h"
 #include "nsIFile.h"
@@ -55,10 +56,6 @@
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/Unused.h"
-
-#ifdef MOZ_CRASHREPORTER
-#include "mozilla/ipc/CrashReporterClient.h"
-#endif
 
 using namespace mozilla;
 using namespace mozilla::scache;
@@ -363,11 +360,10 @@ ResolveModuleObjectProperty(JSContext* aCx, HandleObject aModObj, const char* na
     return aModObj;
 }
 
-#ifdef MOZ_CRASHREPORTER
 static mozilla::Result<nsCString, nsresult> ReadScript(ComponentLoaderInfo& aInfo);
 
 static nsresult
-AnnotateScriptContents(const nsACString& aName, const nsACString& aURI)
+AnnotateScriptContents(CrashReporter::Annotation aName, const nsACString& aURI)
 {
     ComponentLoaderInfo info(aURI);
 
@@ -384,20 +380,17 @@ AnnotateScriptContents(const nsACString& aName, const nsACString& aURI)
 
     return NS_OK;
 }
-#endif // defined MOZ_CRASHREPORTER
 
 nsresult
 mozJSComponentLoader::AnnotateCrashReport()
 {
-#ifdef MOZ_CRASHREPORTER
     Unused << AnnotateScriptContents(
-        NS_LITERAL_CSTRING("nsAsyncShutdownComponent"),
+        CrashReporter::Annotation::nsAsyncShutdownComponent,
         NS_LITERAL_CSTRING("resource://gre/components/nsAsyncShutdown.js"));
 
     Unused << AnnotateScriptContents(
-        NS_LITERAL_CSTRING("AsyncShutdownModule"),
+        CrashReporter::Annotation::AsyncShutdownModule,
         NS_LITERAL_CSTRING("resource://gre/modules/AsyncShutdown.jsm"));
-#endif // defined MOZ_CRASHREPORTER
 
     return NS_OK;
 }
@@ -994,7 +987,6 @@ mozJSComponentLoader::ImportInto(const nsACString& registryLocation,
     RootedValue targetVal(cx, targetValArg);
     RootedObject targetObject(cx, nullptr);
 
-    Maybe<JSAutoRealm> ar;
     if (optionalArgc) {
         // The caller passed in the optional second argument. Get it.
         if (targetVal.isObject()) {
@@ -1018,9 +1010,6 @@ mozJSComponentLoader::ImportInto(const nsACString& registryLocation,
         }
     } else {
         FindTargetObject(cx, &targetObject);
-        if (targetObject) {
-            ar.emplace(cx, targetObject);
-        }
     }
 
     js::AssertSameCompartment(cx, targetObject);

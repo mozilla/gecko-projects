@@ -1002,9 +1002,7 @@ StructMetaTypeDescr::createFromArrays(JSContext* cx,
     if (!CreateTraceList(cx, descr))
         return nullptr;
 
-    if (!cx->zone()->addTypeDescrObject(cx, descr) ||
-        !cx->zone()->addTypeDescrObject(cx, fieldTypeVec))
-    {
+    if (!cx->zone()->addTypeDescrObject(cx, descr)) {
         ReportOutOfMemory(cx);
         return nullptr;
     }
@@ -2162,11 +2160,6 @@ InlineTransparentTypedObject::getOrCreateBuffer(JSContext* cx)
         auto table = cx->make_unique<ObjectWeakMap>(cx);
         if (!table)
             return nullptr;
-
-        if (!table->init()) {
-            ReportOutOfMemory(cx);
-            return nullptr;
-        }
 
         realm.lazyArrayBuffers = std::move(table);
     }

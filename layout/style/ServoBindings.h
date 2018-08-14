@@ -379,11 +379,10 @@ void Gecko_SetListStyleImageImageValue(nsStyleList* style_struct,
 void Gecko_CopyListStyleImageFrom(nsStyleList* dest, const nsStyleList* src);
 
 // cursor style.
-void Gecko_SetCursorArrayLength(nsStyleUserInterface* ui, size_t len);
+void Gecko_SetCursorArrayLength(nsStyleUI* ui, size_t len);
 void Gecko_SetCursorImageValue(nsCursorImage* aCursor,
                                mozilla::css::ImageValue* aImageValue);
-void Gecko_CopyCursorArrayFrom(nsStyleUserInterface* dest,
-                               const nsStyleUserInterface* src);
+void Gecko_CopyCursorArrayFrom(nsStyleUI* dest, const nsStyleUI* src);
 
 void Gecko_SetContentDataImageValue(nsStyleContentData* aList,
                                     mozilla::css::ImageValue* aImageValue);
@@ -684,7 +683,7 @@ bool Gecko_DocumentRule_UseForPresentation(RawGeckoPresContextBorrowed,
 void Gecko_SetJemallocThreadLocalArena(bool enabled);
 
 void Gecko_AddBufferToCrashReport(const void* addr, size_t len);
-void Gecko_AnnotateCrashReport(const char* key_str, const char* value_str);
+void Gecko_AnnotateCrashReport(uint32_t key, const char* value_str);
 
 // Pseudo-element flags.
 #define CSS_PSEUDO_ELEMENT(name_, value_, flags_) \

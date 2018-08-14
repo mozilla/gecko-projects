@@ -610,8 +610,7 @@ TabChild::Init()
   // and all windows, even the root one, will use the docshell one.
   nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(WebNavigation());
   NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
-  nsCOMPtr<EventTarget> chromeHandler =
-    do_QueryInterface(window->GetChromeEventHandler());
+  nsCOMPtr<EventTarget> chromeHandler = window->GetChromeEventHandler();
   docShell->SetChromeEventHandler(chromeHandler);
 
   if (window->GetCurrentInnerWindow()) {
@@ -1163,7 +1162,7 @@ TabChild::RecvLoadURL(const nsCString& aURI,
       NS_WARNING("WebNavigation()->LoadURI failed. Eating exception, what else can I do?");
   }
 
-  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("URL"), aURI);
+  CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::URL, aURI);
 
   return IPC_OK();
 }
@@ -2279,8 +2278,7 @@ TabChild::RecvActivateFrameEvent(const nsString& aType, const bool& capture)
 {
   nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(WebNavigation());
   NS_ENSURE_TRUE(window, IPC_OK());
-  nsCOMPtr<EventTarget> chromeHandler =
-    do_QueryInterface(window->GetChromeEventHandler());
+  nsCOMPtr<EventTarget> chromeHandler = window->GetChromeEventHandler();
   NS_ENSURE_TRUE(chromeHandler, IPC_OK());
   RefPtr<ContentListener> listener = new ContentListener(this);
   chromeHandler->AddEventListener(aType, listener, capture);
@@ -2742,8 +2740,7 @@ TabChild::InitTabChildGlobal()
   if (!mTabChildGlobal) {
     nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(WebNavigation());
     NS_ENSURE_TRUE(window, false);
-    nsCOMPtr<EventTarget> chromeHandler =
-      do_QueryInterface(window->GetChromeEventHandler());
+    nsCOMPtr<EventTarget> chromeHandler = window->GetChromeEventHandler();
     NS_ENSURE_TRUE(chromeHandler, false);
 
     RefPtr<TabChildGlobal> scope = mTabChildGlobal = new TabChildGlobal(this);

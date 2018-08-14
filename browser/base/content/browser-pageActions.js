@@ -240,11 +240,6 @@ var BrowserPageActions = {
       "pageAction-panel-button"
     );
     buttonNode.setAttribute("actionid", action.id);
-    if (action.nodeAttributes) {
-      for (let name in action.nodeAttributes) {
-        buttonNode.setAttribute(name, action.nodeAttributes[name]);
-      }
-    }
     buttonNode.addEventListener("command", event => {
       this.doCommandForAction(action, event, buttonNode);
     });
@@ -476,11 +471,6 @@ var BrowserPageActions = {
     buttonNode.classList.add("urlbar-icon", "urlbar-page-action");
     buttonNode.setAttribute("actionid", action.id);
     buttonNode.setAttribute("role", "button");
-    if (action.nodeAttributes) {
-      for (let name in action.nodeAttributes) {
-        buttonNode.setAttribute(name, action.nodeAttributes[name]);
-      }
-    }
     buttonNode.addEventListener("click", event => {
       this.doCommandForAction(action, event, buttonNode);
     });
@@ -1023,7 +1013,7 @@ BrowserPageActions.sendToDevice = {
     notReady.setAttribute("label", "sendToDevice-notReadyTitle");
     notReady.setAttribute("disabled", "true");
     bodyNode.appendChild(notReady);
-    for (let node of bodyNode.childNodes) {
+    for (let node of bodyNode.children) {
       BrowserPageActions.takeNodeAttributeFromPanel(node, "title");
       BrowserPageActions.takeNodeAttributeFromPanel(node, "shortcut");
     }
@@ -1218,7 +1208,7 @@ BrowserPageActions.shareURL = {
 
     // We cache the providers + the UI if the user selects the share
     // panel multiple times while the panel is open.
-    if (this._cached && bodyNode.childNodes.length > 0) {
+    if (this._cached && bodyNode.children.length > 0) {
       return;
     }
 

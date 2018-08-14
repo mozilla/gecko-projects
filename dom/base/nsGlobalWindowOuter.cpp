@@ -2117,7 +2117,7 @@ nsGlobalWindowOuter::SetDocShell(nsIDocShell* aDocShell)
   // that we can do some forwarding to the chrome document.
   RefPtr<EventTarget> chromeEventHandler;
   mDocShell->GetChromeEventHandler(getter_AddRefs(chromeEventHandler));
-  mChromeEventHandler = do_QueryInterface(chromeEventHandler);
+  mChromeEventHandler = chromeEventHandler;
   if (!mChromeEventHandler) {
     // We have no chrome event handler. If we have a parent,
     // get our chrome event handler from the parent. If
@@ -3458,7 +3458,7 @@ nsGlobalWindowOuter::GetDevicePixelRatioOuter(CallerType aCallerType)
     return overrideDPPX;
   }
 
-  return double(nsPresContext::AppUnitsPerCSSPixel()) /
+  return double(AppUnitsPerCSSPixel()) /
          double(presContext->AppUnitsPerDevPixel());
 }
 
@@ -7004,7 +7004,7 @@ nsGlobalWindowOuter::OpenInternal(const nsAString& aUrl, const nsAString& aName,
 
   // success!
 
-  if (!aCalledNoScript && !windowExists && uri) {
+  if (!aCalledNoScript && !windowExists && uri && !forceNoOpener) {
     MaybeAllowStorageForOpenedWindow(uri);
   }
 

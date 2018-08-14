@@ -2743,10 +2743,10 @@ SrcNotes(JSContext* cx, HandleScript script, Sprinter* sp)
             break;
 
           case SRC_FOR:
-            if (!sp->jsprintf(" cond %u update %u tail %u",
-                              unsigned(GetSrcNoteOffset(sn, 0)),
-                              unsigned(GetSrcNoteOffset(sn, 1)),
-                              unsigned(GetSrcNoteOffset(sn, 2))))
+            if (!sp->jsprintf(" cond %u update %u backjump %u",
+                              unsigned(GetSrcNoteOffset(sn, SrcNote::For::CondOffset)),
+                              unsigned(GetSrcNoteOffset(sn, SrcNote::For::UpdateOffset)),
+                              unsigned(GetSrcNoteOffset(sn, SrcNote::For::BackJumpOffset))))
             {
                 return false;
             }
@@ -2754,13 +2754,21 @@ SrcNotes(JSContext* cx, HandleScript script, Sprinter* sp)
 
           case SRC_FOR_IN:
           case SRC_FOR_OF:
-            if (!sp->jsprintf(" closingjump %u", unsigned(GetSrcNoteOffset(sn, 0))))
+            static_assert(unsigned(SrcNote::ForIn::BackJumpOffset) == unsigned(SrcNote::ForOf::BackJumpOffset),
+                          "SrcNote::{ForIn,ForOf}::BackJumpOffset should be same");
+            if (!sp->jsprintf(" backjump %u",
+                              unsigned(GetSrcNoteOffset(sn, SrcNote::ForIn::BackJumpOffset))))
+            {
                 return false;
+            }
             break;
 
           case SRC_WHILE:
-            if (!sp->jsprintf(" offset %u", unsigned(GetSrcNoteOffset(sn, 0))))
+            if (!sp->jsprintf(" offset %u",
+                              unsigned(GetSrcNoteOffset(sn, SrcNote::While::BackJumpOffset))))
+            {
                 return false;
+            }
             break;
 
           case SRC_NEXTCASE:
@@ -4476,8 +4484,6 @@ BinParse(JSContext* cx, unsigned argc, Value* vp)
            .setFileAndLine("<ArrayBuffer>", 1);
 
     UsedNameTracker usedNames(cx);
-    if (!usedNames.init())
-        return false;
 
     JS::Result<ParseNode*> parsed(nullptr);
     if (useMultipart) {
@@ -4573,8 +4579,6 @@ Parse(JSContext* cx, unsigned argc, Value* vp)
            .setAllowSyntaxParser(allowSyntaxParser);
 
     UsedNameTracker usedNames(cx);
-    if (!usedNames.init())
-        return false;
 
     RootedScriptSourceObject sourceObject(cx, frontend::CreateScriptSourceObject(cx, options,
                                                                                  Nothing()));
@@ -4630,8 +4634,6 @@ SyntaxParse(JSContext* cx, unsigned argc, Value* vp)
     const char16_t* chars = stableChars.twoByteRange().begin().get();
     size_t length = scriptContents->length();
     UsedNameTracker usedNames(cx);
-    if (!usedNames.init())
-        return false;
 
     RootedScriptSourceObject sourceObject(cx, frontend::CreateScriptSourceObject(cx, options,
                                                                                  Nothing()));
@@ -5306,6 +5308,13 @@ NewGlobal(JSContext* cx, unsigned argc, Value* vp)
         if (v.isBoolean())
             behaviors.setDisableLazyParsing(v.toBoolean());
 
+        if (!JS_GetProperty(cx, opts, "systemPrincipal", &v))
+            return false;
+        if (v.isBoolean()) {
+            principals = &ShellPrincipals::fullyTrusted;
+            JS_HoldPrincipals(principals);
+        }
+
         if (!JS_GetProperty(cx, opts, "principal", &v))
             return false;
         if (!v.isUndefined()) {
@@ -5316,6 +5325,17 @@ NewGlobal(JSContext* cx, unsigned argc, Value* vp)
             if (!principals)
                 return false;
             JS_HoldPrincipals(principals);
+        }
+    }
+
+    if (creationOptions.compartmentSpecifier() == JS::CompartmentSpecifier::ExistingCompartment) {
+        JS::Compartment* comp = creationOptions.compartment();
+        bool isSystem = principals && principals == cx->runtime()->trustedPrincipals();
+        if (isSystem != IsSystemCompartment(comp)) {
+            JS_ReportErrorASCII(cx,
+                                "Cannot create system and non-system realms in the "
+                                "same compartment");
+            return false;
         }
     }
 
@@ -7264,18 +7284,31 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 
     JS_FN_HELP("newGlobal", NewGlobal, 1, 0,
 "newGlobal([options])",
-"  Return a new global object in a new compartment. If options\n"
+"  Return a new global object in a new realm. If options\n"
 "  is given, it may have any of the following properties:\n"
-"      sameZoneAs: the compartment will be in the same zone as the given object (defaults to a new zone)\n"
-"      invisibleToDebugger: the global will be invisible to the debugger (default false)\n"
+"\n"
+"      sameZoneAs: The compartment will be in the same zone as the given\n"
+"         object (defaults to a new zone).\n"
+"      sameCompartmentAs: The global will be in the same compartment and\n"
+"         zone as the given object (defaults to a new compartment).\n"
+"      cloneSingletons: If true, always clone the objects baked into\n"
+"         scripts, even if it's a top-level script that will only run once\n"
+"         (defaults to using them directly in scripts that will only run\n"
+"         once).\n"
+"      invisibleToDebugger: If true, the global will be invisible to the\n"
+"         debugger (default false)\n"
+"      disableLazyParsing: If true, don't create lazy scripts for functions\n"
+"         (default false).\n"
 "      principal: if present, its value converted to a number must be an\n"
-"         integer that fits in 32 bits; use that as the new compartment's\n"
+"         integer that fits in 32 bits; use that as the new realm's\n"
 "         principal. Shell principals are toys, meant only for testing; one\n"
 "         shell principal subsumes another if its set bits are a superset of\n"
 "         the other's. Thus, a principal of 0 subsumes nothing, while a\n"
 "         principals of ~0 subsumes all other principals. The absence of a\n"
 "         principal is treated as if its bits were 0xffff, for subsumption\n"
-"         purposes. If this property is omitted, supply no principal."),
+"         purposes. If this property is omitted, supply no principal.\n"
+"      systemPrincipal: If true, use the shell's trusted principals for the\n"
+"         new realm. This creates a realm that's marked as a 'system' realm."),
 
     JS_FN_HELP("nukeCCW", NukeCCW, 1, 0,
 "nukeCCW(wrapper)",

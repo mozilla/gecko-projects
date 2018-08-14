@@ -950,6 +950,7 @@ nsDocShell::LoadURI(nsIURI* aURI,
   uint32_t flags = 0;
 
   if (inheritPrincipal) {
+    MOZ_ASSERT(!nsContentUtils::IsSystemPrincipal(principalToInherit), "Should not inherit SystemPrincipal");
     flags |= INTERNAL_LOAD_FLAGS_INHERIT_PRINCIPAL;
   }
 
@@ -1699,8 +1700,8 @@ NS_IMETHODIMP
 nsDocShell::SetRemoteTabs(bool aUseRemoteTabs)
 {
   if (aUseRemoteTabs) {
-    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("DOMIPCEnabled"),
-                                       NS_LITERAL_CSTRING("1"));
+    CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::DOMIPCEnabled,
+                                       true);
   }
 
   mUseRemoteTabs = aUseRemoteTabs;
@@ -4772,7 +4773,7 @@ nsDocShell::LoadErrorPage(nsIURI* aURI, const char16_t* aURL,
     nsresult rv = aURI->GetSpec(url);
     NS_ENSURE_SUCCESS(rv, rv);
   } else if (aURL) {
-    CopyUTF16toUTF8(aURL, url);
+    CopyUTF16toUTF8(MakeStringSpan(aURL), url);
   } else {
     return NS_ERROR_INVALID_POINTER;
   }
@@ -13114,20 +13115,23 @@ nsDocShell::GetUseTrackingProtection(bool* aUseTrackingProtection)
 {
   *aUseTrackingProtection  = false;
 
+  static bool sCBEnabled = false;
   static bool sTPEnabled = false;
   static bool sTPInPBEnabled = false;
   static bool sPrefsInit = false;
 
   if (!sPrefsInit) {
     sPrefsInit = true;
+    Preferences::AddBoolVarCache(&sCBEnabled,
+      "browser.contentblocking.enabled", true);
     Preferences::AddBoolVarCache(&sTPEnabled,
       "privacy.trackingprotection.enabled", false);
     Preferences::AddBoolVarCache(&sTPInPBEnabled,
       "privacy.trackingprotection.pbmode.enabled", false);
   }
 
-  if (mUseTrackingProtection || sTPEnabled ||
-      (UsePrivateBrowsing() && sTPInPBEnabled)) {
+  if (mUseTrackingProtection || (sCBEnabled && sTPEnabled) ||
+      (sCBEnabled && UsePrivateBrowsing() && sTPInPBEnabled)) {
     *aUseTrackingProtection = true;
     return NS_OK;
   }
