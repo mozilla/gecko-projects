@@ -307,10 +307,6 @@ release-mark-as-shipped
 -----------------------
 Marks releases as shipped in Ship-It v1
 
-release-submit-mar-manifest
----------------------------
-Submits unsigned mar manifest to Ship It
-
 release-mark-as-started
 -----------------------
 Marks releases as started in Ship-It v1

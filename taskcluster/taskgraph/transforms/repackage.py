@@ -184,7 +184,7 @@ def make_job_description(config, jobs):
             'using': 'mozharness',
             'script': 'mozharness/scripts/repackage.py',
             'job-script': 'taskcluster/scripts/builder/repackage.sh',
-            'actions': ['download_input', 'setup', 'repackage', 'generate_checksums'],
+            'actions': ['download_input', 'setup', 'repackage'],
             'extra-workspace-cache-key': 'repackage',
         })
 
@@ -290,20 +290,12 @@ def _generate_task_output_files(task, build_platform, locale=None, project=None)
     artifact_prefix = get_artifact_prefix(task)
 
     if build_platform.startswith('linux') or build_platform.startswith('macosx'):
-        output_files = [
-            {
-                'type': 'file',
-                'path': '/builds/worker/workspace/build/artifacts/{}target.complete.mar'
-                        .format(locale_output_path),
-                'name': '{}/{}target.complete.mar'.format(artifact_prefix, locale_output_path),
-            },
-            {
-                'type': 'file',
-                'path': '/builds/worker/workspace/build/artifacts/{}target.complete.mar.sha512'
-                        .format(locale_output_path),
-                'name': '{}/{}target.complete.mar.sha512'.format(artifact_prefix, locale_output_path),
-            },
-        ]
+        output_files = [{
+            'type': 'file',
+            'path': '/builds/worker/workspace/build/artifacts/{}target.complete.mar'
+                    .format(locale_output_path),
+            'name': '{}/{}target.complete.mar'.format(artifact_prefix, locale_output_path),
+        }]
 
         if build_platform.startswith('macosx'):
             output_files.append({
@@ -322,10 +314,6 @@ def _generate_task_output_files(task, build_platform, locale=None, project=None)
             'type': 'file',
             'path': '{}/{}target.complete.mar'.format(artifact_prefix, locale_output_path),
             'name': '{}/{}target.complete.mar'.format(artifact_prefix, locale_output_path),
-        }, {
-            'type': 'file',
-            'path': '{}/{}target.complete.mar.sha512'.format(artifact_prefix, locale_output_path),
-            'name': '{}/{}target.complete.mar.sha512'.format(artifact_prefix, locale_output_path),
         }]
 
         use_stub = task.attributes.get('stub-installer')
