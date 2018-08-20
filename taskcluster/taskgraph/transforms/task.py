@@ -559,7 +559,7 @@ task_description_schema = Schema({
         Required('entries'): object,
     }, {
         Required('implementation'): 'bouncer-locations',
-        Required('locations'): [basestring],
+        Required('bouncer-products'): [basestring],
     }, {
         Required('implementation'): 'bouncer-submission',
         Required('locales'): [basestring],
@@ -1171,7 +1171,7 @@ def build_bouncer_locations_payload(config, task, task_def):
     release_config = get_release_config(config)
 
     task_def['payload'] = {
-        'locations_entries': worker['locations'],
+        'bouncer_products': worker['bouncer-products'],
         'version': release_config['version'],
     }
 

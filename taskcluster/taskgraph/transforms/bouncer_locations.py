@@ -27,7 +27,7 @@ def make_task_worker(config, jobs):
             job, 'bouncer-products', item_name=job['name'], project=config.params['project']
         )
 
-        job['worker']['locations'] = job['bouncer-products']
+        job['worker']['bouncer-products'] = job['bouncer-products']
 
         del job['bouncer-products']
         yield job
