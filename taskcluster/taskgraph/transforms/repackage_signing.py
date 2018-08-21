@@ -105,7 +105,7 @@ def make_repackage_signing_description(config, jobs):
             "paths": [
                 get_artifact_path(dep_job, "{}target.complete.mar".format(locale_str)),
             ],
-            "formats": ["mar_sha384"]
+            "formats": ["autograph_mar384"]
         }]
         if 'win' in build_platform:
             upstream_artifacts.append({
