@@ -1029,6 +1029,11 @@ pub unsafe extern "C" fn wr_api_shut_down(dh: &mut DocumentHandle) {
     dh.api.shut_down();
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn wr_api_notify_memory_pressure(dh: &mut DocumentHandle) {
+    dh.api.notify_memory_pressure();
+}
+
 /// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_api_clear_all_caches(dh: &mut DocumentHandle) {
@@ -1955,7 +1960,8 @@ pub extern "C" fn wr_dp_push_image(state: &mut WrState,
                                    tile_spacing: LayoutSize,
                                    image_rendering: ImageRendering,
                                    key: WrImageKey,
-                                   premultiplied_alpha: bool) {
+                                   premultiplied_alpha: bool,
+                                   color: ColorF) {
     debug_assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
     let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(bounds, clip.into());
@@ -1973,7 +1979,8 @@ pub extern "C" fn wr_dp_push_image(state: &mut WrState,
                      tile_spacing,
                      image_rendering,
                      alpha_type,
-                     key);
+                     key,
+                     color);
 }
 
 /// Push a 3 planar yuv image.

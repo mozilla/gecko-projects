@@ -25,7 +25,9 @@
 #include "gc/PublicIterators.h"
 #include "jit/BaselineDebugModeOSR.h"
 #include "jit/BaselineJIT.h"
+#include "js/AutoByteString.h"
 #include "js/Date.h"
+#include "js/StableStringChars.h"
 #include "js/UbiNodeBreadthFirst.h"
 #include "js/Vector.h"
 #include "js/Wrapper.h"
@@ -55,6 +57,7 @@
 
 using namespace js;
 
+using JS::AutoStableStringChars;
 using JS::dbg::AutoEntryMonitor;
 using JS::dbg::Builder;
 using js::frontend::IsIdentifier;
@@ -3720,9 +3723,11 @@ Debugger::addDebuggee(JSContext* cx, unsigned argc, Value* vp)
 Debugger::addAllGlobalsAsDebuggees(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGGER(cx, argc, vp, "addAllGlobalsAsDebuggees", args, dbg);
-    for (ZonesIter zone(cx->runtime(), SkipAtoms); !zone.done(); zone.next()) {
-        for (RealmsInZoneIter r(zone); !r.done(); r.next()) {
-            if (r == dbg->object->realm() || r->creationOptions().invisibleToDebugger())
+    for (CompartmentsIter comp(cx->runtime()); !comp.done(); comp.next()) {
+        if (comp == dbg->object->compartment())
+            continue;
+        for (RealmsInCompartmentIter r(comp); !r.done(); r.next()) {
+            if (r->creationOptions().invisibleToDebugger())
                 continue;
             r->compartment()->gcState.scheduledForDestruction = false;
             GlobalObject* global = r->maybeGlobal();
@@ -3918,7 +3923,7 @@ Debugger::construct(JSContext* cx, unsigned argc, Value* vp)
     // Add the initial debuggees, if any.
     for (unsigned i = 0; i < args.length(); i++) {
         JSObject& wrappedObj = args[i].toObject().as<ProxyObject>().private_().toObject();
-        Rooted<GlobalObject*> debuggee(cx, &wrappedObj.deprecatedGlobal());
+        Rooted<GlobalObject*> debuggee(cx, &wrappedObj.nonCCWGlobal());
         if (!debugger->addDebuggeeGlobal(cx, debuggee))
             return false;
     }
@@ -3940,6 +3945,12 @@ Debugger::addDebuggeeGlobal(JSContext* cx, Handle<GlobalObject*> global)
     Realm* debuggeeRealm = global->realm();
     if (debuggeeRealm->creationOptions().invisibleToDebugger()) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_CANT_DEBUG_GLOBAL);
+        return false;
+    }
+
+    // Debugger and debuggee must be in different compartments.
+    if (debuggeeRealm->compartment() == object->compartment()) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_SAME_COMPARTMENT);
         return false;
     }
 
@@ -5036,7 +5047,7 @@ Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp)
     }
 
     JSString* str = args[0].toString();
-    size_t length = GetStringLength(str);
+    size_t length = str->length();
 
     AutoStableStringChars chars(cx);
     if (!chars.initTwoByte(cx, str))

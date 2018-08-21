@@ -11,8 +11,10 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/Move.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/TextUtils.h"
 #include "mozilla/Unused.h"
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdlib>
@@ -39,8 +41,10 @@
 #include "jit/BaselineJIT.h"
 #include "jit/InlinableNatives.h"
 #include "jit/JitRealm.h"
+#include "js/AutoByteString.h"
 #include "js/Debug.h"
 #include "js/HashTable.h"
+#include "js/StableStringChars.h"
 #include "js/StructuredClone.h"
 #include "js/UbiNode.h"
 #include "js/UbiNodeBreadthFirst.h"
@@ -82,6 +86,8 @@ using namespace js;
 
 using mozilla::ArrayLength;
 using mozilla::Maybe;
+
+using JS::AutoStableStringChars;
 
 // If fuzzingSafe is set, remove functionality that could cause problems with
 // fuzzers. Set this via the environment variable MOZ_FUZZING_SAFE.
@@ -4953,6 +4959,85 @@ SetTimeZone(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+static bool
+GetDefaultLocale(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    RootedObject callee(cx, &args.callee());
+
+    if (args.length() != 0) {
+        ReportUsageErrorASCII(cx, callee, "Wrong number of arguments");
+        return false;
+    }
+
+    UniqueChars locale = JS_GetDefaultLocale(cx);
+    if (!locale) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEFAULT_LOCALE_ERROR);
+        return false;
+    }
+
+    return ReturnStringCopy(cx, args, locale.get());
+}
+
+static bool
+SetDefaultLocale(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    RootedObject callee(cx, &args.callee());
+
+    if (args.length() != 1) {
+        ReportUsageErrorASCII(cx, callee, "Wrong number of arguments");
+        return false;
+    }
+
+    if (!args[0].isString() && !args[0].isUndefined()) {
+        ReportUsageErrorASCII(cx, callee, "First argument should be a string or undefined");
+        return false;
+    }
+
+    if (args[0].isString() && !args[0].toString()->empty()) {
+        auto containsOnlyValidBCP47Characters = [](auto* chars, size_t length) {
+            return mozilla::IsAsciiAlpha(chars[0]) &&
+                   std::all_of(chars, chars + length, [](auto c) {
+                       return mozilla::IsAsciiAlphanumeric(c) || c == '-';
+                   });
+        };
+
+        RootedLinearString str(cx, args[0].toString()->ensureLinear(cx));
+        if (!str)
+            return false;
+
+        bool hasValidChars;
+        {
+            JS::AutoCheckCannotGC nogc;
+
+            size_t length = str->length();
+            hasValidChars = str->hasLatin1Chars()
+                            ? containsOnlyValidBCP47Characters(str->latin1Chars(nogc), length)
+                            : containsOnlyValidBCP47Characters(str->twoByteChars(nogc), length);
+        }
+
+        if (!hasValidChars) {
+            ReportUsageErrorASCII(cx, callee, "First argument should be BCP47 language tag");
+            return false;
+        }
+
+        JSAutoByteString locale;
+        if (!locale.encodeLatin1(cx, str))
+            return false;
+
+        if (!JS_SetDefaultLocale(cx->runtime(), locale.ptr())) {
+            ReportOutOfMemory(cx);
+            return false;
+        }
+    } else {
+        JS_ResetDefaultLocale(cx->runtime());
+    }
+
+    args.rval().setUndefined();
+    return true;
+}
+
 #if defined(FUZZING) && defined(__AFL_COMPILER)
 static bool
 AflLoop(JSContext* cx, unsigned argc, Value* vp)
@@ -5248,6 +5333,15 @@ BaselineCompile(JSContext* cx, unsigned argc, Value* vp)
 
     const char* returnedStr = nullptr;
     do {
+#ifdef JS_MORE_DETERMINISTIC
+        // In order to check for differential behaviour, baselineCompile should have
+        // the same output whether --no-baseline is used or not.
+        if (fuzzingSafe) {
+            returnedStr = "skipped (fuzzing-safe)";
+            break;
+        }
+#endif
+
         AutoRealm ar(cx, script);
         if (script->hasBaselineScript()) {
             if (forceDebug && !script->baselineScript()->hasDebugInstrumentation()) {
@@ -5943,6 +6037,10 @@ gc::ZealModeHelpText),
 "getTimeZone()",
 "  Get the current time zone.\n"),
 
+    JS_FN_HELP("getDefaultLocale", GetDefaultLocale, 0, 0,
+"getDefaultLocale()",
+"  Get the current default locale.\n"),
+
     JS_FN_HELP("setTimeResolution", SetTimeResolution, 2, 0,
 "setTimeResolution(resolution, jitter)",
 "  Enables time clamping and jittering. Specify a time resolution in\n"
@@ -5967,7 +6065,8 @@ gc::ZealModeHelpText),
 "  that extra boilerplate is needed afterwards to cause the VM to start\n"
 "  running the jitcode rather than staying in the interpreter:\n"
 "    baselineCompile();  for (var i=0; i<1; i++) {} ...\n"
-"  The interpreter will enter the new jitcode at the loop header.\n"),
+"  The interpreter will enter the new jitcode at the loop header unless\n"
+"  baselineCompile returned a string or threw an error.\n"),
 
     JS_FS_HELP_END
 };
@@ -5992,6 +6091,12 @@ static const JSFunctionSpecWithHelp FuzzingUnsafeTestingFunctions[] = {
 "  Set the 'TZ' environment variable to the given time zone and applies the new time zone.\n"
 "  An empty string or undefined resets the time zone to its default value.\n"
 "  NOTE: The input string is not validated and will be passed verbatim to setenv()."),
+
+JS_FN_HELP("setDefaultLocale", SetDefaultLocale, 1, 0,
+"setDefaultLocale(locale)",
+"  Set the runtime default locale to the given value.\n"
+"  An empty string or undefined resets the runtime locale to its default value.\n"
+"  NOTE: The input string is not fully validated, it must be a valid BCP-47 language tag."),
 
     JS_FS_HELP_END
 };

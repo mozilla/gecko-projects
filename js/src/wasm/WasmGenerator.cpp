@@ -513,10 +513,6 @@ ModuleGenerator::noteCodeRange(uint32_t codeRangeIndex, const CodeRange& codeRan
         MOZ_ASSERT(!debugTrapCodeOffset_);
         debugTrapCodeOffset_ = codeRange.begin();
         break;
-      case CodeRange::UnalignedExit:
-        MOZ_ASSERT(!linkDataTier_->unalignedAccessOffset);
-        linkDataTier_->unalignedAccessOffset = codeRange.begin();
-        break;
       case CodeRange::TrapExit:
         MOZ_ASSERT(!linkDataTier_->trapOffset);
         linkDataTier_->trapOffset = codeRange.begin();
@@ -866,7 +862,7 @@ ModuleGenerator::finishMetadata(const ShareableBytes& bytecode)
     // now that every function has a code range.
 
     for (FuncExport& fe : metadataTier_->funcExports)
-        fe.initInterpCodeRangeIndex(funcToCodeRange_[fe.funcIndex()]);
+        fe.initFuncCodeRangeIndex(funcToCodeRange_[fe.funcIndex()]);
 
     for (ElemSegment& elems : env_->elemSegments) {
         Uint32Vector& codeRangeIndices = elems.elemCodeRangeIndices(tier());

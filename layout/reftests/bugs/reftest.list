@@ -1389,7 +1389,7 @@ random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == 495385-4.html 495385-4-r
 == 501257-1a.html 501257-1-ref.html
 == 501257-1b.html 501257-1-ref.html
 == 501257-1.xhtml 501257-1-ref.xhtml
-fuzzy-if(webrender,5-6,83244-97456) == 501627-1.html 501627-1-ref.html
+fuzzy-if(webrender,2-6,39042-97456) == 501627-1.html 501627-1-ref.html # Bug 1481664
 == 502288-1.html 502288-1-ref.html
 fuzzy-if(gtkWidget,0-1,0-2) == 502447-1.html 502447-1-ref.html #Bug 1315834
 == 502795-1.html 502795-1-ref.html
@@ -1866,7 +1866,7 @@ test-pref(dom.webcomponents.shadowdom.enabled,true) == 1066554-1.html 1066554-1-
 == 1069716-1.html 1069716-1-ref.html
 == 1078262-1.html about:blank
 test-pref(layout.testing.overlay-scrollbars.always-visible,false) == 1081072-1.html 1081072-1-ref.html
-fails-if(webrender) == 1081185-1.html 1081185-1-ref.html
+== 1081185-1.html 1081185-1-ref.html
 == 1097437-1.html 1097437-1-ref.html
 == 1103258-1.html 1103258-1-ref.html # assertion crash test with layers culling test
 == 1105137-1.html 1105137-1-ref.html
@@ -2080,3 +2080,4 @@ test-pref(layout.css.contain.enabled,false) == 1466008.html 1466008-ref.html
 fuzzy(0-1,0-625) == 1466638-1.html 1466638-1-ref.html
 == bug1472465-1.html bug1472465-1-ref.html
 == 1475971-1.html 1475971-1-ref.html
+== 1483649-1.xul 1483649-1-ref.xul

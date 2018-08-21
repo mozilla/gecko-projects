@@ -13,6 +13,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.lang.IllegalStateException;
 import java.net.MalformedURLException;
 import java.net.Proxy;
 import java.net.URLConnection;
@@ -237,6 +238,8 @@ public class GeckoAppShell
 
     @WrapForJNI(dispatchTo = "gecko")
     public static native void notifyUriVisited(String uri);
+
+    private static Rect sScreenSizeOverride;
 
     @WrapForJNI(stubName = "NotifyObservers", dispatchTo = "gecko")
     private static native void nativeNotifyObservers(String topic, String data);
@@ -983,16 +986,30 @@ public class GeckoAppShell
         getNotificationListener().closeNotification(name);
     }
 
+    public static synchronized void setDisplayDpiOverride(final Integer dpi) {
+        if (dpi == null) {
+            return;
+        }
+        if (sDensityDpi != 0) {
+            Log.e(LOGTAG, "Tried to override screen DPI after it's already been set");
+            throw new IllegalStateException();
+        }
+        sDensityDpi = dpi;
+    }
+
     @WrapForJNI(calledFrom = "gecko")
-    public static int getDpi() {
+    public static synchronized int getDpi() {
         if (sDensityDpi == 0) {
             sDensityDpi = getApplicationContext().getResources().getDisplayMetrics().densityDpi;
         }
-
         return sDensityDpi;
     }
 
     public static synchronized void setDisplayDensityOverride(@Nullable Float density) {
+        if (sDensity != null) {
+            Log.e(LOGTAG, "Tried to override screen density after it's already been set");
+            throw new IllegalStateException();
+        }
         sDensity = density;
     }
 
@@ -1027,16 +1044,6 @@ public class GeckoAppShell
         }
 
         return sScreenDepth;
-    }
-
-    @WrapForJNI(calledFrom = "gecko")
-    private static synchronized void setScreenDepthOverride(int aScreenDepth) {
-        if (sScreenDepth != 0) {
-            Log.e(LOGTAG, "Tried to override screen depth after it's already been set");
-            return;
-        }
-
-        sScreenDepth = aScreenDepth;
     }
 
     @WrapForJNI(calledFrom = "gecko")
@@ -1823,8 +1830,15 @@ public class GeckoAppShell
         return 0;
     }
 
+    public static synchronized void setScreenSizeOverride(final Rect size) {
+        sScreenSizeOverride = size;
+    }
+
     @WrapForJNI(calledFrom = "gecko")
-    private static Rect getScreenSize() {
+    private static synchronized Rect getScreenSize() {
+        if (sScreenSizeOverride != null) {
+            return sScreenSizeOverride;
+        }
         final WindowManager wm = (WindowManager)
                 getApplicationContext().getSystemService(Context.WINDOW_SERVICE);
         final Display disp = wm.getDefaultDisplay();

@@ -1098,6 +1098,10 @@ bool wr_api_hit_test(DocumentHandle *aDh,
 WR_FUNC;
 
 WR_INLINE
+void wr_api_notify_memory_pressure(DocumentHandle *aDh)
+WR_FUNC;
+
+WR_INLINE
 void wr_api_send_external_event(DocumentHandle *aDh,
                                 uintptr_t aEvt)
 WR_DESTRUCTOR_SAFE_FUNC;
@@ -1291,7 +1295,8 @@ void wr_dp_push_image(WrState *aState,
                       LayoutSize aTileSpacing,
                       ImageRendering aImageRendering,
                       WrImageKey aKey,
-                      bool aPremultipliedAlpha)
+                      bool aPremultipliedAlpha,
+                      ColorF color)
 WR_FUNC;
 
 WR_INLINE

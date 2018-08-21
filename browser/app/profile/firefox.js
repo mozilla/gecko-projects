@@ -1051,7 +1051,7 @@ pref("security.sandbox.content.level", 3);
 // 2 - "read access triggered by file dialog activity, limited read/write"
 //     "access for Flash functionality"
 // 3 - "limited read/write access for Flash functionality"
-pref("dom.ipc.plugins.sandbox-level.flash", 2);
+pref("dom.ipc.plugins.sandbox-level.flash", 1);
 // Controls the level used on older OS X versions. Is overriden when the
 // "dom.ipc.plugins.sandbox-level.flash" is set to 0.
 pref("dom.ipc.plugins.sandbox-level.flash.legacy", 1);
@@ -1060,7 +1060,7 @@ pref("dom.ipc.plugins.sandbox-level.flash.max-legacy-os-minor", 10);
 // Controls the sandbox level used by plugins other than Flash. On Mac,
 // no other plugins are supported and this pref is only used for test
 // plugins used in automated tests.
-pref("dom.ipc.plugins.sandbox-level.default", 2);
+pref("dom.ipc.plugins.sandbox-level.default", 1);
 #endif
 
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
@@ -1402,7 +1402,7 @@ pref("identity.fxaccounts.migrateToDevEdition", false);
 #endif
 
 // If activated, send tab will use the new FxA commands backend.
-pref("identity.fxaccounts.commands.enabled", true);
+pref("identity.fxaccounts.commands.enabled", false);
 
 // On GTK, we now default to showing the menubar only when alt is pressed:
 #ifdef MOZ_WIDGET_GTK
@@ -1488,10 +1488,13 @@ pref("browser.ping-centre.production.endpoint", "https://tiles.services.mozilla.
 pref("media.gmp-provider.enabled", true);
 
 pref("browser.contentblocking.enabled", true);
+pref("browser.contentblocking.cookies-site-data.ui.reject-trackers.recommended", true);
 #ifdef NIGHTLY_BUILD
 pref("browser.contentblocking.ui.enabled", true);
+pref("browser.contentblocking.cookies-site-data.ui.reject-trackers.enabled", true);
 #else
 pref("browser.contentblocking.ui.enabled", false);
+pref("browser.contentblocking.cookies-site-data.ui.reject-trackers.enabled", false);
 #endif
 #ifdef NIGHTLY_BUILD
 pref("browser.contentblocking.reportBreakage.enabled", true);

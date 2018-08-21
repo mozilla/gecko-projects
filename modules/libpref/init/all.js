@@ -1010,8 +1010,10 @@ pref("accessibility.typeaheadfind.autostart", true);
 pref("accessibility.typeaheadfind.casesensitive", 0);
 pref("accessibility.typeaheadfind.linksonly", true);
 pref("accessibility.typeaheadfind.startlinksonly", false);
+// timeout: controls the delay in milliseconds after which the quick-find dialog will close
+//          if no further keystrokes are pressed
+//              set to a zero or negative value to keep dialog open until it's manually closed
 pref("accessibility.typeaheadfind.timeout", 4000);
-pref("accessibility.typeaheadfind.enabletimeout", true);
 pref("accessibility.typeaheadfind.soundURL", "beep");
 pref("accessibility.typeaheadfind.enablesound", true);
 #ifdef XP_MACOSX
@@ -1193,16 +1195,33 @@ pref("print.font-variations-as-paths", true);
 // in a document.
 pref("extensions.spellcheck.inline.max-misspellings", 500);
 
-// Prefs used by libeditor. Prefs specific to seamonkey composer
-// belong in comm-central/editor/ui/composer.js
+// General prefs for editor.
+// Whether Gecko specific editing UI is enabled by default.
+// Those UIs are not impelemnted by any other browsers.  So, only Firefox users
+// can change some styles with them.  This means that only Firefox users may
+// get unexpected result of some web apps if they assume that users cannot
+// change such styles.
+#ifdef EARLY_BETA_OR_EARLIER
+pref("editor.resizing.enabled_by_default", false);
+pref("editor.inline_table_editing.enabled_by_default", false);
+pref("editor.positioning.enabled_by_default", false);
+#else
+pref("editor.resizing.enabled_by_default", true);
+pref("editor.inline_table_editing.enabled_by_default", true);
+pref("editor.positioning.enabled_by_default", true);
+#endif
+// Whether inserting <div> when typing Enter in a block element which can
+// contain <div>.  If false, inserts <br> instead.
+pref("editor.use_div_for_default_newlines",  true);
 
+// Prefs specific to seamonkey composer belong in
+// comm-central/editor/ui/composer.js
 pref("editor.use_custom_colors", false);
 pref("editor.singleLine.pasteNewlines",      2);
 pref("editor.use_css",                       false);
 pref("editor.css.default_length_unit",       "px");
 pref("editor.resizing.preserve_ratio",       true);
 pref("editor.positioning.offset",            0);
-pref("editor.use_div_for_default_newlines",  true);
 
 // Scripts & Windows prefs
 pref("dom.disable_beforeunload",            false);
@@ -5313,16 +5332,18 @@ pref("dom.vr.poseprediction.enabled", true);
 // this requirement to be disabled for special cases such as during automated
 // tests or in a headless kiosk system.
 pref("dom.vr.require-gesture", true);
-// path to OSVR DLLs
-pref("gfx.vr.osvr.utilLibPath", "");
-pref("gfx.vr.osvr.commonLibPath", "");
-pref("gfx.vr.osvr.clientLibPath", "");
-pref("gfx.vr.osvr.clientKitLibPath", "");
+// Enable a separate process for VR module.
+pref("dom.vr.process.enabled", false);
 // Puppet device, used for simulating VR hardware within tests and dev tools
 pref("dom.vr.puppet.enabled", false);
 // Allow displaying the result of vr submitframe (0: disable, 1: store the
 // result as a base64 image, 2: show it on the screen).
 pref("dom.vr.puppet.submitframe", 0);
+// path to OSVR DLLs
+pref("gfx.vr.osvr.utilLibPath", "");
+pref("gfx.vr.osvr.commonLibPath", "");
+pref("gfx.vr.osvr.clientLibPath", "");
+pref("gfx.vr.osvr.clientKitLibPath", "");
 // The number of milliseconds since last frame start before triggering a new frame.
 // When content is failing to submit frames on time or the lower level VR platform API's
 // are rejecting frames, it determines the rate at which RAF callbacks will be called.
@@ -5617,6 +5638,9 @@ pref("intl.allow-insecure-text-input", false);
 
 // Enable meta-viewport support in remote APZ-enabled frames.
 pref("dom.meta-viewport.enabled", false);
+
+// Disable Visual Viewport API
+pref("dom.visualviewport.enabled", false);
 
 // Search service settings
 pref("browser.search.log", false);

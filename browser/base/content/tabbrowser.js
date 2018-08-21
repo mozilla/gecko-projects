@@ -775,7 +775,7 @@ window._gBrowser = {
     }
   },
 
-  setIcon(aTab, aIconURL = "", aOriginalURL = aIconURL) {
+  setIcon(aTab, aIconURL = "", aOriginalURL = aIconURL, aLoadingPrincipal = null) {
     let makeString = (url) => url instanceof Ci.nsIURI ? url.spec : url;
 
     aIconURL = makeString(aIconURL);
@@ -788,8 +788,8 @@ window._gBrowser = {
       "data:",
     ];
 
-    if (aIconURL && !LOCAL_PROTOCOLS.some(protocol => aIconURL.startsWith(protocol))) {
-      console.error(`Attempt to set a remote URL ${aIconURL} as a tab icon.`);
+    if (aIconURL && !aLoadingPrincipal && !LOCAL_PROTOCOLS.some(protocol => aIconURL.startsWith(protocol))) {
+      console.error(`Attempt to set a remote URL ${aIconURL} as a tab icon without a loading principal.`);
       return;
     }
 
@@ -798,9 +798,15 @@ window._gBrowser = {
 
     if (aIconURL != aTab.getAttribute("image")) {
       if (aIconURL) {
+        if (aLoadingPrincipal) {
+          aTab.setAttribute("iconloadingprincipal", aLoadingPrincipal);
+        } else {
+          aTab.removeAttribute("iconloadingprincipal");
+        }
         aTab.setAttribute("image", aIconURL);
       } else {
         aTab.removeAttribute("image");
+        aTab.removeAttribute("iconloadingprincipal");
       }
       this._tabAttrModified(aTab, ["image"]);
     }
@@ -874,10 +880,16 @@ window._gBrowser = {
       return;
     }
 
-    if (!aForceUpdate) {
-      document.commandDispatcher.lock();
+    let newTab = this.getTabForBrowser(newBrowser);
 
+    if (!aForceUpdate) {
       TelemetryStopwatch.start("FX_TAB_SWITCH_UPDATE_MS");
+
+      if (gMultiProcessBrowser) {
+        this._getSwitcher().requestTab(newTab);
+      }
+
+      document.commandDispatcher.lock();
     }
 
     let oldTab = this.selectedTab;
@@ -904,7 +916,6 @@ window._gBrowser = {
           !window.isFullyOccluded);
     }
 
-    let newTab = this.getTabForBrowser(newBrowser);
     this._selectedBrowser = newBrowser;
     this._selectedTab = newTab;
     this.showTab(newTab);
@@ -3353,6 +3364,7 @@ window._gBrowser = {
     // Reset temporary permissions on the current tab. This is done here
     // because we only want to reset permissions on user reload.
     SitePermissions.clearTemporaryPermissions(browser);
+    PanelMultiView.hidePopup(gIdentityHandler._identityPopup);
     browser.reload();
   },
 
@@ -4348,12 +4360,6 @@ window._gBrowser = {
     this.tabpanels.addEventListener("select", event => {
       if (event.target == this.tabpanels) {
         this.updateCurrentBrowser();
-      }
-    });
-
-    this.tabpanels.addEventListener("preselect", event => {
-      if (gMultiProcessBrowser) {
-        this._getSwitcher().requestTab(event.detail);
       }
     });
 

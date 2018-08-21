@@ -15,6 +15,7 @@
 #include "Layers.h"
 #include "ContentChild.h"
 #include "TabParent.h"
+#include "js/JSON.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/BrowserElementParent.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -43,6 +44,7 @@
 #include "mozilla/layout/RenderFrameChild.h"
 #include "mozilla/layout/RenderFrameParent.h"
 #include "mozilla/plugins/PPluginWidgetChild.h"
+#include "mozilla/recordreplay/ParentIPC.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Move.h"
@@ -339,7 +341,10 @@ private:
         }
 
         // Check in case ActorDestroy was called after RecvDestroy message.
-        if (mTabChild->IPCOpen()) {
+        // Middleman processes with their own recording child process avoid
+        // sending a delete message, so that the parent process does not
+        // receive two deletes for the same actor.
+        if (mTabChild->IPCOpen() && !recordreplay::parent::IsMiddlemanWithRecordingChild()) {
           Unused << PBrowserChild::Send__delete__(mTabChild);
         }
 
@@ -2377,12 +2382,12 @@ TabChild::RecvSwappedWithOtherRemoteLoader(const IPCTabContext& aContext)
 
   RefPtr<nsDocShell> docShell = static_cast<nsDocShell*>(ourDocShell.get());
 
-  nsCOMPtr<EventTarget> ourEventTarget = ourWindow->GetParentTarget();
+  nsCOMPtr<EventTarget> ourEventTarget = nsGlobalWindowOuter::Cast(ourWindow);
 
   docShell->SetInFrameSwap(true);
 
-  nsContentUtils::FirePageShowEvent(ourDocShell, ourEventTarget, false);
-  nsContentUtils::FirePageHideEvent(ourDocShell, ourEventTarget);
+  nsContentUtils::FirePageShowEvent(ourDocShell, ourEventTarget, false, true);
+  nsContentUtils::FirePageHideEvent(ourDocShell, ourEventTarget, true);
 
   // Owner content type may have changed, so store the possibly updated context
   // and notify others.
@@ -2410,7 +2415,7 @@ TabChild::RecvSwappedWithOtherRemoteLoader(const IPCTabContext& aContext)
     RecvLoadRemoteScript(BROWSER_ELEMENT_CHILD_SCRIPT, true);
   }
 
-  nsContentUtils::FirePageShowEvent(ourDocShell, ourEventTarget, true);
+  nsContentUtils::FirePageShowEvent(ourDocShell, ourEventTarget, true, true);
 
   docShell->SetInFrameSwap(false);
 

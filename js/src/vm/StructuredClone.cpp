@@ -519,7 +519,7 @@ struct JSStructuredCloneWriter {
     bool writeSharedWasmMemory(HandleObject obj);
     bool startObject(HandleObject obj, bool* backref);
     bool startWrite(HandleValue v);
-    bool traverseObject(HandleObject obj);
+    bool traverseObject(HandleObject obj, ESClass cls);
     bool traverseMap(HandleObject obj);
     bool traverseSet(HandleObject obj);
     bool traverseSavedFrame(HandleObject obj);
@@ -1375,33 +1375,101 @@ JSStructuredCloneWriter::startObject(HandleObject obj, bool* backref)
     return true;
 }
 
-bool
-JSStructuredCloneWriter::traverseObject(HandleObject obj)
+static bool
+TryAppendNativeProperties(JSContext* cx, HandleObject obj, AutoValueVector& entries, size_t* properties,
+                          bool* optimized)
 {
-    // Get enumerable property ids and put them in reverse order so that they
-    // will come off the stack in forward order.
-    AutoIdVector properties(context());
-    if (!GetPropertyKeys(context(), obj, JSITER_OWNONLY, &properties))
+    *optimized = false;
+
+    if (!obj->isNative())
+        return true;
+
+    HandleNativeObject nobj = obj.as<NativeObject>();
+    if (nobj->isIndexed() ||
+        nobj->is<TypedArrayObject>() ||
+        nobj->getClass()->getNewEnumerate() ||
+        nobj->getClass()->getEnumerate())
+    {
+        return true;
+    }
+
+    *optimized = true;
+
+    size_t count = 0;
+    // We iterate from the last to the first shape, so the property names
+    // are already in reverse order.
+    RootedShape shape(cx, nobj->lastProperty());
+    for (Shape::Range<NoGC> r(shape); !r.empty(); r.popFront()) {
+        jsid id = r.front().propidRaw();
+
+        // Ignore symbols and non-enumerable properties.
+        if (!r.front().enumerable() || JSID_IS_SYMBOL(id))
+            continue;
+
+        MOZ_ASSERT(JSID_IS_STRING(id));
+        if (!entries.append(StringValue(JSID_TO_STRING(id))))
+            return false;
+
+        count++;
+    }
+
+    // Add dense element ids in reverse order.
+    for (uint32_t i = nobj->getDenseInitializedLength(); i > 0; --i) {
+        if (nobj->getDenseElement(i - 1).isMagic(JS_ELEMENTS_HOLE))
+            continue;
+
+        if (!entries.append(Int32Value(i - 1)))
+            return false;
+
+        count++;
+    }
+
+    *properties = count;
+    return true;
+}
+
+bool
+JSStructuredCloneWriter::traverseObject(HandleObject obj, ESClass cls)
+{
+    size_t count;
+    bool optimized = false;
+    if (!TryAppendNativeProperties(context(), obj, entries, &count, &optimized))
         return false;
 
-    for (size_t i = properties.length(); i > 0; --i) {
-        MOZ_ASSERT(JSID_IS_STRING(properties[i - 1]) || JSID_IS_INT(properties[i - 1]));
-        RootedValue val(context(), IdToValue(properties[i - 1]));
-        if (!entries.append(val))
+    if (!optimized) {
+        // Get enumerable property ids and put them in reverse order so that they
+        // will come off the stack in forward order.
+        AutoIdVector properties(context());
+        if (!GetPropertyKeys(context(), obj, JSITER_OWNONLY, &properties))
             return false;
+
+        for (size_t i = properties.length(); i > 0; --i) {
+            MOZ_ASSERT(JSID_IS_STRING(properties[i - 1]) || JSID_IS_INT(properties[i - 1]));
+
+            // JSStructuredCloneWriter::write relies on this.
+            RootedValue val(context(), IdToValue(properties[i - 1]));
+            if (!entries.append(val))
+                return false;
+
+        }
+
+        count = properties.length();
     }
 
     // Push obj and count to the stack.
-    if (!objs.append(ObjectValue(*obj)) || !counts.append(properties.length()))
+    if (!objs.append(ObjectValue(*obj)) || !counts.append(count))
         return false;
 
     checkStack();
 
-    // Write the header for obj.
-    ESClass cls;
-    if (!GetBuiltinClass(context(), obj, &cls))
+#if DEBUG
+    ESClass cls2;
+    if (!GetBuiltinClass(context(), obj, &cls2))
         return false;
+    MOZ_ASSERT(cls2 == cls);
+#endif
 
+    // Write the header for obj.
     if (cls == ESClass::Array) {
         uint32_t length = 0;
         if (!JS_GetArrayLength(context(), obj, &length))
@@ -1611,61 +1679,80 @@ JSStructuredCloneWriter::startWrite(HandleValue v)
         if (!GetBuiltinClass(context(), obj, &cls))
             return false;
 
-        if (cls == ESClass::RegExp) {
+        switch (cls) {
+          case ESClass::Object:
+          case ESClass::Array:
+            return traverseObject(obj, cls);
+          case ESClass::Number: {
+            RootedValue unboxed(context());
+            if (!Unbox(context(), obj, &unboxed))
+                return false;
+            return out.writePair(SCTAG_NUMBER_OBJECT, 0) && out.writeDouble(unboxed.toNumber());
+          }
+          case ESClass::String: {
+            RootedValue unboxed(context());
+            if (!Unbox(context(), obj, &unboxed))
+                return false;
+            return writeString(SCTAG_STRING_OBJECT, unboxed.toString());
+          }
+          case ESClass::Boolean: {
+            RootedValue unboxed(context());
+            if (!Unbox(context(), obj, &unboxed))
+                return false;
+            return out.writePair(SCTAG_BOOLEAN_OBJECT, unboxed.toBoolean());
+          }
+          case ESClass::RegExp: {
             RegExpShared* re = RegExpToShared(context(), obj);
             if (!re)
                 return false;
             return out.writePair(SCTAG_REGEXP_OBJECT, re->getFlags()) &&
                    writeString(SCTAG_STRING, re->getSource());
-        } else if (cls == ESClass::Date) {
+          }
+          case ESClass::ArrayBuffer: {
+            if (JS_IsArrayBufferObject(obj) && JS_ArrayBufferHasData(obj))
+                return writeArrayBuffer(obj);
+            break;
+          }
+          case ESClass::SharedArrayBuffer:
+            if (JS_IsSharedArrayBufferObject(obj))
+                return writeSharedArrayBuffer(obj);
+            break;
+          case ESClass::Date: {
             RootedValue unboxed(context());
             if (!Unbox(context(), obj, &unboxed))
                 return false;
             return out.writePair(SCTAG_DATE_OBJECT, 0) && out.writeDouble(unboxed.toNumber());
-        } else if (JS_IsTypedArrayObject(obj)) {
-            return writeTypedArray(obj);
-        } else if (JS_IsDataViewObject(obj)) {
-            return writeDataView(obj);
-        } else if (JS_IsArrayBufferObject(obj) && JS_ArrayBufferHasData(obj)) {
-            return writeArrayBuffer(obj);
-        } else if (JS_IsSharedArrayBufferObject(obj)) {
-            return writeSharedArrayBuffer(obj);
-        } else if (wasm::IsSharedWasmMemoryObject(obj)) {
-            return writeSharedWasmMemory(obj);
-        } else if (cls == ESClass::Object) {
-            return traverseObject(obj);
-        } else if (cls == ESClass::Array) {
-            return traverseObject(obj);
-        } else if (cls == ESClass::Boolean) {
-            RootedValue unboxed(context());
-            if (!Unbox(context(), obj, &unboxed))
-                return false;
-            return out.writePair(SCTAG_BOOLEAN_OBJECT, unboxed.toBoolean());
-        } else if (cls == ESClass::Number) {
-            RootedValue unboxed(context());
-            if (!Unbox(context(), obj, &unboxed))
-                return false;
-            return out.writePair(SCTAG_NUMBER_OBJECT, 0) && out.writeDouble(unboxed.toNumber());
-        } else if (cls == ESClass::String) {
-            RootedValue unboxed(context());
-            if (!Unbox(context(), obj, &unboxed))
-                return false;
-            return writeString(SCTAG_STRING_OBJECT, unboxed.toString());
-        } else if (cls == ESClass::Map) {
-            return traverseMap(obj);
-        } else if (cls == ESClass::Set) {
+          }
+          case ESClass::Set:
             return traverseSet(obj);
-        }
+          case ESClass::Map:
+            return traverseMap(obj);
 #ifdef ENABLE_BIGINT
-        else if (cls == ESClass::BigInt) {
+          case ESClass::BigInt: {
             RootedValue unboxed(context());
             if (!Unbox(context(), obj, &unboxed))
                 return false;
             return writeBigInt(SCTAG_BIGINT_OBJECT, unboxed.toBigInt());
-        }
+          }
 #endif
-        else if (SavedFrame::isSavedFrameOrWrapperAndNotProto(*obj)) {
-            return traverseSavedFrame(obj);
+          case ESClass::Promise:
+          case ESClass::MapIterator:
+          case ESClass::SetIterator:
+          case ESClass::Arguments:
+          case ESClass::Error:
+            break;
+
+          case ESClass::Other: {
+            if (JS_IsTypedArrayObject(obj))
+                return writeTypedArray(obj);
+            if (JS_IsDataViewObject(obj))
+                return writeDataView(obj);
+            if (wasm::IsSharedWasmMemoryObject(obj))
+                return writeSharedWasmMemory(obj);
+            if (SavedFrame::isSavedFrameOrWrapperAndNotProto(*obj))
+                return traverseSavedFrame(obj);
+            break;
+          }
         }
 
         if (out.buf.callbacks_ && out.buf.callbacks_->write)
@@ -1855,12 +1942,17 @@ JSStructuredCloneWriter::write(HandleValue v)
     if (!startWrite(v))
         return false;
 
+    RootedObject obj(context());
+    RootedValue key(context());
+    RootedValue val(context());
+    RootedId id(context());
+
     while (!counts.empty()) {
-        RootedObject obj(context(), &objs.back().toObject());
+        obj = &objs.back().toObject();
         assertSameCompartment(context(), obj);
         if (counts.back()) {
             counts.back()--;
-            RootedValue key(context(), entries.back());
+            key = entries.back();
             entries.popBack();
             checkStack();
 
@@ -1870,7 +1962,7 @@ JSStructuredCloneWriter::write(HandleValue v)
 
             if (cls == ESClass::Map) {
                 counts.back()--;
-                RootedValue val(context(), entries.back());
+                val = entries.back();
                 entries.popBack();
                 checkStack();
 
@@ -1880,20 +1972,27 @@ JSStructuredCloneWriter::write(HandleValue v)
                 if (!startWrite(key))
                     return false;
             } else {
-                RootedId id(context());
-                if (!ValueToId<CanGC>(context(), key, &id))
-                  return false;
-                MOZ_ASSERT(JSID_IS_STRING(id) || JSID_IS_INT(id));
+                // This relies on the way JSStructuredCloneWriter::traverseObject
+                // converts JSIDs to Value.
+                if (key.isString())
+                    id = AtomToId(&key.toString()->asAtom());
+                else
+                    id = INT_TO_JSID(key.toInt32());
 
                 // If obj still has an own property named id, write it out.
-                // The cost of re-checking could be avoided by using
-                // NativeIterators.
                 bool found;
+                if (GetOwnPropertyPure(context(), obj, id, val.address(), &found)) {
+                    if (found) {
+                        if (!startWrite(key) || !startWrite(val))
+                            return false;
+                    }
+                    continue;
+                }
+
                 if (!HasOwnProperty(context(), obj, id, &found))
                     return false;
 
                 if (found) {
-                    RootedValue val(context());
                     if (!startWrite(key) ||
                         !GetProperty(context(), obj, obj, id, &val) ||
                         !startWrite(val))

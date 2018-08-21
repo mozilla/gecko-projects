@@ -31,6 +31,7 @@
 #include "gfxTextRun.h"
 #include "gfxUserFontSet.h"
 #include "gfxConfig.h"
+#include "VRProcessManager.h"
 #include "VRThread.h"
 
 #ifdef XP_WIN
@@ -72,6 +73,7 @@
 #include "gfx2DGlue.h"
 #include "gfxGradientCache.h"
 #include "gfxUtils.h" // for NextPowerOfTwo
+#include "gfxFontMissingGlyphs.h"
 
 #include "nsExceptionHandler.h"
 #include "nsUnicodeRange.h"
@@ -469,8 +471,15 @@ gfxPlatform::OnMemoryPressure(layers::MemoryPressureReason aWhy)
 {
     Factory::PurgeAllCaches();
     gfxGradientCache::PurgeAllCaches();
+    gfxFontMissingGlyphs::Purge();
     PurgeSkiaFontCache();
     PurgeSkiaGPUCache();
+    if (XRE_IsParentProcess()) {
+      layers::CompositorManagerChild* manager = CompositorManagerChild::GetInstance();
+      if (manager) {
+        manager->SendNotifyMemoryPressure();
+      }
+    }
 }
 
 gfxPlatform::gfxPlatform()
@@ -957,6 +966,7 @@ gfxPlatform::Shutdown()
     gfxAlphaBoxBlur::ShutdownBlurCache();
     gfxGraphiteShaper::Shutdown();
     gfxPlatformFontList::Shutdown();
+    gfxFontMissingGlyphs::Shutdown();
     ShutdownTileCache();
 
     // Free the various non-null transforms and loaded profiles
@@ -997,6 +1007,7 @@ gfxPlatform::Shutdown()
 
     if (XRE_IsParentProcess()) {
       GPUProcessManager::Shutdown();
+      VRProcessManager::Shutdown();
     }
 
     gfx::Factory::ShutDown();

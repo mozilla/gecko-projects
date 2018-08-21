@@ -718,7 +718,8 @@ IsVP9CodecString(const nsAString& aCodec)
 bool
 IsAV1CodecString(const nsAString& aCodec)
 {
-  return aCodec.EqualsLiteral("av1"); // AV1
+  return aCodec.EqualsLiteral("av1") ||
+    StartsWith(NS_ConvertUTF16toUTF8(aCodec), "av01");
 }
 
 UniquePtr<TrackInfo>
@@ -747,10 +748,12 @@ CreateTrackInfoWithMIMETypeAndContainerTypeExtraParameters(
       Maybe<int32_t> maybeWidth = aContainerType.ExtendedType().GetWidth();
       if (maybeWidth && *maybeWidth > 0) {
         videoInfo->mImage.width = *maybeWidth;
+        videoInfo->mDisplay.width = *maybeWidth;
       }
       Maybe<int32_t> maybeHeight = aContainerType.ExtendedType().GetHeight();
       if (maybeHeight && *maybeHeight > 0) {
         videoInfo->mImage.height = *maybeHeight;
+        videoInfo->mDisplay.height = *maybeHeight;
       }
     } else if (trackInfo->GetAsAudioInfo()) {
       AudioInfo* audioInfo = trackInfo->GetAsAudioInfo();

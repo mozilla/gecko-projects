@@ -1081,7 +1081,7 @@ nsHTMLDocument::CreateDummyChannelForCookies(nsIURI* aCodebaseURI)
       MOZ_ASSERT(httpChannel, "How come we're coming from an HTTP doc but "
                               "we don't have an HTTP channel here?");
       if (httpChannel) {
-        httpChannel->OverrideTrackingResource(isTracking);
+        httpChannel->OverrideTrackingFlagsForDocumentCookieAccessor(docHTTPChannel);
       }
     }
   }
@@ -2728,6 +2728,7 @@ static const struct MidasCommand gMidasCommandTable[] = {
   { "defaultParagraphSeparator", "cmd_defaultParagraphSeparator", "", false, false },
   { "enableObjectResizing", "cmd_enableObjectResizing", "", false, true },
   { "enableInlineTableEditing", "cmd_enableInlineTableEditing", "", false, true },
+  { "enableAbsolutePositionEditing", "cmd_enableAbsolutePositionEditing", "", false, true },
 #if 0
 // no editor support to remove alignments right now
   { "justifynone",   "cmd_align",           "", true,  false },

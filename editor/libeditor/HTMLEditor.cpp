@@ -100,6 +100,53 @@ IsNamedAnchorTag(const nsAtom& aTagName)
   return &aTagName == nsGkAtoms::anchor;
 }
 
+class HTMLEditorPrefs final
+{
+public:
+  static bool IsResizingUIEnabledByDefault()
+  {
+    EnsurePrefValues();
+    return sUserWantsToEnableResizingUIByDefault;
+  }
+  static bool IsInlineTableEditingUIEnabledByDefault()
+  {
+    EnsurePrefValues();
+    return sUserWantsToEnableInlineTableEditingUIByDefault;
+  }
+  static bool IsAbsolutePositioningUIEnabledByDefault()
+  {
+    EnsurePrefValues();
+    return sUserWantsToEnableAbsolutePositioningUIByDefault;
+  }
+
+private:
+  static bool sUserWantsToEnableResizingUIByDefault;
+  static bool sUserWantsToEnableInlineTableEditingUIByDefault;
+  static bool sUserWantsToEnableAbsolutePositioningUIByDefault;
+
+  static void EnsurePrefValues()
+  {
+    static bool sInitialized = false;
+    if (sInitialized) {
+      return;
+    }
+    Preferences::AddBoolVarCache(
+                   &sUserWantsToEnableResizingUIByDefault,
+                   "editor.resizing.enabled_by_default");
+    Preferences::AddBoolVarCache(
+                   &sUserWantsToEnableInlineTableEditingUIByDefault,
+                   "editor.inline_table_editing.enabled_by_default");
+    Preferences::AddBoolVarCache(
+                   &sUserWantsToEnableAbsolutePositioningUIByDefault,
+                   "editor.positioning.enabled_by_default");
+    sInitialized = true;
+  }
+};
+
+bool HTMLEditorPrefs::sUserWantsToEnableResizingUIByDefault = false;
+bool HTMLEditorPrefs::sUserWantsToEnableInlineTableEditingUIByDefault = false;
+bool HTMLEditorPrefs::sUserWantsToEnableAbsolutePositioningUIByDefault = false;
+
 template EditorDOMPoint
 HTMLEditor::InsertNodeIntoProperAncestorWithTransaction(
               nsIContent& aNode,
@@ -116,18 +163,20 @@ HTMLEditor::HTMLEditor()
   , mCSSAware(false)
   , mSelectedCellIndex(0)
   , mHasShownResizers(false)
-  , mIsObjectResizingEnabled(true)
+  , mIsObjectResizingEnabled(HTMLEditorPrefs::IsResizingUIEnabledByDefault())
   , mIsResizing(false)
   , mPreserveRatio(false)
   , mResizedObjectIsAnImage(false)
-  , mIsAbsolutelyPositioningEnabled(true)
+  , mIsAbsolutelyPositioningEnabled(
+      HTMLEditorPrefs::IsAbsolutePositioningUIEnabledByDefault())
   , mResizedObjectIsAbsolutelyPositioned(false)
   , mHasShownGrabber(false)
   , mGrabberClicked(false)
   , mIsMoving(false)
   , mSnapToGridEnabled(false)
   , mHasShownInlineTableEditor(false)
-  , mIsInlineTableEditingEnabled(true)
+  , mIsInlineTableEditingEnabled(
+      HTMLEditorPrefs::IsInlineTableEditingUIEnabledByDefault())
   , mOriginalX(0)
   , mOriginalY(0)
   , mResizedObjectX(0)
@@ -206,20 +255,6 @@ HTMLEditor::~HTMLEditor()
     Telemetry::Accumulate(
       Telemetry::HTMLEDITORS_WHOSE_INLINE_TABLE_EDITOR_USED_BY_USER,
       mInlineTableEditorUsedCount);
-  }
-}
-
-void
-HTMLEditor::HideAnonymousEditingUIs()
-{
-  if (mAbsolutelyPositionedObject) {
-    HideGrabber();
-  }
-  if (mInlineEditedCell) {
-    HideInlineTableEditingUI();
-  }
-  if (mResizedObject) {
-    HideResizers();
   }
 }
 
@@ -385,9 +420,9 @@ HTMLEditor::NotifySelectionChanged(nsIDocument* aDocument,
     typeInState->OnSelectionChange(*aSelection);
 
     // We used a class which derived from nsISelectionListener to call
-    // HTMLEditor::CheckSelectionStateForAnonymousButtons().  The lifetime of
-    // the class was exactly same as mTypeInState.  So, call it only when
-    // mTypeInState is not nullptr.
+    // HTMLEditor::RefereshEditingUI().  The lifetime of the class was
+    // exactly same as mTypeInState.  So, call it only when mTypeInState
+    // is not nullptr.
     if ((aReason & (nsISelectionListener::MOUSEDOWN_REASON |
                     nsISelectionListener::KEYPRESS_REASON |
                     nsISelectionListener::SELECTALL_REASON)) && aSelection) {
@@ -396,7 +431,8 @@ HTMLEditor::NotifySelectionChanged(nsIDocument* aDocument,
       // FYI: This is an XPCOM method.  So, the caller, Selection, guarantees
       //      the lifetime of this instance.  So, don't need to grab this with
       //      local variable.
-      CheckSelectionStateForAnonymousButtons(aSelection);
+      DebugOnly<nsresult> rv = RefereshEditingUI(*aSelection);
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "RefereshEditingUI() failed");
     }
   }
 
@@ -2171,7 +2207,7 @@ HTMLEditor::MakeOrChangeList(const nsAString& aListType,
 }
 
 NS_IMETHODIMP
-HTMLEditor::RemoveList(const nsAString& aListType)
+HTMLEditor::RemoveList(const nsAString&)
 {
   if (!mRules) {
     return NS_ERROR_NOT_INITIALIZED;
@@ -2192,11 +2228,6 @@ HTMLEditor::RemoveList(const nsAString& aListType)
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
 
   EditSubActionInfo subActionInfo(EditSubAction::eRemoveList);
-  if (aListType.LowerCaseEqualsLiteral("ol")) {
-    subActionInfo.bOrdered = true;
-  } else {
-    subActionInfo.bOrdered = false;
-  }
   nsresult rv =
     rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
   if (cancel || NS_FAILED(rv)) {
@@ -2756,14 +2787,7 @@ HTMLEditor::GetSelectedElement(Selection& aSelection,
     return selectedElement.forget();
   }
 
-  nsresult rv;
-  nsCOMPtr<nsIContentIterator> iter =
-    do_CreateInstance("@mozilla.org/content/post-content-iterator;1",
-                      &rv);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    aRv.Throw(rv);
-    return nullptr;
-  }
+  nsCOMPtr<nsIContentIterator> iter = NS_NewContentIterator();
 
   bool found = !!selectedElement;
   const nsAtom* tagNameLookingFor = aTagName;
@@ -3016,28 +3040,24 @@ HTMLEditor::GetLinkedObjects(nsIArray** aNodeList)
     return rv;
   }
 
-  nsCOMPtr<nsIContentIterator> iter =
-    do_CreateInstance("@mozilla.org/content/post-content-iterator;1", &rv);
-  NS_ENSURE_TRUE(iter, NS_ERROR_NULL_POINTER);
-  if (NS_SUCCEEDED(rv)) {
-    nsCOMPtr<nsIDocument> doc = GetDocument();
-    NS_ENSURE_TRUE(doc, NS_ERROR_UNEXPECTED);
+  nsCOMPtr<nsIContentIterator> iter = NS_NewContentIterator();
+  nsCOMPtr<nsIDocument> doc = GetDocument();
+  NS_ENSURE_TRUE(doc, NS_ERROR_UNEXPECTED);
 
-    iter->Init(doc->GetRootElement());
+  iter->Init(doc->GetRootElement());
 
-    // loop through the content iterator for each content node
-    while (!iter->IsDone()) {
-      nsCOMPtr<nsINode> node = iter->GetCurrentNode();
-      if (node) {
-        // Let nsURIRefObject make the hard decisions:
-        nsCOMPtr<nsIURIRefObject> refObject;
-        rv = NS_NewHTMLURIRefObject(getter_AddRefs(refObject), node);
-        if (NS_SUCCEEDED(rv)) {
-          nodes->AppendElement(refObject);
-        }
+  // loop through the content iterator for each content node
+  while (!iter->IsDone()) {
+    nsCOMPtr<nsINode> node = iter->GetCurrentNode();
+    if (node) {
+      // Let nsURIRefObject make the hard decisions:
+      nsCOMPtr<nsIURIRefObject> refObject;
+      rv = NS_NewHTMLURIRefObject(getter_AddRefs(refObject), node);
+      if (NS_SUCCEEDED(rv)) {
+        nodes->AppendElement(refObject);
       }
-      iter->Next();
     }
+    iter->Next();
   }
 
   nodes.forget(aNodeList);
@@ -3080,8 +3100,10 @@ HTMLEditor::AddOverrideStyleSheetInternal(const nsAString& aURL)
   // synchronously, of course..
   RefPtr<StyleSheet> sheet;
   // Editor override style sheets may want to style Gecko anonymous boxes
-  rv = presShell->GetDocument()->CSSLoader()->
-    LoadSheetSync(uaURI, css::eAgentSheetFeatures, true, &sheet);
+  DebugOnly<nsresult> ignoredRv =
+    presShell->GetDocument()->CSSLoader()->
+      LoadSheetSync(uaURI, css::eAgentSheetFeatures, true, &sheet);
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(ignoredRv), "LoadSheetSync() failed");
 
   // Synchronous loads should ALWAYS return completed
   if (NS_WARN_IF(!sheet)) {
@@ -3275,14 +3297,7 @@ HTMLEditor::GetEmbeddedObjects(nsIArray** aNodeList)
     return rv;
   }
 
-  nsCOMPtr<nsIContentIterator> iter =
-    do_CreateInstance("@mozilla.org/content/post-content-iterator;1", &rv);
-  if (NS_WARN_IF(!iter)) {
-    return NS_ERROR_FAILURE;
-  }
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
+  nsCOMPtr<nsIContentIterator> iter = NS_NewContentIterator();
 
   nsCOMPtr<nsIDocument> doc = GetDocument();
   if (NS_WARN_IF(!doc)) {
@@ -3802,10 +3817,7 @@ HTMLEditor::CollapseAdjacentTextNodes(nsRange* aInRange)
 
 
   // build a list of editable text nodes
-  nsresult rv = NS_ERROR_UNEXPECTED;
-  nsCOMPtr<nsIContentIterator> iter =
-    do_CreateInstance("@mozilla.org/content/subtree-content-iterator;1", &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIContentIterator> iter = NS_NewContentSubtreeIterator();
 
   iter->Init(aInRange);
 
@@ -3830,7 +3842,7 @@ HTMLEditor::CollapseAdjacentTextNodes(nsRange* aInRange)
     // get the prev sibling of the right node, and see if its leftTextNode
     nsCOMPtr<nsINode> prevSibOfRightNode = rightTextNode->GetPreviousSibling();
     if (prevSibOfRightNode && prevSibOfRightNode == leftTextNode) {
-      rv = JoinNodesWithTransaction(*leftTextNode, *rightTextNode);
+      nsresult rv = JoinNodesWithTransaction(*leftTextNode, *rightTextNode);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }

@@ -221,11 +221,71 @@ public:
    */
   nsresult OnMouseMove(dom::MouseEvent* aMouseEvent);
 
-  // non-virtual methods of interface methods
-  bool AbsolutePositioningEnabled() const
+  /**
+   * Enable/disable object resizers for <img> elements, <table> elements,
+   * absolute positioned elements (required absolute position editor enabled).
+   */
+  void EnableObjectResizer(bool aEnable)
+  {
+    if (mIsObjectResizingEnabled == aEnable) {
+      return;
+    }
+    mIsObjectResizingEnabled = aEnable;
+    RefPtr<Selection> selection = GetSelection();
+    if (NS_WARN_IF(!selection)) {
+      return;
+    }
+    RefereshEditingUI(*selection);
+  }
+  bool IsObjectResizerEnabled() const
+  {
+    return mIsObjectResizingEnabled;
+  }
+
+  /**
+   * Enable/disable inline table editor, e.g., adding new row or column,
+   * removing existing row or column.
+   */
+  void EnableInlineTableEditor(bool aEnable)
+  {
+    if (mIsInlineTableEditingEnabled == aEnable) {
+      return;
+    }
+    mIsInlineTableEditingEnabled = aEnable;
+    RefPtr<Selection> selection = GetSelection();
+    if (NS_WARN_IF(!selection)) {
+      return;
+    }
+    RefereshEditingUI(*selection);
+  }
+  bool IsInlineTableEditorEnabled() const
+  {
+    return mIsInlineTableEditingEnabled;
+  }
+
+  /**
+   * Enable/disable absolute position editor, resizing absolute positioned
+   * elements (required object resizers enabled) or positioning them with
+   * dragging grabber.
+   */
+  void EnableAbsolutePositionEditor(bool aEnable)
+  {
+    if (mIsAbsolutelyPositioningEnabled == aEnable) {
+      return;
+    }
+    mIsAbsolutelyPositioningEnabled = aEnable;
+    RefPtr<Selection> selection = GetSelection();
+    if (NS_WARN_IF(!selection)) {
+      return;
+    }
+    RefereshEditingUI(*selection);
+  }
+  bool IsAbsolutePositionEditorEnabled() const
   {
     return mIsAbsolutelyPositioningEnabled;
   }
+
+  // non-virtual methods of interface methods
 
   /**
    * returns the deepest absolutely positioned container of the selection
@@ -1474,6 +1534,13 @@ protected: // Shouldn't be used by friend classes
   void DeleteRefToAnonymousNode(ManualNACPtr aContent,
                                 nsIPresShell* aShell);
 
+  /**
+   * RefereshEditingUI() may refresh editing UIs for current Selection, focus,
+   * etc.  If this shows or hides some UIs, it causes reflow.  So, this is
+   * not safe method.
+   */
+  nsresult RefereshEditingUI(Selection& aSelection);
+
   nsresult ShowResizersInner(Element& aResizedElement);
 
   /**
@@ -1534,7 +1601,18 @@ protected: // Shouldn't be used by friend classes
   void SetFinalSize(int32_t aX, int32_t aY);
   void SetResizeIncrements(int32_t aX, int32_t aY, int32_t aW, int32_t aH,
                            bool aPreserveRatio);
+
+  /**
+   * HideAnonymousEditingUIs() forcibly hides all editing UIs (resizers,
+   * inline-table-editing UI, absolute positioning UI).
+   */
   void HideAnonymousEditingUIs();
+
+  /**
+   * HideAnonymousEditingUIsIfUnnecessary() hides all editing UIs if some of
+   * visible UIs are now unnecessary.
+   */
+  void HideAnonymousEditingUIsIfUnnecessary();
 
   /**
    * sets the z-index of an element.
@@ -1576,7 +1654,7 @@ protected: // Shouldn't be used by friend classes
   /**
    * Hide all inline table editing UI
    */
-  nsresult HideInlineTableEditingUI();
+  void HideInlineTableEditingUI();
 
   /**
    * IsEmptyTextNode() returns true if aNode is a text node and does not have

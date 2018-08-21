@@ -206,6 +206,8 @@ public:
   void WakeSceneBuilder();
   void FlushSceneBuilder();
 
+  void NotifyMemoryPressure();
+
   wr::WrIdNamespace GetNamespace();
   uint32_t GetMaxTextureSize() const { return mMaxTextureSize; }
   bool GetUseANGLE() const { return mUseANGLE; }
@@ -369,7 +371,8 @@ public:
                  bool aIsBackfaceVisible,
                  wr::ImageRendering aFilter,
                  wr::ImageKey aImage,
-                 bool aPremultipliedAlpha = true);
+                 bool aPremultipliedAlpha = true,
+                 const wr::ColorF& aColor = wr::ColorF{1.0f, 1.0f, 1.0f, 1.0f});
 
   void PushImage(const wr::LayoutRect& aBounds,
                  const wr::LayoutRect& aClip,
@@ -378,7 +381,8 @@ public:
                  const wr::LayoutSize& aTileSpacing,
                  wr::ImageRendering aFilter,
                  wr::ImageKey aImage,
-                 bool aPremultipliedAlpha = true);
+                 bool aPremultipliedAlpha = true,
+                 const wr::ColorF& aColor = wr::ColorF{1.0f, 1.0f, 1.0f, 1.0f});
 
   void PushYCbCrPlanarImage(const wr::LayoutRect& aBounds,
                             const wr::LayoutRect& aClip,
