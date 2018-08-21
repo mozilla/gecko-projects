@@ -1402,7 +1402,7 @@ pref("identity.fxaccounts.migrateToDevEdition", false);
 #endif
 
 // If activated, send tab will use the new FxA commands backend.
-pref("identity.fxaccounts.commands.enabled", false);
+pref("identity.fxaccounts.commands.enabled", true);
 
 // On GTK, we now default to showing the menubar only when alt is pressed:
 #ifdef MOZ_WIDGET_GTK
@@ -1493,6 +1493,12 @@ pref("browser.contentblocking.ui.enabled", true);
 #else
 pref("browser.contentblocking.ui.enabled", false);
 #endif
+#ifdef NIGHTLY_BUILD
+pref("browser.contentblocking.reportBreakage.enabled", true);
+#else
+pref("browser.contentblocking.reportBreakage.enabled", false);
+#endif
+pref("browser.contentblocking.reportBreakage.url", "https://tracking-protection-issues.herokuapp.com/new");
 
 pref("privacy.trackingprotection.introCount", 0);
 pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/tracking-protection/start/");

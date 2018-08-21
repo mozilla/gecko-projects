@@ -1750,6 +1750,7 @@ HTMLMediaElement::ShutdownDecoder()
   mDecoder->Shutdown();
   DDUNLINKCHILD(mDecoder.get());
   mDecoder = nullptr;
+  ReportAudioTrackSilenceProportionTelemetry();
 }
 
 void
@@ -1827,6 +1828,7 @@ HTMLMediaElement::AbortExistingLoads()
   mSourcePointer = nullptr;
 
   mTags = nullptr;
+  mAudioTrackSilenceStartedTime = 0.0;
 
   if (mNetworkState != NETWORK_EMPTY) {
     NS_ASSERTION(!mDecoder && !mSrcStream,
@@ -2010,7 +2012,7 @@ HTMLMediaElement::Load()
        HasSourceChildren(this),
        EventStateManager::IsHandlingUserInput(),
        HasAttr(kNameSpaceID_None, nsGkAtoms::autoplay),
-       AutoplayPolicy::IsAllowedToPlay(*this) == nsIAutoplay::ALLOWED,
+       AutoplayPolicy::IsAllowedToPlay(*this),
        OwnerDoc(),
        DocumentOrigin(OwnerDoc()).get(),
        OwnerDoc() ? OwnerDoc()->HasBeenUserGestureActivated() : 0,
@@ -2529,7 +2531,7 @@ HTMLMediaElement::ResumeLoad(PreloadAction aAction)
 bool
 HTMLMediaElement::AllowedToPlay() const
 {
-  return AutoplayPolicy::IsAllowedToPlay(*this) == nsIAutoplay::ALLOWED;
+  return AutoplayPolicy::IsAllowedToPlay(*this);
 }
 
 void
@@ -2538,7 +2540,7 @@ HTMLMediaElement::UpdatePreloadAction()
   PreloadAction nextAction = PRELOAD_UNDEFINED;
   // If autoplay is set, or we're playing, we should always preload data,
   // as we'll need it to play.
-  if ((AutoplayPolicy::IsAllowedToPlay(*this) == nsIAutoplay::ALLOWED &&
+  if ((AutoplayPolicy::IsAllowedToPlay(*this) &&
        HasAttr(kNameSpaceID_None, nsGkAtoms::autoplay)) ||
       !mPaused) {
     nextAction = HTMLMediaElement::PRELOAD_ENOUGH;
@@ -2903,6 +2905,18 @@ HTMLMediaElement::Seek(double aTime,
 
   mPlayingBeforeSeek = IsPotentiallyPlaying();
 
+  // If the audio track is silent before seeking, we should end current silence
+  // range and start a new range after seeking. Since seek() could be called
+  // multiple times before seekEnd() executed, we should only calculate silence
+  // range when first time seek() called. Calculating on other seek() calls
+  // would cause a wrong result. In order to get correct time, this checking
+  // should be called before decoder->seek().
+  if (IsAudioTrackCurrentlySilent() &&
+      !mHasAccumulatedSilenceRangeBeforeSeekEnd) {
+    AccumulateAudioTrackSilence();
+    mHasAccumulatedSilenceRangeBeforeSeekEnd = true;
+  }
+
   // The media backend is responsible for dispatching the timeupdate
   // event if it changes the playback position as a result of the seek.
   LOG(LogLevel::Debug, ("%p SetCurrentTime(%f) starting seek", this, aTime));
@@ -3071,7 +3085,7 @@ HTMLMediaElement::PauseIfShouldNotBePlaying()
   if (GetPaused()) {
     return;
   }
-  if (AutoplayPolicy::IsAllowedToPlay(*this) != nsIAutoplay::ALLOWED) {
+  if (!AutoplayPolicy::IsAllowedToPlay(*this)) {
     AUTOPLAY_LOG("pause because not allowed to play, element=%p", this);
     ErrorResult rv;
     Pause(rv);
@@ -4103,27 +4117,14 @@ HTMLMediaElement::Play(ErrorResult& aRv)
   UpdateHadAudibleAutoplayState();
 
   const bool handlingUserInput = EventStateManager::IsHandlingUserInput();
-  switch (AutoplayPolicy::IsAllowedToPlay(*this)) {
-    case nsIAutoplay::ALLOWED: {
-      mPendingPlayPromises.AppendElement(promise);
-      PlayInternal(handlingUserInput);
-      UpdateCustomPolicyAfterPlayed();
-      break;
-    }
-    case nsIAutoplay::BLOCKED: {
-      AUTOPLAY_LOG("%p play blocked.", this);
-      promise->MaybeReject(NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR);
-      if (StaticPrefs::MediaBlockEventEnabled()) {
-        DispatchAsyncEvent(NS_LITERAL_STRING("blocked"));
-      }
-      break;
-    }
-    case nsIAutoplay::PROMPT: {
-      // Prompt the user for permission to play.
-      mPendingPlayPromises.AppendElement(promise);
-      EnsureAutoplayRequested(handlingUserInput);
-      break;
-    }
+  if (AutoplayPolicy::IsAllowedToPlay(*this)) {
+    mPendingPlayPromises.AppendElement(promise);
+    PlayInternal(handlingUserInput);
+    UpdateCustomPolicyAfterPlayed();
+  } else {
+    // Prompt the user for permission to play.
+    mPendingPlayPromises.AppendElement(promise);
+    EnsureAutoplayRequested(handlingUserInput);
   }
   return promise.forget();
 }
@@ -4379,7 +4380,8 @@ HTMLMediaElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
     case ePointerMove:
     case eMouseMove:
       node = do_QueryInterface(aVisitor.mEvent->mOriginalTarget);
-      if (node->IsInNativeAnonymousSubtree()) {
+      if (node->IsInNativeAnonymousSubtree() ||
+          node->IsInUAWidget()) {
         if (node->IsHTMLElement(nsGkAtoms::input)) {
           // The node is a <input type="range">
           el = static_cast<HTMLInputElement*>(node.get());
@@ -4509,6 +4511,17 @@ HTMLMediaElement::AfterSetAttr(int32_t aNameSpaceID,
       if (mDecoder) {
         mDecoder->SetLooping(!!aValue);
       }
+    } else if (nsContentUtils::IsUAWidgetEnabled() &&
+               aName == nsGkAtoms::controls &&
+               IsInComposedDoc()) {
+      AsyncEventDispatcher* dispatcher =
+        new AsyncEventDispatcher(this,
+                                 NS_LITERAL_STRING("UAWidgetAttributeChanged"),
+                                 CanBubble::eYes,
+                                 ChromeOnlyDispatch::eYes);
+      // This has to happen at this tick so that UA Widget could respond
+      // before returning to content script.
+      dispatcher->RunDOMEventWhenSafe();
     }
   }
 
@@ -4553,6 +4566,34 @@ HTMLMediaElement::BindToTree(nsIDocument* aDocument,
 {
   nsresult rv = nsGenericHTMLElement::BindToTree(
     aDocument, aParent, aBindingParent);
+
+  if (nsContentUtils::IsUAWidgetEnabled() && IsInComposedDoc()) {
+    // Construct Shadow Root so web content can be hidden in the DOM.
+    AttachAndSetUAShadowRoot();
+#ifdef ANDROID
+    AsyncEventDispatcher* dispatcher =
+      new AsyncEventDispatcher(this,
+                               NS_LITERAL_STRING("UAWidgetBindToTree"),
+                               CanBubble::eYes,
+                               ChromeOnlyDispatch::eYes);
+    dispatcher->RunDOMEventWhenSafe();
+#else
+    // We don't want to call into JS if the website never asks for native
+    // video controls.
+    // If controls attribute is set later, controls is constructed lazily
+    // with the UAWidgetAttributeChanged event.
+    // This only applies to Desktop because on Fennec we would need to show
+    // an UI if the video is blocked.
+    if (Controls()) {
+      AsyncEventDispatcher* dispatcher =
+        new AsyncEventDispatcher(this,
+                                 NS_LITERAL_STRING("UAWidgetBindToTree"),
+                                 CanBubble::eYes,
+                                 ChromeOnlyDispatch::eYes);
+      dispatcher->RunDOMEventWhenSafe();
+    }
+#endif
+  }
 
   mUnboundFromTree = false;
 
@@ -4803,6 +4844,13 @@ HTMLMediaElement::UnbindFromTree(bool aDeep, bool aNullParent)
   MOZ_ASSERT(IsHidden());
   NotifyDecoderActivityChanges();
 
+  AsyncEventDispatcher* dispatcher =
+    new AsyncEventDispatcher(this,
+                             NS_LITERAL_STRING("UAWidgetUnbindFromTree"),
+                             CanBubble::eYes,
+                             ChromeOnlyDispatch::eYes);
+  dispatcher->RunDOMEventWhenSafe();
+
   RefPtr<HTMLMediaElement> self(this);
   nsCOMPtr<nsIRunnable> task =
     NS_NewRunnableFunction("dom::HTMLMediaElement::UnbindFromTree", [self]() {
@@ -4889,6 +4937,20 @@ HTMLMediaElement::AssertReadyStateIsNothing()
     MOZ_CRASH_UNSAFE_PRINTF("ReadyState should be HAVE_NOTHING! %s", buf);
   }
 #endif
+}
+
+void
+HTMLMediaElement::AttachAndSetUAShadowRoot()
+{
+  if (GetShadowRoot()) {
+    MOZ_ASSERT(GetShadowRoot()->IsUAWidget());
+    return;
+  }
+
+  // Add a closed shadow root to host video controls
+  RefPtr<ShadowRoot> shadowRoot =
+    AttachShadowWithoutNameChecks(ShadowRootMode::Closed);
+  shadowRoot->SetIsUAWidget(true);
 }
 
 nsresult
@@ -5728,6 +5790,13 @@ HTMLMediaElement::SeekCompleted()
   if (mCurrentPlayRangeStart == -1.0) {
     mCurrentPlayRangeStart = CurrentTime();
   }
+
+  // After seeking completed, if the audio track is silent, start another new
+  // silence range.
+  mHasAccumulatedSilenceRangeBeforeSeekEnd = false;
+  if (IsAudioTrackCurrentlySilent()) {
+    UpdateAudioTrackSilenceRange(mIsAudioTrackAudible);
+  }
 }
 
 void
@@ -6151,8 +6220,7 @@ HTMLMediaElement::ChangeReadyState(nsMediaReadyState aState)
     DispatchAsyncEvent(NS_LITERAL_STRING("canplay"));
     if (!mPaused) {
       if (mDecoder && !mPausedForInactiveDocumentOrChannel) {
-        MOZ_ASSERT(AutoplayPolicy::IsAllowedToPlay(*this) ==
-                   nsIAutoplay::ALLOWED);
+        MOZ_ASSERT(AutoplayPolicy::IsAllowedToPlay(*this));
         mDecoder->Play();
       }
       NotifyAboutPlaying();
@@ -6264,14 +6332,9 @@ HTMLMediaElement::CheckAutoplayDataReady()
   }
 
   UpdateHadAudibleAutoplayState();
-  switch (AutoplayPolicy::IsAllowedToPlay(*this)) {
-    case nsIAutoplay::BLOCKED:
-      return;
-    case nsIAutoplay::PROMPT:
-      EnsureAutoplayRequested(false);
-      return;
-    case nsIAutoplay::ALLOWED:
-      break;
+  if (!AutoplayPolicy::IsAllowedToPlay(*this)) {
+    EnsureAutoplayRequested(false);
+    return;
   }
 
   mPaused = false;
@@ -7603,10 +7666,81 @@ void
 HTMLMediaElement::SetAudibleState(bool aAudible)
 {
   if (mIsAudioTrackAudible != aAudible) {
+    UpdateAudioTrackSilenceRange(aAudible);
     mIsAudioTrackAudible = aAudible;
     NotifyAudioPlaybackChanged(
       AudioChannelService::AudibleChangedReasons::eDataAudibleChanged);
   }
+}
+
+bool
+HTMLMediaElement::IsAudioTrackCurrentlySilent() const
+{
+  return HasAudio() && !mIsAudioTrackAudible;
+}
+
+void
+HTMLMediaElement::UpdateAudioTrackSilenceRange(bool aAudible)
+{
+  if (!HasAudio()) {
+    return;
+  }
+
+  if (!aAudible) {
+    mAudioTrackSilenceStartedTime = CurrentTime();
+    return;
+  }
+
+  AccumulateAudioTrackSilence();
+}
+
+void
+HTMLMediaElement::AccumulateAudioTrackSilence()
+{
+  MOZ_ASSERT(HasAudio());
+  const double current = CurrentTime();
+  if (current < mAudioTrackSilenceStartedTime) {
+    return;
+  }
+  const auto start = media::TimeUnit::FromSeconds(mAudioTrackSilenceStartedTime);
+  const auto end = media::TimeUnit::FromSeconds(current);
+  mSilenceTimeRanges += media::TimeInterval(start, end);
+}
+
+void
+HTMLMediaElement::ReportAudioTrackSilenceProportionTelemetry()
+{
+  if (!HasAudio()) {
+    return;
+  }
+
+  // Add last silence range to our ranges set.
+  if (!mIsAudioTrackAudible) {
+    AccumulateAudioTrackSilence();
+  }
+
+  RefPtr<TimeRanges> ranges = Played();
+  const uint32_t lengthPlayedRange = ranges->Length();
+  const uint32_t lengthSilenceRange = mSilenceTimeRanges.Length();
+  if (!lengthPlayedRange || !lengthSilenceRange) {
+    return;
+  }
+
+  double playedTime = 0.0, silenceTime = 0.0;
+  for (uint32_t idx = 0; idx < lengthPlayedRange; idx++) {
+    playedTime += ranges->End(idx) - ranges->Start(idx);
+  }
+
+  for (uint32_t idx = 0; idx < lengthSilenceRange; idx++) {
+    silenceTime +=
+      mSilenceTimeRanges.End(idx).ToSeconds() - mSilenceTimeRanges.Start(idx).ToSeconds();
+  }
+
+  double silenceProportion = (silenceTime / playedTime) * 100;
+  // silenceProportion should be in the range [0, 100]
+  silenceProportion = std::min(100.0, std::max(silenceProportion, 0.0));
+  Telemetry::Accumulate(Telemetry::AUDIO_TRACK_SILENCE_PROPORTION,
+                        silenceProportion);
 }
 
 void

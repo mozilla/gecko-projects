@@ -344,7 +344,7 @@ const loadListener = {
     const winID = subject.QueryInterface(Ci.nsISupportsPRUint64).data;
     const curWinID = win.windowUtils.outerWindowID;
 
-    logger.debug(`Received observer notification ${topic} for ${winID}`);
+    logger.debug(`Received observer notification ${topic}`);
 
     switch (topic) {
       // In the case when the currently selected frame is closed,
@@ -621,10 +621,10 @@ function deleteSession() {
  *     JSON serialisable object to accompany the message.  Defaults to
  *     an empty dictionary.
  */
-function sendToServer(uuid, data = undefined) {
+let sendToServer = (uuid, data = undefined) => {
   let channel = new proxy.AsyncMessageChannel(sendAsyncMessage.bind(this));
   channel.reply(uuid, data);
-}
+};
 
 /**
  * Send asynchronous reply with value to chrome.

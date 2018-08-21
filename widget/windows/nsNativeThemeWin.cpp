@@ -1545,6 +1545,20 @@ GetThemeDpiScaleFactor(nsIFrame* aFrame)
   return 1.0;
 }
 
+static bool
+IsScrollbarWidthThin(ComputedStyle* aStyle)
+{
+  auto scrollbarWidth = aStyle->StyleUIReset()->mScrollbarWidth;
+  return scrollbarWidth == StyleScrollbarWidth::Thin;
+}
+
+static bool
+IsScrollbarWidthThin(nsIFrame* aFrame)
+{
+  ComputedStyle* style = nsLayoutUtils::StyleForScrollbar(aFrame);
+  return IsScrollbarWidthThin(style);
+}
+
 NS_IMETHODIMP
 nsNativeThemeWin::DrawWidgetBackground(gfxContext* aContext,
                                        nsIFrame* aFrame,
@@ -1559,7 +1573,8 @@ nsNativeThemeWin::DrawWidgetBackground(gfxContext* aContext,
 
   if (IsWidgetScrollbarPart(aWidgetType)) {
     ComputedStyle* style = nsLayoutUtils::StyleForScrollbar(aFrame);
-    if (style->StyleUI()->HasCustomScrollbars()) {
+    if (style->StyleUI()->HasCustomScrollbars() ||
+        IsScrollbarWidthThin(style)) {
       return DrawCustomScrollbarPart(aContext, aFrame, style,
                                      aWidgetType, aRect, aDirtyRect);
     }
@@ -1965,19 +1980,13 @@ RENDER_AGAIN:
 static nscolor
 GetScrollbarFaceColorForAuto(ComputedStyle* aStyle)
 {
-  // Do we want to derive from scrollbar-track-color when possible?
-  DWORD sysColor = ::GetSysColor(COLOR_SCROLLBAR);
-  return NS_RGB(GetRValue(sysColor),
-                GetGValue(sysColor),
-                GetBValue(sysColor));
+  return NS_RGB(205, 205, 205);
 }
 
 static nscolor
 GetScrollbarTrackColorForAuto(ComputedStyle* aStyle)
 {
-  // Fallback to background color for now. Do we want to derive from
-  // scrollbar-face-color somehow?
-  return aStyle->StyleBackground()->BackgroundColor(aStyle);
+  return NS_RGB(240, 240, 240);
 }
 
 nscolor
@@ -3011,14 +3020,20 @@ nsNativeThemeWin::ClassicGetMinimumWidgetSize(nsIFrame* aFrame,
       break;
     case StyleAppearance::ScrollbarbuttonUp:
     case StyleAppearance::ScrollbarbuttonDown:
-      (*aResult).width = ::GetSystemMetrics(SM_CXVSCROLL);
-      (*aResult).height = ::GetSystemMetrics(SM_CYVSCROLL);
+      // For scrollbar-width:thin, we don't display the buttons.
+      if (!IsScrollbarWidthThin(aFrame)) {
+        (*aResult).width = ::GetSystemMetrics(SM_CXVSCROLL);
+        (*aResult).height = ::GetSystemMetrics(SM_CYVSCROLL);
+      }
       *aIsOverridable = false;
       break;
     case StyleAppearance::ScrollbarbuttonLeft:
     case StyleAppearance::ScrollbarbuttonRight:
-      (*aResult).width = ::GetSystemMetrics(SM_CXHSCROLL);
-      (*aResult).height = ::GetSystemMetrics(SM_CYHSCROLL);
+      // For scrollbar-width:thin, we don't display the buttons.
+      if (!IsScrollbarWidthThin(aFrame)) {
+        (*aResult).width = ::GetSystemMetrics(SM_CXHSCROLL);
+        (*aResult).height = ::GetSystemMetrics(SM_CYHSCROLL);
+      }
       *aIsOverridable = false;
       break;
     case StyleAppearance::ScrollbarVertical:
@@ -3095,8 +3110,14 @@ nsNativeThemeWin::ClassicGetMinimumWidgetSize(nsIFrame* aFrame,
       (*aResult).height = ::GetSystemMetrics(SM_CYVTHUMB);
       // Without theming, divide the thumb size by two in order to look more
       // native
-      if (!GetTheme(aWidgetType))
+      if (!GetTheme(aWidgetType)) {
         (*aResult).height >>= 1;
+      }
+      // If scrollbar-width is thin, divide the thickness by two to make
+      // it look more compact.
+      if (IsScrollbarWidthThin(aFrame)) {
+        aResult->width >>= 1;
+      }
       *aIsOverridable = false;
       break;
     case StyleAppearance::ScrollbarthumbHorizontal:
@@ -3104,8 +3125,14 @@ nsNativeThemeWin::ClassicGetMinimumWidgetSize(nsIFrame* aFrame,
       (*aResult).height = ::GetSystemMetrics(SM_CYHSCROLL);
       // Without theming, divide the thumb size by two in order to look more
       // native
-      if (!GetTheme(aWidgetType))
+      if (!GetTheme(aWidgetType)) {
         (*aResult).width >>= 1;
+      }
+      // If scrollbar-width is thin, divide the thickness by two to make
+      // it look more compact.
+      if (IsScrollbarWidthThin(aFrame)) {
+        aResult->height >>= 1;
+      }
       *aIsOverridable = false;
       break;
     case StyleAppearance::ScrollbarHorizontal:
@@ -4232,7 +4259,8 @@ nsNativeThemeWin::DrawCustomScrollbarPart(gfxContext* aContext,
                                           const nsRect& aClipRect)
 {
   MOZ_ASSERT(!aStyle->StyleUI()->mScrollbarFaceColor.IsAuto() ||
-             !aStyle->StyleUI()->mScrollbarTrackColor.IsAuto());
+             !aStyle->StyleUI()->mScrollbarTrackColor.IsAuto() ||
+             IsScrollbarWidthThin(aStyle));
 
   gfxRect tr(aRect.X(), aRect.Y(), aRect.Width(), aRect.Height()),
           dr(aClipRect.X(), aClipRect.Y(),

@@ -347,7 +347,7 @@ it will be removed once the interactability checks have been stabilized.
    <code>info</code>, <code>warn</code>,
    <code>error</code>, and <code>fatal</code>.
    If left undefined the default is <code>info</code>.
-   The value is treated case-insensitively.
+   The value is case-insensitive.
  </tr>
 </table>
 
@@ -649,4 +649,4 @@ There is also an IRC channel to talk about using and developing
 geckodriver in #ateam on irc.mozilla.org.
 
 [subscribe]: https://lists.mozilla.org/listinfo/tools-marionette
-[archive]: https://groups.google.com/group/mozilla.tools.marionette
+[archive]: https://lists.mozilla.org/pipermail/tools-marionette/

@@ -33,3 +33,9 @@ job-template:
    # Beetmoving geckoview makes it available to the official maven repo. So we want beetmover to
    # act only when the release is greenlit.
    shipping-phase: ship
+   bucket-scope:
+      by-project:
+         mozilla-central: 'project:releng:beetmover:bucket:maven-production'
+         mozilla-beta: 'project:releng:beetmover:bucket:maven-production'
+         mozilla-release: 'project:releng:beetmover:bucket:maven-production'
+         default: 'project:releng:beetmover:bucket:maven-staging'

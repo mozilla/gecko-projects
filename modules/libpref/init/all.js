@@ -1373,13 +1373,14 @@ pref("dom.event.clipboardevents.enabled",   true);
 pref("dom.event.highrestimestamp.enabled",  true);
 pref("dom.event.coalesce_mouse_move",       true);
 
-#ifdef NIGHTLY_BUILD
+#if defined(NIGHTLY_BUILD) && !defined(ANDROID)
+pref("dom.ua_widget.enabled", false);
+#else
+pref("dom.ua_widget.enabled", false);
+#endif
+
 pref("dom.webcomponents.shadowdom.enabled", true);
 pref("dom.webcomponents.customelements.enabled", true);
-#else
-pref("dom.webcomponents.shadowdom.enabled", false);
-pref("dom.webcomponents.customelements.enabled", false);
-#endif
 
 pref("javascript.enabled",                  true);
 pref("javascript.options.strict",           false);
@@ -1815,6 +1816,10 @@ pref("network.http.rcwn.max_wait_before_racing_ms", 500);
 // The ratio of the transaction count for the focused window and the count of
 // all available active connections.
 pref("network.http.focused_window_transaction_ratio", "0.9");
+
+// This is the size of the flow control window (KB) (i.e., the amount of data
+// that the parent can send to the child before getting an ack)
+pref("network.http.send_window_size", 1024);
 
 // Whether or not we give more priority to active tab.
 // Note that this requires restart for changes to take effect.
@@ -2924,6 +2929,9 @@ pref("layout.css.filters.enabled", true);
 
 // Is support for CSS Scrollbar color properties enabled?
 pref("layout.css.scrollbar-colors.enabled", false);
+
+// Is support for scrollbar-width property enabled?
+pref("layout.css.scrollbar-width.enabled", false);
 
 // Set the threshold distance in CSS pixels below which scrolling will snap to
 // an edge, when scroll snapping is set to "proximity".

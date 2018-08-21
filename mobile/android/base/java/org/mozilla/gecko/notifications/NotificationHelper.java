@@ -97,7 +97,11 @@ public final class NotificationHelper implements BundleEventListener {
         /**
          * Mozilla Location Services notification channel.
          */
-        DOWNLOAD
+        DOWNLOAD,
+        /**
+         *  Media notification channel
+         */
+        MEDIA
     }
 
     private final Map<Channel, String> mDefinedNotificationChannels = new HashMap<Channel, String>() {{
@@ -109,6 +113,10 @@ public final class NotificationHelper implements BundleEventListener {
 
         final String DOWNLOAD_NOTIFICATION_TAG = "download-notification-channel";
         put(Channel.DOWNLOAD, DOWNLOAD_NOTIFICATION_TAG);
+
+
+        final String MEDIA_CHANNEL_TAG = "media-notification-channel";
+        put(Channel.MEDIA, MEDIA_CHANNEL_TAG);
     }};
 
     // Holds a list of notifications that should be cleared if the Fennec Activity is shut down.
@@ -173,6 +181,12 @@ public final class NotificationHelper implements BundleEventListener {
                 case DOWNLOAD: {
                     channel = new NotificationChannel(mDefinedNotificationChannels.get(definedChannel),
                             mContext.getString(R.string.download_notification_channel), NotificationManager.IMPORTANCE_LOW);
+                }
+                break;
+
+                case MEDIA: {
+                    channel = new NotificationChannel(mDefinedNotificationChannels.get(definedChannel),
+                            mContext.getString(R.string.media_notification_channel), NotificationManager.IMPORTANCE_LOW);
                 }
                 break;
 
@@ -353,7 +367,7 @@ public final class NotificationHelper implements BundleEventListener {
         }
 
         if (!AppConstants.Versions.preO) {
-            if (message.getString(HANDLER_ATTR).equals("downloads")) {
+            if ("downloads".equals(message.getString(HANDLER_ATTR))) {
                 builder.setChannelId(getNotificationChannel(Channel.DOWNLOAD).getId());
                 builder.setOnlyAlertOnce(true);
             } else {

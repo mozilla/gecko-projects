@@ -200,7 +200,6 @@ bool Gecko_IsBrowserFrame(RawGeckoElementBorrowed element);
 
 // Attributes.
 #define SERVO_DECLARE_ELEMENT_ATTR_MATCHING_FUNCTIONS(prefix_, implementor_)  \
-  nsAtom* prefix_##AtomAttrValue(implementor_ element, nsAtom* attribute);    \
   nsAtom* prefix_##LangValue(implementor_ element);                           \
   bool prefix_##HasAttr(implementor_ element, nsAtom* ns, nsAtom* name);      \
   bool prefix_##AttrEquals(implementor_ element, nsAtom* ns, nsAtom* name,    \
@@ -215,11 +214,11 @@ bool Gecko_IsBrowserFrame(RawGeckoElementBorrowed element);
   bool prefix_##AttrHasPrefix(implementor_ element, nsAtom* ns,               \
                               nsAtom* name, nsAtom* str, bool ignore_case);   \
   bool prefix_##AttrHasSuffix(implementor_ element, nsAtom* ns,               \
-                              nsAtom* name, nsAtom* str, bool ignore_case);   \
-  uint32_t prefix_##ClassOrClassList(implementor_ element, nsAtom** class_,   \
-                                     nsAtom*** classList);                    \
-  bool prefix_##HasClass(implementor_ element, nsAtom* class_,                \
-                         bool ignore_case);
+                              nsAtom* name, nsAtom* str, bool ignore_case);
+
+bool Gecko_AssertClassAttrValueIsSane(const nsAttrValue*);
+const nsAttrValue* Gecko_GetSVGAnimatedClass(RawGeckoElementBorrowed);
+
 
 SERVO_DECLARE_ELEMENT_ATTR_MATCHING_FUNCTIONS(Gecko_, RawGeckoElementBorrowed)
 SERVO_DECLARE_ELEMENT_ATTR_MATCHING_FUNCTIONS(Gecko_Snapshot,
@@ -244,8 +243,8 @@ Gecko_GetActiveLinkAttrDeclarationBlock(RawGeckoElementBorrowed element);
 
 // Visited handling.
 
-// Returns whether private browsing is enabled for a given element.
-bool Gecko_IsPrivateBrowsingEnabled(const nsIDocument* aDoc);
+// Returns whether visited styles are enabled for a given document.
+bool Gecko_VisitedStylesEnabled(const nsIDocument*);
 
 // Animations
 bool
@@ -653,7 +652,6 @@ nsCSSKeyword Gecko_LookupCSSKeyword(const uint8_t* string, uint32_t len);
 const char* Gecko_CSSKeywordString(nsCSSKeyword keyword, uint32_t* len);
 
 bool Gecko_IsDocumentBody(RawGeckoElementBorrowed element);
-
 // We use an int32_t here instead of a LookAndFeel::ColorID
 // because forward-declaring a nested enum/struct is impossible
 nscolor Gecko_GetLookAndFeelSystemColor(int32_t color_id,
@@ -737,6 +735,19 @@ bool Gecko_IsInServoTraversal();
 
 // Returns true if we're currently on the main thread.
 bool Gecko_IsMainThread();
+
+// Media feature helpers.
+mozilla::StyleDisplayMode Gecko_MediaFeatures_GetDisplayMode(nsIDocument*);
+uint32_t Gecko_MediaFeatures_GetColorDepth(nsIDocument*);
+void Gecko_MediaFeatures_GetDeviceSize(nsIDocument*, nscoord* width, nscoord* height);
+float Gecko_MediaFeatures_GetResolution(nsIDocument*);
+bool Gecko_MediaFeatures_PrefersReducedMotion(nsIDocument*);
+float Gecko_MediaFeatures_GetDevicePixelRatio(nsIDocument*);
+bool Gecko_MediaFeatures_HasSystemMetric(nsIDocument*,
+                                         nsAtom* metric,
+                                         bool is_accessible_from_content);
+bool Gecko_MediaFeatures_IsResourceDocument(nsIDocument*);
+nsAtom* Gecko_MediaFeatures_GetOperatingSystemVersion(nsIDocument*);
 
 } // extern "C"
 

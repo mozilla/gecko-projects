@@ -601,19 +601,12 @@ class GTestCommands(MachCommandBase):
 
         active_backend = config.substs.get('BUILD_BACKENDS', [None])[0]
         if 'Tup' in active_backend:
-            gtest_build_path = mozpath.join(self.topobjdir, '<gtest>')
+            gtest_build_target = mozpath.join(self.topobjdir, '<gtest>')
         else:
-            # This path happens build the necessary parts of the tree in the
-            # Make backend due to the odd nature of partial tree builds.
-            gtest_build_path = mozpath.relpath(mozpath.join(self.topobjdir,
-                                                            'toolkit', 'library',
-                                                            'gtest', 'rust'),
-                                               self.topsrcdir)
+            gtest_build_target = 'recurse_gtest'
 
-        os.environ[b'LINK_GTEST_DURING_COMPILE'] = b'1'
         res = self._mach_context.commands.dispatch('build', self._mach_context,
-                                                   what=[gtest_build_path])
-        del os.environ[b'LINK_GTEST_DURING_COMPILE']
+                                                   what=[gtest_build_target])
         if res:
             print("Could not build xul-gtest")
             return res
@@ -1351,9 +1344,16 @@ class PackageFrontend(MachCommandBase):
 
         class ArtifactRecord(DownloadRecord):
             def __init__(self, task_id, artifact_name):
-                cot = cache._download_manager.session.get(
-                    get_artifact_url(task_id, 'public/chainOfTrust.json.asc'))
-                cot.raise_for_status()
+                for _ in redo.retrier(attempts=retry+1, sleeptime=60):
+                    cot = cache._download_manager.session.get(
+                        get_artifact_url(task_id, 'public/chainOfTrust.json.asc'))
+                    if cot.status_code >= 500:
+                        continue
+                    cot.raise_for_status()
+                    break
+                else:
+                    cot.raise_for_status()
+
                 digest = algorithm = None
                 data = {}
                 # The file is GPG-signed, but we don't care about validating

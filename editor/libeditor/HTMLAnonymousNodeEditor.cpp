@@ -289,7 +289,9 @@ HTMLEditor::DeleteRefToAnonymousNode(ManualNACPtr aContent,
 NS_IMETHODIMP
 HTMLEditor::CheckSelectionStateForAnonymousButtons(Selection* aSelection)
 {
-  NS_ENSURE_ARG_POINTER(aSelection);
+  if (NS_WARN_IF(!aSelection)) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
   // early way out if all contextual UI extensions are disabled
   NS_ENSURE_TRUE(mIsObjectResizingEnabled ||
@@ -302,8 +304,10 @@ HTMLEditor::CheckSelectionStateForAnonymousButtons(Selection* aSelection)
   }
 
   // let's get the containing element of the selection
-  RefPtr<Element> focusElement = GetSelectionContainer();
-  NS_ENSURE_TRUE(focusElement, NS_OK);
+  RefPtr<Element> focusElement = GetSelectionContainerElement(*aSelection);
+  if (NS_WARN_IF(!focusElement)) {
+    return NS_OK;
+  }
 
   // If we're not in a document, don't try to add resizers
   if (!focusElement->IsInUncomposedDoc()) {
@@ -324,7 +328,8 @@ HTMLEditor::CheckSelectionStateForAnonymousButtons(Selection* aSelection)
   if (mIsObjectResizingEnabled || mIsInlineTableEditingEnabled) {
     // Resizing or Inline Table Editing is enabled, we need to check if the
     // selection is contained in a table cell
-    cellElement = GetElementOrParentByTagName(NS_LITERAL_STRING("td"), nullptr);
+    cellElement =
+      GetElementOrParentByTagNameAtSelection(*aSelection, *nsGkAtoms::td);
   }
 
   if (mIsObjectResizingEnabled && cellElement) {

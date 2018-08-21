@@ -124,11 +124,6 @@ public:
 
   bool GetReturnInParagraphCreatesNewParagraph();
 
-  /**
-   * Returns the deepest container of the selection
-   */
-  Element* GetSelectionContainer();
-
   // TextEditor overrides
   virtual nsresult Init(nsIDocument& aDoc, Element* aRoot,
                         nsISelectionController* aSelCon, uint32_t aFlags,
@@ -179,6 +174,28 @@ public:
    * Shift + Enter or something.
    */
   nsresult OnInputLineBreak();
+
+  /**
+   * CreateElementWithDefaults() creates new element whose name is
+   * aTagName with some default attributes are set.  Note that this is a
+   * public utility method.  I.e., just creates element, not insert it
+   * into the DOM tree.
+   * NOTE: This is available for internal use too since this does not change
+   *       the DOM tree nor undo transactions, and does not refer Selection,
+   *       HTMLEditRules, etc.
+   *
+   * @param aTagName            The new element's tag name.  If the name is
+   *                            one of "href", "anchor" or "namedanchor",
+   *                            this creates an <a> element.
+   * @return                    Newly created element.
+   */
+  already_AddRefed<Element> CreateElementWithDefaults(const nsAtom& aTagName);
+
+  /**
+   * Indent or outdent content around Selection.
+   */
+  nsresult IndentAsAction();
+  nsresult OutdentAsAction();
 
   /**
    * event callback when a mouse button is pressed
@@ -305,8 +322,27 @@ public:
    */
   nsresult DoInlineTableEditingAction(const Element& aUIAnonymousElement);
 
-  already_AddRefed<Element>
-  GetElementOrParentByTagName(const nsAString& aTagName, nsINode* aNode);
+  /**
+   * GetElementOrParentByTagName() looks for an element node whose name matches
+   * aTagName from aNode or anchor node of Selection to <body> element.
+   *
+   * @param aTagName        The tag name which you want to look for.
+   *                        Must not be nsGkAtoms::_empty.
+   *                        If nsGkAtoms::list, the result may be <ul>, <ol> or
+   *                        <dl> element.
+   *                        If nsGkAtoms::td, the result may be <td> or <th>.
+   *                        If nsGkAtoms::href, the result may be <a> element
+   *                        which has "href" attribute with non-empty value.
+   *                        If nsGkAtoms::anchor, the result may be <a> which
+   *                        has "name" attribute with non-empty value.
+   * @param aNode           If non-nullptr, this starts to look for the result
+   *                        from it.  Otherwise, i.e., nullptr, starts from
+   *                        anchor node of Selection.
+   * @return                If an element which matches aTagName, returns
+   *                        an Element.  Otherwise, nullptr.
+   */
+  Element*
+  GetElementOrParentByTagName(const nsAtom& aTagName, nsINode* aNode);
 
   /**
     * Get an active editor's editing host in DOM window.  If this editor isn't
@@ -423,6 +459,17 @@ protected: // May be called by friends.
   static Element* GetBlock(nsINode& aNode,
                            nsINode* aAncestorLimiter = nullptr);
 
+  /**
+   * Returns container element of ranges in Selection.  If Selection is
+   * collapsed, returns focus container node (or its parent element).
+   * If Selection selects only one element node, returns the element node.
+   * If Selection is only one range, returns common ancestor of the range.
+   * XXX If there are two or more Selection ranges, this returns parent node
+   *     of start container of a range which starts with different node from
+   *     start container of the first range.
+   */
+  Element* GetSelectionContainerElement(Selection& aSelection) const;
+
   void IsNextCharInNodeWhitespace(nsIContent* aContent,
                                   int32_t aOffset,
                                   bool* outIsSpace,
@@ -479,9 +526,6 @@ protected: // May be called by friends.
    * Join together any adjacent editable text nodes in the range.
    */
   nsresult CollapseAdjacentTextNodes(nsRange* aRange);
-
-  virtual bool AreNodesSameType(nsIContent* aNode1,
-                                nsIContent* aNode2) override;
 
   /**
    * IsInVisibleTextFrames() returns true if all text in aText is in visible
@@ -783,6 +827,92 @@ protected: // Shouldn't be used by friend classes
                                  nsIContent& aContentToSelect);
 
   /**
+   * CollapseSelectionAfter() collapses Selection after aElement.
+   * If aElement is an orphan node or not in editing host, returns error.
+   */
+  nsresult CollapseSelectionAfter(Selection& aSelection,
+                                  Element& aElement);
+
+  /**
+   * GetElementOrParentByTagNameAtSelection() looks for an element node whose
+   * name matches aTagName from anchor node of Selection to <body> element.
+   *
+   * @param aSelection      The Selection for this editor.
+   * @param aTagName        The tag name which you want to look for.
+   *                        Must not be nsGkAtoms::_empty.
+   *                        If nsGkAtoms::list, the result may be <ul>, <ol> or
+   *                        <dl> element.
+   *                        If nsGkAtoms::td, the result may be <td> or <th>.
+   *                        If nsGkAtoms::href, the result may be <a> element
+   *                        which has "href" attribute with non-empty value.
+   *                        If nsGkAtoms::anchor, the result may be <a> which
+   *                        has "name" attribute with non-empty value.
+   * @return                If an element which matches aTagName, returns
+   *                        an Element.  Otherwise, nullptr.
+   */
+  Element*
+  GetElementOrParentByTagNameAtSelection(Selection& aSelection,
+                                         const nsAtom& aTagName);
+
+  /**
+   * GetElementOrParentByTagNameInternal() looks for an element node whose
+   * name matches aTagName from aNode to <body> element.
+   *
+   * @param aTagName        The tag name which you want to look for.
+   *                        Must not be nsGkAtoms::_empty.
+   *                        If nsGkAtoms::list, the result may be <ul>, <ol> or
+   *                        <dl> element.
+   *                        If nsGkAtoms::td, the result may be <td> or <th>.
+   *                        If nsGkAtoms::href, the result may be <a> element
+   *                        which has "href" attribute with non-empty value.
+   *                        If nsGkAtoms::anchor, the result may be <a> which
+   *                        has "name" attribute with non-empty value.
+   * @param aNode           Start node to look for the element.
+   * @return                If an element which matches aTagName, returns
+   *                        an Element.  Otherwise, nullptr.
+   */
+  Element*
+  GetElementOrParentByTagNameInternal(const nsAtom& aTagName,
+                                      nsINode& aNode);
+
+  /**
+   * GetSelectedElement() returns an element node which is in first range of
+   * aSelection.  The rule is a little bit complicated and the rules do not
+   * make sense except in a few cases.  If you want to use this newly,
+   * you should create new method instead.  This needs to be here for
+   * comm-central.
+   * The rules are:
+   *   1. If Selection selects an element node, i.e., both containers are
+   *      same node and start offset and end offset is start offset + 1.
+   *      (XXX However, if last child is selected, this path is not used.)
+   *   2. If the argument is "href", look for anchor elements whose href
+   *      attribute is not empty from container of anchor/focus of Selection
+   *      to <body> element.  Then, both result are same one, returns the node.
+   *      (i.e., this allows collapsed selection.)
+   *   3. If the Selection is collapsed, returns null.
+   *   4. Otherwise, listing up all nodes with content iterator (post-order).
+   *     4-1. When first element node does *not* match with the argument,
+   *          *returns* the element.
+   *     4-2. When first element node matches with the argument, returns
+   *          *next* element node.
+   *
+   * @param aSelection          The Selection.
+   * @param aTagName            The atom of tag name in lower case.
+   *                            If nullptr, look for any element node.
+   *                            If nsGkAtoms::href, look for an <a> element
+   *                            which has non-empty href attribute.
+   *                            If nsGkAtoms::anchor or atomized "namedanchor",
+   *                            look for an <a> element which has non-empty
+   *                            name attribute.
+   * @param aRv                 Returns error code.
+   * @return                    An element in first range of aSelection.
+   */
+  already_AddRefed<Element>
+  GetSelectedElement(Selection& aSelection,
+                     const nsAtom* aTagName,
+                     ErrorResult& aRv);
+
+  /**
    * PasteInternal() pasts text with replacing selected content.
    * This tries to dispatch ePaste event first.  If its defaultPrevent() is
    * called, this does nothing but returns NS_OK.
@@ -832,6 +962,16 @@ protected: // Shouldn't be used by friend classes
    * inserted as normal text.
    */
   nsresult InsertTextWithQuotationsInternal(const nsAString& aStringToInsert);
+
+  /**
+   * IndentOrOutdentAsSubAction() indents or outdents the content around
+   * Selection.  Callers have to guarantee that there is a placeholder
+   * transaction.
+   *
+   * @param aEditSubAction      Must be EditSubAction::eIndent or
+   *                            EditSubAction::eOutdent.
+   */
+  nsresult IndentOrOutdentAsSubAction(EditSubAction aEditSubAction);
 
   nsresult LoadHTML(const nsAString& aInputString);
 
@@ -894,18 +1034,55 @@ protected: // Shouldn't be used by friend classes
   bool EnableExistingStyleSheet(const nsAString& aURL);
 
   /**
-   * Dealing with the internal style sheet lists.
+   * GetStyleSheetForURL() returns a pointer to StyleSheet which was added
+   * with AddOverrideStyleSheetInternal().  If it's not found, returns nullptr.
+   *
+   * @param aURL        URL to the style sheet.
    */
   StyleSheet* GetStyleSheetForURL(const nsAString& aURL);
-  void GetURLForStyleSheet(StyleSheet* aStyleSheet,
-                           nsAString& aURL);
 
   /**
    * Add a url + known style sheet to the internal lists.
    */
   nsresult AddNewStyleSheetToList(const nsAString &aURL,
                                   StyleSheet* aStyleSheet);
-  nsresult RemoveStyleSheetFromList(const nsAString &aURL);
+
+  /**
+   * Removes style sheet from the internal lists.
+   *
+   * @param aURL        URL to the style sheet.
+   * @return            If the URL is in the internal list, returns the
+   *                    removed style sheet.  Otherwise, i.e., not found,
+   *                    nullptr.
+   */
+  already_AddRefed<StyleSheet> RemoveStyleSheetFromList(const nsAString& aURL);
+
+  /**
+   * Add and apply the style sheet synchronously.
+   *
+   * @param aURL        URL to the style sheet.
+   */
+  nsresult AddOverrideStyleSheetInternal(const nsAString& aURL);
+
+  /**
+   * Remove the style sheet from this editor synchronously.
+   *
+   * @param aURL        URL to the style sheet.
+   * @return            Even if there is no specified style sheet in the
+   *                    internal lists, this returns NS_OK.
+   */
+  nsresult RemoveOverrideStyleSheetInternal(const nsAString& aURL);
+
+  /**
+   * Enable or disable the style sheet synchronously.
+   * aURL is just a key to specify a style sheet in the internal array.
+   * I.e., the style sheet has already been registered with
+   * AddOverrideStyleSheetInternal().
+   *
+   * @param aURL        URL to the style sheet.
+   * @param aEnable     true if enable the style sheet.  false if disable it.
+   */
+  void EnableStyleSheetInternal(const nsAString& aURL, bool aEnable);
 
   /**
    * MaybeCollapseSelectionAtFirstEditableNode() may collapse selection at
@@ -1289,12 +1466,6 @@ protected: // Shouldn't be used by friend classes
                                   int32_t aRow, int32_t aCol,
                                   int32_t aDirection, bool aSelected);
 
-  /**
-   * A more C++-friendly version of nsIHTMLEditor::GetSelectedElement
-   * that just returns null on errors.
-   */
-  already_AddRefed<dom::Element> GetSelectedElement(const nsAString& aTagName);
-
   void RemoveListenerAndDeleteRef(const nsAString& aEvent,
                                   nsIDOMEventListener* aListener,
                                   bool aUseCapture,
@@ -1423,10 +1594,7 @@ protected: // Shouldn't be used by friend classes
                                        const nsAString& aValue);
   typedef enum { eInserted, eAppended } InsertedOrAppended;
   void DoContentInserted(nsIContent* aChild, InsertedOrAppended);
-  // XXX Shouldn't this used by external classes instead of nsIHTMLEditor's
-  //     method?
-  already_AddRefed<Element> CreateElementWithDefaults(
-                              const nsAString& aTagName);
+
   /**
    * Returns an anonymous Element of type aTag,
    * child of aParentContent. If aIsCreatedHidden is true, the class
@@ -1574,6 +1742,7 @@ protected:
 
   friend class AutoSelectionSetterAfterTableEdit;
   friend class CSSEditUtils;
+  friend class EditorBase;
   friend class EmptyEditableFunctor;
   friend class HTMLEditRules;
   friend class TextEditor;

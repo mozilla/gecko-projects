@@ -21,7 +21,6 @@ menucaption {
   -moz-appearance: menuitem;
   -moz-box-align: center;
   max-width: 42em;
-  color: MenuText;
   list-style-image: none;
   -moz-image-region: auto;
 }
@@ -107,10 +106,6 @@ menulist > menupopup > menu {
   margin-inline-start: 21px !important;
 }
 
-menucaption > .menu-iconic-text {
-  margin-inline-start: 0 !important;
-}
-
 .menu-accel,
 .menu-iconic-accel {
   margin-top: 0px !important;
@@ -184,11 +179,4 @@ menuitem[type="radio"] {
 
 menuseparator {
   -moz-appearance: menuseparator;
-}
-
-/* ::::: autocomplete ::::: */
-
-.autocomplete-history-popup > menuitem {
-  max-width: none !important;
-  font: message-box;
 }

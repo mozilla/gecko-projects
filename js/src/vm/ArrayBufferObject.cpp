@@ -275,23 +275,23 @@ static const ClassOps ArrayBufferObjectClassOps = {
     ArrayBufferObject::trace,
 };
 
-static const JSFunctionSpec static_functions[] = {
+static const JSFunctionSpec arraybuffer_functions[] = {
     JS_FN("isView", ArrayBufferObject::fun_isView, 1, 0),
     JS_FS_END
 };
 
-static const JSPropertySpec static_properties[] = {
+static const JSPropertySpec arraybuffer_properties[] = {
     JS_SELF_HOSTED_SYM_GET(species, "ArrayBufferSpecies", 0),
     JS_PS_END
 };
 
 
-static const JSFunctionSpec prototype_functions[] = {
+static const JSFunctionSpec arraybuffer_proto_functions[] = {
     JS_SELF_HOSTED_FN("slice", "ArrayBufferSlice", 2, 0),
     JS_FS_END
 };
 
-static const JSPropertySpec prototype_properties[] = {
+static const JSPropertySpec arraybuffer_proto_properties[] = {
     JS_PSG("byteLength", ArrayBufferObject::byteLengthGetter, 0),
     JS_STRING_SYM_PS(toStringTag, "ArrayBuffer", JSPROP_READONLY),
     JS_PS_END
@@ -300,10 +300,10 @@ static const JSPropertySpec prototype_properties[] = {
 static const ClassSpec ArrayBufferObjectClassSpec = {
     GenericCreateConstructor<ArrayBufferObject::class_constructor, 1, gc::AllocKind::FUNCTION>,
     CreateArrayBufferPrototype,
-    static_functions,
-    static_properties,
-    prototype_functions,
-    prototype_properties
+    arraybuffer_functions,
+    arraybuffer_properties,
+    arraybuffer_proto_functions,
+    arraybuffer_proto_properties
 };
 
 static const ClassExtension ArrayBufferObjectClassExtension = {
@@ -1492,7 +1492,7 @@ ArrayBufferObject::addView(JSContext* cx, JSObject* viewArg)
  * InnerViewTable
  */
 
-static size_t VIEW_LIST_MAX_LENGTH = 500;
+constexpr size_t VIEW_LIST_MAX_LENGTH = 500;
 
 bool
 InnerViewTable::addView(JSContext* cx, ArrayBufferObject* buffer, ArrayBufferViewObject* view)

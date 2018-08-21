@@ -1,6 +1,7 @@
 import {actionCreators as ac, actionTypes as at} from "common/Actions.jsm";
 import {FormattedMessage} from "react-intl";
 import React from "react";
+import {TOP_SITES_SOURCE} from "./TopSitesConstants";
 
 class SelectableSearchShortcut extends React.PureComponent {
   render() {
@@ -74,37 +75,32 @@ export class SearchShortcutsForm extends React.PureComponent {
       if (shortcut.isSelected && !alreadyPinned) {
         pinQueue.push(this._searchTopSite(shortcut));
       } else if (!shortcut.isSelected && alreadyPinned) {
-        unpinQueue.push({url: alreadyPinned.url});
+        unpinQueue.push({url: alreadyPinned.url, searchVendor: shortcut.shortURL});
       }
     });
 
-    // Pin the pinQueue
-    if (pinQueue.length > 0) {
-      // First find the available slots. A slot is available if it isn't pinned
-      // or if it's a pinned shortcut that we are about to unpin.
-      const availableSlots = [];
-      rows.forEach((row, index) => {
-        if (!row || !row.isPinned || (row.searchTopSite && unpinQueue.find(site => row.url === site.url))) {
-          availableSlots.push(index);
-        }
-      });
+    // Tell the feed to do the work.
+    this.props.dispatch(ac.OnlyToMain({
+      type: at.UPDATE_PINNED_SEARCH_SHORTCUTS,
+      data: {
+        addedShortcuts: pinQueue,
+        deletedShortcuts: unpinQueue
+      }
+    }));
 
-      pinQueue.forEach(shortcut => {
-        this.props.dispatch(ac.OnlyToMain({
-          type: at.TOP_SITES_PIN,
-          data: {
-            site: shortcut,
-            index: availableSlots.shift()
-          }
-        }));
-      });
-    }
-
-    // Unpin the unpinQueue.
+    // Send the Telemetry pings.
+    pinQueue.forEach(shortcut => {
+      this.props.dispatch(ac.UserEvent({
+        source: TOP_SITES_SOURCE,
+        event: "SEARCH_EDIT_ADD",
+        value: {search_vendor: shortcut.searchVendor}
+      }));
+    });
     unpinQueue.forEach(shortcut => {
-      this.props.dispatch(ac.OnlyToMain({
-        type: at.TOP_SITES_UNPIN,
-        data: {site: shortcut}
+      this.props.dispatch(ac.UserEvent({
+        source: TOP_SITES_SOURCE,
+        event: "SEARCH_EDIT_DELETE",
+        value: {search_vendor: shortcut.searchVendor}
       }));
     });
 
@@ -115,7 +111,8 @@ export class SearchShortcutsForm extends React.PureComponent {
     return {
       url: shortcut.url,
       searchTopSite: true,
-      label: shortcut.keyword
+      label: shortcut.keyword,
+      searchVendor: shortcut.shortURL
     };
   }
 

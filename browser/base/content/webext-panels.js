@@ -25,10 +25,10 @@ function getBrowser(sidebar) {
     return Promise.resolve(browser);
   }
 
-  let stack = document.createElementNS(XUL_NS, "stack");
+  let stack = document.createXULElement("stack");
   stack.setAttribute("flex", "1");
 
-  browser = document.createElementNS(XUL_NS, "browser");
+  browser = document.createXULElement("browser");
   browser.setAttribute("id", "webext-panels-browser");
   browser.setAttribute("type", "content");
   browser.setAttribute("flex", "1");
@@ -64,12 +64,12 @@ function getBrowser(sidebar) {
   document.documentElement.appendChild(stack);
 
   return readyPromise.then(() => {
-    browser.messageManager.loadFrameScript("chrome://browser/content/content.js", false);
+    browser.messageManager.loadFrameScript("chrome://browser/content/content.js", false, true);
     ExtensionParent.apiManager.emit("extension-browser-inserted", browser);
 
     if (sidebar.browserStyle) {
       browser.messageManager.loadFrameScript(
-        "chrome://extensions/content/ext-browser-content.js", false);
+        "chrome://extensions/content/ext-browser-content.js", false, true);
 
       browser.messageManager.sendAsyncMessage("Extension:InitBrowser", {
         stylesheets: ExtensionParent.extensionStylesheets,

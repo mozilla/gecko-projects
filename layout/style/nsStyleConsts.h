@@ -178,6 +178,13 @@ enum class StyleImageOrientation : uint8_t {
   FromImage,
 };
 
+// scrollbar-width
+enum class StyleScrollbarWidth : uint8_t {
+  Auto,
+  Thin,
+  None,
+};
+
 // <shape-radius> for <basic-shape>
 enum class StyleShapeRadius : uint8_t {
   ClosestSide,
@@ -318,12 +325,6 @@ enum class StyleImageLayerRepeat : uint8_t {
   Space,
   Round
 };
-
-enum class StylePrefersReducedMotion : uint8_t {
-  NoPreference,
-  Reduce,
-};
-
 
 // See nsStyleImageLayers
 #define NS_STYLE_IMAGELAYER_SIZE_CONTAIN             0
@@ -1162,30 +1163,6 @@ enum class StyleOverscrollBehavior : uint8_t {
 #define NS_STYLE_SCROLL_SNAP_TYPE_NONE              0
 #define NS_STYLE_SCROLL_SNAP_TYPE_MANDATORY         1
 #define NS_STYLE_SCROLL_SNAP_TYPE_PROXIMITY         2
-
-/*****************************************************************************
- * Constants for media features.                                             *
- *****************************************************************************/
-
-// orientation
-enum class StyleOrientation : uint8_t {
-  Portrait = 0,
-  Landscape,
-};
-
-// scan
-enum class StyleScan : uint8_t {
-  Progressive = 0,
-  Interlace,
-};
-
-// display-mode
-enum class StyleDisplayMode : uint8_t {
-  Browser = 0,
-  MinimalUi,
-  Standalone,
-  Fullscreen,
-};
 
 } // namespace mozilla
 

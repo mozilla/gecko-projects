@@ -11,7 +11,7 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import \
     craft_release_properties as beetmover_craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, Schema
+from taskgraph.util.schema import validate_schema, Schema, resolve_keyed_by, optionally_keyed_by
 from taskgraph.util.scriptworker import (get_phase,
                                          get_worker_type_for_scope)
 from taskgraph.transforms.task import task_description_schema
@@ -41,6 +41,7 @@ beetmover_description_schema = Schema({
     Optional('label'): basestring,
     Optional('treeherder'): task_description_schema['treeherder'],
 
+    Optional('bucket-scope'): optionally_keyed_by('project', basestring),
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
 })
@@ -87,21 +88,21 @@ def make_task_description(config, jobs):
         if job.get('locale'):
             attributes['locale'] = job['locale']
 
-        bucket_scope = 'project:releng:beetmover:bucket:maven-staging'
-        # TODO Put this action elsewhere
-        action_scope = 'project:releng:beetmover:action:push-to-maven'
-        phase = get_phase(config)
+        resolve_keyed_by(
+            job, 'bucket-scope', item_name=job['label'],
+            project=config.params['project']
+        )
 
         task = {
             'label': label,
             'description': description,
-            'worker-type': get_worker_type_for_scope(config, bucket_scope),
-            'scopes': [bucket_scope, action_scope],
+            'worker-type': get_worker_type_for_scope(config, job['bucket-scope']),
+            'scopes': [job['bucket-scope'], 'project:releng:beetmover:action:push-to-maven'],
             'dependencies': dependencies,
             'attributes': attributes,
             'run-on-projects': ['mozilla-central'],
             'treeherder': treeherder,
-            'shipping-phase': job.get('shipping-phase', phase),
+            'shipping-phase': job.get('shipping-phase', get_phase(config)),
         }
 
         yield task

@@ -1174,11 +1174,12 @@ fails-if(usesRepeatResampling) fails-if(Android) fails-if(webrender) == 446100-1
 == 446100-1h.html about:blank
 == 447749-1.html 447749-1-ref.html
 fuzzy(0-127,0-2) fails-if(webrender) == 448193.html 448193-ref.html # bug 1382896 for webrender
-!= 449149-1a.html about:blank
-!= 449149-1b.html about:blank
+# There isn't a way to load UA Widget in reftest yet.
+test-pref(dom.ua_widget.enabled,false) != 449149-1a.html about:blank
+test-pref(dom.ua_widget.enabled,false) != 449149-1b.html about:blank
 # Retry the above with XBL scopes
-test-pref(dom.use_xbl_scopes_for_remote_xul,true) != 449149-1a.html about:blank
-test-pref(dom.use_xbl_scopes_for_remote_xul,true) != 449149-1b.html about:blank
+test-pref(dom.ua_widget.enabled,false) test-pref(dom.use_xbl_scopes_for_remote_xul,true) != 449149-1a.html about:blank
+test-pref(dom.ua_widget.enabled,false) test-pref(dom.use_xbl_scopes_for_remote_xul,true) != 449149-1b.html about:blank
 == 449149-2.html 449149-2-ref.html
 == 449171-1.html 449171-ref.html
 == 449362-1.html 449362-1-ref.html
@@ -1685,7 +1686,7 @@ fuzzy-if(skiaContent,0-1,0-65536) == 654950-1.html 654950-1-ref.html # Quartz al
 != 656875.html about:blank
 == 658952.html 658952-ref.html
 fuzzy-if(skiaContent,0-10,0-919) fuzzy-if(webrender&&cocoaWidget,54-54,831-831) == 660682-1.html 660682-1-ref.html
-pref(layout.css.xul-tree-pseudos.content.enabled,true) fuzzy-if(d2d,0-1,0-256) skip-if(Android) fuzzy-if(skiaContent,0-1,0-68000) fuzzy-if(webrender&&cocoaWidget,2-2,256-256) == 664127-1.xul 664127-1-ref.xul # Android: Intermittent failures - bug 1019131
+pref(layout.css.xul-tree-pseudos.content.enabled,true) fuzzy-if(d2d,0-1,0-256) skip-if(Android) fuzzy-if(skiaContent,0-1,0-68000) == 664127-1.xul 664127-1-ref.xul # Android: Intermittent failures - bug 1019131
 == 665597-1.html 665597-1-ref.html
 == 665597-2.html 665597-2-ref.html
 == 667079-1.html 667079-1-ref.html

@@ -3549,6 +3549,30 @@ public:
     --mIgnoreOpensDuringUnloadCounter;
   }
 
+  void IncrementTrackerCount(bool aIsTrackerBlocked)
+  {
+    MOZ_ASSERT(!GetSameTypeParentDocument());
+
+    ++mNumTrackersFound;
+    if (aIsTrackerBlocked) {
+      ++mNumTrackersBlocked;
+    }
+  }
+
+  uint32_t NumTrackersFound()
+  {
+    MOZ_ASSERT(!GetSameTypeParentDocument() || mNumTrackersFound == 0);
+
+    return mNumTrackersFound;
+  }
+
+  uint32_t NumTrackersBlocked()
+  {
+    MOZ_ASSERT(!GetSameTypeParentDocument() || mNumTrackersBlocked == 0);
+
+    return mNumTrackersBlocked;
+  }
+
   bool AllowPaymentRequest() const
   {
     return mAllowPaymentRequest;
@@ -4501,6 +4525,12 @@ protected:
   uint32_t mIgnoreOpensDuringUnloadCounter;
 
   nsCOMPtr<nsIDOMXULCommandDispatcher> mCommandDispatcher; // [OWNER] of the focus tracker
+
+  // At the moment, trackers might be blocked by Tracking Protection or FastBlock.
+  // In order to know the numbers of trackers detected and blocked, we add
+  // these two values here and those are shared by TP and FB.
+  uint32_t mNumTrackersFound;
+  uint32_t mNumTrackersBlocked;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIDocument, NS_IDOCUMENT_IID)
@@ -4660,17 +4690,26 @@ nsINode::OwnerDocAsNode() const
 template<typename T>
 inline bool ShouldUseXBLScope(const T* aNode)
 {
-  // TODO(emilio): Is the <svg:use> shadow tree check needed now?
-  return aNode->IsInAnonymousSubtree() && !aNode->IsInSVGUseShadowTree();
+  return aNode->IsInAnonymousSubtree();
+}
+
+template<typename T>
+inline bool ShouldUseUAWidgetScope(const T* aNode)
+{
+  return aNode->IsInUAWidget();
 }
 
 inline mozilla::dom::ParentObject
 nsINode::GetParentObject() const
 {
   mozilla::dom::ParentObject p(OwnerDoc());
-    // Note that mUseXBLScope is a no-op for chrome, and other places where we
-    // don't use XBL scopes.
-  p.mUseXBLScope = ShouldUseXBLScope(this);
+    // Note that mReflectionScope is a no-op for chrome, and other places
+    // where we don't check this value.
+  if (ShouldUseXBLScope(this)) {
+    p.mReflectionScope = mozilla::dom::ReflectionScope::XBL;
+  } else if (ShouldUseUAWidgetScope(this)) {
+    p.mReflectionScope = mozilla::dom::ReflectionScope::UAWidget;
+  }
   return p;
 }
 

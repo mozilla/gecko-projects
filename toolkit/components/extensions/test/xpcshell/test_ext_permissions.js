@@ -36,7 +36,7 @@ async function withHandlingUserInput(extension, fn) {
   let {messageManager} = extension.extension.groupFrameLoader;
 
   if (!extensionHandlers.has(extension)) {
-    messageManager.loadFrameScript(`data:,(${frameScript})(this)`, false);
+    messageManager.loadFrameScript(`data:,(${frameScript}).call(this)`, false, true);
     extensionHandlers.add(extension);
   }
 
@@ -412,6 +412,7 @@ const GRANTED_WITHOUT_USER_PROMPT = [
   "mozillaAddons",
   "search",
   "storage",
+  "telemetry",
   "theme",
   "webRequest",
   "webRequestBlocking",

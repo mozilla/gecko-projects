@@ -333,6 +333,8 @@ class IonBuilder
                                                                MDefinition* left,
                                                                MDefinition* right);
     AbortReasonOr<Ok> compareTryBinaryStub(bool* emitted, MDefinition* left, MDefinition* right);
+    AbortReasonOr<Ok> compareTryCharacter(bool* emitted, JSOp op, MDefinition* left,
+                                          MDefinition* right);
 
     // jsop_newarray helpers.
     AbortReasonOr<Ok> newArrayTryTemplateObject(bool* emitted, JSObject* templateObject,
@@ -340,7 +342,6 @@ class IonBuilder
     AbortReasonOr<Ok> newArrayTryVM(bool* emitted, JSObject* templateObject, uint32_t length);
 
     // jsop_newobject helpers.
-    AbortReasonOr<Ok> newObjectTrySharedStub(bool* emitted);
     AbortReasonOr<Ok> newObjectTryTemplateObject(bool* emitted, JSObject* templateObject);
     AbortReasonOr<Ok> newObjectTryVM(bool* emitted, JSObject* templateObject);
 

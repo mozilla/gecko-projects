@@ -279,6 +279,19 @@ var PermissionPromptPrototype = {
                                         this.browser);
 
       if (state == SitePermissions.BLOCK) {
+        // If the request is blocked by a global setting then we record
+        // a flag that lasts for the duration of the current page load
+        // to notify the user that the permission has been blocked.
+        // Currently only applies to autoplay-media
+        if (state == SitePermissions.getDefault(this.permissionKey) &&
+            SitePermissions.showGloballyBlocked(this.permissionKey)) {
+          SitePermissions.set(this.principal.URI,
+                              this.permissionKey,
+                              state,
+                              SitePermissions.SCOPE_GLOBAL,
+                              this.browser);
+        }
+
         this.cancel();
         return;
       }
@@ -324,8 +337,10 @@ var PermissionPromptPrototype = {
                                   this.permissionKey,
                                   promptAction.action,
                                   scope);
-            } else if (promptAction.action == SitePermissions.BLOCK) {
-              // Temporarily store BLOCK permissions only.
+            } else if (promptAction.action == SitePermissions.BLOCK ||
+                       SitePermissions.permitTemporaryAllow(this.permissionKey)) {
+              // Temporarily store BLOCK permissions only unless permission object
+              // sets permitTemporaryAllow: true
               // SitePermissions does not consider subframes when storing temporary
               // permissions on a tab, thus storing ALLOW could be exploited.
               SitePermissions.set(this.principal.URI,

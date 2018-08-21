@@ -1053,26 +1053,6 @@ InternalEnqueuePromiseJobCallback(JSContext* cx, JS::HandleObject job,
     return true;
 }
 
-namespace {
-class MOZ_STACK_CLASS ReportExceptionClosure : public ScriptEnvironmentPreparer::Closure
-{
-  public:
-    explicit ReportExceptionClosure(HandleValue exn)
-        : exn_(exn)
-    {
-    }
-
-    bool operator()(JSContext* cx) override
-    {
-        cx->setPendingException(exn_);
-        return false;
-    }
-
-  private:
-    HandleValue exn_;
-};
-} // anonymous namespace
-
 JS_FRIEND_API(bool)
 js::UseInternalJobQueues(JSContext* cx)
 {
@@ -1175,7 +1155,7 @@ js::RunJobs(JSContext* cx)
                          * have one.
                          */
                         cx->clearPendingException();
-                        ReportExceptionClosure reportExn(exn);
+                        js::ReportExceptionClosure reportExn(exn);
                         PrepareScriptEnvironmentAndInvoke(cx, cx->global(), reportExn);
                     }
                 }
@@ -1581,17 +1561,17 @@ JS::AutoCheckRequestDepth::~AutoCheckRequestDepth()
 
 #ifdef JS_CRASH_DIAGNOSTICS
 void
-CompartmentChecker::check(InterpreterFrame* fp)
+CompartmentChecker::check(InterpreterFrame* fp, int argIndex)
 {
     if (fp)
-        check(fp->environmentChain());
+        check(fp->environmentChain(), argIndex);
 }
 
 void
-CompartmentChecker::check(AbstractFramePtr frame)
+CompartmentChecker::check(AbstractFramePtr frame, int argIndex)
 {
     if (frame)
-        check(frame.environmentChain());
+        check(frame.environmentChain(), argIndex);
 }
 #endif
 

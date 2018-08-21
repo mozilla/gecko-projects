@@ -687,8 +687,6 @@ interface nsIDOMWindowUtils : nsISupports {
    * non-debug builds. Available to all callers in debug builds.
    *
    * @param aListener listener that receives information about the CC graph
-   *                  (see @mozilla.org/cycle-collector-logger;1 for a logger
-   *                   component)
    */
   void garbageCollect([optional] in nsICycleCollectorListener aListener);
 
@@ -699,8 +697,6 @@ interface nsIDOMWindowUtils : nsISupports {
    * non-debug builds. Available to all callers in debug builds.
    *
    * @param aListener listener that receives information about the CC graph
-   *                  (see @mozilla.org/cycle-collector-logger;1 for a logger
-   *                   component)
    */
   void cycleCollect([optional] in nsICycleCollectorListener aListener);
 
@@ -1930,6 +1926,11 @@ interface nsIDOMWindowUtils : nsISupports {
    * save them to a folder relative to the current working directory.
    */
   void wrCapture();
+
+  /**
+   * NOTE: Currently works only on GTK+.
+   */
+  attribute ACString systemFont;
 
   // These consts are only for testing purposes.
   const long DEFAULT_MOUSE_POINTER_ID = 0;

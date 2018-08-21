@@ -32,6 +32,7 @@
 
 #include "nsDOMMutationObserver.h"
 #include "nsICycleCollectorListener.h"
+#include "nsCycleCollector.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsScriptSecurityManager.h"
@@ -1111,12 +1112,8 @@ DumpJSStack()
 MOZ_EXPORT void
 DumpCompleteHeap()
 {
-    nsCOMPtr<nsICycleCollectorListener> listener =
-      do_CreateInstance("@mozilla.org/cycle-collector-logger;1");
-    if (!listener) {
-      NS_WARNING("Failed to create CC logger");
-      return;
-    }
+    nsCOMPtr<nsICycleCollectorListener> listener = nsCycleCollector_createLogger();
+    MOZ_ASSERT(listener);
 
     nsCOMPtr<nsICycleCollectorListener> alltracesListener;
     listener->AllTraces(getter_AddRefs(alltracesListener));
@@ -1180,13 +1177,40 @@ IsChromeOrXBL(JSContext* cx, JSObject* /* unused */)
     return AccessCheck::isChrome(c) || IsContentXBLCompartment(c) || !AllowContentXBLScope(realm);
 }
 
+bool
+IsNotUAWidget(JSContext* cx, JSObject* /* unused */)
+{
+    MOZ_ASSERT(NS_IsMainThread());
+    JS::Realm* realm = JS::GetCurrentRealmOrNull(cx);
+    MOZ_ASSERT(realm);
+    JS::Compartment* c = JS::GetCompartmentForRealm(realm);
+
+    return !IsUAWidgetCompartment(c);
+}
+
+bool
+IsChromeOrXBLOrUAWidget(JSContext* cx, JSObject* /* unused */)
+{
+    if (IsChromeOrXBL(cx, nullptr)) {
+      return true;
+    }
+
+    MOZ_ASSERT(NS_IsMainThread());
+    JS::Realm* realm = JS::GetCurrentRealmOrNull(cx);
+    MOZ_ASSERT(realm);
+    JS::Compartment* c = JS::GetCompartmentForRealm(realm);
+
+    return IsUAWidgetCompartment(c);
+}
+
+
 extern bool IsCurrentThreadRunningChromeWorker();
 
 bool
-ThreadSafeIsChromeOrXBL(JSContext* cx, JSObject* obj)
+ThreadSafeIsChromeOrXBLOrUAWidget(JSContext* cx, JSObject* obj)
 {
     if (NS_IsMainThread()) {
-        return IsChromeOrXBL(cx, obj);
+        return IsChromeOrXBLOrUAWidget(cx, obj);
     }
     return IsCurrentThreadRunningChromeWorker();
 }

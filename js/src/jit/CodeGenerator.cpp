@@ -428,6 +428,7 @@ CodeGenerator::visitOutOfLineICFallback(OutOfLineICFallback* ool)
       case CacheKind::TypeOf:
       case CacheKind::ToBool:
       case CacheKind::GetIntrinsic:
+      case CacheKind::NewObject:
         MOZ_CRASH("Unsupported IC");
     }
     MOZ_CRASH();
@@ -8370,10 +8371,6 @@ CodeGenerator::visitSameValueVM(LSameValueVM* lir)
     pushArg(ToValue(lir, LSameValueVM::LhsInput));
     callVM(SameValueInfo, lir);
 }
-
-typedef JSString* (*ConcatStringsFn)(JSContext*, HandleString, HandleString);
-static const VMFunction ConcatStringsInfo =
-    FunctionInfo<ConcatStringsFn>(ConcatStrings<CanGC>, "ConcatStrings");
 
 void
 CodeGenerator::emitConcat(LInstruction* lir, Register lhs, Register rhs, Register output)

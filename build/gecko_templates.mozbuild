@@ -36,15 +36,6 @@ def GeckoBinary(linkage='dependent', mozglue=None):
     elif linkage != None:
         error('`linkage` must be "dependent", "standalone" or None')
 
-    if CONFIG['LIBFUZZER']:
-        assert mozglue is not None, 'libfuzzer depends on "mozglue"'
-        USE_LIBS += [
-            'fuzzer'
-        ]
-        LOCAL_INCLUDES += [
-            '/tools/fuzzing/libfuzzer'
-        ]
-
     if mozglue:
         LDFLAGS += CONFIG['MOZ_GLUE_WRAP_LDFLAGS']
         if mozglue == 'program':
@@ -107,13 +98,13 @@ def GeckoCppUnitTests(names, **kwargs):
 
 
 @template
-def GeckoSharedLibrary(name, **kwargs):
+def GeckoSharedLibrary(name, output_category=None, **kwargs):
     '''Template for shared libraries related to Gecko.
 
     `name` identifies the library base name.
     See the documentation for `GeckoBinary` for other possible arguments.
     '''
-    SharedLibrary(name)
+    SharedLibrary(name, output_category)
 
     kwargs.setdefault('mozglue', 'library')
 
@@ -121,13 +112,13 @@ def GeckoSharedLibrary(name, **kwargs):
 
 
 @template
-def GeckoFramework(name, **kwargs):
+def GeckoFramework(name, output_category=None, **kwargs):
     '''Template for OSX frameworks related to Gecko.
 
     `name` identifies the library base name.
     See the documentation for `GeckoBinary` for other possible arguments.
     '''
-    Framework(name)
+    Framework(name, output_category)
 
     kwargs.setdefault('mozglue', 'library')
 

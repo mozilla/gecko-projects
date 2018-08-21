@@ -185,6 +185,8 @@ HttpChannelChild::HttpChannelChild()
   , mPostRedirectChannelShouldUpgrade(false)
   , mShouldParentIntercept(false)
   , mSuspendParentAfterSynthesizeResponse(false)
+  , mCacheNeedToReportBytesReadInitialized(false)
+  , mNeedToReportBytesRead(true)
 {
   LOG(("Creating HttpChannelChild @%p\n", this));
 
@@ -694,6 +696,38 @@ public:
 
 NS_IMPL_ISUPPORTS(SyntheticDiversionListener, nsIStreamListener);
 
+static nsresult
+GetTopDocument(nsIChannel* aChannel, nsIDocument** aResult)
+{
+  nsresult rv;
+
+  nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil = services::GetThirdPartyUtil();
+  if (NS_WARN_IF(!thirdPartyUtil)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<mozIDOMWindowProxy> win;
+  rv = thirdPartyUtil->GetTopWindowForChannel(aChannel,
+                                              getter_AddRefs(win));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  auto* pwin = nsPIDOMWindowOuter::From(win);
+  nsCOMPtr<nsIDocShell> docShell = pwin->GetDocShell();
+  if (!docShell) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIDocument> doc = docShell->GetDocument();
+  if (!doc) {
+    return NS_ERROR_FAILURE;
+  }
+
+  doc.forget(aResult);
+  return NS_OK;
+}
+
 void
 HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
 {
@@ -709,6 +743,23 @@ HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
   if (mSynthesizedResponsePump && mLoadFlags & LOAD_CALL_CONTENT_SNIFFERS) {
     mSynthesizedResponsePump->PeekStream(CallTypeSniffers,
                                          static_cast<nsIChannel*>(this));
+  }
+
+  bool isTracker;
+  if (NS_SUCCEEDED(mLoadInfo->GetIsTracker(&isTracker)) && isTracker) {
+    bool isTrackerBlocked;
+    Unused << mLoadInfo->GetIsTrackerBlocked(&isTrackerBlocked);
+
+    LOG(("HttpChannelChild::DoOnStartRequest FastBlock %d [this=%p]\n",
+         isTrackerBlocked,
+         this));
+
+    nsCOMPtr<nsIDocument> doc;
+    if (!NS_WARN_IF(NS_FAILED(GetTopDocument(this,
+                                             getter_AddRefs(doc))))) {
+
+      doc->IncrementTrackerCount(isTrackerBlocked);
+    }
   }
 
   nsresult rv = mListener->OnStartRequest(aRequest, aContext);
@@ -920,6 +971,50 @@ HttpChannelChild::OnTransportAndData(const nsresult& channelStatus,
 
   DoOnDataAvailable(this, mListenerContext, stringStream, offset, count);
   stringStream->Close();
+
+  if (NeedToReportBytesRead()) {
+    mUnreportBytesRead += count;
+    if (mUnreportBytesRead >= gHttpHandler->SendWindowSize() >> 2) {
+      if (NS_IsMainThread()) {
+        Unused << SendBytesRead(mUnreportBytesRead);
+      } else {
+        // PHttpChannel connects to the main thread
+        RefPtr<HttpChannelChild> self = this;
+        int32_t bytesRead = mUnreportBytesRead;
+        nsCOMPtr<nsIEventTarget> neckoTarget = GetNeckoTarget();
+        MOZ_ASSERT(neckoTarget);
+
+        DebugOnly<nsresult> rv = neckoTarget->Dispatch(
+          NS_NewRunnableFunction("net::HttpChannelChild::SendBytesRead",
+                                 [self, bytesRead]() {
+                                   Unused << self->SendBytesRead(bytesRead);
+                                 }),
+          NS_DISPATCH_NORMAL);
+        MOZ_ASSERT(NS_SUCCEEDED(rv));
+      }
+      mUnreportBytesRead = 0;
+    }
+  }
+}
+
+bool
+HttpChannelChild::NeedToReportBytesRead() {
+ if (mCacheNeedToReportBytesReadInitialized) {
+    return mNeedToReportBytesRead;
+  }
+
+  // Might notify parent for partial cache, and the IPC message is ignored by
+  // parent.
+  int64_t contentLength = -1;
+  if (gHttpHandler->SendWindowSize() == 0 ||
+      mIsFromCache ||
+      NS_FAILED(GetContentLength(&contentLength)) ||
+      contentLength < gHttpHandler->SendWindowSize()) {
+    mNeedToReportBytesRead = false;
+  }
+
+  mCacheNeedToReportBytesReadInitialized = true;
+  return mNeedToReportBytesRead;
 }
 
 void

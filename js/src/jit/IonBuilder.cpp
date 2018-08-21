@@ -3455,18 +3455,6 @@ IonBuilder::powTrySpecialized(bool* emitted, MDefinition* base, MDefinition* pow
     return Ok();
 }
 
-static inline bool
-SimpleArithOperand(MDefinition* op)
-{
-    return !op->emptyResultTypeSet()
-        && !op->mightBeType(MIRType::Object)
-        && !op->mightBeType(MIRType::String)
-        && !op->mightBeType(MIRType::Symbol)
-        && !op->mightBeType(MIRType::MagicOptimizedArguments)
-        && !op->mightBeType(MIRType::MagicHole)
-        && !op->mightBeType(MIRType::MagicIsConstructing);
-}
-
 AbortReasonOr<Ok>
 IonBuilder::binaryArithTrySpecialized(bool* emitted, JSOp op, MDefinition* left, MDefinition* right)
 {
@@ -5825,6 +5813,9 @@ IonBuilder::jsop_compare(JSOp op, MDefinition* left, MDefinition* right)
         startTrackingOptimizations();
 
     if (!forceInlineCaches()) {
+        MOZ_TRY(compareTryCharacter(&emitted, op, left, right));
+        if (emitted)
+            return Ok();
         MOZ_TRY(compareTrySpecialized(&emitted, op, left, right));
         if (emitted)
             return Ok();
@@ -5854,6 +5845,70 @@ IonBuilder::jsop_compare(JSOp op, MDefinition* left, MDefinition* right)
 
     if (canTrackOptimization)
         trackOptimizationSuccess();
+    return Ok();
+}
+
+AbortReasonOr<Ok>
+IonBuilder::compareTryCharacter(bool* emitted, JSOp op, MDefinition* left, MDefinition* right)
+{
+    MOZ_ASSERT(*emitted == false);
+
+    // TODO: Support tracking optimizations for inlining a call and regular
+    // optimization tracking at the same time. Currently just drop optimization
+    // tracking when that happens.
+    bool canTrackOptimization = !IsCallPC(pc);
+    if (canTrackOptimization)
+        trackOptimizationAttempt(TrackedStrategy::Compare_Character);
+
+    // Try to optimize |MConstant(string) <compare> (MFromCharCode MCharCodeAt)|
+    // as |MConstant(charcode) <compare> MCharCodeAt|.
+
+    MConstant* constant;
+    MDefinition* operand;
+    if (left->isConstant()) {
+        constant = left->toConstant();
+        operand = right;
+    } else if (right->isConstant()) {
+        constant = right->toConstant();
+        operand = left;
+    } else {
+        return Ok();
+    }
+
+    if (constant->type() != MIRType::String || constant->toString()->length() != 1)
+        return Ok();
+
+    if (!operand->isFromCharCode() || !operand->toFromCharCode()->input()->isCharCodeAt())
+        return Ok();
+
+    char16_t charCode = constant->toString()->asAtom().latin1OrTwoByteChar(0);
+    constant->setImplicitlyUsedUnchecked();
+
+    MConstant* charCodeConst = MConstant::New(alloc(), Int32Value(charCode));
+    current->add(charCodeConst);
+
+    MDefinition* charCodeAt = operand->toFromCharCode()->input();
+    operand->setImplicitlyUsedUnchecked();
+
+    if (left == constant) {
+        left = charCodeConst;
+        right = charCodeAt;
+    } else {
+        left = charCodeAt;
+        right = charCodeConst;
+    }
+
+    MCompare* ins = MCompare::New(alloc(), left, right, op);
+    ins->setCompareType(MCompare::Compare_Int32);
+    ins->cacheOperandMightEmulateUndefined(constraints());
+
+    current->add(ins);
+    current->push(ins);
+
+    MOZ_ASSERT(!ins->isEffectful());
+    if (canTrackOptimization)
+        trackOptimizationSuccess();
+    *emitted = true;
     return Ok();
 }
 
@@ -5949,18 +6004,18 @@ IonBuilder::compareTryBitwise(bool* emitted, JSOp op, MDefinition* left, MDefini
         return Ok();
     }
 
-    // Objects that emulate undefined are not supported.
-    if (left->maybeEmulatesUndefined(constraints()) ||
-        right->maybeEmulatesUndefined(constraints()))
-    {
-        if (canTrackOptimization)
-            trackOptimizationOutcome(TrackedOutcome::OperandMaybeEmulatesUndefined);
-        return Ok();
-    }
-
     // In the loose comparison more values could be the same,
     // but value comparison reporting otherwise.
     if (op == JSOP_EQ || op == JSOP_NE) {
+
+        // Objects that emulate undefined are not supported.
+        if (left->maybeEmulatesUndefined(constraints()) ||
+            right->maybeEmulatesUndefined(constraints()))
+        {
+            if (canTrackOptimization)
+                trackOptimizationOutcome(TrackedOutcome::OperandMaybeEmulatesUndefined);
+            return Ok();
+        }
 
         // Undefined compared loosy to Null is not supported,
         // because tag is different, but value can be the same (undefined == null).
@@ -6245,12 +6300,6 @@ IonBuilder::newObjectTryTemplateObject(bool* emitted, JSObject* templateObject)
         return Ok();
     }
 
-    if (templateObject->is<PlainObject>() && templateObject->as<PlainObject>().hasDynamicSlots()) {
-        if (canTrackOptimization)
-            trackOptimizationOutcome(TrackedOutcome::TemplateObjectIsPlainObjectWithDynamicSlots);
-        return Ok();
-    }
-
     // Emit fastpath.
 
     MNewObject::Mode mode;
@@ -6268,40 +6317,6 @@ IonBuilder::newObjectTryTemplateObject(bool* emitted, JSObject* templateObject)
     current->push(ins);
 
     MOZ_TRY(resumeAfter(ins));
-
-    if (canTrackOptimization)
-        trackOptimizationSuccess();
-    *emitted = true;
-    return Ok();
-}
-
-AbortReasonOr<Ok>
-IonBuilder::newObjectTrySharedStub(bool* emitted)
-{
-    MOZ_ASSERT(*emitted == false);
-
-    // TODO: Support tracking optimizations for inlining a call and regular
-    // optimization tracking at the same time. Currently just drop optimization
-    // tracking when that happens.
-    bool canTrackOptimization = !IsCallPC(pc);
-
-    // Try to emit a shared stub cache.
-
-    if (JitOptions.disableSharedStubs)
-        return Ok();
-
-    if (canTrackOptimization)
-        trackOptimizationAttempt(TrackedStrategy::NewObject_SharedCache);
-
-    MInstruction* stub = MNullarySharedStub::New(alloc());
-    current->add(stub);
-    current->push(stub);
-
-    MOZ_TRY(resumeAfter(stub));
-
-    MUnbox* unbox = MUnbox::New(alloc(), current->pop(), MIRType::Object, MUnbox::Infallible);
-    current->add(unbox);
-    current->push(unbox);
 
     if (canTrackOptimization)
         trackOptimizationSuccess();
@@ -6347,12 +6362,7 @@ IonBuilder::jsop_newobject()
 
     JSObject* templateObject = inspector->getTemplateObject(pc);
 
-    if (!forceInlineCaches()) {
-        MOZ_TRY(newObjectTryTemplateObject(&emitted, templateObject));
-        if (emitted)
-            return Ok();
-    }
-    MOZ_TRY(newObjectTrySharedStub(&emitted));
+    MOZ_TRY(newObjectTryTemplateObject(&emitted, templateObject));
     if (emitted)
         return Ok();
 

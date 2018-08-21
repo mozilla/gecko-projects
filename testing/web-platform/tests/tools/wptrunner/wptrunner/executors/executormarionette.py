@@ -467,7 +467,7 @@ class MarionetteProtocol(Protocol):
                     raise
 
         self.logger.debug("Starting Marionette session")
-        self.marionette.start_session()
+        self.marionette.start_session(self.capabilities)
         self.logger.debug("Marionette session started")
 
     def after_connect(self):
@@ -816,11 +816,12 @@ class InternalRefTestImplementation(object):
 
     def run_test(self, test):
         references = self.get_references(test)
+        timeout = (test.timeout * 1000) * self.timeout_multiplier
         rv = self.executor.protocol.marionette._send_message("reftest:run",
                                                              {"test": self.executor.test_url(test),
                                                               "references": references,
                                                               "expected": test.expected(),
-                                                              "timeout": test.timeout * 1000})["value"]
+                                                              "timeout": timeout})["value"]
         return rv
 
     def get_references(self, node):

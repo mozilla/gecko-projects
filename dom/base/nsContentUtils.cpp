@@ -121,7 +121,6 @@
 #include "nsHtml5StringParser.h"
 #include "nsHTMLDocument.h"
 #include "nsHTMLTags.h"
-#include "nsInProcessTabChildGlobal.h"
 #include "nsIAddonPolicyService.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
@@ -168,7 +167,6 @@
 #include "nsIParserUtils.h"
 #include "nsIPermissionManager.h"
 #include "nsIPluginHost.h"
-#include "nsIRemoteBrowser.h"
 #include "nsIRequest.h"
 #include "nsIRunnable.h"
 #include "nsIScriptContext.h"
@@ -215,6 +213,7 @@
 #include "nsXULPopupManager.h"
 #include "xpcprivate.h" // nsXPConnect
 #include "HTMLSplitOnSpacesTokenizer.h"
+#include "InProcessTabChildMessageManager.h"
 #include "nsContentTypeParser.h"
 #include "nsICookiePermission.h"
 #include "nsICookieService.h"
@@ -226,6 +225,7 @@
 #include "mozilla/dom/TabGroup.h"
 #include "nsIWebNavigationInfo.h"
 #include "nsPluginHost.h"
+#include "nsIBrowser.h"
 #include "mozilla/HangAnnotations.h"
 #include "mozilla/Encoding.h"
 #include "nsXULElement.h"
@@ -300,6 +300,7 @@ bool nsContentUtils::sIsPerformanceTimingEnabled = false;
 bool nsContentUtils::sIsResourceTimingEnabled = false;
 bool nsContentUtils::sIsPerformanceNavigationTimingEnabled = false;
 bool nsContentUtils::sIsFormAutofillAutocompleteEnabled = false;
+bool nsContentUtils::sIsUAWidgetEnabled = false;
 bool nsContentUtils::sIsShadowDOMEnabled = false;
 bool nsContentUtils::sIsCustomElementsEnabled = false;
 bool nsContentUtils::sSendPerformanceTimingNotifications = false;
@@ -665,6 +666,9 @@ nsContentUtils::Init()
 
   Preferences::AddBoolVarCache(&sIsFormAutofillAutocompleteEnabled,
                                "dom.forms.autocomplete.formautofill", false);
+
+  Preferences::AddBoolVarCache(&sIsUAWidgetEnabled,
+                               "dom.ua_widget.enabled", false);
 
   Preferences::AddBoolVarCache(&sIsShadowDOMEnabled,
                                "dom.webcomponents.shadowdom.enabled", false);
@@ -8688,8 +8692,12 @@ nsContentUtils::StorageAllowedForWindow(nsPIDOMWindowInner* aWindow)
 {
   if (nsIDocument* document = aWindow->GetExtantDoc()) {
     nsCOMPtr<nsIPrincipal> principal = document->NodePrincipal();
+    // Note that GetChannel() below may return null, but that's OK, since the
+    // callee is able to deal with a null channel argument, and if passed null,
+    // will only fail to notify the UI in case storage gets blocked.
+    nsIChannel* channel = document->GetChannel();
     return InternalStorageAllowedForPrincipal(principal, aWindow, nullptr,
-                                              nullptr);
+                                              channel);
   }
 
   return StorageAccess::eDeny;
@@ -8703,8 +8711,12 @@ nsContentUtils::StorageAllowedForDocument(nsIDocument* aDoc)
 
   if (nsPIDOMWindowInner* inner = aDoc->GetInnerWindow()) {
     nsCOMPtr<nsIPrincipal> principal = aDoc->NodePrincipal();
+    // Note that GetChannel() below may return null, but that's OK, since the
+    // callee is able to deal with a null channel argument, and if passed null,
+    // will only fail to notify the UI in case storage gets blocked.
+    nsIChannel* channel = aDoc->GetChannel();
     return InternalStorageAllowedForPrincipal(principal, inner, nullptr,
-                                              nullptr);
+                                              channel);
   }
 
   return StorageAccess::eDeny;
@@ -8916,7 +8928,7 @@ nsContentUtils::StorageDisabledByAntiTracking(nsPIDOMWindowInner* aWindow,
       pwin = nsPIDOMWindowOuter::From(win);
     }
 
-    if (pwin) {
+    if (pwin && aChannel) {
       pwin->NotifyContentBlockingState(
         nsIWebProgressListener::STATE_BLOCKED_TRACKING_COOKIES, aChannel);
     }
@@ -10002,6 +10014,15 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
     nsIGlobalObject* global;
     if (aFromParser == dom::NOT_FROM_PARSER) {
       global = GetEntryGlobal();
+
+      // XUL documents always use NOT_FROM_PARSER for non-XUL elements. We can
+      // get the global from the document in that case.
+      if (!global) {
+        nsIDocument* doc = nodeInfo->GetDocument();
+        if (doc && doc->IsXULDocument()) {
+          global = doc->GetScopeObject();
+        }
+      }
     } else {
       global = nodeInfo->GetDocument()->GetScopeObject();
     }
@@ -10122,7 +10143,7 @@ nsContentUtils::LookupCustomElementDefinition(nsIDocument* aDoc,
     return nullptr;
   }
 
-  return registry->LookupCustomElementDefinition(aNameAtom, aTypeAtom);
+  return registry->LookupCustomElementDefinition(aNameAtom, aNameSpaceID, aTypeAtom);
 }
 
 /* static */ void
@@ -10538,8 +10559,13 @@ bool
 nsContentUtils::ShouldBlockReservedKeys(WidgetKeyboardEvent* aKeyEvent)
 {
   nsCOMPtr<nsIPrincipal> principal;
-  nsCOMPtr<nsIRemoteBrowser> targetBrowser = do_QueryInterface(aKeyEvent->mOriginalTarget);
+  nsCOMPtr<nsIBrowser> targetBrowser = do_QueryInterface(aKeyEvent->mOriginalTarget);
+  bool isRemoteBrowser = false;
   if (targetBrowser) {
+    targetBrowser->GetIsRemoteBrowser(&isRemoteBrowser);
+  }
+
+  if (isRemoteBrowser) {
     targetBrowser->GetContentPrincipal(getter_AddRefs(principal));
   }
   else {
@@ -11029,7 +11055,7 @@ nsContentUtils::TryGetTabChildGlobal(nsISupports* aFrom)
     return nullptr;
   }
 
-  RefPtr<ContentFrameMessageManager> manager = frameLoader->GetTabChildGlobal();
+  RefPtr<ContentFrameMessageManager> manager = frameLoader->GetTabChildMessageManager();
   return manager.forget();
 }
 

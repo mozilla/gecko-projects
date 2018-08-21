@@ -154,6 +154,7 @@ class WrapperHandler(object):
 
 class HtmlWrapperHandler(WrapperHandler):
     global_type = None
+    headers = [('Content-Type', 'text/html')]
 
     def check_exposure(self, request):
         if self.global_type:
@@ -249,7 +250,7 @@ fetch_tests_from_worker(new SharedWorker("%(path)s%(query)s"));
 
 class ServiceWorkersHandler(HtmlWrapperHandler):
     global_type = b"serviceworker"
-    path_replace = [(".https.any.serviceworker.html", ".any.js", ".any.worker.js")]
+    path_replace = [(".any.serviceworker.html", ".any.js", ".any.worker.js")]
     wrapper = """<!doctype html>
 <meta charset=utf-8>
 %(meta)s
@@ -342,7 +343,7 @@ class RoutesBuilder(object):
             ("GET", "*.window.html", WindowHandler),
             ("GET", "*.any.html", AnyHtmlHandler),
             ("GET", "*.any.sharedworker.html", SharedWorkersHandler),
-            ("GET", "*.https.any.serviceworker.html", ServiceWorkersHandler),
+            ("GET", "*.any.serviceworker.html", ServiceWorkersHandler),
             ("GET", "*.any.worker.js", AnyWorkerHandler),
             ("GET", "*.asis", handlers.AsIsHandler),
             ("*", "*.py", handlers.PythonScriptHandler),
@@ -754,9 +755,11 @@ class ConfigBuilder(config.ConfigBuilder):
     computed_properties = ["ws_doc_root"] + config.ConfigBuilder.computed_properties
 
     def __init__(self, *args, **kwargs):
+        if "subdomains" not in kwargs:
+            kwargs["subdomains"] = _subdomains
+        if "not_subdomains" not in kwargs:
+            kwargs["not_subdomains"] = _not_subdomains
         super(ConfigBuilder, self).__init__(
-            subdomains=_subdomains,
-            not_subdomains=_not_subdomains,
             *args,
             **kwargs
         )

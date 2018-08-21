@@ -489,9 +489,6 @@ const gSessionHistoryObserver = {
     var fwdCommand = document.getElementById("Browser:Forward");
     fwdCommand.setAttribute("disabled", "true");
 
-    // Hide session restore button on about:home
-    window.messageManager.broadcastAsyncMessage("Browser:HideSessionRestoreButton");
-
     // Clear undo history of the URL bar
     gURLBar.editor.transactionManager.clear();
   }
@@ -1318,8 +1315,8 @@ var gBrowserInit = {
     ZoomUI.init(window);
 
     let mm = window.getGroupMessageManager("browsers");
-    mm.loadFrameScript("chrome://browser/content/tab-content.js", true);
-    mm.loadFrameScript("chrome://browser/content/content.js", true);
+    mm.loadFrameScript("chrome://browser/content/tab-content.js", true, true);
+    mm.loadFrameScript("chrome://browser/content/content.js", true, true);
     mm.loadFrameScript("chrome://global/content/content-HybridContentTelemetry.js", true);
 
     window.messageManager.addMessageListener("Browser:LoadURI", RedirectLoad);
@@ -2980,6 +2977,29 @@ var BrowserOnClick = {
         sslStatus = securityInfo.SSLStatus;
         let params = { exceptionAdded: false,
                        sslStatus };
+        if (Services.prefs.getBoolPref("browser.security.newcerterrorpage.enabled", false)) {
+          let overrideService = Cc["@mozilla.org/security/certoverride;1"]
+                                  .getService(Ci.nsICertOverrideService);
+          let flags = 0;
+          if (sslStatus.isUntrusted) {
+            flags |= overrideService.ERROR_UNTRUSTED;
+          }
+          if (sslStatus.isDomainMismatch) {
+            flags |= overrideService.ERROR_MISMATCH;
+          }
+          if (sslStatus.isNotValidAtThisTime) {
+            flags |= overrideService.ERROR_TIME;
+          }
+          let uri = Services.uriFixup.createFixupURI(location, 0);
+          let cert = sslStatus.serverCert;
+          overrideService.rememberValidityOverride(
+            uri.asciiHost, uri.port,
+            cert,
+            flags,
+            true);
+          browser.reload();
+          return;
+        }
 
         try {
           switch (Services.prefs.getIntPref("browser.ssl_override_behavior")) {
@@ -5209,7 +5229,7 @@ const AccessibilityRefreshBlocker = {
     if (!this._loaded) {
       this._loaded = true;
       let mm = window.getGroupMessageManager("browsers");
-      mm.loadFrameScript("chrome://browser/content/content-refreshblocker.js", true);
+      mm.loadFrameScript("chrome://browser/content/content-refreshblocker.js", true, true);
     }
   }
 };
@@ -8076,8 +8096,7 @@ TabModalPromptBox.prototype = {
   },
 
   appendPrompt(args, onCloseCallback) {
-    const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-    let newPrompt = document.createElementNS(XUL_NS, "tabmodalprompt");
+    let newPrompt = document.createXULElement("tabmodalprompt");
     let browser = this.browser;
     browser.parentNode.insertBefore(newPrompt, browser.nextElementSibling);
     browser.setAttribute("tabmodalPromptShowing", true);
@@ -8099,9 +8118,9 @@ TabModalPromptBox.prototype = {
       hostForAllowFocusCheckbox = principalToAllowFocusFor.URI.host;
     } catch (ex) { /* Ignore exceptions for host-less URIs */ }
     if (hostForAllowFocusCheckbox) {
-      let allowFocusRow = document.createElementNS(XUL_NS, "row");
-      allowFocusCheckbox = document.createElementNS(XUL_NS, "checkbox");
-      let spacer = document.createElementNS(XUL_NS, "spacer");
+      let allowFocusRow = document.createXULElement("row");
+      allowFocusCheckbox = document.createXULElement("checkbox");
+      let spacer = document.createXULElement("spacer");
       allowFocusRow.appendChild(spacer);
       let label = gTabBrowserBundle.formatStringFromName("tabs.allowTabFocusByPromptForSite",
                                                       [hostForAllowFocusCheckbox], 1);
