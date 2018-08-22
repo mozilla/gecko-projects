@@ -97,7 +97,7 @@ def make_repackage_signing_description(config, jobs):
         signing_cert_scope = get_signing_cert_scope_per_platform(
             build_platform, is_nightly, config
         )
-        scopes = [signing_cert_scope, add_scope_prefix(config, 'signing:format:mar_sha384')]
+        scopes = [signing_cert_scope, add_scope_prefix(config, 'signing:format:autograph_mar384')]
 
         upstream_artifacts = [{
             "taskId": {"task-reference": "<repackage>"},

@@ -180,7 +180,7 @@ scriptworker:
     # See additional configuration in taskcluster/taskgraph/util/scriptworker.py
     scope-prefix: 'project:releng'
     worker-types:
-        'scriptworker-prov-v1/signing-linux-v1':
+        'scriptworker-prov-v1/signing-linux-dev':
             - 'project:releng:signing:cert:release-signing'
             - 'project:releng:signing:cert:nightly-signing'
         'scriptworker-prov-v1/depsigning':
