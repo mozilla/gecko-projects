@@ -120,7 +120,7 @@ def make_repackage_signing_description(config, jobs):
             'label': label,
             'description': description,
             # 'worker-type': get_worker_type_for_scope(config, signing_cert_scope),
-            'worker-type': 'scriptworker-prov-v1/signing-linux-dev',
+            'worker-type': 'scriptworker-prov-v1/signing-linux-v1',
             'worker': {'implementation': 'scriptworker-signing',
                        'upstream-artifacts': upstream_artifacts,
                        'max-run-time': 3600},

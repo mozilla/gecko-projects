@@ -42,7 +42,7 @@ WORKER_TYPES = {
     'scriptworker-prov-v1/beetmoverworker-dev': ('beetmover', None),
     'scriptworker-prov-v1/beetmoverworker-v1': ('beetmover', None),
     'scriptworker-prov-v1/pushapk-v1': ('push-apk', None),
-    "scriptworker-prov-v1/signing-linux-dev": ('scriptworker-signing', None),
+    "scriptworker-prov-v1/signing-linux-v1": ('scriptworker-signing', None),
     "scriptworker-prov-v1/shipit": ('shipit', None),
     "scriptworker-prov-v1/shipit-dev": ('shipit', None),
     "scriptworker-prov-v1/treescript-v1": ('treescript', None),

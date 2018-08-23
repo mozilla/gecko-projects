@@ -180,9 +180,10 @@ scriptworker:
     # See additional configuration in taskcluster/taskgraph/util/scriptworker.py
     scope-prefix: 'project:releng'
     worker-types:
-        'scriptworker-prov-v1/signing-linux-dev':
+        'scriptworker-prov-v1/signing-linux-v1':
             - 'project:releng:signing:cert:release-signing'
             - 'project:releng:signing:cert:nightly-signing'
+        'scriptworker-prov-v1/depsigning':
             - 'project:releng:signing:cert:dep-signing'
         'scriptworker-prov-v1/beetmoverworker-v1':
             - 'project:releng:beetmover:bucket:release'
