@@ -481,7 +481,7 @@ var PlacesUIUtils = {
 
     await PlacesUtils.history.update({
       url,
-      annotations: new Map([[PlacesUtils.CHARSET_ANNO, charset]])
+      annotations: new Map([[PlacesUtils.CHARSET_ANNO, charset]]),
     });
   },
 
@@ -742,9 +742,11 @@ var PlacesUIUtils = {
           this.markPageAsTyped(aNode.uri);
       }
 
+      const isJavaScriptURL = aNode.uri.startsWith("javascript:");
       aWindow.openTrustedLinkIn(aNode.uri, aWhere, {
-        allowPopups: aNode.uri.startsWith("javascript:"),
+        allowPopups: isJavaScriptURL,
         inBackground: this.loadBookmarksInBackground,
+        allowInheritPrincipal: isJavaScriptURL && aWhere == "current",
         private: aPrivate,
       });
     }
@@ -842,7 +844,7 @@ var PlacesUIUtils = {
     let parent = {
       itemId: await PlacesUtils.promiseItemId(aFetchInfo.parentGuid),
       bookmarkGuid: aFetchInfo.parentGuid,
-      type: Ci.nsINavHistoryResultNode.RESULT_TYPE_FOLDER
+      type: Ci.nsINavHistoryResultNode.RESULT_TYPE_FOLDER,
     };
 
     return Object.freeze({
@@ -870,7 +872,7 @@ var PlacesUIUtils = {
 
       get parent() {
         return parent;
-      }
+      },
     });
   },
 

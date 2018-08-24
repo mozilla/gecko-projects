@@ -4,6 +4,7 @@
 
 var FastBlock = {
   PREF_ENABLED: "browser.fastblock.enabled",
+  PREF_UI_ENABLED: "browser.contentblocking.fastblock.control-center.ui.enabled",
 
   get categoryItem() {
     delete this.categoryItem;
@@ -12,12 +13,14 @@ var FastBlock = {
 
   init() {
     XPCOMUtils.defineLazyPreferenceGetter(this, "enabled", this.PREF_ENABLED, false);
+    XPCOMUtils.defineLazyPreferenceGetter(this, "visible", this.PREF_UI_ENABLED, false);
   },
 };
 
 var TrackingProtection = {
   PREF_ENABLED_GLOBALLY: "privacy.trackingprotection.enabled",
   PREF_ENABLED_IN_PRIVATE_WINDOWS: "privacy.trackingprotection.pbmode.enabled",
+  PREF_UI_ENABLED: "browser.contentblocking.trackingprotection.control-center.ui.enabled",
   enabledGlobally: false,
   enabledInPrivateWindows: false,
 
@@ -61,6 +64,8 @@ var TrackingProtection = {
 
     Services.prefs.addObserver(this.PREF_ENABLED_GLOBALLY, this);
     Services.prefs.addObserver(this.PREF_ENABLED_IN_PRIVATE_WINDOWS, this);
+
+    XPCOMUtils.defineLazyPreferenceGetter(this, "visible", this.PREF_UI_ENABLED, false);
   },
 
   uninit() {
@@ -125,6 +130,27 @@ var TrackingProtection = {
   },
 };
 
+var ThirdPartyCookies = {
+  PREF_ENABLED: "network.cookie.cookieBehavior",
+  PREF_ENABLED_VALUE: Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER,
+  PREF_UI_ENABLED: "browser.contentblocking.rejecttrackers.control-center.ui.enabled",
+
+  get categoryItem() {
+    delete this.categoryItem;
+    return this.categoryItem =
+      document.getElementById("identity-popup-content-blocking-category-3rdpartycookies");
+  },
+
+  init() {
+    XPCOMUtils.defineLazyPreferenceGetter(this, "behaviorPref", this.PREF_ENABLED,
+                                          Ci.nsICookieService.BEHAVIOR_ACCEPT);
+    XPCOMUtils.defineLazyPreferenceGetter(this, "visible", this.PREF_UI_ENABLED, false);
+  },
+  get enabled() {
+    return this.behaviorPref == this.PREF_ENABLED_VALUE;
+  },
+};
+
 
 var ContentBlocking = {
   // If the user ignores the doorhanger, we stop showing it after some time.
@@ -134,10 +160,16 @@ var ContentBlocking = {
   PREF_ANIMATIONS_ENABLED: "toolkit.cosmeticAnimations.enabled",
   PREF_REPORT_BREAKAGE_ENABLED: "browser.contentblocking.reportBreakage.enabled",
   PREF_REPORT_BREAKAGE_URL: "browser.contentblocking.reportBreakage.url",
+  PREF_INTRO_COUNT_CB: "browser.contentblocking.introCount",
+  PREF_INTRO_COUNT_TP: "privacy.trackingprotection.introCount",
   content: null,
   icon: null,
   activeTooltipText: null,
   disabledTooltipText: null,
+
+  get prefIntroCount() {
+    return this.contentBlockingUIEnabled ? this.PREF_INTRO_COUNT_CB : this.PREF_INTRO_COUNT_TP;
+  },
 
   get appMenuLabel() {
     delete this.appMenuLabel;
@@ -183,7 +215,7 @@ var ContentBlocking = {
   //
   // It may also contain an init() and uninit() function, which will be called
   // on ContentBlocking.init() and ContentBlocking.uninit().
-  blockers: [FastBlock, TrackingProtection],
+  blockers: [FastBlock, TrackingProtection, ThirdPartyCookies],
 
   get _baseURIForChannelClassifier() {
     // Convert document URI into the format used by
@@ -329,13 +361,16 @@ var ContentBlocking = {
     body += "\n**Preferences**\n";
     body += `${TrackingProtection.PREF_ENABLED_GLOBALLY}: ${Services.prefs.getBoolPref(TrackingProtection.PREF_ENABLED_GLOBALLY)}\n`;
     body += `${TrackingProtection.PREF_ENABLED_IN_PRIVATE_WINDOWS}: ${Services.prefs.getBoolPref(TrackingProtection.PREF_ENABLED_IN_PRIVATE_WINDOWS)}\n`;
+    body += `${TrackingProtection.PREF_UI_ENABLED}: ${Services.prefs.getBoolPref(TrackingProtection.PREF_UI_ENABLED)}\n`;
     body += `urlclassifier.trackingTable: ${Services.prefs.getStringPref("urlclassifier.trackingTable")}\n`;
     body += `network.http.referer.defaultPolicy: ${Services.prefs.getIntPref("network.http.referer.defaultPolicy")}\n`;
     body += `network.http.referer.defaultPolicy.pbmode: ${Services.prefs.getIntPref("network.http.referer.defaultPolicy.pbmode")}\n`;
-    body += `network.cookie.cookieBehavior: ${Services.prefs.getIntPref("network.cookie.cookieBehavior")}\n`;
+    body += `${ThirdPartyCookies.PREF_UI_ENABLED}: ${Services.prefs.getBoolPref(ThirdPartyCookies.PREF_UI_ENABLED)}\n`;
+    body += `${ThirdPartyCookies.PREF_ENABLED}: ${Services.prefs.getIntPref(ThirdPartyCookies.PREF_ENABLED)}\n`;
     body += `network.cookie.lifetimePolicy: ${Services.prefs.getIntPref("network.cookie.lifetimePolicy")}\n`;
     body += `privacy.restrict3rdpartystorage.expiration: ${Services.prefs.getIntPref("privacy.restrict3rdpartystorage.expiration")}\n`;
     body += `${FastBlock.PREF_ENABLED}: ${Services.prefs.getBoolPref(FastBlock.PREF_ENABLED)}\n`;
+    body += `${FastBlock.PREF_UI_ENABLED}: ${Services.prefs.getBoolPref(FastBlock.PREF_UI_ENABLED)}\n`;
     body += `browser.fastblock.timeout: ${Services.prefs.getIntPref("browser.fastblock.timeout")}\n`;
 
     let comments = document.getElementById("identity-popup-breakageReportView-collection-comments");
@@ -409,16 +444,15 @@ var ContentBlocking = {
 
     for (let blocker of this.blockers) {
       blocker.categoryItem.classList.toggle("blocked", this.enabled && blocker.enabled);
+      blocker.categoryItem.hidden = !blocker.visible;
     }
 
     // Check whether the user has added an exception for this site.
-    let hasException = false;
-    if (PrivateBrowsingUtils.isBrowserPrivate(gBrowser.selectedBrowser)) {
-      hasException = PrivateBrowsingUtils.existsInTrackingAllowlist(baseURI);
-    } else {
-      hasException = Services.perms.testExactPermission(baseURI,
-        "trackingprotection") == Services.perms.ALLOW_ACTION;
-    }
+    let type = PrivateBrowsingUtils.isBrowserPrivate(gBrowser.selectedBrowser) ?
+                 "trackingprotection-pb" :
+                 "trackingprotection";
+    let hasException = Services.perms.testExactPermission(baseURI, type) ==
+      Services.perms.ALLOW_ACTION;
 
     this.content.toggleAttribute("detected", detected);
     this.content.toggleAttribute("hasException", hasException);
@@ -431,14 +465,11 @@ var ContentBlocking = {
     } else if (active && webProgress.isTopLevel) {
       this.iconBox.setAttribute("animate", "true");
 
-      // Open the tracking protection introduction panel, if applicable.
-      if (TrackingProtection.enabledGlobally) {
-        let introCount = Services.prefs.getIntPref("privacy.trackingprotection.introCount");
-        if (introCount < this.MAX_INTROS) {
-          Services.prefs.setIntPref("privacy.trackingprotection.introCount", ++introCount);
-          Services.prefs.savePrefFile(null);
-          this.showIntroPanel();
-        }
+      let introCount = Services.prefs.getIntPref(this.prefIntroCount);
+      if (introCount < this.MAX_INTROS) {
+        Services.prefs.setIntPref(this.prefIntroCount, ++introCount);
+        Services.prefs.savePrefFile(null);
+        this.showIntroPanel();
       }
     }
 
@@ -495,11 +526,8 @@ var ContentBlocking = {
   },
 
   dontShowIntroPanelAgain() {
-    // This function may be called in private windows, but it does not change
-    // any preference unless Tracking Protection is enabled globally.
-    if (TrackingProtection.enabledGlobally) {
-      Services.prefs.setIntPref("privacy.trackingprotection.introCount",
-                                this.MAX_INTROS);
+    if (!PrivateBrowsingUtils.isBrowserPrivate(gBrowser.selectedBrowser)) {
+      Services.prefs.setIntPref(this.prefIntroCount, this.MAX_INTROS);
       Services.prefs.savePrefFile(null);
     }
   },
@@ -508,13 +536,39 @@ var ContentBlocking = {
     let brandBundle = document.getElementById("bundle_brand");
     let brandShortName = brandBundle.getString("brandShortName");
 
+    let introTitle;
+    let introDescription;
+    // This will be sent to the onboarding website to let them know which
+    // UI variation we're showing.
+    let variation;
+
+    if (this.contentBlockingUIEnabled) {
+      introTitle = gNavigatorBundle.getFormattedString("contentBlocking.intro.title",
+                                                       [brandShortName]);
+      // We show a different UI tour variation for users that already have TP
+      // enabled globally.
+      if (TrackingProtection.enabledGlobally) {
+        introDescription = gNavigatorBundle.getString("contentBlocking.intro.v2.description");
+        variation = 2;
+      } else {
+        introDescription = gNavigatorBundle.getFormattedString("contentBlocking.intro.v1.description",
+                                                               [brandShortName]);
+        variation = 1;
+      }
+    } else {
+      introTitle = gNavigatorBundle.getString("trackingProtection.intro.title");
+      introDescription = gNavigatorBundle.getFormattedString("trackingProtection.intro.description2",
+                                                             [brandShortName]);
+      variation = 0;
+    }
+
     let openStep2 = () => {
       // When the user proceeds in the tour, adjust the counter to indicate that
       // the user doesn't need to see the intro anymore.
       this.dontShowIntroPanelAgain();
 
       let nextURL = Services.urlFormatter.formatURLPref("privacy.trackingprotection.introURL") +
-                    "?step=2&newtab=true";
+                    `?step=2&newtab=true&variation=${variation}`;
       switchToTabHavingURI(nextURL, true, {
         // Ignore the fragment in case the intro is shown on the tour page
         // (e.g. if the user manually visited the tour or clicked the link from
@@ -538,11 +592,7 @@ var ContentBlocking = {
 
     let panelTarget = await UITour.getTarget(window, "trackingProtection");
     UITour.initForBrowser(gBrowser.selectedBrowser, window);
-    UITour.showInfo(window, panelTarget,
-                    gNavigatorBundle.getString("trackingProtection.intro.title"),
-                    gNavigatorBundle.getFormattedString("trackingProtection.intro.description2",
-                                                        [brandShortName]),
-                    undefined, buttons,
+    UITour.showInfo(window, panelTarget, introTitle, introDescription, undefined, buttons,
                     { closeButtonCallback: () => this.dontShowIntroPanelAgain() });
   },
 };

@@ -1151,7 +1151,7 @@ fuzzy-if(skiaContent,0-1,0-3280) == 438987-2c.html 438987-2-ref.html
 fuzzy-if(skiaContent,0-1,0-1) == 440112.html 440112-ref.html
 == 440149-1.html 440149-1-ref.html
 == 441259-1.html 441259-1-ref.html
-fails == 441259-2.html 441259-2-ref.html # bug 441400
+== 441259-2.html 441259-2-ref.html
 fuzzy-if(skiaContent,0-1,0-3) == 442542-1.html 442542-1-ref.html
 == 444015-1.html 444015-1-ref.html
 == 444375-1.html 444375-1-ref.html
@@ -1866,7 +1866,7 @@ test-pref(dom.webcomponents.shadowdom.enabled,true) == 1066554-1.html 1066554-1-
 == 1069716-1.html 1069716-1-ref.html
 == 1078262-1.html about:blank
 test-pref(layout.testing.overlay-scrollbars.always-visible,false) == 1081072-1.html 1081072-1-ref.html
-== 1081185-1.html 1081185-1-ref.html
+fails-if(webrender) == 1081185-1.html 1081185-1-ref.html
 == 1097437-1.html 1097437-1-ref.html
 == 1103258-1.html 1103258-1-ref.html # assertion crash test with layers culling test
 == 1105137-1.html 1105137-1-ref.html
@@ -2081,3 +2081,4 @@ fuzzy(0-1,0-625) == 1466638-1.html 1466638-1-ref.html
 == bug1472465-1.html bug1472465-1-ref.html
 == 1475971-1.html 1475971-1-ref.html
 == 1483649-1.xul 1483649-1-ref.xul
+test-pref(layout.css.contain.enabled,true) == 1483946.html 1483946-ref.html

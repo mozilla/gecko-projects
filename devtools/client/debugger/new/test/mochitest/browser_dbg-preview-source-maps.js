@@ -49,7 +49,7 @@ add_task(async function() {
 
   info(`Test previewing in the original location`);
   await assertPreviews(dbg, [
-    { line: 2, column: 10, result: 4, expression: "x;" }
+    { line: 2, column: 10, result: 4, expression: "x" }
   ]);
 
   info(`Test previewing in the generated location`);
@@ -60,7 +60,7 @@ add_task(async function() {
   ]);
 
   info(`Test that you can not preview in another original file`);
-  await selectSpecificSource(dbg, "output");
+  await selectSource(dbg, "output");
   await hoverAtPos(dbg, { line: 2, ch: 16 });
   await assertNoTooltip(dbg);
 });

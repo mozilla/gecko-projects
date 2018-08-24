@@ -133,6 +133,7 @@
 }
 
 .font-name {
+  display: inline-block;
   margin-bottom: 0.6em;
   font-size: 1em;
   color: var(--grey-50);
@@ -141,6 +142,23 @@
 .font-family-name {
   margin-bottom: 0.2em;
   font-size: 1.2em;
+}
+
+.font-group {
+  margin-bottom: .5em;
+}
+
+.font-group .font-name {
+  white-space: unset;
+  margin-right: .5em;
+}
+
+.font-group .font-name::after {
+  content: ",";
+}
+
+.font-group .font-name:nth-last-child(1)::after {
+  content: "";
 }
 
 .font-css-code {
@@ -192,7 +210,7 @@
   padding-top: unset;
 }
 
-.font-control-family {
+.font-control-used-fonts {
   align-items: flex-start;
   border-bottom: 1px solid var(--theme-splitter-color);
   margin-top: 0;
@@ -219,12 +237,6 @@
   max-width: 70px;
   margin-right: 10px;
   -moz-user-select: none;
-}
-
-.font-family-unused {
-  margin-bottom: .3em;
-  margin-left: 1.15em;
-  color: var(--grey-50);
 }
 
 .font-value-input {

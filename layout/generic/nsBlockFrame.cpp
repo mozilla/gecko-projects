@@ -1844,23 +1844,14 @@ nsBlockFrame::ComputeOverflowAreas(const nsRect&         aBounds,
   // XXX_perf: This can be done incrementally.  It is currently one of
   // the things that makes incremental reflow O(N^2).
   nsOverflowAreas areas(aBounds, aBounds);
-  if (mComputedStyle->GetPseudo() == nsCSSAnonBoxes::scrolledContent() &&
-      mParent->StyleDisplay()->IsContainLayout()) {
-    // If we are a scrollframe's inner anonymous box and our parent
-    // has layout containment, we want to pass our parent's style to
-    // ConsiderBlockEndEdgeOfChildren to make sure all overflow from the
-    // layout contained element is processed as ink (visual) overflow.
-    aDisplay = mParent->StyleDisplay();
-  }
   if (!ShouldApplyOverflowClipping(this, aDisplay)) {
     for (LineIterator line = LinesBegin(), line_end = LinesEnd();
          line != line_end;
          ++line) {
       if (aDisplay->IsContainLayout()) {
-        // If we have layout containment (or, per above, we are a scrollframe's
-        // inner anonymous box and our parent has layout containment), we should
-        // only consider our child's visual overflow, leaving the scrollable
-        // regions of the parent unaffected.
+        // If we have layout containment, we should only consider our child's
+        // visual overflow, leaving the scrollable regions of the parent
+        // unaffected.
         // Note: scrollable overflow is a subset of visual overflow,
         // so this has the same affect as unioning the child's visual and
         // scrollable overflow with its parent's visual overflow.
@@ -3971,6 +3962,7 @@ nsBlockFrame::ReflowInlineFrames(BlockReflowInput& aState,
           aState.FloatManager()->PopState(&floatManagerState);
           // Clear out float lists
           aState.mCurrentLineFloats.DeleteAll();
+          MOZ_ASSERT(aState.mNoWrapFloats.IsEmpty());
           aState.mBelowCurrentLineFloats.DeleteAll();
         }
 
@@ -4596,6 +4588,9 @@ nsBlockFrame::PlaceLine(BlockReflowInput& aState,
                         nscoord& aAvailableSpaceBSize,
                         bool* aKeepReflowGoing)
 {
+  // Try to position the floats in a nowrap context.
+  aLineLayout.FlushNoWrapFloats();
+
   // Trim extra white-space from the line before placing the frames
   aLineLayout.TrimTrailingWhiteSpace();
 
@@ -4802,8 +4797,7 @@ nsBlockFrame::PlaceLine(BlockReflowInput& aState,
   if (aState.mBelowCurrentLineFloats.NotEmpty()) {
     // Reflow the below-current-line floats, which places on the line's
     // float list.
-    aState.PlaceBelowCurrentLineFloats(aState.mBelowCurrentLineFloats, aLine);
-    aLine->AppendFloats(aState.mBelowCurrentLineFloats);
+    aState.PlaceBelowCurrentLineFloats(aLine);
   }
 
   // When a line has floats, factor them into the combined-area

@@ -11,6 +11,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Move.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/Sprintf.h"
 
 #include <new>
@@ -3414,7 +3415,7 @@ js::FillBytecodeTypeMap(JSScript* script, uint32_t* bytecodeMap)
 void
 js::TypeMonitorResult(JSContext* cx, JSScript* script, jsbytecode* pc, TypeSet::Type type)
 {
-    assertSameCompartment(cx, script, type);
+    cx->check(script, type);
 
     AutoEnterAnalysis enter(cx);
 
@@ -3432,7 +3433,7 @@ void
 js::TypeMonitorResult(JSContext* cx, JSScript* script, jsbytecode* pc, StackTypeSet* types,
                       TypeSet::Type type)
 {
-    assertSameCompartment(cx, script, type);
+    cx->check(script, type);
 
     AutoEnterAnalysis enter(cx);
 
@@ -3467,7 +3468,7 @@ bool
 JSScript::makeTypes(JSContext* cx)
 {
     MOZ_ASSERT(!types_);
-    assertSameCompartment(cx, this);
+    cx->check(this);
 
     AutoEnterAnalysis enter(cx);
 
@@ -3818,25 +3819,6 @@ ChangeObjectFixedSlotCount(JSContext* cx, PlainObject* obj, gc::AllocKind allocK
     return true;
 }
 
-namespace {
-
-struct DestroyTypeNewScript
-{
-    JSContext* cx;
-    ObjectGroup* group;
-
-    DestroyTypeNewScript(JSContext* cx, ObjectGroup* group)
-      : cx(cx), group(group)
-    {}
-
-    ~DestroyTypeNewScript() {
-        if (group)
-            group->clearNewScript(cx);
-    }
-};
-
-} // namespace
-
 bool
 TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group, bool* regenerate, bool force)
 {
@@ -3868,7 +3850,10 @@ TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group, bool* regenerate,
     AutoEnterAnalysis enter(cx);
 
     // Any failures after this point will clear out this TypeNewScript.
-    DestroyTypeNewScript destroyNewScript(cx, group);
+    auto destroyNewScript = mozilla::MakeScopeExit([&] {
+        if (group)
+            group->clearNewScript(cx);
+    });
 
     // Compute the greatest common shape prefix and the largest slot span of
     // the preliminary objects.
@@ -4003,7 +3988,7 @@ TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group, bool* regenerate,
         // An unboxed layout was constructed for the group, and this has already
         // been hooked into it.
         MOZ_ASSERT(group->unboxedLayout(sweep).newScript() == this);
-        destroyNewScript.group = nullptr;
+        destroyNewScript.release();
 
         // Clear out the template object, which is not used for TypeNewScripts
         // with an unboxed layout. Currently it is a mutant object with a
@@ -4026,7 +4011,7 @@ TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group, bool* regenerate,
         // is needed.
         group->addDefiniteProperties(cx, templateObject()->lastProperty());
 
-        destroyNewScript.group = nullptr;
+        destroyNewScript.release();
         return true;
     }
 
@@ -4065,7 +4050,7 @@ TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group, bool* regenerate,
     initializedShape_ = prefixShape;
     initializedGroup_ = group;
 
-    destroyNewScript.group = nullptr;
+    destroyNewScript.release();
 
     if (regenerate)
         *regenerate = true;
@@ -4647,7 +4632,7 @@ Zone::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                              size_t* compartmentsPrivateData)
 {
     *typePool += types.typeLifoAlloc().sizeOfExcludingThis(mallocSizeOf);
-    *regexpZone += regExps.sizeOfExcludingThis(mallocSizeOf);
+    *regexpZone += regExps().sizeOfExcludingThis(mallocSizeOf);
     if (jitZone_)
         jitZone_->addSizeOfIncludingThis(mallocSizeOf, jitZone, baselineStubsOptimized, cachedCFG);
     *uniqueIdMap += uniqueIds().shallowSizeOfExcludingThis(mallocSizeOf);

@@ -119,6 +119,13 @@
   mask-image: linear-gradient(to right, transparent 0, black 6px);
 }
 
+.devtools-tab .devtools-tab-badge {
+  color: var(--theme-highlight-blue);
+  font-size: 80%;
+  font-weight: 500;
+  margin-inline-start: 5px;
+}
+
 .devtools-tab-icon-only {
   min-width: 24px;
 }
@@ -198,9 +205,12 @@
   margin-inline-end: 3px;
 }
 
+#toolbox-buttons-start > .devtools-separator {
+  --separator-inline-margin: 0;
+}
+
 #toolbox-buttons-end > .devtools-separator {
-  margin-inline-start: 5px;
-  margin-inline-end: 5px;
+  --separator-inline-margin: 5px;
 }
 
 #toolbox-close {

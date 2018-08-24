@@ -68,6 +68,11 @@ static const JSFunctionSpec relativeTimeFormat_methods[] = {
     JS_FS_END
 };
 
+static const JSPropertySpec relativeTimeFormat_properties[] = {
+    JS_STRING_SYM_PS(toStringTag, "Intl.RelativeTimeFormat", JSPROP_READONLY),
+    JS_PS_END
+};
+
 /**
  * RelativeTimeFormat constructor.
  * Spec: ECMAScript 402 API, RelativeTimeFormat, 1.1
@@ -146,6 +151,9 @@ js::CreateRelativeTimeFormatPrototype(JSContext* cx, HandleObject Intl,
         return nullptr;
 
     if (!JS_DefineFunctions(cx, proto, relativeTimeFormat_methods))
+        return nullptr;
+
+    if (!JS_DefineProperties(cx, proto, relativeTimeFormat_properties))
         return nullptr;
 
     RootedValue ctorValue(cx, ObjectValue(*ctor));
@@ -296,22 +304,22 @@ js::intl_FormatRelativeTime(JSContext* cx, unsigned argc, Value* vp)
         if (!unit)
             return false;
 
-        if (StringEqualsAscii(unit, "second")) {
+        if (StringEqualsAscii(unit, "second") || StringEqualsAscii(unit, "seconds")) {
             relDateTimeUnit = UDAT_REL_UNIT_SECOND;
-        } else if (StringEqualsAscii(unit, "minute")) {
+        } else if (StringEqualsAscii(unit, "minute") || StringEqualsAscii(unit, "minutes")) {
             relDateTimeUnit = UDAT_REL_UNIT_MINUTE;
-        } else if (StringEqualsAscii(unit, "hour")) {
+        } else if (StringEqualsAscii(unit, "hour") || StringEqualsAscii(unit, "hours")) {
             relDateTimeUnit = UDAT_REL_UNIT_HOUR;
-        } else if (StringEqualsAscii(unit, "day")) {
+        } else if (StringEqualsAscii(unit, "day") || StringEqualsAscii(unit, "days")) {
             relDateTimeUnit = UDAT_REL_UNIT_DAY;
-        } else if (StringEqualsAscii(unit, "week")) {
+        } else if (StringEqualsAscii(unit, "week") || StringEqualsAscii(unit, "weeks")) {
             relDateTimeUnit = UDAT_REL_UNIT_WEEK;
-        } else if (StringEqualsAscii(unit, "month")) {
+        } else if (StringEqualsAscii(unit, "month") || StringEqualsAscii(unit, "months")) {
             relDateTimeUnit = UDAT_REL_UNIT_MONTH;
-        } else if (StringEqualsAscii(unit, "quarter")) {
+        } else if (StringEqualsAscii(unit, "quarter") || StringEqualsAscii(unit, "quarters")) {
             relDateTimeUnit = UDAT_REL_UNIT_QUARTER;
         } else {
-            MOZ_ASSERT(StringEqualsAscii(unit, "year"));
+            MOZ_ASSERT(StringEqualsAscii(unit, "year") || StringEqualsAscii(unit, "years"));
             relDateTimeUnit = UDAT_REL_UNIT_YEAR;
         }
     }

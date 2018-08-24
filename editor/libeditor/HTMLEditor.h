@@ -402,7 +402,7 @@ public:
    *                        an Element.  Otherwise, nullptr.
    */
   Element*
-  GetElementOrParentByTagName(const nsAtom& aTagName, nsINode* aNode);
+  GetElementOrParentByTagName(const nsAtom& aTagName, nsINode* aNode) const;
 
   /**
     * Get an active editor's editing host in DOM window.  If this editor isn't
@@ -912,7 +912,7 @@ protected: // Shouldn't be used by friend classes
    */
   Element*
   GetElementOrParentByTagNameAtSelection(Selection& aSelection,
-                                         const nsAtom& aTagName);
+                                         const nsAtom& aTagName) const;
 
   /**
    * GetElementOrParentByTagNameInternal() looks for an element node whose
@@ -933,7 +933,7 @@ protected: // Shouldn't be used by friend classes
    */
   Element*
   GetElementOrParentByTagNameInternal(const nsAtom& aTagName,
-                                      nsINode& aNode);
+                                      nsINode& aNode) const;
 
   /**
    * GetSelectedElement() returns an element node which is in first range of
@@ -971,6 +971,161 @@ protected: // Shouldn't be used by friend classes
   GetSelectedElement(Selection& aSelection,
                      const nsAtom* aTagName,
                      ErrorResult& aRv);
+
+  /**
+   * GetFirstTableRowElement() returns the first <tr> element in the most
+   * nearest ancestor of aTableOrElementInTable or itself.
+   *
+   * @param aTableOrElementInTable      <table> element or another element.
+   *                                    If this is a <table> element, returns
+   *                                    first <tr> element in it.  Otherwise,
+   *                                    returns first <tr> element in nearest
+   *                                    ancestor <table> element.
+   * @param aRv                         Returns an error code.  When
+   *                                    aTableOrElementInTable is neither
+   *                                    <table> nor in a <table> element,
+   *                                    returns NS_ERROR_FAILURE.
+   *                                    However, if <table> does not have
+   *                                    <tr> element, returns NS_OK.
+   */
+  Element*
+  GetFirstTableRowElement(Element& aTableOrElementInTable,
+                          ErrorResult& aRv) const;
+
+  /**
+   * GetNextTableRowElement() returns next <tr> element of aTableRowElement.
+   * This won't cross <table> element boundary but may cross table section
+   * elements like <tbody>.
+   *
+   * @param aTableRowElement    A <tr> element.
+   * @param aRv                 Returns error.  If given element is <tr> but
+   *                            there is no next <tr> element, this returns
+   *                            nullptr but does not return error.
+   */
+  Element*
+  GetNextTableRowElement(Element& aTableRowElement,
+                         ErrorResult& aRv) const;
+
+  /**
+   * CellIndexes store both row index and column index of a table cell.
+   */
+  struct MOZ_STACK_CLASS CellIndexes final
+  {
+    int32_t mRow;
+    int32_t mColumn;
+
+    /**
+     * This constructor initializes mRowIndex and mColumnIndex with indexes of
+     * aCellElement.
+     *
+     * @param aCellElement      An <td> or <th> element.
+     * @param aRv               Returns error if layout information is not
+     *                          available or given element is not a table cell.
+     */
+    CellIndexes(Element& aCellElement, ErrorResult& aRv)
+      : mRow(-1)
+      , mColumn(-1)
+    {
+      MOZ_ASSERT(!aRv.Failed());
+      Update(aCellElement, aRv);
+    }
+
+    /**
+     * Update mRowIndex and mColumnIndex with indexes of aCellElement.
+     *
+     * @param                   See above.
+     */
+    void Update(Element& aCellElement, ErrorResult& aRv);
+
+    /**
+     * This constructor initializes mRowIndex and mColumnIndex with indexes of
+     * cell element which contains anchor of Selection.
+     *
+     * @param aHTMLEditor       The editor which creates the instance.
+     * @param aSelection        The Selection for the editor.
+     * @param aRv               Returns error if there is no cell element
+     *                          which contains anchor of Selection, or layout
+     *                          information is not available.
+     */
+    CellIndexes(HTMLEditor& aHTMLEditor, Selection& aSelection,
+                ErrorResult& aRv)
+      : mRow(-1)
+      , mColumn(-1)
+    {
+      Update(aHTMLEditor, aSelection, aRv);
+    }
+
+    /**
+     * Update mRowIndex and mColumnIndex with indexes of cell element which
+     * contains anchor of Selection.
+     *
+     * @param                   See above.
+     */
+    void Update(HTMLEditor& aHTMLEditor, Selection& aSelection,
+                ErrorResult& aRv);
+  };
+
+  /**
+   * TableSize stores and computes number of rows and columns of a <table>
+   * element.
+   */
+  struct MOZ_STACK_CLASS TableSize final
+  {
+    int32_t mRowCount;
+    int32_t mColumnCount;
+
+    /**
+     * @param aHTMLEditor               The editor which creates the instance.
+     * @param aTableOrElementInTable    If a <table> element, computes number
+     *                                  of rows and columns of it.
+     *                                  If another element in a <table> element,
+     *                                  computes number of rows and columns
+     *                                  of nearest ancestor <table> element.
+     *                                  Otherwise, i.e., non-<table> element
+     *                                  not in <table>, returns error.
+     * @param aRv                       Returns error if the element is not
+     *                                  in <table> or layout information is
+     *                                  not available.
+     */
+    TableSize(HTMLEditor& aHTMLEditor, Element& aTableOrElementInTable,
+              ErrorResult& aRv)
+      : mRowCount(-1)
+      , mColumnCount(-1)
+    {
+      MOZ_ASSERT(!aRv.Failed());
+      Update(aHTMLEditor, aTableOrElementInTable, aRv);
+    }
+
+    /**
+     * Update mRowCount and mColumnCount for aTableOrElementInTable.
+     * See above for the detail.
+     */
+    void Update(HTMLEditor& aHTMLEditor, Element& aTableOrElementInTable,
+                ErrorResult& aRv);
+  };
+
+  /**
+   * GetTableCellElementAt() returns a <td> or <th> element of aTableElement
+   * if there is a cell at the indexes.
+   *
+   * @param aTableElement       Must be a <table> element.
+   * @param aCellIndexes        Indexes of cell which you want.
+   *                            If rowspan and/or colspan is specified 2 or
+   *                            larger, any indexes are allowed to retrieve
+   *                            the cell in the area.
+   * @return                    The cell element if there is in the <table>.
+   *                            Returns nullptr without error if the indexes
+   *                            are out of bounds.
+   */
+  Element* GetTableCellElementAt(Element& aTableElement,
+                                 const CellIndexes& aCellIndexes) const
+  {
+    return GetTableCellElementAt(aTableElement, aCellIndexes.mRow,
+                                 aCellIndexes.mColumn);
+  }
+  Element* GetTableCellElementAt(Element& aTableElement,
+                                 int32_t aRowIndex,
+                                 int32_t aColumnIndex) const;
 
   /**
    * PasteInternal() pasts text with replacing selected content.
@@ -1252,7 +1407,7 @@ protected: // Shouldn't be used by friend classes
   /**
    * Helper used to get nsTableWrapperFrame for a table.
    */
-  nsTableWrapperFrame* GetTableFrame(Element* aTable);
+  static nsTableWrapperFrame* GetTableFrame(Element* aTable);
 
   /**
    * Needed to do appropriate deleting when last cell or row is about to be
@@ -1746,7 +1901,7 @@ protected:
   ManualNACPtr mBottomHandle;
   ManualNACPtr mBottomRightHandle;
 
-  nsCOMPtr<Element> mActivatedHandle;
+  RefPtr<Element> mActivatedHandle;
 
   ManualNACPtr mResizingShadow;
   ManualNACPtr mResizingInfo;

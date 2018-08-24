@@ -327,7 +327,6 @@ struct SCOutput {
     MOZ_MUST_USE bool writeBytes(const void* p, size_t nbytes);
     MOZ_MUST_USE bool writeChars(const Latin1Char* p, size_t nchars);
     MOZ_MUST_USE bool writeChars(const char16_t* p, size_t nchars);
-    MOZ_MUST_USE bool writePtr(const void*);
 
     template <class T>
     MOZ_MUST_USE bool writeArray(const T* p, size_t nbytes);
@@ -839,10 +838,11 @@ SCInput::getPtr(uint64_t data, void** ptr)
 bool
 SCInput::readPtr(void** p)
 {
+    // See endianness comment in getPtr, above.
     uint64_t u;
     if (!readNativeEndian(&u))
         return false;
-    *p = reinterpret_cast<void*>(NativeEndian::swapFromLittleEndian(u));
+    *p = reinterpret_cast<void*>(u);
     return true;
 }
 
@@ -951,12 +951,6 @@ SCOutput::writeChars(const Latin1Char* p, size_t nchars)
 {
     static_assert(sizeof(Latin1Char) == sizeof(uint8_t), "Latin1Char must fit in 1 byte");
     return writeBytes(p, nchars);
-}
-
-bool
-SCOutput::writePtr(const void* p)
-{
-    return write(reinterpret_cast<uint64_t>(p));
 }
 
 void
@@ -1646,7 +1640,7 @@ JSStructuredCloneWriter::traverseSavedFrame(HandleObject obj)
 bool
 JSStructuredCloneWriter::startWrite(HandleValue v)
 {
-    assertSameCompartment(context(), v);
+    context()->check(v);
 
     if (v.isString()) {
         return writeString(SCTAG_STRING, v.toString());
@@ -1793,7 +1787,7 @@ JSStructuredCloneWriter::writeTransferMap()
         // (and, if necessary, detaching this object if it's an ArrayBuffer).
         if (!out.writePair(SCTAG_TRANSFER_MAP_PENDING_ENTRY, JS::SCTAG_TMO_UNFILLED))
             return false;
-        if (!out.writePtr(nullptr)) // Pointer to ArrayBuffer contents.
+        if (!out.write(0)) // Pointer to ArrayBuffer contents.
             return false;
         if (!out.write(0)) // extraData
             return false;
@@ -1918,7 +1912,7 @@ JSStructuredCloneWriter::transferOwnership()
 
         point.write(NativeEndian::swapToLittleEndian(PairToUInt64(tag, ownership)));
         point.next();
-        point.write(NativeEndian::swapToLittleEndian(reinterpret_cast<uint64_t>(content)));
+        point.write(reinterpret_cast<uint64_t>(content));
         point.next();
         point.write(NativeEndian::swapToLittleEndian(extraData));
         point.next();
@@ -1949,7 +1943,7 @@ JSStructuredCloneWriter::write(HandleValue v)
 
     while (!counts.empty()) {
         obj = &objs.back().toObject();
-        assertSameCompartment(context(), obj);
+        context()->check(obj);
         if (counts.back()) {
             counts.back()--;
             key = entries.back();
@@ -2947,7 +2941,7 @@ JS_WriteStructuredClone(JSContext* cx, HandleValue value, JSStructuredCloneData*
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    assertSameCompartment(cx, value);
+    cx->check(value);
 
     const JSStructuredCloneCallbacks* callbacks = optionalCallbacks;
     return WriteStructuredClone(cx, value, bufp, scope, cloneDataPolicy, callbacks, closure,
@@ -3156,7 +3150,7 @@ JS_PUBLIC_API(bool)
 JS_WriteTypedArray(JSStructuredCloneWriter* w, HandleValue v)
 {
     MOZ_ASSERT(v.isObject());
-    assertSameCompartment(w->context(), v);
+    w->context()->check(v);
     RootedObject obj(w->context(), &v.toObject());
 
     // Note: writeTypedArray also does a CheckedUnwrap but it assumes this

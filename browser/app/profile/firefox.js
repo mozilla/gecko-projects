@@ -1489,12 +1489,16 @@ pref("media.gmp-provider.enabled", true);
 
 pref("browser.contentblocking.enabled", true);
 pref("browser.contentblocking.cookies-site-data.ui.reject-trackers.recommended", true);
+pref("browser.contentblocking.fastblock.control-center.ui.enabled", true);
+pref("browser.contentblocking.trackingprotection.control-center.ui.enabled", true);
 #ifdef NIGHTLY_BUILD
 pref("browser.contentblocking.ui.enabled", true);
 pref("browser.contentblocking.cookies-site-data.ui.reject-trackers.enabled", true);
+pref("browser.contentblocking.rejecttrackers.control-center.ui.enabled", true);
 #else
 pref("browser.contentblocking.ui.enabled", false);
 pref("browser.contentblocking.cookies-site-data.ui.reject-trackers.enabled", false);
+pref("browser.contentblocking.rejecttrackers.control-center.ui.enabled", false);
 #endif
 #ifdef NIGHTLY_BUILD
 pref("browser.contentblocking.reportBreakage.enabled", true);
@@ -1502,6 +1506,9 @@ pref("browser.contentblocking.reportBreakage.enabled", true);
 pref("browser.contentblocking.reportBreakage.enabled", false);
 #endif
 pref("browser.contentblocking.reportBreakage.url", "https://tracking-protection-issues.herokuapp.com/new");
+// Content Blocking has a separate pref for the intro count, since the former TP intro
+// was updated when we introduced content blocking and we want people to see it again.
+pref("browser.contentblocking.introCount", 0);
 
 pref("privacy.trackingprotection.introCount", 0);
 pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/tracking-protection/start/");
@@ -1737,3 +1744,8 @@ pref("shield.savant.loglevel", "warn");
 
 // Multi-lingual preferences
 pref("intl.multilingual.enabled", false);
+
+// Prio preferences
+// Curve25519 public keys for Prio servers
+pref("prio.publicKeyA", "35AC1C7576C7C6EDD7FED6BCFC337B34D48CB4EE45C86BEEFB40BD8875707733");
+pref("prio.publicKeyB", "26E6674E65425B823F1F1D5F96E3BB3EF9E406EC7FBA7DEF8B08A35DD135AF50");

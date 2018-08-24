@@ -31,8 +31,13 @@ async function buildMappedScopes(source, frame, scopes, sourceMaps, client) {
     return null;
   }
 
-  const generatedAstBindings = (0, _buildGeneratedBindingList.buildGeneratedBindingList)(scopes, generatedAstScopes, frame.this);
   const originalRanges = await (0, _rangeMetadata.loadRangeMetadata)(source, frame, originalAstScopes, sourceMaps);
+
+  if (hasLineMappings(originalRanges)) {
+    return null;
+  }
+
+  const generatedAstBindings = (0, _buildGeneratedBindingList.buildGeneratedBindingList)(scopes, generatedAstScopes, frame.this);
   const {
     mappedOriginalScopes,
     expressionLookup
@@ -102,6 +107,10 @@ function isReliableScope(scope) {
 
 
   return totalBindings === 0 || unknownBindings / totalBindings < 0.25;
+}
+
+function hasLineMappings(ranges) {
+  return ranges.every(range => range.columnStart === 0 && range.columnEnd === Infinity);
 }
 
 function batchScopeMappings(originalAstScopes, source, sourceMaps) {
@@ -341,7 +350,7 @@ async function findGeneratedBinding(sourceMaps, client, source, name, originalBi
       },
       expression: null
     };
-  } else if (!hadApplicableBindings) {
+  } else if (!hadApplicableBindings && name !== "this") {
     // If there were no applicable bindings to consider while searching for
     // matching bindings, then the source map for this file didn't make any
     // attempt to map the binding, and that most likely means that the

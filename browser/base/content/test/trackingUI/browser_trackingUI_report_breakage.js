@@ -7,6 +7,7 @@ const TRACKING_PAGE = "http://tracking.example.org/browser/browser/base/content/
 const BENIGN_PAGE = "http://tracking.example.org/browser/browser/base/content/test/trackingUI/benignPage.html";
 
 const CB_PREF = "browser.contentblocking.enabled";
+const CB_UI_PREF = "browser.contentblocking.ui.enabled";
 const TP_PREF = "privacy.trackingprotection.enabled";
 const PREF_REPORT_BREAKAGE_ENABLED = "browser.contentblocking.reportBreakage.enabled";
 const PREF_REPORT_BREAKAGE_URL = "browser.contentblocking.reportBreakage.url";
@@ -16,6 +17,9 @@ let {CommonUtils} = ChromeUtils.import("resource://services-common/utils.js", {}
 let {Preferences} = ChromeUtils.import("resource://gre/modules/Preferences.jsm", {});
 
 add_task(async function setup() {
+  await SpecialPowers.pushPrefEnv({set: [
+    [CB_UI_PREF, true],
+  ]});
   await UrlClassifierTestUtils.addTestTrackers();
 });
 
@@ -180,13 +184,16 @@ add_task(async function testReportBreakage() {
         let prefs = [
           "privacy.trackingprotection.enabled",
           "privacy.trackingprotection.pbmode.enabled",
+          "browser.contentblocking.trackingprotection.control-center.ui.enabled",
           "urlclassifier.trackingTable",
           "network.http.referer.defaultPolicy",
           "network.http.referer.defaultPolicy.pbmode",
+          "browser.contentblocking.rejecttrackers.control-center.ui.enabled",
           "network.cookie.cookieBehavior",
           "network.cookie.lifetimePolicy",
           "privacy.restrict3rdpartystorage.expiration",
           "browser.fastblock.enabled",
+          "browser.contentblocking.fastblock.control-center.ui.enabled",
           "browser.fastblock.timeout",
         ];
         let prefsBody = "";

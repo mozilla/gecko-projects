@@ -238,7 +238,7 @@ var UITour = {
       query: (aDocument) => {
         aDocument.ownerGlobal.BrowserPageActions.placeLazyActionsInPanel();
         return aDocument.getElementById("pageAction-urlbar-screenshots") ||
-               aDocument.getElementById("pageAction-panel-screenshots_mozilla_org");
+               aDocument.getElementById("pageAction-panel-screenshots");
       },
     }]
   ]),
@@ -652,9 +652,7 @@ var UITour = {
       // The browser message manager is disconnected when the <browser> is
       // destroyed and we want to teardown at that point.
       case "message-manager-close": {
-        let winEnum = Services.wm.getEnumerator("navigator:browser");
-        while (winEnum.hasMoreElements()) {
-          let window = winEnum.getNext();
+        for (let window of Services.wm.getEnumerator("navigator:browser")) {
           if (window.closed)
             continue;
 
@@ -1364,7 +1362,11 @@ var UITour = {
   },
 
   showNewTab(aWindow, aBrowser) {
-    aWindow.openLinkIn("about:newtab", "current", {targetBrowser: aBrowser});
+    let url = "about:newtab";
+    aWindow.openLinkIn(url, "current", {
+      targetBrowser: aBrowser,
+      triggeringPrincipal: Services.scriptSecurityManager.createCodebasePrincipal(Services.io.newURI(url), {}),
+    });
     aWindow.gURLBar.focus();
   },
 
@@ -1679,9 +1681,7 @@ var UITour = {
   },
 
   notify(eventName, params) {
-    let winEnum = Services.wm.getEnumerator("navigator:browser");
-    while (winEnum.hasMoreElements()) {
-      let window = winEnum.getNext();
+    for (let window of Services.wm.getEnumerator("navigator:browser")) {
       if (window.closed)
         continue;
 

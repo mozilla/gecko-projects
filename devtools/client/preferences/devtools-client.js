@@ -65,13 +65,8 @@ pref("devtools.inspector.shapesHighlighter.enabled", true);
 pref("devtools.flexboxinspector.enabled", false);
 // Enable the new Animation Inspector
 pref("devtools.new-animationinspector.enabled", true);
-
-// Enable the Variable Fonts editor only in Nightly
-#if defined(NIGHTLY_BUILD)
+// Enable the Font Editor
 pref("devtools.inspector.fonteditor.enabled", true);
-#else
-pref("devtools.inspector.fonteditor.enabled", false);
-#endif
 // Enable the font highlight-on-hover feature
 pref("devtools.inspector.fonthighlighter.enabled", false);
 
@@ -229,6 +224,9 @@ pref("devtools.dom.enabled", false);
 
 // Make sure the Accessibility panel is hidden by default
 pref("devtools.accessibility.enabled", false);
+// Counter to promote the Accessibility panel.
+// @remove after release 63 (See Bug 1482461)
+pref("devtools.promote.accessibility", 1);
 
 // Web Audio Editor Inspector Width should be a preference
 pref("devtools.webaudioeditor.inspectorWidth", 300);
@@ -337,8 +335,8 @@ pref("devtools.aboutdebugging.network-locations", "[]");
 #endif
 
 // Map top-level await expressions in the console
-#if defined(RELEASE_OR_BETA)
-pref("devtools.debugger.features.map-await-expression", false);
-#else
+#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
 pref("devtools.debugger.features.map-await-expression", true);
+#else
+pref("devtools.debugger.features.map-await-expression", false);
 #endif

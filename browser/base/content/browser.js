@@ -336,35 +336,33 @@ function isInitialPage(url) {
   return gInitialPages.includes(url) || url == BROWSER_NEW_TAB_URL;
 }
 
-function* browserWindows() {
-  let windows = Services.wm.getEnumerator("navigator:browser");
-  while (windows.hasMoreElements())
-    yield windows.getNext();
+function browserWindows() {
+  return Services.wm.getEnumerator("navigator:browser");
 }
 
 function UpdateBackForwardCommands(aWebNavigation) {
-  var backBroadcaster = document.getElementById("Browser:Back");
-  var forwardBroadcaster = document.getElementById("Browser:Forward");
+  var backCommand = document.getElementById("Browser:Back");
+  var forwardCommand = document.getElementById("Browser:Forward");
 
-  // Avoid setting attributes on broadcasters if the value hasn't changed!
+  // Avoid setting attributes on commands if the value hasn't changed!
   // Remember, guys, setting attributes on elements is expensive!  They
   // get inherited into anonymous content, broadcast to other widgets, etc.!
   // Don't do it if the value hasn't changed! - dwh
 
-  var backDisabled = backBroadcaster.hasAttribute("disabled");
-  var forwardDisabled = forwardBroadcaster.hasAttribute("disabled");
+  var backDisabled = backCommand.hasAttribute("disabled");
+  var forwardDisabled = forwardCommand.hasAttribute("disabled");
   if (backDisabled == aWebNavigation.canGoBack) {
     if (backDisabled)
-      backBroadcaster.removeAttribute("disabled");
+      backCommand.removeAttribute("disabled");
     else
-      backBroadcaster.setAttribute("disabled", true);
+      backCommand.setAttribute("disabled", true);
   }
 
   if (forwardDisabled == aWebNavigation.canGoForward) {
     if (forwardDisabled)
-      forwardBroadcaster.removeAttribute("disabled");
+      forwardCommand.removeAttribute("disabled");
     else
-      forwardBroadcaster.setAttribute("disabled", true);
+      forwardCommand.setAttribute("disabled", true);
   }
 }
 
@@ -2636,13 +2634,11 @@ function BrowserPageInfo(documentURL, initialTab, imageElement, frameOuterWindow
   }
 
   let args = { initialTab, imageElement, frameOuterWindowID, browser };
-  var windows = Services.wm.getEnumerator("Browser:page-info");
 
   documentURL = documentURL || window.gBrowser.selectedBrowser.currentURI.spec;
 
   // Check for windows matching the url
-  while (windows.hasMoreElements()) {
-    var currentWindow = windows.getNext();
+  for (let currentWindow of Services.wm.getEnumerator("Browser:page-info")) {
     if (currentWindow.closed) {
       continue;
     }
@@ -3309,10 +3305,7 @@ function getDetailedCertErrorInfo(location, securityInfo) {
 
   let certChain = "";
   if (securityInfo.failedCertChain) {
-    let certs = securityInfo.failedCertChain.getEnumerator();
-    while (certs.hasMoreElements()) {
-      let cert = certs.getNext();
-      cert.QueryInterface(Ci.nsIX509Cert);
+    for (let cert of securityInfo.failedCertChain.getEnumerator()) {
       certChain += getPEMString(cert);
     }
   }
@@ -4524,13 +4517,22 @@ var XULBrowserWindow = {
     delete this.reloadCommand;
     return this.reloadCommand = document.getElementById("Browser:Reload");
   },
-  get isImage() {
-    delete this.isImage;
-    return this.isImage = document.getElementById("isImage");
+  get elementsForTextBasedTypes() {
+    delete this.elementsForTextBasedTypes;
+    return this.elementsForTextBasedTypes = [
+      document.getElementById("pageStyleMenu"),
+      document.getElementById("context-viewpartialsource-selection"),
+      document.getElementById("cmd_find"),
+      document.getElementById("cmd_findAgain"),
+      document.getElementById("cmd_findPrevious"),
+    ];
   },
-  get canViewSource() {
-    delete this.canViewSource;
-    return this.canViewSource = document.getElementById("canViewSource");
+  get elementsForViewSource() {
+    delete this.elementsForViewSource;
+    return this.elementsForViewSource = [
+      document.getElementById("context-viewsource"),
+      document.getElementById("View:PageSource"),
+    ];
   },
 
   forceInitialBrowserNonRemote(aOpener) {
@@ -4684,17 +4686,22 @@ var XULBrowserWindow = {
         this.setDefaultStatus(msg);
 
         // Disable menu entries for images, enable otherwise
-        if (browser.documentContentType && BrowserUtils.mimeTypeIsTextBased(browser.documentContentType)) {
-          this.isImage.removeAttribute("disabled");
-        } else {
-          canViewSource = false;
-          this.isImage.setAttribute("disabled", "true");
+        let isText = browser.documentContentType &&
+                     BrowserUtils.mimeTypeIsTextBased(browser.documentContentType);
+        for (let element of this.elementsForTextBasedTypes) {
+          if (isText) {
+            element.removeAttribute("disabled");
+          } else {
+            element.setAttribute("disabled", "true");
+          }
         }
 
-        if (canViewSource) {
-          this.canViewSource.removeAttribute("disabled");
-        } else {
-          this.canViewSource.setAttribute("disabled", "true");
+        for (let element of this.elementsForViewSource) {
+          if (canViewSource && isText) {
+            element.removeAttribute("disabled");
+          } else {
+            element.setAttribute("disabled", "true");
+          }
         }
       }
 
@@ -4733,10 +4740,15 @@ var XULBrowserWindow = {
     let browser = gBrowser.selectedBrowser;
 
     // Disable menu entries for images, enable otherwise
-    if (browser.documentContentType && BrowserUtils.mimeTypeIsTextBased(browser.documentContentType))
-      this.isImage.removeAttribute("disabled");
-    else
-      this.isImage.setAttribute("disabled", "true");
+    let isText = browser.documentContentType &&
+                 BrowserUtils.mimeTypeIsTextBased(browser.documentContentType);
+    for (let element of this.elementsForTextBasedTypes) {
+      if (isText) {
+        element.removeAttribute("disabled");
+      } else {
+        element.setAttribute("disabled", "true");
+      }
+    }
 
     this.hideOverLinkImmediately = true;
     this.setOverLink("", null);
@@ -6431,7 +6443,7 @@ var BrowserOffline = {
   // BrowserOffline Public Methods
   init() {
     if (!this._uiElement)
-      this._uiElement = document.getElementById("workOfflineMenuitemState");
+      this._uiElement = document.getElementById("cmd_toggleOfflineStatus");
 
     Services.obs.addObserver(this, "network:offline-status-changed");
 

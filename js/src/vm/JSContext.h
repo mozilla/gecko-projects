@@ -954,6 +954,26 @@ struct JSContext : public JS::RootingContext,
                            js::HandleObject incumbentGlobal);
     void addUnhandledRejectedPromise(JSContext* cx, js::HandleObject promise);
     void removeUnhandledRejectedPromise(JSContext* cx, js::HandleObject promise);
+
+  private:
+    // Base case for the recursive function below.
+    inline void checkImpl(int argIndex) {}
+
+    template <class Head, class... Tail>
+    inline void checkImpl(int argIndex, const Head& head, const Tail&... tail);
+
+    bool contextChecksEnabled() const {
+        // Don't perform these checks when called from a finalizer. The checking
+        // depends on other objects not having been swept yet.
+        return !RuntimeHeapIsCollecting(runtime()->heapState());
+    }
+
+  public:
+    // Assert the arguments are in this context's realm (for scripts),
+    // compartment (for objects) or zone (for strings, symbols).
+    template <class... Args> inline void check(const Args&... args);
+    template <class... Args> inline void releaseCheck(const Args&... args);
+    template <class... Args> MOZ_ALWAYS_INLINE void debugOnlyCheck(const Args&... args);
 }; /* struct JSContext */
 
 inline JS::Result<>
@@ -1087,7 +1107,10 @@ ReportIsNotDefined(JSContext* cx, HandleId id);
  * Report an attempt to access the property of a null or undefined value (v).
  */
 extern void
-ReportIsNullOrUndefined(JSContext* cx, int spindex, HandleValue v);
+ReportIsNullOrUndefinedForPropertyAccess(JSContext* cx, HandleValue v, bool reportScanStack);
+extern void
+ReportIsNullOrUndefinedForPropertyAccess(JSContext* cx, HandleValue v, HandleId key,
+                                         bool reportScanStack);
 
 extern void
 ReportMissingArg(JSContext* cx, js::HandleValue v, unsigned arg);

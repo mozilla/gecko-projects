@@ -367,18 +367,18 @@ var PanelMultiView = class extends AssociatedToNode {
     PanelMultiView.ensureUnloadHandlerRegistered(this.window);
 
     let viewContainer = this._viewContainer =
-      this.document.createElement("box");
+      this.document.createXULElement("box");
     viewContainer.classList.add("panel-viewcontainer");
 
-    let viewStack = this._viewStack = this.document.createElement("box");
+    let viewStack = this._viewStack = this.document.createXULElement("box");
     viewStack.classList.add("panel-viewstack");
     viewContainer.append(viewStack);
 
-    let offscreenViewContainer = this.document.createElement("box");
+    let offscreenViewContainer = this.document.createXULElement("box");
     offscreenViewContainer.classList.add("panel-viewcontainer", "offscreen");
 
     let offscreenViewStack = this._offscreenViewStack =
-      this.document.createElement("box");
+      this.document.createXULElement("box");
     offscreenViewStack.classList.add("panel-viewstack");
     offscreenViewContainer.append(offscreenViewStack);
 
@@ -516,6 +516,15 @@ var PanelMultiView = class extends AssociatedToNode {
       try {
         canCancel = false;
         this._panel.openPopup(...args);
+
+        // On Windows, if another popup is hiding while we call openPopup, the
+        // call won't fail but the popup won't open. In this case, we have to
+        // dispatch an artificial "popuphidden" event to reset our state.
+        if (this._panel.state == "closed" && this.openViews.length) {
+          this.dispatchCustomEvent("popuphidden");
+          return false;
+        }
+
         return true;
       } catch (ex) {
         this.dispatchCustomEvent("popuphidden");
@@ -1056,8 +1065,10 @@ var PanelMultiView = class extends AssociatedToNode {
   }
 
   handleEvent(aEvent) {
-    if (aEvent.type.startsWith("popup") && aEvent.target != this._panel) {
-      // Shouldn't act on e.g. context menus being shown from within the panel.
+    // Only process actual popup events from the panel or events we generate
+    // ourselves, but not from menus being shown from within the panel.
+    if (aEvent.type.startsWith("popup") && aEvent.target != this._panel &&
+                                           aEvent.target != this.node) {
       return;
     }
     switch (aEvent.type) {
@@ -1212,10 +1223,10 @@ var PanelView = class extends AssociatedToNode {
       return;
     }
 
-    header = this.document.createElement("box");
+    header = this.document.createXULElement("box");
     header.classList.add("panel-header");
 
-    let backButton = this.document.createElement("toolbarbutton");
+    let backButton = this.document.createXULElement("toolbarbutton");
     backButton.className =
       "subviewbutton subviewbutton-iconic subviewbutton-back";
     backButton.setAttribute("closemenu", "none");
@@ -1228,7 +1239,7 @@ var PanelView = class extends AssociatedToNode {
       backButton.blur();
     });
 
-    let label = this.document.createElement("label");
+    let label = this.document.createXULElement("label");
     label.setAttribute("value", value);
 
     header.append(backButton, label);

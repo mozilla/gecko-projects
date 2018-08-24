@@ -138,37 +138,73 @@ interface nsITableEditor : nsISupports
     */
   void normalizeTable(in Element aTable);
 
-  /** Get the row an column index from the layout's cellmap
-    * If aCell is null, it will try to find enclosing table of selection anchor
-    *
-    */
-  void getCellIndexes(in Element aCell,
-                      out long aRowIndex, out long aColIndex);
+  /**
+   * getCellIndexes() computes row index and column index of a table cell.
+   * Note that this depends on layout information.  Therefore, all pending
+   * layout should've been flushed before calling this.
+   *
+   * @param aCellElement        If not null, this computes indexes of the cell.
+   *                            If null, this computes indexes of a cell which
+   *                            contains anchor of Selection.
+   * @param aRowIndex           Must be an object, whose .value will be set
+   *                            to row index of the cell.  0 is the first row.
+   *                            If rowspan is set to 2 or more, the start
+   *                            row index is used.
+   * @param aColumnIndex        Must be an object, whose .value will be set
+   *                            to column index of the cell.  0 is the first
+   *                            column.  If colspan is set to 2 or more, the
+   *                            start column index is used.
+   */
+  void getCellIndexes(in Element aCellElement,
+                      out long aRowIndex, out long aColumnIndex);
 
-  /** Get the number of rows and columns in a table from the layout's cellmap
-    * If aTable is null, it will try to find enclosing table of selection ancho
-    * Note that all rows in table will not have this many because of
-    * ROWSPAN effects or if table is not "rectangular" (has short rows)
-    */
-  void getTableSize(in Element aTable,
+  /**
+   * getTableSize() computes number of rows and columns.
+   * Note that this depends on layout information.  Therefore, all pending
+   * layout should've been flushed before calling this.
+   *
+   * @param aTableOrElementInTable  If a <table> element, this computes number
+   *                                of rows and columns of it.
+   *                                If another element and in a <table>, this
+   *                                computes number of rows and columns of
+   *                                the nearest ancestor <table> element.
+   *                                If element is not in <table> element,
+   *                                throwing an exception.
+   *                                If null, this looks for nearest ancestor
+   *                                <table> element containing anchor of
+   *                                Selection.  If found, computes the number
+   *                                of rows and columns of the <table>.
+   *                                Otherwise, throwing an exception.
+   * @param aRowCount               Number of *actual* row count.
+   *                                I.e., rowspan does NOT increase this value.
+   * @param aColumnCount            Number of column count.
+   *                                I.e., if colspan is specified with bigger
+   *                                number than actual, the value is used
+   *                                as this.
+   */
+  void getTableSize(in Element aTableOrElementInTable,
                     out long aRowCount, out long aColCount);
 
-  /** Get a cell element at cellmap grid coordinates
-    * A cell that spans across multiple cellmap locations will
-    *   be returned multiple times, once for each location it occupies
-    *
-    * @param aTable                   A table in the document
-    * @param aRowIndex, aColIndex     The 0-based cellmap indexes
-    *
-    * (in C++ returns: NS_EDITOR_ELEMENT_NOT_FOUND if an element is not found
-    *  passes NS_SUCCEEDED macro)
-    *
-    *   You can scan for all cells in a row or column
-    *   by iterating through the appropriate indexes
-    *   until the returned aCell is null
-    */
-  Element getCellAt(in Element aTable,
-                    in long aRowIndex, in long aColIndex);
+  /**
+   * getCellAt() returns a <td> or <th> element in a <table> if there is a
+   * cell at the indexes.
+   *
+   * @param aTableElement       If not null, must be a <table> element.
+   *                            If null, looks for the nearest ancestor <table>
+   *                            to look for a cell.
+   * @param aRowIndex           Row index of the cell.
+   * @param aColumnIndex        Column index of the cell.
+   * @return                    Returns a <td> or <th> element if there is.
+   *                            Otherwise, returns null without throwing
+   *                            exception.
+   *                            If aTableElement is not null and not a <table>
+   *                            element, throwing an exception.
+   *                            If aTableElement is null and anchor of Selection
+   *                            is not in any <table> element, throwing an
+   *                            exception.
+   */
+  Element getCellAt(in Element aTableElement,
+                    in long aRowIndex, in long aColumnIndex);
 
   /** Get a cell at cellmap grid coordinates and associated data
     * A cell that spans across multiple cellmap locations will
@@ -203,26 +239,25 @@ interface nsITableEditor : nsISupports
                      out long  aActualRowSpan, out long  aActualColSpan,
                      out boolean aIsSelected);
 
-  /** Get the first row element in a table
-    *
-    * @return            The row at the requested index
-    *                    Returns null if there are no rows in table
-    * (in C++ returns: NS_EDITOR_ELEMENT_NOT_FOUND if an element is not found
-    *  passes NS_SUCCEEDED macro)
-    */
-  Node getFirstRow(in Element aTableElement);
-
-  /** Get the next row element starting the search from aTableElement
-    *
-    * @param aTableElement Any TR or child-of-TR element in the document
-    *
-    * @return            The row to start search from
-    *                    and the row returned from the search
-    *                    Returns null if there isn't another row
-    * (in C++ returns: NS_EDITOR_ELEMENT_NOT_FOUND if an element is not found
-    *  passes NS_SUCCEEDED macro)
-    */
-  Node getNextRow(in Node aTableElement);
+  /**
+   * getFirstRow() returns first <tr> element in a <table> element.
+   *
+   * @param aTableOrElementInTable  If a <table> element, returns its first
+   *                                <tr> element.
+   *                                If another element, looks for nearest
+   *                                ancestor <table> element first.  Then,
+   *                                return its first <tr> element.
+   * @return                        <tr> element in the <table> element.
+   *                                If <table> element is not found, this
+   *                                throws an exception.
+   *                                If there is a <table> element but it
+   *                                does not have <tr> elements, returns
+   *                                null without throwing exception.
+   *                                Note that this may return anonymous <tr>
+   *                                element if <table> has one or more cells
+   *                                but <tr> element is not in the source.
+   */
+  Element getFirstRow(in Element aTableElement);
 
   /** Preferred direction to search for neighboring cell
     * when trying to locate a cell to place caret in after

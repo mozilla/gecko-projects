@@ -924,6 +924,7 @@ pref("gfx.webrender.debug.compact-profiler", false);
 pref("gfx.webrender.debug.echo-driver-messages", false);
 pref("gfx.webrender.debug.new-frame-indicator", false);
 pref("gfx.webrender.debug.new-scene-indicator", false);
+pref("gfx.webrender.debug.show-overdraw", false);
 pref("gfx.webrender.dl.dump-parent", false);
 pref("gfx.webrender.dl.dump-content", false);
 
@@ -3073,6 +3074,13 @@ pref("layout.css.ruby.intercharacter.enabled", false);
 // Is support for overscroll-behavior enabled?
 pref("layout.css.overscroll-behavior.enabled", true);
 
+// Is support for motion-path enabled?
+#ifdef RELEASE_OR_BETA
+pref("layout.css.motion-path.enabled", false);
+#else
+pref("layout.css.motion-path.enabled", true);
+#endif
+
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
 // 1 = end-side in document/content direction
@@ -4887,7 +4895,7 @@ pref("layers.max-active", -1);
 // 0  -> full-tilt mode: Recomposite even if not transaction occured.
 pref("layers.offmainthreadcomposition.frame-rate", -1);
 
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined (OS_OPENBSD)
 pref("layers.enable-tiles", true);
 #else
 pref("layers.enable-tiles", false);
@@ -5930,3 +5938,10 @@ pref("dom.events.asyncClipboard", true);
 pref("dom.events.asyncClipboard.dataTransfer", false);
 // Should only be enabled in tests
 pref("dom.events.testing.asyncClipboard", false);
+
+#ifdef NIGHTLY_BUILD
+// Disable moz* APIs in DataTransfer
+pref("dom.datatransfer.mozAtAPIs", false);
+#else
+pref("dom.datatransfer.mozAtAPIs", true);
+#endif

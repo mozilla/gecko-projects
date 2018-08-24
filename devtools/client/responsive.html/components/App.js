@@ -11,10 +11,13 @@ const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 
-const DeviceModal = createFactory(require("./DeviceModal"));
 const Toolbar = createFactory(require("./Toolbar"));
 const Viewports = createFactory(require("./Viewports"));
 
+loader.lazyGetter(this, "DeviceModal",
+  () => createFactory(require("./DeviceModal")));
+
+const { changeNetworkThrottling } = require("devtools/client/shared/components/throttling/actions");
 const {
   addCustomDevice,
   removeCustomDevice,
@@ -22,7 +25,6 @@ const {
   updateDeviceModal,
   updatePreferredDevices,
 } = require("../actions/devices");
-const { changeNetworkThrottling } = require("devtools/client/shared/components/throttling/actions");
 const { changeReloadCondition } = require("../actions/reload-conditions");
 const { takeScreenshot } = require("../actions/screenshot");
 const { changeTouchSimulation } = require("../actions/touch-simulation");
@@ -220,50 +222,52 @@ class App extends Component {
       deviceAdderViewportTemplate = viewports[devices.modalOpenedFromViewport];
     }
 
-    return dom.div(
-      {
-        id: "app",
-      },
-      Toolbar({
-        devices,
-        displayPixelRatio,
-        networkThrottling,
-        reloadConditions,
-        screenshot,
-        selectedDevice,
-        selectedPixelRatio,
-        touchSimulation,
-        viewport: viewports[0],
-        onChangeDevice,
-        onChangeNetworkThrottling,
-        onChangePixelRatio,
-        onChangeReloadCondition,
-        onChangeTouchSimulation,
-        onExit,
-        onRemoveDeviceAssociation,
-        onResizeViewport,
-        onRotateViewport,
-        onScreenshot,
-        onToggleLeftAlignment,
-        onUpdateDeviceModal,
-      }),
-      Viewports({
-        screenshot,
-        viewports,
-        onBrowserMounted,
-        onContentResize,
-        onRemoveDeviceAssociation,
-        onResizeViewport,
-      }),
-      DeviceModal({
-        deviceAdderViewportTemplate,
-        devices,
-        onAddCustomDevice,
-        onDeviceListUpdate,
-        onRemoveCustomDevice,
-        onUpdateDeviceDisplayed,
-        onUpdateDeviceModal,
-      })
+    return (
+      dom.div({ id: "app" },
+        Toolbar({
+          devices,
+          displayPixelRatio,
+          networkThrottling,
+          reloadConditions,
+          screenshot,
+          selectedDevice,
+          selectedPixelRatio,
+          touchSimulation,
+          viewport: viewports[0],
+          onChangeDevice,
+          onChangeNetworkThrottling,
+          onChangePixelRatio,
+          onChangeReloadCondition,
+          onChangeTouchSimulation,
+          onExit,
+          onRemoveDeviceAssociation,
+          onResizeViewport,
+          onRotateViewport,
+          onScreenshot,
+          onToggleLeftAlignment,
+          onUpdateDeviceModal,
+        }),
+        Viewports({
+          screenshot,
+          viewports,
+          onBrowserMounted,
+          onContentResize,
+          onRemoveDeviceAssociation,
+          onResizeViewport,
+        }),
+        devices.isModalOpen ?
+          DeviceModal({
+            deviceAdderViewportTemplate,
+            devices,
+            onAddCustomDevice,
+            onDeviceListUpdate,
+            onRemoveCustomDevice,
+            onUpdateDeviceDisplayed,
+            onUpdateDeviceModal,
+          })
+          :
+          null
+      )
     );
   }
 }

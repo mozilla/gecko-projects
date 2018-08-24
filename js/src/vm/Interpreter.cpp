@@ -263,7 +263,7 @@ SetPropertyOperation(JSContext* cx, JSOp op, HandleValue lval, HandleId id, Hand
 {
     MOZ_ASSERT(op == JSOP_SETPROP || op == JSOP_STRICTSETPROP);
 
-    RootedObject obj(cx, ToObjectFromStack(cx, lval));
+    RootedObject obj(cx, ToObjectFromStackForPropertyAccess(cx, lval, id));
     if (!obj)
         return false;
 
@@ -309,8 +309,11 @@ js::MakeDefaultConstructor(JSContext* cx, HandleScript script, jsbytecode* pc, H
         return nullptr;
     uint32_t classStartOffset = GetSrcNoteOffset(classNote, 0);
     uint32_t classEndOffset = GetSrcNoteOffset(classNote, 1);
-    ctorScript->setDefaultClassConstructorSpan(script->sourceObject(), classStartOffset,
-                                               classEndOffset);
+    unsigned column;
+    unsigned line = PCToLineNumber(script, pc, &column);
+    ctorScript->setDefaultClassConstructorSpan(script->sourceObject(),
+                                               classStartOffset, classEndOffset,
+                                               line, column);
 
     return ctor;
 }
@@ -439,13 +442,13 @@ CallJSNative(JSContext* cx, Native native, const CallArgs& args)
 #ifdef DEBUG
     bool alreadyThrowing = cx->isExceptionPending();
 #endif
-    assertSameCompartment(cx, args);
+    cx->check(args);
     MOZ_ASSERT(!args.callee().is<ProxyObject>());
 
     AutoRealm ar(cx, &args.callee());
     bool ok = native(cx, args.length(), args.base());
     if (ok) {
-        assertSameCompartment(cx, args.rval());
+        cx->check(args.rval());
         MOZ_ASSERT_IF(!alreadyThrowing, !cx->isExceptionPending());
     }
     return ok;
@@ -798,7 +801,7 @@ js::Execute(JSContext* cx, HandleScript script, JSObject& envChainArg, Value* rv
 #ifdef DEBUG
     JSObject* s = envChain;
     do {
-        assertSameCompartment(cx, s);
+        cx->check(s);
         MOZ_ASSERT_IF(!s->enclosingEnvironment(), s->is<GlobalObject>());
     } while ((s = s->enclosingEnvironment()));
 #endif
@@ -1500,7 +1503,7 @@ HandleError(JSContext* cx, InterpreterRegs& regs)
 }
 
 #define REGS                     (activation.regs())
-#define PUSH_COPY(v)             do { *REGS.sp++ = (v); assertSameCompartmentDebugOnly(cx, REGS.sp[-1]); } while (0)
+#define PUSH_COPY(v)             do { *REGS.sp++ = (v); cx->debugOnlyCheck(REGS.sp[-1]); } while (0)
 #define PUSH_COPY_SKIP_CHECK(v)  *REGS.sp++ = (v)
 #define PUSH_NULL()              REGS.sp++->setNull()
 #define PUSH_UNDEFINED()         REGS.sp++->setUndefined()
@@ -1508,17 +1511,17 @@ HandleError(JSContext* cx, InterpreterRegs& regs)
 #define PUSH_DOUBLE(d)           REGS.sp++->setDouble(d)
 #define PUSH_INT32(i)            REGS.sp++->setInt32(i)
 #define PUSH_SYMBOL(s)           REGS.sp++->setSymbol(s)
-#define PUSH_STRING(s)           do { REGS.sp++->setString(s); assertSameCompartmentDebugOnly(cx, REGS.sp[-1]); } while (0)
-#define PUSH_OBJECT(obj)         do { REGS.sp++->setObject(obj); assertSameCompartmentDebugOnly(cx, REGS.sp[-1]); } while (0)
-#define PUSH_OBJECT_OR_NULL(obj) do { REGS.sp++->setObjectOrNull(obj); assertSameCompartmentDebugOnly(cx, REGS.sp[-1]); } while (0)
+#define PUSH_STRING(s)           do { REGS.sp++->setString(s); cx->debugOnlyCheck(REGS.sp[-1]); } while (0)
+#define PUSH_OBJECT(obj)         do { REGS.sp++->setObject(obj); cx->debugOnlyCheck(REGS.sp[-1]); } while (0)
+#define PUSH_OBJECT_OR_NULL(obj) do { REGS.sp++->setObjectOrNull(obj); cx->debugOnlyCheck(REGS.sp[-1]); } while (0)
 #define PUSH_MAGIC(magic)        REGS.sp++->setMagic(magic)
 #define POP_COPY_TO(v)           (v) = *--REGS.sp
 #define POP_RETURN_VALUE()       REGS.fp()->setReturnValue(*--REGS.sp)
 
-#define FETCH_OBJECT(cx, n, obj)                                              \
+#define FETCH_OBJECT(cx, n, obj, key)                                         \
     JS_BEGIN_MACRO                                                            \
         HandleValue val = REGS.stackHandleAt(n);                              \
-        obj = ToObjectFromStack((cx), (val));                                 \
+        obj = ToObjectFromStackForPropertyAccess((cx), (val), (key));         \
         if (!obj)                                                             \
             goto error;                                                       \
     JS_END_MACRO
@@ -2821,7 +2824,7 @@ CASE(JSOP_STRICTDELPROP)
                   "delprop and strictdelprop must be the same size");
     ReservedRooted<jsid> id(&rootId0, NameToId(script->getName(REGS.pc)));
     ReservedRooted<JSObject*> obj(&rootObject0);
-    FETCH_OBJECT(cx, -1, obj);
+    FETCH_OBJECT(cx, -1, obj, id);
 
     ObjectOpResult result;
     if (!DeleteProperty(cx, obj, id, result))
@@ -2842,9 +2845,8 @@ CASE(JSOP_STRICTDELELEM)
                   "delelem and strictdelelem must be the same size");
     /* Fetch the left part and resolve it to a non-null object. */
     ReservedRooted<JSObject*> obj(&rootObject0);
-    FETCH_OBJECT(cx, -2, obj);
-
     ReservedRooted<Value> propval(&rootValue0, REGS.sp[-1]);
+    FETCH_OBJECT(cx, -2, obj, propval);
 
     ObjectOpResult result;
     ReservedRooted<jsid> id(&rootId0);
@@ -2958,7 +2960,7 @@ CASE(JSOP_CALLPROP)
         goto error;
 
     TypeScript::Monitor(cx, script, REGS.pc, lval);
-    assertSameCompartmentDebugOnly(cx, lval);
+    cx->debugOnlyCheck(lval);
 }
 END_CASE(JSOP_GETPROP)
 
@@ -2972,7 +2974,7 @@ CASE(JSOP_GETPROP_SUPER)
         goto error;
 
     TypeScript::Monitor(cx, script, REGS.pc, rref);
-    assertSameCompartmentDebugOnly(cx, rref);
+    cx->debugOnlyCheck(rref);
 
     REGS.sp--;
 }
@@ -2987,7 +2989,7 @@ CASE(JSOP_GETBOUNDNAME)
         goto error;
 
     TypeScript::Monitor(cx, script, REGS.pc, rval);
-    assertSameCompartmentDebugOnly(cx, rval);
+    cx->debugOnlyCheck(rval);
 }
 END_CASE(JSOP_GETBOUNDNAME)
 
@@ -3108,7 +3110,7 @@ CASE(JSOP_STRICTSETELEM)
                   "setelem and strictsetelem must be the same size");
     HandleValue receiver = REGS.stackHandleAt(-3);
     ReservedRooted<JSObject*> obj(&rootObject0);
-    obj = ToObjectFromStack(cx, receiver);
+    obj = ToObjectFromStackForPropertyAccess(cx, receiver, REGS.stackHandleAt(-2));
     if (!obj)
         goto error;
     ReservedRooted<jsid> id(&rootId0);
@@ -3703,7 +3705,7 @@ CASE(JSOP_GETLOCAL)
      * a use of the variable.
      */
     if (REGS.pc[JSOP_GETLOCAL_LENGTH] != JSOP_POP)
-        assertSameCompartmentDebugOnly(cx, REGS.sp[-1]);
+        cx->debugOnlyCheck(REGS.sp[-1]);
 }
 END_CASE(JSOP_GETLOCAL)
 
@@ -4267,13 +4269,14 @@ CASE(JSOP_AWAIT)
 CASE(JSOP_RESUME)
 {
     {
-        ReservedRooted<JSObject*> gen(&rootObject0, &REGS.sp[-2].toObject());
+        Rooted<GeneratorObject*> gen(cx, &REGS.sp[-2].toObject().as<GeneratorObject>());
         ReservedRooted<Value> val(&rootValue0, REGS.sp[-1]);
         // popInlineFrame expects there to be an additional value on the stack
         // to pop off, so leave "gen" on the stack.
 
         GeneratorObject::ResumeKind resumeKind = GeneratorObject::getResumeKind(REGS.pc);
-        bool ok = GeneratorObject::resume(cx, activation, gen, val, resumeKind);
+        if (!GeneratorObject::resume(cx, activation, gen, val))
+            goto error;
 
         JSScript* generatorScript = REGS.fp()->script();
         if (cx->realm() != generatorScript->realm())
@@ -4285,8 +4288,31 @@ CASE(JSOP_RESUME)
         TraceLogStartEvent(logger, scriptEvent);
         TraceLogStartEvent(logger, TraceLogger_Interpreter);
 
-        if (!ok)
+        switch (Debugger::onEnterFrame(cx, REGS.fp())) {
+          case ResumeMode::Continue:
+            break;
+          case ResumeMode::Throw:
+          case ResumeMode::Terminate:
             goto error;
+          case ResumeMode::Return:
+            MOZ_ASSERT_IF(REGS.fp()->callee().isGenerator(),  // as opposed to an async function
+                          gen->isClosed());
+            if (!ForcedReturn(cx, REGS))
+                goto error;
+            goto successful_return_continuation;
+        }
+
+        switch (resumeKind) {
+          case GeneratorObject::NEXT:
+            break;
+          case GeneratorObject::THROW:
+          case GeneratorObject::RETURN:
+            MOZ_ALWAYS_FALSE(GeneratorThrowOrReturn(cx, activation.regs().fp(), gen, val,
+                                                    resumeKind));
+            goto error;
+          default:
+            MOZ_CRASH("bad resumeKind");
+        }
     }
     ADVANCE_AND_DISPATCH(0);
 }
@@ -4587,7 +4613,7 @@ js::GetProperty(JSContext* cx, HandleValue v, HandlePropertyName name, MutableHa
     }
 
     RootedValue receiver(cx, v);
-    RootedObject obj(cx, ToObjectFromStack(cx, v));
+    RootedObject obj(cx, ToObjectFromStackForPropertyAccess(cx, v, name));
     if (!obj)
         return false;
 
@@ -4732,7 +4758,7 @@ template <bool strict>
 bool
 js::DeletePropertyJit(JSContext* cx, HandleValue v, HandlePropertyName name, bool* bp)
 {
-    RootedObject obj(cx, ToObjectFromStack(cx, v));
+    RootedObject obj(cx, ToObjectFromStackForPropertyAccess(cx, v, name));
     if (!obj)
         return false;
 
@@ -4760,7 +4786,7 @@ template <bool strict>
 bool
 js::DeleteElementJit(JSContext* cx, HandleValue val, HandleValue index, bool* bp)
 {
-    RootedObject obj(cx, ToObjectFromStack(cx, val));
+    RootedObject obj(cx, ToObjectFromStackForPropertyAccess(cx, val, index));
     if (!obj)
         return false;
 

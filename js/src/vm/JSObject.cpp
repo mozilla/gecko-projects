@@ -140,7 +140,7 @@ JS::FromPropertyDescriptor(JSContext* cx, Handle<PropertyDescriptor> desc, Mutab
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    assertSameCompartment(cx, desc);
+    cx->check(desc);
 
     // Step 1.
     if (!desc.object()) {
@@ -476,7 +476,7 @@ GetSealedOrFrozenAttributes(unsigned attrs, IntegrityLevel level)
 bool
 js::SetIntegrityLevel(JSContext* cx, HandleObject obj, IntegrityLevel level)
 {
-    assertSameCompartment(cx, obj);
+    cx->check(obj);
 
     // Steps 3-5. (Steps 1-2 are redundant assertions.)
     if (!PreventExtensions(cx, obj))
@@ -1139,7 +1139,7 @@ JS_CopyPropertyFrom(JSContext* cx, HandleId id, HandleObject target,
                     HandleObject obj, PropertyCopyBehavior copyBehavior)
 {
     // |obj| and |cx| are generally not same-compartment with |target| here.
-    assertSameCompartment(cx, obj, id);
+    cx->check(obj, id);
     Rooted<PropertyDescriptor> desc(cx);
 
     if (!GetOwnPropertyDescriptor(cx, obj, id, &desc))
@@ -1376,7 +1376,7 @@ InitializePropertiesFromCompatibleNativeObject(JSContext* cx,
                                                HandleNativeObject dst,
                                                HandleNativeObject src)
 {
-    assertSameCompartment(cx, src, dst);
+    cx->check(src, dst);
     MOZ_ASSERT(src->getClass() == dst->getClass());
     MOZ_ASSERT(dst->lastProperty()->getObjectFlags() == 0);
     MOZ_ASSERT(!src->isSingleton());
@@ -1445,7 +1445,7 @@ js::XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj)
     /* NB: Keep this in sync with DeepCloneObjectLiteral. */
 
     JSContext* cx = xdr->cx();
-    assertSameCompartment(cx, obj);
+    cx->check(obj);
 
     // Distinguish between objects and array classes.
     uint32_t isArray = 0;
@@ -2684,17 +2684,6 @@ js::SetPrototype(JSContext* cx, HandleObject obj, HandleObject proto, JS::Object
         return result.fail(JSMSG_CANT_SET_PROTO);
 
     /*
-     * Disallow mutating the [[Prototype]] on ArrayBuffer objects, which
-     * due to their complicated delegate-object shenanigans can't easily
-     * have a mutable [[Prototype]].
-     */
-    if (obj->is<ArrayBufferObject>()) {
-        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_CANT_SET_PROTO_OF,
-                                  "incompatible ArrayBuffer");
-        return false;
-    }
-
-    /*
      * Disallow mutating the [[Prototype]] on Typed Objects, per the spec.
      */
     if (obj->is<TypedObject>()) {
@@ -3251,11 +3240,59 @@ js::ToObjectSlow(JSContext* cx, JS::HandleValue val, bool reportScanStack)
     MOZ_ASSERT(!val.isObject());
 
     if (val.isNullOrUndefined()) {
-        if (reportScanStack) {
-            ReportIsNullOrUndefined(cx, JSDVG_SEARCH_STACK, val);
+        ReportIsNullOrUndefinedForPropertyAccess(cx, val, reportScanStack);
+        return nullptr;
+    }
+
+    return PrimitiveToObject(cx, val);
+}
+
+JSObject*
+js::ToObjectSlowForPropertyAccess(JSContext* cx, JS::HandleValue val, HandleId key,
+                                  bool reportScanStack)
+{
+    MOZ_ASSERT(!val.isMagic());
+    MOZ_ASSERT(!val.isObject());
+
+    if (val.isNullOrUndefined()) {
+        ReportIsNullOrUndefinedForPropertyAccess(cx, val, key, reportScanStack);
+        return nullptr;
+    }
+
+    return PrimitiveToObject(cx, val);
+}
+
+JSObject*
+js::ToObjectSlowForPropertyAccess(JSContext* cx, JS::HandleValue val, HandlePropertyName key,
+                                  bool reportScanStack)
+{
+    MOZ_ASSERT(!val.isMagic());
+    MOZ_ASSERT(!val.isObject());
+
+    if (val.isNullOrUndefined()) {
+        RootedId keyId(cx, NameToId(key));
+        ReportIsNullOrUndefinedForPropertyAccess(cx, val, keyId, reportScanStack);
+        return nullptr;
+    }
+
+    return PrimitiveToObject(cx, val);
+}
+
+JSObject*
+js::ToObjectSlowForPropertyAccess(JSContext* cx, JS::HandleValue val, HandleValue keyValue,
+                                  bool reportScanStack)
+{
+    MOZ_ASSERT(!val.isMagic());
+    MOZ_ASSERT(!val.isObject());
+
+    if (val.isNullOrUndefined()) {
+        RootedId key(cx);
+        if (keyValue.isPrimitive()) {
+            if (!ValueToId<CanGC>(cx, keyValue, &key))
+                return nullptr;
+            ReportIsNullOrUndefinedForPropertyAccess(cx, val, key, reportScanStack);
         } else {
-            JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_CANT_CONVERT_TO,
-                                      val.isNull() ? "null" : "undefined", "object");
+            ReportIsNullOrUndefinedForPropertyAccess(cx, val, reportScanStack);
         }
         return nullptr;
     }

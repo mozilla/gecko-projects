@@ -232,9 +232,9 @@ NewPromiseAllDataHolder(JSContext* cx, HandleObject resultPromise, HandleValue v
     if (!dataHolder)
         return nullptr;
 
-    assertSameCompartment(cx, resultPromise);
-    assertSameCompartment(cx, valuesArray);
-    assertSameCompartment(cx, resolve);
+    cx->check(resultPromise);
+    cx->check(valuesArray);
+    cx->check(resolve);
 
     dataHolder->setFixedSlot(PromiseAllDataHolderSlot_Promise, ObjectValue(*resultPromise));
     dataHolder->setFixedSlot(PromiseAllDataHolderSlot_RemainingElements, Int32Value(1));
@@ -772,7 +772,7 @@ static bool Promise_then_impl(JSContext* cx, HandleValue promiseVal, HandleValue
 static MOZ_MUST_USE bool
 ResolvePromiseInternal(JSContext* cx, HandleObject promise, HandleValue resolutionVal)
 {
-    assertSameCompartment(cx, promise, resolutionVal);
+    cx->check(promise, resolutionVal);
     MOZ_ASSERT(!IsSettledMaybeWrappedPromise(promise));
 
     // Step 7 (reordered).
@@ -935,7 +935,7 @@ EnqueuePromiseReactionJob(JSContext* cx, HandleObject reactionObj,
     // Must not enqueue a reaction job more than once.
     MOZ_ASSERT(reaction->targetState() == JS::PromiseState::Pending);
 
-    assertSameCompartment(cx, handlerArg);
+    cx->check(handlerArg);
     reaction->setTargetStateAndHandlerArg(targetState, handlerArg);
 
     RootedValue reactionVal(cx, ObjectValue(*reaction));
@@ -1637,7 +1637,7 @@ PromiseResolveBuiltinThenableJob(JSContext* cx, unsigned argc, Value* vp)
     RootedObject promise(cx, &job->getExtendedSlot(BuiltinThenableJobSlot_Promise).toObject());
     RootedObject thenable(cx, &job->getExtendedSlot(BuiltinThenableJobSlot_Thenable).toObject());
 
-    assertSameCompartment(cx, promise, thenable);
+    cx->check(promise, thenable);
     MOZ_ASSERT(promise->is<PromiseObject>());
     MOZ_ASSERT(thenable->is<PromiseObject>());
 
@@ -1740,7 +1740,7 @@ static MOZ_MUST_USE bool
 EnqueuePromiseResolveThenableBuiltinJob(JSContext* cx, HandleObject promiseToResolve,
                                         HandleObject thenable)
 {
-    assertSameCompartment(cx, promiseToResolve, thenable);
+    cx->check(promiseToResolve, thenable);
     MOZ_ASSERT(promiseToResolve->is<PromiseObject>());
     MOZ_ASSERT(thenable->is<PromiseObject>());
 
@@ -2156,7 +2156,7 @@ js::GetWaitForAllPromise(JSContext* cx, const JS::AutoObjectVector& promises)
 #ifdef DEBUG
     for (size_t i = 0, len = promises.length(); i < len; i++) {
         JSObject* obj = promises[i];
-        assertSameCompartment(cx, obj);
+        cx->check(obj);
         MOZ_ASSERT(UncheckedUnwrap(obj)->is<PromiseObject>());
     }
 #endif
@@ -2285,9 +2285,9 @@ RunResolutionFunction(JSContext *cx, HandleObject resolutionFun, HandleValue res
     // subclass constructor passes null/undefined to `super()`.)
     // There are also reactions where the Promise itself is missing. For
     // those, there's nothing left to do here.
-    assertSameCompartment(cx, resolutionFun);
-    assertSameCompartment(cx, result);
-    assertSameCompartment(cx, promiseObj);
+    cx->check(resolutionFun);
+    cx->check(result);
+    cx->check(promiseObj);
     if (resolutionFun) {
         RootedValue calleeOrRval(cx, ObjectValue(*resolutionFun));
         return Call(cx, calleeOrRval, UndefinedHandleValue, result, &calleeOrRval);
@@ -2562,10 +2562,11 @@ CommonPerformPromiseAllRace(JSContext *cx, PromiseForOfIterator& iterator, Handl
                     return false;
             }
 
-            // If either the object to depend on or the object that gets
-            // blocked isn't a, maybe-wrapped, Promise instance, we ignore it.
-            // All this does is lose some small amount of debug information in
-            // scenarios that are highly unlikely to occur in useful code.
+            // If either the object to depend on (`nextPromiseObj`) or the
+            // object that gets blocked (`resultPromise`) isn't a,
+            // maybe-wrapped, Promise instance, we ignore it. All this does is
+            // lose some small amount of debug information in scenarios that
+            // are highly unlikely to occur in useful code.
             if (nextPromiseObj->is<PromiseObject>() && resultPromise->is<PromiseObject>()) {
                 Handle<PromiseObject*> promise = nextPromiseObj.as<PromiseObject>();
                 if (!AddDummyPromiseReactionForDebugger(cx, promise, blockedPromise))
@@ -2999,7 +3000,12 @@ Promise_static_species(JSContext* cx, unsigned argc, Value* vp)
 // ES2016, 25.4.5.1, implemented in Promise.js.
 
 enum class IncumbentGlobalObject {
-    Yes, No
+    // Do not use the incumbent global, this is a special case used by the
+    // debugger.
+    No,
+
+    // Use incumbent global, this is the normal operation.
+    Yes
 };
 
 static PromiseReactionRecord*
@@ -3007,16 +3013,45 @@ NewReactionRecord(JSContext* cx, Handle<PromiseCapability> resultCapability,
                   HandleValue onFulfilled, HandleValue onRejected,
                   IncumbentGlobalObject incumbentGlobalObjectOption)
 {
-    // Either of the following conditions must be met:
-    //   * resultCapability.promise is a PromiseObject
-    //   * resultCapability.resolve and resultCapability.resolve are callable
-    // except for Async Generator, there resultPromise can be nullptr.
 #ifdef DEBUG
-    if (resultCapability.promise() && !resultCapability.promise()->is<PromiseObject>()) {
-        MOZ_ASSERT(resultCapability.resolve());
-        MOZ_ASSERT(IsCallable(resultCapability.resolve()));
-        MOZ_ASSERT(resultCapability.reject());
-        MOZ_ASSERT(IsCallable(resultCapability.reject()));
+    if (resultCapability.promise()) {
+        if (incumbentGlobalObjectOption == IncumbentGlobalObject::Yes) {
+            if (resultCapability.promise()->is<PromiseObject>()) {
+                // If `resultCapability.promise` is a Promise object,
+                // `resultCapability.{resolve,reject}` may be optimized out,
+                // but if they're not, they should be callable.
+                MOZ_ASSERT_IF(resultCapability.resolve(),
+                              IsCallable(resultCapability.resolve()));
+                MOZ_ASSERT_IF(resultCapability.reject(),
+                              IsCallable(resultCapability.reject()));
+            } else {
+                // If `resultCapability.promise` is a non-Promise object
+                // (including wrapped Promise object),
+                // `resultCapability.{resolve,reject}` should be callable.
+                MOZ_ASSERT(resultCapability.resolve());
+                MOZ_ASSERT(IsCallable(resultCapability.resolve()));
+                MOZ_ASSERT(resultCapability.reject());
+                MOZ_ASSERT(IsCallable(resultCapability.reject()));
+            }
+        } else {
+            // For debugger usage, `resultCapability.promise` should be a
+            // maybe-wrapped Promise object. The other fields are not used.
+            //
+            // This is the only case where we allow `resolve` and `reject` to
+            // be null when the `promise` field is not a PromiseObject.
+            JSObject* unwrappedPromise = UncheckedUnwrap(resultCapability.promise());
+            MOZ_ASSERT(unwrappedPromise->is<PromiseObject>());
+            MOZ_ASSERT(!resultCapability.resolve());
+            MOZ_ASSERT(!resultCapability.reject());
+        }
+    } else {
+        // `resultCapability.promise` is null for the following cases:
+        //   * resulting Promise is known to be unused
+        //   * Async Generator
+        // In any case, other fields are also not used.
+        MOZ_ASSERT(!resultCapability.resolve());
+        MOZ_ASSERT(!resultCapability.reject());
+        MOZ_ASSERT(incumbentGlobalObjectOption == IncumbentGlobalObject::Yes);
     }
 #endif
 
@@ -3045,12 +3080,12 @@ NewReactionRecord(JSContext* cx, Handle<PromiseCapability> resultCapability,
     if (!reaction)
         return nullptr;
 
-    assertSameCompartment(cx, resultCapability.promise());
-    assertSameCompartment(cx, onFulfilled);
-    assertSameCompartment(cx, onRejected);
-    assertSameCompartment(cx, resultCapability.resolve());
-    assertSameCompartment(cx, resultCapability.reject());
-    assertSameCompartment(cx, incumbentGlobalObject);
+    cx->check(resultCapability.promise());
+    cx->check(onFulfilled);
+    cx->check(onRejected);
+    cx->check(resultCapability.resolve());
+    cx->check(resultCapability.reject());
+    cx->check(incumbentGlobalObject);
 
     reaction->setFixedSlot(ReactionRecordSlot_Promise,
                            ObjectOrNullValue(resultCapability.promise()));
@@ -3125,7 +3160,7 @@ static MOZ_MUST_USE bool
 OriginalPromiseThenWithoutSettleHandlers(JSContext* cx, Handle<PromiseObject*> promise,
                                          Handle<PromiseObject*> promiseToResolve)
 {
-    assertSameCompartment(cx, promise);
+    cx->check(promise);
 
     // Steps 3-4.
     Rooted<PromiseCapability> resultCapability(cx);
@@ -3152,7 +3187,7 @@ static bool
 OriginalPromiseThenBuiltin(JSContext* cx, HandleValue promiseVal, HandleValue onFulfilled,
                            HandleValue onRejected, MutableHandleValue rval, bool rvalUsed)
 {
-    assertSameCompartment(cx, promiseVal, onFulfilled, onRejected);
+    cx->check(promiseVal, onFulfilled, onRejected);
     MOZ_ASSERT(CanCallOriginalPromiseThenBuiltin(cx, promiseVal));
 
     Rooted<PromiseObject*> promise(cx, &promiseVal.toObject().as<PromiseObject>());
@@ -4017,6 +4052,9 @@ AddDummyPromiseReactionForDebugger(JSContext* cx, Handle<PromiseObject*> promise
 {
     if (promise->state() != JS::PromiseState::Pending)
         return true;
+
+    // `dependentPromise` should be a maybe-wrapped Promise.
+    MOZ_ASSERT(UncheckedUnwrap(dependentPromise)->is<PromiseObject>());
 
     // Leave resolve and reject as null.
     Rooted<PromiseCapability> capability(cx);

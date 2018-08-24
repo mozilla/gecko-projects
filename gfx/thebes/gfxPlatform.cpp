@@ -602,6 +602,7 @@ WebRenderDebugPrefChangeCallback(const char* aPrefName, void*)
   GFX_WEBRENDER_DEBUG(".echo-driver-messages", 1 << 8)
   GFX_WEBRENDER_DEBUG(".new-frame-indicator", 1 << 9)
   GFX_WEBRENDER_DEBUG(".new-scene-indicator", 1 << 10)
+  GFX_WEBRENDER_DEBUG(".show-overdraw", 1 << 11)
 #undef GFX_WEBRENDER_DEBUG
 
   gfx::gfxVars::SetWebRenderDebugFlags(flags);
@@ -1653,17 +1654,20 @@ gfxPlatform::GetStandardFamilyName(const nsAString& aFontName,
     return NS_OK;
 }
 
-nsString
+nsAutoString
 gfxPlatform::GetDefaultFontName(const nsACString& aLangGroup,
                                 const nsACString& aGenericFamily)
 {
+    // To benefit from Return Value Optimization, all paths here must return
+    // this one variable:
+    nsAutoString result;
+
     gfxFontFamily* fontFamily = gfxPlatformFontList::PlatformFontList()->
         GetDefaultFontFamily(aLangGroup, aGenericFamily);
-    if (!fontFamily) {
-      return EmptyString();
-    }
-    nsAutoString result;
-    fontFamily->LocalizedName(result);
+    if (fontFamily) {
+      fontFamily->LocalizedName(result);
+    } // (else, leave 'result' empty)
+
     return result;
 }
 

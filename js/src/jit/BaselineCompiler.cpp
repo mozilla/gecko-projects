@@ -247,7 +247,7 @@ BaselineCompiler::compile()
     for (size_t i = 0; i < icLoadLabels_.length(); i++) {
         CodeOffset label = icLoadLabels_[i].label;
         size_t icEntry = icLoadLabels_[i].icEntry;
-        BaselineICEntry* entryAddr = &(baselineScript->icEntry(icEntry));
+        ICEntry* entryAddr = &(baselineScript->icEntry(icEntry));
         Assembler::PatchDataWithValueCheck(CodeLocationLabel(code, label),
                                            ImmPtr(entryAddr),
                                            ImmPtr((void*)-1));
@@ -512,7 +512,7 @@ BaselineCompiler::emitOutOfLinePostBarrierSlot()
 bool
 BaselineCompiler::emitIC(ICStub* stub, ICEntry::Kind kind)
 {
-    BaselineICEntry* entry = allocateICEntry(stub, kind);
+    ICEntry* entry = allocateICEntry(stub, kind);
     if (!entry)
         return false;
 
@@ -1926,7 +1926,7 @@ BaselineCompiler::emitBinaryArith()
     frame.popRegsAndSync(2);
 
     // Call IC
-    ICBinaryArith_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
+    ICBinaryArith_Fallback::Compiler stubCompiler(cx);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
@@ -2008,7 +2008,7 @@ BaselineCompiler::emitCompare()
     frame.popRegsAndSync(2);
 
     // Call IC.
-    ICCompare_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
+    ICCompare_Fallback::Compiler stubCompiler(cx);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
@@ -2043,7 +2043,7 @@ BaselineCompiler::emit_JSOP_CASE()
     frame.syncStack(0);
 
     // Call IC.
-    ICCompare_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
+    ICCompare_Fallback::Compiler stubCompiler(cx);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
@@ -2091,7 +2091,7 @@ BaselineCompiler::emit_JSOP_NEWARRAY()
     if (!group)
         return false;
 
-    ICNewArray_Fallback::Compiler stubCompiler(cx, group, ICStubCompiler::Engine::Baseline);
+    ICNewArray_Fallback::Compiler stubCompiler(cx, group);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
@@ -2155,7 +2155,7 @@ BaselineCompiler::emit_JSOP_NEWOBJECT()
 {
     frame.syncStack(0);
 
-    ICNewObject_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
+    ICNewObject_Fallback::Compiler stubCompiler(cx);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
@@ -2168,7 +2168,7 @@ BaselineCompiler::emit_JSOP_NEWINIT()
 {
     frame.syncStack(0);
 
-    ICNewObject_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
+    ICNewObject_Fallback::Compiler stubCompiler(cx);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
@@ -2616,7 +2616,7 @@ BaselineCompiler::emit_JSOP_GETPROP()
     frame.popRegsAndSync(1);
 
     // Call IC.
-    ICGetProp_Fallback::Compiler compiler(cx, ICStubCompiler::Engine::Baseline);
+    ICGetProp_Fallback::Compiler compiler(cx);
     if (!emitOpIC(compiler.getStub(&stubSpace_)))
         return false;
 
@@ -2651,8 +2651,7 @@ BaselineCompiler::emit_JSOP_GETPROP_SUPER()
     masm.loadValue(frame.addressOfStackValue(frame.peek(-1)), R1);
     frame.pop();
 
-    ICGetProp_Fallback::Compiler compiler(cx, ICStubCompiler::Engine::Baseline,
-                                          /* hasReceiver = */ true);
+    ICGetProp_Fallback::Compiler compiler(cx, /* hasReceiver = */ true);
     if (!emitOpIC(compiler.getStub(&stubSpace_)))
         return false;
 
@@ -4647,7 +4646,7 @@ BaselineCompiler::emit_JSOP_AWAIT()
     return emit_JSOP_YIELD();
 }
 
-typedef bool (*DebugAfterYieldFn)(JSContext*, BaselineFrame*);
+typedef bool (*DebugAfterYieldFn)(JSContext*, BaselineFrame*, jsbytecode*, bool*);
 static const VMFunction DebugAfterYieldInfo =
     FunctionInfo<DebugAfterYieldFn>(jit::DebugAfterYield, "DebugAfterYield");
 
@@ -4660,8 +4659,21 @@ BaselineCompiler::emit_JSOP_DEBUGAFTERYIELD()
     frame.assertSyncedStack();
     masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
     prepareVMCall();
+    pushArg(ImmPtr(pc));
     pushArg(R0.scratchReg());
-    return callVM(DebugAfterYieldInfo);
+    if (!callVM(DebugAfterYieldInfo))
+        return false;
+
+    icEntries_.back().setFakeKind(ICEntry::Kind_DebugAfterYield);
+
+    Label done;
+    masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, &done);
+    {
+        masm.loadValue(frame.addressOfReturnValue(), JSReturnOperand);
+        masm.jump(&return_);
+    }
+    masm.bind(&done);
+    return true;
 }
 
 typedef bool (*FinalSuspendFn)(JSContext*, HandleObject, jsbytecode*);
@@ -4693,7 +4705,7 @@ static const VMFunction InterpretResumeInfo =
 
 typedef bool (*GeneratorThrowFn)(JSContext*, BaselineFrame*, Handle<GeneratorObject*>,
                                  HandleValue, uint32_t);
-static const VMFunction GeneratorThrowInfo =
+static const VMFunction GeneratorThrowOrReturnInfo =
     FunctionInfo<GeneratorThrowFn>(jit::GeneratorThrowOrReturn, "GeneratorThrowOrReturn", TailCall);
 
 bool
@@ -4878,7 +4890,7 @@ BaselineCompiler::emit_JSOP_RESUME()
         pushArg(genObj);
         pushArg(scratch2);
 
-        TrampolinePtr code = cx->runtime()->jitRuntime()->getVMWrapper(GeneratorThrowInfo);
+        TrampolinePtr code = cx->runtime()->jitRuntime()->getVMWrapper(GeneratorThrowOrReturnInfo);
 
         // Create the frame descriptor.
         masm.subStackPtrFrom(scratch1);

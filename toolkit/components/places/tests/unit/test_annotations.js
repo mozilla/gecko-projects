@@ -54,11 +54,6 @@ add_task(async function test_execute() {
     do_throw("unable to get item annotation");
   }
 
-  // get annotation that doesn't exist
-  try {
-    annosvc.getPageAnnotation(testURI, "blah");
-    do_throw("fetching page-annotation that doesn't exist, should've thrown");
-  } catch (ex) {}
   try {
     annosvc.getItemAnnotation(testURI, "blah");
     do_throw("fetching item-annotation that doesn't exist, should've thrown");
@@ -168,7 +163,7 @@ add_task(async function test_getAnnotationsHavingName() {
   const ANNOS = {
     "int": 7,
     "double": 7.7,
-    "string": "seven"
+    "string": "seven",
   };
   for (let name in ANNOS) {
     PlacesUtils.annotations.setItemAnnotation(

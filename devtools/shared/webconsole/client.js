@@ -110,7 +110,8 @@ WebConsoleClient.prototype = {
         updates: [],
         private: actor.private,
         fromCache: actor.fromCache,
-        fromServiceWorker: actor.fromServiceWorker
+        fromServiceWorker: actor.fromServiceWorker,
+        isTrackingResource: actor.isTrackingResource,
       };
       this._networkRequests.set(actor.actor, networkInfo);
 
@@ -165,7 +166,7 @@ WebConsoleClient.prototype = {
         networkInfo.totalTime = packet.totalTime;
         break;
       case "securityInfo":
-        networkInfo.securityInfo = packet.state;
+        networkInfo.securityState = packet.state;
         break;
       case "responseCache":
         networkInfo.response.responseCache = packet.responseCache;

@@ -32,7 +32,7 @@ const windowTracker = {
       let {document} = window;
       let {documentURI} = document;
 
-      if (documentURI !== "chrome://browser/content/browser.xul") {
+      if (documentURI !== AppConstants.BROWSER_CHROME_URL) {
         return;
       }
       loadChromeScripts(window);
@@ -129,9 +129,7 @@ this.mochikit = class extends ExtensionAPI {
 
   onShutdown() {
     if (AppConstants.platform != "android") {
-      let windows = Services.wm.getEnumerator("navigator:browser");
-      while (windows.hasMoreElements()) {
-        let win = windows.getNext().QueryInterface(Ci.nsIDOMWindow);
+      for (let win of Services.wm.getEnumerator("navigator:browser")) {
         WindowListener.tearDownWindow(win);
       }
 

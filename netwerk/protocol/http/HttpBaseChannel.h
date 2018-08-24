@@ -271,6 +271,7 @@ public:
   NS_IMETHOD SetLastRedirectFlags(uint32_t aValue) override;
   NS_IMETHOD GetNavigationStartTimeStamp(TimeStamp* aTimeStamp) override;
   NS_IMETHOD SetNavigationStartTimeStamp(TimeStamp aTimeStamp) override;
+  NS_IMETHOD CancelForTrackingProtection() override;
 
   inline void CleanRedirectCacheChainIfNecessary()
   {
@@ -452,6 +453,7 @@ protected:
   // bundle calling OMR observers and marking flag into one function
   inline void CallOnModifyRequestObservers() {
     gHttpHandler->OnModifyRequest(this);
+    MOZ_ASSERT(!mRequestObserversCalled);
     mRequestObserversCalled = true;
   }
 

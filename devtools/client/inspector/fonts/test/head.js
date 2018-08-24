@@ -27,7 +27,14 @@ selectNode = async function(node, inspector, reason) {
   const onInspectorUpdated = inspector.once("fontinspector-updated");
   const onEditorUpdated = inspector.once("fonteditor-updated");
   await _selectNode(node, inspector, reason);
-  await Promise.all([onInspectorUpdated, onEditorUpdated]);
+
+  if (Services.prefs.getBoolPref("devtools.inspector.fonteditor.enabled")) {
+    // Wait for both the font inspetor and font editor before proceeding.
+    await Promise.all([onInspectorUpdated, onEditorUpdated]);
+  } else {
+    // Wait just for the font inspector.
+    await onInspectorUpdated;
+  }
 };
 
 /**
@@ -92,35 +99,48 @@ async function updatePreviewText(view, text) {
 }
 
 /**
- * Get all of the <li> elements for the fonts used on the currently selected element.
- *
- * @param  {document} viewDoc
- * @return {Array}
- */
-function getUsedFontsEls(viewDoc) {
+*  Get all of the <li> elements for the fonts used on the currently selected element.
+*
+*  NOTE: This method is used by tests which check the old Font Inspector. It, along with
+*  the tests should be removed once the Font Editor reaches Firefox Stable.
+*  @see https://bugzilla.mozilla.org/show_bug.cgi?id=1485324
+*
+* @param  {Document} viewDoc
+* @return {NodeList}
+*/
+function getUsedFontsEls_obsolete(viewDoc) {
   return viewDoc.querySelectorAll("#font-editor .fonts-list li");
 }
 
 /**
- * Get the DOM element for the accordion widget that contains the fonts used to render the
- * current element.
+ * Get all of the elements with names of fonts used on the currently selected element.
  *
- * @param  {document} viewDoc
- * @return {DOMNode}
+ * @param  {Document} viewDoc
+ * @return {NodeList}
  */
-function getRenderedFontsAccordion(viewDoc) {
-  return viewDoc.querySelectorAll("#font-container .accordion")[0];
+function getUsedFontsEls(viewDoc) {
+  return viewDoc.querySelectorAll("#font-editor .font-control-used-fonts .font-name");
+}
+
+/**
+ * Get all of the elements with groups of fonts used on the currently selected element.
+ *
+ * @param  {Document} viewDoc
+ * @return {NodeList}
+ */
+function getUsedFontGroupsEls(viewDoc) {
+  return viewDoc.querySelectorAll("#font-editor .font-control-used-fonts .font-group");
 }
 
 /**
  * Get the DOM element for the accordion widget that contains the fonts used elsewhere in
  * the document.
  *
- * @param  {document} viewDoc
+ * @param  {Document} viewDoc
  * @return {DOMNode}
  */
-function getOtherFontsAccordion(viewDoc) {
-  return viewDoc.querySelectorAll("#font-container .accordion")[1];
+function getFontsAccordion(viewDoc) {
+  return viewDoc.querySelector("#font-container .accordion");
 }
 
 /**
@@ -141,33 +161,23 @@ async function expandAccordion(accordion) {
 }
 
 /**
- * Expand the other fonts accordion.
+ * Expand the fonts accordion.
  *
- * @param  {document} viewDoc
+ * @param  {Document} viewDoc
  */
-async function expandOtherFontsAccordion(viewDoc) {
+async function expandFontsAccordion(viewDoc) {
   info("Expanding the other fonts section");
-  await expandAccordion(getOtherFontsAccordion(viewDoc));
-}
-
-/**
- * Get all of the <li> elements for the fonts used to render the current element.
- *
- * @param  {document} viewDoc
- * @return {Array}
- */
-function getRenderedFontsEls(viewDoc) {
-  return getRenderedFontsAccordion(viewDoc).querySelectorAll(".fonts-list > li");
+  await expandAccordion(getFontsAccordion(viewDoc));
 }
 
 /**
  * Get all of the <li> elements for the fonts used elsewhere in the document.
  *
- * @param  {document} viewDoc
- * @return {Array}
+ * @param  {Document} viewDoc
+ * @return {NodeList}
  */
-function getOtherFontsEls(viewDoc) {
-  return getOtherFontsAccordion(viewDoc).querySelectorAll(".fonts-list > li");
+function getAllFontsEls(viewDoc) {
+  return getFontsAccordion(viewDoc).querySelectorAll(".fonts-list > li");
 }
 
 /**
@@ -209,7 +219,7 @@ function getFamilyName(fontEl) {
 /**
  * Get the value and unit of a CSS font property or font axis from the font editor.
  *
- * @param  {document} viewDoc
+ * @param  {Document} viewDoc
  *         Host document of the font inspector panel.
  * @param  {String} name
  *         Font property name or axis tag
@@ -232,6 +242,17 @@ function getPropertyValue(viewDoc, name) {
     unit: viewDoc.querySelector(selector + ` ~ .font-value-select`) &&
           viewDoc.querySelector(selector + ` ~ .font-value-select`).value
   };
+}
+
+/**
+ * Given a font element, check whether its font source is remote.
+ *
+ * @param  {DOMNode} fontEl
+ *         The font element.
+ * @return {Boolean}
+ */
+function isRemote(fontEl) {
+  return fontEl.querySelector(".font-origin").classList.contains("remote");
 }
 
 /**

@@ -1002,12 +1002,20 @@ JSScript::setSourceObject(JSObject* object)
 }
 
 void
-JSScript::setDefaultClassConstructorSpan(JSObject* sourceObject, uint32_t start, uint32_t end)
+JSScript::setDefaultClassConstructorSpan(JSObject* sourceObject, uint32_t start, uint32_t end,
+                                         unsigned line, unsigned column)
 {
     MOZ_ASSERT(isDefaultClassConstructor());
     setSourceObject(sourceObject);
     toStringStart_ = start;
     toStringEnd_ = end;
+    sourceStart_ = start;
+    sourceEnd_ = end;
+    lineno_ = line;
+    column_ = column;
+    // Since this script has been changed to point into the user's source, we
+    // can clear its self-hosted flag, allowing Debugger to see it.
+    bitFields_.selfHosted_ = false;
 }
 
 js::ScriptSourceObject&
@@ -1378,7 +1386,7 @@ ScriptSourceObject::create(JSContext* cx, ScriptSource* source)
 ScriptSourceObject::initFromOptions(JSContext* cx, HandleScriptSourceObject source,
                                     const ReadOnlyCompileOptions& options)
 {
-    releaseAssertSameCompartment(cx, source);
+    cx->releaseCheck(source);
     MOZ_ASSERT(source->getReservedSlot(ELEMENT_SLOT).isMagic(JS_GENERIC_MAGIC));
     MOZ_ASSERT(source->getReservedSlot(ELEMENT_PROPERTY_SLOT).isMagic(JS_GENERIC_MAGIC));
     MOZ_ASSERT(source->getReservedSlot(INTRODUCTION_SCRIPT_SLOT).isMagic(JS_GENERIC_MAGIC));
@@ -2745,7 +2753,7 @@ JSScript::partiallyInit(JSContext* cx, HandleScript script, uint32_t nscopes,
                         uint32_t nconsts, uint32_t nobjects, uint32_t ntrynotes,
                         uint32_t nscopenotes, uint32_t nyieldoffsets, uint32_t nTypeSets)
 {
-    assertSameCompartment(cx, script);
+    cx->check(script);
 
     size_t size = ScriptDataSize(nscopes, nconsts, nobjects, ntrynotes,
                                  nscopenotes, nyieldoffsets);
@@ -3816,7 +3824,7 @@ JSScript::setNewStepMode(FreeOp* fop, uint32_t newValue)
 bool
 JSScript::incrementStepModeCount(JSContext* cx)
 {
-    assertSameCompartment(cx, this);
+    cx->check(this);
     MOZ_ASSERT(cx->realm()->isDebuggee());
 
     AutoRealm ar(cx, this);
@@ -4274,7 +4282,7 @@ LazyScript::CreateRaw(JSContext* cx, HandleFunction fun,
                       uint64_t packedFields, uint32_t sourceStart, uint32_t sourceEnd,
                       uint32_t toStringStart, uint32_t lineno, uint32_t column)
 {
-    assertSameCompartment(cx, fun);
+    cx->check(fun);
 
     MOZ_ASSERT(sourceObject);
     union {

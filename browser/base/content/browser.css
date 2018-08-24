@@ -28,6 +28,14 @@
   background-color: var(--lwt-accent-color-inactive, var(--lwt-accent-color)) !important;
 }
 
+/* Set additional backgrounds alignment relative to toolbox */
+
+#navigator-toolbox:-moz-lwtheme {
+  background-image: var(--lwt-additional-images);
+  background-position: var(--lwt-background-alignment);
+  background-repeat: var(--lwt-background-tiling);
+}
+
 #main-window:not([chromehidden~="toolbar"]) {
 %ifdef XP_MACOSX
   min-width: 335px;
@@ -571,13 +579,13 @@ html|input.urlbar-input[dir=ltr]:-moz-locale-dir(rtl) {
 }
 
 /* Show the url scheme in a static box when overflowing to the left */
-hbox.urlbar-input-box {
+moz-input-box.urlbar-input-box {
   position: relative;
+  direction: ltr;
 }
 html|input.urlbar-scheme {
   position: absolute;
   height: 100%;
-  left: 0;
   visibility: hidden;
   direction: ltr;
   pointer-events: none;

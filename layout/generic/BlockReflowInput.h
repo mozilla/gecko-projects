@@ -154,8 +154,7 @@ public:
 
   bool FlowAndPlaceFloat(nsIFrame* aFloat);
 
-  void PlaceBelowCurrentLineFloats(nsFloatCacheFreeList& aFloats,
-                                   nsLineBox* aLine);
+  void PlaceBelowCurrentLineFloats(nsLineBox* aLine);
 
   // Returns the first coordinate >= aBCoord that clears the
   // floats indicated by aBreakType and has enough inline size between floats
@@ -381,6 +380,10 @@ public:
   // and placed. Again, this is done to keep the list fiddling from
   // being N^2.
   nsFloatCacheFreeList mBelowCurrentLineFloats;
+
+  // The list of floats that are waiting on a break opportunity in order to be
+  // placed, since we're on a nowrap context.
+  nsTArray<nsIFrame*> mNoWrapFloats;
 
   nscoord mMinLineHeight;
 

@@ -1196,10 +1196,14 @@ HTMLEditor::TabInTable(bool inIsShift,
                         getter_AddRefs(cell),
                         nullptr, nullptr,
                         &row, nullptr);
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+    if (NS_WARN_IF(!tblElement)) {
+      return NS_ERROR_FAILURE;
+    }
     // ...so that we can ask for first cell in that row...
-    rv = GetCellAt(tblElement, row, 0, getter_AddRefs(cell));
-    NS_ENSURE_SUCCESS(rv, rv);
+    cell = GetTableCellElementAt(*tblElement, row, 0);
     // ...and then set selection there.  (Note that normally you should use
     // CollapseSelectionToDeepestNonTableFirstChild(), but we know cell is an
     // empty new cell, so this works fine)
@@ -2561,7 +2565,7 @@ HTMLEditor::Align(const nsAString& aAlignType)
 
 Element*
 HTMLEditor::GetElementOrParentByTagName(const nsAtom& aTagName,
-                                        nsINode* aNode)
+                                        nsINode* aNode) const
 {
   MOZ_ASSERT(&aTagName != nsGkAtoms::_empty);
 
@@ -2577,7 +2581,7 @@ HTMLEditor::GetElementOrParentByTagName(const nsAtom& aTagName,
 
 Element*
 HTMLEditor::GetElementOrParentByTagNameAtSelection(Selection& aSelection,
-                                                   const nsAtom& aTagName)
+                                                   const nsAtom& aTagName) const
 {
   MOZ_ASSERT(&aTagName != nsGkAtoms::_empty);
 
@@ -2605,7 +2609,7 @@ HTMLEditor::GetElementOrParentByTagNameAtSelection(Selection& aSelection,
 
 Element*
 HTMLEditor::GetElementOrParentByTagNameInternal(const nsAtom& aTagName,
-                                                nsINode& aNode)
+                                                nsINode& aNode) const
 {
   MOZ_ASSERT(&aTagName != nsGkAtoms::_empty);
 
