@@ -57,18 +57,24 @@ pref("devtools.inspector.imagePreviewTooltipSize", 300);
 pref("devtools.inspector.showUserAgentStyles", false);
 // Show all native anonymous content (like controls in <video> tags)
 pref("devtools.inspector.showAllAnonymousContent", false);
-// Enable the Flexbox highlighter
-pref("devtools.inspector.flexboxHighlighter.enabled", false);
 // Enable the CSS shapes highlighter
 pref("devtools.inspector.shapesHighlighter.enabled", true);
-// Enable the Flexbox Inspector panel
-pref("devtools.flexboxinspector.enabled", false);
 // Enable the new Animation Inspector
 pref("devtools.new-animationinspector.enabled", true);
 // Enable the Font Editor
 pref("devtools.inspector.fonteditor.enabled", true);
 // Enable the font highlight-on-hover feature
-pref("devtools.inspector.fonthighlighter.enabled", false);
+pref("devtools.inspector.fonthighlighter.enabled", true);
+
+// Flexbox preferences
+// Enable the Flexbox highlighter in Nightly
+#if defined(NIGHTLY_BUILD)
+pref("devtools.inspector.flexboxHighlighter.enabled", true);
+#else
+pref("devtools.inspector.flexboxHighlighter.enabled", false);
+#endif
+// Enable the Flexbox Inspector panel
+pref("devtools.flexboxinspector.enabled", false);
 
 // Grid highlighter preferences
 pref("devtools.gridinspector.gridOutlineMaxColumns", 50);
@@ -222,8 +228,8 @@ pref("devtools.scratchpad.enabled", false);
 // Make sure the DOM panel is hidden by default
 pref("devtools.dom.enabled", false);
 
-// Make sure the Accessibility panel is hidden by default
-pref("devtools.accessibility.enabled", false);
+// Enable the Accessibility panel.
+pref("devtools.accessibility.enabled", true);
 // Counter to promote the Accessibility panel.
 // @remove after release 63 (See Bug 1482461)
 pref("devtools.promote.accessibility", 1);
@@ -326,6 +332,13 @@ pref("devtools.responsive.show-setting-tooltip", false);
 // Enable new about:debugging.
 pref("devtools.aboutdebugging.new-enabled", false);
 pref("devtools.aboutdebugging.network-locations", "[]");
+// Debug target pane collapse/expand settings.
+pref("devtools.aboutdebugging.collapsibilities.installedExtension", false);
+pref("devtools.aboutdebugging.collapsibilities.otherWorker", false);
+pref("devtools.aboutdebugging.collapsibilities.serviceWorker", false);
+pref("devtools.aboutdebugging.collapsibilities.sharedWorker", false);
+pref("devtools.aboutdebugging.collapsibilities.tab", false);
+pref("devtools.aboutdebugging.collapsibilities.temporaryExtension", false);
 
 // about:debugging: only show system add-ons in local builds by default.
 #ifdef MOZILLA_OFFICIAL
@@ -335,7 +348,7 @@ pref("devtools.aboutdebugging.network-locations", "[]");
 #endif
 
 // Map top-level await expressions in the console
-#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
+#if defined(NIGHTLY_BUILD)
 pref("devtools.debugger.features.map-await-expression", true);
 #else
 pref("devtools.debugger.features.map-await-expression", false);

@@ -41,8 +41,6 @@ loader.lazyRequireGetter(this, "getHighlighterUtils",
   "devtools/client/framework/toolbox-highlighter-utils", true);
 loader.lazyRequireGetter(this, "Selection",
   "devtools/client/framework/selection", true);
-loader.lazyRequireGetter(this, "InspectorFront",
-  "devtools/shared/fronts/inspector", true);
 loader.lazyRequireGetter(this, "flags",
   "devtools/shared/flags");
 loader.lazyRequireGetter(this, "KeyShortcuts",
@@ -156,10 +154,13 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId,
   this._onNewSelectedNodeFront = this._onNewSelectedNodeFront.bind(this);
   this._onToolSelected = this._onToolSelected.bind(this);
   this.updateToolboxButtonsVisibility = this.updateToolboxButtonsVisibility.bind(this);
+  this.updateToolboxButtons = this.updateToolboxButtons.bind(this);
   this.selectTool = this.selectTool.bind(this);
   this._pingTelemetrySelectTool = this._pingTelemetrySelectTool.bind(this);
   this.toggleSplitConsole = this.toggleSplitConsole.bind(this);
   this.toggleOptions = this.toggleOptions.bind(this);
+  this.togglePaintFlashing = this.togglePaintFlashing.bind(this);
+  this.isPaintFlashing = false;
 
   this._target.on("close", this.destroy);
 
@@ -799,9 +800,10 @@ Toolbox.prototype = {
       className,
       description,
       disabled,
-      onClick(event) {
+      async onClick(event) {
         if (typeof onClick == "function") {
-          onClick(event, toolbox);
+          await onClick(event, toolbox);
+          button.emit("updatechecked");
         }
       },
       onKeyDown(event) {
@@ -1354,6 +1356,40 @@ Toolbox.prototype = {
       button.isVisible = this._commandIsVisible(button);
     });
     this.component.setToolboxButtons(this.toolbarButtons);
+  },
+
+  /**
+   * Update the buttons.
+   */
+  updateToolboxButtons() {
+    const inspector = this.inspector;
+    // two of the buttons have highlighters that need to be cleared
+    // on will-navigate, otherwise we hold on to the stale highlighter
+    const hasHighlighters = inspector &&
+        (inspector.hasHighlighter("RulersHighlighter") ||
+        inspector.hasHighlighter("MeasuringToolHighlighter"));
+    if (hasHighlighters || this.isPaintFlashing) {
+      if (this.isPaintFlashing) {
+        this.togglePaintFlashing();
+      }
+      if (hasHighlighters) {
+        inspector.destroyHighlighters();
+      }
+      this.component.setToolboxButtons(this.toolbarButtons);
+    }
+  },
+
+  /**
+   * Set paintflashing to enabled or disabled for this toolbox's tab.
+   */
+  togglePaintFlashing: function() {
+    if (this.isPaintFlashing) {
+      this.telemetry.toolOpened("paintflashing");
+    } else {
+      this.telemetry.toolClosed("paintflashing");
+    }
+    this.isPaintFlashing = !this.isPaintFlashing;
+    return this.target.activeTab.reconfigure({"paintFlashing": this.isPaintFlashing});
   },
 
   /**
@@ -2165,6 +2201,7 @@ Toolbox.prototype = {
    * Fired when user just started navigating away to another web page.
    */
   async _onWillNavigate() {
+    this.updateToolboxButtons();
     const toolId = this.currentToolId;
     // For now, only inspector, webconsole and netmonitor fire "reloaded" event
     if (toolId != "inspector" && toolId != "webconsole" && toolId != "netmonitor") {
@@ -2696,7 +2733,7 @@ Toolbox.prototype = {
   initInspector: function() {
     if (!this._initInspector) {
       this._initInspector = (async function() {
-        this._inspector = InspectorFront(this._target.client, this._target.form);
+        this._inspector = this.target.getFront("inspector");
         const pref = "devtools.inspector.showAllAnonymousContent";
         const showAllAnonymousContent = Services.prefs.getBoolPref(pref);
         this._walker = await this._inspector.getWalker({ showAllAnonymousContent });
@@ -2784,7 +2821,6 @@ Toolbox.prototype = {
         await this.highlighterUtils.stopPicker();
       }
 
-      await this._inspector.destroy();
       if (this._highlighter) {
         // Note that if the toolbox is closed, this will work fine, but will fail
         // in case the browser is closed and will trigger a noSuchActor message.

@@ -5,10 +5,21 @@
 /* Permissions */
 
 .content-blocking-icon,
-.permission-icon {
-  height: 20px;
+.permission-icon,
+.content-blocking-checkbox {
   width: 20px;
+  height: 20px;
   vertical-align: middle;
+}
+
+.content-blocking-checkbox .checkbox-icon {
+  margin-inline-end: 8px;
+  margin-inline-start: 4px;
+  width: 16px;
+}
+
+.content-blocking-icon,
+.permission-icon {
   -moz-context-properties: fill;
   fill: currentColor;
 }
@@ -108,19 +119,27 @@
 }
 
 .content-blocking-category {
-  margin: 8px 0;
-}
-
-.content-blocking-category-icon {
-  padding: 4px;
+  margin: 16px 0;
 }
 
 .content-blocking-category-labels {
   padding-inline-start: 4px;
+  margin-inline-start: 25px !important;
+}
+
+#trackingProtectionMenu,
+#blockCookiesCB {
+  margin-top: 0.75em;
+}
+
+#blockCookiesCBDeck {
+  max-width: 444px;
 }
 
 #changeBlockListLink {
   font-size: 90%;
+  /* In order to override the margins set in preferences.inc.css, we have to use !important. */
+  margin-top: 1em !important;
 }
 
 .content-blocking-category-description {
@@ -128,15 +147,19 @@
   opacity: 0.6;
 }
 
-.content-blocking-category-menu {
-  margin-top: -2px;
-  min-width: 250px;
+.reject-trackers-warning-icon {
+  background: url(chrome://browser/skin/controlcenter/warning.svg) no-repeat 0 5px;
+  -moz-context-properties: fill, stroke;
+  fill: #d7b600;
+  stroke: white;
+  padding-inline-start: 20px;
 }
 
-.fastblock-icon {
-  list-style-image: url(chrome://browser/skin/controlcenter/slowtrackers.svg);
+.reject-trackers-warning-icon:-moz-locale-dir(rtl) {
+  background-position-x: right 0;
 }
 
-.tracking-protection-icon {
-  list-style-image: url(chrome://browser/skin/controlcenter/trackers.svg);
+#contentBlockingChangeCookieSettings {
+  padding: 0.25em 0.75em;
+  margin: 4px 8px;
 }

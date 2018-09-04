@@ -33,6 +33,7 @@ from taskgraph.util.scriptworker import (
     get_release_config,
     add_scope_prefix,
 )
+from taskgraph.util.signed_artifacts import get_signed_artifacts
 from voluptuous import Any, Required, Optional, Extra
 from taskgraph import GECKO, MAX_DEPENDENCIES
 from ..util import docker as dockerutil
@@ -212,6 +213,9 @@ task_description_schema = Schema({
 
     # Whether the job should use sccache compiler caching.
     Required('needs-sccache'): bool,
+
+    # Set of artifacts relevant to release tasks
+    Optional('release-artifacts'): [basestring],
 
     # information specific to the worker implementation that will run this task
     'worker': Any({
@@ -542,6 +546,9 @@ task_description_schema = Schema({
         Optional('rules-to-update'): optionally_keyed_by('project', [basestring]),
         Optional('archive-domain'): optionally_keyed_by('project', basestring),
         Optional('download-domain'): optionally_keyed_by('project', basestring),
+        Optional('blob-suffix'): basestring,
+        Optional('complete-mar-filename-pattern'): basestring,
+        Optional('complete-mar-bouncer-product-pattern'): basestring,
 
         # list of artifact URLs for the artifacts that should be beetmoved
         Optional('upstream-artifacts'): [{
@@ -980,17 +987,36 @@ def build_docker_worker_payload(config, task, task_def):
 def build_generic_worker_payload(config, task, task_def):
     worker = task['worker']
 
+    task_def['payload'] = {
+        'command': worker['command'],
+        'maxRunTime': worker['max-run-time'],
+    }
+
+    env = worker.get('env', {})
+
+    if task.get('needs-sccache'):
+        env['USE_SCCACHE'] = '1'
+        # Disable sccache idle shutdown.
+        env['SCCACHE_IDLE_TIMEOUT'] = '0'
+    else:
+        env['SCCACHE_DISABLE'] = '1'
+
+    if env:
+        task_def['payload']['env'] = env
+
     artifacts = []
 
     for artifact in worker.get('artifacts', []):
         a = {
             'path': artifact['path'],
             'type': artifact['type'],
-            'expires': task_def['expires'],  # always expire with the task
         }
         if 'name' in artifact:
             a['name'] = artifact['name']
         artifacts.append(a)
+
+    if artifacts:
+        task_def['payload']['artifacts'] = artifacts
 
     # Need to copy over mounts, but rename keys to respect naming convention
     #   * 'cache-name' -> 'cacheName'
@@ -1004,23 +1030,12 @@ def build_generic_worker_payload(config, task, task_def):
             if 'task-id' in mount['content']:
                 mount['content']['taskId'] = mount['content'].pop('task-id')
 
-    task_def['payload'] = {
-        'command': worker['command'],
-        'artifacts': artifacts,
-        'env': worker.get('env', {}),
-        'mounts': mounts,
-        'maxRunTime': worker['max-run-time'],
-        'osGroups': worker.get('os-groups', []),
-    }
+    if mounts:
+        task_def['payload']['mounts'] = mounts
 
-    if task.get('needs-sccache'):
-        worker['env']['USE_SCCACHE'] = '1'
-        # Disable sccache idle shutdown.
-        worker['env']['SCCACHE_IDLE_TIMEOUT'] = '0'
-    else:
-        worker['env']['SCCACHE_DISABLE'] = '1'
+    if worker.get('os-groups', []):
+        task_def['payload']['osGroups'] = worker['os-groups']
 
-    # currently only support one feature (chain of trust) but this will likely grow
     features = {}
 
     if worker.get('chain-of-trust'):
@@ -1045,6 +1060,16 @@ def build_scriptworker_signing_payload(config, task, task_def):
         'maxRunTime': worker['max-run-time'],
         'upstreamArtifacts':  worker['upstream-artifacts']
     }
+
+    artifacts = set(task.get('release-artifacts', []))
+    for upstream_artifact in worker['upstream-artifacts']:
+        for path in upstream_artifact['paths']:
+            artifacts.update(get_signed_artifacts(
+                input=path,
+                formats=upstream_artifact['formats'],
+            ))
+
+    task['release-artifacts'] = list(artifacts)
 
 
 @payload_builder('binary-transparency')
@@ -1140,6 +1165,10 @@ def build_balrog_payload(config, task, task_def):
             'product': worker['product'],
             'version': release_config['version'],
         }
+        for prop in ('blob-suffix', 'complete-mar-filename-pattern',
+                     'complete-mar-bouncer-product-pattern'):
+            if prop in worker:
+                task_def['payload'][prop.replace('-', '_')] = worker[prop]
         if worker['balrog-action'] == 'submit-toplevel':
             task_def['payload'].update({
                 'app_version': release_config['appVersion'],
@@ -1291,7 +1320,7 @@ def build_treescript_payload(config, task, task_def):
         task_def['payload']['dry_run'] = True
 
     if worker.get('dontbuild'):
-        task_def['payload']['dont_build'] = True
+        task_def['payload']['dontbuild'] = True
 
 
 @payload_builder('invalid')
@@ -1381,6 +1410,9 @@ def set_defaults(config, tasks):
         elif worker['implementation'] == 'generic-worker':
             worker.setdefault('env', {})
             worker.setdefault('os-groups', [])
+            if worker['os-groups'] and worker['os'] != 'windows':
+                raise Exception('os-groups feature of generic-worker is only supported on '
+                                'Windows, not on {}'.format(worker['os']))
             worker.setdefault('chain-of-trust', False)
         elif worker['implementation'] in (
             'scriptworker-signing', 'beetmover', 'beetmover-push-to-release', 'beetmover-maven',
@@ -1773,6 +1805,7 @@ def build_task(config, tasks):
             'dependencies': task.get('dependencies', {}),
             'attributes': attributes,
             'optimization': task.get('optimization', None),
+            'release-artifacts': task.get('release-artifacts', []),
         }
 
 

@@ -263,6 +263,18 @@ pub struct NormalBorder {
     pub radius: BorderRadius,
 }
 
+impl NormalBorder {
+    // Construct a border based upon self with color
+    pub fn with_color(&self, color: ColorF) -> Self {
+        let mut b = *self;
+        b.left.color = color;
+        b.right.color = color;
+        b.top.color = color;
+        b.bottom.color = color;
+        b
+    }
+}
+
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RepeatMode {
@@ -531,6 +543,9 @@ pub enum MixBlendMode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub enum FilterOp {
+    /// Filter that does no transformation of the colors, needed for
+    /// debug purposes only.
+    Identity,
     Blur(f32),
     Brightness(f32),
     Contrast(f32),

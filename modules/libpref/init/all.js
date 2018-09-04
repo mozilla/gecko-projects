@@ -195,6 +195,12 @@ pref("dom.enable_performance_observer", true);
 // Enable requestIdleCallback API
 pref("dom.requestIdleCallback.enabled", true);
 
+// Enable Pointer Lock API
+// This is added for accessibility purpose. When user has no way to exit
+// pointer lock (e.g. no keyboard available), they can use this pref to
+// disable the Pointer Lock API altogether.
+pref("dom.pointer-lock.enabled", true);
+
 // Whether the Gamepad API is enabled
 pref("dom.gamepad.enabled", true);
 pref("dom.gamepad.test.enabled", false);
@@ -2291,6 +2297,9 @@ pref("network.cookie.move.interval_sec",    10);
 
 pref("network.cookie.maxNumber", 3000);
 pref("network.cookie.maxPerHost", 180);
+// Cookies quota for each host. If cookies exceed the limit maxPerHost,
+// (maxPerHost - quotaPerHost) cookies will be evicted.
+pref("network.cookie.quotaPerHost", 150);
 
 // The PAC file to load.  Ignored unless network.proxy.type is 2.
 pref("network.proxy.autoconfig_url", "");
@@ -3064,9 +3073,6 @@ pref("layout.css.shape-outside.enabled", true);
 
 // Is support for document.fonts enabled?
 pref("layout.css.font-loading-api.enabled", true);
-
-// Is support for column-span enabled?
-pref("layout.css.column-span.enabled", false);
 
 // Are inter-character ruby annotations enabled?
 pref("layout.css.ruby.intercharacter.enabled", false);
@@ -5573,10 +5579,6 @@ pref("layout.accessiblecaret.enabled_on_touch", true);
 pref("layout.accessiblecaret.width", "34.0");
 pref("layout.accessiblecaret.height", "36.0");
 pref("layout.accessiblecaret.margin-left", "-18.5");
-pref("layout.accessiblecaret.bar.width", "2.0");
-
-// Show no selection bars at the two ends of the selection highlight.
-pref("layout.accessiblecaret.bar.enabled", false);
 
 // Show the caret when long tapping on an empty content.
 pref("layout.accessiblecaret.caret_shown_when_long_tapping_on_empty_content", false);

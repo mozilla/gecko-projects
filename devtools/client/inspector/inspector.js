@@ -33,9 +33,10 @@ loader.lazyRequireGetter(this, "nodeConstants", "devtools/shared/dom-node-consta
 loader.lazyRequireGetter(this, "Menu", "devtools/client/framework/menu");
 loader.lazyRequireGetter(this, "MenuItem", "devtools/client/framework/menu-item");
 loader.lazyRequireGetter(this, "ExtensionSidebar", "devtools/client/inspector/extensions/extension-sidebar");
-loader.lazyRequireGetter(this, "CommandUtils", "devtools/client/shared/developer-toolbar", true);
 loader.lazyRequireGetter(this, "clipboardHelper", "devtools/shared/platform/clipboard");
 loader.lazyRequireGetter(this, "openContentLink", "devtools/client/shared/link", true);
+loader.lazyRequireGetter(this, "getScreenshotFront", "devtools/shared/fronts/screenshot", true);
+loader.lazyRequireGetter(this, "saveScreenshot", "devtools/shared/screenshot/save");
 
 loader.lazyImporter(this, "DeferredTask", "resource://gre/modules/DeferredTask.jsm");
 
@@ -619,14 +620,17 @@ Inspector.prototype = {
     if (window.closed) {
       return;
     }
+
     // Use window.top because promiseDocumentFlushed() in a subframe doesn't
     // work, see https://bugzilla.mozilla.org/show_bug.cgi?id=1441173
     const useLandscapeMode = await window.top.promiseDocumentFlushed(() => {
       return this.useLandscapeMode();
     });
+
     if (window.closed) {
       return;
     }
+
     this.splitBox.setState({ vert: useLandscapeMode });
     this.emit("inspector-resize");
   },
@@ -636,6 +640,10 @@ Inspector.prototype = {
    * to `horizontal` to support portrait view.
    */
   onPanelWindowResize: function() {
+    if (this.toolbox.currentToolId !== "inspector") {
+      return;
+    }
+
     if (!this._lazyResizeHandler) {
       this._lazyResizeHandler = new DeferredTask(this._onLazyPanelResize.bind(this),
                                                  LAZY_RESIZE_INTERVAL_MS, 0);
@@ -1697,7 +1705,13 @@ Inspector.prototype = {
       click: () => this.showAccessibilityProperties(),
       disabled: true
     });
-    this._updateA11YMenuItem(showA11YPropsItem);
+    // Only attempt to determine if a11y props menu item needs to be enabled iff
+    // AccessibilityFront is enabled.
+    const accessibilityFront = this.target.getFront("accessibility");
+    if (accessibilityFront.enabled) {
+      this._updateA11YMenuItem(showA11YPropsItem);
+    }
+
     menu.append(showA11YPropsItem);
   },
 
@@ -2016,7 +2030,7 @@ Inspector.prototype = {
     this.telemetry.scalarSet(TELEMETRY_EYEDROPPER_OPENED, 1);
     this.eyeDropperButton.classList.add("checked");
     this.startEyeDropperListeners();
-    return this.inspector.pickColorFromPage(this.toolbox, {copyOnSelect: true})
+    return this.inspector.pickColorFromPage({copyOnSelect: true})
                          .catch(console.error);
   },
 
@@ -2311,21 +2325,22 @@ Inspector.prototype = {
    * Initiate gcli screenshot command on selected node.
    */
   async screenshotNode() {
-    const command = Services.prefs.getBoolPref("devtools.screenshot.clipboard.enabled") ?
-      "screenshot --file --clipboard --selector" :
-      "screenshot --file --selector";
-
     // Bug 1332936 - it's possible to call `screenshotNode` while the BoxModel highlighter
     // is still visible, therefore showing it in the picture.
     // To avoid that, we have to hide it before taking the screenshot. The `hideBoxModel`
     // will do that, calling `hide` for the highlighter only if previously shown.
     await this.highlighter.hideBoxModel();
 
-    // Bug 1180314 -  CssSelector might contain white space so need to make sure it is
-    // passed to screenshot as a single parameter.  More work *might* be needed if
-    // CssSelector could contain escaped single- or double-quotes, backslashes, etc.
-    CommandUtils.executeOnTarget(this._target,
-      `${command} '${this.selectionCssSelector}'`);
+    const clipboardEnabled = Services.prefs
+      .getBoolPref("devtools.screenshot.clipboard.enabled");
+    const args = {
+      file: true,
+      selector: this.selectionCssSelector,
+      clipboard: clipboardEnabled
+    };
+    const screenshotFront = getScreenshotFront(this.target);
+    const screenshot = await screenshotFront.capture(args);
+    await saveScreenshot(this.panelWin, args, screenshot);
   },
 
   /**

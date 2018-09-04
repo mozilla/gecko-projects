@@ -148,7 +148,7 @@ function gzipCompressString(string) {
       for (let offset = 0; offset < result.length; offset += chunkSize) {
         this.buffer += String.fromCharCode.apply(String, result.slice(offset, offset + chunkSize));
       }
-    }
+    },
   };
 
   let scs = Cc["@mozilla.org/streamConverters;1"]
@@ -800,7 +800,6 @@ var TelemetrySendImpl = {
     let setOSShutdown = () => {
       this._log.trace("setOSShutdown - in OS shutdown");
       this._isOSShutdown = true;
-      Telemetry.scalarSet("telemetry.os_shutting_down", true);
     };
 
     switch (topic) {
@@ -1053,7 +1052,7 @@ var TelemetrySendImpl = {
       // pings.
       let app = ping.application;
       pathComponents = [
-        ping.id, ping.type, app.name, app.version, app.channel, app.buildId
+        ping.id, ping.type, app.name, app.version, app.channel, app.buildId,
       ];
     } else {
       // This is a ping in the old format.

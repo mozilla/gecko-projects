@@ -29,7 +29,9 @@
 #include "nsIProtocolHandler.h"
 #include "nsIScriptSecurityManager.h"
 #include "xpcpublic.h"
+#include "js/CompilationAndEvaluation.h"
 #include "js/JSON.h"
+#include "js/SourceBufferHolder.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/Preferences.h"
@@ -53,6 +55,7 @@
 #include "mozilla/dom/ipc/StructuredCloneData.h"
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
+#include "mozilla/recordreplay/ParentIPC.h"
 #include "nsPrintfCString.h"
 #include "nsXULAppAPI.h"
 #include "nsQueryObject.h"
@@ -661,7 +664,8 @@ DirectMessageToMiddleman(const nsAString& aMessage)
   // Middleman processes run developer tools server code and need to receive
   // debugger related messages. The session store flush message needs to be
   // received in order to cleanly shutdown the process.
-  return StringBeginsWith(aMessage, NS_LITERAL_STRING("debug:"))
+  return (StringBeginsWith(aMessage, NS_LITERAL_STRING("debug:")) &&
+          recordreplay::parent::DebuggerRunsInMiddleman())
       || aMessage.EqualsLiteral("SessionStore:flush");
 }
 

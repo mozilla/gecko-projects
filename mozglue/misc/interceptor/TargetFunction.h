@@ -361,7 +361,7 @@ private:
   // needs to touch the heap.
 #if defined(_M_IX86)
   static const size_t kInlineStorage = 16;
-#elif defined(_M_X64)
+#elif defined(_M_X64) || defined(_M_ARM64)
   static const size_t kInlineStorage = 32;
 #endif
   Vector<uint8_t, kInlineStorage> mLocalBytes;
@@ -586,7 +586,7 @@ private:
   // needs to touch the heap.
 #if defined(_M_IX86)
   static const size_t kInlineStorage = 16;
-#elif defined(_M_X64)
+#elif defined(_M_X64) || defined(_M_ARM64)
   static const size_t kInlineStorage = 32;
 #endif
 
@@ -808,8 +808,8 @@ private:
   template <typename T>
   struct ChasePointerHelper
   {
-    template <typename MMPolicy>
-    static T Result(const MMPolicy&, T aValue)
+    template <typename MMPolicy_>
+    static T Result(const MMPolicy_&, T aValue)
     {
       return aValue;
     }
@@ -818,10 +818,10 @@ private:
   template <typename T>
   struct ChasePointerHelper<T*>
   {
-    template <typename MMPolicy>
-    static auto Result(const MMPolicy& aPolicy, T* aValue)
+    template <typename MMPolicy_>
+    static auto Result(const MMPolicy_& aPolicy, T* aValue)
     {
-      ReadOnlyTargetFunction<MMPolicy> ptr(aPolicy, aValue);
+      ReadOnlyTargetFunction<MMPolicy_> ptr(aPolicy, aValue);
       return ptr.template ChasePointer<T>();
     }
   };

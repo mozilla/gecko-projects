@@ -151,10 +151,7 @@ TimerManager.prototype = {
       }
     }
 
-    var catMan = Cc["@mozilla.org/categorymanager;1"].
-                 getService(Ci.nsICategoryManager);
-    for (let {data: entry} of catMan.enumerateCategory(CATEGORY_UPDATE_TIMER)) {
-      let value = catMan.getCategoryEntry(CATEGORY_UPDATE_TIMER, entry);
+    for (let {value} of Services.catMan.enumerateCategory(CATEGORY_UPDATE_TIMER)) {
       let [cid, method, timerID, prefInterval, defaultInterval, maxInterval] = value.split(",");
 
       defaultInterval = parseInt(defaultInterval);
@@ -330,7 +327,7 @@ TimerManager.prototype = {
   classID: Components.ID("{B322A5C0-A419-484E-96BA-D7182163899F}"),
   QueryInterface: ChromeUtils.generateQI([Ci.nsIUpdateTimerManager,
                                           Ci.nsITimerCallback,
-                                          Ci.nsIObserver])
+                                          Ci.nsIObserver]),
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([TimerManager]);

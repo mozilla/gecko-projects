@@ -41,6 +41,8 @@ struct LifecycleCallbackArgs
   nsString oldValue;
   nsString newValue;
   nsString namespaceURI;
+
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
 };
 
 struct LifecycleAdoptedCallbackArgs
@@ -56,6 +58,7 @@ public:
                         nsIDocument::ElementCallbackType aCallbackType,
                         CallbackFunction* aCallback);
   void Traverse(nsCycleCollectionTraversalCallback& aCb) const;
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
   void Call();
   void SetArgs(LifecycleCallbackArgs& aArgs)
   {
@@ -130,6 +133,7 @@ struct CustomElementData
 
   void Traverse(nsCycleCollectionTraversalCallback& aCb) const;
   void Unlink();
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
 
   nsAtom* GetIs(Element* aElement)
   {
@@ -184,6 +188,18 @@ struct CustomElementDefinition
   // A construction stack. Use nullptr to represent an "already constructed marker".
   nsTArray<RefPtr<Element>> mConstructionStack;
 
+  // See step 6.1.10 of https://dom.spec.whatwg.org/#concept-create-element
+  // which set up the prefix after a custom element is created. However, In Gecko,
+  // the prefix isn't allowed to be changed in NodeInfo, so we store the prefix
+  // information here and propagate to where NodeInfo is assigned to a custom
+  // element instead.
+  nsTArray<RefPtr<nsAtom>> mPrefixStack;
+
+  // This basically is used for distinguishing the custom element constructor
+  // is invoked from document.createElement or directly from JS, i.e.
+  // `new CustomElementConstructor()`.
+  uint32_t mConstructionDepth = 0;
+
   bool IsCustomBuiltIn()
   {
     return mType != mLocalName;
@@ -208,6 +224,7 @@ public:
   virtual ~CustomElementReaction() = default;
   virtual void Invoke(Element* aElement, ErrorResult& aRv) = 0;
   virtual void Traverse(nsCycleCollectionTraversalCallback& aCb) const = 0;
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const = 0;
 
   bool IsUpgradeReaction()
   {

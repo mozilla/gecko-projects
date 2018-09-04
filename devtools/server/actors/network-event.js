@@ -262,12 +262,13 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
         const onMessage = ({ data }) => {
           const { channelId, stack } = data;
           if (channelId == this._channelId) {
-            messageManager.removeMessageListener("debug:request-stack", onMessage);
+            messageManager.removeMessageListener("debug:request-stack:response",
+              onMessage);
             resolve(stack);
           }
         };
-        messageManager.addMessageListener("debug:request-stack", onMessage);
-        messageManager.sendAsyncMessage("debug:request-stack", this._channelId);
+        messageManager.addMessageListener("debug:request-stack:response", onMessage);
+        messageManager.sendAsyncMessage("debug:request-stack:request", this._channelId);
       });
       this._stackTrace = stacktrace;
     }
@@ -290,6 +291,11 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
    *        The raw headers source.
    */
   addRequestHeaders(headers, rawHeaders) {
+    // Ignore calls when this actor is already destroyed
+    if (!this.actorID) {
+      return;
+    }
+
     this._request.headers = headers;
     this._prepareHeaders(headers);
 
@@ -315,6 +321,11 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
    *        The request cookies array.
    */
   addRequestCookies(cookies) {
+    // Ignore calls when this actor is already destroyed
+    if (!this.actorID) {
+      return;
+    }
+
     this._request.cookies = cookies;
     this._prepareHeaders(cookies);
 
@@ -330,6 +341,11 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
    *        The request POST data.
    */
   addRequestPostData(postData) {
+    // Ignore calls when this actor is already destroyed
+    if (!this.actorID) {
+      return;
+    }
+
     this._request.postData = postData;
     postData.text = new LongStringActor(this.conn, postData.text);
     // bug 1462561 - Use "json" type and manually manage/marshall actors to woraround
@@ -353,6 +369,11 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
    *        The raw headers source.
    */
   addResponseStart(info, rawHeaders) {
+    // Ignore calls when this actor is already destroyed
+    if (!this.actorID) {
+      return;
+    }
+
     rawHeaders = new LongStringActor(this.conn, rawHeaders);
     // bug 1462561 - Use "json" type and manually manage/marshall actors to woraround
     // protocol.js performance issue
@@ -378,6 +399,11 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
    *        The object containing security information.
    */
   addSecurityInfo(info) {
+    // Ignore calls when this actor is already destroyed
+    if (!this.actorID) {
+      return;
+    }
+
     this._securityInfo = info;
 
     this.emit("network-event-update:security-info", "securityInfo", {
@@ -392,6 +418,11 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
    *        The response headers array.
    */
   addResponseHeaders(headers) {
+    // Ignore calls when this actor is already destroyed
+    if (!this.actorID) {
+      return;
+    }
+
     this._response.headers = headers;
     this._prepareHeaders(headers);
 
@@ -408,6 +439,11 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
    *        The response cookies array.
    */
   addResponseCookies(cookies) {
+    // Ignore calls when this actor is already destroyed
+    if (!this.actorID) {
+      return;
+    }
+
     this._response.cookies = cookies;
     this._prepareHeaders(cookies);
 
@@ -428,6 +464,11 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
    *          Tells if the some of the response content is missing.
    */
   addResponseContent(content, {discardResponseBody, truncated}) {
+    // Ignore calls when this actor is already destroyed
+    if (!this.actorID) {
+      return;
+    }
+
     this._truncated = truncated;
     this._response.content = content;
     content.text = new LongStringActor(this.conn, content.text);
@@ -446,6 +487,11 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
   },
 
   addResponseCache: function(content) {
+    // Ignore calls when this actor is already destroyed
+    if (!this.actorID) {
+      return;
+    }
+
     this._response.responseCache = content.responseCache;
     this.emit("network-event-update:response-cache", "responseCache");
   },
@@ -459,6 +505,11 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
    *        Timing details about the network event.
    */
   addEventTimings(total, timings, offsets) {
+    // Ignore calls when this actor is already destroyed
+    if (!this.actorID) {
+      return;
+    }
+
     this._totalTime = total;
     this._timings = timings;
     this._offsets = offsets;

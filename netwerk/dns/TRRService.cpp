@@ -12,6 +12,7 @@
 #include "TRRService.h"
 
 #include "mozilla/Preferences.h"
+#include "mozilla/Tokenizer.h"
 
 static const char kOpenCaptivePortalLoginEvent[] = "captive-portal-login";
 static const char kClearPrivateData[] = "clear-private-data";
@@ -132,14 +133,18 @@ TRRService::ReadPrefs(const char *name)
 {
   MOZ_ASSERT(NS_IsMainThread(), "wrong thread");
   if (!name || !strcmp(name, TRR_PREF("mode"))) {
-    // 0 - off, 1 - parallel, 2 - TRR first, 3 - TRR only, 4 - shadow
+    // 0 - off, 1 - parallel, 2 - TRR first, 3 - TRR only, 4 - shadow,
+    // 5 - explicit off
     uint32_t tmp;
     if (NS_SUCCEEDED(Preferences::GetUint(TRR_PREF("mode"), &tmp))) {
+      if (tmp > MODE_TRROFF) {
+        tmp = MODE_TRROFF;
+      }
       mMode = tmp;
     }
   }
   if (!name || !strcmp(name, TRR_PREF("uri"))) {
-    // Base URI, appends "?ct&dns=..."
+    // URI Template, RFC 6570.
     MutexAutoLock lock(mLock);
     nsAutoCString old(mPrivateURI);
     Preferences::GetCString(TRR_PREF("uri"), mPrivateURI);
@@ -156,7 +161,35 @@ TRRService::ReadPrefs(const char *name)
       mPrivateURI.Truncate();
     }
     if (!mPrivateURI.IsEmpty()) {
-      LOG(("TRRService TRR URI %s\n", mPrivateURI.get()));
+      // cut off everything from "{" to "}" sequences (potentially multiple),
+      // as a crude conversion from template into URI.
+      nsAutoCString uri(mPrivateURI);
+
+      do {
+        nsCCharSeparatedTokenizer openBrace(uri, '{');
+        if (openBrace.hasMoreTokens()) {
+          // the 'nextToken' is the left side of the open brace (or full uri)
+          nsAutoCString prefix(openBrace.nextToken());
+
+          // if there is an open brace, there's another token
+          const nsACString& endBrace = openBrace.nextToken();
+          nsCCharSeparatedTokenizer closeBrace(endBrace, '}');
+          if (closeBrace.hasMoreTokens()) {
+            // there is a close brace as well, make a URI out of the prefix
+            // and the suffix
+            closeBrace.nextToken();
+            nsAutoCString suffix(closeBrace.nextToken());
+            uri = prefix + suffix;
+          } else {
+            // no (more) close brace
+            break;
+          }
+        } else {
+          // no (more) open brace
+          break;
+        }
+      } while (true);
+      mPrivateURI = uri;
     }
     if (!old.IsEmpty() && !mPrivateURI.Equals(old)) {
       mClearTRRBLStorage = true;

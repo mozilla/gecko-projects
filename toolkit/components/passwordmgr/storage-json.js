@@ -30,6 +30,8 @@ this.LoginManagerStorage_json.prototype = {
   classID: Components.ID("{c00c432d-a0c9-46d7-bef6-9c45b4d07341}"),
   QueryInterface: ChromeUtils.generateQI([Ci.nsILoginManagerStorage]),
 
+  _xpcom_factory: XPCOMUtils.generateSingletonFactory(this.LoginManagerStorage_json),
+
   __crypto: null,  // nsILoginManagerCrypto service
   get _crypto() {
     if (!this.__crypto)
@@ -159,7 +161,7 @@ this.LoginManagerStorage_json.prototype = {
       timeCreated:         loginClone.timeCreated,
       timeLastUsed:        loginClone.timeLastUsed,
       timePasswordChanged: loginClone.timePasswordChanged,
-      timesUsed:           loginClone.timesUsed
+      timesUsed:           loginClone.timesUsed,
     });
     this._store.saveSoon();
 
@@ -391,7 +393,7 @@ this.LoginManagerStorage_json.prototype = {
     let loginData = {
       hostname,
       formSubmitURL,
-      httpRealm
+      httpRealm,
     };
     let matchData = { };
     for (let field of ["hostname", "formSubmitURL", "httpRealm"])
@@ -411,7 +413,7 @@ this.LoginManagerStorage_json.prototype = {
     let loginData = {
       hostname,
       formSubmitURL,
-      httpRealm
+      httpRealm,
     };
     let matchData = { };
     for (let field of ["hostname", "formSubmitURL", "httpRealm"])

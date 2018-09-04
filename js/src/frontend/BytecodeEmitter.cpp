@@ -18,7 +18,6 @@
 
 #include <string.h>
 
-#include "jsapi.h"
 #include "jsnum.h"
 #include "jstypes.h"
 #include "jsutil.h"
@@ -37,6 +36,7 @@
 #include "frontend/TDZCheckCache.h"
 #include "frontend/TryEmitter.h"
 #include "frontend/WhileEmitter.h"
+#include "js/CompileOptions.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/Debugger.h"
 #include "vm/GeneratorObject.h"
@@ -48,10 +48,7 @@
 #include "wasm/AsmJS.h"
 
 #include "frontend/ParseNode-inl.h"
-#include "vm/EnvironmentObject-inl.h"
-#include "vm/JSAtom-inl.h"
-#include "vm/JSScript-inl.h"
-#include "vm/NativeObject-inl.h"
+#include "vm/JSObject-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -5113,8 +5110,8 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
             // parent.  Use default values for the rest.
             Rooted<JSScript*> parent(cx, script);
             MOZ_ASSERT(parent->mutedErrors() == parser->options().mutedErrors());
-            const TransitiveCompileOptions& transitiveOptions = parser->options();
-            CompileOptions options(cx, transitiveOptions);
+            const JS::TransitiveCompileOptions& transitiveOptions = parser->options();
+            JS::CompileOptions options(cx, transitiveOptions);
 
             Rooted<JSObject*> sourceObject(cx, script->sourceObject());
             Rooted<JSScript*> script(cx, JSScript::Create(cx, options, sourceObject,

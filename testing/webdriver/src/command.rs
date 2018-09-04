@@ -64,7 +64,7 @@ pub enum WebDriverCommand<T: WebDriverExtensionCommand> {
     GetAlertText,
     SendAlertText(SendKeysParameters),
     TakeScreenshot,
-    TakeElementScreenshot(TakeScreenshotParameters),
+    TakeElementScreenshot(WebElement),
     Status,
     Extension(T),
 }
@@ -94,13 +94,13 @@ impl<U: WebDriverExtensionRoute> WebDriverMessage<U> {
         command: WebDriverCommand<U::Command>,
     ) -> WebDriverMessage<U> {
         WebDriverMessage {
-            session_id: session_id,
-            command: command,
+            session_id,
+            command,
         }
     }
 
     pub fn from_http(
-        match_type: Route<U>,
+        match_type: &Route<U>,
         params: &Captures,
         raw_body: &str,
         requires_body: bool,
@@ -330,7 +330,13 @@ impl<U: WebDriverExtensionRoute> WebDriverMessage<U> {
             }
             Route::TakeScreenshot => WebDriverCommand::TakeScreenshot,
             Route::TakeElementScreenshot => {
-                WebDriverCommand::TakeElementScreenshot(serde_json::from_str(raw_body)?)
+                let element_id = try_opt!(
+                    params.name("elementId"),
+                    ErrorStatus::InvalidArgument,
+                    "Missing elementId parameter"
+                );
+                let element = WebElement::new(element_id.as_str().into());
+                WebDriverCommand::TakeElementScreenshot(element)
             }
             Route::Status => WebDriverCommand::Status,
             Route::Extension(ref extension) => try!(extension.command(params, &body_data)),
@@ -520,23 +526,19 @@ where
         Some(n) => {
             if n < 0.0 || n.fract() != 0.0 {
                 return Err(de::Error::custom(format!(
-                    "'{}' is not a positive Integer",
+                    "{} is not a positive Integer",
                     n
                 )));
             }
             if (n as u64) > MAX_SAFE_INTEGER {
                 return Err(de::Error::custom(format!(
-                    "'{}' is greater than maximum safe integer",
+                    "{} is greater than maximum safe integer",
                     n
                 )));
             }
             Some(n as u64)
         }
-        None => {
-            return Err(de::Error::custom(format!(
-                "'null' is not a positive Integer"
-            )));
-        }
+        None => return Err(de::Error::custom("null is not a positive integer")),
     };
 
     Ok(value)

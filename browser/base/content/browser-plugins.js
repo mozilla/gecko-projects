@@ -395,7 +395,7 @@ var gPluginHandler = {
       }
       let classifier = Cc["@mozilla.org/url-classifier/dbservice;1"]
         .getService(Ci.nsIURIClassifier);
-      classifier.asyncClassifyLocalWithTables(uri, tableName, (c, list) => {
+      classifier.asyncClassifyLocalWithTables(uri, tableName, [], [], (c, list) => {
         resolve(list.length > 0);
       });
     });
@@ -503,7 +503,7 @@ var gPluginHandler = {
             Services.perms.addFromPrincipal(principal,
                                             "plugin-hidden-notification",
                                             Services.perms.DENY_ACTION);
-          }
+          },
         },
         {
           label: gNavigatorBundle.getString("pluginActivateTrigger.label"),
@@ -518,8 +518,8 @@ var gPluginHandler = {
             if (curNotification) {
               curNotification.reshow();
             }
-          }
-        }
+          },
+        },
       ];
       function notificationCallback(type) {
         if (type == "dismissed") {

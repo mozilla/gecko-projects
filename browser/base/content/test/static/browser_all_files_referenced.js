@@ -118,6 +118,11 @@ var whitelist = [
   // browser/extensions/pdfjs/content/web/viewer.js#7450
   {file: "resource://pdf.js/web/debugger.js"},
 
+  // resource://app/modules/translation/TranslationContentHandler.jsm
+  {file: "resource://app/modules/translation/BingTranslator.jsm"},
+  {file: "resource://app/modules/translation/GoogleTranslator.jsm"},
+  {file: "resource://app/modules/translation/YandexTranslator.jsm"},
+
   // Starting from here, files in the whitelist are bugs that need fixing.
   // Bug 1339424 (wontfix?)
   {file: "chrome://browser/locale/taskbar.properties",
@@ -209,7 +214,7 @@ if (AppConstants.MOZ_CODE_COVERAGE) {
 const gInterestingCategories = new Set([
   "agent-style-sheets", "addon-provider-module", "webextension-modules",
   "webextension-scripts", "webextension-schemas", "webextension-scripts-addon",
-  "webextension-scripts-content", "webextension-scripts-devtools"
+  "webextension-scripts-content", "webextension-scripts-devtools",
 ]);
 
 var gChromeReg = Cc["@mozilla.org/chrome/chrome-registry;1"]
@@ -408,7 +413,7 @@ function parseCodeFile(fileUri) {
             ["devtools/client/locales", "chrome://devtools/locale"],
             ["devtools/shared/locales", "chrome://devtools-shared/locale"],
             ["devtools/shared/platform", "resource://devtools/shared/platform/chrome"],
-            ["devtools", "resource://devtools"]
+            ["devtools", "resource://devtools"],
           ];
 
           match = line.match(/["']((?:devtools|gcli)\/[^\\#"']+)["']/);

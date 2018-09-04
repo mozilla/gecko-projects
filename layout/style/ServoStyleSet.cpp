@@ -228,7 +228,9 @@ ServoStyleSet::InvalidateStyleForDocumentStateChanges(EventStates aStatesChanged
   AutoTArray<RawServoAuthorStylesBorrowed, 20> nonDocumentStyles;
 
   EnumerateShadowRoots(*mDocument, [&](ShadowRoot& aShadowRoot) {
-    nonDocumentStyles.AppendElement(aShadowRoot.ServoStyles());
+    if (auto* authorStyles = aShadowRoot.GetServoStyles()) {
+      nonDocumentStyles.AppendElement(authorStyles);
+    }
   });
 
   mDocument->BindingManager()->EnumerateBoundContentProtoBindings(
@@ -261,7 +263,9 @@ ServoStyleSet::MediumFeaturesChanged(MediaFeatureChangeReason aReason)
   AutoTArray<RawServoAuthorStylesBorrowedMut, 20> nonDocumentStyles;
 
   EnumerateShadowRoots(*mDocument, [&](ShadowRoot& aShadowRoot) {
-    nonDocumentStyles.AppendElement(aShadowRoot.ServoStyles());
+    if (auto* authorStyles = aShadowRoot.GetServoStyles()) {
+      nonDocumentStyles.AppendElement(authorStyles);
+    }
   });
 
   // FIXME(emilio): This is broken for XBL. See bug 1406875.
@@ -1281,16 +1285,17 @@ ServoStyleSet::EnsureUniqueInnerOnCSSSheets()
     queue.RemoveElementAt(idx);
 
     if (!sheet->HasUniqueInner()) {
+      RawServoAuthorStyles* authorStyles = nullptr;
       if (owner.is<ShadowRoot*>()) {
-        Servo_AuthorStyles_ForceDirty(owner.as<ShadowRoot*>()->ServoStyles());
+        authorStyles = owner.as<ShadowRoot*>()->GetServoStyles();
+      } else if (owner.is<nsXBLPrototypeBinding*>()) {
+        authorStyles = owner.as<nsXBLPrototypeBinding*>()->GetServoStyles();
+      }
+
+      if (authorStyles) {
+        Servo_AuthorStyles_ForceDirty(authorStyles);
         mNeedsRestyleAfterEnsureUniqueInner = true;
         anyNonDocStyleChanged = true;
-      } else if (owner.is<nsXBLPrototypeBinding*>()) {
-        if (auto* styles = owner.as<nsXBLPrototypeBinding*>()->GetServoStyles()) {
-          Servo_AuthorStyles_ForceDirty(styles);
-          mNeedsRestyleAfterEnsureUniqueInner = true;
-          anyNonDocStyleChanged = true;
-        }
       }
     }
 
@@ -1411,6 +1416,7 @@ ServoStyleSet::ResolveStyleLazilyInternal(Element* aElement,
 bool
 ServoStyleSet::AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray)
 {
+  // TODO(emilio): Can we make this so this asserts instead?
   UpdateStylistIfNeeded();
   Servo_StyleSet_GetFontFaceRules(mRawSet.get(), &aArray);
   return true;
@@ -1426,9 +1432,7 @@ ServoStyleSet::CounterStyleRuleForName(nsAtom* aName)
 already_AddRefed<gfxFontFeatureValueSet>
 ServoStyleSet::BuildFontFeatureValueSet()
 {
-  // FIXME(emilio): This should assert once we update the stylist from
-  // FlushPendingNotifications explicitly.
-  UpdateStylistIfNeeded();
+  MOZ_ASSERT(!StylistNeedsUpdate());
   RefPtr<gfxFontFeatureValueSet> set =
     Servo_StyleSet_BuildFontFeatureValueSet(mRawSet.get());
   return set.forget();
@@ -1466,7 +1470,9 @@ ServoStyleSet::UpdateStylist()
     MOZ_ASSERT(GetPresContext(), "How did they get dirty?");
 
     EnumerateShadowRoots(*mDocument, [&](ShadowRoot& aShadowRoot) {
-      Servo_AuthorStyles_Flush(aShadowRoot.ServoStyles(), mRawSet.get());
+      if (auto* authorStyles = aShadowRoot.GetServoStyles()) {
+        Servo_AuthorStyles_Flush(authorStyles, mRawSet.get());
+      }
     });
 
     mDocument->BindingManager()->EnumerateBoundContentProtoBindings(

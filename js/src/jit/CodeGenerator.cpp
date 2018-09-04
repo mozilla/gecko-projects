@@ -4636,7 +4636,7 @@ CodeGenerator::visitCallGeneric(LCallGeneric* call)
     masm.freeStack(unusedStack);
 
     // Construct the IonFramePrefix.
-    uint32_t descriptor = MakeFrameDescriptor(masm.framePushed(), JitFrame_IonJS,
+    uint32_t descriptor = MakeFrameDescriptor(masm.framePushed(), FrameType::IonJS,
                                               JitFrameLayout::Size());
     masm.Push(Imm32(call->numActualArgs()));
     masm.PushCalleeToken(calleereg, call->mir()->isConstructing());
@@ -4758,7 +4758,7 @@ CodeGenerator::visitCallKnown(LCallKnown* call)
     masm.freeStack(unusedStack);
 
     // Construct the IonFramePrefix.
-    uint32_t descriptor = MakeFrameDescriptor(masm.framePushed(), JitFrame_IonJS,
+    uint32_t descriptor = MakeFrameDescriptor(masm.framePushed(), FrameType::IonJS,
                                               JitFrameLayout::Size());
     masm.Push(Imm32(call->numActualArgs()));
     masm.PushCalleeToken(calleereg, call->mir()->isConstructing());
@@ -5074,7 +5074,7 @@ CodeGenerator::emitApplyGeneric(T* apply)
         unsigned pushed = masm.framePushed();
         Register stackSpace = extraStackSpace;
         masm.addPtr(Imm32(pushed), stackSpace);
-        masm.makeFrameDescriptor(stackSpace, JitFrame_IonJS, JitFrameLayout::Size());
+        masm.makeFrameDescriptor(stackSpace, FrameType::IonJS, JitFrameLayout::Size());
 
         masm.Push(argcreg);
         masm.Push(calleereg);
@@ -10212,9 +10212,10 @@ CodeGenerator::generateWasm(wasm::FuncTypeIdDesc funcTypeId, wasm::BytecodeOffse
 bool
 CodeGenerator::generate()
 {
-    JitSpew(JitSpew_Codegen, "# Emitting code for script %s:%u",
+    JitSpew(JitSpew_Codegen, "# Emitting code for script %s:%u:%u",
             gen->info().script()->filename(),
-            gen->info().script()->lineno());
+            gen->info().script()->lineno(),
+            gen->info().script()->column());
 
     // Initialize native code table with an entry to the start of
     // top-level script.
@@ -10558,9 +10559,11 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
         ionScript->copyConstants(vp);
         for (size_t i = 0; i < graph.numConstants(); i++) {
             const Value& v = vp[i];
-            if ((v.isObject() || v.isString()) && IsInsideNursery(v.toGCThing())) {
-                cx->runtime()->gc.storeBuffer().putWholeCell(script);
-                break;
+            if (v.isGCThing()) {
+                if (gc::StoreBuffer* sb = v.toGCThing()->storeBuffer()) {
+                    sb->putWholeCell(script);
+                    break;
+                }
             }
         }
     }
@@ -12035,16 +12038,9 @@ CodeGenerator::visitInstanceOfV(LInstanceOfV* ins)
     emitInstanceOf(ins, ins->mir()->prototypeObject());
 }
 
-// Wrap IsDelegateOfObject, which takes a JSObject*, not a HandleObject
-static bool
-IsDelegateObject(JSContext* cx, HandleObject protoObj, HandleObject obj, bool* res)
-{
-    return IsDelegateOfObject(cx, protoObj, obj, res);
-}
-
-typedef bool (*IsDelegateObjectFn)(JSContext*, HandleObject, HandleObject, bool*);
-static const VMFunction IsDelegateObjectInfo =
-    FunctionInfo<IsDelegateObjectFn>(IsDelegateObject, "IsDelegateObject");
+typedef bool (*IsPrototypeOfFn)(JSContext*, HandleObject, JSObject*, bool*);
+static const VMFunction IsPrototypeOfInfo =
+    FunctionInfo<IsPrototypeOfFn>(IsPrototypeOf, "IsPrototypeOf");
 
 void
 CodeGenerator::emitInstanceOf(LInstruction* ins, JSObject* prototypeObject)
@@ -12070,7 +12066,7 @@ CodeGenerator::emitInstanceOf(LInstruction* ins, JSObject* prototypeObject)
     }
 
     // Crawl the lhs's prototype chain in a loop to search for prototypeObject.
-    // This follows the main loop of js::IsDelegate, though additionally breaks
+    // This follows the main loop of js::IsPrototypeOf, though additionally breaks
     // out of the loop on Proxy::LazyProto.
 
     // Load the lhs's prototype.
@@ -12105,7 +12101,7 @@ CodeGenerator::emitInstanceOf(LInstruction* ins, JSObject* prototypeObject)
     // compartment. Otherwise, we stopped on a nullptr prototype and the output
     // register is already correct.
 
-    OutOfLineCode* ool = oolCallVM(IsDelegateObjectInfo, ins,
+    OutOfLineCode* ool = oolCallVM(IsPrototypeOfInfo, ins,
                                    ArgList(ImmGCPtr(prototypeObject), objReg),
                                    StoreRegisterTo(output));
 

@@ -14,10 +14,12 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(FetchObserver)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(FetchObserver,
                                                   DOMEventTargetHelper)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFollowingSignal)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(FetchObserver,
                                                 DOMEventTargetHelper)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mFollowingSignal)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(FetchObserver)
@@ -27,12 +29,12 @@ NS_IMPL_ADDREF_INHERITED(FetchObserver, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(FetchObserver, DOMEventTargetHelper)
 
 FetchObserver::FetchObserver(nsIGlobalObject* aGlobal,
-                             AbortSignal* aSignal)
+                             AbortSignalImpl* aSignalImpl)
   : DOMEventTargetHelper(aGlobal)
   , mState(FetchState::Requesting)
 {
-  if (aSignal) {
-    Follow(aSignal);
+  if (aSignalImpl) {
+    Follow(aSignalImpl);
   }
 }
 

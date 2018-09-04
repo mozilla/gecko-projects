@@ -6,21 +6,19 @@
 :root {
   --slider-thumb-color: var(--grey-50);
   --slider-track-color: var(--grey-30);
-  --toggle-thumb-color: white;
-  --toggle-track-color: var(--grey-30);
   --input-background-color: white;
   --input-border-color: var(--grey-30);
   --input-text-color: var(--grey-90);
+  --preview-input-background: var(--theme-toolbar-background);
 }
 
 :root.theme-dark {
   --slider-thumb-color: var(--grey-40);
-  --slider-track-color: var(--grey-50);
-  --toggle-thumb-color: var(--grey-40);
-  --toggle-track-color: var(--grey-50);
+  --slider-track-color: var(--grey-60);
   --input-background-color: var(--grey-70);
   --input-border-color: var(--grey-70);
   --input-text-color: var(--grey-40);
+  --preview-input-background: #222225;
 }
 
 #sidebar-panel-fontinspector {
@@ -64,6 +62,10 @@
   display: inline-block;
 }
 
+#font-editor .devtools-sidepanel-no-result {
+  padding-bottom: 0;
+}
+
 .fonts-list {
   padding: 0;
   margin: 0;
@@ -86,44 +88,25 @@
   vertical-align: bottom;
 }
 
-.font-preview-container {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  overflow: hidden;
-  display: grid;
-  place-items: center end;
-  position: relative;
+#font-preview-input-container {
+  background: var(--preview-input-background);
+  border-bottom: 1px solid var(--theme-splitter-color);
+  display: flex;
+  height: 23px;
+}
+
+#font-preview-input-container input {
+  background-image: none;
+  flex: 1;
+  padding-left: 14px;
 }
 
 .font-preview {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  object-fit: contain;
   height: 50px;
-  display: block;
-}
-
-.font-preview:hover {
-  cursor: text;
-  background-image: linear-gradient(to right,
-    var(--grey-40) 3px, transparent 3px, transparent);
-  background-size: 6px 1px;
-  background-repeat: repeat-x;
-  background-position-y: 45px;
-}
-
-#font-container .font-preview-input {
-  position: absolute;
-  top: 5px;
-  left: 0;
-  width: calc(100% - 5px);
-  height: calc(100% - 10px);
-  background: transparent;
-  color: transparent;
-  border-radius: 0;
-  padding: 0;
-}
-
-.font-preview-input::-moz-selection {
-  background: transparent;
-  color: transparent;
+  width: 100%;
 }
 
 .font-name,
@@ -228,6 +211,10 @@
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
+}
+
+.font-control-input .devtools-checkbox-toggle {
+  margin: 2px 0;
 }
 
 .font-control-label {
@@ -354,58 +341,6 @@
 .font-value-slider::-moz-range-track {
   background-color: var(--slider-track-color);
   height: 3px;
-}
-
-/*
-  Restyle a native checkbox input to look like a toggle with a "thumb".
-  Build the decoration using solid shapes created with radial- and linear-gradient
-  background images. Animate the position of the "thumb" using background-position.
- */
-.font-value-toggle {
-  --x-pos: .15em;
-  /* Reset native checkbox styling. */
-  -moz-appearance: none;
-  background-color: var(--toggle-track-color);
-  cursor: pointer;
-  /* Change font-size to scale. */
-  font-size: 16px;
-  width: 2em;
-  height: 1em;
-  border-radius: 1em;
-  /* Animate the thumb position between states of the checkbox. */
-  transition: background-color .1s ease-out;
-  /* border: 1px solid transparent; */
-  /* box-sizing: content-box; */
-}
-
-.font-value-toggle:focus {
-  box-shadow: 0 0 0 1px var(--blue-55);
-}
-
-.font-value-toggle:checked:focus {
-  background-color: var(--blue-40);
-  box-shadow: none;
-}
-
-.font-value-toggle:checked {
-  --x-pos: 1.15em;
-  background-color: var(--blue-55);
-}
-
-.font-value-toggle::before {
-  position: relative;
-  width: calc(1em - .3em);
-  height: calc(1em - .3em);
-  transform: translateY(.15em) translateX(var(--x-pos));
-  border-radius: 100%;
-  display: block;
-  content: "";
-  background-color: var(--toggle-thumb-color);
-  transition: transform .1s ease-out;
-}
-
-.font-value-toggle:checked::before {
-  background-color: white;
 }
 
 .font-origin {

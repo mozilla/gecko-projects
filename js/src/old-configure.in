@@ -423,8 +423,9 @@ MOZ_ANDROID_STLPORT
 dnl ========================================================
 dnl Suppress Clang Argument Warnings
 dnl ========================================================
+WARNINGS_CFLAGS="$_WARNINGS_CFLAGS"
 if test -n "${CLANG_CC}${CLANG_CL}"; then
-    _WARNINGS_CFLAGS="-Qunused-arguments ${_WARNINGS_CFLAGS}"
+    WARNINGS_CFLAGS="-Qunused-arguments $WARNINGS_CFLAGS"
     CPPFLAGS="-Qunused-arguments ${CPPFLAGS}"
 fi
 if test -n "${CLANG_CXX}${CLANG_CL}"; then
@@ -492,9 +493,9 @@ if test "$GNU_CC"; then
                   AC_MSG_RESULT([no])
                   LDFLAGS=$_SAVE_LDFLAGS)
 
-    AC_MSG_CHECKING([for --build-id option to ld])
+    AC_MSG_CHECKING([for --build-id=sha1 option to ld])
     _SAVE_LDFLAGS=$LDFLAGS
-    LDFLAGS="$LDFLAGS -Wl,--build-id"
+    LDFLAGS="$LDFLAGS -Wl,--build-id=sha1"
     AC_TRY_LINK(,,AC_MSG_RESULT([yes]),
                   AC_MSG_RESULT([no])
                   LDFLAGS=$_SAVE_LDFLAGS)
@@ -1109,7 +1110,7 @@ dnl Checks for library functions.
 dnl ========================================================
 AC_PROG_GCC_TRADITIONAL
 AC_FUNC_MEMCMP
-AC_CHECK_FUNCS([getc_unlocked _getc_nolock gmtime_r localtime_r pthread_getname_np])
+AC_CHECK_FUNCS([getc_unlocked _getc_nolock gmtime_r localtime_r pthread_getname_np pthread_get_name_np])
 
 dnl check for clock_gettime(), the CLOCK_MONOTONIC clock
 dnl avoid this on Darwin, since depending on your system config, we may think
@@ -1756,6 +1757,7 @@ AC_SUBST(IMPLIB)
 AC_SUBST(FILTER)
 AC_SUBST_LIST(MOZ_DEBUG_LDFLAGS)
 AC_SUBST(WARNINGS_AS_ERRORS)
+AC_SUBST_LIST(WARNINGS_CFLAGS)
 AC_SUBST(LIBICONV)
 
 AC_SUBST(ENABLE_STRIP)
@@ -1783,7 +1785,6 @@ MOZ_CONFIG_ICU()
 
 dnl Echo the CFLAGS to remove extra whitespace.
 CFLAGS=`echo \
-	$_WARNINGS_CFLAGS \
 	$_COMPILATION_CFLAGS \
 	$CFLAGS`
 

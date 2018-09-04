@@ -40,6 +40,7 @@
 #include "jit/InlinableNatives.h"
 #include "js/AutoByteString.h"
 #include "js/CharacterEncoding.h"
+#include "js/CompilationAndEvaluation.h"
 #include "js/Date.h"
 #include "js/StableStringChars.h"
 #include "js/Wrapper.h"
@@ -73,6 +74,7 @@ using namespace js::selfhosted;
 
 using JS::AutoCheckCannotGC;
 using JS::AutoStableStringChars;
+using JS::CompileOptions;
 using mozilla::IsInRange;
 using mozilla::Maybe;
 
@@ -2443,6 +2445,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("_DefineDataProperty",     intrinsic_DefineDataProperty,      4,0),
     JS_FN("_DefineProperty",         intrinsic_DefineProperty,          6,0),
     JS_FN("CopyDataPropertiesOrGetOwnKeys", intrinsic_CopyDataPropertiesOrGetOwnKeys, 3,0),
+    JS_INLINABLE_FN("SameValue",     js::obj_is,                        2,0, ObjectIs),
 
     JS_INLINABLE_FN("_IsConstructing", intrinsic_IsConstructing,        0,0,
                     IntrinsicIsConstructing),

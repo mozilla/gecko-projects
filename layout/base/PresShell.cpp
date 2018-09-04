@@ -68,7 +68,7 @@
 #include "nsIPermissionManager.h"
 #include "nsIMozBrowserFrame.h"
 #include "nsCaret.h"
-#include "AccessibleCaretEventHub.h"
+#include "mozilla/AccessibleCaretEventHub.h"
 #include "nsFrameManager.h"
 #include "nsXPCOM.h"
 #include "nsILayoutHistoryState.h"
@@ -4268,6 +4268,10 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     if (!mIsDestroying) {
       viewManager->FlushDelayedResize(false);
       mPresContext->FlushPendingMediaFeatureValuesChanged();
+
+      // Now that we have flushed media queries, update the rules before looking
+      // up @font-face / @counter-style / @font-feature-values rules.
+      mStyleSet->UpdateStylistIfNeeded();
 
       // Flush any pending update of the user font set, since that could
       // cause style changes (for updating ex/ch units, and to cause a

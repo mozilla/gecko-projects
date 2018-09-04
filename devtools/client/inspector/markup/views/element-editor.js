@@ -74,8 +74,9 @@ function ElementEditor(container, node) {
   this.newAttr = null;
   this.closeElt = null;
 
-  this.onDisplayBadgeClick = this.onDisplayBadgeClick.bind(this);
   this.onCustomBadgeClick = this.onCustomBadgeClick.bind(this);
+  this.onDisplayBadgeClick = this.onDisplayBadgeClick.bind(this);
+  this.onExpandBadgeClick = this.onExpandBadgeClick.bind(this);
   this.onTagEdit = this.onTagEdit.bind(this);
 
   // Create the main editor
@@ -165,6 +166,11 @@ ElementEditor.prototype = {
     closingBracket.classList.add("closing-bracket");
     closingBracket.textContent = ">";
     open.appendChild(closingBracket);
+
+    this.expandBadge = this.doc.createElement("span");
+    this.expandBadge.classList.add("markup-expand-badge");
+    this.expandBadge.addEventListener("click", this.onExpandBadgeClick);
+    this.elt.appendChild(this.expandBadge);
 
     const close = this.doc.createElement("span");
     close.classList.add("close");
@@ -702,11 +708,13 @@ ElementEditor.prototype = {
 
     if (Services.prefs.getBoolPref("devtools.inspector.flexboxHighlighter.enabled") &&
         (target.dataset.display === "flex" || target.dataset.display === "inline-flex")) {
+      this._displayBadge.classList.add("active");
       this.highlighters.toggleFlexboxHighlighter(this.inspector.selection.nodeFront,
         "markup");
     }
 
     if (target.dataset.display === "grid" || target.dataset.display === "inline-grid") {
+      this._displayBadge.classList.add("active");
       this.highlighters.toggleGridHighlighter(this.inspector.selection.nodeFront,
         "markup");
     }
@@ -715,6 +723,10 @@ ElementEditor.prototype = {
   onCustomBadgeClick: function() {
     const { url, line } = this.node.customElementLocation;
     this.markup.toolbox.viewSourceInDebugger(url, line, "show_custom_element");
+  },
+
+  onExpandBadgeClick: function() {
+    this.container.expandContainer();
   },
 
   /**
@@ -743,6 +755,8 @@ ElementEditor.prototype = {
     if (this._customBadge) {
       this._customBadge.removeEventListener("click", this.onCustomBadgeClick);
     }
+
+    this.expandBadge.removeEventListener("click", this.onExpandBadgeClick);
 
     for (const key in this.animationTimers) {
       clearTimeout(this.animationTimers[key]);

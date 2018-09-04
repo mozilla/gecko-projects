@@ -63,7 +63,7 @@ user_pref("browser.tabs.remote.autostart", false);
 // Make sure Translation won't hit the network.
 user_pref("browser.translation.bing.authURL", "http://{server}/browser/browser/components/translation/test/bing.sjs");
 user_pref("browser.translation.bing.translateArrayURL", "http://{server}/browser/browser/components/translation/test/bing.sjs");
-user_pref("browser.translation.engine", "bing");
+user_pref("browser.translation.engine", "Bing");
 user_pref("browser.translation.yandex.translateURLOverride", "http://{server}/browser/browser/components/translation/test/yandex.sjs");
 user_pref("browser.ui.layout.tablet", 0); // force tablet UI off
 // Ensure UITour won't hit the network
@@ -91,6 +91,8 @@ user_pref("devtools.debugger.prompt-connection", true);
 user_pref("devtools.debugger.remote-enabled", false);
 user_pref("devtools.debugger.remote-port", 6023);
 user_pref("devtools.testing", true);
+// Required to set values in wpt metadata files (bug 1485842)
+user_pref("dom.audioworklet.enabled", false);
 user_pref("dom.allow_scripts_to_close_windows", true);
 user_pref("dom.disable_open_during_load", false);
 user_pref("dom.experimental_forms", true); // on for testing

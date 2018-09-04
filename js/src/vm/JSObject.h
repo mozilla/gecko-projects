@@ -430,9 +430,6 @@ class JSObject : public js::gc::Cell
      */
     inline JSObject* enclosingEnvironment() const;
 
-    // Deprecated: call nonCCWGlobal or NativeObject::global() instead!
-    inline js::GlobalObject& deprecatedGlobal() const;
-
     // Cross-compartment wrappers are not associated with a single realm/global,
     // so these methods assert the object is not a CCW.
     inline js::GlobalObject& nonCCWGlobal() const;
@@ -1181,13 +1178,10 @@ extern bool
 FromPropertyDescriptorToObject(JSContext* cx, Handle<JS::PropertyDescriptor> desc,
                                MutableHandleValue vp);
 
-extern bool
-IsDelegate(JSContext* cx, HandleObject obj, const Value& v, bool* result);
-
 // obj is a JSObject*, but we root it immediately up front. We do it
 // that way because we need a Rooted temporary in this method anyway.
 extern bool
-IsDelegateOfObject(JSContext* cx, HandleObject protoObj, JSObject* obj, bool* result);
+IsPrototypeOf(JSContext* cx, HandleObject protoObj, JSObject* obj, bool* result);
 
 /* Wrap boolean, number or string as Boolean, Number or String object. */
 extern JSObject*

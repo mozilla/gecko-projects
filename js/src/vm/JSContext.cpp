@@ -1193,7 +1193,7 @@ js::RunJobs(JSContext* cx)
             if (i == cx->jobQueue->length() - 1)
                 JS::JobQueueIsEmpty(cx);
 
-            AutoRealm ar(cx, job);
+            AutoRealm ar(cx, &job->as<JSFunction>());
             {
                 if (!JS::Call(cx, UndefinedHandleValue, job, args, &rval)) {
                     // Nothing we can do about uncatchable exceptions.
@@ -1358,8 +1358,6 @@ JSContext::~JSContext()
 
     /* Free the stuff hanging off of cx. */
     MOZ_ASSERT(!resolvingList);
-
-    js_delete(ionPcScriptCache.ref());
 
     if (dtoaState)
         DestroyDtoaState(dtoaState);

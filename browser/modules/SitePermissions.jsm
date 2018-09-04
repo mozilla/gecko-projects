@@ -186,7 +186,7 @@ const GloballyBlockedPermissions = {
         permissions.push({
           id,
           state: SitePermissions.BLOCK,
-          scope: SitePermissions.SCOPE_GLOBAL
+          scope: SitePermissions.SCOPE_GLOBAL,
         });
       }
     }
@@ -682,8 +682,10 @@ var SitePermissions = {
       case this.ALLOW_COOKIES_FOR_SESSION:
         return gStringBundle.GetStringFromName("state.current.allowedForSession");
       case this.BLOCK:
-        if (scope && scope != this.SCOPE_PERSISTENT && scope != this.SCOPE_POLICY)
+        if (scope && scope != this.SCOPE_PERSISTENT && scope != this.SCOPE_POLICY &&
+            scope != this.SCOPE_GLOBAL) {
           return gStringBundle.GetStringFromName("state.current.blockedTemporarily");
+        }
         return gStringBundle.GetStringFromName("state.current.blocked");
       default:
         return null;
@@ -730,7 +732,7 @@ var gPermissionObject = {
       }
       return SitePermissions.UNKNOWN;
     },
-    labelID: "autoplay-media"
+    labelID: "autoplay-media",
   },
 
   "image": {
@@ -747,7 +749,7 @@ var gPermissionObject = {
         return SitePermissions.ALLOW_COOKIES_FOR_SESSION;
 
       return SitePermissions.ALLOW;
-    }
+    },
   },
 
   "desktop-notification": {
@@ -785,7 +787,7 @@ var gPermissionObject = {
   },
 
   "geo": {
-    exactHostMatch: true
+    exactHostMatch: true,
   },
 
   "focus-tab-by-prompt": {
@@ -793,7 +795,7 @@ var gPermissionObject = {
     states: [ SitePermissions.UNKNOWN, SitePermissions.ALLOW ],
   },
   "persistent-storage": {
-    exactHostMatch: true
+    exactHostMatch: true,
   },
 
   "shortcuts": {
@@ -809,12 +811,12 @@ var gPermissionObject = {
   },
 
   "midi": {
-    exactHostMatch: true
+    exactHostMatch: true,
   },
 
   "midi-sysex": {
-    exactHostMatch: true
-  }
+    exactHostMatch: true,
+  },
 };
 
 if (!Services.prefs.getBoolPref("dom.webmidi.enabled")) {

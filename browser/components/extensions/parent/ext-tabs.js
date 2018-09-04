@@ -120,8 +120,9 @@ let tabListener = {
   },
 };
 
-const allAttrs = new Set(["audible", "favIconUrl", "mutedInfo", "sharingState", "title"]);
+const allAttrs = new Set(["attention", "audible", "favIconUrl", "mutedInfo", "sharingState", "title"]);
 const allProperties = new Set([
+  "attention",
   "audible",
   "discarded",
   "favIconUrl",
@@ -226,6 +227,9 @@ class TabsUpdateFilterEventManager extends EventManager {
           }
           if (changed.includes("sharing") && filter.properties.has("sharingState")) {
             needed.push("sharingState");
+          }
+          if (changed.includes("attention") && filter.properties.has("attention")) {
+            needed.push("attention");
           }
         } else if (event.type == "TabPinned") {
           needed.push("pinned");
@@ -712,9 +716,12 @@ this.tabs = class extends ExtensionAPI {
             if (updateProperties.highlighted) {
               if (!nativeTab.selected && !nativeTab.multiselected) {
                 tabbrowser.addToMultiSelectedTabs(nativeTab, false);
-                // Select the highlighted tab, this matches Chrome's behavior.
-                tabbrowser.lockClearMultiSelectionOnce();
-                tabbrowser.selectedTab = nativeTab;
+                // Select the highlighted tab unless active:false is provided.
+                // Note that Chrome selects it even in that case.
+                if (updateProperties.active !== false) {
+                  tabbrowser.lockClearMultiSelectionOnce();
+                  tabbrowser.selectedTab = nativeTab;
+                }
               }
             } else {
               tabbrowser.removeFromMultiSelectedTabs(nativeTab, true);

@@ -55,7 +55,7 @@ class FxAccountsCommands {
       }
       const handledCommands = (device.handledCommands || []).concat(messages.map(m => m.index));
       await updateUserData({
-        device: {...device, handledCommands}
+        device: {...device, handledCommands},
       });
       await this._handleCommands(messages);
 
@@ -83,7 +83,7 @@ class FxAccountsCommands {
       const {index, messages} = await this._fetchRemoteCommands(lastCommandIndex);
       const missedMessages = messages.filter(m => !handledCommands.includes(m.index));
       await updateUserData({
-        device: {...device, lastCommandIndex: index, handledCommands: []}
+        device: {...device, lastCommandIndex: index, handledCommands: []},
       });
       if (missedMessages.length) {
         log.info(`Handling ${missedMessages.length} missed messages`);
@@ -124,6 +124,7 @@ class FxAccountsCommands {
           } catch (e) {
             log.error(`Error while handling incoming Send Tab payload.`, e);
           }
+          break;
         default:
           log.info(`Unknown command: ${command}.`);
       }
@@ -155,7 +156,7 @@ class SendTab {
     log.info(`Sending a tab to ${to.length} devices.`);
     const encoder = new TextEncoder("utf8");
     const data = {
-      entries: [{title: tab.title, url: tab.url}]
+      entries: [{title: tab.title, url: tab.url}],
     };
     const bytes = encoder.encode(JSON.stringify(data));
     const report = {
@@ -199,10 +200,10 @@ class SendTab {
                                                      data.entries.length - 1;
     const tabSender = {
       id: sender ? sender.id : "",
-      name: sender ? sender.name : ""
+      name: sender ? sender.name : "",
     };
     const {title, url: uri} = data.entries[current];
-    console.log(`Tab received with FxA commands: ${title} from ${tabSender.name}.`);
+    log.info(`Tab received with FxA commands: ${title} from ${tabSender.name}.`);
     Observers.notify("fxaccounts:commands:open-uri", [{uri, title, sender: tabSender}]);
   }
 
@@ -252,7 +253,7 @@ class SendTab {
     const sendTabKeys = {
       publicKey,
       privateKey,
-      authSecret
+      authSecret,
     };
     await this._fxAccounts._withCurrentAccountState(async (getUserData, updateUserData) => {
       const {device} = await getUserData();
@@ -260,7 +261,7 @@ class SendTab {
         device: {
           ...device,
           sendTabKeys,
-        }
+        },
       });
     });
     return sendTabKeys;

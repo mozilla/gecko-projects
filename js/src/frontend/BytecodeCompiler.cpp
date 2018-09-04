@@ -17,6 +17,7 @@
 #include "frontend/ErrorReporter.h"
 #include "frontend/FoldConstants.h"
 #include "frontend/Parser.h"
+#include "js/SourceBufferHolder.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSContext.h"
 #include "vm/JSScript.h"
@@ -25,13 +26,17 @@
 
 #include "vm/EnvironmentObject-inl.h"
 #include "vm/GeckoProfiler-inl.h"
-#include "vm/JSObject-inl.h"
-#include "vm/JSScript-inl.h"
+#include "vm/JSContext-inl.h"
 
 using namespace js;
 using namespace js::frontend;
+
 using mozilla::Maybe;
 using mozilla::Nothing;
+
+using JS::CompileOptions;
+using JS::ReadOnlyCompileOptions;
+using JS::SourceBufferHolder;
 
 // The BytecodeCompiler class contains resources common to compiling scripts and
 // function bodies.
@@ -708,7 +713,7 @@ frontend::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& optionsInpu
 }
 
 JSScript*
-frontend::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
+frontend::CompileModule(JSContext* cx, const JS::ReadOnlyCompileOptions& options,
                         SourceBufferHolder& srcBuf)
 {
     AutoAssertReportedException assertException(cx);
@@ -786,7 +791,7 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
     Rooted<JSFunction*> fun(cx, lazy->functionNonDelazifying());
     AutoAssertFunctionDelazificationCompletion delazificationCompletion(cx, fun);
 
-    CompileOptions options(cx);
+    JS::CompileOptions options(cx);
     options.setMutedErrors(lazy->mutedErrors())
            .setFileAndLine(lazy->filename(), lazy->lineno())
            .setColumn(lazy->column())
@@ -853,7 +858,7 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
 
 bool
 frontend::CompileStandaloneFunction(JSContext* cx, MutableHandleFunction fun,
-                                    const ReadOnlyCompileOptions& options,
+                                    const JS::ReadOnlyCompileOptions& options,
                                     JS::SourceBufferHolder& srcBuf,
                                     const Maybe<uint32_t>& parameterListEnd,
                                     HandleScope enclosingScope /* = nullptr */)
@@ -878,7 +883,7 @@ frontend::CompileStandaloneFunction(JSContext* cx, MutableHandleFunction fun,
 
 bool
 frontend::CompileStandaloneGenerator(JSContext* cx, MutableHandleFunction fun,
-                                     const ReadOnlyCompileOptions& options,
+                                     const JS::ReadOnlyCompileOptions& options,
                                      JS::SourceBufferHolder& srcBuf,
                                      const Maybe<uint32_t>& parameterListEnd)
 {

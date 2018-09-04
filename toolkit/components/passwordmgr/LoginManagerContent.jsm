@@ -436,14 +436,8 @@ var LoginManagerContent = {
   _fetchLoginsFromParentAndFillForm(form, window) {
     this._detectInsecureFormLikes(window);
 
-    const isPrivateWindow = PrivateBrowsingUtils.isContentWindowPrivate(window);
-
     let messageManager = window.docShell.messageManager;
-    messageManager.sendAsyncMessage("LoginStats:LoginEncountered",
-                                    {
-                                      isPrivateWindow,
-                                      isPwmgrEnabled: gEnabled,
-                                    });
+    messageManager.sendAsyncMessage("LoginStats:LoginEncountered");
 
     if (!gEnabled) {
       return;
@@ -700,7 +694,7 @@ var LoginManagerContent = {
 
       pwFields[pwFields.length] = {
                                     index: i,
-                                    element
+                                    element,
                                   };
     }
 
@@ -1576,7 +1570,7 @@ UserAutoCompleteResult.prototype = {
         Services.logins.removeLogin(removedLogin);
       }
     }
-  }
+  },
 };
 
 /**

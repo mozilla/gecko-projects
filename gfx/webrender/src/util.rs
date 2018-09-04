@@ -3,14 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{BorderRadius, DeviceIntPoint, DeviceIntRect, DeviceIntSize, DevicePixelScale};
-use api::{DevicePoint, DeviceRect, DeviceSize, LayoutPixel, LayoutPoint, LayoutRect, LayoutSize};
-use api::{WorldPixel, WorldRect};
+use api::{LayoutPixel, DeviceRect, WorldPixel, WorldRect};
 use euclid::{Point2D, Rect, Size2D, TypedPoint2D, TypedRect, TypedSize2D};
 use euclid::{TypedTransform2D, TypedTransform3D, TypedVector2D};
-use euclid::{HomogeneousVector};
 use num_traits::Zero;
 use plane_split::{Clipper, Polygon};
-use std::{i32, f32};
+use std::{i32, f32, fmt};
 use std::borrow::Cow;
 
 
@@ -169,79 +167,6 @@ pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
     (b - a) * t + a
 }
 
-pub fn calculate_screen_bounding_rect(
-    transform: &LayoutToWorldFastTransform,
-    rect: &LayoutRect,
-    device_pixel_scale: DevicePixelScale,
-    screen_bounds: Option<&DeviceIntRect>,
-) -> Option<DeviceIntRect> {
-    debug!("calculate_screen_bounding_rect for {:?}", rect);
-    let homogens = [
-        transform.transform_point2d_homogeneous(&rect.origin),
-        transform.transform_point2d_homogeneous(&rect.top_right()),
-        transform.transform_point2d_homogeneous(&rect.bottom_left()),
-        transform.transform_point2d_homogeneous(&rect.bottom_right()),
-    ];
-    let max_rect = match screen_bounds {
-        Some(bounds) => bounds.to_f32(),
-        None => DeviceRect::max_rect(),
-    };
-
-    // Note: we only do the full frustum collision when the polygon approaches the camera plane.
-    // Otherwise, it will be clamped to the screen bounds anyway.
-    let world_rect = if homogens.iter().any(|h| h.w <= 0.0) {
-        debug!("transform {:?}", transform);
-        debug!("screen_bounds: {:?}", screen_bounds);
-        debug!("homogeneous points {:?}", homogens);
-
-        let mut clipper = Clipper::new();
-        clipper.add_frustum(
-            &transform.to_transform(),
-            screen_bounds.map(|b| b.to_f32() / device_pixel_scale),
-        );
-
-        let polygon = Polygon::from_rect(*rect, 1);
-        debug!("crossing detected for poly {:?}", polygon);
-        let results = clipper.clip(polygon);
-        debug!("clip results: {:?}", results);
-        if results.is_empty() {
-            return None
-        }
-
-        debug!("points:");
-        WorldRect::from_points(results
-            .into_iter()
-            // filter out parts behind the view plane
-            .flat_map(|poly| &poly.points)
-            .map(|p| {
-                let mut homo = transform.transform_point2d_homogeneous(&p.to_2d());
-                homo.w = homo.w.max(0.00000001); // avoid infinite values
-                debug!("\tpoint {:?} -> {:?} -> {:?}", p, homo, homo.to_point2d());
-                homo.to_point2d().unwrap()
-            })
-        )
-    } else {
-        // we just checked for all the points to be in positive hemisphere, so `unwrap` is valid
-        WorldRect::from_points(&[
-            homogens[0].to_point2d().unwrap(),
-            homogens[1].to_point2d().unwrap(),
-            homogens[2].to_point2d().unwrap(),
-            homogens[3].to_point2d().unwrap(),
-        ])
-    };
-
-    let result = (world_rect * device_pixel_scale)
-         .round_out()
-         .intersection(&max_rect)
-         .map(|r| r.to_i32());
-    if homogens.iter().any(|h| h.w <= 0.0) {
-        debug!("world rect {:?}", world_rect);
-        debug!("result {:?}", result);
-    }
-    result
-}
-
-
 #[repr(u32)]
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -331,15 +256,6 @@ pub trait MaxRect {
     fn max_rect() -> Self;
 }
 
-impl MaxRect for LayoutRect {
-    fn max_rect() -> Self {
-        LayoutRect::new(
-            LayoutPoint::new(f32::MIN / 2.0, f32::MIN / 2.0),
-            LayoutSize::new(f32::MAX, f32::MAX),
-        )
-    }
-}
-
 impl MaxRect for DeviceIntRect {
     fn max_rect() -> Self {
         DeviceIntRect::new(
@@ -349,7 +265,7 @@ impl MaxRect for DeviceIntRect {
     }
 }
 
-impl MaxRect for DeviceRect {
+impl<U> MaxRect for TypedRect<f32, U> {
     fn max_rect() -> Self {
         // Having an unlimited bounding box is fine up until we try
         // to cast it to `i32`, where we get `-2147483648` for any
@@ -359,9 +275,9 @@ impl MaxRect for DeviceRect {
         // with explanation left as an exercise for the reader.
         const MAX_COORD: f32 = 1.0e9;
 
-        DeviceRect::new(
-            DevicePoint::new(-MAX_COORD, -MAX_COORD),
-            DeviceSize::new(2.0 * MAX_COORD, 2.0 * MAX_COORD),
+        TypedRect::new(
+            TypedPoint2D::new(-MAX_COORD, -MAX_COORD),
+            TypedSize2D::new(2.0 * MAX_COORD, 2.0 * MAX_COORD),
         )
     }
 }
@@ -470,17 +386,6 @@ impl<Src, Dst> FastTransform<Src, Dst> {
         }
     }
 
-    #[inline(always)]
-    pub fn transform_point2d_homogeneous(&self, point: &TypedPoint2D<f32, Src>) -> HomogeneousVector<f32, Dst> {
-        match *self {
-            FastTransform::Offset(offset) => {
-                let new_point = *point + offset;
-                HomogeneousVector::new(new_point.x, new_point.y, 0.0, 1.0)
-            }
-            FastTransform::Transform { ref transform, .. } => transform.transform_point2d_homogeneous(point),
-        }
-    }
-
     pub fn unapply(&self, rect: &TypedRect<f32, Dst>) -> Option<TypedRect<f32, Src>> {
         match *self {
             FastTransform::Offset(offset) =>
@@ -537,3 +442,60 @@ impl<Src, Dst> From<TypedVector2D<f32, Src>> for FastTransform<Src, Dst> {
 
 pub type LayoutFastTransform = FastTransform<LayoutPixel, LayoutPixel>;
 pub type LayoutToWorldFastTransform = FastTransform<LayoutPixel, WorldPixel>;
+
+pub fn project_rect<F, T>(
+    transform: &TypedTransform3D<f32, F, T>,
+    rect: &TypedRect<f32, F>,
+) -> Option<TypedRect<f32, T>>
+ where F: fmt::Debug
+{
+    let homogens = [
+        transform.transform_point2d_homogeneous(&rect.origin),
+        transform.transform_point2d_homogeneous(&rect.top_right()),
+        transform.transform_point2d_homogeneous(&rect.bottom_left()),
+        transform.transform_point2d_homogeneous(&rect.bottom_right()),
+    ];
+
+    // Note: we only do the full frustum collision when the polygon approaches the camera plane.
+    // Otherwise, it will be clamped to the screen bounds anyway.
+    if homogens.iter().any(|h| h.w <= 0.0) {
+        let mut clipper = Clipper::new();
+        clipper.add_frustum(
+            transform,
+            None,
+        );
+
+        let polygon = Polygon::from_rect(*rect, 1);
+        let results = clipper.clip(polygon);
+        if results.is_empty() {
+            return None
+        }
+
+        Some(TypedRect::from_points(results
+            .into_iter()
+            // filter out parts behind the view plane
+            .flat_map(|poly| &poly.points)
+            .map(|p| {
+                let mut homo = transform.transform_point2d_homogeneous(&p.to_2d());
+                homo.w = homo.w.max(0.00000001); // avoid infinite values
+                homo.to_point2d().unwrap()
+            })
+        ))
+    } else {
+        // we just checked for all the points to be in positive hemisphere, so `unwrap` is valid
+        Some(TypedRect::from_points(&[
+            homogens[0].to_point2d().unwrap(),
+            homogens[1].to_point2d().unwrap(),
+            homogens[2].to_point2d().unwrap(),
+            homogens[3].to_point2d().unwrap(),
+        ]))
+    }
+}
+
+pub fn world_rect_to_device_pixels(
+    rect: WorldRect,
+    device_pixel_scale: DevicePixelScale,
+) -> DeviceRect {
+    let device_rect = rect * device_pixel_scale;
+    device_rect.round_out()
+}

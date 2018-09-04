@@ -74,7 +74,7 @@ if (!Services.prefs.getBoolPref("layout.css.xul-box-display-values.content.enabl
   whitelist.push({
     sourceName: /(skin\/shared\/Heartbeat|((?:res|gre-resources)\/(ua|html)))\.css$/i,
     errorMessage: /Error in parsing value for .*\bdisplay\b/i,
-    isFromDevTools: false
+    isFromDevTools: false,
   });
 }
 
@@ -82,12 +82,12 @@ if (!Services.prefs.getBoolPref("full-screen-api.unprefix.enabled")) {
   whitelist.push({
     sourceName: /(?:res|gre-resources)\/(ua|html)\.css$/i,
     errorMessage: /Unknown pseudo-class .*\bfullscreen\b/i,
-    isFromDevTools: false
+    isFromDevTools: false,
   }, {
     // PDFjs is futureproofing its pseudoselectors, and those rules are dropped.
     sourceName: /web\/viewer\.css$/i,
     errorMessage: /Unknown pseudo-class .*\bfullscreen\b/i,
-    isFromDevTools: false
+    isFromDevTools: false,
   });
 }
 
@@ -99,9 +99,6 @@ let propNameWhitelist = [
    isFromDevTools: false},
   // Bug 1441929
   {propName: "--theme-search-overlays-semitransparent",
-   isFromDevTools: true},
-  // Bug 1441878
-  {propName: "--theme-codemirror-gutter-background",
    isFromDevTools: true},
   // These custom properties are retrieved directly from CSSOM
   // in videocontrols.xml to get pre-defined style instead of computed

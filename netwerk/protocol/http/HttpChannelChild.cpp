@@ -10,6 +10,7 @@
 
 #include "nsHttp.h"
 #include "nsICacheEntry.h"
+#include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/Unused.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/DocGroup.h"
@@ -57,6 +58,7 @@
 #include "nsStreamUtils.h"
 #include "nsThreadUtils.h"
 #include "nsCORSListenerProxy.h"
+#include "nsApplicationCache.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -400,10 +402,7 @@ HttpChannelChild::AssociateApplicationCache(const nsCString &groupID,
                                             const nsCString &clientID)
 {
   LOG(("HttpChannelChild::AssociateApplicationCache [this=%p]\n", this));
-  nsresult rv;
-  mApplicationCache = do_CreateInstance(NS_APPLICATIONCACHE_CONTRACTID, &rv);
-  if (NS_FAILED(rv))
-    return;
+  mApplicationCache = new nsApplicationCache();
 
   mLoadedFromApplicationCache = true;
   mApplicationCache->InitAsHandle(groupID, clientID);
@@ -746,10 +745,10 @@ HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
   }
 
   bool isTracker;
-  if (NS_SUCCEEDED(mLoadInfo->GetIsTracker(&isTracker)) && isTracker) {
+  MOZ_ALWAYS_SUCCEEDS(mLoadInfo->GetIsTracker(&isTracker));
+  if (isTracker) {
     bool isTrackerBlocked;
-    Unused << mLoadInfo->GetIsTrackerBlocked(&isTrackerBlocked);
-
+    MOZ_ALWAYS_SUCCEEDS(mLoadInfo->GetIsTrackerBlocked(&isTrackerBlocked));
     LOG(("HttpChannelChild::DoOnStartRequest FastBlock %d [this=%p]\n",
          isTrackerBlocked,
          this));
@@ -757,8 +756,10 @@ HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
     nsCOMPtr<nsIDocument> doc;
     if (!NS_WARN_IF(NS_FAILED(GetTopDocument(this,
                                              getter_AddRefs(doc))))) {
-
-      doc->IncrementTrackerCount(isTrackerBlocked);
+      doc->IncrementTrackerCount();
+      if (isTrackerBlocked) {
+        doc->IncrementTrackerBlockedCount();
+      }
     }
   }
 
@@ -2035,6 +2036,23 @@ HttpChannelChild::ProcessNotifyTrackingProtectionDisabled()
       "nsChannelClassifier::NotifyTrackingProtectionDisabled",
       [self]() {
         nsChannelClassifier::NotifyTrackingProtectionDisabled(self);
+      }),
+    NS_DISPATCH_NORMAL);
+}
+
+void
+HttpChannelChild::ProcessNotifyTrackingCookieBlocked(uint32_t aRejectedReason)
+{
+  LOG(("HttpChannelChild::ProcessNotifyTrackingCookieBlocked [this=%p]\n", this));
+  MOZ_ASSERT(OnSocketThread());
+
+  RefPtr<HttpChannelChild> self = this;
+  nsCOMPtr<nsIEventTarget> neckoTarget = GetNeckoTarget();
+  neckoTarget->Dispatch(
+    NS_NewRunnableFunction(
+      "nsChannelClassifier::NotifyTrackingCookieBlocked",
+      [self, aRejectedReason]() {
+        AntiTrackingCommon::NotifyRejection(self, aRejectedReason);
       }),
     NS_DISPATCH_NORMAL);
 }

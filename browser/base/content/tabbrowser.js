@@ -138,7 +138,7 @@ window._gBrowser = {
     "resumeMedia", "mute", "unmute", "blockedPopups", "lastURI",
     "purgeSessionHistory", "stopScroll", "startScroll",
     "userTypedValue", "userTypedClear",
-    "didStartLoadSinceLastUserTyping", "audioMuted"
+    "didStartLoadSinceLastUserTyping", "audioMuted",
   ],
 
   _removingTabs: [],
@@ -187,7 +187,7 @@ window._gBrowser = {
         return gBrowser.tabs[name].linkedBrowser;
       }
       return target[name];
-    }
+    },
   }),
 
   /**
@@ -282,49 +282,39 @@ window._gBrowser = {
     return this._selectedBrowser;
   },
 
-  get initialBrowser() {
-    delete this.initialBrowser;
-    return this.initialBrowser = document.getElementById("tabbrowser-initialBrowser");
-  },
-
   _setupInitialBrowserAndTab() {
-    let browser = this.initialBrowser;
-    this._selectedBrowser = browser;
-
-    browser.permanentKey = {};
+    // Bug 1362774 will adjust this to only set `uriIsAboutBlank` when
+    // necessary. For now, we always pass it.
+    let browser = this._createBrowser({uriIsAboutBlank: true});
+    browser.setAttribute("primary", "true");
+    browser.setAttribute("blank", "true");
     browser.droppedLinkHandler = handleDroppedLink;
     browser.loadURI = _loadURI.bind(null, browser);
 
-    let autoScrollPopup = browser._createAutoScrollPopup();
-    autoScrollPopup.id = "autoscroller";
-    document.getElementById("mainPopupSet").appendChild(autoScrollPopup);
-    browser.setAttribute("autoscrollpopup", autoScrollPopup.id);
-
-    this._defaultBrowserAttributes = {
-      autoscrollpopup: "",
-      contextmenu: "",
-      datetimepicker: "",
-      message: "",
-      messagemanagergroup: "",
-      selectmenulist: "",
-      tooltip: "",
-      type: "",
-    };
-    for (let attribute in this._defaultBrowserAttributes) {
-      this._defaultBrowserAttributes[attribute] = browser.getAttribute(attribute);
-    }
+    let uniqueId = this._generateUniquePanelID();
+    let notificationbox = this.getNotificationBox(browser);
+    notificationbox.id = uniqueId;
+    this.tabpanels.appendChild(notificationbox);
 
     let tab = this.tabs[0];
-    this._selectedTab = tab;
-
-    let uniqueId = this._generateUniquePanelID();
-    this.tabpanels.children[0].id = uniqueId;
     tab.linkedPanel = uniqueId;
+    this._selectedTab = tab;
+    this._selectedBrowser = browser;
     tab.permanentKey = browser.permanentKey;
     tab._tPos = 0;
     tab._fullyOpen = true;
     tab.linkedBrowser = browser;
     this._tabForBrowser.set(browser, tab);
+
+    this._appendStatusPanel();
+
+    this.initialBrowser = browser;
+
+    let autoScrollPopup = browser._createAutoScrollPopup();
+    autoScrollPopup.id = "autoscroller";
+    document.getElementById("mainPopupSet").appendChild(autoScrollPopup);
+    browser.setAttribute("autoscrollpopup", autoScrollPopup.id);
+    this._autoScrollPopup = autoScrollPopup;
 
     // Hook the browser up with a progress listener.
     let tabListener = new TabProgressListener(tab, browser, true, false);
@@ -969,6 +959,7 @@ window._gBrowser = {
 
       newTab.removeAttribute("titlechanged");
       newTab.removeAttribute("attention");
+      this._tabAttrModified(newTab, ["attention"]);
 
       // The tab has been selected, it's not unselected anymore.
       // (1) Call the current tab's finishUnselectedTabHoverTimer()
@@ -1010,11 +1001,10 @@ window._gBrowser = {
         bubbles: true,
         cancelable: false,
         detail: {
-          previousTab: oldTab
-        }
+          previousTab: oldTab,
+        },
       });
       newTab.dispatchEvent(event);
-      Services.telemetry.recordEvent("savant", "tab", "select", null, { subcategory: "frame" });
 
       this._tabAttrModified(oldTab, ["selected"]);
       this._tabAttrModified(newTab, ["selected"]);
@@ -1067,7 +1057,7 @@ window._gBrowser = {
 
       let event = new CustomEvent("TabSwitchDone", {
         bubbles: true,
-        cancelable: true
+        cancelable: true,
       });
       this.dispatchEvent(event);
     }
@@ -1188,7 +1178,7 @@ window._gBrowser = {
       cancelable: false,
       detail: {
         changed: aChanged,
-      }
+      },
     });
     aTab.dispatchEvent(event);
   },
@@ -1420,7 +1410,7 @@ window._gBrowser = {
       openerBrowser: aOpenerBrowser,
       nextTabParentId: aNextTabParentId,
       focusUrlBar: aFocusUrlBar,
-      name: aName
+      name: aName,
     });
     if (!bgLoad)
       this.selectedTab = tab;
@@ -1812,8 +1802,17 @@ window._gBrowser = {
     let b = document.createXULElement("browser");
     b.permanentKey = {};
 
-    for (let attribute in this._defaultBrowserAttributes) {
-      b.setAttribute(attribute, this._defaultBrowserAttributes[attribute]);
+    const defaultBrowserAttributes = {
+      contextmenu: "contentAreaContextMenu",
+      datetimepicker: "DateTimePickerPanel",
+      message: "true",
+      messagemanagergroup: "browsers",
+      selectmenulist: "ContentSelectDropdown",
+      tooltip: "aHTMLTooltip",
+      type: "content",
+    };
+    for (let attribute in defaultBrowserAttributes) {
+      b.setAttribute(attribute, defaultBrowserAttributes[attribute]);
     }
 
     if (userContextId) {
@@ -1843,6 +1842,10 @@ window._gBrowser = {
     if (!isPreloadBrowser) {
       b.setAttribute("autocompletepopup", "PopupAutoComplete");
     }
+    if (this._autoScrollPopup) {
+      b.setAttribute("autoscrollpopup", this._autoScrollPopup.id);
+    }
+
 
     /*
      * This attribute is meant to describe if the browser is the
@@ -1889,13 +1892,17 @@ window._gBrowser = {
     stack.appendChild(b);
     stack.setAttribute("flex", "1");
 
-    // Create the browserContainer
+    // We set large flex on both containers to allow the devtools toolbox to
+    // set a flex attribute. We don't want the toolbox to actually take up free
+    // space, but we do want it to collapse when the window shrinks, and with
+    // flex=0 it can't. When the toolbox is on the bottom it's a sibling of
+    // browserSidebarContainer, and when it's on the side it's a sibling of
+    // browserContainer.
     let browserContainer = document.createXULElement("vbox");
     browserContainer.className = "browserContainer";
     browserContainer.appendChild(stack);
     browserContainer.setAttribute("flex", "10000");
 
-    // Create the sidebar container
     let browserSidebarContainer = document.createXULElement("hbox");
     browserSidebarContainer.className = "browserSidebarContainer";
     browserSidebarContainer.appendChild(browserContainer);
@@ -1998,7 +2005,7 @@ window._gBrowser = {
         get: getter,
         set: setter,
         configurable: true,
-        enumerable: true
+        enumerable: true,
       });
     }
   },
@@ -2119,7 +2126,7 @@ window._gBrowser = {
     tab._browserParams = {
       uriIsAboutBlank: aBrowser.currentURI.spec == "about:blank",
       remoteType: aBrowser.remoteType,
-      usingPreloadedContent: false
+      usingPreloadedContent: false,
     };
 
     SessionStore.resetBrowserToLazyState(tab);
@@ -2472,7 +2479,6 @@ window._gBrowser = {
     // even if the event listener opens or closes tabs.
     let evt = new CustomEvent("TabOpen", { bubbles: true, detail: eventDetail || {} });
     t.dispatchEvent(evt);
-    Services.telemetry.recordEvent("savant", "tab", "open", null, { subcategory: "frame" });
 
     if (!usingPreloadedContent && originPrincipal && aURI) {
       let { URI_INHERITS_SECURITY_CONTEXT } = Ci.nsIProtocolHandler;
@@ -2886,7 +2892,6 @@ window._gBrowser = {
     // inspect the tab that's about to close.
     var evt = new CustomEvent("TabClose", { bubbles: true, detail: { adoptedBy: aAdoptedByTab } });
     aTab.dispatchEvent(evt);
-    Services.telemetry.recordEvent("savant", "tab", "close", null, { subcategory: "frame" });
 
     if (this.tabs.length == 2) {
       // We're closing one of our two open tabs, inform the other tab that its
@@ -3497,7 +3502,7 @@ window._gBrowser = {
    * to a new browser window, unless it is (they are) already the only tab(s)
    * in the current window, in which case this will do nothing.
    */
-  replaceTabsWithWindow(contextTab) {
+  replaceTabsWithWindow(contextTab, aOptions) {
     let tabs;
     if (contextTab.multiselected) {
       tabs = this.selectedTabs;
@@ -3510,7 +3515,7 @@ window._gBrowser = {
     }
 
     if (tabs.length == 1) {
-      return this.replaceTabWithWindow(tabs[0]);
+      return this.replaceTabWithWindow(tabs[0], aOptions);
     }
 
     // The order of the tabs is reserved.
@@ -3548,7 +3553,7 @@ window._gBrowser = {
                                                winVisibleTabs[winTabLength - 1]);
     }, { once: true });
 
-    win = this.replaceTabWithWindow(firstInactiveTab);
+    win = this.replaceTabWithWindow(firstInactiveTab, aOptions);
     return win;
   },
 
@@ -4090,34 +4095,41 @@ window._gBrowser = {
       return;
     }
 
-    let stringWithShortcut = (stringId, keyElemId) => {
+    let stringWithShortcut = (stringId, keyElemId, pluralCount) => {
       let keyElem = document.getElementById(keyElemId);
       let shortcut = ShortcutUtils.prettifyShortcut(keyElem);
-      return gTabBrowserBundle.formatStringFromName(stringId, [shortcut], 1);
+      return PluralForm.get(pluralCount, gTabBrowserBundle.GetStringFromName(stringId))
+                       .replace("%S", shortcut)
+                       .replace("#1", pluralCount);
     };
 
-    var label;
+    let label;
+    const selectedTabs = this.selectedTabs;
+    const contextTabInSelection = selectedTabs.includes(tab);
+    const affectedTabsLength = contextTabInSelection ? selectedTabs.length : 1;
     if (tab.mOverCloseButton) {
       label = tab.selected ?
-        stringWithShortcut("tabs.closeSelectedTab.tooltip", "key_close") :
-        gTabBrowserBundle.GetStringFromName("tabs.closeTab.tooltip");
+        stringWithShortcut("tabs.closeSelectedTabs.tooltip", "key_close", affectedTabsLength) :
+        PluralForm.get(affectedTabsLength, gTabBrowserBundle.GetStringFromName("tabs.closeTabs.tooltip"))
+                  .replace("#1", affectedTabsLength);
     } else if (tab._overPlayingIcon) {
       let stringID;
       if (tab.selected) {
         stringID = tab.linkedBrowser.audioMuted ?
-          "tabs.unmuteAudio.tooltip" :
-          "tabs.muteAudio.tooltip";
-        label = stringWithShortcut(stringID, "key_toggleMute");
+          "tabs.unmuteAudio2.tooltip" :
+          "tabs.muteAudio2.tooltip";
+        label = stringWithShortcut(stringID, "key_toggleMute", affectedTabsLength);
       } else {
         if (tab.hasAttribute("activemedia-blocked")) {
-          stringID = "tabs.unblockAudio.tooltip";
+          stringID = "tabs.unblockAudio2.tooltip";
         } else {
           stringID = tab.linkedBrowser.audioMuted ?
-            "tabs.unmuteAudio.background.tooltip" :
-            "tabs.muteAudio.background.tooltip";
+            "tabs.unmuteAudio2.background.tooltip" :
+            "tabs.muteAudio2.background.tooltip";
         }
 
-        label = gTabBrowserBundle.GetStringFromName(stringID);
+        label = PluralForm.get(affectedTabsLength, gTabBrowserBundle.GetStringFromName(stringID))
+                          .replace("#1", affectedTabsLength);
       }
     } else {
       label = tab._fullLabel || tab.getAttribute("label");
@@ -4279,7 +4291,7 @@ window._gBrowser = {
               if (browser.messageManager) {
                 browser.messageManager.sendAsyncMessage("RefreshBlocker:Refresh", data);
               }
-            }
+            },
           }];
 
           notificationBox.appendNotification(message, "refresh-blocked",
@@ -4428,9 +4440,11 @@ window._gBrowser = {
         // At least one of these should/will be non-null:
         let promptPrincipal = event.detail.promptPrincipal || docPrincipal ||
           tabForEvent.linkedBrowser.contentPrincipal;
+
         // For null principals, we bail immediately and don't show the checkbox:
         if (!promptPrincipal || promptPrincipal.isNullPrincipal) {
           tabForEvent.setAttribute("attention", "true");
+          this._tabAttrModified(tabForEvent, ["attention"]);
           return;
         }
 
@@ -4444,6 +4458,7 @@ window._gBrowser = {
             let tabPrompt = this.getTabModalPromptBox(tabForEvent.linkedBrowser);
             tabPrompt.onNextPromptShowAllowFocusCheckboxFor(promptPrincipal);
             tabForEvent.setAttribute("attention", "true");
+            this._tabAttrModified(tabForEvent, ["attention"]);
             return;
           }
         }
@@ -5155,7 +5170,7 @@ var StatusPanel = {
       top:    panelRect.top,
       bottom: panelRect.bottom,
       left:   alignRight ? containerRect.right - panelRect.width : containerRect.left,
-      right:  alignRight ? containerRect.right : containerRect.left + panelRect.width
+      right:  alignRight ? containerRect.right : containerRect.left + panelRect.width,
     };
   },
 
@@ -5170,7 +5185,7 @@ var StatusPanel = {
       this.panel.setAttribute("sizelimit", "true");
       this._mouseTargetRect = null;
     }
-  }
+  },
 };
 
 var TabBarVisibility = {
@@ -5196,7 +5211,7 @@ var TabBarVisibility = {
       gTabBrowserBundle.GetStringFromName(collapse ? "tabs.close" : "tabs.closeTab"));
 
     TabsInTitlebar.allowedBy("tabs-visible", !collapse);
-  }
+  },
 };
 
 var TabContextMenu = {
@@ -5252,6 +5267,10 @@ var TabContextMenu = {
     contextPinSelectedTabs.hidden = this.contextTab.pinned || !multiselectionContext;
     let contextUnpinSelectedTabs = document.getElementById("context_unpinSelectedTabs");
     contextUnpinSelectedTabs.hidden = !this.contextTab.pinned || !multiselectionContext;
+
+    // Hide the "Duplicate Tab" if there is a selection present
+    let contextDuplicateTab = document.getElementById("context_duplicateTab");
+    contextDuplicateTab.hidden = multiselectionContext;
 
     // Disable "Close Tabs to the Right" if there are no tabs
     // following it.
@@ -5370,6 +5389,6 @@ var TabContextMenu = {
         newTab.toggleMuteAudio(this.contextTab.muteReason);
       }
     }
-  }
+  },
 };
 

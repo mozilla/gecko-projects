@@ -729,14 +729,7 @@ nsXULPopupManager::ShowMenu(nsIContent *aMenu,
 
 #ifdef XP_MACOSX
   nsCOMPtr<nsIDOMXULMenuListElement> menulist = do_QueryInterface(aMenu);
-  bool isNonEditableMenulist = false;
   if (menulist) {
-    bool editable;
-    menulist->GetEditable(&editable);
-    isNonEditableMenulist = !editable;
-  }
-
-  if (isNonEditableMenulist) {
     position.AssignLiteral("selection");
   }
   else
@@ -942,6 +935,7 @@ nsXULPopupManager::ShowPopupCallback(nsIContent* aPopup,
   item->SetParent(mPopups);
   mPopups = item;
   SetCaptureState(oldmenu);
+  NS_ENSURE_TRUE_VOID(weakFrame.IsAlive());
 
   item->UpdateFollowAnchor();
 

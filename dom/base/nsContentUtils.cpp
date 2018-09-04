@@ -339,6 +339,8 @@ bool nsContentUtils::sFragmentParsingActive = false;
 
 bool nsContentUtils::sDoNotTrackEnabled = false;
 
+bool nsContentUtils::sAntiTrackingControlCenterUIEnabled = false;
+
 mozilla::LazyLogModule nsContentUtils::sDOMDumpLog("Dump");
 
 PopupControlState nsContentUtils::sPopupControlState = openAbused;
@@ -736,6 +738,9 @@ nsContentUtils::Init()
 
   Preferences::AddBoolVarCache(&sDisablePopups,
                                "dom.disable_open_during_load", false);
+
+  Preferences::AddBoolVarCache(&sAntiTrackingControlCenterUIEnabled,
+                               "browser.contentblocking.rejecttrackers.control-center.ui.enabled", false);
 
   Preferences::AddIntVarCache(&sBytecodeCacheStrategy,
                               "dom.script_loader.bytecode_cache.strategy", 0);
@@ -8871,7 +8876,8 @@ static bool
 StorageDisabledByAntiTrackingInternal(nsPIDOMWindowInner* aWindow,
                                       nsIChannel* aChannel,
                                       nsIPrincipal* aPrincipal,
-                                      nsIURI* aURI)
+                                      nsIURI* aURI,
+                                      uint32_t* aRejectedReason)
 {
   MOZ_ASSERT(aWindow || aChannel || aPrincipal);
 
@@ -8879,7 +8885,8 @@ StorageDisabledByAntiTrackingInternal(nsPIDOMWindowInner* aWindow,
     nsIURI* documentURI = aURI ? aURI : aWindow->GetDocumentURI();
     return !documentURI ||
            !AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(aWindow,
-                                                                    documentURI);
+                                                                    documentURI,
+                                                                    aRejectedReason);
   }
 
   if (aChannel) {
@@ -8895,7 +8902,8 @@ StorageDisabledByAntiTrackingInternal(nsPIDOMWindowInner* aWindow,
     }
 
     return !AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(httpChannel,
-                                                                    uri);
+                                                                    uri,
+                                                                    aRejectedReason);
   }
 
   MOZ_ASSERT(aPrincipal);
@@ -8909,32 +8917,15 @@ nsContentUtils::StorageDisabledByAntiTracking(nsPIDOMWindowInner* aWindow,
                                               nsIPrincipal* aPrincipal,
                                               nsIURI* aURI)
 {
+  uint32_t rejectedReason = 0;
   bool disabled =
-    StorageDisabledByAntiTrackingInternal(aWindow, aChannel, aPrincipal, aURI);
-  if (disabled &&
-      StaticPrefs::privacy_restrict3rdpartystorage_ui_enabled()) {
-    nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil = services::GetThirdPartyUtil();
-    if (!thirdPartyUtil) {
-      return false;
-    }
-
-    nsCOMPtr<nsPIDOMWindowOuter> pwin;
+    StorageDisabledByAntiTrackingInternal(aWindow, aChannel, aPrincipal, aURI,
+                                          &rejectedReason);
+  if (disabled && sAntiTrackingControlCenterUIEnabled && rejectedReason) {
     if (aWindow) {
-      auto* outer = nsGlobalWindowOuter::Cast(aWindow->GetOuterWindow());
-      if (outer) {
-        pwin = outer->GetTopOuter();
-      }
+      AntiTrackingCommon::NotifyRejection(aWindow, rejectedReason);
     } else if (aChannel) {
-      nsCOMPtr<mozIDOMWindowProxy> win;
-      nsresult rv = thirdPartyUtil->GetTopWindowForChannel(aChannel,
-                                                           getter_AddRefs(win));
-      NS_ENSURE_SUCCESS(rv, false);
-      pwin = nsPIDOMWindowOuter::From(win);
-    }
-
-    if (pwin && aChannel) {
-      pwin->NotifyContentBlockingState(
-        nsIWebProgressListener::STATE_BLOCKED_TRACKING_COOKIES, aChannel);
+      AntiTrackingCommon::NotifyRejection(aChannel, rejectedReason);
     }
   }
   return disabled;
@@ -10066,6 +10057,7 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
 
     // Step 6.1.
     if (synchronousCustomElements) {
+      definition->mPrefixStack.AppendElement(nodeInfo->GetPrefixAtom());
       DoCustomElementCreate(aResult, nodeInfo->GetDocument(), nodeInfo,
                             definition->mConstructor, rv);
       if (rv.MaybeSetPendingException(cx)) {
@@ -10076,6 +10068,7 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
         }
         (*aResult)->SetDefined(false);
       }
+      definition->mPrefixStack.RemoveLastElement();
       return NS_OK;
     }
 

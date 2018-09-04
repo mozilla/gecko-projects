@@ -204,18 +204,23 @@
 
 #include "frontend/ErrorReporter.h"
 #include "frontend/TokenKind.h"
+#include "js/CompileOptions.h"
 #include "js/UniquePtr.h"
 #include "js/Vector.h"
 #include "util/Text.h"
 #include "util/Unicode.h"
 #include "vm/ErrorReporting.h"
-#include "vm/JSContext.h"
-#include "vm/RegExpShared.h"
+#include "vm/JSAtom.h"
+#include "vm/RegExpConstants.h"
 #include "vm/StringType.h"
 
+struct JSContext;
 struct KeywordInfo;
 
 namespace js {
+
+class AutoKeepAtoms;
+
 namespace frontend {
 
 struct TokenPos {
@@ -593,7 +598,7 @@ class TokenStreamAnyChars
   : public TokenStreamShared
 {
   public:
-    TokenStreamAnyChars(JSContext* cx, const ReadOnlyCompileOptions& options,
+    TokenStreamAnyChars(JSContext* cx, const JS::ReadOnlyCompileOptions& options,
                         StrictModeGetter* smg);
 
     template<typename CharT, class AnyCharsAccess> friend class GeneralTokenStreamChars;
@@ -894,7 +899,7 @@ class TokenStreamAnyChars
 
   protected:
     // Options used for parsing/tokenizing.
-    const ReadOnlyCompileOptions& options_;
+    const JS::ReadOnlyCompileOptions& options_;
 
     Token               tokens[ntokens];    // circular token buffer
   private:
@@ -2322,7 +2327,7 @@ class MOZ_STACK_CLASS TokenStreamSpecific
     template<typename CharU> friend class TokenStreamPosition;
 
   public:
-    TokenStreamSpecific(JSContext* cx, const ReadOnlyCompileOptions& options,
+    TokenStreamSpecific(JSContext* cx, const JS::ReadOnlyCompileOptions& options,
                         const CharT* base, size_t length);
 
     /**
@@ -2695,7 +2700,7 @@ class MOZ_STACK_CLASS TokenStream final
     using CharT = char16_t;
 
   public:
-    TokenStream(JSContext* cx, const ReadOnlyCompileOptions& options,
+    TokenStream(JSContext* cx, const JS::ReadOnlyCompileOptions& options,
                 const CharT* base, size_t length, StrictModeGetter* smg)
     : TokenStreamAnyChars(cx, options, smg),
       TokenStreamSpecific<CharT, TokenStreamAnyCharsAccess>(cx, options, base, length)

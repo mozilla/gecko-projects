@@ -42,6 +42,7 @@ const SEC_ERROR_OCSP_INVALID_SIGNING_CERT          = SEC_ERROR_BASE + 144;
 const SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED  = SEC_ERROR_BASE + 176;
 const MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 5;
 const MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 6;
+const MOZILLA_PKIX_ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED = MOZILLA_PKIX_ERROR_BASE + 13;
 const MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT          = MOZILLA_PKIX_ERROR_BASE + 14;
 const MOZILLA_PKIX_ERROR_MITM_DETECTED             = MOZILLA_PKIX_ERROR_BASE + 15;
 
@@ -146,6 +147,11 @@ class NetErrorChild extends ActorChild {
         case MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT:
           msg1 += gPipNSSBundle.GetStringFromName("certErrorTrust_SelfSigned") + "\n";
           break;
+        // This error code currently only exists for the Symantec distrust, we may need to adjust
+        // it to fit other distrusts later.
+        case MOZILLA_PKIX_ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED:
+          msg1 += gPipNSSBundle.formatStringFromName("certErrorTrust_Symantec", [hostString], 1) + "\n";
+          break;
         default:
           msg1 += gPipNSSBundle.GetStringFromName("certErrorTrust_Untrusted") + "\n";
       }
@@ -162,7 +168,7 @@ class NetErrorChild extends ActorChild {
           if (newErrorPagesEnabled) {
             technicalInfo.textContent = "";
             let brandName = gBrandBundle.GetStringFromName("brandShortName");
-            msgPrefix = gPipNSSBundle.formatStringFromName("certErrorMismatchSinglePrefix1", [brandName, hostString], 2);
+            msgPrefix = gPipNSSBundle.formatStringFromName("certErrorMismatchSinglePrefix1", [brandName, hostString], 2) + " ";
             msgPrefix += gPipNSSBundle.GetStringFromName("certErrorMismatchSinglePrefix");
           } else {
             msgPrefix = gPipNSSBundle.GetStringFromName("certErrorMismatchSinglePrefix");
@@ -365,6 +371,26 @@ class NetErrorChild extends ActorChild {
         updateContainerPosition();
         break;
 
+      // This error code currently only exists for the Symantec distrust
+      // in Firefox 63, so we add copy explaining that to the user.
+      // In case of future distrusts of that scale we might need to add
+      // additional parameters that allow us to identify the affected party
+      // without replicating the complex logic from certverifier code.
+      case MOZILLA_PKIX_ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED:
+        let description = gPipNSSBundle.formatStringFromName(
+          "certErrorSymantecDistrustDescription", [doc.location.hostname], 1);
+        let descriptionContainer = doc.getElementById("errorShortDescText2");
+        descriptionContainer.textContent = description;
+
+        let adminDescription = doc.createElement("p");
+        adminDescription.textContent =
+          gPipNSSBundle.GetStringFromName("certErrorSymantecDistrustAdministrator");
+        descriptionContainer.append(adminDescription);
+
+        learnMoreLink.href = baseURL + "symantec-warning";
+
+        updateContainerPosition();
+        break;
       case MOZILLA_PKIX_ERROR_MITM_DETECTED:
       case MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT:
         learnMoreLink.href = baseURL + "security-error";
@@ -397,7 +423,7 @@ class NetErrorChild extends ActorChild {
             certRange.notBefore < approximateDate && certRange.notAfter > approximateDate) {
           clockSkew = true;
           let formatter = new Services.intl.DateTimeFormat(undefined, {
-            dateStyle: "short"
+            dateStyle: "short",
           });
           let systemDate = formatter.format(new Date());
           // negative difference means local time is behind server time
@@ -429,7 +455,7 @@ class NetErrorChild extends ActorChild {
           if (buildDate > systemDate && new Date(certRange.notAfter) > buildDate) {
             clockSkew = true;
             let formatter = new Services.intl.DateTimeFormat(undefined, {
-              dateStyle: "short"
+              dateStyle: "short",
             });
 
             doc.getElementById("wrongSystemTimeWithoutReference_URL")
@@ -624,7 +650,7 @@ class NetErrorChild extends ActorChild {
         changedCertPrefs: this.changedCertPrefs(),
         automatic,
         hideAddExceptionButton,
-      })
+      }),
     }));
 
     this.mm.sendAsyncMessage("Browser:SSLErrorReportTelemetry",
@@ -642,7 +668,7 @@ class NetErrorChild extends ActorChild {
 
   onSetAutomatic(evt) {
     this.mm.sendAsyncMessage("Browser:SetSSLErrorReportAuto", {
-      automatic: evt.detail
+      automatic: evt.detail,
     });
 
     // If we're enabling reports, send a report for this failure.

@@ -291,34 +291,23 @@ const clickOnTargetNode = async function(animationInspector, panel, index) {
  *
  * @param {DOMElement} panel
  *        #animation-container element.
- * @param {Number} mouseDownPosition
- *        rate on scrubber controller pane.
- *        This method calculates
- *        `mouseDownPosition * offsetWidth + offsetLeft of scrubber controller pane`
- *        as the clientX of MouseEvent.
- * @param {Number} mouseMovePosition
+ * @param {Number} mouseMovePixel
  *        Dispatch mousemove event with mouseMovePosition after mousedown.
- *        Calculation for clinetX is same to above.
  * @param {Number} mouseYPixel
  *        Y of mouse in pixel.
  */
 const dragOnCurrentTimeScrubber = async function(animationInspector,
                                                  panel,
-                                                 mouseDownPosition,
-                                                 mouseMovePosition,
+                                                 mouseMovePixel,
                                                  mouseYPixel) {
   const controllerEl = panel.querySelector(".current-time-scrubber");
-  const bounds = controllerEl.getBoundingClientRect();
-  const mousedonwX = bounds.width * mouseDownPosition;
-  const mousemoveX = bounds.width * mouseMovePosition;
-
-  info(`Drag on scrubber from ${ mousedonwX } to ${ mousemoveX }`);
-  EventUtils.synthesizeMouse(controllerEl, mousedonwX, mouseYPixel,
+  info(`Drag scrubber to X ${ mouseMovePixel }`);
+  EventUtils.synthesizeMouse(controllerEl, 0, mouseYPixel,
                              { type: "mousedown" }, controllerEl.ownerGlobal);
   await waitForSummaryAndDetail(animationInspector);
-  EventUtils.synthesizeMouse(controllerEl, mousemoveX, mouseYPixel,
+  EventUtils.synthesizeMouse(controllerEl, mouseMovePixel, mouseYPixel,
                              { type: "mousemove" }, controllerEl.ownerGlobal);
-  EventUtils.synthesizeMouse(controllerEl, mousemoveX, mouseYPixel,
+  EventUtils.synthesizeMouse(controllerEl, mouseMovePixel, mouseYPixel,
                              { type: "mouseup" }, controllerEl.ownerGlobal);
   await waitForSummaryAndDetail(animationInspector);
 };
@@ -452,12 +441,11 @@ const selectNodeAndWaitForAnimations = async function(data, inspector, reason = 
  * Send keyboard event of space to given panel.
  *
  * @param {AnimationInspector} animationInspector
- * @param {DOMElement} panel
- *        #animation-container element.
+ * @param {DOMElement} target element.
  */
-const sendSpaceKeyEvent = async function(animationInspector, panel) {
-  panel.focus();
-  EventUtils.sendKey("SPACE", panel.ownerGlobal);
+const sendSpaceKeyEvent = async function(animationInspector, element) {
+  element.focus();
+  EventUtils.sendKey("SPACE", element.ownerGlobal);
   await waitForSummaryAndDetail(animationInspector);
 };
 
@@ -644,22 +632,18 @@ function assertAnimationsCurrentTime(animationInspector, time) {
  * Check whether the animations are pausing.
  *
  * @param {AnimationInspector} animationInspector
- * @param {DOMElement} panel
- *        #animation-container element.
  */
-function assertAnimationsPausing(animationInspector, panel) {
-  assertAnimationsPausingOrRunning(animationInspector, panel, true);
+function assertAnimationsPausing(animationInspector) {
+  assertAnimationsPausingOrRunning(animationInspector, true);
 }
 
 /**
  * Check whether the animations are pausing/running.
  *
  * @param {AnimationInspector} animationInspector
- * @param {DOMElement} panel
- *        #animation-container element.
  * @param {boolean} shouldPause
  */
-function assertAnimationsPausingOrRunning(animationInspector, panel, shouldPause) {
+function assertAnimationsPausingOrRunning(animationInspector, shouldPause) {
   const hasRunningAnimation =
     animationInspector.state.animations.some(({state}) => state.playState === "running");
 
@@ -674,11 +658,9 @@ function assertAnimationsPausingOrRunning(animationInspector, panel, shouldPause
  * Check whether the animations are running.
  *
  * @param {AnimationInspector} animationInspector
- * @param {DOMElement} panel
- *        #animation-container element.
  */
-function assertAnimationsRunning(animationInspector, panel) {
-  assertAnimationsPausingOrRunning(animationInspector, panel, false);
+function assertAnimationsRunning(animationInspector) {
+  assertAnimationsPausingOrRunning(animationInspector, false);
 }
 
 /**

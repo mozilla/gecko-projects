@@ -1862,6 +1862,9 @@ static nsresult LaunchChild(nsINativeAppSupport* aNative,
   }
 
   SaveToEnv("MOZ_LAUNCHED_CHILD=1");
+#if defined(MOZ_LAUNCHER_PROCESS)
+  SaveToEnv("MOZ_LAUNCHER_PROCESS=1");
+#endif // defined(MOZ_LAUNCHER_PROCESS)
 
 #if !defined(MOZ_WIDGET_ANDROID) // Android has separate restart code.
 #if defined(XP_MACOSX)
@@ -4668,7 +4671,6 @@ XREMain::XRE_mainRun()
   SaveToEnv("XRE_PROFILE_LOCAL_PATH=");
   SaveToEnv("XRE_PROFILE_NAME=");
   SaveToEnv("XRE_START_OFFLINE=");
-  SaveToEnv("NO_EM_RESTART=");
   SaveToEnv("XUL_APP_FILE=");
   SaveToEnv("XRE_BINARY_PATH=");
 

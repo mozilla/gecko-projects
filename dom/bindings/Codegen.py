@@ -3498,7 +3498,7 @@ def CreateBindingJSObject(descriptor, properties):
         if descriptor.interface.getExtendedAttribute('OverrideBuiltins'):
             create = dedent(
                 """
-                MOZ_ASSERT(aObject->mExpandoAndGeneration.expando.isUndefined());
+                aObject->mExpandoAndGeneration.expando.setUndefined();
                 JS::Rooted<JS::Value> expandoValue(aCx, JS::PrivateValue(&aObject->mExpandoAndGeneration));
                 creator.CreateProxyObject(aCx, &sClass.mBase, DOMProxyHandler::getInstance(),
                                           proto, aObject, expandoValue, aReflector);
@@ -7580,9 +7580,15 @@ class CGPerSignatureCall(CGThing):
         elif needScopeObject(returnType, arguments, self.extendedAttributes,
                              descriptor.wrapperCache, True,
                              idlNode.getExtendedAttribute("StoreInSlot")):
-            needsUnwrap = True
-            needsUnwrappedVar = True
-            argsPre.append("unwrappedObj ? *unwrappedObj : obj")
+            # The scope object should always be from the relevant
+            # global.  Make sure to unwrap it as needed.
+            cgThings.append(CGGeneric(dedent(
+                """
+                JS::Rooted<JSObject*> unwrappedObj(cx, js::CheckedUnwrap(obj));
+                // Caller should have ensured that "obj" can be unwrapped already.
+                MOZ_DIAGNOSTIC_ASSERT(unwrappedObj);
+                """)))
+            argsPre.append("unwrappedObj")
 
         if needsUnwrap and needsUnwrappedVar:
             # We cannot assign into obj because it's a Handle, not a

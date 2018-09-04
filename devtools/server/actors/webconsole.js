@@ -18,6 +18,7 @@ const { LongStringActor } = require("devtools/server/actors/object/long-string")
 const { createValueGrip, stringIsLong } = require("devtools/server/actors/object/utils");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const ErrorDocs = require("devtools/server/actors/errordocs");
+const { evalWithDebugger } = require("devtools/server/actors/webconsole/eval-with-debugger");
 
 loader.lazyRequireGetter(this, "NetworkMonitorActor", "devtools/server/actors/network-monitor", true);
 loader.lazyRequireGetter(this, "ConsoleProgressListener", "devtools/server/actors/webconsole/listeners/console-progress", true);
@@ -32,8 +33,6 @@ loader.lazyRequireGetter(this, "CONSOLE_WORKER_IDS", "devtools/server/actors/web
 loader.lazyRequireGetter(this, "WebConsoleUtils", "devtools/server/actors/webconsole/utils", true);
 loader.lazyRequireGetter(this, "EnvironmentActor", "devtools/server/actors/environment", true);
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
-+loader.lazyRequireGetter(this, "evalWithDebugger",
-                          "devtools/server/actors/webconsole/eval-with-debugger", true);
 
 // Overwrite implemented listeners for workers so that we don't attempt
 // to load an unsupported module.
@@ -423,11 +422,9 @@ WebConsoleActor.prototype =
    */
   makeDebuggeeValue: function(value, useObjectGlobal) {
     if (this.dbg.replaying) {
-      if (typeof value == "object") {
-        throw new Error("Object makeDebuggeeValue not supported with replaying debugger");
-      } else {
-        return value;
-      }
+      // If we are replaying then any values we are operating on should already
+      // be debuggee values.
+      return value;
     }
     if (useObjectGlobal && isObject(value)) {
       try {
@@ -1176,7 +1173,7 @@ WebConsoleActor.prototype =
         this.dbg.removeDebuggee(this.evalWindow);
       }
 
-      matches = result.matches || [];
+      matches = result.matches || new Set();
       matchProp = result.matchProp;
 
       // We consider '$' as alphanumeric because it is used in the names of some
@@ -1184,18 +1181,26 @@ WebConsoleActor.prototype =
       // be seen as break in the evaled string.
       const lastNonAlphaIsDot = /[.][a-zA-Z0-9$\s]*$/.test(reqText);
       if (!lastNonAlphaIsDot) {
-        matches = matches.concat(this._getWebConsoleCommandsCache().filter(n =>
-          // filter out `screenshot` command as it is inaccessible without
-          // the `:` prefix
-          n !== "screenshot" && n.startsWith(result.matchProp)
-        ));
+        this._getWebConsoleCommandsCache().forEach(n => {
+          // filter out `screenshot` command as it is inaccessible without the `:` prefix
+          if (n !== "screenshot" && n.startsWith(result.matchProp)) {
+            matches.add(n);
+          }
+        });
       }
-    }
 
-    // Make sure we return an array with unique items, since `matches` can hold twice
-    // the same function name if it was defined in the content page and match an helper
-    // function (e.g. $, keys, …).
-    matches = [...new Set(matches)].sort();
+      // Sort the results in order to display lowercased item first (e.g. we want to
+      // display `document` then `Document` as we loosely match the user input if the
+      // first letter they typed was lowercase).
+      matches = Array.from(matches).sort((a, b) => {
+        const lA = a[0].toLocaleLowerCase() === a[0];
+        const lB = b[0].toLocaleLowerCase() === b[0];
+        if (lA === lB) {
+          return a < b ? -1 : 1;
+        }
+        return lA ? -1 : 1;
+      });
+    }
 
     return {
       from: this.actorID,
@@ -1508,14 +1513,15 @@ WebConsoleActor.prototype =
         // if we received the responses from all the message managers.
         if (data.content || messagesReceived == this.netmonitors.length) {
           for (const { messageManager } of this.netmonitors) {
-            messageManager.removeMessageListener("debug:request-content", onMessage);
+            messageManager.removeMessageListener("debug:request-content:response",
+              onMessage);
           }
           resolve(data.content);
         }
       };
       for (const { messageManager } of this.netmonitors) {
-        messageManager.addMessageListener("debug:request-content", onMessage);
-        messageManager.sendAsyncMessage("debug:request-content", { url });
+        messageManager.addMessageListener("debug:request-content:response", onMessage);
+        messageManager.sendAsyncMessage("debug:request-content:request", { url });
       }
     });
   },
@@ -1575,15 +1581,17 @@ WebConsoleActor.prototype =
     return new Promise(resolve => {
       const onMessage = ({ data }) => {
         if (data.channelId == channelId) {
-          messageManager.removeMessageListener("debug:get-network-event-actor",
+          messageManager.removeMessageListener("debug:get-network-event-actor:response",
             onMessage);
           resolve({
             eventActor: data.actor
           });
         }
       };
-      messageManager.addMessageListener("debug:get-network-event-actor", onMessage);
-      messageManager.sendAsyncMessage("debug:get-network-event-actor", { channelId });
+      messageManager.addMessageListener("debug:get-network-event-actor:response",
+        onMessage);
+      messageManager.sendAsyncMessage("debug:get-network-event-actor:request",
+        { channelId });
     });
   },
 

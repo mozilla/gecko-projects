@@ -18,6 +18,8 @@
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/DeclarationBlock.h"
+#include "js/CompilationAndEvaluation.h"
+#include "js/SourceBufferHolder.h"
 #include "nsFocusManager.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsNameSpaceManager.h"
@@ -866,10 +868,8 @@ nsXULElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
                 } else if (aName == nsGkAtoms::lwtheme ||
                          aName == nsGkAtoms::lwthemetextcolor) {
                     // if the lwtheme changed, make sure to reset the document lwtheme cache
-                    if (document->IsXULDocument()) {
-                        document->AsXULDocument()->ResetDocumentLWTheme();
-                        UpdateBrightTitlebarForeground(document);
-                    }
+                    document->ResetDocumentLWTheme();
+                    UpdateBrightTitlebarForeground(document);
                 } else if (aName == nsGkAtoms::brighttitlebarforeground) {
                     UpdateBrightTitlebarForeground(document);
                 }
@@ -893,10 +893,8 @@ nsXULElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
                 } else if ((aName == nsGkAtoms::lwtheme ||
                             aName == nsGkAtoms::lwthemetextcolor)) {
                     // if the lwtheme changed, make sure to restyle appropriately
-                    if (doc->IsXULDocument()) {
-                        doc->AsXULDocument()->ResetDocumentLWTheme();
-                        UpdateBrightTitlebarForeground(doc);
-                    }
+                    doc->ResetDocumentLWTheme();
+                    UpdateBrightTitlebarForeground(doc);
                 } else if (aName == nsGkAtoms::brighttitlebarforeground) {
                     UpdateBrightTitlebarForeground(doc);
                 } else if (aName == nsGkAtoms::drawintitlebar) {
