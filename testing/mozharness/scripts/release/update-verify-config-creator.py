@@ -347,6 +347,7 @@ class UpdateVerifyConfigCreator(BaseScript):
             to_build_id=self.config["to_buildid"],
             to_app_version=self.config["to_app_version"],
             to_display_version=to_display_version,
+            cert_replacements="release_primary.der dep1.der",
         )
 
         to_shipped_locales_url = urljoin(
