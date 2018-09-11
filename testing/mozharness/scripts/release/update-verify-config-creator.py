@@ -89,6 +89,11 @@ class UpdateVerifyConfigCreator(BaseScript):
             "dest": "to_revision",
             "help": "The revision that the release being updated to was built against",
         }],
+        [["--override-certs"], {
+            "dest": "override_certs",
+            "help": "Certs to override the updater with prior to running update verify."
+                    "Should be one of: dep, nightly, release"
+        }],
         [["--partial-version"], {
             "dest": "partial_versions",
             "default": [],
@@ -347,7 +352,7 @@ class UpdateVerifyConfigCreator(BaseScript):
             to_build_id=self.config["to_buildid"],
             to_app_version=self.config["to_app_version"],
             to_display_version=to_display_version,
-            cert_replacements="release_primary.der dep1.der",
+            override_certs=self.config["override_certs"],
         )
 
         to_shipped_locales_url = urljoin(

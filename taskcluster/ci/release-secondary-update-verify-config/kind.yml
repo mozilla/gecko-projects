@@ -42,6 +42,13 @@ job-defaults:
          by-project:
             birch: "https://aus4.stage.mozaws.net"
             default: "https://aus5.mozilla.org"
+      override-certs:
+         by-project:
+            birch: dep
+            jamun: dep
+            maple: dep
+            try: dep
+            default: null
       include-version:
          by-project:
             birch: beta

@@ -1,8 +1,9 @@
+from __future__ import absolute_import
+
 import os
 import re
 
 from .chunking import getChunk
-
 
 class UpdateVerifyError(Exception):
     pass

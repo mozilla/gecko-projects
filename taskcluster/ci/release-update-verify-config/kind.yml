@@ -46,6 +46,13 @@ job-defaults:
             jamun: "https://aus4.stage.mozaws.net"
             maple: "https://aus4.stage.mozaws.net"
             default: "https://aus5.mozilla.org"
+      override-certs:
+         by-project:
+            birch: dep
+            jamun: dep
+            maple: dep
+            try: dep
+            default: null
       # This is overridden for devedition to exclude 58.0b1
       # because of the special case added by
       # https://bugzilla.mozilla.org/show_bug.cgi?id=1419189
