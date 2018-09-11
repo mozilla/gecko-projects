@@ -1,6 +1,7 @@
 import os
 import re
-from util.algorithms import getChunk
+
+from .chunking import getChunk
 
 
 class UpdateVerifyError(Exception):
@@ -12,21 +13,21 @@ class UpdateVerifyConfig(object):
     key_write_order = ("release", "product", "platform", "build_id", "locales",
                        "channel", "patch_types", "from", "aus_server",
                        "ftp_server_from", "ftp_server_to", "to",
-                       "mar_channel_IDs", "to_build_id", "to_display_version",
-                       "to_app_version", "updater_package", "cert_replacements")
+                       "mar_channel_IDs", "override_certs", "to_build_id",
+                       "to_display_version", "to_app_version", "updater_package")
     global_keys = ("product", "channel", "aus_server", "to", "to_build_id",
-                   "to_display_version", "to_app_version", "cert_replacements")
+                   "to_display_version", "to_app_version", "override_certs")
     release_keys = ("release", "build_id", "locales", "patch_types", "from",
                     "ftp_server_from", "ftp_server_to", "mar_channel_IDs",
                     "platform", "updater_package")
     first_only_keys = ("from", "aus_server", "to", "to_build_id",
-                       "to_display_version", "to_app_version", "cert_replacements")
+                       "to_display_version", "to_app_version", "override_certs")
     compare_attrs = global_keys + ("releases",)
 
     def __init__(self, product=None, channel=None,
                  aus_server=None, to=None, to_build_id=None,
                  to_display_version=None, to_app_version=None,
-                 cert_replacements=None):
+                 override_certs=None):
         self.product = product
         self.channel = channel
         self.aus_server = aus_server
@@ -34,7 +35,7 @@ class UpdateVerifyConfig(object):
         self.to_build_id = to_build_id
         self.to_display_version = to_display_version
         self.to_app_version = to_app_version
-        self.cert_replacements = cert_replacements
+        self.override_certs = override_certs
         self.releases = []
 
     def __eq__(self, other):
@@ -170,7 +171,7 @@ class UpdateVerifyConfig(object):
                                        self.to_build_id,
                                        self.to_display_version,
                                        self.to_app_version,
-                                       self.cert_replacements)
+                                       self.override_certs)
         for t in allTests:
             build_id, locale, from_path = t
             if from_path == "None":
