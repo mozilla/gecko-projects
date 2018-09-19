@@ -16,6 +16,7 @@
 #include "mozilla/ComputedStyle.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/ToString.h"
 #include "mozilla/UniquePtr.h"
 
 #include "nsCOMPtr.h"
@@ -285,6 +286,12 @@ RecordReflowStatus(bool aChildIsBlock, const nsReflowStatus& aFrameReflowStatus)
 }
 #endif
 
+static nscoord
+ResolveTextIndent(const nsStyleCoord& aStyle, nscoord aPercentageBasis)
+{
+  return nsLayoutUtils::ResolveToLength<false>(aStyle, aPercentageBasis);
+}
+
 NS_DECLARE_FRAME_PROPERTY_WITH_DTOR_NEVER_CALLED(OverflowLinesProperty,
                                                  nsBlockFrame::FrameLines)
 NS_DECLARE_FRAME_PROPERTY_FRAMELIST(OverflowOutOfFlowsProperty)
@@ -314,6 +321,26 @@ NS_IMPL_FRAMEARENA_HELPERS(nsBlockFrame)
 
 nsBlockFrame::~nsBlockFrame()
 {
+}
+
+void
+nsBlockFrame::AddSizeOfExcludingThisForTree(nsWindowSizes& aWindowSizes) const
+{
+  nsContainerFrame::AddSizeOfExcludingThisForTree(aWindowSizes);
+
+  // Add the size of any nsLineBox::mFrames hashtables we might have:
+  for (ConstLineIterator line = LinesBegin(), line_end = LinesEnd();
+       line != line_end; ++line) {
+    line->AddSizeOfExcludingThis(aWindowSizes);
+  }
+  const FrameLines* overflowLines = GetOverflowLines();
+  if (overflowLines) {
+    ConstLineIterator line = overflowLines->mLines.begin(),
+                      line_end = overflowLines->mLines.end();
+    for (; line != line_end; ++line) {
+      line->AddSizeOfExcludingThis(aWindowSizes);
+    }
+  }
 }
 
 void
@@ -489,6 +516,10 @@ nsBlockFrame::GetNaturalBaselineBOffset(mozilla::WritingMode aWM,
     return nsLayoutUtils::GetFirstLineBaseline(aWM, this, aBaseline);
   }
 
+  if (StyleDisplay()->IsContainSize()) {
+    return false;
+  }
+
   for (ConstReverseLineIterator line = LinesRBegin(), line_end = LinesREnd();
        line != line_end; ++line) {
     if (line->IsBlock()) {
@@ -602,25 +633,79 @@ nsBlockFrame::IsFloatContainingBlock() const
 }
 
 static void
-ReparentFrame(nsIFrame* aFrame, nsContainerFrame* aOldParent,
-              nsContainerFrame* aNewParent)
+ReparentFrameInternal(nsIFrame* aFrame, nsContainerFrame* aOldParent,
+                      nsContainerFrame* aNewParent, bool aMarkDirty)
 {
   NS_ASSERTION(aOldParent == aFrame->GetParent(),
                "Parent not consistent with expectations");
 
   aFrame->SetParent(aNewParent);
+  if (aMarkDirty) {
+    aFrame->AddStateBits(NS_FRAME_IS_DIRTY);
+  }
 
   // When pushing and pulling frames we need to check for whether any
   // views need to be reparented
   nsContainerFrame::ReparentFrameView(aFrame, aOldParent, aNewParent);
 }
 
+static bool
+ShouldMarkReparentedFramesDirty(
+#ifdef DEBUG
+                         nsContainerFrame* aOldParent,
+#endif
+                         nsIFrame* aNewParent,
+                         ReparentingDirection aDirection)
+{
+#ifdef DEBUG
+  MOZ_ASSERT(aOldParent->FirstInFlow() == aNewParent->FirstInFlow(),
+             "Reparenting should be between continuations of the same frame");
+  if (aDirection != ReparentingDirection::Variable &&
+      aOldParent->FirstInFlow() == aNewParent->FirstInFlow()) {
+    auto IndexInFlow =
+      [](const nsIFrame* f) {
+        int i = 0; while ((f = f->GetPrevInFlow())) { ++i; } return i;
+      };
+    MOZ_ASSERT((IndexInFlow(aOldParent) < IndexInFlow(aNewParent)) ==
+               (aDirection == ReparentingDirection::Forwards),
+               "Parents not in expected order");
+  }
+#endif
+  // Frames going forward must have already been reflowed, or at least marked
+  // dirty. Otherwise frames going backwards (or direction is unknown) may not
+  // be marked dirty yet.
+  return (aDirection != ReparentingDirection::Forwards) &&
+         (aNewParent->GetStateBits() & NS_FRAME_IS_DIRTY);
+}
+
+// Because a frame with NS_FRAME_IS_DIRTY marks all of its children dirty at
+// the start of its reflow, when we move a frame from a later frame backwards to
+// an earlier frame, and the earlier frame has NS_FRAME_IS_DIRTY (though that
+// should corresponded with the later frame having NS_FRAME_IS_DIRTY), we need
+// to add NS_FRAME_IS_DIRTY to the reparented frame.
+static void
+ReparentFrame(nsIFrame* aFrame, nsContainerFrame* aOldParent,
+              nsContainerFrame* aNewParent, ReparentingDirection aDirection)
+{
+  const bool markDirty = ShouldMarkReparentedFramesDirty(
+#ifdef DEBUG
+                                                         aOldParent,
+#endif
+                                                         aNewParent, aDirection);
+  ReparentFrameInternal(aFrame, aOldParent, aNewParent, markDirty);
+}
+
 static void
 ReparentFrames(nsFrameList& aFrameList, nsContainerFrame* aOldParent,
-               nsContainerFrame* aNewParent)
+               nsContainerFrame* aNewParent, ReparentingDirection aDirection)
 {
+  const bool markDirty = ShouldMarkReparentedFramesDirty(
+#ifdef DEBUG
+                                                         aOldParent,
+#endif
+                                                         aNewParent, aDirection);
   for (nsFrameList::Enumerator e(aFrameList); !e.AtEnd(); e.Next()) {
-    ReparentFrame(e.get(), aOldParent, aNewParent);
+    ReparentFrameInternal(e.get(), aOldParent, aNewParent, markDirty);
   }
 }
 
@@ -694,12 +779,17 @@ nsBlockFrame::GetMinISize(gfxContext *aRenderingContext)
   if (firstInFlow != this)
     return firstInFlow->GetMinISize(aRenderingContext);
 
-  DISPLAY_MIN_WIDTH(this, mMinWidth);
+  DISPLAY_MIN_INLINE_SIZE(this, mMinWidth);
 
   CheckIntrinsicCacheAgainstShrinkWrapState();
 
   if (mMinWidth != NS_INTRINSIC_WIDTH_UNKNOWN)
     return mMinWidth;
+
+  if (StyleDisplay()->IsContainSize()) {
+    mMinWidth = 0;
+    return mMinWidth;
+  }
 
 #ifdef DEBUG
   if (gNoisyIntrinsic) {
@@ -743,15 +833,8 @@ nsBlockFrame::GetMinISize(gfxContext *aRenderingContext)
       } else {
         if (!curFrame->GetPrevContinuation() &&
             line == curFrame->LinesBegin()) {
-          // Only add text-indent if it has no percentages; using a
-          // percentage basis of 0 unconditionally would give strange
-          // behavior for calc(10%-3px).
-          const nsStyleCoord &indent = StyleText()->mTextIndent;
-          if (indent.ConvertsToLength())
-            data.mCurrentLine += indent.ComputeCoordPercentCalc(0);
+          data.mCurrentLine += ::ResolveTextIndent(StyleText()->mTextIndent, 0);
         }
-        // XXX Bug NNNNNN Should probably handle percentage text-indent.
-
         data.mLine = &line;
         data.SetLineContainer(curFrame);
         nsIFrame *kid = line->mFirstChild;
@@ -782,12 +865,17 @@ nsBlockFrame::GetPrefISize(gfxContext *aRenderingContext)
   if (firstInFlow != this)
     return firstInFlow->GetPrefISize(aRenderingContext);
 
-  DISPLAY_PREF_WIDTH(this, mPrefWidth);
+  DISPLAY_PREF_INLINE_SIZE(this, mPrefWidth);
 
   CheckIntrinsicCacheAgainstShrinkWrapState();
 
   if (mPrefWidth != NS_INTRINSIC_WIDTH_UNKNOWN)
     return mPrefWidth;
+
+  if (StyleDisplay()->IsContainSize()) {
+    mPrefWidth = 0;
+    return mPrefWidth;
+  }
 
 #ifdef DEBUG
   if (gNoisyIntrinsic) {
@@ -828,8 +916,7 @@ nsBlockFrame::GetPrefISize(gfxContext *aRenderingContext)
         if (!data.mLineIsEmpty || BlockCanIntersectFloats(line->mFirstChild)) {
           breakType = StyleClear::Both;
         } else {
-          breakType = line->mFirstChild->
-            StyleDisplay()->PhysicalBreakType(data.mLineContainerWM);
+          breakType = line->mFirstChild->StyleDisplay()->mBreakType;
         }
         data.ForceBreak(breakType);
         data.mCurrentLine = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
@@ -838,20 +925,13 @@ nsBlockFrame::GetPrefISize(gfxContext *aRenderingContext)
       } else {
         if (!curFrame->GetPrevContinuation() &&
             line == curFrame->LinesBegin()) {
-          // Only add text-indent if it has no percentages; using a
-          // percentage basis of 0 unconditionally would give strange
-          // behavior for calc(10%-3px).
-          const nsStyleCoord &indent = StyleText()->mTextIndent;
-          if (indent.ConvertsToLength()) {
-            nscoord length = indent.ToLength();
-            if (length != 0) {
-              data.mCurrentLine += length;
-              data.mLineIsEmpty = false;
-            }
+          nscoord indent = ::ResolveTextIndent(StyleText()->mTextIndent, 0);
+          data.mCurrentLine += indent;
+          // XXXmats should the test below be indent > 0?
+          if (indent != nscoord(0)) {
+            data.mLineIsEmpty = false;
           }
         }
-        // XXX Bug NNNNNN Should probably handle percentage text-indent.
-
         data.mLine = &line;
         data.SetLineContainer(curFrame);
         nsIFrame *kid = line->mFirstChild;
@@ -916,16 +996,8 @@ nsBlockFrame::GetPrefWidthTightBounds(gfxContext* aRenderingContext,
       } else {
         if (!curFrame->GetPrevContinuation() &&
             line == curFrame->LinesBegin()) {
-          // Only add text-indent if it has no percentages; using a
-          // percentage basis of 0 unconditionally would give strange
-          // behavior for calc(10%-3px).
-          const nsStyleCoord &indent = StyleText()->mTextIndent;
-          if (indent.ConvertsToLength()) {
-            data.mCurrentLine += indent.ComputeCoordPercentCalc(0);
-          }
+          data.mCurrentLine += ::ResolveTextIndent(StyleText()->mTextIndent, 0);
         }
-        // XXX Bug NNNNNN Should probably handle percentage text-indent.
-
         data.mLine = &line;
         data.SetLineContainer(curFrame);
         nsIFrame *kid = line->mFirstChild;
@@ -1623,6 +1695,17 @@ nsBlockFrame::ComputeFinalSize(const ReflowInput& aReflowInput,
     // Don't carry out a block-end margin when our BSize is fixed.
     aMetrics.mCarriedOutBEndMargin.Zero();
   }
+  else if (aReflowInput.mStyleDisplay->IsContainSize()) {
+    // If we're size-containing and we don't have a specified size, then our
+    // final size should actually be computed from only our border and padding,
+    // as though we were empty.
+    // Hence this case is a simplified version of the case below.
+    nscoord contentBSize = 0;
+    nscoord autoBSize = aReflowInput.ApplyMinMaxBSize(contentBSize);
+    aMetrics.mCarriedOutBEndMargin.Zero();
+    autoBSize += borderPadding.BStartEnd(wm);
+    finalSize.BSize(wm) = autoBSize;
+  }
   else if (aState.mReflowStatus.IsComplete()) {
     nscoord contentBSize = blockEndEdgeOfChildren - borderPadding.BStart(wm);
     nscoord autoBSize = aReflowInput.ApplyMinMaxBSize(contentBSize);
@@ -1712,7 +1795,8 @@ nsBlockFrame::ComputeFinalSize(const ReflowInput& aReflowInput,
 static void
 ConsiderBlockEndEdgeOfChildren(const WritingMode aWritingMode,
                                nscoord aBEndEdgeOfChildren,
-                               nsOverflowAreas& aOverflowAreas)
+                               nsOverflowAreas& aOverflowAreas,
+                               const nsStyleDisplay* aDisplay)
 {
   // Factor in the block-end edge of the children.  Child frames will be added
   // to the overflow area as we iterate through the lines, but their margins
@@ -1726,21 +1810,31 @@ ConsiderBlockEndEdgeOfChildren(const WritingMode aWritingMode,
   if (aWritingMode.IsVertical()) {
     if (aWritingMode.IsVerticalLR()) {
       NS_FOR_FRAME_OVERFLOW_TYPES(otype) {
-        nsRect& o = aOverflowAreas.Overflow(otype);
-        o.width = std::max(o.XMost(), aBEndEdgeOfChildren) - o.x;
+        if (!(aDisplay->IsContainLayout() && otype == eScrollableOverflow)) {
+          // Layout containment should force all overflow to be ink (visual)
+          // overflow, so if we're layout-contained, we only add our children's
+          // block-end edge to the ink (visual) overflow -- not to the
+          // scrollable overflow.
+          nsRect& o = aOverflowAreas.Overflow(otype);
+          o.width = std::max(o.XMost(), aBEndEdgeOfChildren) - o.x;
+        }
       }
     } else {
       NS_FOR_FRAME_OVERFLOW_TYPES(otype) {
-        nsRect& o = aOverflowAreas.Overflow(otype);
-        nscoord xmost = o.XMost();
-        o.x = std::min(o.x, xmost - aBEndEdgeOfChildren);
-        o.width = xmost - o.x;
+        if (!(aDisplay->IsContainLayout() && otype == eScrollableOverflow)) {
+          nsRect& o = aOverflowAreas.Overflow(otype);
+          nscoord xmost = o.XMost();
+          o.x = std::min(o.x, xmost - aBEndEdgeOfChildren);
+          o.width = xmost - o.x;
+        }
       }
     }
   } else {
     NS_FOR_FRAME_OVERFLOW_TYPES(otype) {
-      nsRect& o = aOverflowAreas.Overflow(otype);
-      o.height = std::max(o.YMost(), aBEndEdgeOfChildren) - o.y;
+      if (!(aDisplay->IsContainLayout() && otype == eScrollableOverflow)) {
+        nsRect& o = aOverflowAreas.Overflow(otype);
+        o.height = std::max(o.YMost(), aBEndEdgeOfChildren) - o.y;
+      }
     }
   }
 }
@@ -1759,7 +1853,21 @@ nsBlockFrame::ComputeOverflowAreas(const nsRect&         aBounds,
     for (LineIterator line = LinesBegin(), line_end = LinesEnd();
          line != line_end;
          ++line) {
-      areas.UnionWith(line->GetOverflowAreas());
+      if (aDisplay->IsContainLayout()) {
+        // If we have layout containment, we should only consider our child's
+        // visual overflow, leaving the scrollable regions of the parent
+        // unaffected.
+        // Note: scrollable overflow is a subset of visual overflow,
+        // so this has the same affect as unioning the child's visual and
+        // scrollable overflow with its parent's visual overflow.
+        nsRect childVisualRect = line->GetVisualOverflowArea();
+        nsOverflowAreas childVisualArea = nsOverflowAreas(
+          childVisualRect,
+          nsRect());
+        areas.UnionWith(childVisualArea);
+      } else {
+        areas.UnionWith(line->GetOverflowAreas());
+      }
     }
 
     // Factor an outside bullet in; normally the bullet will be factored into
@@ -1773,7 +1881,7 @@ nsBlockFrame::ComputeOverflowAreas(const nsRect&         aBounds,
     }
 
     ConsiderBlockEndEdgeOfChildren(GetWritingMode(),
-                                   aBEndEdgeOfChildren, areas);
+                                   aBEndEdgeOfChildren, areas, aDisplay);
   }
 
 #ifdef NOISY_COMBINED_AREA
@@ -1831,7 +1939,8 @@ nsBlockFrame::ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas)
     GetProperty(BlockEndEdgeOfChildrenProperty(), &found);
   if (found) {
     ConsiderBlockEndEdgeOfChildren(GetWritingMode(),
-                                   blockEndEdgeOfChildren, aOverflowAreas);
+                                   blockEndEdgeOfChildren, aOverflowAreas,
+                                   StyleDisplay());
   }
 
   // Line cursor invariants depend on the overflow areas of the lines, so
@@ -2099,14 +2208,16 @@ static bool LineHasClear(nsLineBox* aLine) {
  */
 void
 nsBlockFrame::ReparentFloats(nsIFrame* aFirstFrame, nsBlockFrame* aOldParent,
-                             bool aReparentSiblings) {
+                             bool aReparentSiblings,
+                             ReparentingDirection aDirection)
+{
   nsFrameList list;
   aOldParent->CollectFloats(aFirstFrame, list, aReparentSiblings);
   if (list.NotEmpty()) {
     for (nsIFrame* f : list) {
       MOZ_ASSERT(!(f->GetStateBits() & NS_FRAME_IS_PUSHED_FLOAT),
                  "CollectFloats should've removed that bit");
-      ReparentFrame(f, aOldParent, this);
+      ReparentFrame(f, aOldParent, this, aDirection);
     }
     mFloats.AppendFrames(nullptr, list);
   }
@@ -2603,7 +2714,8 @@ nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState)
       if (pulledLine == nextInFlow->GetLineCursor()) {
         nextInFlow->ClearLineCursor();
       }
-      ReparentFrames(pulledFrames, nextInFlow, this);
+      ReparentFrames(pulledFrames, nextInFlow, this,
+                     ReparentingDirection::Backwards);
 
       NS_ASSERTION(pulledFrames.LastChild() == pulledLine->LastChild(),
                    "Unexpected last frame");
@@ -2619,7 +2731,8 @@ nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState)
       aState.mPrevChild = mFrames.LastChild();
 
       // Reparent floats whose placeholders are in the line.
-      ReparentFloats(pulledLine->mFirstChild, nextInFlow, true);
+      ReparentFloats(pulledLine->mFirstChild, nextInFlow, true,
+                     ReparentingDirection::Backwards);
 
       DumpLine(aState, pulledLine, deltaBCoord, 0);
 #ifdef DEBUG
@@ -2898,12 +3011,13 @@ nsBlockFrame::PullFrameFrom(nsLineBox*           aLine,
 
     // When pushing and pulling frames we need to check for whether any
     // views need to be reparented.
-    ReparentFrame(frame, aFromContainer, this);
+    ReparentFrame(frame, aFromContainer, this, ReparentingDirection::Backwards);
     mFrames.AppendFrame(nullptr, frame);
 
     // The frame might have (or contain) floats that need to be brought
     // over too. (pass 'false' since there are no siblings to check)
-    ReparentFloats(frame, aFromContainer, false);
+    ReparentFloats(frame, aFromContainer, false,
+                   ReparentingDirection::Backwards);
   } else {
     MOZ_ASSERT(aLine == aFromLine.prev());
   }
@@ -3201,8 +3315,7 @@ nsBlockFrame::ReflowBlockFrame(BlockReflowInput& aState,
   // Prepare the block reflow engine
   nsBlockReflowContext brc(aState.mPresContext, aState.mReflowInput);
 
-  StyleClear breakType = frame->StyleDisplay()->
-    PhysicalBreakType(aState.mReflowInput.GetWritingMode());
+  StyleClear breakType = frame->StyleDisplay()->mBreakType;
   if (StyleClear::None != aState.mFloatBreakType) {
     breakType = nsLayoutUtils::CombineBreakType(breakType,
                                                 aState.mFloatBreakType);
@@ -3648,8 +3761,10 @@ nsBlockFrame::ReflowBlockFrame(BlockReflowInput& aState,
               if (NS_FAILED(rv)) {
                 return;
               }
-              if (parent != this)
-                ReparentFrame(nextFrame, parent, this);
+              if (parent != this) {
+                ReparentFrame(nextFrame, parent, this,
+                              ReparentingDirection::Variable);
+              }
               mFrames.InsertFrame(nullptr, frame, nextFrame);
               madeContinuation = true; // needs to be added to mLines
               nextFrame->RemoveStateBits(NS_FRAME_IS_OVERFLOW_CONTAINER);
@@ -3852,6 +3967,7 @@ nsBlockFrame::ReflowInlineFrames(BlockReflowInput& aState,
           aState.FloatManager()->PopState(&floatManagerState);
           // Clear out float lists
           aState.mCurrentLineFloats.DeleteAll();
+          aState.mNoWrapFloats.Clear();
           aState.mBelowCurrentLineFloats.DeleteAll();
         }
 
@@ -4163,7 +4279,7 @@ nsBlockFrame::ReflowInlineFrame(BlockReflowInput& aState,
 
 #ifdef REALLY_NOISY_REFLOW
   nsFrame::ListTag(stdout, aFrame);
-  printf(": status=%s\n", frameReflowStatus.ToString().get());
+  printf(": status=%s\n", ToString(frameReflowStatus).c_str());
 #endif
 
 #if defined(REFLOW_STATUS_COVERAGE)
@@ -4308,7 +4424,7 @@ nsBlockFrame::SplitFloat(BlockReflowInput& aState,
     DebugOnly<nsresult> rv = oldParent->StealFrame(nextInFlow);
     NS_ASSERTION(NS_SUCCEEDED(rv), "StealFrame failed");
     if (oldParent != this) {
-      ReparentFrame(nextInFlow, oldParent, this);
+      ReparentFrame(nextInFlow, oldParent, this, ReparentingDirection::Backwards);
     }
     if (!aFloatStatus.IsOverflowIncomplete()) {
       nextInFlow->RemoveStateBits(NS_FRAME_IS_OVERFLOW_CONTAINER);
@@ -4321,8 +4437,7 @@ nsBlockFrame::SplitFloat(BlockReflowInput& aState,
     nextInFlow->AddStateBits(NS_FRAME_IS_OVERFLOW_CONTAINER);
   }
 
-  StyleFloat floatStyle =
-    aFloat->StyleDisplay()->PhysicalFloats(aState.mReflowInput.GetWritingMode());
+  StyleFloat floatStyle = aFloat->StyleDisplay()->mFloat;
   if (floatStyle == StyleFloat::Left) {
     aState.FloatManager()->SetSplitLeftFloatAcrossBreak();
   } else {
@@ -4478,6 +4593,9 @@ nsBlockFrame::PlaceLine(BlockReflowInput& aState,
                         nscoord& aAvailableSpaceBSize,
                         bool* aKeepReflowGoing)
 {
+  // Try to position the floats in a nowrap context.
+  aLineLayout.FlushNoWrapFloats();
+
   // Trim extra white-space from the line before placing the frames
   aLineLayout.TrimTrailingWhiteSpace();
 
@@ -4499,7 +4617,7 @@ nsBlockFrame::PlaceLine(BlockReflowInput& aState,
         0 == mLines.front()->BSize() &&
         aLine == mLines.begin().next()))) {
     ReflowOutput metrics(aState.mReflowInput);
-    nsIFrame* bullet = GetOutsideBullet();
+    nsBulletFrame* bullet = GetOutsideBullet();
     ReflowBullet(bullet, aState, metrics, aState.mBCoord);
     NS_ASSERTION(!BulletIsEmpty() || metrics.BSize(wm) == 0,
                  "empty bullet took up space");
@@ -4684,8 +4802,7 @@ nsBlockFrame::PlaceLine(BlockReflowInput& aState,
   if (aState.mBelowCurrentLineFloats.NotEmpty()) {
     // Reflow the below-current-line floats, which places on the line's
     // float list.
-    aState.PlaceBelowCurrentLineFloats(aState.mBelowCurrentLineFloats, aLine);
-    aLine->AppendFloats(aState.mBelowCurrentLineFloats);
+    aState.PlaceBelowCurrentLineFloats(aLine);
   }
 
   // When a line has floats, factor them into the combined-area
@@ -4828,7 +4945,8 @@ nsBlockFrame::DrainOverflowLines()
     FrameLines* overflowLines = prevBlock->RemoveOverflowLines();
     if (overflowLines) {
       // Make all the frames on the overflow line list mine.
-      ReparentFrames(overflowLines->mFrames, prevBlock, this);
+      ReparentFrames(overflowLines->mFrames, prevBlock, this,
+                     ReparentingDirection::Forwards);
 
       // Make the overflow out-of-flow frames mine too.
       nsAutoOOFFrameList oofs(prevBlock);
@@ -4842,7 +4960,8 @@ nsBlockFrame::DrainOverflowLines()
             nif->RemoveStateBits(NS_FRAME_IS_PUSHED_FLOAT);
           }
         }
-        ReparentFrames(oofs.mList, prevBlock, this);
+        ReparentFrames(oofs.mList, prevBlock, this,
+                       ReparentingDirection::Forwards);
         mFloats.InsertFrames(nullptr, nullptr, oofs.mList);
       }
 
@@ -5594,7 +5713,7 @@ nsBlockFrame::UpdateFirstLetterStyle(ServoRestyleState& aRestyleState)
   }
   nsIFrame* styleParent =
     CorrectStyleParentFrame(inFlowFrame->GetParent(),
-                            nsCSSPseudoElements::firstLetter);
+                            nsCSSPseudoElements::firstLetter());
   ComputedStyle* parentStyle = styleParent->Style();
   RefPtr<ComputedStyle> firstLetterStyle =
     aRestyleState.StyleSet()
@@ -6698,8 +6817,7 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   aBuilder->MarkFramesForDisplayList(this, mFloats);
 
   // Prepare for text-overflow processing.
-  UniquePtr<TextOverflow> textOverflow =
-    TextOverflow::WillProcessLines(aBuilder, this);
+  Maybe<TextOverflow> textOverflow = TextOverflow::WillProcessLines(aBuilder, this);
 
   // We'll collect our lines' display items here, & then append this to aLists.
   nsDisplayListCollection linesDisplayListCollection(aBuilder);
@@ -6714,7 +6832,7 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // Also skip the cursor if we're creating text overflow markers,
   // since we need to know what line number we're up to in order
   // to generate unique display item keys.
-  nsLineBox* cursor = (aBuilder->ShouldDescendIntoFrame(this, true) || textOverflow) ?
+  nsLineBox* cursor = (aBuilder->ShouldDescendIntoFrame(this, true) || textOverflow.isSome()) ?
     nullptr : GetFirstLineContaining(aBuilder->GetDirtyRect().y);
   LineIterator line_end = LinesEnd();
 
@@ -6729,7 +6847,7 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
         if (lineArea.y >= aBuilder->GetDirtyRect().YMost()) {
           break;
         }
-        MOZ_ASSERT(!textOverflow);
+        MOZ_ASSERT(textOverflow.isNothing());
         DisplayLine(aBuilder, lineArea, line, depth, drawnLines,
                     linesDisplayListCollection, this, nullptr, 0);
       }
@@ -6744,7 +6862,7 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
          ++line) {
       nsRect lineArea = line->GetVisualOverflowArea();
       DisplayLine(aBuilder, lineArea, line, depth, drawnLines,
-                  linesDisplayListCollection, this, textOverflow.get(), lineCount);
+                  linesDisplayListCollection, this, textOverflow.ptrOr(nullptr), lineCount);
       if (!lineArea.IsEmpty()) {
         if (lineArea.y < lastY
             || lineArea.YMost() < lastYMost) {
@@ -6765,7 +6883,7 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // PositionedDescendants just before we append the lines' display items,
   // so that our text-overflow markers will appear on top of this block's
   // normal content but below any of its its' positioned children.
-  if (textOverflow) {
+  if (textOverflow.isSome()) {
     aLists.PositionedDescendants()->AppendToTop(&textOverflow->GetMarkers());
   }
   linesDisplayListCollection.MoveTo(aLists);
@@ -6972,12 +7090,13 @@ nsBlockFrame::Init(nsIContent*       aContent,
   //   If the box is a block container, then it establishes a new block
   //   formatting context.
   // (http://dev.w3.org/csswg/css-writing-modes/#block-flow)
-  // If the box has contain: paint (or contain: strict), then it should also
-  // establish a formatting context.
+  // If the box has contain: paint or contain:layout (or contain:strict),
+  // then it should also establish a formatting context.
   if (StyleDisplay()->mDisplay == mozilla::StyleDisplay::FlowRoot ||
       (GetParent() && StyleVisibility()->mWritingMode !=
                       GetParent()->StyleVisibility()->mWritingMode) ||
-      StyleDisplay()->IsContainPaint()) {
+      StyleDisplay()->IsContainPaint() ||
+      StyleDisplay()->IsContainLayout()) {
     AddStateBits(NS_BLOCK_FORMATTING_CONTEXT_STATE_BITS);
   }
 
@@ -7010,14 +7129,14 @@ nsBlockFrame::SetInitialChildList(ChildListID     aListID,
     nsAtom *pseudo = Style()->GetPseudo();
     bool haveFirstLetterStyle =
       (!pseudo ||
-       (pseudo == nsCSSAnonBoxes::cellContent &&
+       (pseudo == nsCSSAnonBoxes::cellContent() &&
         GetParent()->Style()->GetPseudo() == nullptr) ||
-       pseudo == nsCSSAnonBoxes::fieldsetContent ||
-       pseudo == nsCSSAnonBoxes::buttonContent ||
-       pseudo == nsCSSAnonBoxes::columnContent ||
-       (pseudo == nsCSSAnonBoxes::scrolledContent &&
+       pseudo == nsCSSAnonBoxes::fieldsetContent() ||
+       pseudo == nsCSSAnonBoxes::buttonContent() ||
+       pseudo == nsCSSAnonBoxes::columnContent() ||
+       (pseudo == nsCSSAnonBoxes::scrolledContent() &&
         !GetParent()->IsListControlFrame()) ||
-       pseudo == nsCSSAnonBoxes::mozSVGText) &&
+       pseudo == nsCSSAnonBoxes::mozSVGText()) &&
       !IsComboboxControlFrame() &&
       !IsFrameOfType(eMathML) &&
       RefPtr<ComputedStyle>(GetFirstLetterStyle(PresContext())) != nullptr;
@@ -7436,7 +7555,7 @@ nsBlockFrame::GetNearestAncestorBlock(nsIFrame* aCandidate)
     // Not a block. Check its parent next.
     aCandidate = aCandidate->GetParent();
   }
-  NS_NOTREACHED("Fell off frame tree looking for ancestor block!");
+  MOZ_ASSERT_UNREACHABLE("Fell off frame tree looking for ancestor block!");
   return nullptr;
 }
 
@@ -7524,7 +7643,7 @@ nsBlockFrame::UpdatePseudoElementStyles(ServoRestyleState& aRestyleState)
   if (nsIFrame* firstLineFrame = GetFirstLineFrame()) {
     nsIFrame* styleParent =
       CorrectStyleParentFrame(firstLineFrame->GetParent(),
-                              nsCSSPseudoElements::firstLine);
+                              nsCSSPseudoElements::firstLine());
 
     ComputedStyle* parentStyle = styleParent->Style();
     RefPtr<ComputedStyle> firstLineStyle =
@@ -7537,7 +7656,7 @@ nsBlockFrame::UpdatePseudoElementStyles(ServoRestyleState& aRestyleState)
     // FIXME(bz): Can we make first-line continuations be non-inheriting anon
     // boxes?
     RefPtr<ComputedStyle> continuationStyle = aRestyleState.StyleSet().
-      ResolveInheritingAnonymousBoxStyle(nsCSSAnonBoxes::mozLineFrame,
+      ResolveInheritingAnonymousBoxStyle(nsCSSAnonBoxes::mozLineFrame(),
                                          parentStyle);
 
     UpdateStyleOfOwnedChildFrame(firstLineFrame, firstLineStyle, aRestyleState,
@@ -7759,8 +7878,8 @@ already_AddRefed<ComputedStyle>
 nsBlockFrame::GetFirstLetterStyle(nsPresContext* aPresContext)
 {
   return aPresContext->StyleSet()->
-    ProbePseudoElementStyle(mContent->AsElement(),
+    ProbePseudoElementStyle(*mContent->AsElement(),
                             CSSPseudoElementType::firstLetter,
-                            mComputedStyle);
+                            Style());
 }
 #endif

@@ -77,12 +77,21 @@ FFmpegDataDecoder<LIBAV_VER>::InitDecoder()
     mCodecContext->extradata_size = mExtraData->Length();
     // FFmpeg may use SIMD instructions to access the data which reads the
     // data in 32 bytes block. Must ensure we have enough data to read.
+    uint32_t padding_size =
 #if LIBAVCODEC_VERSION_MAJOR >= 58
-    mExtraData->AppendElements(AV_INPUT_BUFFER_PADDING_SIZE);
+      AV_INPUT_BUFFER_PADDING_SIZE;
 #else
-    mExtraData->AppendElements(FF_INPUT_BUFFER_PADDING_SIZE);
+      FF_INPUT_BUFFER_PADDING_SIZE;
 #endif
-    mCodecContext->extradata = mExtraData->Elements();
+    mCodecContext->extradata = static_cast<uint8_t*>(
+      mLib->av_malloc(mExtraData->Length() + padding_size));
+    if (!mCodecContext->extradata) {
+      return MediaResult(NS_ERROR_OUT_OF_MEMORY,
+                        RESULT_DETAIL("Couldn't init ffmpeg extradata"));
+    }
+    memcpy(mCodecContext->extradata,
+           mExtraData->Elements(),
+           mExtraData->Length());
   } else {
     mCodecContext->extradata_size = 0;
   }
@@ -146,11 +155,11 @@ FFmpegDataDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample, bool* aGotFrame,
 
   mLastInputDts = aSample->mTimecode;
 
-  if (mCodecParser) {
+  if (inputData && mCodecParser) { // inputData is null when draining.
     if (aGotFrame) {
       *aGotFrame = false;
     }
-    do {
+    while (inputSize) {
       uint8_t* data = inputData;
       int size = inputSize;
       int len = mLib->av_parser_parse2(
@@ -160,7 +169,7 @@ FFmpegDataDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample, bool* aGotFrame,
       if (size_t(len) > inputSize) {
         return NS_ERROR_DOM_MEDIA_DECODE_ERR;
       }
-      if (size || !inputSize) {
+      if (size) {
         bool gotFrame = false;
         MediaResult rv = DoDecode(aSample, data, size, &gotFrame, aResults);
         if (NS_FAILED(rv)) {
@@ -172,7 +181,7 @@ FFmpegDataDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample, bool* aGotFrame,
       }
       inputData += len;
       inputSize -= len;
-    } while (inputSize > 0);
+    }
     return NS_OK;
   }
   return DoDecode(aSample, inputData, inputSize, aGotFrame, aResults);
@@ -225,6 +234,9 @@ FFmpegDataDecoder<LIBAV_VER>::ProcessShutdown()
   StaticMutexAutoLock mon(sMonitor);
 
   if (mCodecContext) {
+    if (mCodecContext->extradata) {
+      mLib->av_freep(&mCodecContext->extradata);
+    }
     mLib->avcodec_close(mCodecContext);
     mLib->av_freep(&mCodecContext);
 #if LIBAVCODEC_VERSION_MAJOR >= 55

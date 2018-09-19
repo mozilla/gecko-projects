@@ -268,7 +268,6 @@ public:
                                  const InputContextAction& aAction) override;
     virtual InputContext GetInputContext() override;
 
-    void SetSelectionDragState(bool aState);
     LayerManager* GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
                                   LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
                                   LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) override;
@@ -310,6 +309,10 @@ public:
     void RecvToolbarAnimatorMessageFromCompositor(int32_t aMessage) override;
     void UpdateRootFrameMetrics(const ScreenPoint& aScrollOffset, const CSSToScreenScale& aZoom) override;
     void RecvScreenPixels(mozilla::ipc::Shmem&& aMem, const ScreenIntSize& aSize) override;
+
+    nsresult SetPrefersReducedMotionOverrideForTest(bool aValue) override;
+    nsresult ResetPrefersReducedMotionOverrideForTest() override;
+
 protected:
     void BringToFront();
     nsWindow *FindTopLevel();

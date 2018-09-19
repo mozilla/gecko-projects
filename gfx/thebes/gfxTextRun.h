@@ -327,6 +327,12 @@ public:
     }
 
     /**
+     * Computes the minimum advance width for a substring assuming line
+     * breaking is allowed everywhere.
+     */
+    gfxFloat GetMinAdvanceWidth(Range aRange);
+
+    /**
      * Clear all stored line breaks for the given range (both before and after),
      * and then set the line-break state before aRange.start to aBreakBefore and
      * after the last cluster to aBreakAfter.
@@ -1269,7 +1275,7 @@ protected:
    // helper methods for looking up fonts
 
     // lookup and add a font with a given name (i.e. *not* a generic!)
-    void AddPlatformFont(const nsAString& aName,
+    void AddPlatformFont(const nsACString& aName,
                          nsTArray<FamilyAndGeneric>& aFamilyList);
 
     // do style selection and add entries to list

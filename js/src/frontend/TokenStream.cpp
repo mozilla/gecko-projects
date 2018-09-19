@@ -12,13 +12,17 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/IntegerTypeTraits.h"
 #include "mozilla/Likely.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/MemoryChecking.h"
-#include "mozilla/PodOperations.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/Span.h"
 #include "mozilla/TextUtils.h"
+#include "mozilla/Utf8.h"
 
+#include <algorithm>
 #include <ctype.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <utility>
@@ -40,11 +44,18 @@
 
 using mozilla::ArrayLength;
 using mozilla::AssertedCast;
+using mozilla::DecodeOneUtf8CodePoint;
 using mozilla::IsAscii;
 using mozilla::IsAsciiAlpha;
 using mozilla::IsAsciiDigit;
+using mozilla::IsTrailingUnit;
 using mozilla::MakeScopeExit;
-using mozilla::PodCopy;
+using mozilla::MakeSpan;
+using mozilla::Maybe;
+using mozilla::PointerRangeSize;
+using mozilla::Utf8Unit;
+
+using JS::ReadOnlyCompileOptions;
 
 struct ReservedWordInfo
 {
@@ -90,13 +101,21 @@ FindReservedWord(const CharT* s, size_t length)
     rw = &reservedWords[i];
     chars = rw->chars;
     do {
-        if (*s++ != (unsigned char)(*chars++))
+        if (*s++ != static_cast<unsigned char>(*chars++)) {
             goto no_match;
+        }
     } while (--length != 0);
     return rw;
 
   no_match:
     return nullptr;
+}
+
+template <>
+MOZ_ALWAYS_INLINE const ReservedWordInfo*
+FindReservedWord<Utf8Unit>(const Utf8Unit* units, size_t length)
+{
+    return FindReservedWord(Utf8AsUnsignedChars(units), length);
 }
 
 static const ReservedWordInfo*
@@ -110,20 +129,23 @@ FindReservedWord(JSLinearString* str)
 
 template <typename CharT>
 static bool
-IsIdentifier(const CharT* chars, size_t length)
+IsIdentifierImpl(const CharT* chars, size_t length)
 {
     using namespace js;
 
-    if (length == 0)
+    if (length == 0) {
         return false;
+    }
 
-    if (!unicode::IsIdentifierStart(char16_t(*chars)))
+    if (!unicode::IsIdentifierStart(char16_t(*chars))) {
         return false;
+    }
 
     const CharT* end = chars + length;
     while (++chars != end) {
-        if (!unicode::IsIdentifierPart(char16_t(*chars)))
+        if (!unicode::IsIdentifierPart(char16_t(*chars))) {
             return false;
+        }
     }
 
     return true;
@@ -154,24 +176,28 @@ IsIdentifierMaybeNonBMP(const char16_t* chars, size_t length)
 {
     using namespace js;
 
-    if (IsIdentifier(chars, length))
+    if (IsIdentifierImpl(chars, length)) {
         return true;
+    }
 
-    if (length == 0)
+    if (length == 0) {
         return false;
+    }
 
     const char16_t* p = chars;
     const char16_t* end = chars + length;
     uint32_t codePoint;
 
     codePoint = GetSingleCodePoint(&p, end);
-    if (!unicode::IsIdentifierStart(codePoint))
+    if (!unicode::IsIdentifierStart(codePoint)) {
         return false;
+    }
 
     while (p < end) {
         codePoint = GetSingleCodePoint(&p, end);
-        if (!unicode::IsIdentifierPart(codePoint))
+        if (!unicode::IsIdentifierPart(codePoint)) {
             return false;
+        }
     }
 
     return true;
@@ -186,28 +212,30 @@ IsIdentifier(JSLinearString* str)
 {
     JS::AutoCheckCannotGC nogc;
     MOZ_ASSERT(str);
-    if (str->hasLatin1Chars())
-        return ::IsIdentifier(str->latin1Chars(nogc), str->length());
+    if (str->hasLatin1Chars()) {
+        return ::IsIdentifierImpl(str->latin1Chars(nogc), str->length());
+    }
     return ::IsIdentifierMaybeNonBMP(str->twoByteChars(nogc), str->length());
 }
 
 bool
 IsIdentifier(const char* chars, size_t length)
 {
-    return ::IsIdentifier(chars, length);
+    return ::IsIdentifierImpl(chars, length);
 }
 
 bool
 IsIdentifier(const char16_t* chars, size_t length)
 {
-    return ::IsIdentifier(chars, length);
+    return ::IsIdentifierImpl(chars, length);
 }
 
 bool
 IsKeyword(JSLinearString* str)
 {
-    if (const ReservedWordInfo* rw = FindReservedWord(str))
+    if (const ReservedWordInfo* rw = FindReservedWord(str)) {
         return TokenKindIsKeyword(rw->tokentype);
+    }
 
     return false;
 }
@@ -215,8 +243,9 @@ IsKeyword(JSLinearString* str)
 TokenKind
 ReservedWordTokenKind(PropertyName* str)
 {
-    if (const ReservedWordInfo* rw = FindReservedWord(str))
+    if (const ReservedWordInfo* rw = FindReservedWord(str)) {
         return rw->tokentype;
+    }
 
     return TokenKind::Name;
 }
@@ -224,8 +253,9 @@ ReservedWordTokenKind(PropertyName* str)
 const char*
 ReservedWordToCharZ(PropertyName* str)
 {
-    if (const ReservedWordInfo* rw = FindReservedWord(str))
+    if (const ReservedWordInfo* rw = FindReservedWord(str)) {
         return ReservedWordToCharZ(rw->tokentype);
+    }
 
     return nullptr;
 }
@@ -319,15 +349,17 @@ TokenStreamAnyChars::SourceCoords::fill(const TokenStreamAnyChars::SourceCoords&
     MOZ_ASSERT(lineStartOffsets_.back() == MAX_PTR);
     MOZ_ASSERT(other.lineStartOffsets_.back() == MAX_PTR);
 
-    if (lineStartOffsets_.length() >= other.lineStartOffsets_.length())
+    if (lineStartOffsets_.length() >= other.lineStartOffsets_.length()) {
         return true;
+    }
 
     uint32_t sentinelIndex = lineStartOffsets_.length() - 1;
     lineStartOffsets_[sentinelIndex] = other.lineStartOffsets_[sentinelIndex];
 
     for (size_t i = sentinelIndex + 1; i < other.lineStartOffsets_.length(); i++) {
-        if (!lineStartOffsets_.append(other.lineStartOffsets_[i]))
+        if (!lineStartOffsets_.append(other.lineStartOffsets_[i])) {
             return false;
+        }
     }
     return true;
 }
@@ -341,14 +373,16 @@ TokenStreamAnyChars::SourceCoords::lineIndexOf(uint32_t offset) const
         // If we reach here, offset is on a line the same as or higher than
         // last time.  Check first for the +0, +1, +2 cases, because they
         // typically cover 85--98% of cases.
-        if (offset < lineStartOffsets_[lastLineIndex_ + 1])
+        if (offset < lineStartOffsets_[lastLineIndex_ + 1]) {
             return lastLineIndex_;      // lineIndex is same as last time
+        }
 
         // If we reach here, there must be at least one more entry (plus the
         // sentinel).  Try it.
         lastLineIndex_++;
-        if (offset < lineStartOffsets_[lastLineIndex_ + 1])
+        if (offset < lineStartOffsets_[lastLineIndex_ + 1]) {
             return lastLineIndex_;      // lineIndex is one higher than last time
+        }
 
         // The same logic applies here.
         lastLineIndex_++;
@@ -372,10 +406,11 @@ TokenStreamAnyChars::SourceCoords::lineIndexOf(uint32_t offset) const
     iMax = lineStartOffsets_.length() - 2;
     while (iMax > iMin) {
         iMid = iMin + (iMax - iMin) / 2;
-        if (offset >= lineStartOffsets_[iMid + 1])
+        if (offset >= lineStartOffsets_[iMid + 1]) {
             iMin = iMid + 1;    // offset is above lineStartOffsets_[iMid]
-        else
+        } else {
             iMax = iMid;        // offset is below or within lineStartOffsets_[iMid]
+        }
     }
     MOZ_ASSERT(iMax == iMin);
     MOZ_ASSERT(lineStartOffsets_[iMin] <= offset && offset < lineStartOffsets_[iMin + 1]);
@@ -427,17 +462,80 @@ TokenStreamAnyChars::TokenStreamAnyChars(JSContext* cx, const ReadOnlyCompileOpt
     isExprEnding[size_t(TokenKind::Comma)] = true;
     isExprEnding[size_t(TokenKind::Semi)] = true;
     isExprEnding[size_t(TokenKind::Colon)] = true;
-    isExprEnding[size_t(TokenKind::Rp)] = true;
-    isExprEnding[size_t(TokenKind::Rb)] = true;
-    isExprEnding[size_t(TokenKind::Rc)] = true;
+    isExprEnding[size_t(TokenKind::RightParen)] = true;
+    isExprEnding[size_t(TokenKind::RightBracket)] = true;
+    isExprEnding[size_t(TokenKind::RightCurly)] = true;
 }
 
 template<typename CharT>
 TokenStreamCharsBase<CharT>::TokenStreamCharsBase(JSContext* cx, const CharT* chars, size_t length,
                                                   size_t startOffset)
-  : sourceUnits(chars, length, startOffset),
-    tokenbuf(cx)
+  : TokenStreamCharsShared(cx),
+    sourceUnits(chars, length, startOffset)
 {}
+
+template<>
+MOZ_MUST_USE bool
+TokenStreamCharsBase<char16_t>::fillCharBufferFromSourceNormalizingAsciiLineBreaks(const char16_t* cur,
+                                                                                   const char16_t* end)
+{
+    MOZ_ASSERT(this->charBuffer.length() == 0);
+
+    while (cur < end) {
+        char16_t ch = *cur++;
+        if (ch == '\r') {
+            ch = '\n';
+            if (cur < end && *cur == '\n') {
+                cur++;
+            }
+        }
+
+        if (!this->charBuffer.append(ch)) {
+            return false;
+        }
+    }
+
+    MOZ_ASSERT(cur == end);
+    return true;
+}
+
+template<>
+MOZ_MUST_USE bool
+TokenStreamCharsBase<Utf8Unit>::fillCharBufferFromSourceNormalizingAsciiLineBreaks(const Utf8Unit* cur,
+                                                                                   const Utf8Unit* end)
+{
+    MOZ_ASSERT(this->charBuffer.length() == 0);
+
+    while (cur < end) {
+        Utf8Unit unit = *cur++;
+        if (MOZ_LIKELY(IsAscii(unit))) {
+            char16_t ch = unit.toUint8();
+            if (ch == '\r') {
+                ch = '\n';
+                if (cur < end && *cur == Utf8Unit('\n')) {
+                    cur++;
+                }
+            }
+
+            if (!this->charBuffer.append(ch)) {
+                return false;
+            }
+
+            continue;
+        }
+
+        Maybe<char32_t> ch = DecodeOneUtf8CodePoint(unit, &cur, end);
+        MOZ_ASSERT(ch.isSome(),
+                   "provided source text should already have been validated");
+
+        if (!appendCodePointToCharBuffer(ch.value())) {
+            return false;
+        }
+    }
+
+    MOZ_ASSERT(cur == end);
+    return true;
+}
 
 template<typename CharT, class AnyCharsAccess>
 TokenStreamSpecific<CharT, AnyCharsAccess>::TokenStreamSpecific(JSContext* cx,
@@ -486,63 +584,256 @@ TokenStreamAnyChars::undoInternalUpdateLineInfoForEOL()
     lineno--;
 }
 
-MOZ_ALWAYS_INLINE void
-TokenStreamAnyChars::updateFlagsForEOL()
+#ifdef DEBUG
+
+template<>
+inline void
+SourceUnits<char16_t>::assertNextCodePoint(const PeekedCodePoint<char16_t>& peeked)
 {
-    flags.isDirtyLine = false;
+    char32_t c = peeked.codePoint();
+    if (c < unicode::NonBMPMin) {
+        MOZ_ASSERT(peeked.lengthInUnits() == 1);
+        MOZ_ASSERT(ptr[0] == c);
+    } else {
+        MOZ_ASSERT(peeked.lengthInUnits() == 2);
+        char16_t lead, trail;
+        unicode::UTF16Encode(c, &lead, &trail);
+        MOZ_ASSERT(ptr[0] == lead);
+        MOZ_ASSERT(ptr[1] == trail);
+    }
 }
 
-// This gets a full code point, starting from an already-consumed leading code
-// unit, normalizing EOL sequences to '\n', also updating line/column info as
-// needed.
-template<class AnyCharsAccess>
-bool
-TokenStreamChars<char16_t, AnyCharsAccess>::getCodePoint(int32_t* cp)
+template<>
+inline void
+SourceUnits<Utf8Unit>::assertNextCodePoint(const PeekedCodePoint<Utf8Unit>& peeked)
 {
-    TokenStreamAnyChars& anyChars = anyCharsAccess();
+    char32_t c = peeked.codePoint();
 
-    if (MOZ_UNLIKELY(sourceUnits.atEnd())) {
-        anyChars.flags.isEOF = true;
-        *cp = EOF;
-        return true;
+    // This is all roughly indulgence of paranoia only for assertions, so the
+    // reimplementation of UTF-8 encoding a code point is (we think) a virtue.
+    uint8_t expectedUnits[4] = {};
+    if (c < 0x80) {
+        expectedUnits[0] = AssertedCast<uint8_t>(c);
+    } else if (c < 0x800) {
+        expectedUnits[0] = 0b1100'0000 | (c >> 6);
+        expectedUnits[1] = 0b1000'0000 | (c & 0b11'1111);
+    } else if (c < 0x10000) {
+        expectedUnits[0] = 0b1110'0000 | (c >> 12);
+        expectedUnits[1] = 0b1000'0000 | ((c >> 6) & 0b11'1111);
+        expectedUnits[2] = 0b1000'0000 | (c & 0b11'1111);
+    } else {
+        expectedUnits[0] = 0b1110'0000 | (c >> 18);
+        expectedUnits[2] = 0b1000'0000 | ((c >> 12) & 0b11'1111);
+        expectedUnits[2] = 0b1000'0000 | ((c >> 6) & 0b11'1111);
+        expectedUnits[3] = 0b1000'0000 | (c & 0b11'1111);
     }
 
-    int32_t c = sourceUnits.getCodeUnit();
+    MOZ_ASSERT(peeked.lengthInUnits() <= 4);
+    for (uint8_t i = 0; i < peeked.lengthInUnits(); i++) {
+        MOZ_ASSERT(expectedUnits[i] == ptr[i].toUint8());
+    }
+}
+
+#endif // DEBUG
+
+template<class AnyCharsAccess>
+MOZ_COLD void
+TokenStreamChars<Utf8Unit, AnyCharsAccess>::internalEncodingError(uint8_t relevantUnits,
+                                                                  unsigned errorNumber, ...)
+{
+    va_list args;
+    va_start(args, errorNumber);
 
     do {
-        // Normalize the char16_t if it was a newline.
-        if (MOZ_UNLIKELY(c == '\n'))
-            break;
+        size_t offset = this->sourceUnits.offset();
 
-        if (MOZ_UNLIKELY(c == '\r')) {
-            // If it's a \r\n sequence: treat as a single EOL, skip over the \n.
-            if (MOZ_LIKELY(!sourceUnits.atEnd()))
-                sourceUnits.matchCodeUnit('\n');
+        ErrorMetadata err;
 
+        TokenStreamAnyChars& anyChars = anyCharsAccess();
+
+        bool hasLineOfContext = anyChars.fillExcludingContext(&err, offset);
+        if (hasLineOfContext) {
+            if (!internalComputeLineOfContext(&err, offset)) {
+                break;
+            }
+
+            // As this is an encoding error, the computed window-end must be
+            // identical to the location of the error -- any further on and the
+            // window would contain invalid Unicode.
+            MOZ_ASSERT_IF(err.lineOfContext != nullptr,
+                          err.lineLength == err.tokenOffset);
+        }
+
+        auto notes = MakeUnique<JSErrorNotes>();
+        if (!notes) {
+            ReportOutOfMemory(anyChars.cx);
             break;
         }
 
-        if (MOZ_UNLIKELY(c == unicode::LINE_SEPARATOR || c == unicode::PARA_SEPARATOR))
-            break;
+        // The largest encoding of a UTF-8 code point is 4 units.  (Encoding an
+        // obsolete 5- or 6-byte code point will complain only about a bad lead
+        // code unit.)
+        constexpr size_t MaxWidth = sizeof("0xHH 0xHH 0xHH 0xHH");
 
-        *cp = c;
-        return true;
+        MOZ_ASSERT(relevantUnits > 0);
+
+        char badUnitsStr[MaxWidth];
+        char* ptr = badUnitsStr;
+        while (relevantUnits > 0) {
+            byteToString(this->sourceUnits.getCodeUnit().toUint8(), ptr);
+            ptr[4] = ' ';
+
+            ptr += 5;
+            relevantUnits--;
+        }
+
+        ptr[-1] = '\0';
+
+        uint32_t line, column;
+        anyChars.srcCoords.lineNumAndColumnIndex(offset, &line, &column);
+
+        if (!notes->addNoteASCII(anyChars.cx, anyChars.getFilename(), line, column,
+                                 GetErrorMessage, nullptr, JSMSG_BAD_CODE_UNITS, badUnitsStr))
+        {
+            break;
+        }
+
+        ReportCompileError(anyChars.cx, std::move(err), std::move(notes), JSREPORT_ERROR,
+                           errorNumber, args);
     } while (false);
 
-    if (!updateLineInfoForEOL())
-        return false;
+    va_end(args);
+}
 
-    *cp = '\n';
+template<class AnyCharsAccess>
+MOZ_COLD void
+TokenStreamChars<Utf8Unit, AnyCharsAccess>::badLeadUnit(Utf8Unit lead)
+{
+    uint8_t leadValue = lead.toUint8();
+
+    char leadByteStr[5];
+    byteToTerminatedString(leadValue, leadByteStr);
+
+    internalEncodingError(1, JSMSG_BAD_LEADING_UTF8_UNIT, leadByteStr);
+}
+
+template<class AnyCharsAccess>
+MOZ_COLD void
+TokenStreamChars<Utf8Unit, AnyCharsAccess>::notEnoughUnits(Utf8Unit lead,
+                                                           uint8_t remaining, uint8_t required)
+{
+    uint8_t leadValue = lead.toUint8();
+
+    MOZ_ASSERT(required == 2 || required == 3 || required == 4);
+    MOZ_ASSERT(remaining < 4);
+    MOZ_ASSERT(remaining < required);
+
+    char leadByteStr[5];
+    byteToTerminatedString(leadValue, leadByteStr);
+
+    // |toHexChar| produces the desired decimal numbers for values < 4.
+    const char expectedStr[] = { toHexChar(required - 1), '\0' };
+    const char actualStr[] = { toHexChar(remaining - 1), '\0' };
+
+    internalEncodingError(remaining, JSMSG_NOT_ENOUGH_CODE_UNITS,
+                          leadByteStr, expectedStr, actualStr, remaining == 2 ? " was" : "s were");
+}
+
+template<class AnyCharsAccess>
+MOZ_COLD void
+TokenStreamChars<Utf8Unit, AnyCharsAccess>::badTrailingUnit(Utf8Unit badUnit,
+                                                            uint8_t unitsObserved)
+{
+    char badByteStr[5];
+    byteToTerminatedString(badUnit.toUint8(), badByteStr);
+
+    internalEncodingError(unitsObserved, JSMSG_BAD_TRAILING_UTF8_UNIT, badByteStr);
+}
+
+template<class AnyCharsAccess>
+MOZ_COLD void
+TokenStreamChars<Utf8Unit, AnyCharsAccess>::badStructurallyValidCodePoint(uint32_t codePoint,
+                                                                          uint8_t codePointLength,
+                                                                          const char* reason)
+{
+    // Construct a string like "0x203D" (including null terminator) to include
+    // in the error message.  Write the string end-to-start from end to start
+    // of an adequately sized |char| array, shifting least significant nibbles
+    // off the number and writing the corresponding hex digits until done, then
+    // prefixing with "0x".  |codePointStr| points at the incrementally
+    // computed string, within |codePointCharsArray|'s bounds.
+
+    // 0x1F'FFFF is the maximum value that can fit in 3+6+6+6 unconstrained
+    // bits in a four-byte UTF-8 code unit sequence.
+    constexpr size_t MaxHexSize = sizeof("0x1F" "FFFF"); // including '\0'
+    char codePointCharsArray[MaxHexSize];
+
+    char* codePointStr = codePointCharsArray + ArrayLength(codePointCharsArray);
+    *--codePointStr = '\0';
+
+    uint32_t copy = codePoint;
+    while (copy) {
+        MOZ_ASSERT(codePointCharsArray < codePointStr);
+        *--codePointStr = toHexChar(copy & 0xF);
+        copy >>= 4;
+    }
+
+    MOZ_ASSERT(codePointCharsArray + 2 <= codePointStr);
+    *--codePointStr = 'x';
+    *--codePointStr = '0';
+
+    internalEncodingError(codePointLength, JSMSG_FORBIDDEN_UTF8_CODE_POINT, codePointStr, reason);
+}
+
+template<class AnyCharsAccess>
+MOZ_MUST_USE bool
+TokenStreamChars<Utf8Unit, AnyCharsAccess>::getNonAsciiCodePointDontNormalize(Utf8Unit lead,
+                                                                              char32_t* codePoint)
+{
+    auto onBadLeadUnit = [this, &lead]() {
+        this->badLeadUnit(lead);
+    };
+
+    auto onNotEnoughUnits = [this, &lead](uint8_t remaining, uint8_t required) {
+        this->notEnoughUnits(lead, remaining, required);
+    };
+
+    auto onBadTrailingUnit = [this, &lead](uint8_t unitsObserved) {
+        this->badTrailingUnit(lead, unitsObserved);
+    };
+
+    auto onBadCodePoint = [this](char32_t badCodePoint, uint8_t unitsObserved) {
+        this->badCodePoint(badCodePoint, unitsObserved);
+    };
+
+    auto onNotShortestForm = [this](char32_t badCodePoint, uint8_t unitsObserved) {
+        this->notShortestForm(badCodePoint, unitsObserved);
+    };
+
+    // If a valid code point is decoded, this function call consumes its code
+    // units.  If not, it ungets the lead code unit and invokes the right error
+    // handler, so on failure we must immediately return false.
+    SourceUnitsIterator iter(this->sourceUnits);
+    Maybe<char32_t> maybeCodePoint =
+        DecodeOneUtf8CodePointInline(lead, &iter, SourceUnitsEnd(),
+                                     onBadLeadUnit, onNotEnoughUnits, onBadTrailingUnit,
+                                     onBadCodePoint, onNotShortestForm);
+    if (maybeCodePoint.isNothing()) {
+        return false;
+    }
+
+    *codePoint = maybeCodePoint.value();
     return true;
 }
 
 template<class AnyCharsAccess>
 bool
-TokenStreamChars<char16_t, AnyCharsAccess>::getNonAsciiCodePoint(char16_t lead, int32_t* codePoint)
+TokenStreamChars<char16_t, AnyCharsAccess>::getNonAsciiCodePoint(int32_t lead, int32_t* codePoint)
 {
+    MOZ_ASSERT(lead != EOF);
     MOZ_ASSERT(!isAsciiCodePoint(lead),
                "ASCII code unit/point must be handled separately");
-    MOZ_ASSERT(lead == sourceUnits.previousCodeUnit(),
+    MOZ_ASSERT(lead == this->sourceUnits.previousCodeUnit(),
                "getNonAsciiCodePoint called incorrectly");
 
     // The code point is usually |lead|: overwrite later if needed.
@@ -569,116 +860,362 @@ TokenStreamChars<char16_t, AnyCharsAccess>::getNonAsciiCodePoint(char16_t lead, 
 
             *codePoint = '\n';
         } else {
-            MOZ_ASSERT(!SourceUnits::isRawEOLChar(*codePoint));
+            MOZ_ASSERT(!IsLineTerminator(AssertedCast<char32_t>(*codePoint)));
         }
 
         return true;
     }
 
     // Also handle a lead surrogate not paired with a trailing surrogate.
-    if (MOZ_UNLIKELY(sourceUnits.atEnd() ||
-                     !unicode::IsTrailSurrogate(sourceUnits.peekCodeUnit())))
+    if (MOZ_UNLIKELY(this->sourceUnits.atEnd() ||
+                     !unicode::IsTrailSurrogate(this->sourceUnits.peekCodeUnit())))
     {
-        MOZ_ASSERT(!SourceUnits::isRawEOLChar(*codePoint));
+        MOZ_ASSERT(!IsLineTerminator(AssertedCast<char32_t>(*codePoint)));
         return true;
     }
 
     // Otherwise we have a multi-unit code point.
-    *codePoint = unicode::UTF16Decode(lead, sourceUnits.getCodeUnit());
-    MOZ_ASSERT(!SourceUnits::isRawEOLChar(*codePoint));
+    *codePoint = unicode::UTF16Decode(lead, this->sourceUnits.getCodeUnit());
+    MOZ_ASSERT(!IsLineTerminator(AssertedCast<char32_t>(*codePoint)));
     return true;
 }
 
 template<typename CharT, class AnyCharsAccess>
-void
-GeneralTokenStreamChars<CharT, AnyCharsAccess>::ungetChar(int32_t c)
+bool
+TokenStreamSpecific<CharT, AnyCharsAccess>::getCodePoint(int32_t* cp)
 {
-    if (c == EOF)
-        return;
-
-    sourceUnits.ungetCodeUnit();
-    if (c == '\n') {
-        int32_t c2 = sourceUnits.peekCodeUnit();
-        MOZ_ASSERT(SourceUnits::isRawEOLChar(c2));
-
-        // If it's a \r\n sequence, also unget the \r.
-        if (c2 == CharT('\n') && !sourceUnits.atStart())
-            sourceUnits.ungetOptionalCRBeforeLF();
-
-        anyCharsAccess().undoInternalUpdateLineInfoForEOL();
-    } else {
-        MOZ_ASSERT(sourceUnits.peekCodeUnit() == c);
+    int32_t unit = getCodeUnit();
+    if (unit == EOF) {
+        MOZ_ASSERT(anyCharsAccess().flags.isEOF,
+                   "flags.isEOF should have been set by getCodeUnit()");
+        *cp = EOF;
+        return true;
     }
+
+    if (isAsciiCodePoint(unit)) {
+        return getFullAsciiCodePoint(unit, cp);
+    }
+
+    return getNonAsciiCodePoint(unit, cp);
 }
 
 template<class AnyCharsAccess>
-void
-TokenStreamChars<char16_t, AnyCharsAccess>::ungetCodePointIgnoreEOL(uint32_t codePoint)
+bool
+TokenStreamChars<Utf8Unit, AnyCharsAccess>::getNonAsciiCodePoint(int32_t unit, int32_t* codePoint)
 {
-    MOZ_ASSERT(!sourceUnits.atStart());
+    MOZ_ASSERT(unit != EOF);
+    MOZ_ASSERT(!isAsciiCodePoint(unit),
+               "ASCII code unit/point must be handled separately");
 
-    unsigned numUnits = 0;
-    char16_t units[2];
-    unicode::UTF16Encode(codePoint, units, &numUnits);
+    Utf8Unit lead = Utf8Unit(static_cast<unsigned char>(unit));
+    MOZ_ASSERT(lead == this->sourceUnits.previousCodeUnit(),
+               "getNonAsciiCodePoint called incorrectly");
 
-    MOZ_ASSERT(numUnits == 1 || numUnits == 2);
+    auto onBadLeadUnit = [this, &lead]() {
+        this->badLeadUnit(lead);
+    };
 
-    while (numUnits-- > 0)
-        ungetCodeUnit(units[numUnits]);
+    auto onNotEnoughUnits = [this, &lead](uint_fast8_t remaining, uint_fast8_t required) {
+        this->notEnoughUnits(lead, remaining, required);
+    };
+
+    auto onBadTrailingUnit = [this, &lead](uint_fast8_t unitsObserved) {
+        this->badTrailingUnit(lead, unitsObserved);
+    };
+
+    auto onBadCodePoint = [this](char32_t badCodePoint, uint_fast8_t unitsObserved) {
+        this->badCodePoint(badCodePoint, unitsObserved);
+    };
+
+    auto onNotShortestForm = [this](char32_t badCodePoint, uint_fast8_t unitsObserved) {
+        this->notShortestForm(badCodePoint, unitsObserved);
+    };
+
+    // This consumes the full, valid code point or ungets |lead| and calls the
+    // appropriate error functor on failure.
+    SourceUnitsIterator iter(this->sourceUnits);
+    Maybe<char32_t> maybeCodePoint =
+        DecodeOneUtf8CodePoint(lead, &iter, SourceUnitsEnd(),
+                               onBadLeadUnit, onNotEnoughUnits, onBadTrailingUnit, onBadCodePoint,
+                               onNotShortestForm);
+    if (maybeCodePoint.isNothing()) {
+        return false;
+    }
+
+    char32_t cp = maybeCodePoint.value();
+    if (MOZ_UNLIKELY(cp == unicode::LINE_SEPARATOR || cp == unicode::PARA_SEPARATOR)) {
+        if (!updateLineInfoForEOL()) {
+#ifdef DEBUG
+            *codePoint = EOF; // sentinel value to hopefully cause errors
+#endif
+            MOZ_MAKE_MEM_UNDEFINED(codePoint, sizeof(*codePoint));
+            return false;
+        }
+
+        *codePoint = '\n';
+    } else {
+        MOZ_ASSERT(!IsLineTerminator(cp));
+        *codePoint = AssertedCast<int32_t>(cp);
+    }
+
+    return true;
 }
 
-template<class AnyCharsAccess>
-void
-TokenStreamChars<char16_t, AnyCharsAccess>::ungetLineTerminator()
-{
-    sourceUnits.ungetCodeUnit();
-
-    char16_t last = sourceUnits.peekCodeUnit();
-    MOZ_ASSERT(SourceUnits::isRawEOLChar(last));
-
-    if (last == '\n')
-        sourceUnits.ungetOptionalCRBeforeLF();
-
-    anyCharsAccess().undoInternalUpdateLineInfoForEOL();
-}
-
-template<typename CharT>
+template<>
 size_t
-SourceUnits<CharT>::findEOLMax(size_t start, size_t max)
+SourceUnits<char16_t>::findWindowStart(size_t offset) const
 {
-    const CharT* p = codeUnitPtrAt(start);
+    // This is JS's understanding of UTF-16 that allows lone surrogates, so
+    // we have to exclude lone surrogates from [windowStart, offset) ourselves.
 
-    size_t n = 0;
+    const char16_t* const earliestPossibleStart = codeUnitPtrAt(startOffset_);
+
+    const char16_t* const initial = codeUnitPtrAt(offset);
+    const char16_t* p = initial;
+
+    auto HalfWindowSize = [&p, &initial]() { return PointerRangeSize(p, initial); };
+
     while (true) {
-        if (p >= limit_)
+        MOZ_ASSERT(earliestPossibleStart <= p);
+        MOZ_ASSERT(HalfWindowSize() <= WindowRadius);
+        if (p <= earliestPossibleStart || HalfWindowSize() >= WindowRadius) {
             break;
-        if (n >= max)
-            break;
-        n++;
+        }
+
+        char16_t c = p[-1];
 
         // This stops at U+2028 LINE SEPARATOR or U+2029 PARAGRAPH SEPARATOR in
         // string and template literals.  These code points do affect line and
         // column coordinates, even as they encode their literal values.
-        if (isRawEOLChar(*p++))
+        if (IsLineTerminator(c)) {
             break;
+        }
+
+        // Don't allow invalid UTF-16 in pre-context.  (Current users don't
+        // require this, and this behavior isn't currently imposed on
+        // pre-context, but these facts might change someday.)
+
+        if (MOZ_UNLIKELY(unicode::IsLeadSurrogate(c))) {
+            break;
+        }
+
+        // Optimistically include the code unit, reverting below if needed.
+        p--;
+
+        // If it's not a surrogate at all, keep going.
+        if (MOZ_LIKELY(!unicode::IsTrailSurrogate(c))) {
+            continue;
+        }
+
+        // Stop if we don't have a usable surrogate pair.
+        if (HalfWindowSize() >= WindowRadius ||
+            p <= earliestPossibleStart || // trail surrogate at low end
+            !unicode::IsLeadSurrogate(p[-1])) // no paired lead surrogate
+        {
+            p++;
+            break;
+        }
+
+        p--;
     }
-    return start + n;
+
+    MOZ_ASSERT(HalfWindowSize() <= WindowRadius);
+    return offset - HalfWindowSize();
+}
+
+template<>
+size_t
+SourceUnits<Utf8Unit>::findWindowStart(size_t offset) const
+{
+    // |offset| must be the location of the error or somewhere before it, so we
+    // know preceding data is valid UTF-8.
+
+    const Utf8Unit* const earliestPossibleStart = codeUnitPtrAt(startOffset_);
+
+    const Utf8Unit* const initial = codeUnitPtrAt(offset);
+    const Utf8Unit* p = initial;
+
+    auto HalfWindowSize = [&p, &initial]() { return PointerRangeSize(p, initial); };
+
+    while (true) {
+        MOZ_ASSERT(earliestPossibleStart <= p);
+        MOZ_ASSERT(HalfWindowSize() <= WindowRadius);
+        if (p <= earliestPossibleStart || HalfWindowSize() >= WindowRadius) {
+            break;
+        }
+
+        // Peek backward for a line break, and only decrement if there is none.
+        uint8_t prev = p[-1].toUint8();
+
+        // First check for the ASCII LineTerminators.
+        if (prev == '\r' || prev == '\n') {
+            break;
+        }
+
+        // Now check for the non-ASCII LineTerminators U+2028 LINE SEPARATOR
+        // (0xE2 0x80 0xA8) and U+2029 PARAGRAPH (0xE2 0x80 0xA9).  If there
+        // aren't three code units available, some comparison here will fail
+        // before we'd underflow.
+        if (MOZ_UNLIKELY((prev == 0xA8 || prev == 0xA9) &&
+                         p[-2].toUint8() == 0x80 &&
+                         p[-3].toUint8() == 0xE2))
+        {
+            break;
+        }
+
+        // Rewind over the non-LineTerminator.  This can't underflow
+        // |earliestPossibleStart| because it begins a code point.
+        while (IsTrailingUnit(*--p)) {
+            continue;
+        }
+
+        MOZ_ASSERT(earliestPossibleStart <= p);
+
+        // But if we underflowed |WindowRadius|, adjust forward and stop.
+        if (HalfWindowSize() > WindowRadius) {
+            static_assert(WindowRadius > 3,
+                          "skipping over non-lead code units below must not "
+                          "advance past |offset|");
+
+            while (IsTrailingUnit(*++p)) {
+                continue;
+            }
+
+            MOZ_ASSERT(HalfWindowSize() < WindowRadius);
+            break;
+        }
+    }
+
+    MOZ_ASSERT(HalfWindowSize() <= WindowRadius);
+    return offset - HalfWindowSize();
+}
+
+template<>
+size_t
+SourceUnits<char16_t>::findWindowEnd(size_t offset) const
+{
+    const char16_t* const initial = codeUnitPtrAt(offset);
+    const char16_t* p = initial;
+
+    auto HalfWindowSize = [&initial, &p]() { return PointerRangeSize(initial, p); };
+
+    while (true) {
+        MOZ_ASSERT(p <= limit_);
+        MOZ_ASSERT(HalfWindowSize() <= WindowRadius);
+        if (p >= limit_ || HalfWindowSize() >= WindowRadius) {
+            break;
+        }
+
+        char16_t c = *p;
+
+        // This stops at U+2028 LINE SEPARATOR or U+2029 PARAGRAPH SEPARATOR in
+        // string and template literals.  These code points do affect line and
+        // column coordinates, even as they encode their literal values.
+        if (IsLineTerminator(c)) {
+            break;
+        }
+
+        // Don't allow invalid UTF-16 in post-context.  (Current users don't
+        // require this, and this behavior isn't currently imposed on
+        // pre-context, but these facts might change someday.)
+
+        if (MOZ_UNLIKELY(unicode::IsTrailSurrogate(c))) {
+            break;
+        }
+
+        // Optimistically consume the code unit, ungetting it below if needed.
+        p++;
+
+        // If it's not a surrogate at all, keep going.
+        if (MOZ_LIKELY(!unicode::IsLeadSurrogate(c))) {
+            continue;
+        }
+
+        // Retract if the lead surrogate would stand alone at the end of the
+        // window.
+        if (HalfWindowSize() >= WindowRadius || // split pair
+            p >= limit_ || // half-pair at end of source
+            !unicode::IsTrailSurrogate(*p)) // no paired trail surrogate
+        {
+            p--;
+            break;
+        }
+
+        p++;
+    }
+
+    return offset + HalfWindowSize();
+}
+
+template<>
+size_t
+SourceUnits<Utf8Unit>::findWindowEnd(size_t offset) const
+{
+    const Utf8Unit* const initial = codeUnitPtrAt(offset);
+    const Utf8Unit* p = initial;
+
+    auto HalfWindowSize = [&initial, &p]() { return PointerRangeSize(initial, p); };
+
+    while (true) {
+        MOZ_ASSERT(p <= limit_);
+        MOZ_ASSERT(HalfWindowSize() <= WindowRadius);
+        if (p >= limit_ || HalfWindowSize() >= WindowRadius) {
+            break;
+        }
+
+        // A non-encoding error might be followed by an encoding error within
+        // |maxEnd|, so we must validate as we go to not include invalid UTF-8
+        // in the computed window.  What joy!
+
+        Utf8Unit lead = *p;
+        if (mozilla::IsAscii(lead)) {
+            if (IsSingleUnitLineTerminator(lead)) {
+                break;
+            }
+
+            p++;
+            continue;
+        }
+
+        PeekedCodePoint<Utf8Unit> peeked = PeekCodePoint(p, limit_);
+        if (peeked.isNone()) {
+            break; // encoding error
+        }
+
+        char32_t c = peeked.codePoint();
+        if (MOZ_UNLIKELY(c == unicode::LINE_SEPARATOR || c == unicode::PARA_SEPARATOR)) {
+            break;
+        }
+
+        MOZ_ASSERT(!IsLineTerminator(c));
+
+        uint8_t len = peeked.lengthInUnits();
+        if (HalfWindowSize() + len > WindowRadius) {
+            break;
+        }
+
+        p += len;
+    }
+
+    MOZ_ASSERT(HalfWindowSize() <= WindowRadius);
+    return offset + HalfWindowSize();
 }
 
 template<typename CharT, class AnyCharsAccess>
 bool
 TokenStreamSpecific<CharT, AnyCharsAccess>::advance(size_t position)
 {
-    const CharT* end = sourceUnits.codeUnitPtrAt(position);
-    while (sourceUnits.addressOfNextCodeUnit() < end) {
+    const CharT* end = this->sourceUnits.codeUnitPtrAt(position);
+    while (this->sourceUnits.addressOfNextCodeUnit() < end) {
         int32_t c;
-        if (!getCodePoint(&c))
+        if (!getCodePoint(&c)) {
             return false;
+        }
     }
 
     TokenStreamAnyChars& anyChars = anyCharsAccess();
     Token* cur = const_cast<Token*>(&anyChars.currentToken());
-    cur->pos.begin = sourceUnits.offset();
+    cur->pos.begin = this->sourceUnits.offset();
     MOZ_MAKE_MEM_UNDEFINED(&cur->type, sizeof(cur->type));
     anyChars.lookahead = 0;
     return true;
@@ -690,7 +1227,7 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::seek(const Position& pos)
 {
     TokenStreamAnyChars& anyChars = anyCharsAccess();
 
-    sourceUnits.setAddressOfNextCodeUnit(pos.buf, /* allowPoisoned = */ true);
+    this->sourceUnits.setAddressOfNextCodeUnit(pos.buf, /* allowPoisoned = */ true);
     anyChars.flags = pos.flags;
     anyChars.lineno = pos.lineno;
     anyChars.linebase = pos.linebase;
@@ -698,8 +1235,9 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::seek(const Position& pos)
     anyChars.lookahead = pos.lookahead;
 
     anyChars.tokens[anyChars.cursor()] = pos.currentToken;
-    for (unsigned i = 0; i < anyChars.lookahead; i++)
+    for (unsigned i = 0; i < anyChars.lookahead; i++) {
         anyChars.tokens[anyChars.aheadCursor(1 + i)] = pos.lookaheadTokens[i];
+    }
 }
 
 template<typename CharT, class AnyCharsAccess>
@@ -707,8 +1245,9 @@ bool
 TokenStreamSpecific<CharT, AnyCharsAccess>::seek(const Position& pos,
                                                  const TokenStreamAnyChars& other)
 {
-    if (!anyCharsAccess().srcCoords.fill(other.srcCoords))
+    if (!anyCharsAccess().srcCoords.fill(other.srcCoords)) {
         return false;
+    }
 
     seek(pos);
     return true;
@@ -723,12 +1262,14 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::reportStrictModeErrorNumberVA(Unique
                                                                           va_list* args)
 {
     TokenStreamAnyChars& anyChars = anyCharsAccess();
-    if (!strictMode && !anyChars.options().extraWarningsOption)
+    if (!strictMode && !anyChars.options().extraWarningsOption) {
         return true;
+    }
 
     ErrorMetadata metadata;
-    if (!computeErrorMetadata(&metadata, offset))
+    if (!computeErrorMetadata(&metadata, offset)) {
         return false;
+    }
 
     if (strictMode) {
         ReportCompileError(anyChars.cx, std::move(metadata), std::move(notes), JSREPORT_ERROR, errorNumber,
@@ -811,6 +1352,51 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::currentLineAndColumn(uint32_t* line,
     anyChars.srcCoords.lineNumAndColumnIndex(offset, line, column);
 }
 
+template<typename CharT>
+bool
+TokenStreamCharsBase<CharT>::addLineOfContext(ErrorMetadata* err, uint32_t offset)
+{
+    size_t windowStart = sourceUnits.findWindowStart(offset);
+    size_t windowEnd = sourceUnits.findWindowEnd(offset);
+
+    size_t windowLength = windowEnd - windowStart;
+    MOZ_ASSERT(windowLength <= SourceUnits::WindowRadius * 2);
+
+    // Don't add a useless "line" of context when the window ends up empty
+    // because of an invalid encoding at the start of a line.
+    if (windowLength == 0) {
+        MOZ_ASSERT(err->lineOfContext == nullptr,
+                   "ErrorMetadata::lineOfContext must be null so we don't "
+                   "have to set the lineLength/tokenOffset fields");
+        return true;
+    }
+
+    // We might have hit an error while processing some source code feature
+    // that's accumulating text into |this->charBuffer| -- e.g. we could be
+    // halfway into a regular expression literal, then encounter invalid UTF-8.
+    // Thus we must clear |this->charBuffer| of prior work.
+    this->charBuffer.clear();
+
+    const CharT* start = sourceUnits.codeUnitPtrAt(windowStart);
+    if (!fillCharBufferFromSourceNormalizingAsciiLineBreaks(start, start + windowLength)) {
+        return false;
+    }
+
+    // The windowed string is null-terminated.
+    if (!this->charBuffer.append('\0')) {
+        return false;
+    }
+
+    err->lineOfContext.reset(this->charBuffer.extractOrCopyRawBuffer());
+    if (!err->lineOfContext) {
+        return false;
+    }
+
+    err->lineLength = windowLength;
+    err->tokenOffset = offset - windowStart;
+    return true;
+}
+
 template<typename CharT, class AnyCharsAccess>
 bool
 TokenStreamSpecific<CharT, AnyCharsAccess>::computeErrorMetadata(ErrorMetadata* err,
@@ -825,68 +1411,13 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::computeErrorMetadata(ErrorMetadata* 
     // returns true if this TokenStream's location information could be used,
     // and it returns false when that information can't be used (and so we
     // can't provide a line of context).
-    if (!anyCharsAccess().fillExcludingContext(err, offset))
+    if (!anyCharsAccess().fillExcludingContext(err, offset)) {
         return true;
-
-    // Add a line of context from this TokenStream to help with debugging.
-    return computeLineOfContext(err, offset);
-}
-
-template<typename CharT, class AnyCharsAccess>
-bool
-TokenStreamSpecific<CharT, AnyCharsAccess>::computeLineOfContext(ErrorMetadata* err,
-                                                                 uint32_t offset)
-{
-    // This function presumes |err| is filled in *except* for line-of-context
-    // fields.  It exists to make |TokenStreamSpecific::computeErrorMetadata|,
-    // above, more readable.
-    TokenStreamAnyChars& anyChars = anyCharsAccess();
-
-    // We only have line-start information for the current line.  If the error
-    // is on a different line, we can't easily provide context.  (This means
-    // any error in a multi-line token, e.g. an unterminated multiline string
-    // literal, won't have context.)
-    if (err->lineNumber != anyChars.lineno)
-        return true;
-
-    constexpr size_t windowRadius = ErrorMetadata::lineOfContextRadius;
-
-    // The window must start within the current line, no earlier than
-    // |windowRadius| characters before |offset|.
-    MOZ_ASSERT(offset >= anyChars.linebase);
-    size_t windowStart = (offset - anyChars.linebase > windowRadius) ?
-                         offset - windowRadius :
-                         anyChars.linebase;
-
-    // The window must start within the portion of the current line that we
-    // actually have in our buffer.
-    if (windowStart < sourceUnits.startOffset())
-        windowStart = sourceUnits.startOffset();
-
-    // The window must end within the current line, no later than
-    // windowRadius after offset.
-    size_t windowEnd = sourceUnits.findEOLMax(offset, windowRadius);
-    size_t windowLength = windowEnd - windowStart;
-    MOZ_ASSERT(windowLength <= windowRadius * 2);
-
-    // Create the windowed string, not including the potential line
-    // terminator.
-    StringBuffer windowBuf(anyChars.cx);
-    if (!windowBuf.append(codeUnitPtrAt(windowStart), windowLength) ||
-        !windowBuf.append('\0'))
-    {
-        return false;
     }
 
-    err->lineOfContext.reset(windowBuf.stealChars());
-    if (!err->lineOfContext)
-        return false;
-
-    err->lineLength = windowLength;
-    err->tokenOffset = offset - windowStart;
-    return true;
+    // Add a line of context from this TokenStream to help with debugging.
+    return internalComputeLineOfContext(err, offset);
 }
-
 
 template<typename CharT, class AnyCharsAccess>
 bool
@@ -965,12 +1496,14 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::reportExtraWarningErrorNumberVA(Uniq
                                                                             va_list* args)
 {
     TokenStreamAnyChars& anyChars = anyCharsAccess();
-    if (!anyChars.options().extraWarningsOption)
+    if (!anyChars.options().extraWarningsOption) {
         return true;
+    }
 
     ErrorMetadata metadata;
-    if (!computeErrorMetadata(&metadata, offset))
+    if (!computeErrorMetadata(&metadata, offset)) {
         return false;
+    }
 
     return anyChars.compileWarning(std::move(metadata), std::move(notes), JSREPORT_STRICT | JSREPORT_WARNING,
                                    errorNumber, *args);
@@ -984,7 +1517,7 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::error(unsigned errorNumber, ...)
     va_start(args, errorNumber);
 
     ErrorMetadata metadata;
-    if (computeErrorMetadata(&metadata, sourceUnits.offset())) {
+    if (computeErrorMetadata(&metadata, this->sourceUnits.offset())) {
         TokenStreamAnyChars& anyChars = anyCharsAccess();
         ReportCompileError(anyChars.cx, std::move(metadata), nullptr, JSREPORT_ERROR, errorNumber,
                            args);
@@ -1019,44 +1552,38 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::errorAt(uint32_t offset, unsigned er
 }
 
 // We have encountered a '\': check for a Unicode escape sequence after it.
-// Return the length of the escape sequence and the character code point (by
-// value) if we found a Unicode escape sequence.  Otherwise, return 0.  In both
-// cases, do not advance along the buffer.
+// Return the length of the escape sequence and the encoded code point (by
+// value) if we found a Unicode escape sequence, and skip all code units
+// involed.  Otherwise, return 0 and don't advance along the buffer.
 template<typename CharT, class AnyCharsAccess>
 uint32_t
 GeneralTokenStreamChars<CharT, AnyCharsAccess>::matchUnicodeEscape(uint32_t* codePoint)
 {
-    MOZ_ASSERT(sourceUnits.previousCodeUnit() == '\\');
+    MOZ_ASSERT(this->sourceUnits.previousCodeUnit() == CharT('\\'));
 
     int32_t unit = getCodeUnit();
     if (unit != 'u') {
         // NOTE: |unit| may be EOF here.
         ungetCodeUnit(unit);
-        MOZ_ASSERT(sourceUnits.previousCodeUnit() == '\\');
+        MOZ_ASSERT(this->sourceUnits.previousCodeUnit() == CharT('\\'));
         return 0;
     }
 
-    CharT cp[3];
+    char16_t v;
     unit = getCodeUnit();
-    if (JS7_ISHEX(unit) &&
-        sourceUnits.peekCodeUnits(3, cp) &&
-        JS7_ISHEX(cp[0]) && JS7_ISHEX(cp[1]) && JS7_ISHEX(cp[2]))
-    {
-        *codePoint = (JS7_UNHEX(unit) << 12) |
-                     (JS7_UNHEX(cp[0]) << 8) |
-                     (JS7_UNHEX(cp[1]) << 4) |
-                     JS7_UNHEX(cp[2]);
-        sourceUnits.skipCodeUnits(3);
+    if (JS7_ISHEX(unit) && this->sourceUnits.matchHexDigits(3, &v)) {
+        *codePoint = (JS7_UNHEX(unit) << 12) | v;
         return 5;
     }
 
-    if (unit == '{')
+    if (unit == '{') {
         return matchExtendedUnicodeEscape(codePoint);
+    }
 
     // NOTE: |unit| may be EOF here, so this ungets either one or two units.
     ungetCodeUnit(unit);
     ungetCodeUnit('u');
-    MOZ_ASSERT(sourceUnits.previousCodeUnit() == '\\');
+    MOZ_ASSERT(this->sourceUnits.previousCodeUnit() == CharT('\\'));
     return 0;
 }
 
@@ -1064,7 +1591,7 @@ template<typename CharT, class AnyCharsAccess>
 uint32_t
 GeneralTokenStreamChars<CharT, AnyCharsAccess>::matchExtendedUnicodeEscape(uint32_t* codePoint)
 {
-    MOZ_ASSERT(sourceUnits.previousCodeUnit() == '{');
+    MOZ_ASSERT(this->sourceUnits.previousCodeUnit() == CharT('{'));
 
     int32_t unit = getCodeUnit();
 
@@ -1094,8 +1621,8 @@ GeneralTokenStreamChars<CharT, AnyCharsAccess>::matchExtendedUnicodeEscape(uint3
         return gotten;
     }
 
-    sourceUnits.unskipCodeUnits(gotten);
-    MOZ_ASSERT(sourceUnits.previousCodeUnit() == '\\');
+    this->sourceUnits.unskipCodeUnits(gotten);
+    MOZ_ASSERT(this->sourceUnits.previousCodeUnit() == CharT('\\'));
     return 0;
 }
 
@@ -1105,13 +1632,14 @@ GeneralTokenStreamChars<CharT, AnyCharsAccess>::matchUnicodeEscapeIdStart(uint32
 {
     uint32_t length = matchUnicodeEscape(codePoint);
     if (MOZ_LIKELY(length > 0)) {
-        if (MOZ_LIKELY(unicode::IsIdentifierStart(*codePoint)))
+        if (MOZ_LIKELY(unicode::IsIdentifierStart(*codePoint))) {
             return length;
+        }
 
-        sourceUnits.unskipCodeUnits(length);
+        this->sourceUnits.unskipCodeUnits(length);
     }
 
-    MOZ_ASSERT(sourceUnits.previousCodeUnit() == '\\');
+    MOZ_ASSERT(this->sourceUnits.previousCodeUnit() == CharT('\\'));
     return 0;
 }
 
@@ -1121,28 +1649,15 @@ GeneralTokenStreamChars<CharT, AnyCharsAccess>::matchUnicodeEscapeIdent(uint32_t
 {
     uint32_t length = matchUnicodeEscape(codePoint);
     if (MOZ_LIKELY(length > 0)) {
-        if (MOZ_LIKELY(unicode::IsIdentifierPart(*codePoint)))
+        if (MOZ_LIKELY(unicode::IsIdentifierPart(*codePoint))) {
             return true;
+        }
 
-        sourceUnits.unskipCodeUnits(length);
+        this->sourceUnits.unskipCodeUnits(length);
     }
 
-    MOZ_ASSERT(sourceUnits.previousCodeUnit() == '\\');
+    MOZ_ASSERT(this->sourceUnits.previousCodeUnit() == CharT('\\'));
     return false;
-}
-
-// Helper function which returns true if the first length(q) characters in p are
-// the same as the characters in q.
-template<typename CharT>
-static bool
-CharsMatch(const CharT* p, const char* q)
-{
-    while (*q) {
-        if (*p++ != *q++)
-            return false;
-    }
-
-    return true;
 }
 
 template<typename CharT, class AnyCharsAccess>
@@ -1156,28 +1671,29 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getDirectives(bool isMultiline,
     // To avoid a crashing bug in IE, several JavaScript transpilers wrap single
     // line comments containing a source mapping URL inside a multiline
     // comment. To avoid potentially expensive lookahead and backtracking, we
-    // only check for this case if we encounter a '#' character.
+    // only check for this case if we encounter a '#' code unit.
 
     bool res = getDisplayURL(isMultiline, shouldWarnDeprecated) &&
                getSourceMappingURL(isMultiline, shouldWarnDeprecated);
-    if (!res)
+    if (!res) {
         badToken();
+    }
 
     return res;
 }
 
-template<>
 MOZ_MUST_USE bool
-TokenStreamCharsBase<char16_t>::copyTokenbufTo(JSContext* cx,
-                                               UniquePtr<char16_t[], JS::FreePolicy>* destination)
+TokenStreamCharsShared::copyCharBufferTo(JSContext* cx,
+                                         UniquePtr<char16_t[], JS::FreePolicy>* destination)
 {
-    size_t length = tokenbuf.length();
+    size_t length = charBuffer.length();
 
     *destination = cx->make_pod_array<char16_t>(length + 1);
-    if (!*destination)
+    if (!*destination) {
         return false;
+    }
 
-    PodCopy(destination->get(), tokenbuf.begin(), length);
+    std::copy(charBuffer.begin(), charBuffer.end(), destination->get());
     (*destination)[length] = '\0';
     return true;
 }
@@ -1191,34 +1707,31 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getDirective(bool isMultiline,
                                                          const char* errorMsgPragma,
                                                          UniquePtr<char16_t[], JS::FreePolicy>* destination)
 {
-    MOZ_ASSERT(directiveLength <= 18);
-    char16_t peeked[18];
-
-    // If there aren't enough characters left, it can't be the desired
-    // directive.
-    if (!sourceUnits.peekCodeUnits(directiveLength, peeked))
+    // Stop if we don't find |directive|.  (Note that |directive| must be
+    // ASCII, so there are no tricky encoding issues to consider in matching
+    // UTF-8/16-agnostically.)
+    if (!this->sourceUnits.matchCodeUnits(directive, directiveLength)) {
         return true;
-
-    // It's also not the desired directive if the characters don't match.
-    if (!CharsMatch(peeked, directive))
-        return true;
-
-    if (shouldWarnDeprecated) {
-        if (!warning(JSMSG_DEPRECATED_PRAGMA, errorMsgPragma))
-            return false;
     }
 
-    sourceUnits.skipCodeUnits(directiveLength);
-    tokenbuf.clear();
+    if (shouldWarnDeprecated) {
+        if (!warning(JSMSG_DEPRECATED_PRAGMA, errorMsgPragma)) {
+            return false;
+        }
+    }
+
+    this->charBuffer.clear();
 
     do {
         int32_t unit = peekCodeUnit();
-        if (unit == EOF)
+        if (unit == EOF) {
             break;
+        }
 
         if (MOZ_LIKELY(isAsciiCodePoint(unit))) {
-            if (unicode::IsSpaceOrBOM2(unit))
+            if (unicode::IsSpaceOrBOM2(unit)) {
                 break;
+            }
 
             consumeKnownCodeUnit(unit);
 
@@ -1230,32 +1743,37 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getDirective(bool isMultiline,
                 break;
             }
 
-            if (!tokenbuf.append(unit))
+            if (!this->charBuffer.append(unit)) {
                 return false;
+            }
 
             continue;
         }
 
-        int32_t codePoint;
-        if (!getCodePoint(&codePoint))
-            return false;
-
-        if (unicode::IsSpaceOrBOM2(codePoint)) {
-            ungetNonAsciiNormalizedCodePoint(codePoint);
+        // This ignores encoding errors: subsequent caller-side code to
+        // handle the remaining source text in the comment will do so.
+        PeekedCodePoint<CharT> peeked = this->sourceUnits.peekCodePoint();
+        if (peeked.isNone() || unicode::IsSpaceOrBOM2(peeked.codePoint())) {
             break;
         }
 
-        if (!appendCodePointToTokenbuf(codePoint))
+        MOZ_ASSERT(!IsLineTerminator(peeked.codePoint()),
+                   "!IsSpaceOrBOM2 must imply !IsLineTerminator or else we'll "
+                   "fail to maintain line-info/flags for EOL");
+        this->sourceUnits.consumeKnownCodePoint(peeked);
+
+        if (!appendCodePointToCharBuffer(peeked.codePoint())) {
             return false;
+        }
     } while (true);
 
-    if (tokenbuf.empty()) {
+    if (this->charBuffer.empty()) {
         // The directive's URL was missing, but comments can contain anything,
         // so it isn't an error.
         return true;
     }
 
-    return copyTokenbufTo(anyCharsAccess().cx, destination);
+    return copyCharBufferTo(anyCharsAccess().cx, destination);
 }
 
 template<typename CharT, class AnyCharsAccess>
@@ -1330,14 +1848,13 @@ GeneralTokenStreamChars<CharT, AnyCharsAccess>::badToken()
     // erroneous token has been seen, sourceUnits will not be consulted again.
     // This is true because the parser will deal with the illegal token by
     // aborting parsing immediately.
-    sourceUnits.poisonInDebug();
+    this->sourceUnits.poisonInDebug();
 
     return false;
 };
 
-template<>
 MOZ_MUST_USE bool
-TokenStreamCharsBase<char16_t>::appendCodePointToTokenbuf(uint32_t codePoint)
+TokenStreamCharsShared::appendCodePointToCharBuffer(uint32_t codePoint)
 {
     char16_t units[2];
     unsigned numUnits = 0;
@@ -1346,67 +1863,66 @@ TokenStreamCharsBase<char16_t>::appendCodePointToTokenbuf(uint32_t codePoint)
     MOZ_ASSERT(numUnits == 1 || numUnits == 2,
                "UTF-16 code points are only encoded in one or two units");
 
-    if (!tokenbuf.append(units[0]))
+    if (!charBuffer.append(units[0])) {
         return false;
+    }
 
-    if (numUnits == 1)
+    if (numUnits == 1) {
         return true;
+    }
 
-    return tokenbuf.append(units[1]);
+    return charBuffer.append(units[1]);
 }
 
 template<typename CharT, class AnyCharsAccess>
 bool
-TokenStreamSpecific<CharT, AnyCharsAccess>::putIdentInTokenbuf(const CharT* identStart)
+TokenStreamSpecific<CharT, AnyCharsAccess>::putIdentInCharBuffer(const CharT* identStart)
 {
-    const CharT* const originalAddress = sourceUnits.addressOfNextCodeUnit();
-    sourceUnits.setAddressOfNextCodeUnit(identStart);
+    const CharT* const originalAddress = this->sourceUnits.addressOfNextCodeUnit();
+    this->sourceUnits.setAddressOfNextCodeUnit(identStart);
 
     auto restoreNextRawCharAddress =
         MakeScopeExit([this, originalAddress]() {
             this->sourceUnits.setAddressOfNextCodeUnit(originalAddress);
         });
 
-    tokenbuf.clear();
+    this->charBuffer.clear();
     do {
         int32_t unit = getCodeUnit();
-        if (unit == EOF)
+        if (unit == EOF) {
             break;
+        }
 
         uint32_t codePoint;
         if (MOZ_LIKELY(isAsciiCodePoint(unit))) {
-            if (MOZ_LIKELY(unicode::IsIdentifierPart(char16_t(unit)))) {
-                if (!tokenbuf.append(unit))
+            if (unicode::IsIdentifierPart(char16_t(unit))) {
+                if (!this->charBuffer.append(unit)) {
                     return false;
+                }
 
                 continue;
             }
 
-            if (unit != '\\' || !matchUnicodeEscapeIdent(&codePoint))
+            if (unit != '\\' || !matchUnicodeEscapeIdent(&codePoint)) {
                 break;
-        } else {
-            int32_t cp;
-            if (!getNonAsciiCodePoint(unit, &cp))
-                return false;
-
-            codePoint = AssertedCast<uint32_t>(cp);
-        }
-
-        if (!unicode::IsIdentifierPart(codePoint)) {
-            if (MOZ_UNLIKELY(codePoint == unicode::LINE_SEPARATOR ||
-                             codePoint == unicode::PARA_SEPARATOR))
-            {
-                // |restoreNextRawCharAddress| undoes all gets, but it doesn't
-                // revert line/column updates.  The ASCII code path never
-                // updates line/column state, so only Unicode separators gotten
-                // by |getNonAsciiCodePoint| require this.
-                anyCharsAccess().undoInternalUpdateLineInfoForEOL();
             }
-            break;
+        } else {
+            // |restoreNextRawCharAddress| undoes all gets, and this function
+            // doesn't update line/column info.
+            char32_t cp;
+            if (!getNonAsciiCodePointDontNormalize(toCharT(unit), &cp)) {
+                return false;
+            }
+
+            codePoint = cp;
+            if (!unicode::IsIdentifierPart(codePoint)) {
+                break;
+            }
         }
 
-        if (!appendCodePointToTokenbuf(codePoint))
+        if (!appendCodePointToCharBuffer(codePoint)) {
             return false;
+        }
     } while (true);
 
     return true;
@@ -1430,11 +1946,14 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::identifierName(TokenStart start,
     // code points in the loop below.
     int32_t unit;
     while (true) {
-        unit = getCodeUnit();
-        if (unit == EOF)
+        unit = peekCodeUnit();
+        if (unit == EOF) {
             break;
+        }
 
         if (MOZ_LIKELY(isAsciiCodePoint(unit))) {
+            consumeKnownCodeUnit(unit);
+
             if (MOZ_UNLIKELY(!unicode::IsIdentifierPart(static_cast<char16_t>(unit)))) {
                 // Handle a Unicode escape -- otherwise it's not part of the
                 // identifier.
@@ -1447,31 +1966,34 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::identifierName(TokenStart start,
                 escaping = IdentifierEscapes::SawUnicodeEscape;
             }
         } else {
-            int32_t codePoint;
-            if (!getNonAsciiCodePoint(unit, &codePoint))
-                return false;
-
-            if (!unicode::IsIdentifierPart(uint32_t(codePoint))) {
-                ungetNonAsciiNormalizedCodePoint(codePoint);
+            // This ignores encoding errors: subsequent caller-side code to
+            // handle source text after the IdentifierName will do so.
+            PeekedCodePoint<CharT> peeked = this->sourceUnits.peekCodePoint();
+            if (peeked.isNone() || !unicode::IsIdentifierPart(peeked.codePoint())) {
                 break;
             }
+
+            MOZ_ASSERT(!IsLineTerminator(peeked.codePoint()),
+                       "IdentifierPart must guarantee !IsLineTerminator or "
+                       "else we'll fail to maintain line-info/flags for EOL");
+
+            this->sourceUnits.consumeKnownCodePoint(peeked);
         }
     }
 
-    const CharT* chars;
-    size_t length;
-    if (escaping == IdentifierEscapes::SawUnicodeEscape) {
+    JSAtom* atom;
+    if (MOZ_UNLIKELY(escaping == IdentifierEscapes::SawUnicodeEscape)) {
         // Identifiers containing Unicode escapes have to be converted into
         // tokenbuf before atomizing.
-        if (!putIdentInTokenbuf(identStart))
+        if (!putIdentInCharBuffer(identStart)) {
             return false;
+        }
 
-        chars = tokenbuf.begin();
-        length = tokenbuf.length();
+        atom = drainCharBufferIntoAtom(anyCharsAccess().cx);
     } else {
         // Escape-free identifiers can be created directly from sourceUnits.
-        chars = identStart;
-        length = sourceUnits.addressOfNextCodeUnit() - identStart;
+        const CharT* chars = identStart;
+        size_t length = this->sourceUnits.addressOfNextCodeUnit() - identStart;
 
         // Represent reserved words lacking escapes as reserved word tokens.
         if (const ReservedWordInfo* rw = FindReservedWord(chars, length)) {
@@ -1479,11 +2001,12 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::identifierName(TokenStart start,
             newSimpleToken(rw->tokentype, start, modifier, out);
             return true;
         }
-    }
 
-    JSAtom* atom = atomizeChars(anyCharsAccess().cx, chars, length);
-    if (!atom)
+        atom = atomizeSourceChars(anyCharsAccess().cx, MakeSpan(chars, length));
+    }
+    if (!atom) {
         return false;
+    }
 
     noteBadToken.release();
     newNameToken(atom->asPropertyName(), start, modifier, out);
@@ -1532,14 +2055,14 @@ enum FirstCharKind {
 #define T_COMMA     size_t(TokenKind::Comma)
 #define T_COLON     size_t(TokenKind::Colon)
 #define T_BITNOT    size_t(TokenKind::BitNot)
-#define T_LP        size_t(TokenKind::Lp)
-#define T_RP        size_t(TokenKind::Rp)
+#define T_LP        size_t(TokenKind::LeftParen)
+#define T_RP        size_t(TokenKind::RightParen)
 #define T_SEMI      size_t(TokenKind::Semi)
 #define T_HOOK      size_t(TokenKind::Hook)
-#define T_LB        size_t(TokenKind::Lb)
-#define T_RB        size_t(TokenKind::Rb)
-#define T_LC        size_t(TokenKind::Lc)
-#define T_RC        size_t(TokenKind::Rc)
+#define T_LB        size_t(TokenKind::LeftBracket)
+#define T_RB        size_t(TokenKind::RightBracket)
+#define T_LC        size_t(TokenKind::LeftCurly)
+#define T_RC        size_t(TokenKind::RightCurly)
 #define _______     Other
 static const uint8_t firstCharKinds[] = {
 /*         0        1        2        3        4        5        6        7        8        9    */
@@ -1573,16 +2096,47 @@ static const uint8_t firstCharKinds[] = {
 static_assert(LastCharKind < (1 << (sizeof(firstCharKinds[0]) * 8)),
               "Elements of firstCharKinds[] are too small");
 
-template<typename CharT, class AnyCharsAccess>
+template<>
 void
-GeneralTokenStreamChars<CharT, AnyCharsAccess>::consumeRestOfSingleLineComment()
+SourceUnits<char16_t>::consumeRestOfSingleLineComment()
 {
-    int32_t c;
-    do {
-        c = getCodeUnit();
-    } while (c != EOF && !SourceUnits::isRawEOLChar(c));
+    while (MOZ_LIKELY(!atEnd())) {
+        char16_t unit = peekCodeUnit();
+        if (IsLineTerminator(unit)) {
+            return;
+        }
 
-    ungetCodeUnit(c);
+        consumeKnownCodeUnit(unit);
+    }
+}
+
+template<>
+void
+SourceUnits<Utf8Unit>::consumeRestOfSingleLineComment()
+{
+    while (MOZ_LIKELY(!atEnd())) {
+        const Utf8Unit unit = peekCodeUnit();
+        if (IsSingleUnitLineTerminator(unit)) {
+            return;
+        }
+
+        if (MOZ_LIKELY(IsAscii(unit))) {
+            consumeKnownCodeUnit(unit);
+            continue;
+        }
+
+        PeekedCodePoint<Utf8Unit> peeked = peekCodePoint();
+        if (peeked.isNone()) {
+            return;
+        }
+
+        char32_t c = peeked.codePoint();
+        if (MOZ_UNLIKELY(c == unicode::LINE_SEPARATOR || c == unicode::PARA_SEPARATOR)) {
+            return;
+        }
+
+        consumeKnownCodePoint(peeked);
+    }
 }
 
 template<typename CharT, class AnyCharsAccess>
@@ -1598,8 +2152,9 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::decimalNumber(int32_t unit, TokenSta
     });
 
     // Consume integral component digits.
-    while (IsAsciiDigit(unit))
+    while (IsAsciiDigit(unit)) {
         unit = getCodeUnit();
+    }
 
     // Numbers contain no escapes, so we can read directly from |sourceUnits|.
     double dval;
@@ -1610,8 +2165,8 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::decimalNumber(int32_t unit, TokenSta
 
         // Most numbers are pure decimal integers without fractional component
         // or exponential notation.  Handle that with optimized code.
-        if (!GetDecimalInteger(anyCharsAccess().cx, numStart, sourceUnits.addressOfNextCodeUnit(),
-                               &dval))
+        if (!GetDecimalInteger(anyCharsAccess().cx, numStart,
+                               this->sourceUnits.addressOfNextCodeUnit(), &dval))
         {
             return false;
         }
@@ -1627,8 +2182,9 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::decimalNumber(int32_t unit, TokenSta
         // Consume any exponential notation.
         if (unit == 'e' || unit == 'E') {
             unit = getCodeUnit();
-            if (unit == '+' || unit == '-')
+            if (unit == '+' || unit == '-') {
                 unit = getCodeUnit();
+            }
 
             // Exponential notation must contain at least one digit.
             if (!IsAsciiDigit(unit)) {
@@ -1645,9 +2201,11 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::decimalNumber(int32_t unit, TokenSta
 
         ungetCodeUnit(unit);
 
-        const CharT* dummy;
-        if (!js_strtod(anyCharsAccess().cx, numStart, sourceUnits.addressOfNextCodeUnit(), &dummy,
-                       &dval))
+        // "0." and "0e..." numbers parse "." or "e..." here.  Neither range
+        // contains a number, so we can't use |FullStringToDouble|.  (Parse
+        // failures return 0.0, so we'll still get the right result.)
+        if (!StringToDouble(anyCharsAccess().cx,
+                            numStart, this->sourceUnits.addressOfNextCodeUnit(), &dval))
         {
            return false;
         }
@@ -1663,13 +2221,10 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::decimalNumber(int32_t unit, TokenSta
                 return false;
             }
         } else {
-            int32_t codePoint;
-            if (!getCodePoint(&codePoint))
-                return false;
-
-            ungetNonAsciiNormalizedCodePoint(codePoint);
-
-            if (unicode::IsIdentifierStart(uint32_t(codePoint))) {
+            // This ignores encoding errors: subsequent caller-side code to
+            // handle source text after the number will do so.
+            PeekedCodePoint<CharT> peeked = this->sourceUnits.peekCodePoint();
+            if (!peeked.isNone() && unicode::IsIdentifierStart(peeked.codePoint())) {
                 error(JSMSG_IDSTART_AFTER_NUMBER);
                 return false;
             }
@@ -1685,24 +2240,30 @@ template<typename CharT, class AnyCharsAccess>
 MOZ_MUST_USE bool
 TokenStreamSpecific<CharT, AnyCharsAccess>::regexpLiteral(TokenStart start, TokenKind* out)
 {
-    MOZ_ASSERT(sourceUnits.previousCodeUnit() == '/');
-    tokenbuf.clear();
+    MOZ_ASSERT(this->sourceUnits.previousCodeUnit() == CharT('/'));
+    this->charBuffer.clear();
 
-    auto ProcessNonAsciiCodePoint = [this](CharT lead) {
-        int32_t codePoint;
-        if (!this->getNonAsciiCodePoint(lead, &codePoint))
+    auto ProcessNonAsciiCodePoint = [this](int32_t lead) {
+        MOZ_ASSERT(lead != EOF);
+        MOZ_ASSERT(!this->isAsciiCodePoint(lead));
+
+        char32_t codePoint;
+        if (!this->getNonAsciiCodePointDontNormalize(this->toCharT(lead), &codePoint)) {
             return false;
+        }
 
-        if (codePoint == '\n') {
-            this->ungetLineTerminator();
+        if (MOZ_UNLIKELY(codePoint == unicode::LINE_SEPARATOR ||
+                         codePoint == unicode::PARA_SEPARATOR))
+        {
+            this->sourceUnits.ungetLineOrParagraphSeparator();
             this->reportError(JSMSG_UNTERMINATED_REGEXP);
             return false;
         }
 
-        return this->appendCodePointToTokenbuf(codePoint);
+        return this->appendCodePointToCharBuffer(codePoint);
     };
 
-    auto ReportUnterminatedRegExp = [this](CharT unit) {
+    auto ReportUnterminatedRegExp = [this](int32_t unit) {
         this->ungetCodeUnit(unit);
         this->error(JSMSG_UNTERMINATED_REGEXP);
     };
@@ -1715,44 +2276,53 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::regexpLiteral(TokenStart start, Toke
             return badToken();
         }
 
-        if (MOZ_LIKELY(isAsciiCodePoint(unit))) {
-            if (unit == '\\')  {
-                if (!tokenbuf.append(unit))
-                    return badToken();
-
-                unit = getCodeUnit();
-                if (unit == EOF) {
-                    ReportUnterminatedRegExp(unit);
-                    return badToken();
-                }
-
-                // Fallthrough only handles ASCII code points, so
-                // deal with non-ASCII and skip everything else.
-                if (MOZ_UNLIKELY(!isAsciiCodePoint(unit))) {
-                    if (!ProcessNonAsciiCodePoint(unit))
-                        return badToken();
-
-                    continue;
-                }
-            } else if (unit == '[') {
-                inCharClass = true;
-            } else if (unit == ']') {
-                inCharClass = false;
-            } else if (unit == '/' && !inCharClass) {
-                // For IE compat, allow unescaped / in char classes.
-                break;
+        if (MOZ_UNLIKELY(!isAsciiCodePoint(unit))) {
+            if (!ProcessNonAsciiCodePoint(unit)) {
+                return badToken();
             }
 
-            if (unit == '\r' || unit == '\n') {
+            continue;
+        }
+
+        if (unit == '\\')  {
+            if (!this->charBuffer.append(unit)) {
+                return badToken();
+            }
+
+            unit = getCodeUnit();
+            if (unit == EOF) {
                 ReportUnterminatedRegExp(unit);
                 return badToken();
             }
 
-            if (!tokenbuf.append(unit))
-                return badToken();
-        } else {
-            if (!ProcessNonAsciiCodePoint(unit))
-                return badToken();
+            // Fallthrough only handles ASCII code points, so
+            // deal with non-ASCII and skip everything else.
+            if (MOZ_UNLIKELY(!isAsciiCodePoint(unit))) {
+                if (!ProcessNonAsciiCodePoint(unit)) {
+                    return badToken();
+                }
+
+                continue;
+            }
+        } else if (unit == '[') {
+            inCharClass = true;
+        } else if (unit == ']') {
+            inCharClass = false;
+        } else if (unit == '/' && !inCharClass) {
+            // For IE compat, allow unescaped / in char classes.
+            break;
+        }
+
+        // NOTE: Non-ASCII LineTerminators were handled by
+        //       ProcessNonAsciiCodePoint calls above.
+        if (unit == '\r' || unit == '\n') {
+            ReportUnterminatedRegExp(unit);
+            return badToken();
+        }
+
+        MOZ_ASSERT(!IsLineTerminator(AssertedCast<char32_t>(unit)));
+        if (!this->charBuffer.append(unit)) {
+            return badToken();
         }
     } while (true);
 
@@ -1761,20 +2331,21 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::regexpLiteral(TokenStart start, Toke
     while (true) {
         RegExpFlag flag;
         unit = getCodeUnit();
-        if (unit == 'g')
+        if (unit == 'g') {
             flag = GlobalFlag;
-        else if (unit == 'i')
+        } else if (unit == 'i') {
             flag = IgnoreCaseFlag;
-        else if (unit == 'm')
+        } else if (unit == 'm') {
             flag = MultilineFlag;
-        else if (unit == 'y')
+        } else if (unit == 'y') {
             flag = StickyFlag;
-        else if (unit == 'u')
+        } else if (unit == 'u') {
             flag = UnicodeFlag;
-        else if (IsAsciiAlpha(unit))
+        } else if (IsAsciiAlpha(unit)) {
             flag = NoFlags;
-        else
+        } else {
             break;
+        }
 
         if ((reflags & flag) || flag == NoFlags) {
             ungetCodeUnit(unit);
@@ -1804,17 +2375,18 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
 
     // Check if in the middle of a template string. Have to get this out of
     // the way first.
-    if (MOZ_UNLIKELY(modifier == TemplateTail))
+    if (MOZ_UNLIKELY(modifier == TemplateTail)) {
         return getStringOrTemplateToken('`', modifier, ttp);
+    }
 
     // This loop runs more than once only when whitespace or comments are
     // encountered.
     do {
-        int32_t unit = getCodeUnit();
+        int32_t unit = peekCodeUnit();
         if (MOZ_UNLIKELY(unit == EOF)) {
-            MOZ_ASSERT(sourceUnits.atEnd());
+            MOZ_ASSERT(this->sourceUnits.atEnd());
             anyCharsAccess().flags.isEOF = true;
-            TokenStart start(sourceUnits, 0);
+            TokenStart start(this->sourceUnits, 0);
             newSimpleToken(TokenKind::Eof, start, modifier, ttp);
             return true;
         }
@@ -1826,17 +2398,23 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
             // a variable number of code points, it's easier to assume it's an
             // identifier and maybe do a little wasted work, than to unget and
             // compute and reget if whitespace.
-            TokenStart start(sourceUnits, -1);
-            const CharT* identStart = sourceUnits.addressOfNextCodeUnit() - 1;
+            TokenStart start(this->sourceUnits, 0);
+            const CharT* identStart = this->sourceUnits.addressOfNextCodeUnit();
 
-            int32_t codePoint;
-            if (!getNonAsciiCodePoint(unit, &codePoint))
+            PeekedCodePoint<CharT> peeked = this->sourceUnits.peekCodePoint();
+            if (peeked.isNone()) {
+                int32_t bad;
+                MOZ_ALWAYS_FALSE(getCodePoint(&bad));
                 return badToken();
+            }
 
-            if (unicode::IsSpaceOrBOM2(codePoint)) {
-                if (codePoint == unicode::LINE_SEPARATOR || codePoint == unicode::PARA_SEPARATOR) {
-                    if (!updateLineInfoForEOL())
+            char32_t cp = peeked.codePoint();
+            if (unicode::IsSpaceOrBOM2(cp)) {
+                this->sourceUnits.consumeKnownCodePoint(peeked);
+                if (IsLineTerminator(cp)) {
+                    if (!updateLineInfoForEOL()) {
                         return badToken();
+                    }
 
                     anyCharsAccess().updateFlagsForEOL();
                 }
@@ -1853,13 +2431,21 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
                           "!IsUnicodeIDStart('_'), ensure that '_' is never "
                           "handled here");
 
-            if (unicode::IsUnicodeIDStart(uint32_t(codePoint)))
-                return identifierName(start, identStart, IdentifierEscapes::None, modifier, ttp);
+            if (MOZ_LIKELY(unicode::IsUnicodeIDStart(cp))) {
+                this->sourceUnits.consumeKnownCodePoint(peeked);
+                MOZ_ASSERT(!IsLineTerminator(cp),
+                           "IdentifierStart must guarantee !IsLineTerminator "
+                           "or else we'll fail to maintain line-info/flags "
+                           "for EOL here");
 
-            ungetCodePointIgnoreEOL(codePoint);
+                return identifierName(start, identStart, IdentifierEscapes::None, modifier, ttp);
+            }
+
             error(JSMSG_ILLEGAL_CHARACTER);
             return badToken();
         } // !isAsciiCodePoint(unit)
+
+        consumeKnownCodeUnit(unit);
 
         // Get the token kind, based on the first char.  The ordering of c1kind
         // comparison is based on the frequency of tokens in real code:
@@ -1885,46 +2471,49 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
         // Look for an unambiguous single-char token.
         //
         if (c1kind <= OneChar_Max) {
-            TokenStart start(sourceUnits, -1);
+            TokenStart start(this->sourceUnits, -1);
             newSimpleToken(TokenKind(c1kind), start, modifier, ttp);
             return true;
         }
 
         // Skip over non-EOL whitespace chars.
         //
-        if (c1kind == Space)
+        if (c1kind == Space) {
             continue;
+        }
 
         // Look for an identifier.
         //
         if (c1kind == Ident) {
-            TokenStart start(sourceUnits, -1);
-            return identifierName(start, sourceUnits.addressOfNextCodeUnit() - 1,
+            TokenStart start(this->sourceUnits, -1);
+            return identifierName(start, this->sourceUnits.addressOfNextCodeUnit() - 1,
                                   IdentifierEscapes::None, modifier, ttp);
         }
 
         // Look for a decimal number.
         //
         if (c1kind == Dec) {
-            TokenStart start(sourceUnits, -1);
-            const CharT* numStart = sourceUnits.addressOfNextCodeUnit() - 1;
+            TokenStart start(this->sourceUnits, -1);
+            const CharT* numStart = this->sourceUnits.addressOfNextCodeUnit() - 1;
             return decimalNumber(unit, start, numStart, modifier, ttp);
         }
 
         // Look for a string or a template string.
         //
-        if (c1kind == String)
+        if (c1kind == String) {
             return getStringOrTemplateToken(static_cast<char>(unit), modifier, ttp);
+        }
 
         // Skip over EOL chars, updating line state along the way.
         //
         if (c1kind == EOL) {
-            // If it's a \r\n sequence, consume it as a single EOL.
-            if (unit == '\r' && !sourceUnits.atEnd())
-                sourceUnits.matchCodeUnit('\n');
+            if (unit == '\r') {
+                matchLineTerminator('\n');
+            }
 
-            if (!updateLineInfoForEOL())
+            if (!updateLineInfoForEOL()) {
                 return badToken();
+            }
 
             anyCharsAccess().updateFlagsForEOL();
             continue;
@@ -1935,7 +2524,7 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
         // decimal) number.
         //
         if (c1kind == ZeroDigit) {
-            TokenStart start(sourceUnits, -1);
+            TokenStart start(this->sourceUnits, -1);
 
             int radix;
             const CharT* numStart;
@@ -1951,10 +2540,11 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
                 }
 
                 // one past the '0x'
-                numStart = sourceUnits.addressOfNextCodeUnit() - 1;
+                numStart = this->sourceUnits.addressOfNextCodeUnit() - 1;
 
-                while (JS7_ISHEX(unit))
+                while (JS7_ISHEX(unit)) {
                     unit = getCodeUnit();
+                }
             } else if (unit == 'b' || unit == 'B') {
                 radix = 2;
                 unit = getCodeUnit();
@@ -1966,10 +2556,11 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
                 }
 
                 // one past the '0b'
-                numStart = sourceUnits.addressOfNextCodeUnit() - 1;
+                numStart = this->sourceUnits.addressOfNextCodeUnit() - 1;
 
-                while (unit == '0' || unit == '1')
+                while (unit == '0' || unit == '1') {
                     unit = getCodeUnit();
+                }
             } else if (unit == 'o' || unit == 'O') {
                 radix = 8;
                 unit = getCodeUnit();
@@ -1981,28 +2572,31 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
                 }
 
                 // one past the '0o'
-                numStart = sourceUnits.addressOfNextCodeUnit() - 1;
+                numStart = this->sourceUnits.addressOfNextCodeUnit() - 1;
 
-                while (JS7_ISOCT(unit))
+                while (JS7_ISOCT(unit)) {
                     unit = getCodeUnit();
+                }
             } else if (IsAsciiDigit(unit)) {
                 radix = 8;
                 // one past the '0'
-                numStart = sourceUnits.addressOfNextCodeUnit() - 1;
+                numStart = this->sourceUnits.addressOfNextCodeUnit() - 1;
 
                 do {
                     // Octal integer literals are not permitted in strict mode
                     // code.
-                    if (!reportStrictModeError(JSMSG_DEPRECATED_OCTAL))
+                    if (!reportStrictModeError(JSMSG_DEPRECATED_OCTAL)) {
                         return badToken();
+                    }
 
                     // Outside strict mode, we permit 08 and 09 as decimal
                     // numbers, which makes our behaviour a superset of the
                     // ECMA numeric grammar. We might not always be so
                     // permissive, so we warn about it.
                     if (unit >= '8') {
-                        if (!warning(JSMSG_BAD_OCTAL, unit == '8' ? "08" : "09"))
+                        if (!warning(JSMSG_BAD_OCTAL, unit == '8' ? "08" : "09")) {
                             return badToken();
+                        }
 
                         // Use the decimal scanner for the rest of the number.
                         return decimalNumber(unit, start, numStart, modifier, ttp);
@@ -2012,51 +2606,39 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
                 } while (IsAsciiDigit(unit));
             } else {
                 // '0' not followed by [XxBbOo0-9];  scan as a decimal number.
-                numStart = sourceUnits.addressOfNextCodeUnit() - 1;
+                numStart = this->sourceUnits.addressOfNextCodeUnit() - 1;
 
                 // NOTE: |unit| may be EOF here.  (This is permitted by case #3
                 //       in TokenStream.h docs for this function.)
                 return decimalNumber(unit, start, numStart, modifier, ttp);
             }
 
-            // Check for an identifier-start code point immediately after the
-            // number.  This must be an error, and somewhat surprisingly, if
-            // a check doesn't happen here, it never will.
-            if (MOZ_UNLIKELY(unit == EOF)) {
-                // Technically this isn't necessary -- ungetting EOF does
-                // nothing -- but it's conceptually nicer if we consider all
-                // gets requiring an unget to revert them.
-                ungetCodeUnit(unit);
-            } else if (MOZ_LIKELY(isAsciiCodePoint(unit))) {
-                ungetCodeUnit(unit);
+            ungetCodeUnit(unit);
 
+            // Error if an identifier-start code point appears immediately
+            // after the number.  Somewhat surprisingly, if we don't check
+            // here, we'll never check at all.
+            if (MOZ_LIKELY(isAsciiCodePoint(unit))) {
                 if (unicode::IsIdentifierStart(char16_t(unit))) {
                     error(JSMSG_IDSTART_AFTER_NUMBER);
                     return badToken();
                 }
-            } else {
-                int32_t codePoint;
-                if (!getNonAsciiCodePoint(unit, &codePoint))
-                    return badToken();
-
-                ungetCodePointIgnoreEOL(codePoint);
-                if (codePoint == unicode::LINE_SEPARATOR || codePoint == unicode::PARA_SEPARATOR)
-                    anyCharsAccess().undoInternalUpdateLineInfoForEOL();
-
-                if (unicode::IsIdentifierStart(uint32_t(codePoint))) {
+            } else if (MOZ_LIKELY(unit != EOF)) {
+                // This ignores encoding errors: subsequent caller-side code to
+                // handle source text after the number will do so.
+                PeekedCodePoint<CharT> peeked = this->sourceUnits.peekCodePoint();
+                if (!peeked.isNone() && unicode::IsIdentifierStart(peeked.codePoint())) {
                     error(JSMSG_IDSTART_AFTER_NUMBER);
                     return badToken();
                 }
             }
 
             double dval;
-            const char16_t* dummy;
-            if (!GetPrefixInteger(anyCharsAccess().cx, numStart,
-                                  sourceUnits.addressOfNextCodeUnit(), radix, &dummy, &dval))
+            if (!GetFullInteger(anyCharsAccess().cx, numStart,
+                                this->sourceUnits.addressOfNextCodeUnit(), radix, &dval))
             {
                 return badToken();
             }
-
             newNumberToken(dval, NoDecimal, start, modifier, ttp);
             return true;
         }
@@ -2068,17 +2650,20 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
         // creation code for all such tokens.  All other tokens must be handled
         // by returning (or by continuing from the loop enclosing this).
         //
-        TokenStart start(sourceUnits, -1);
+        TokenStart start(this->sourceUnits, -1);
         TokenKind simpleKind;
 #ifdef DEBUG
         simpleKind = TokenKind::Limit; // sentinel value for code after switch
 #endif
-        switch (static_cast<CharT>(unit)) {
+
+        // The block a ways above eliminated all non-ASCII, so cast to the
+        // smallest type possible to assist the C++ compiler.
+        switch (AssertedCast<uint8_t>(CodeUnitValue(toCharT(unit)))) {
           case '.':
             unit = getCodeUnit();
             if (IsAsciiDigit(unit)) {
-                return decimalNumber('.', start, sourceUnits.addressOfNextCodeUnit() - 2, modifier,
-                                     ttp);
+                return decimalNumber('.', start, this->sourceUnits.addressOfNextCodeUnit() - 2,
+                                     modifier, ttp);
             }
 
             if (unit == '.') {
@@ -2096,47 +2681,50 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
             break;
 
           case '=':
-            if (matchCodeUnit('='))
+            if (matchCodeUnit('=')) {
                 simpleKind = matchCodeUnit('=') ? TokenKind::StrictEq : TokenKind::Eq;
-            else if (matchCodeUnit('>'))
+            } else if (matchCodeUnit('>')) {
                 simpleKind = TokenKind::Arrow;
-            else
+            } else {
                 simpleKind = TokenKind::Assign;
+            }
             break;
 
           case '+':
-            if (matchCodeUnit('+'))
+            if (matchCodeUnit('+')) {
                 simpleKind = TokenKind::Inc;
-            else
+            } else {
                 simpleKind = matchCodeUnit('=') ? TokenKind::AddAssign : TokenKind::Add;
+            }
             break;
 
           case '\\': {
             uint32_t codePoint;
             if (uint32_t escapeLength = matchUnicodeEscapeIdStart(&codePoint)) {
                 return identifierName(start,
-                                      sourceUnits.addressOfNextCodeUnit() - escapeLength - 1,
+                                      this->sourceUnits.addressOfNextCodeUnit() - escapeLength - 1,
                                       IdentifierEscapes::SawUnicodeEscape, modifier, ttp);
             }
 
             // We could point "into" a mistyped escape, e.g. for "\u{41H}" we
-            // could point at the 'H'.  But we don't do that now, so the
-            // character after the '\' isn't necessarily bad, so just point at
-            // the start of the actually-invalid escape.
+            // could point at the 'H'.  But we don't do that now, so the code
+            // unit after the '\' isn't necessarily bad, so just point at the
+            // start of the actually-invalid escape.
             ungetCodeUnit('\\');
             error(JSMSG_BAD_ESCAPE);
             return badToken();
           }
 
           case '|':
-            if (matchCodeUnit('|'))
+            if (matchCodeUnit('|')) {
                 simpleKind = TokenKind::Or;
 #ifdef ENABLE_PIPELINE_OPERATOR
-            else if (matchCodeUnit('>'))
+            } else if (matchCodeUnit('>')) {
                 simpleKind = TokenKind::Pipeline;
 #endif
-            else
+            } else {
                 simpleKind = matchCodeUnit('=') ? TokenKind::BitOrAssign : TokenKind::BitOr;
+            }
             break;
 
           case '^':
@@ -2144,17 +2732,19 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
             break;
 
           case '&':
-            if (matchCodeUnit('&'))
+            if (matchCodeUnit('&')) {
                 simpleKind = TokenKind::And;
-            else
+            } else {
                 simpleKind = matchCodeUnit('=') ? TokenKind::BitAndAssign : TokenKind::BitAnd;
+            }
             break;
 
           case '!':
-            if (matchCodeUnit('='))
+            if (matchCodeUnit('=')) {
                 simpleKind = matchCodeUnit('=') ? TokenKind::StrictNe : TokenKind::Ne;
-            else
+            } else {
                 simpleKind = TokenKind::Not;
+            }
             break;
 
           case '<':
@@ -2163,7 +2753,7 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
                 if (matchCodeUnit('!')) {
                     if (matchCodeUnit('-')) {
                         if (matchCodeUnit('-')) {
-                            consumeRestOfSingleLineComment();
+                            this->sourceUnits.consumeRestOfSingleLineComment();
                             continue;
                         }
                         ungetCodeUnit('-');
@@ -2171,28 +2761,31 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
                     ungetCodeUnit('!');
                 }
             }
-            if (matchCodeUnit('<'))
+            if (matchCodeUnit('<')) {
                 simpleKind = matchCodeUnit('=') ? TokenKind::LshAssign : TokenKind::Lsh;
-            else
+            } else {
                 simpleKind = matchCodeUnit('=') ? TokenKind::Le : TokenKind::Lt;
+            }
             break;
 
           case '>':
             if (matchCodeUnit('>')) {
-                if (matchCodeUnit('>'))
+                if (matchCodeUnit('>')) {
                     simpleKind = matchCodeUnit('=') ? TokenKind::UrshAssign : TokenKind::Ursh;
-                else
+                } else {
                     simpleKind = matchCodeUnit('=') ? TokenKind::RshAssign : TokenKind::Rsh;
+                }
             } else {
                 simpleKind = matchCodeUnit('=') ? TokenKind::Ge : TokenKind::Gt;
             }
             break;
 
           case '*':
-            if (matchCodeUnit('*'))
+            if (matchCodeUnit('*')) {
                 simpleKind = matchCodeUnit('=') ? TokenKind::PowAssign : TokenKind::Pow;
-            else
+            } else {
                 simpleKind = matchCodeUnit('=') ? TokenKind::MulAssign : TokenKind::Mul;
+            }
             break;
 
           case '/':
@@ -2201,14 +2794,15 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
                 unit = getCodeUnit();
                 if (unit == '@' || unit == '#') {
                     bool shouldWarn = unit == '@';
-                    if (!getDirectives(false, shouldWarn))
+                    if (!getDirectives(false, shouldWarn)) {
                         return false;
+                    }
                 } else {
                     // NOTE: |unit| may be EOF here.
                     ungetCodeUnit(unit);
                 }
 
-                consumeRestOfSingleLineComment();
+                this->sourceUnits.consumeRestOfSingleLineComment();
                 continue;
             }
 
@@ -2224,33 +2818,39 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
                         return badToken();
                     }
 
-                    if (unit == '*' && matchCodeUnit('/'))
+                    if (unit == '*' && matchCodeUnit('/')) {
                         break;
+                    }
 
                     if (unit == '@' || unit == '#') {
                         bool shouldWarn = unit == '@';
-                        if (!getDirectives(true, shouldWarn))
+                        if (!getDirectives(true, shouldWarn)) {
                             return badToken();
+                        }
                     } else if (MOZ_LIKELY(isAsciiCodePoint(unit))) {
                         int32_t codePoint;
-                        if (!getFullAsciiCodePoint(unit, &codePoint))
+                        if (!getFullAsciiCodePoint(unit, &codePoint)) {
                             return badToken();
+                        }
                     } else {
                         int32_t codePoint;
-                        if (!getNonAsciiCodePoint(unit, &codePoint))
+                        if (!getNonAsciiCodePoint(unit, &codePoint)) {
                             return badToken();
+                        }
                     }
                 } while (true);
 
-                if (linenoBefore != anyChars.lineno)
+                if (linenoBefore != anyChars.lineno) {
                     anyChars.updateFlagsForEOL();
+                }
 
                 continue;
             }
 
             // Look for a regexp.
-            if (modifier == Operand)
+            if (modifier == Operand) {
                 return regexpLiteral(start, ttp);
+            }
 
             simpleKind = matchCodeUnit('=') ? TokenKind::DivAssign : TokenKind::Div;
             break;
@@ -2265,7 +2865,7 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
                     !anyCharsAccess().flags.isDirtyLine)
                 {
                     if (matchCodeUnit('>')) {
-                        consumeRestOfSingleLineComment();
+                        this->sourceUnits.consumeRestOfSingleLineComment();
                         continue;
                     }
                 }
@@ -2282,7 +2882,7 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getTokenInternal(TokenKind* const tt
             ungetCodeUnit(unit);
             error(JSMSG_ILLEGAL_CHARACTER);
             return badToken();
-        } // switch (static_cast<CharT>(unit))
+        } // switch (AssertedCast<uint8_t>(CodeUnitValue(toCharT(unit))))
 
         MOZ_ASSERT(simpleKind != TokenKind::Limit,
                    "switch-statement should have set |simpleKind| before "
@@ -2305,8 +2905,8 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
     bool parsingTemplate = (untilChar == '`');
     bool templateHead = false;
 
-    TokenStart start(sourceUnits, -1);
-    tokenbuf.clear();
+    TokenStart start(this->sourceUnits, -1);
+    this->charBuffer.clear();
 
     // Run the bad-token code for every path out of this function except the
     // one success-case.
@@ -2318,8 +2918,8 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
         // Unicode separators aren't end-of-line in template or (as of
         // recently) string literals, so this assertion doesn't allow them.
         MOZ_ASSERT(this->sourceUnits.atEnd() ||
-                   this->sourceUnits.peekCodeUnit() == '\r' ||
-                   this->sourceUnits.peekCodeUnit() == '\n',
+                   this->sourceUnits.peekCodeUnit() == CharT('\r') ||
+                   this->sourceUnits.peekCodeUnit() == CharT('\n'),
                    "must be parked at EOF or EOL to call this function");
 
         // The various errors reported here include language like "in a ''
@@ -2345,27 +2945,26 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
         // ordinarily LineTerminatorSequences.  (They contribute their literal
         // values to template and [as of recently] string literals, but they're
         // line terminators when computing line/column coordinates.)  Handle
-        // the non-ASCI case early for readability.
+        // the non-ASCII case early for readability.
         if (MOZ_UNLIKELY(!isAsciiCodePoint(unit))) {
-            static_assert(mozilla::IsSame<CharT, char16_t>::value,
-                          "need a getNonAsciiCodePoint that doesn't normalize "
-                          "LineTerminatorSequences to correctly handle UTF-8");
-
-            int32_t codePoint;
-            if (unit == unicode::LINE_SEPARATOR || unit == unicode::PARA_SEPARATOR) {
-                if (!updateLineInfoForEOL())
-                    return false;
-
-                anyCharsAccess().updateFlagsForEOL();
-
-                codePoint = unit;
-            } else {
-                if (!getNonAsciiCodePoint(unit, &codePoint))
-                    return false;
+            char32_t cp;
+            if (!getNonAsciiCodePointDontNormalize(toCharT(unit), &cp)) {
+                return false;
             }
 
-            if (!appendCodePointToTokenbuf(codePoint))
+            if (MOZ_UNLIKELY(cp == unicode::LINE_SEPARATOR || cp == unicode::PARA_SEPARATOR)) {
+                if (!updateLineInfoForEOL()) {
+                    return false;
+                }
+
+                anyCharsAccess().updateFlagsForEOL();
+            } else {
+                MOZ_ASSERT(!IsLineTerminator(cp));
+            }
+
+            if (!appendCodePointToCharBuffer(cp)) {
                 return false;
+            }
 
             continue;
         }
@@ -2373,7 +2972,7 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
         if (unit == '\\') {
             // When parsing templates, we don't immediately report errors for
             // invalid escapes; these are handled by the parser.  We don't
-            // append to tokenbuf in those cases because it won't be read.
+            // append to charBuffer in those cases because it won't be read.
             unit = getCodeUnit();
             if (unit == EOF) {
                 ReportPrematureEndOfLiteral(JSMSG_EOF_IN_ESCAPE_IN_LITERAL);
@@ -2384,22 +2983,26 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
             // an unlikely special-case to it and then continue.
             if (MOZ_UNLIKELY(!isAsciiCodePoint(unit))) {
                 int32_t codePoint;
-                if (!getNonAsciiCodePoint(unit, &codePoint))
+                if (!getNonAsciiCodePoint(unit, &codePoint)) {
                     return false;
+                }
 
                 // If we consumed U+2028 LINE SEPARATOR or U+2029 PARAGRAPH
                 // SEPARATOR, they'll be normalized to '\n'.  '\' followed by
                 // LineContinuation represents no code points, so don't append
                 // in this case.
                 if (codePoint != '\n') {
-                    if (!tokenbuf.append(unit))
+                    if (!this->charBuffer.append(unit)) {
                         return false;
+                    }
                 }
 
                 continue;
             }
 
-            switch (static_cast<CharT>(unit)) {
+            // The block above eliminated all non-ASCII, so cast to the
+            // smallest type possible to assist the C++ compiler.
+            switch (AssertedCast<uint8_t>(CodeUnitValue(toCharT(unit)))) {
               case 'b': unit = '\b'; break;
               case 'f': unit = '\f'; break;
               case 'n': unit = '\n'; break;
@@ -2408,14 +3011,15 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
               case 'v': unit = '\v'; break;
 
               case '\r':
-                sourceUnits.matchCodeUnit('\n');
+                matchLineTerminator('\n');
                 MOZ_FALLTHROUGH;
               case '\n': {
                 // LineContinuation represents no code points.  We're manually
                 // consuming a LineTerminatorSequence, so we must manually
                 // update line/column info.
-                if (!updateLineInfoForEOL())
+                if (!updateLineInfoForEOL()) {
                     return false;
+                }
 
                 continue;
               }
@@ -2430,7 +3034,7 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
 
                 // First handle a delimited Unicode escape, e.g. \u{1F4A9}.
                 if (c2 == '{') {
-                    uint32_t start = sourceUnits.offset() - 3;
+                    uint32_t start = this->sourceUnits.offset() - 3;
                     uint32_t code = 0;
                     bool first = true;
                     bool valid = true;
@@ -2466,7 +3070,7 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
                         // so it'll pass into this |if|-block.
                         if (!JS7_ISHEX(u3)) {
                             if (parsingTemplate) {
-                                // We put the character back so that we read it
+                                // We put the code unit back so that we read it
                                 // on the next pass, which matters if it was
                                 // '`' or '\'.
                                 ungetCodeUnit(u3);
@@ -2497,12 +3101,14 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
                         first = false;
                     } while (true);
 
-                    if (!valid)
+                    if (!valid) {
                         continue;
+                    }
 
                     MOZ_ASSERT(code <= unicode::NonBMPMax);
-                    if (!appendCodePointToTokenbuf(code))
+                    if (!appendCodePointToCharBuffer(code)) {
                         return false;
+                    }
 
                     continue;
                 } // end of delimited Unicode escape handling
@@ -2511,20 +3117,13 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
                 // If it isn't, this is usually an error -- but if this is a
                 // template literal, we must defer error reporting because
                 // malformed escapes are okay in *tagged* template literals.
-                CharT cp[3];
-                if (JS7_ISHEX(c2) &&
-                    sourceUnits.peekCodeUnits(3, cp) &&
-                    JS7_ISHEX(cp[0]) && JS7_ISHEX(cp[1]) && JS7_ISHEX(cp[2]))
-                {
-                    unit = (JS7_UNHEX(c2) << 12) |
-                           (JS7_UNHEX(cp[0]) << 8) |
-                           (JS7_UNHEX(cp[1]) << 4) |
-                           JS7_UNHEX(cp[2]);
-                    sourceUnits.skipCodeUnits(3);
+                char16_t v;
+                if (JS7_ISHEX(c2) && this->sourceUnits.matchHexDigits(3, &v)) {
+                    unit = (JS7_UNHEX(c2) << 12) | v;
                 } else {
                     // Beware: |c2| may not be an ASCII code point here!
                     ungetCodeUnit(c2);
-                    uint32_t start = sourceUnits.offset() - 2;
+                    uint32_t start = this->sourceUnits.offset() - 2;
                     if (parsingTemplate) {
                         TokenStreamAnyChars& anyChars = anyCharsAccess();
                         anyChars.setInvalidTemplateEscape(start, InvalidEscapeType::Unicode);
@@ -2538,14 +3137,11 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
 
               // Hexadecimal character specification.
               case 'x': {
-                CharT cp[2];
-                if (sourceUnits.peekCodeUnits(2, cp) &&
-                    JS7_ISHEX(cp[0]) && JS7_ISHEX(cp[1]))
-                {
-                    unit = (JS7_UNHEX(cp[0]) << 4) + JS7_UNHEX(cp[1]);
-                    sourceUnits.skipCodeUnits(2);
+                char16_t v;
+                if (this->sourceUnits.matchHexDigits(2, &v)) {
+                    unit = v;
                 } else {
-                    uint32_t start = sourceUnits.offset() - 2;
+                    uint32_t start = this->sourceUnits.offset() - 2;
                     if (parsingTemplate) {
                         TokenStreamAnyChars& anyChars = anyCharsAccess();
                         anyChars.setInvalidTemplateEscape(start, InvalidEscapeType::Hexadecimal);
@@ -2558,8 +3154,9 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
               }
 
               default: {
-                if (!JS7_ISOCT(unit))
+                if (!JS7_ISOCT(unit)) {
                     break;
+                }
 
                 // Octal character specification.
                 int32_t val = JS7_UNOCT(unit);
@@ -2574,12 +3171,13 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
                 if (val != 0 || IsAsciiDigit(unit)) {
                     TokenStreamAnyChars& anyChars = anyCharsAccess();
                     if (parsingTemplate) {
-                        anyChars.setInvalidTemplateEscape(sourceUnits.offset() - 2,
+                        anyChars.setInvalidTemplateEscape(this->sourceUnits.offset() - 2,
                                                           InvalidEscapeType::Octal);
                         continue;
                     }
-                    if (!reportStrictModeError(JSMSG_DEPRECATED_OCTAL))
+                    if (!reportStrictModeError(JSMSG_DEPRECATED_OCTAL)) {
                         return false;
+                    }
                     anyChars.flags.sawOctalEscape = true;
                 }
 
@@ -2596,20 +3194,22 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
                     if (JS7_ISOCT(unit)) {
                         int32_t save = val;
                         val = 8 * val + JS7_UNOCT(unit);
-                        if (val <= 0xFF)
+                        if (val <= 0xFF) {
                             consumeKnownCodeUnit(unit);
-                        else
+                        } else {
                             val = save;
+                        }
                     }
                 }
 
                 unit = char16_t(val);
                 break;
               } // default
-            }
+            } // switch (AssertedCast<uint8_t>(CodeUnitValue(toCharT(unit))))
 
-            if (!tokenbuf.append(unit))
+            if (!this->charBuffer.append(unit)) {
                 return false;
+            }
 
             continue;
         } // (unit == '\\')
@@ -2624,14 +3224,12 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
 
             if (unit == '\r') {
                 unit = '\n';
-
-                // If it's a \r\n sequence: treat as a single EOL, skip over the \n.
-                if (!sourceUnits.atEnd())
-                    sourceUnits.matchCodeUnit('\n');
+                matchLineTerminator('\n');
             }
 
-            if (!updateLineInfoForEOL())
+            if (!updateLineInfoForEOL()) {
                 return false;
+            }
 
             anyCharsAccess().updateFlagsForEOL();
         } else if (parsingTemplate && unit == '$' && matchCodeUnit('{')) {
@@ -2639,13 +3237,15 @@ TokenStreamSpecific<CharT, AnyCharsAccess>::getStringOrTemplateToken(char untilC
             break;
         }
 
-        if (!tokenbuf.append(unit))
+        if (!this->charBuffer.append(unit)) {
             return false;
+        }
     }
 
-    JSAtom* atom = atomizeChars(anyCharsAccess().cx, tokenbuf.begin(), tokenbuf.length());
-    if (!atom)
+    JSAtom* atom = drainCharBufferIntoAtom(anyCharsAccess().cx);
+    if (!atom) {
         return false;
+    }
 
     noteBadToken.release();
 
@@ -2690,20 +3290,29 @@ TokenKindToString(TokenKind tt)
 }
 #endif
 
-template class frontend::TokenStreamCharsBase<char16_t>;
+template class TokenStreamCharsBase<Utf8Unit>;
+template class TokenStreamCharsBase<char16_t>;
 
-template class frontend::TokenStreamChars<char16_t, frontend::TokenStreamAnyCharsAccess>;
-template class frontend::TokenStreamSpecific<char16_t, frontend::TokenStreamAnyCharsAccess>;
-
-template class
-frontend::TokenStreamChars<char16_t, frontend::ParserAnyCharsAccess<frontend::GeneralParser<frontend::FullParseHandler, char16_t>>>;
-template class
-frontend::TokenStreamChars<char16_t, frontend::ParserAnyCharsAccess<frontend::GeneralParser<frontend::SyntaxParseHandler, char16_t>>>;
+template class TokenStreamChars<char16_t, TokenStreamAnyCharsAccess>;
+template class TokenStreamSpecific<char16_t, TokenStreamAnyCharsAccess>;
 
 template class
-frontend::TokenStreamSpecific<char16_t, frontend::ParserAnyCharsAccess<frontend::GeneralParser<frontend::FullParseHandler, char16_t>>>;
+TokenStreamChars<Utf8Unit, ParserAnyCharsAccess<GeneralParser<FullParseHandler, Utf8Unit>>>;
 template class
-frontend::TokenStreamSpecific<char16_t, frontend::ParserAnyCharsAccess<frontend::GeneralParser<frontend::SyntaxParseHandler, char16_t>>>;
+TokenStreamChars<Utf8Unit, ParserAnyCharsAccess<GeneralParser<SyntaxParseHandler, Utf8Unit>>>;
+template class
+TokenStreamChars<char16_t, ParserAnyCharsAccess<GeneralParser<FullParseHandler, char16_t>>>;
+template class
+TokenStreamChars<char16_t, ParserAnyCharsAccess<GeneralParser<SyntaxParseHandler, char16_t>>>;
+
+template class
+TokenStreamSpecific<Utf8Unit, ParserAnyCharsAccess<GeneralParser<FullParseHandler, Utf8Unit>>>;
+template class
+TokenStreamSpecific<Utf8Unit, ParserAnyCharsAccess<GeneralParser<SyntaxParseHandler, Utf8Unit>>>;
+template class
+TokenStreamSpecific<char16_t, ParserAnyCharsAccess<GeneralParser<FullParseHandler, char16_t>>>;
+template class
+TokenStreamSpecific<char16_t, ParserAnyCharsAccess<GeneralParser<SyntaxParseHandler, char16_t>>>;
 
 } // namespace frontend
 
@@ -2717,8 +3326,9 @@ js_fgets(char* buf, int size, FILE* file)
     bool crflag;
 
     n = size - 1;
-    if (n < 0)
+    if (n < 0) {
         return -1;
+    }
 
     crflag = false;
     for (i = 0; i < n && (c = fast_getc(file)) != EOF; i++) {

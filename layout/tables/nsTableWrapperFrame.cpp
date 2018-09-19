@@ -33,7 +33,7 @@ nsTableWrapperFrame::GetLogicalBaseline(WritingMode aWritingMode) const
 {
   nsIFrame* kid = mFrames.FirstChild();
   if (!kid) {
-    NS_NOTREACHED("no inner table");
+    MOZ_ASSERT_UNREACHABLE("no inner table");
     return nsContainerFrame::GetLogicalBaseline(aWritingMode);
   }
 
@@ -321,7 +321,7 @@ nsTableWrapperFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   nscoord iSize = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
                     InnerTableFrame(), nsLayoutUtils::MIN_ISIZE);
-  DISPLAY_MIN_WIDTH(this, iSize);
+  DISPLAY_MIN_INLINE_SIZE(this, iSize);
   if (mCaptionFrames.NotEmpty()) {
     nscoord capISize =
       nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
@@ -342,7 +342,7 @@ nsTableWrapperFrame::GetMinISize(gfxContext *aRenderingContext)
 nsTableWrapperFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   nscoord maxISize;
-  DISPLAY_PREF_WIDTH(this, maxISize);
+  DISPLAY_PREF_INLINE_SIZE(this, maxISize);
 
   maxISize = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
                InnerTableFrame(), nsLayoutUtils::PREF_ISIZE);
@@ -671,7 +671,7 @@ nsTableWrapperFrame::GetCaptionOrigin(uint32_t             aCaptionSide,
       aOrigin.B(aWM) = aInnerMargin.BStart(aWM) + aCaptionMargin.BStart(aWM);
       break;
     default:
-      NS_NOTREACHED("Unknown caption alignment type");
+      MOZ_ASSERT_UNREACHABLE("Unknown caption alignment type");
       break;
   }
   return NS_OK;
@@ -763,7 +763,7 @@ nsTableWrapperFrame::GetInnerOrigin(uint32_t             aCaptionSide,
                        aCaptionMargin.BStartEnd(aWM);
       break;
     default:
-      NS_NOTREACHED("Unknown caption alignment type");
+      MOZ_ASSERT_UNREACHABLE("Unknown caption alignment type");
       break;
   }
   return NS_OK;

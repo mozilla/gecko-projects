@@ -2,8 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-.tree {
-  overflow: auto;
+ /* We can remove the outline since we do add our own focus style on nodes */
+.tree:focus {
+  outline: none;
 }
 
 .tree.inline {
@@ -163,12 +164,6 @@ html[dir="rtl"] .tree-node img.arrow {
   margin-top: 3px;
 }
 
-.objectBox-stackTrace-fn::before {
-  content: "\3BB"; /* The "lambda" symbol */
-  display: inline-block;
-  margin: 0 0.3em;
-}
-
 .objectBox-stackTrace-fn {
   color: var(--console-output-color);
   padding-inline-start: 17px;
@@ -226,6 +221,7 @@ html[dir="rtl"] .tree-node img.arrow {
   padding: 0 2px;
 }
 
+.objectBox-accessible.clickable,
 .objectBox-node.clickable {
   cursor: pointer;
 }
@@ -251,6 +247,7 @@ html[dir="rtl"] .tree-node img.arrow {
   color: var(--comment-node-color);
 }
 
+.accessible-role,
 .tag-name {
   color: var(--object-color);
 }
@@ -327,8 +324,9 @@ html[dir="rtl"] .tree-node img.arrow {
 }
 
 /******************************************************************************/
-/* Open DOMNode in inspector button */
+/* Open DOMNode in inspector or Accessible in accessibility inspector button */
 
+button.open-accessibility-inspector,
 button.open-inspector {
   mask: url("chrome://devtools/skin/images/devtools-reps/open-inspector.svg") no-repeat;
   display: inline-block;
@@ -339,8 +337,10 @@ button.open-inspector {
   cursor: pointer;
 }
 
+.objectBox-accessible:hover .open-accessibility-inspector,
 .objectBox-node:hover .open-inspector,
 .objectBox-textNode:hover .open-inspector,
+.open-accessibility-inspector:hover,
 .open-inspector:hover {
   background-color: var(--theme-highlight-blue);
 }

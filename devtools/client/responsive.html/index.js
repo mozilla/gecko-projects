@@ -13,7 +13,6 @@ const { require } = BrowserLoader({
   window
 });
 const Telemetry = require("devtools/client/shared/telemetry");
-const { loadAgentSheet } = require("./utils/css");
 
 const { createFactory, createElement } =
   require("devtools/client/shared/vendor/react");
@@ -21,13 +20,12 @@ const ReactDOM = require("devtools/client/shared/vendor/react-dom");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
 
 const message = require("./utils/message");
-const App = createFactory(require("./app"));
+const App = createFactory(require("./components/App"));
 const Store = require("./store");
 const { loadDevices } = require("./actions/devices");
-const { changeDisplayPixelRatio } = require("./actions/display-pixel-ratio");
-const { changeLocation } = require("./actions/location");
 const { loadReloadConditions } = require("./actions/reload-conditions");
 const { addViewport, resizeViewport } = require("./actions/viewports");
+const { changeDisplayPixelRatio } = require("./actions/ui");
 
 // Exposed for use by tests
 window.require = require;
@@ -39,13 +37,6 @@ const bootstrap = {
   store: null,
 
   async init() {
-    // Load a special UA stylesheet to reset certain styles such as dropdown
-    // lists.
-    loadAgentSheet(
-      window,
-      "resource://devtools/client/responsive.html/responsive-ua.css"
-    );
-
     this.telemetry.toolOpened("responsive");
 
     const store = this.store = Store();
@@ -125,7 +116,6 @@ function onDevicePixelRatioChange() {
 window.addInitialViewport = ({ uri, userContextId }) => {
   try {
     onDevicePixelRatioChange();
-    bootstrap.dispatch(changeLocation(uri));
     bootstrap.dispatch(changeDisplayPixelRatio(window.devicePixelRatio));
     bootstrap.dispatch(addViewport(userContextId));
   } catch (e) {
@@ -137,12 +127,17 @@ window.addInitialViewport = ({ uri, userContextId }) => {
  * Called by manager.js when tests want to check the viewport size.
  */
 window.getViewportSize = () => {
-  const { width, height } = bootstrap.store.getState().viewports[0];
+  const { viewports } = bootstrap.store.getState();
+  if (!viewports.length) {
+    return null;
+  }
+
+  const { width, height } = viewports[0];
   return { width, height };
 };
 
 /**
- * Called by manager.js to set viewport size from tests, GCLI, etc.
+ * Called by manager.js to set viewport size from tests, etc.
  */
 window.setViewportSize = ({ width, height }) => {
   try {

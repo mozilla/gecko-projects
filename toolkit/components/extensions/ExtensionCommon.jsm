@@ -22,6 +22,7 @@ XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
+  ConsoleAPI: "resource://gre/modules/Console.jsm",
   MessageChannel: "resource://gre/modules/MessageChannel.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
   Schemas: "resource://gre/modules/Schemas.jsm",
@@ -37,15 +38,19 @@ ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 var {
   DefaultMap,
   DefaultWeakMap,
-  EventEmitter,
   ExtensionError,
-  defineLazyGetter,
   filterStack,
-  getConsole,
   getInnerWindowID,
   getUniqueId,
   getWinUtils,
 } = ExtensionUtils;
+
+function getConsole() {
+  return new ConsoleAPI({
+    maxLogLevelPref: "extensions.webextensions.log.level",
+    prefix: "WebExtensions",
+  });
+}
 
 XPCOMUtils.defineLazyGetter(this, "console", getConsole);
 
@@ -53,6 +58,121 @@ XPCOMUtils.defineLazyPreferenceGetter(this, "DELAYED_BG_STARTUP",
                                       "extensions.webextensions.background-delayed-startup");
 
 var ExtensionCommon;
+
+// Run a function and report exceptions.
+function runSafeSyncWithoutClone(f, ...args) {
+  try {
+    return f(...args);
+  } catch (e) {
+    dump(`Extension error: ${e} ${e.fileName} ${e.lineNumber}\n[[Exception stack\n${filterStack(e)}Current stack\n${filterStack(Error())}]]\n`);
+    Cu.reportError(e);
+  }
+}
+
+// Return true if the given value is an instance of the given
+// native type.
+function instanceOf(value, type) {
+  return (value && typeof value === "object" &&
+          ChromeUtils.getClassName(value) === type);
+}
+
+/**
+ * Convert any of several different representations of a date/time to a Date object.
+ * Accepts several formats:
+ * a Date object, an ISO8601 string, or a number of milliseconds since the epoch as
+ * either a number or a string.
+ *
+ * @param {Date|string|number} date
+ *      The date to convert.
+ * @returns {Date}
+ *      A Date object
+ */
+function normalizeTime(date) {
+  // Of all the formats we accept the "number of milliseconds since the epoch as a string"
+  // is an outlier, everything else can just be passed directly to the Date constructor.
+  return new Date((typeof date == "string" && /^\d+$/.test(date))
+                        ? parseInt(date, 10) : date);
+}
+
+function withHandlingUserInput(window, callable) {
+  let handle = getWinUtils(window).setHandlingUserInput(true);
+  try {
+    return callable();
+  } finally {
+    handle.destruct();
+  }
+}
+
+/**
+ * Defines a lazy getter for the given property on the given object. The
+ * first time the property is accessed, the return value of the getter
+ * is defined on the current `this` object with the given property name.
+ * Importantly, this means that a lazy getter defined on an object
+ * prototype will be invoked separately for each object instance that
+ * it's accessed on.
+ *
+ * @param {object} object
+ *        The prototype object on which to define the getter.
+ * @param {string|Symbol} prop
+ *        The property name for which to define the getter.
+ * @param {function} getter
+ *        The function to call in order to generate the final property
+ *        value.
+ */
+function defineLazyGetter(object, prop, getter) {
+  let redefine = (obj, value) => {
+    Object.defineProperty(obj, prop, {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value,
+    });
+    return value;
+  };
+
+  Object.defineProperty(object, prop, {
+    enumerable: true,
+    configurable: true,
+
+    get() {
+      return redefine(this, getter.call(this));
+    },
+
+    set(value) {
+      redefine(this, value);
+    },
+  });
+}
+
+function checkLoadURL(url, principal, options) {
+  let ssm = Services.scriptSecurityManager;
+
+  let flags = ssm.STANDARD;
+  if (!options.allowScript) {
+    flags |= ssm.DISALLOW_SCRIPT;
+  }
+  if (!options.allowInheritsPrincipal) {
+    flags |= ssm.DISALLOW_INHERIT_PRINCIPAL;
+  }
+  if (options.dontReportErrors) {
+    flags |= ssm.DONT_REPORT_ERRORS;
+  }
+
+  try {
+    ssm.checkLoadURIWithPrincipal(principal,
+                                  Services.io.newURI(url),
+                                  flags);
+  } catch (e) {
+    return false;
+  }
+  return true;
+}
+
+function makeWidgetId(id) {
+  id = id.toLowerCase();
+  // FIXME: This allows for collisions.
+  return id.replace(/[^a-z0-9_-]/g, "_");
+}
 
 /**
  * A sentinel class to indicate that an array of values should be
@@ -85,12 +205,130 @@ class NoCloneSpreadArgs {
   }
 }
 
+const LISTENERS = Symbol("listeners");
+const ONCE_MAP = Symbol("onceMap");
+
+class EventEmitter {
+  constructor() {
+    this[LISTENERS] = new Map();
+    this[ONCE_MAP] = new WeakMap();
+  }
+
+  /**
+   * Checks whether there is some listener for the given event.
+   *
+   * @param {string} event
+   *       The name of the event to listen for.
+   * @returns {boolean}
+   */
+  has(event) {
+    return this[LISTENERS].has(event);
+  }
+
+  /**
+   * Adds the given function as a listener for the given event.
+   *
+   * The listener function may optionally return a Promise which
+   * resolves when it has completed all operations which event
+   * dispatchers may need to block on.
+   *
+   * @param {string} event
+   *       The name of the event to listen for.
+   * @param {function(string, ...any)} listener
+   *        The listener to call when events are emitted.
+   */
+  on(event, listener) {
+    let listeners = this[LISTENERS].get(event);
+    if (!listeners) {
+      listeners = new Set();
+      this[LISTENERS].set(event, listeners);
+    }
+
+    listeners.add(listener);
+  }
+
+  /**
+   * Removes the given function as a listener for the given event.
+   *
+   * @param {string} event
+   *       The name of the event to stop listening for.
+   * @param {function(string, ...any)} listener
+   *        The listener function to remove.
+   */
+  off(event, listener) {
+    let set = this[LISTENERS].get(event);
+    if (set) {
+      set.delete(listener);
+      set.delete(this[ONCE_MAP].get(listener));
+      if (!set.size) {
+        this[LISTENERS].delete(event);
+      }
+    }
+  }
+
+  /**
+   * Adds the given function as a listener for the given event once.
+   *
+   * @param {string} event
+   *       The name of the event to listen for.
+   * @param {function(string, ...any)} listener
+   *        The listener to call when events are emitted.
+   */
+  once(event, listener) {
+    let wrapper = (...args) => {
+      this.off(event, wrapper);
+      this[ONCE_MAP].delete(listener);
+
+      return listener(...args);
+    };
+    this[ONCE_MAP].set(listener, wrapper);
+
+    this.on(event, wrapper);
+  }
+
+
+  /**
+   * Triggers all listeners for the given event. If any listeners return
+   * a value, returns a promise which resolves when all returned
+   * promises have resolved. Otherwise, returns undefined.
+   *
+   * @param {string} event
+   *       The name of the event to emit.
+   * @param {any} args
+   *        Arbitrary arguments to pass to the listener functions, after
+   *        the event name.
+   * @returns {Promise?}
+   */
+  emit(event, ...args) {
+    let listeners = this[LISTENERS].get(event);
+
+    if (listeners) {
+      let promises = [];
+
+      for (let listener of listeners) {
+        try {
+          let result = listener(event, ...args);
+          if (result !== undefined) {
+            promises.push(result);
+          }
+        } catch (e) {
+          Cu.reportError(e);
+        }
+      }
+
+      if (promises.length) {
+        return Promise.all(promises);
+      }
+    }
+  }
+}
+
 /**
  * Base class for WebExtension APIs.  Each API creates a new class
  * that inherits from this class, the derived class is instantiated
  * once for each extension that uses the API.
  */
-class ExtensionAPI extends ExtensionUtils.EventEmitter {
+class ExtensionAPI extends EventEmitter {
   constructor(extension) {
     super();
 
@@ -116,6 +354,55 @@ class ExtensionAPI extends ExtensionUtils.EventEmitter {
 }
 
 /**
+ * A wrapper around a window that returns the window iff the inner window
+ * matches the inner window at the construction of this wrapper.
+ *
+ * This wrapper should not be used after the inner window is destroyed.
+ **/
+class InnerWindowReference {
+  constructor(contentWindow, innerWindowID) {
+    this.contentWindow = contentWindow;
+    this.innerWindowID = innerWindowID;
+    this.needWindowIDCheck = false;
+
+    contentWindow.addEventListener("pagehide", this, {mozSystemGroup: true}, false);
+    contentWindow.addEventListener("pageshow", this, {mozSystemGroup: true}, false);
+  }
+
+  get() {
+    // If the pagehide event has fired, the inner window ID needs to be checked,
+    // in case the window ref is dereferenced in a pageshow listener (before our
+    // pageshow listener was dispatched) or during the unload event.
+    if (!this.needWindowIDCheck || getInnerWindowID(this.contentWindow) === this.innerWindowID) {
+      return this.contentWindow;
+    }
+    return null;
+  }
+
+  invalidate() {
+    // If invalidate() is called while the inner window is in the bfcache, then
+    // we are unable to remove the event listener, and handleEvent will be
+    // called once more if the page is revived from the bfcache.
+    if (this.contentWindow) {
+      this.contentWindow.removeEventListener("pagehide", this, {mozSystemGroup: true});
+      this.contentWindow.removeEventListener("pageshow", this, {mozSystemGroup: true});
+    }
+    this.contentWindow = null;
+    this.needWindowIDCheck = false;
+  }
+
+  handleEvent(event) {
+    if (this.contentWindow) {
+      this.needWindowIDCheck = event.type === "pagehide";
+    } else {
+      // Remove listener when restoring from the bfcache - see invalidate().
+      event.currentTarget.removeEventListener("pagehide", this, {mozSystemGroup: true});
+      event.currentTarget.removeEventListener("pageshow", this, {mozSystemGroup: true});
+    }
+  }
+}
+
+/**
  * This class contains the information we have about an individual
  * extension.  It is never instantiated directly, instead subclasses
  * for each type of process extend this class and add members that are
@@ -135,18 +422,32 @@ class BaseContext {
     this.active = true;
     this.incognito = null;
     this.messageManager = null;
-    this.docShell = null;
     this.contentWindow = null;
     this.innerWindowID = 0;
+
+    // These two properties are assigned in ContentScriptContextChild subclass
+    // to keep a copy of the content script sandbox Error and Promise globals
+    // (which are used by the WebExtensions internals) before any extension
+    // content script code had any chance to redefine them.
+    this.cloneScopeError = null;
+    this.cloneScopePromise = null;
+  }
+
+  get Error() {
+    // Return the copy stored in the context instance (when the context is an instance of
+    // ContentScriptContextChild or the global from extension page window otherwise).
+    return this.cloneScopeError || this.cloneScope.Error;
+  }
+
+  get Promise() {
+    // Return the copy stored in the context instance (when the context is an instance of
+    // ContentScriptContextChild or the global from extension page window otherwise).
+    return this.cloneScopePromise || this.cloneScope.Promise;
   }
 
   setContentWindow(contentWindow) {
-    let {document} = contentWindow;
-    let {docShell} = document;
-
     this.innerWindowID = getInnerWindowID(contentWindow);
-    this.messageManager = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                                  .getInterface(Ci.nsIContentFrameMessageManager);
+    this.messageManager = contentWindow.docShell.messageManager;
 
     if (this.incognito == null) {
       this.incognito = PrivateBrowsingUtils.isContentWindowPrivate(contentWindow);
@@ -154,34 +455,26 @@ class BaseContext {
 
     MessageChannel.setupMessageManagers([this.messageManager]);
 
-    let onPageShow = event => {
-      if (!event || event.target === document) {
-        this.docShell = docShell;
-        this.contentWindow = contentWindow;
-        this.active = true;
-      }
-    };
-    let onPageHide = event => {
-      if (!event || event.target === document) {
-        // Put this off until the next tick.
-        Promise.resolve().then(() => {
-          this.docShell = null;
-          this.contentWindow = null;
-          this.active = false;
-        });
-      }
-    };
-
-    onPageShow();
-    contentWindow.addEventListener("pagehide", onPageHide, true);
-    contentWindow.addEventListener("pageshow", onPageShow, true);
+    let windowRef = new InnerWindowReference(contentWindow, this.innerWindowID);
+    Object.defineProperty(this, "active", {
+      configurable: true,
+      enumerable: true,
+      get: () => windowRef.get() !== null,
+    });
+    Object.defineProperty(this, "contentWindow", {
+      configurable: true,
+      enumerable: true,
+      get: () => windowRef.get(),
+    });
     this.callOnClose({
       close: () => {
-        onPageHide();
-        if (this.active) {
-          contentWindow.removeEventListener("pagehide", onPageHide, true);
-          contentWindow.removeEventListener("pageshow", onPageShow, true);
-        }
+        // Allow other "close" handlers to use these properties, until the next tick.
+        Promise.resolve().then(() => {
+          windowRef.invalidate();
+          windowRef = null;
+          Object.defineProperty(this, "contentWindow", {value: null});
+          Object.defineProperty(this, "active", {value: false});
+        });
       },
     });
   }
@@ -246,7 +539,7 @@ class BaseContext {
       return true;
     }
 
-    return ExtensionUtils.checkLoadURL(url, this.principal, options);
+    return checkLoadURL(url, this.principal, options);
   }
 
   /**
@@ -323,7 +616,7 @@ class BaseContext {
    * @returns {Error}
    */
   normalizeError(error, caller) {
-    if (error instanceof this.cloneScope.Error) {
+    if (error instanceof this.Error) {
       return error;
     }
     let message, fileName;
@@ -349,7 +642,7 @@ class BaseContext {
       Cu.reportError(error);
       message = "An unexpected error occurred";
     }
-    return new this.cloneScope.Error(message, fileName);
+    return new this.Error(message, fileName);
   }
 
   /**
@@ -449,7 +742,7 @@ class BaseContext {
           });
         });
     } else {
-      return new this.cloneScope.Promise((resolve, reject) => {
+      return new this.Promise((resolve, reject) => {
         promise.then(
           value => {
             if (this.unloaded) {
@@ -496,6 +789,7 @@ class BaseContext {
     for (let obj of this.onClose) {
       obj.close();
     }
+    this.onClose.clear();
   }
 
   /**
@@ -2074,14 +2368,23 @@ ExtensionCommon = {
   CanOfAPIs,
   EventManager,
   ExtensionAPI,
+  EventEmitter,
   LocalAPIImplementation,
   LocaleData,
   NoCloneSpreadArgs,
   SchemaAPIInterface,
   SchemaAPIManager,
   SpreadArgs,
+  checkLoadURL,
+  defineLazyGetter,
+  getConsole,
   ignoreEvent,
+  instanceOf,
+  makeWidgetId,
+  normalizeTime,
+  runSafeSyncWithoutClone,
   stylesheetMap,
+  withHandlingUserInput,
 
   MultiAPIManager,
   LazyAPIManager,

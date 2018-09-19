@@ -94,7 +94,13 @@ var snapshotFormatters = {
           policiesText = strings.GetStringFromName("policies.error");
           break;
       }
-      $("policies-status").textContent = policiesText;
+
+      if (data.policiesStatus != Services.policies.INACTIVE) {
+        let activePolicies = $.new("a", policiesText, null, {href: "about:policies"});
+        $("policies-status").appendChild(activePolicies);
+      } else {
+        $("policies-status").textContent = policiesText;
+      }
     } else {
       $("policies-status-row").hidden = true;
     }
@@ -161,9 +167,9 @@ var snapshotFormatters = {
       }
       return $.new("tr", [
         $.new("td", [
-          $.new("a", crash.id, null, {href: reportURL + crash.id})
+          $.new("a", crash.id, null, {href: reportURL + crash.id}),
         ]),
-        $.new("td", formattedDate)
+        $.new("td", formattedDate),
       ]);
     }));
   },
@@ -325,8 +331,7 @@ var snapshotFormatters = {
       delete data.info;
     }
 
-    let windowUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                            .getInterface(Ci.nsIDOMWindowUtils);
+    let windowUtils = window.windowUtils;
     let gpuProcessPid = windowUtils.gpuProcessPid;
 
     if (gpuProcessPid != -1) {
@@ -504,7 +509,7 @@ var snapshotFormatters = {
     showGpu("gpu-2", "2");
 
     // Remove adapter keys.
-    for (let [prop, /* key */] of adapterKeys) {
+    for (let [prop /* key */] of adapterKeys) {
       delete data[prop];
       delete data[prop + "2"];
     }
@@ -731,7 +736,7 @@ var snapshotFormatters = {
         $.new("th", ""),
         $.new("th", strings.GetStringFromName("minLibVersions")),
         $.new("th", strings.GetStringFromName("loadedLibVersions")),
-      ])
+      ]),
     ];
     sortedArrayFromObject(data).forEach(
       function([name, val]) {
@@ -818,7 +823,7 @@ var snapshotFormatters = {
       JSON.stringify(data.osPrefs.systemLocales);
     $("intl-osprefs-regionalprefs").textContent =
       JSON.stringify(data.osPrefs.regionalPrefsLocales);
-  }
+  },
 };
 
 var $ = document.getElementById.bind(document);
@@ -911,9 +916,7 @@ function copyRawDataToClipboard(button) {
 }
 
 function getLoadContext() {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIWebNavigation)
-               .QueryInterface(Ci.nsILoadContext);
+  return window.docShell.QueryInterface(Ci.nsILoadContext);
 }
 
 function copyContentsToClipboard() {

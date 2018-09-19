@@ -200,10 +200,8 @@ pm_construct(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     PerfMeasurement* p = cx->new_<PerfMeasurement>(PerfMeasurement::EventMask(mask));
-    if (!p) {
-        JS_ReportOutOfMemory(cx);
+    if (!p)
         return false;
-    }
 
     JS_SetPrivate(obj, p);
     args.rval().setObject(*obj);
@@ -225,7 +223,7 @@ GetPM(JSContext* cx, JS::HandleValue value, const char* fname)
         UniqueChars bytes = DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, value, nullptr);
         if (!bytes)
             return nullptr;
-        JS_ReportErrorNumberLatin1(cx, GetErrorMessage, 0, JSMSG_NOT_NONNULL_OBJECT, bytes.get());
+        JS_ReportErrorNumberUTF8(cx, GetErrorMessage, 0, JSMSG_NOT_NONNULL_OBJECT, bytes.get());
         return nullptr;
     }
     RootedObject obj(cx, &value.toObject());

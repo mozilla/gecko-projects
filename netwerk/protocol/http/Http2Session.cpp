@@ -27,8 +27,6 @@
 #include "nsHttpConnection.h"
 #include "nsIRequestContext.h"
 #include "nsISSLSocketControl.h"
-#include "nsISSLStatus.h"
-#include "nsISSLStatusProvider.h"
 #include "nsISupportsPriority.h"
 #include "nsStandardURL.h"
 #include "nsURLHelper.h"
@@ -123,6 +121,7 @@ Http2Session::Http2Session(nsISocketTransport *aSocketTransport, enum SpdyVersio
   , mTlsHandshakeFinished(false)
   , mCheckNetworkStallsWithTFO(false)
   , mLastRequestBytesSentTime(0)
+  , mTrrStreams(0)
 {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
@@ -181,6 +180,9 @@ Http2Session::~Http2Session()
 
   Shutdown();
 
+  if (mTrrStreams) {
+    Telemetry::Accumulate(Telemetry::DNS_TRR_REQUEST_PER_CONN, mTrrStreams);
+  }
   Telemetry::Accumulate(Telemetry::SPDY_PARALLEL_STREAMS, mConcurrentHighWater);
   Telemetry::Accumulate(Telemetry::SPDY_REQUEST_PER_CONN, (mNextStreamID - 1) / 2);
   Telemetry::Accumulate(Telemetry::SPDY_SERVER_INITIATED_STREAMS,
@@ -400,6 +402,15 @@ Http2Session::RegisterStreamID(Http2Stream *stream, uint32_t aNewID)
       // long time we should check for stalls like bug 1395494.
       mCheckNetworkStallsWithTFO = true;
       mLastRequestBytesSentTime = PR_IntervalNow();
+    }
+  }
+
+  if (aNewID & 1) {
+    // don't count push streams here
+    MOZ_ASSERT(stream->Transaction(), "no transation for the stream!");
+    RefPtr<nsHttpConnectionInfo> ci(stream->Transaction()->ConnectionInfo());
+    if (ci && ci->GetTrrUsed()) {
+      IncrementTrrCounter();
     }
   }
   return aNewID;
@@ -4126,16 +4137,18 @@ Http2Session::BufferOutput(const char *buf,
 bool // static
 Http2Session::ALPNCallback(nsISupports *securityInfo)
 {
-  if (!gHttpHandler->IsH2MandatorySuiteEnabled()) {
-    LOG3(("Http2Session::ALPNCallback Mandatory Cipher Suite Unavailable\n"));
-    return false;
-  }
-
   nsCOMPtr<nsISSLSocketControl> ssl = do_QueryInterface(securityInfo);
   LOG3(("Http2Session::ALPNCallback sslsocketcontrol=%p\n", ssl.get()));
   if (ssl) {
     int16_t version = ssl->GetSSLVersionOffered();
     LOG3(("Http2Session::ALPNCallback version=%x\n", version));
+
+    if (version == nsISSLSocketControl::TLS_VERSION_1_2 &&
+        !gHttpHandler->IsH2MandatorySuiteEnabled()) {
+      LOG3(("Http2Session::ALPNCallback Mandatory Cipher Suite Unavailable\n"));
+      return false;
+    }
+
     if (version >= nsISSLSocketControl::TLS_VERSION_1_2) {
       return true;
     }

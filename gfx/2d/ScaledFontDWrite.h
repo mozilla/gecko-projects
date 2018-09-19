@@ -67,7 +67,7 @@ public:
   bool ForceGDIMode() { return mForceGDIMode; }
 
 #ifdef USE_SKIA
-  SkTypeface* GetSkTypeface() override;
+  SkTypeface* CreateSkTypeface() override;
   SkFontStyle mStyle;
 #endif
 
@@ -101,6 +101,9 @@ private:
       , mGamma(aScaledFont->mGamma)
       , mContrast(aScaledFont->mContrast)
     {}
+
+    InstanceData(const wr::FontInstanceOptions* aOptions,
+                 const wr::FontInstancePlatformOptions* aPlatformOptions);
 
     bool mUseEmbeddedBitmap;
     bool mForceGDIMode;

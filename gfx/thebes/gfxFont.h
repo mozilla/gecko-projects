@@ -715,7 +715,7 @@ public:
     MergeFontFeatures(const gfxFontStyle *aStyle,
                       const nsTArray<gfxFontFeature>& aFontFeatures,
                       bool aDisableLigatures,
-                      const nsAString& aFamilyName,
+                      const nsACString& aFamilyName,
                       bool aAddSmallCaps,
                       void (*aHandleFeature)(const uint32_t&,
                                              uint32_t&, void*),
@@ -1558,7 +1558,7 @@ public:
             // as it does not use cached glyph extents in the font.
     } BoundingBoxType;
 
-    const nsString& GetName() const { return mFontEntry->Name(); }
+    const nsCString& GetName() const { return mFontEntry->Name(); }
     const gfxFontStyle *GetStyle() const { return &mStyle; }
 
     cairo_scaled_font_t* GetCairoScaledFont() { return mScaledFont; }
@@ -1830,6 +1830,7 @@ public:
 
     bool IsSyntheticBold() const { return mApplySyntheticBold; }
 
+    float AngleForSyntheticOblique() const;
     float SkewForSyntheticOblique() const;
 
     // Amount by which synthetic bold "fattens" the glyphs:
@@ -1949,6 +1950,8 @@ public:
     }
 
     virtual already_AddRefed<mozilla::gfx::ScaledFont> GetScaledFont(DrawTarget* aTarget) = 0;
+
+    void InitializeScaledFont();
 
     bool KerningDisabled() {
         return mKerningSet && !mKerningEnabled;

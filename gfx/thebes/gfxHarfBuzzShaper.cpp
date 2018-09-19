@@ -43,6 +43,7 @@ gfxHarfBuzzShaper::gfxHarfBuzzShaper(gfxFont *aFont)
       mHBFace(aFont->GetFontEntry()->GetHBFace()),
       mHBFont(nullptr),
       mBuffer(nullptr),
+      mCallbackData(),
       mKernTable(nullptr),
       mHmtxTable(nullptr),
       mVmtxTable(nullptr),
@@ -57,9 +58,10 @@ gfxHarfBuzzShaper::gfxHarfBuzzShaper(gfxFont *aFont)
       mNumLongVMetrics(0),
       mDefaultVOrg(-1.0),
       mUseFontGetGlyph(aFont->ProvidesGetGlyph()),
-      mUseFontGlyphWidths(false),
+      mUseFontGlyphWidths(aFont->ProvidesGlyphWidths()),
       mInitialized(false),
       mVerticalInitialized(false),
+      mUseVerticalPresentationForms(false),
       mLoadedLocaGlyf(false),
       mLocaLongOffsets(false)
 {
@@ -379,13 +381,13 @@ hb_position_t
 gfxHarfBuzzShaper::HBGetGlyphHAdvance(hb_font_t *font, void *font_data,
                                       hb_codepoint_t glyph, void *user_data)
 {
-    const gfxHarfBuzzShaper::FontCallbackData *fcd =
+    const gfxHarfBuzzShaper::FontCallbackData* fcd =
         static_cast<const gfxHarfBuzzShaper::FontCallbackData*>(font_data);
-    gfxFont *gfxfont = fcd->mShaper->GetFont();
-    if (gfxfont->ProvidesGlyphWidths()) {
-        return gfxfont->GetGlyphWidth(*fcd->mDrawTarget, glyph);
+    const gfxHarfBuzzShaper* shaper = fcd->mShaper;
+    if (shaper->mUseFontGlyphWidths) {
+        return shaper->GetFont()->GetGlyphWidth(*fcd->mDrawTarget, glyph);
     }
-    return fcd->mShaper->GetGlyphHAdvance(glyph);
+    return shaper->GetGlyphHAdvance(glyph);
 }
 
 /* static */
@@ -962,7 +964,7 @@ gfxHarfBuzzShaper::GetHKerning(uint16_t aFirstGlyph,
                     char buf[1024];
                     SprintfLiteral(buf, "unknown kern subtable in %s: "
                                         "ver 0 format %d\n",
-                                   NS_ConvertUTF16toUTF8(mFont->GetName()).get(),
+                                   mFont->GetName().get(),
                                    format);
                     NS_WARNING(buf);
                 }
@@ -1024,7 +1026,7 @@ gfxHarfBuzzShaper::GetHKerning(uint16_t aFirstGlyph,
                         char buf[1024];
                         SprintfLiteral(buf, "unknown kern subtable in %s: "
                                             "ver 0 format %d\n",
-                                       NS_ConvertUTF16toUTF8(mFont->GetName()).get(),
+                                       mFont->GetName().get(),
                                        format);
                         NS_WARNING(buf);
                     }
@@ -1210,8 +1212,6 @@ gfxHarfBuzzShaper::Initialize()
     }
     mInitialized = true;
     mCallbackData.mShaper = this;
-
-    mUseFontGlyphWidths = mFont->ProvidesGlyphWidths();
 
     if (!sHBFontFuncs) {
         // static function callback pointers, initialized by the first

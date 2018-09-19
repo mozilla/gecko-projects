@@ -261,17 +261,16 @@ nsWebBrowserFind::FindNext(bool* aResult)
 }
 
 NS_IMETHODIMP
-nsWebBrowserFind::GetSearchString(char16_t** aSearchString)
+nsWebBrowserFind::GetSearchString(nsAString& aSearchString)
 {
-  NS_ENSURE_ARG_POINTER(aSearchString);
-  *aSearchString = ToNewUnicode(mSearchString);
+  aSearchString = mSearchString;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsWebBrowserFind::SetSearchString(const char16_t* aSearchString)
+nsWebBrowserFind::SetSearchString(const nsAString& aSearchString)
 {
-  mSearchString.Assign(aSearchString);
+  mSearchString = aSearchString;
   return NS_OK;
 }
 
@@ -720,15 +719,7 @@ nsWebBrowserFind::SearchInFrame(nsPIDOMWindowOuter* aWindow, bool aWrapping,
 
   RefPtr<nsRange> foundRange;
 
-  // If !aWrapping, search from selection to end
-  if (!aWrapping)
-    rv = GetSearchLimits(searchRange, startPt, endPt, theDoc, sel, false);
-
-  // If aWrapping, search the part of the starting frame
-  // up to the point where we left off.
-  else
-    rv = GetSearchLimits(searchRange, startPt, endPt, theDoc, sel, true);
-
+  rv = GetSearchLimits(searchRange, startPt, endPt, theDoc, sel, aWrapping);
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = find->Find(mSearchString.get(), searchRange, startPt, endPt,

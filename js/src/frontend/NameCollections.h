@@ -10,10 +10,11 @@
 #include "ds/InlineTable.h"
 #include "frontend/NameAnalysisTypes.h"
 #include "js/Vector.h"
-#include "vm/Stack.h"
 
 namespace js {
 namespace frontend {
+
+class FunctionBox;
 
 // A pool of recyclable containers for use in the frontend. The Parser and
 // BytecodeEmitter create many maps for name analysis that are short-lived
@@ -33,12 +34,14 @@ class CollectionPool
 
     RepresentativeCollection* allocate() {
         size_t newAllLength = all_.length() + 1;
-        if (!all_.reserve(newAllLength) || !recyclable_.reserve(newAllLength))
+        if (!all_.reserve(newAllLength) || !recyclable_.reserve(newAllLength)) {
             return nullptr;
+        }
 
         RepresentativeCollection* collection = js_new<RepresentativeCollection>();
-        if (collection)
+        if (collection) {
             all_.infallibleAppend(collection);
+        }
         return collection;
     }
 
@@ -49,8 +52,9 @@ class CollectionPool
 
     void purgeAll() {
         void** end = all_.end();
-        for (void** it = all_.begin(); it != end; ++it)
+        for (void** it = all_.begin(); it != end; ++it) {
             js_delete(asRepresentative(*it));
+        }
 
         all_.clearAndFree();
         recyclable_.clearAndFree();
@@ -64,8 +68,9 @@ class CollectionPool
         RepresentativeCollection* collection;
         if (recyclable_.empty()) {
             collection = allocate();
-            if (!collection)
+            if (!collection) {
                 ReportOutOfMemory(cx);
+            }
         } else {
             collection = asRepresentative(recyclable_.popCopy());
             collection->clear();
@@ -89,8 +94,9 @@ class CollectionPool
             }
         }
         MOZ_ASSERT(ok);
-        for (void** it = recyclable_.begin(); it != recyclable_.end(); ++it)
+        for (void** it = recyclable_.begin(); it != recyclable_.end(); ++it) {
             MOZ_ASSERT(*it != *collection);
+        }
 #endif
 
         MOZ_ASSERT(recyclable_.length() < all_.length());
@@ -142,15 +148,26 @@ struct RecyclableAtomMapValueWrapper
     }
 };
 
+struct NameMapHasher : public DefaultHasher<JSAtom*>
+{
+    static inline HashNumber hash(const Lookup& l) {
+        // Name maps use the atom's precomputed hash code, which is based on
+        // the atom's contents rather than its pointer value. This is necessary
+        // to preserve iteration order while recording/replaying: iteration can
+        // affect generated script bytecode and the order in which e.g. lookup
+        // property hooks are performed on the associated global.
+        return l->hash();
+    }
+};
+
 template <typename MapValue>
 using RecyclableNameMap = InlineMap<JSAtom*,
                                     RecyclableAtomMapValueWrapper<MapValue>,
                                     24,
-                                    DefaultHasher<JSAtom*>,
+                                    NameMapHasher,
                                     SystemAllocPolicy>;
 
 using DeclaredNameMap = RecyclableNameMap<DeclaredNameInfo>;
-using CheckTDZMap = RecyclableNameMap<MaybeCheckTDZ>;
 using NameLocationMap = RecyclableNameMap<NameLocation>;
 using AtomIndexMap = RecyclableNameMap<uint32_t>;
 
@@ -220,8 +237,9 @@ class NameCollectionPool
     void releaseMap(Map** map) {
         MOZ_ASSERT(hasActiveCompilation());
         MOZ_ASSERT(map);
-        if (*map)
+        if (*map) {
             mapPool_.release(map);
+        }
     }
 
     template <typename Vector>
@@ -234,8 +252,9 @@ class NameCollectionPool
     void releaseVector(Vector** vec) {
         MOZ_ASSERT(hasActiveCompilation());
         MOZ_ASSERT(vec);
-        if (*vec)
+        if (*vec) {
             vectorPool_.release(vec);
+        }
     }
 
     void purge() {
@@ -322,9 +341,6 @@ class PooledVectorPtr
 } // namespace js
 
 namespace mozilla {
-
-template <>
-struct IsPod<js::MaybeCheckTDZ> : TrueType {};
 
 template <typename T>
 struct IsPod<js::frontend::RecyclableAtomMapValueWrapper<T>> : IsPod<T> {};

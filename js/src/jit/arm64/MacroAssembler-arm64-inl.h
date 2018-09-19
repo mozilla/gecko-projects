@@ -486,8 +486,9 @@ MacroAssembler::mul32(Register src1, Register src2, Register dest, Label* onOver
         Cmp(ARMRegister(dest, 64), Operand(ARMRegister(dest, 32), vixl::SXTW));
         B(onOver, NotEqual);
     }
-    if (onZero)
+    if (onZero) {
         Cbz(ARMRegister(dest, 32), onZero);
+    }
 
     // Clear upper 32 bits.
     Mov(ARMRegister(dest, 32), ARMRegister(dest, 32));
@@ -545,10 +546,11 @@ MacroAssembler::mulDoublePtr(ImmPtr imm, Register temp, FloatRegister dest)
 void
 MacroAssembler::quotient32(Register rhs, Register srcDest, bool isUnsigned)
 {
-    if (isUnsigned)
+    if (isUnsigned) {
         Udiv(ARMRegister(srcDest, 32), ARMRegister(srcDest, 32), ARMRegister(rhs, 32));
-    else
+    } else {
         Sdiv(ARMRegister(srcDest, 32), ARMRegister(srcDest, 32), ARMRegister(rhs, 32));
+    }
 }
 
 // This does not deal with x % 0 or INT_MIN % -1, the caller needs to filter
@@ -559,10 +561,11 @@ MacroAssembler::remainder32(Register rhs, Register srcDest, bool isUnsigned)
 {
     vixl::UseScratchRegisterScope temps(this);
     ARMRegister scratch = temps.AcquireW();
-    if (isUnsigned)
+    if (isUnsigned) {
         Udiv(scratch, ARMRegister(srcDest, 32), ARMRegister(rhs, 32));
-    else
+    } else {
         Sdiv(scratch, ARMRegister(srcDest, 32), ARMRegister(rhs, 32));
+    }
     Mul(scratch, scratch, ARMRegister(rhs, 32));
     Sub(ARMRegister(srcDest, 32), ARMRegister(srcDest, 32), scratch);
 }
@@ -692,6 +695,12 @@ MacroAssembler::lshift32(Register shift, Register dest)
 }
 
 void
+MacroAssembler::flexibleLshift32(Register src, Register dest)
+{
+    lshift32(src,dest);
+}
+
+void
 MacroAssembler::lshift32(Imm32 imm, Register dest)
 {
     MOZ_ASSERT(0 <= imm.value && imm.value < 32);
@@ -719,6 +728,12 @@ MacroAssembler::rshift32(Register shift, Register dest)
 }
 
 void
+MacroAssembler::flexibleRshift32(Register src, Register dest)
+{
+    rshift32(src,dest);
+}
+
+void
 MacroAssembler::rshift32(Imm32 imm, Register dest)
 {
     MOZ_ASSERT(0 <= imm.value && imm.value < 32);
@@ -743,6 +758,12 @@ MacroAssembler::rshift32Arithmetic(Imm32 imm, Register dest)
 {
     MOZ_ASSERT(0 <= imm.value && imm.value < 32);
     Asr(ARMRegister(dest, 32), ARMRegister(dest, 32), imm.value);
+}
+
+void
+MacroAssembler::flexibleRshift32Arithmetic(Register src, Register dest)
+{
+    rshift32Arithmetic(src,dest);
 }
 
 void
@@ -897,8 +918,9 @@ MacroAssembler::popcnt32(Register src_, Register dest_, Register tmp_)
     ARMRegister tmp(tmp_, 32);
 
     Mov(tmp, src);
-    if (src_ != dest_)
+    if (src_ != dest_) {
         Mov(dest, src);
+    }
     Lsr(dest, dest, 1);
     And(dest, dest, 0x55555555);
     Sub(dest, tmp, dest);
@@ -925,8 +947,9 @@ MacroAssembler::popcnt64(Register64 src_, Register64 dest_, Register tmp_)
     ARMRegister tmp(tmp_, 64);
 
     Mov(tmp, src);
-    if (src_ != dest_)
+    if (src_ != dest_) {
         Mov(dest, src);
+    }
     Lsr(dest, dest, 1);
     And(dest, dest, 0x5555555555555555);
     Sub(dest, tmp, dest);
@@ -1025,8 +1048,9 @@ MacroAssembler::branch64(Condition cond, Register64 lhs, Imm64 val, Label* succe
 {
     Cmp(ARMRegister(lhs.reg, 64), val.value);
     B(success, cond);
-    if (fail)
+    if (fail) {
         B(fail);
+    }
 }
 
 void
@@ -1034,8 +1058,9 @@ MacroAssembler::branch64(Condition cond, Register64 lhs, Register64 rhs, Label* 
 {
     Cmp(ARMRegister(lhs.reg, 64), ARMRegister(rhs.reg, 64));
     B(success, cond);
-    if (fail)
+    if (fail) {
         B(fail);
+    }
 }
 
 void
@@ -1190,8 +1215,9 @@ MacroAssembler::branchPrivatePtr(Condition cond, const Address& lhs, Register rh
 {
     vixl::UseScratchRegisterScope temps(this);
     const Register scratch = temps.AcquireX().asUnsized();
-    if (rhs != scratch)
+    if (rhs != scratch) {
         movePtr(rhs, scratch);
+    }
     // Instead of unboxing lhs, box rhs and do direct comparison with lhs.
     rshiftPtr(Imm32(1), scratch);
     branchPtr(cond, lhs, scratch, label);
@@ -1308,6 +1334,15 @@ MacroAssembler::branchSub32(Condition cond, T src, Register dest, Label* label)
     branch(cond, label);
 }
 
+template <typename T>
+void
+MacroAssembler::branchMul32(Condition cond, T src, Register dest, Label* label)
+{
+    MOZ_ASSERT(cond == Assembler::Overflow);
+    vixl::UseScratchRegisterScope temps(this);
+    mul32(src, dest, dest, label, nullptr);
+}
+
 void
 MacroAssembler::decBranchPtr(Condition cond, Register lhs, Imm32 rhs, Label* label)
 {
@@ -1322,10 +1357,11 @@ MacroAssembler::branchTest32(Condition cond, Register lhs, Register rhs, L label
     MOZ_ASSERT(cond == Zero || cond == NonZero || cond == Signed || cond == NotSigned);
     // x86 prefers |test foo, foo| to |cmp foo, #0|.
     // Convert the former to the latter for ARM.
-    if (lhs == rhs && (cond == Zero || cond == NonZero))
+    if (lhs == rhs && (cond == Zero || cond == NonZero)) {
         cmp32(lhs, Imm32(0));
-    else
+    } else {
         test32(lhs, rhs);
+    }
     B(label, cond);
 }
 
@@ -1860,8 +1896,9 @@ MacroAssembler::spectreBoundsCheck32(Register index, Register length, Register m
 
     branch32(Assembler::BelowOrEqual, length, index, failure);
 
-    if (JitOptions.spectreIndexMasking)
+    if (JitOptions.spectreIndexMasking) {
         Csel(ARMRegister(index, 32), ARMRegister(index, 32), vixl::wzr, Assembler::Above);
+    }
 }
 
 void
@@ -1874,8 +1911,9 @@ MacroAssembler::spectreBoundsCheck32(Register index, const Address& length, Regi
 
     branch32(Assembler::BelowOrEqual, length, index, failure);
 
-    if (JitOptions.spectreIndexMasking)
+    if (JitOptions.spectreIndexMasking) {
         Csel(ARMRegister(index, 32), ARMRegister(index, 32), vixl::wzr, Assembler::Above);
+    }
 }
 
 // ========================================================================
@@ -1916,12 +1954,13 @@ MacroAssembler::storeFloat32x3(FloatRegister src, const BaseIndex& dest)
 void
 MacroAssembler::memoryBarrier(MemoryBarrierBits barrier)
 {
-    if (barrier == MembarStoreStore)
+    if (barrier == MembarStoreStore) {
         Dmb(vixl::InnerShareable, vixl::BarrierWrites);
-    else if (barrier == MembarLoadLoad)
+    } else if (barrier == MembarLoadLoad) {
         Dmb(vixl::InnerShareable, vixl::BarrierReads);
-    else if (barrier)
+    } else if (barrier) {
         Dmb(vixl::InnerShareable, vixl::BarrierAll);
+    }
 }
 
 // ===============================================================

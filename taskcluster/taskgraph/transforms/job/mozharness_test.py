@@ -70,6 +70,8 @@ def mozharness_test_on_docker(config, job, taskdesc):
     worker['loopback-audio'] = test['loopback-audio']
     worker['max-run-time'] = test['max-run-time']
     worker['retry-exit-status'] = test['retry-exit-status']
+    if 'android-em-7.0-x86' in test['test-platform']:
+        worker['privileged'] = True
 
     artifacts = [
         # (artifact name prefix, in-image path)
@@ -95,7 +97,8 @@ def mozharness_test_on_docker(config, job, taskdesc):
         'mount-point': "{workdir}/workspace".format(**run),
     }]
 
-    env = worker['env'] = {
+    env = worker.setdefault('env', {})
+    env.update({
         'MOZHARNESS_CONFIG': ' '.join(mozharness['config']),
         'MOZHARNESS_SCRIPT': mozharness['script'],
         'MOZILLA_BUILD_URL': {'task-reference': installer_url},
@@ -103,7 +106,7 @@ def mozharness_test_on_docker(config, job, taskdesc):
         'NEED_WINDOW_MANAGER': 'true',
         'ENABLE_E10S': str(bool(test.get('e10s'))).lower(),
         'MOZ_AUTOMATION': '1',
-    }
+    })
 
     if mozharness.get('mochitest-flavor'):
         env['MOCHITEST_FLAVOR'] = mozharness['mochitest-flavor']
@@ -203,9 +206,26 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
     installer_url = get_artifact_url(upstream_task, mozharness['build-artifact-name'])
 
     taskdesc['scopes'].extend(
-        ['generic-worker:os-group:{}'.format(group) for group in test['os-groups']])
+        ['generic-worker:os-group:{}/{}'.format(
+            job['worker-type'],
+            group
+        ) for group in test['os-groups']])
 
     worker['os-groups'] = test['os-groups']
+
+    # run-as-administrator is a feature for workers with UAC enabled and as such should not be
+    # included in tasks on workers that have UAC disabled. Currently UAC is only enabled on
+    # gecko Windows 10 workers, however this may be subject to change. Worker type
+    # environment definitions can be found in https://github.com/mozilla-releng/OpenCloudConfig
+    # See https://docs.microsoft.com/en-us/windows/desktop/secauthz/user-account-control
+    # for more information about UAC.
+    if test.get('run-as-administrator', False):
+        if job['worker-type'].startswith('aws-provisioner-v1/gecko-t-win10-64'):
+            taskdesc['scopes'].extend(
+                ['generic-worker:run-as-administrator:{}'.format(job['worker-type'])])
+            worker['run-as-administrator'] = True
+        else:
+            raise Exception('run-as-administrator not supported on {}'.format(job['worker-type']))
 
     if test['reboot']:
         raise Exception('reboot: {} not supported on generic-worker'.format(test['reboot']))
@@ -227,7 +247,6 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
             'MOZ_HIDE_RESULTS_TABLE': '1',
             'MOZ_NODE_PATH': '/usr/local/bin/node',
             'MOZ_NO_REMOTE': '1',
-            'NO_EM_RESTART': '1',
             'NO_FAIL_ON_TEST_ERRORS': '1',
             'PATH': '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
             'SHELL': '/bin/bash',
@@ -310,7 +329,7 @@ def mozharness_test_on_native_engine(config, job, taskdesc):
     test = taskdesc['run']['test']
     mozharness = test['mozharness']
     worker = taskdesc['worker']
-    is_talos = test['suite'] == 'talos'
+    is_talos = test['suite'] == 'talos' or test['suite'] == 'raptor'
     is_macosx = worker['os'] == 'macosx'
 
     installer_url = get_artifact_url('<build>', mozharness['build-artifact-name'])
@@ -334,7 +353,8 @@ def mozharness_test_on_native_engine(config, job, taskdesc):
     if test['max-run-time']:
         worker['max-run-time'] = test['max-run-time']
 
-    worker['env'] = env = {
+    env = worker.setdefault('env', {})
+    env.update({
         'GECKO_HEAD_REPOSITORY': config.params['head_repository'],
         'GECKO_HEAD_REV': config.params['head_rev'],
         'MOZHARNESS_CONFIG': ' '.join(mozharness['config']),
@@ -342,13 +362,12 @@ def mozharness_test_on_native_engine(config, job, taskdesc):
         'MOZHARNESS_URL': {'task-reference': mozharness_url},
         'MOZILLA_BUILD_URL': {'task-reference': installer_url},
         "MOZ_NO_REMOTE": '1',
-        "NO_EM_RESTART": '1',
         "XPCOM_DEBUG_BREAK": 'warn',
         "NO_FAIL_ON_TEST_ERRORS": '1',
         "MOZ_HIDE_RESULTS_TABLE": '1',
         "MOZ_NODE_PATH": "/usr/local/bin/node",
         'MOZ_AUTOMATION': '1',
-    }
+    })
     # talos tests don't need Xvfb
     if is_talos:
         env['NEED_XVFB'] = 'false'
@@ -390,7 +409,7 @@ def mozharness_test_on_script_engine_autophone(config, job, taskdesc):
     test = taskdesc['run']['test']
     mozharness = test['mozharness']
     worker = taskdesc['worker']
-    is_talos = test['suite'] == 'talos'
+    is_talos = test['suite'] == 'talos' or test['suite'] == 'raptor'
     if worker['os'] != 'linux':
         raise Exception('os: {} not supported on script-engine-autophone'.format(worker['os']))
 
@@ -422,7 +441,6 @@ def mozharness_test_on_script_engine_autophone(config, job, taskdesc):
         'MOZHARNESS_URL': {'task-reference': mozharness_url},
         'MOZILLA_BUILD_URL': {'task-reference': installer_url},
         "MOZ_NO_REMOTE": '1',
-        "NO_EM_RESTART": '1',
         "XPCOM_DEBUG_BREAK": 'warn',
         "NO_FAIL_ON_TEST_ERRORS": '1',
         "MOZ_HIDE_RESULTS_TABLE": '1',

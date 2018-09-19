@@ -15,7 +15,7 @@ function setup_redirect(aSettings) {
 function test() {
   waitForExplicitFinish();
   SpecialPowers.pushPrefEnv({
-    "set": [["security.data_uri.block_toplevel_data_uri_navigations", false]]
+    "set": [["security.data_uri.block_toplevel_data_uri_navigations", false]],
   }, runTest);
 }
 
@@ -25,7 +25,7 @@ function runTest() {
   Harness.setup();
 
   setup_redirect({
-    "Location": "data:text/html,<script>window.location.href='" + TESTROOT + "amosigned.xpi'</script>"
+    "Location": "data:text/html,<script>window.location.href='" + TESTROOT + "amosigned.xpi'</script>",
   });
 
   gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
@@ -33,6 +33,10 @@ function runTest() {
 }
 
 function install_blocked(installInfo) {
+  is(installInfo.installs.length, 1, "Got one AddonInstall instance as expected");
+  Assert.deepEqual(installInfo.installs[0].installTelemetryInfo,
+                   {source: "unknown", method: "link"},
+                   "Got the expected install.installTelemetryInfo");
 }
 
 function finish_test(count) {

@@ -5,6 +5,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "js/LocaleSensitive.h"
 #include "jsapi-tests/tests.h"
 
 BEGIN_TEST(testDateToLocaleString)
@@ -16,8 +17,9 @@ BEGIN_TEST(testDateToLocaleString)
     // affect the behavior of the locale-sensitive Date methods tested here.
     JS::Rooted<JS::Value> haveIntl(cx);
     EVAL("typeof Intl !== 'undefined'", &haveIntl);
-    if (!haveIntl.toBoolean())
+    if (!haveIntl.toBoolean()) {
         return true;
+    }
 
     // Pervasive assumption: our Intl support includes "de" (German) and
     // "en" (English) and treats them differently for purposes of

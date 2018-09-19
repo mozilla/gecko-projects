@@ -12,9 +12,6 @@
 #include "mozilla/hal_sandbox/PHalParent.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/dom/TabChild.h"
-#include "mozilla/dom/battery/Types.h"
-#include "mozilla/dom/network/Types.h"
-#include "mozilla/dom/ScreenOrientation.h"
 #include "mozilla/fallback/FallbackScreenConfiguration.h"
 #include "mozilla/EnumeratedRange.h"
 #include "mozilla/Observer.h"
@@ -124,7 +121,7 @@ GetCurrentScreenConfiguration(ScreenConfiguration* aScreenConfiguration)
 }
 
 bool
-LockScreenOrientation(const dom::ScreenOrientationInternal& aOrientation)
+LockScreenOrientation(const ScreenOrientation& aOrientation)
 {
   bool allowed;
   Hal()->SendLockScreenOrientation(aOrientation, &allowed);
@@ -134,7 +131,10 @@ LockScreenOrientation(const dom::ScreenOrientationInternal& aOrientation)
 void
 UnlockScreenOrientation()
 {
-  Hal()->SendUnlockScreenOrientation();
+  // Don't send this message from both the middleman and recording processes.
+  if (!recordreplay::IsMiddleman()) {
+    Hal()->SendUnlockScreenOrientation();
+  }
 }
 
 void
@@ -203,18 +203,6 @@ bool
 SetProcessPrioritySupported()
 {
   MOZ_CRASH("Only the main process may call SetProcessPrioritySupported().");
-}
-
-void
-StartDiskSpaceWatcher()
-{
-  MOZ_CRASH("StartDiskSpaceWatcher() can't be called from sandboxed contexts.");
-}
-
-void
-StopDiskSpaceWatcher()
-{
-  MOZ_CRASH("StopDiskSpaceWatcher() can't be called from sandboxed contexts.");
 }
 
 class HalParent : public PHalParent
@@ -331,7 +319,7 @@ public:
   }
 
   virtual mozilla::ipc::IPCResult
-  RecvLockScreenOrientation(const dom::ScreenOrientationInternal& aOrientation, bool* aAllowed) override
+  RecvLockScreenOrientation(const ScreenOrientation& aOrientation, bool* aAllowed) override
   {
     // FIXME/bug 777980: unprivileged content may only lock
     // orientation while fullscreen.  We should check whether the

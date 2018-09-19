@@ -232,10 +232,11 @@ class CFGTry : public CFGControlInstruction
     }
     void replaceSuccessor(size_t i, CFGBlock* succ) final {
         MOZ_ASSERT(i < numSuccessors());
-        if (i == 0)
+        if (i == 0) {
             tryBlock_ = succ;
-        else
+        } else {
             mergePoint_ = succ;
+        }
     }
 
     CFGBlock* tryBlock() const {
@@ -824,10 +825,12 @@ class ControlFlowGenerator
     MOZ_MUST_USE bool addBlock(CFGBlock* block);
     ControlFlowGraph* getGraph(TempAllocator& alloc) {
         ControlFlowGraph* cfg = ControlFlowGraph::New(alloc);
-        if (!cfg)
+        if (!cfg) {
             return nullptr;
-        if (!cfg->init(alloc, blocks_))
+        }
+        if (!cfg->init(alloc, blocks_)) {
             return nullptr;
+        }
         return cfg;
     }
 
@@ -854,7 +857,7 @@ class ControlFlowGenerator
     ControlStatus processForCondEnd(CFGState& state);
     ControlStatus processForBodyEnd(CFGState& state);
     ControlStatus processForUpdateEnd(CFGState& state);
-    ControlStatus processWhileOrForInLoop(jssrcnote* sn);
+    ControlStatus processWhileOrForInOrForOfLoop(jssrcnote* sn);
     ControlStatus processNextTableSwitchCase(CFGState& state);
     ControlStatus processCondSwitch();
     ControlStatus processCondSwitchCase(CFGState& state);
@@ -869,7 +872,6 @@ class ControlFlowGenerator
     ControlStatus processContinue(JSOp op);
     ControlStatus processBreak(JSOp op, jssrcnote* sn);
     ControlStatus processReturn(JSOp op);
-    ControlStatus maybeLoop(JSOp op, jssrcnote* sn);
     ControlStatus snoopControlFlow(JSOp op);
     ControlStatus processBrokenLoop(CFGState& state);
     ControlStatus finishLoop(CFGState& state, CFGBlock* successor);

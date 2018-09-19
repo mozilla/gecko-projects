@@ -15,12 +15,11 @@ dictionary PerformanceObserverInit {
 callback PerformanceObserverCallback = void (PerformanceObserverEntryList entries,
                                              PerformanceObserver observer);
 
-[Func="mozilla::dom::DOMPrefs::PerformanceObserverEnabled",
+[Func="mozilla::dom::DOMPrefs::dom_enable_performance_observer",
  Constructor(PerformanceObserverCallback callback),
  Exposed=(Window,Worker)]
 interface PerformanceObserver {
-    [Throws]
-    void                 observe(PerformanceObserverInit options);
-    void                 disconnect();
+    void observe(PerformanceObserverInit options);
+    void disconnect();
     PerformanceEntryList takeRecords();
 };

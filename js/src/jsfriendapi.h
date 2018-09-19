@@ -13,13 +13,15 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/UniquePtr.h"
 
-#include "jsapi.h" // For JSAutoByteString.  See bug 1033916.
 #include "jspubtd.h"
 
 #include "js/CallArgs.h"
 #include "js/CallNonGenericMethod.h"
+#include "js/CharacterEncoding.h"
 #include "js/Class.h"
+#include "js/ErrorReport.h"
 #include "js/HeapAPI.h"
+#include "js/StableStringChars.h"
 #include "js/TypeDecls.h"
 #include "js/Utility.h"
 
@@ -38,9 +40,7 @@
 #endif
 
 struct JSErrorFormatString;
-class JSLinearString;
 struct JSJitInfo;
-class JSErrorReport;
 
 namespace JS {
 template <class T>
@@ -224,6 +224,9 @@ namespace js {
 JS_FRIEND_API(bool)
 GetBuiltinClass(JSContext* cx, JS::HandleObject obj, ESClass* cls);
 
+JS_FRIEND_API(bool)
+IsArgumentsObject(JS::HandleObject obj);
+
 JS_FRIEND_API(const char*)
 ObjectClassName(JSContext* cx, JS::HandleObject obj);
 
@@ -239,7 +242,7 @@ RemoveRawValueRoot(JSContext* cx, JS::Value* vp);
 JS_FRIEND_API(JSAtom*)
 GetPropertyNameFromPC(JSScript* script, jsbytecode* pc);
 
-#ifdef JS_DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 
 /*
  * Routines to print out values during debugging. These are FRIEND_API to help
@@ -301,8 +304,7 @@ namespace JS {
 
 /** Exposed for DumpJSStack */
 extern JS_FRIEND_API(JS::UniqueChars)
-FormatStackDump(JSContext* cx, JS::UniqueChars&& buf, bool showArgs, bool showLocals,
-                bool showThisProps);
+FormatStackDump(JSContext* cx, bool showArgs, bool showLocals, bool showThisProps);
 
 /**
  * Set all of the uninitialized lexicals on an object to undefined. Return
@@ -331,11 +333,11 @@ GetIsSecureContext(JS::Realm* realm);
 } // namespace JS
 
 /**
- * Copies all own properties from |obj| to |target|. |obj| must be a "native"
- * object (that is to say, normal-ish - not an Array or a Proxy).
+ * Copies all own properties from |obj| to |target|. Both |obj| and |target|
+ * must not be cross-compartment wrappers because we have to enter their realms.
  *
- * This function immediately enters a compartment, and does not impose any
- * restrictions on the compartment of |cx|.
+ * This function immediately enters a realm, and does not impose any
+ * restrictions on the realm of |cx|.
  */
 extern JS_FRIEND_API(bool)
 JS_CopyPropertiesFrom(JSContext* cx, JS::HandleObject target, JS::HandleObject obj);
@@ -344,7 +346,8 @@ JS_CopyPropertiesFrom(JSContext* cx, JS::HandleObject target, JS::HandleObject o
  * Single-property version of the above. This function asserts that an |own|
  * property of the given name exists on |obj|.
  *
- * On entry, |cx| must be same-compartment with |obj|.
+ * On entry, |cx| must be same-compartment with |obj|. |target| must not be a
+ * cross-compartment wrapper because we have to enter its realm.
  *
  * The copyBehavior argument controls what happens with
  * non-configurable properties.
@@ -612,8 +615,9 @@ struct Object {
 
     JS::Value& slotRef(size_t slot) const {
         size_t nfixed = numFixedSlots();
-        if (slot < nfixed)
+        if (slot < nfixed) {
             return fixedSlots()[slot];
+        }
         return slots[slot - nfixed];
     }
 };
@@ -660,12 +664,14 @@ inline JSProtoKey
 InheritanceProtoKeyForStandardClass(JSProtoKey key)
 {
     // [Object] has nothing to inherit from.
-    if (key == JSProto_Object)
+    if (key == JSProto_Object) {
         return JSProto_Null;
+    }
 
     // If we're ClassSpec defined return the proto key from that
-    if (ProtoKeyToClass(key)->specDefined())
+    if (ProtoKeyToClass(key)->specDefined()) {
         return ProtoKeyToClass(key)->specInheritanceProtoKey();
+    }
 
     // Otherwise, we inherit [Object].
     return JSProto_Object;
@@ -675,7 +681,7 @@ JS_FRIEND_API(bool)
 IsFunctionObject(JSObject* obj);
 
 JS_FRIEND_API(bool)
-IsCrossCompartmentWrapper(const JSObject* obj);
+UninlinedIsCrossCompartmentWrapper(const JSObject* obj);
 
 static MOZ_ALWAYS_INLINE JS::Compartment*
 GetObjectCompartment(JSObject* obj)
@@ -689,12 +695,9 @@ GetObjectCompartment(JSObject* obj)
 static MOZ_ALWAYS_INLINE JS::Realm*
 GetNonCCWObjectRealm(JSObject* obj)
 {
-    MOZ_ASSERT(!js::IsCrossCompartmentWrapper(obj));
+    MOZ_ASSERT(!js::UninlinedIsCrossCompartmentWrapper(obj));
     return reinterpret_cast<shadow::Object*>(obj)->group->realm;
 }
-
-JS_FRIEND_API(JSObject*)
-GetGlobalForObjectCrossCompartment(JSObject* obj);
 
 JS_FRIEND_API(JSObject*)
 GetPrototypeNoProxy(JSObject* obj);
@@ -779,10 +782,11 @@ SetReservedSlot(JSObject* obj, size_t slot, const JS::Value& value)
 {
     MOZ_ASSERT(slot < JSCLASS_RESERVED_SLOTS(GetObjectClass(obj)));
     shadow::Object* sobj = reinterpret_cast<shadow::Object*>(obj);
-    if (sobj->slotRef(slot).isGCThing() || value.isGCThing())
+    if (sobj->slotRef(slot).isGCThing() || value.isGCThing()) {
         SetReservedSlotWithBarrier(obj, slot, value);
-    else
+    } else {
         sobj->slotRef(slot) = value;
+    }
 }
 
 JS_FRIEND_API(uint32_t)
@@ -798,45 +802,39 @@ GetObjectSlot(JSObject* obj, size_t slot)
 MOZ_ALWAYS_INLINE size_t
 GetAtomLength(JSAtom* atom)
 {
-    return reinterpret_cast<JS::shadow::String*>(atom)->length;
+    return reinterpret_cast<JS::shadow::String*>(atom)->length();
 }
 
 static const uint32_t MaxStringLength = (1 << 28) - 1;
 
 MOZ_ALWAYS_INLINE size_t
-GetStringLength(JSString* s)
-{
-    return reinterpret_cast<JS::shadow::String*>(s)->length;
-}
-
-MOZ_ALWAYS_INLINE size_t
 GetFlatStringLength(JSFlatString* s)
 {
-    return reinterpret_cast<JS::shadow::String*>(s)->length;
+    return reinterpret_cast<JS::shadow::String*>(s)->length();
 }
 
 MOZ_ALWAYS_INLINE size_t
 GetLinearStringLength(JSLinearString* s)
 {
-    return reinterpret_cast<JS::shadow::String*>(s)->length;
+    return reinterpret_cast<JS::shadow::String*>(s)->length();
 }
 
 MOZ_ALWAYS_INLINE bool
 LinearStringHasLatin1Chars(JSLinearString* s)
 {
-    return reinterpret_cast<JS::shadow::String*>(s)->flags & JS::shadow::String::LATIN1_CHARS_BIT;
+    return reinterpret_cast<JS::shadow::String*>(s)->flags() & JS::shadow::String::LATIN1_CHARS_BIT;
 }
 
 MOZ_ALWAYS_INLINE bool
 AtomHasLatin1Chars(JSAtom* atom)
 {
-    return reinterpret_cast<JS::shadow::String*>(atom)->flags & JS::shadow::String::LATIN1_CHARS_BIT;
+    return reinterpret_cast<JS::shadow::String*>(atom)->flags() & JS::shadow::String::LATIN1_CHARS_BIT;
 }
 
 MOZ_ALWAYS_INLINE bool
 StringHasLatin1Chars(JSString* s)
 {
-    return reinterpret_cast<JS::shadow::String*>(s)->flags & JS::shadow::String::LATIN1_CHARS_BIT;
+    return reinterpret_cast<JS::shadow::String*>(s)->flags() & JS::shadow::String::LATIN1_CHARS_BIT;
 }
 
 MOZ_ALWAYS_INLINE const JS::Latin1Char*
@@ -846,8 +844,9 @@ GetLatin1LinearStringChars(const JS::AutoRequireNoGC& nogc, JSLinearString* line
 
     using JS::shadow::String;
     String* s = reinterpret_cast<String*>(linear);
-    if (s->flags & String::INLINE_CHARS_BIT)
+    if (s->flags() & String::INLINE_CHARS_BIT) {
         return s->inlineStorageLatin1;
+    }
     return s->nonInlineCharsLatin1;
 }
 
@@ -858,8 +857,9 @@ GetTwoByteLinearStringChars(const JS::AutoRequireNoGC& nogc, JSLinearString* lin
 
     using JS::shadow::String;
     String* s = reinterpret_cast<String*>(linear);
-    if (s->flags & String::INLINE_CHARS_BIT)
+    if (s->flags() & String::INLINE_CHARS_BIT) {
         return s->inlineStorageTwoByte;
+    }
     return s->nonInlineCharsTwoByte;
 }
 
@@ -899,8 +899,9 @@ IsExternalString(JSString* str, const JSStringFinalizer** fin, const char16_t** 
     using JS::shadow::String;
     String* s = reinterpret_cast<String*>(str);
 
-    if ((s->flags & String::TYPE_FLAGS_MASK) != String::EXTERNAL_FLAGS)
+    if ((s->flags() & String::TYPE_FLAGS_MASK) != String::EXTERNAL_FLAGS) {
         return false;
+    }
 
     MOZ_ASSERT(JS_IsExternalString(str));
     *fin = s->externalFinalizer;
@@ -916,8 +917,9 @@ StringToLinearString(JSContext* cx, JSString* str)
 {
     using JS::shadow::String;
     String* s = reinterpret_cast<String*>(str);
-    if (MOZ_UNLIKELY(!(s->flags & String::LINEAR_BIT)))
+    if (MOZ_UNLIKELY(!(s->flags() & String::LINEAR_BIT))) {
         return StringToLinearStringSlow(cx, str);
+    }
     return reinterpret_cast<JSLinearString*>(str);
 }
 
@@ -932,8 +934,9 @@ CopyLinearStringChars(char16_t* dest, JSLinearString* s, size_t len, size_t star
     JS::AutoCheckCannotGC nogc;
     if (LinearStringHasLatin1Chars(s)) {
         const JS::Latin1Char* src = GetLatin1LinearStringChars(nogc, s);
-        for (size_t i = 0; i < len; i++)
+        for (size_t i = 0; i < len; i++) {
             dest[i] = src[start + i];
+        }
     } else {
         const char16_t* src = GetTwoByteLinearStringChars(nogc, s);
         mozilla::PodCopy(dest, src + start, len);
@@ -947,12 +950,14 @@ CopyLinearStringChars(char* dest, JSLinearString* s, size_t len, size_t start = 
     JS::AutoCheckCannotGC nogc;
     if (LinearStringHasLatin1Chars(s)) {
         const JS::Latin1Char* src = GetLatin1LinearStringChars(nogc, s);
-        for (size_t i = 0; i < len; i++)
+        for (size_t i = 0; i < len; i++) {
            dest[i] = char(src[start + i]);
+        }
     } else {
       const char16_t* src = GetTwoByteLinearStringChars(nogc, s);
-      for (size_t i = 0; i < len; i++)
+      for (size_t i = 0; i < len; i++) {
           dest[i] = char(src[start + i]);
+      }
     }
 }
 
@@ -961,8 +966,9 @@ inline bool
 CopyStringChars(JSContext* cx, CharType* dest, JSString* s, size_t len, size_t start = 0)
 {
     JSLinearString* linear = StringToLinearString(cx, s);
-    if (!linear)
+    if (!linear) {
         return false;
+    }
 
     CopyLinearStringChars(dest, linear, len, start);
     return true;
@@ -1088,8 +1094,9 @@ CheckRecursionLimit(JSContext* cx)
     // use. To work around this, check the untrusted limit first to avoid the
     // overhead in most cases.
     uintptr_t untrustedLimit = GetNativeStackLimit(cx, JS::StackForUntrustedScript);
-    if (MOZ_LIKELY(CheckRecursionLimitDontReport(untrustedLimit)))
+    if (MOZ_LIKELY(CheckRecursionLimitDontReport(untrustedLimit))) {
         return true;
+    }
     return CheckRecursionLimit(cx, GetNativeStackLimit(cx));
 }
 
@@ -1167,17 +1174,6 @@ GetPCCountScriptContents(JSContext* cx, size_t script);
  */
 JS_FRIEND_API(char*)
 GetCodeCoverageSummary(JSContext* cx, size_t* length);
-
-typedef void
-(* ActivityCallback)(void* arg, bool active);
-
-/**
- * Sets a callback that is run whenever the runtime goes idle - the
- * last active request ceases - and begins activity - when it was
- * idle and a request begins.
- */
-JS_FRIEND_API(void)
-SetActivityCallback(JSContext* cx, ActivityCallback cb, void* arg);
 
 typedef bool
 (* DOMInstanceClassHasProtoAtDepth)(const Class* instanceClass,
@@ -1354,9 +1350,9 @@ struct XrayJitInfo {
     // security checks.
     bool (*isCrossCompartmentXray)(const BaseProxyHandler* handler);
 
-    // Test whether xrays with a global object's compartment have expandos of
-    // their own, instead of sharing them with Xrays from other compartments.
-    bool (*globalHasExclusiveExpandos)(JSObject* obj);
+    // Test whether xrays in |obj|'s compartment have expandos of their own,
+    // instead of sharing them with Xrays from other compartments.
+    bool (*compartmentHasExclusiveExpandos)(JSObject* obj);
 
     // Proxy reserved slot used by xrays in sandboxes to store their holder
     // object.
@@ -1400,94 +1396,6 @@ namespace js {
 
 extern JS_FRIEND_API(const JSErrorFormatString*)
 GetErrorMessage(void* userRef, const unsigned errorNumber);
-
-// AutoStableStringChars is here so we can use it in ErrorReport.  It
-// should get moved out of here if we can manage it.  See bug 1040316.
-
-/**
- * This class provides safe access to a string's chars across a GC. Once
- * we allocate strings and chars in the nursery (bug 903519), this class
- * will have to make a copy of the string's chars if they are allocated
- * in the nursery, so it's best to avoid using this class unless you really
- * need it. It's usually more efficient to use the latin1Chars/twoByteChars
- * JSString methods and often the code can be rewritten so that only indexes
- * instead of char pointers are used in parts of the code that can GC.
- */
-class MOZ_STACK_CLASS JS_FRIEND_API(AutoStableStringChars)
-{
-    /*
-     * When copying string char, use this many bytes of inline storage.  This is
-     * chosen to allow the inline string types to be copied without allocating.
-     * This is asserted in AutoStableStringChars::allocOwnChars.
-     */
-    static const size_t InlineCapacity = 24;
-
-    /* Ensure the string is kept alive while we're using its chars. */
-    JS::RootedString s_;
-    MOZ_INIT_OUTSIDE_CTOR union {
-        const char16_t* twoByteChars_;
-        const JS::Latin1Char* latin1Chars_;
-    };
-    mozilla::Maybe<Vector<uint8_t, InlineCapacity>> ownChars_;
-    enum State { Uninitialized, Latin1, TwoByte };
-    State state_;
-
-  public:
-    explicit AutoStableStringChars(JSContext* cx)
-      : s_(cx), state_(Uninitialized)
-    {}
-
-    MOZ_MUST_USE
-    bool init(JSContext* cx, JSString* s);
-
-    /* Like init(), but Latin1 chars are inflated to TwoByte. */
-    MOZ_MUST_USE
-    bool initTwoByte(JSContext* cx, JSString* s);
-
-    bool isLatin1() const { return state_ == Latin1; }
-    bool isTwoByte() const { return state_ == TwoByte; }
-
-    const JS::Latin1Char* latin1Chars() const {
-        MOZ_ASSERT(state_ == Latin1);
-        return latin1Chars_;
-    }
-    const char16_t* twoByteChars() const {
-        MOZ_ASSERT(state_ == TwoByte);
-        return twoByteChars_;
-    }
-
-    mozilla::Range<const JS::Latin1Char> latin1Range() const {
-        MOZ_ASSERT(state_ == Latin1);
-        return mozilla::Range<const JS::Latin1Char>(latin1Chars_,
-                                                    GetStringLength(s_));
-    }
-
-    mozilla::Range<const char16_t> twoByteRange() const {
-        MOZ_ASSERT(state_ == TwoByte);
-        return mozilla::Range<const char16_t>(twoByteChars_,
-                                              GetStringLength(s_));
-    }
-
-    /* If we own the chars, transfer ownership to the caller. */
-    bool maybeGiveOwnershipToCaller() {
-        MOZ_ASSERT(state_ != Uninitialized);
-        if (!ownChars_.isSome() || !ownChars_->extractRawBuffer())
-            return false;
-        state_ = Uninitialized;
-        ownChars_.reset();
-        return true;
-    }
-
-  private:
-    AutoStableStringChars(const AutoStableStringChars& other) = delete;
-    void operator=(const AutoStableStringChars& other) = delete;
-
-    bool baseIsInline(JS::Handle<JSLinearString*> linearString);
-    template <typename T> T* allocOwnChars(JSContext* cx, size_t count);
-    bool copyLatin1Chars(JSContext* cx, JS::Handle<JSLinearString*> linearString);
-    bool copyTwoByteChars(JSContext* cx, JS::Handle<JSLinearString*> linearString);
-    bool copyAndInflateLatin1Chars(JSContext*, JS::Handle<JSLinearString*> linearString);
-};
 
 struct MOZ_STACK_CLASS JS_FRIEND_API(ErrorReport)
 {
@@ -1564,19 +1472,19 @@ struct MOZ_STACK_CLASS JS_FRIEND_API(ErrorReport)
     JS::RootedString str;
 
     // And keep its chars alive too.
-    AutoStableStringChars strChars;
+    JS::AutoStableStringChars strChars;
 
     // And we need to root our exception value.
     JS::RootedObject exnObject;
 
     // And for our filename.
-    JSAutoByteString filename;
+    JS::UniqueChars filename;
 
     // We may have a result of error.toString().
     // FIXME: We should not call error.toString(), since it could have side
     //        effect (see bug 633623).
     JS::ConstUTF8CharsZ toStringResult_;
-    JSAutoByteString toStringResultBytesStorage;
+    JS::UniqueChars toStringResultBytesStorage;
 };
 
 /* Implemented in vm/StructuredClone.cpp. */
@@ -1613,10 +1521,6 @@ enum Type {
     MaxTypedArrayViewType,
 
     Int64,
-    Float32x4,
-    Int8x16,
-    Int16x8,
-    Int32x4
 };
 
 static inline size_t
@@ -1637,10 +1541,6 @@ byteSize(Type atype)
       case Int64:
       case Float64:
         return 8;
-      case Int8x16:
-      case Int16x8:
-      case Int32x4:
-      case Float32x4:
         return 16;
       default:
         MOZ_CRASH("invalid scalar type");
@@ -1654,9 +1554,6 @@ isSignedIntType(Type atype) {
       case Int16:
       case Int32:
       case Int64:
-      case Int8x16:
-      case Int16x8:
-      case Int32x4:
         return true;
       case Uint8:
       case Uint8Clamped:
@@ -1664,62 +1561,10 @@ isSignedIntType(Type atype) {
       case Uint32:
       case Float32:
       case Float64:
-      case Float32x4:
         return false;
       default:
         MOZ_CRASH("invalid scalar type");
     }
-}
-
-static inline bool
-isSimdType(Type atype) {
-    switch (atype) {
-      case Int8:
-      case Uint8:
-      case Uint8Clamped:
-      case Int16:
-      case Uint16:
-      case Int32:
-      case Uint32:
-      case Int64:
-      case Float32:
-      case Float64:
-        return false;
-      case Int8x16:
-      case Int16x8:
-      case Int32x4:
-      case Float32x4:
-        return true;
-      case MaxTypedArrayViewType:
-        break;
-    }
-    MOZ_CRASH("invalid scalar type");
-}
-
-static inline size_t
-scalarByteSize(Type atype) {
-    switch (atype) {
-      case Int8x16:
-        return 1;
-      case Int16x8:
-        return 2;
-      case Int32x4:
-      case Float32x4:
-        return 4;
-      case Int8:
-      case Uint8:
-      case Uint8Clamped:
-      case Int16:
-      case Uint16:
-      case Int32:
-      case Uint32:
-      case Int64:
-      case Float32:
-      case Float64:
-      case MaxTypedArrayViewType:
-        break;
-    }
-    MOZ_CRASH("invalid simd type");
 }
 
 } /* namespace Scalar */
@@ -2723,31 +2568,29 @@ namespace js {
 static MOZ_ALWAYS_INLINE JS::Value
 IdToValue(jsid id)
 {
-    if (JSID_IS_STRING(id))
+    if (JSID_IS_STRING(id)) {
         return JS::StringValue(JSID_TO_STRING(id));
-    if (JSID_IS_INT(id))
+    }
+    if (JSID_IS_INT(id)) {
         return JS::Int32Value(JSID_TO_INT(id));
-    if (JSID_IS_SYMBOL(id))
+    }
+    if (JSID_IS_SYMBOL(id)) {
         return JS::SymbolValue(JSID_TO_SYMBOL(id));
+    }
     MOZ_ASSERT(JSID_IS_VOID(id));
     return JS::UndefinedValue();
 }
 
 /**
- * If the embedder has registered a ScriptEnvironmentPreparer,
- * PrepareScriptEnvironmentAndInvoke will call the preparer's 'invoke' method
+ * PrepareScriptEnvironmentAndInvoke asserts the embedder has registered a
+ * ScriptEnvironmentPreparer and then it calls the preparer's 'invoke' method
  * with the given |closure|, with the assumption that the preparer will set up
- * any state necessary to run script in |scope|, invoke |closure| with a valid
+ * any state necessary to run script in |global|, invoke |closure| with a valid
  * JSContext*, report any exceptions thrown from the closure, and return.
  *
- * If no preparer is registered, PrepareScriptEnvironmentAndInvoke will assert
- * that |rt| has exactly one JSContext associated with it, enter the compartment
- * of |scope| on that context, and invoke |closure|.
- *
- * In both cases, PrepareScriptEnvironmentAndInvoke will report any exceptions
- * that are thrown by the closure.  Consumers who want to propagate back
- * whether the closure succeeded should do so via members of the closure
- * itself.
+ * PrepareScriptEnvironmentAndInvoke will report any exceptions that are thrown
+ * by the closure.  Consumers who want to propagate back whether the closure
+ * succeeded should do so via members of the closure itself.
  */
 
 struct ScriptEnvironmentPreparer {
@@ -2755,11 +2598,11 @@ struct ScriptEnvironmentPreparer {
         virtual bool operator()(JSContext* cx) = 0;
     };
 
-    virtual void invoke(JS::HandleObject scope, Closure& closure) = 0;
+    virtual void invoke(JS::HandleObject global, Closure& closure) = 0;
 };
 
 extern JS_FRIEND_API(void)
-PrepareScriptEnvironmentAndInvoke(JSContext* cx, JS::HandleObject scope,
+PrepareScriptEnvironmentAndInvoke(JSContext* cx, JS::HandleObject global,
                                   ScriptEnvironmentPreparer::Closure& closure);
 
 JS_FRIEND_API(void)
@@ -2869,8 +2712,9 @@ SetPropertyIgnoringNamedGetter(JSContext* cx, JS::HandleObject obj, JS::HandleId
 
 // This function is for one specific use case, please don't use this for anything else!
 extern JS_FRIEND_API(bool)
-ExecuteInGlobalAndReturnScope(JSContext* cx, JS::HandleObject obj, JS::HandleScript script,
-                              JS::MutableHandleObject scope);
+ExecuteInFrameScriptEnvironment(JSContext* cx, JS::HandleObject obj,
+                                JS::HandleScript script,
+                                JS::MutableHandleObject scope);
 
 // These functions are provided for the JSM component loader in Gecko.
 //
@@ -2966,26 +2810,6 @@ extern JS_FRIEND_API(void)
 SetJitExceptionHandler(JitExceptionHandler handler);
 #endif
 
-/**
- * Get the first SavedFrame object in this SavedFrame stack whose principals are
- * subsumed by the cx's principals. If there is no such frame, return nullptr.
- *
- * Do NOT pass a non-SavedFrame object here.
- *
- * The savedFrame and cx do not need to be in the same compartment.
- */
-extern JS_FRIEND_API(JSObject*)
-GetFirstSubsumedSavedFrame(JSContext* cx, JS::HandleObject savedFrame, JS::SavedFrameSelfHosted selfHosted);
-
-/**
- * Get the first SavedFrame object in this SavedFrame stack whose principals are
- * subsumed by the given |principals|. If there is no such frame, return nullptr.
- *
- * Do NOT pass a non-SavedFrame object here.
- */
-extern JS_FRIEND_API(JSObject*)
-GetFirstSubsumedSavedFrame(JSContext* cx, JSPrincipals* principals, JS::HandleObject savedFrame, JS::SavedFrameSelfHosted selfHosted);
-
 extern JS_FRIEND_API(bool)
 ReportIsNotFunction(JSContext* cx, JS::HandleValue v);
 
@@ -3039,8 +2863,9 @@ ToWindowProxyIfWindowSlow(JSObject* obj);
 inline bool
 IsWindow(JSObject* obj)
 {
-    if (GetObjectClass(obj)->flags & JSCLASS_IS_GLOBAL)
+    if (GetObjectClass(obj)->flags & JSCLASS_IS_GLOBAL) {
         return detail::IsWindowSlow(obj);
+    }
     return false;
 }
 
@@ -3058,8 +2883,9 @@ IsWindowProxy(JSObject* obj);
 MOZ_ALWAYS_INLINE JSObject*
 ToWindowProxyIfWindow(JSObject* obj)
 {
-    if (GetObjectClass(obj)->flags & JSCLASS_IS_GLOBAL)
+    if (GetObjectClass(obj)->flags & JSCLASS_IS_GLOBAL) {
         return detail::ToWindowProxyIfWindowSlow(obj);
+    }
     return obj;
 }
 

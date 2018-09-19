@@ -20,6 +20,7 @@
 #include "jsapi.h"
 #include "jsfriendapi.h"
 #include "js/Conversions.h"
+#include "js/StableStringChars.h"
 #include "nsString.h"
 
 class nsIScriptContext;
@@ -43,10 +44,6 @@ public:
   static bool GetCallingLocation(JSContext* aContext, nsAString& aFilename,
                                  uint32_t* aLineno = nullptr,
                                  uint32_t* aColumn = nullptr);
-
-  static nsIScriptGlobalObject *GetStaticScriptGlobal(JSObject* aObj);
-
-  static nsIScriptContext *GetStaticScriptContext(JSObject* aObj);
 
   /**
    * Retrieve the inner window ID based on the given JSContext.
@@ -193,17 +190,17 @@ public:
                                 JS::SourceBufferHolder& aSrcBuf,
                                 JS::Handle<JSObject*> aEvaluationGlobal,
                                 JS::CompileOptions &aCompileOptions,
-                                JS::MutableHandle<JSObject*> aModule);
+                                JS::MutableHandle<JSScript*> aScript);
 
   static nsresult InitModuleSourceElement(JSContext* aCx,
-                                          JS::Handle<JSObject*> aModule,
+                                          JS::Handle<JSScript*> aScript,
                                           nsIScriptElement* aElement);
 
   static nsresult ModuleInstantiate(JSContext* aCx,
-                                    JS::Handle<JSObject*> aModule);
+                                    JS::Handle<JSScript*> aScript);
 
   static nsresult ModuleEvaluate(JSContext* aCx,
-                                 JS::Handle<JSObject*> aModule);
+                                 JS::Handle<JSScript*> aScript);
 
   // Returns false if an exception got thrown on aCx.  Passing a null
   // aElement is allowed; that wil produce an empty aScopeChain.
@@ -229,7 +226,7 @@ template<typename T>
 inline bool
 AssignJSString(JSContext *cx, T &dest, JSString *s)
 {
-  size_t len = js::GetStringLength(s);
+  size_t len = JS::GetStringLength(s);
   static_assert(js::MaxStringLength < (1 << 28),
                 "Shouldn't overflow here or in SetCapacity");
   if (MOZ_UNLIKELY(!dest.SetLength(len, mozilla::fallible))) {

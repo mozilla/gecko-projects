@@ -5,25 +5,36 @@
 "use strict";
 
 const { throttle } = require("devtools/client/inspector/shared/utils");
+const flags = require("devtools/shared/flags");
 
 const {
   clearFlexbox,
+  toggleFlexItemShown,
   updateFlexbox,
+  updateFlexboxColor,
   updateFlexboxHighlighted,
 } = require("./actions/flexbox");
+
+loader.lazyRequireGetter(this, "parseURL", "devtools/client/shared/source-utils", true);
+loader.lazyRequireGetter(this, "asyncStorage", "devtools/shared/async-storage");
+
+const FLEXBOX_COLOR = "#9400FF";
 
 class FlexboxInspector {
   constructor(inspector, window) {
     this.document = window.document;
     this.inspector = inspector;
+    this.selection = inspector.selection;
     this.store = inspector.store;
     this.walker = inspector.walker;
 
     this.onHighlighterShown = this.onHighlighterShown.bind(this);
     this.onHighlighterHidden = this.onHighlighterHidden.bind(this);
     this.onReflow = throttle(this.onReflow, 500, this);
+    this.onSetFlexboxOverlayColor = this.onSetFlexboxOverlayColor.bind(this);
     this.onSidebarSelect = this.onSidebarSelect.bind(this);
     this.onToggleFlexboxHighlighter = this.onToggleFlexboxHighlighter.bind(this);
+    this.onToggleFlexItemShown = this.onToggleFlexItemShown.bind(this);
     this.onUpdatePanel = this.onUpdatePanel.bind(this);
 
     this.init();
@@ -53,10 +64,16 @@ class FlexboxInspector {
       return;
     }
 
-    this.document.addEventListener("mousemove", () => {
+    if (flags.testing) {
+      // In tests, we start listening immediately to avoid having to simulate a mousemove.
       this.highlighters.on("flexbox-highlighter-hidden", this.onHighlighterHidden);
       this.highlighters.on("flexbox-highlighter-shown", this.onHighlighterShown);
-    }, { once: true });
+    } else {
+      this.document.addEventListener("mousemove", () => {
+        this.highlighters.on("flexbox-highlighter-hidden", this.onHighlighterHidden);
+        this.highlighters.on("flexbox-highlighter-shown", this.onHighlighterShown);
+      }, { once: true });
+    }
 
     this.inspector.sidebar.on("select", this.onSidebarSelect);
 
@@ -69,7 +86,7 @@ class FlexboxInspector {
       this.highlighters.off("flexbox-highlighter-shown", this.onHighlighterShown);
     }
 
-    this.inspector.selection.off("new-node-front", this.onUpdatePanel);
+    this.selection.off("new-node-front", this.onUpdatePanel);
     this.inspector.sidebar.off("select", this.onSidebarSelect);
     this.inspector.off("new-root", this.onUpdatePanel);
 
@@ -80,14 +97,26 @@ class FlexboxInspector {
     this.hasGetCurrentFlexbox = null;
     this.inspector = null;
     this.layoutInspector = null;
+    this.selection = null;
     this.store = null;
     this.walker = null;
   }
 
   getComponentProps() {
     return {
+      onSetFlexboxOverlayColor: this.onSetFlexboxOverlayColor,
       onToggleFlexboxHighlighter: this.onToggleFlexboxHighlighter,
+      onToggleFlexItemShown: this.onToggleFlexItemShown,
     };
+  }
+
+  /**
+   * Returns an object containing the custom flexbox colors for different hosts.
+   *
+   * @return {Object} that maps a host name to a custom flexbox color for a given host.
+   */
+  async getCustomFlexboxColors() {
+    return await asyncStorage.getItem("flexboxInspectorHostColors") || {};
   }
 
   /**
@@ -149,45 +178,64 @@ class FlexboxInspector {
    * Handler for the "reflow" event fired by the inspector's reflow tracker. On reflows,
    * updates the flexbox panel because the shape of the flexbox on the page may have
    * changed.
-   *
-   * TODO: In the future, we will want to compare the flex item fragment data returned
-   * for rendering the flexbox outline.
    */
   async onReflow() {
-    if (!this.isPanelVisible() || !this.store || !this.inspector.selection.nodeFront) {
+    if (!this.isPanelVisible() ||
+        !this.store ||
+        !this.selection.nodeFront ||
+        !this.hasGetCurrentFlexbox) {
       return;
     }
 
-    const { flexbox } = this.store.getState();
-
-    let flexboxFront;
     try {
-      if (!this.hasGetCurrentFlexbox) {
+      const flexboxFront = await this.layoutInspector.getCurrentFlexbox(
+        this.selection.nodeFront);
+
+      // Clear the flexbox panel if there is no flex container for the current node
+      // selection.
+      if (!flexboxFront) {
+        this.store.dispatch(clearFlexbox());
         return;
       }
 
-      flexboxFront = await this.layoutInspector.getCurrentFlexbox(
-        this.inspector.selection.nodeFront);
+      const { flexbox } = this.store.getState();
+
+      // Do nothing because the same flex container is still selected.
+      if (flexbox.actorID == flexboxFront.actorID) {
+        return;
+      }
+
+      // Update the flexbox panel with the new flexbox front contents.
+      this.update(flexboxFront);
     } catch (e) {
       // This call might fail if called asynchrously after the toolbox is finished
       // closing.
-      return;
+    }
+  }
+
+  /**
+   * Handler for a change in the flexbox overlay color picker for a flex container.
+   *
+   * @param  {String} color
+   *         A hex string representing the color to use.
+   */
+  async onSetFlexboxOverlayColor(color) {
+    this.store.dispatch(updateFlexboxColor(color));
+
+    const { flexbox } = this.store.getState();
+
+    if (flexbox.highlighted) {
+      this.highlighters.showFlexboxHighlighter(flexbox.nodeFront);
     }
 
-    // Clear the flexbox panel if there is no flex container for the current node
-    // selection.
-    if (!flexboxFront) {
-      this.store.dispatch(clearFlexbox());
-      return;
-    }
+    const currentUrl = this.inspector.target.url;
+    // Get the hostname, if there is no hostname, fall back on protocol
+    // ex: `data:` uri, and `about:` pages
+    const hostname = parseURL(currentUrl).hostname || parseURL(currentUrl).protocol;
+    const customFlexboxColors = await this.getCustomFlexboxColors();
 
-    // Do nothing because the same flex container is still selected.
-    if (flexbox.actorID == flexboxFront.actorID) {
-      return;
-    }
-
-    // Update the flexbox panel with the new flexbox front contents.
-    this.update(flexboxFront);
+    customFlexboxColors[hostname] = color;
+    await asyncStorage.setItem("flexboxInspectorHostColors", customFlexboxColors);
   }
 
   /**
@@ -197,14 +245,14 @@ class FlexboxInspector {
   onSidebarSelect() {
     if (!this.isPanelVisible()) {
       this.inspector.reflowTracker.untrackReflows(this, this.onReflow);
-      this.inspector.selection.off("new-node-front", this.onUpdatePanel);
       this.inspector.off("new-root", this.onUpdatePanel);
+      this.selection.off("new-node-front", this.onUpdatePanel);
       return;
     }
 
     this.inspector.reflowTracker.trackReflows(this, this.onReflow);
-    this.inspector.selection.on("new-node-front", this.onUpdatePanel);
     this.inspector.on("new-root", this.onUpdatePanel);
+    this.selection.on("new-node-front", this.onUpdatePanel);
 
     this.update();
   }
@@ -214,13 +262,31 @@ class FlexboxInspector {
    * Toggles on/off the flexbox highlighter for the provided flex container element.
    *
    * @param  {NodeFront} node
-   *         The NodeFront of the flexb container element for which the flexbox
+   *         The NodeFront of the flex container element for which the flexbox
    *         highlighter is toggled on/off for.
    */
   onToggleFlexboxHighlighter(node) {
     this.highlighters.toggleFlexboxHighlighter(node);
     this.store.dispatch(updateFlexboxHighlighted(node !==
       this.highlighters.flexboxHighlighterShow));
+  }
+
+  /**
+   * Handler for a change in the input checkbox in the FlexItem and Header component.
+   * Toggles on/off the flex item highlighter for the provided flex item element and
+   * changes the selection to the given node.
+   *
+   * @param  {NodeFront|null} node
+   *         The NodeFront of the flex item element for which the flex item is toggled
+   *         on/off for.
+   */
+  onToggleFlexItemShown(node) {
+    this.highlighters.toggleFlexItemHighlighter(node);
+    this.store.dispatch(toggleFlexItemShown(node));
+
+    if (node) {
+      this.selection.setNodeFront(node);
+    }
   }
 
   /**
@@ -240,63 +306,91 @@ class FlexboxInspector {
    * the layout view becomes visible or a new node is selected and needs to be update
    * with new flexbox data.
    *
-   * @param  {FlexboxFront|Null} flexboxFront
-   *         THe FlexboxFront of the flex container for the current node selection.
+   * @param  {FlexboxFront|null} flexboxFront
+   *         The FlexboxFront of the flex container for the current node selection.
    */
   async update(flexboxFront) {
     // Stop refreshing if the inspector or store is already destroyed or no node is
     // selected.
-    if (!this.inspector || !this.store || !this.inspector.selection.nodeFront) {
+    if (!this.inspector ||
+        !this.store ||
+        !this.selection.nodeFront ||
+        !this.hasGetCurrentFlexbox) {
       return;
     }
 
-    // Fetch the current flexbox if no flexbox front was passed into this update.
-    if (!flexboxFront) {
-      try {
-        if (!this.hasGetCurrentFlexbox) {
-          return;
+    try {
+      // Fetch the current flexbox if no flexbox front was passed into this update.
+      if (!flexboxFront) {
+        flexboxFront = await this.layoutInspector.getCurrentFlexbox(
+          this.selection.nodeFront);
+      }
+
+      // Clear the flexbox panel if there is no flex container for the current node
+      // selection.
+      if (!flexboxFront) {
+        this.store.dispatch(clearFlexbox());
+        return;
+      }
+
+      // If the FlexboxFront doesn't yet have access to the NodeFront for its container,
+      // then get it from the walker. This happens when the walker hasn't seen this
+      // particular DOM Node in the tree yet or when we are connected to an older server.
+      let containerNodeFront = flexboxFront.containerNodeFront;
+      if (!containerNodeFront) {
+        containerNodeFront = await this.walker.getNodeFromActor(flexboxFront.actorID,
+          ["containerEl"]);
+      }
+
+      // Fetch the flex items for the given flex container.
+      const flexItemFronts = await flexboxFront.getFlexItems();
+      const flexItems = [];
+      let flexItemShown = null;
+
+      for (const flexItemFront of flexItemFronts) {
+        // Fetch the NodeFront of the flex items.
+        let itemNodeFront = flexItemFront.nodeFront;
+        if (!itemNodeFront) {
+          itemNodeFront = await this.walker.getNodeFromActor(flexItemFront.actorID,
+            ["element"]);
         }
 
-        flexboxFront = await this.layoutInspector.getCurrentFlexbox(
-          this.inspector.selection.nodeFront);
-      } catch (e) {
-        // This call might fail if called asynchrously after the toolbox is finished
-        // closing.
-        return;
+        // If the current selected node is a flex item, display its flex item sizing
+        // properties.
+        if (!flexItemShown && itemNodeFront === this.selection.nodeFront) {
+          flexItemShown = itemNodeFront.actorID;
+        }
+
+        flexItems.push({
+          actorID: flexItemFront.actorID,
+          flexItemSizing: flexItemFront.flexItemSizing,
+          nodeFront: itemNodeFront,
+          properties: flexItemFront.properties,
+        });
       }
+
+      const highlighted = this._highlighters &&
+        containerNodeFront == this.highlighters.flexboxHighlighterShown;
+      const currentUrl = this.inspector.target.url;
+      // Get the hostname, if there is no hostname, fall back on protocol
+      // ex: `data:` uri, and `about:` pages
+      const hostname = parseURL(currentUrl).hostname || parseURL(currentUrl).protocol;
+      const customColors = await this.getCustomFlexboxColors();
+      const color = customColors[hostname] ? customColors[hostname] : FLEXBOX_COLOR;
+
+      this.store.dispatch(updateFlexbox({
+        actorID: flexboxFront.actorID,
+        color,
+        flexItems,
+        flexItemShown,
+        highlighted,
+        nodeFront: containerNodeFront,
+        properties: flexboxFront.properties,
+      }));
+    } catch (e) {
+      // This call might fail if called asynchrously after the toolbox is finished
+      // closing.
     }
-
-    // Clear the flexbox panel if there is no flex container for the current node
-    // selection.
-    if (!flexboxFront) {
-      this.store.dispatch(clearFlexbox());
-      return;
-    }
-
-    let nodeFront = flexboxFront.containerNodeFront;
-
-    // If the FlexboxFront doesn't yet have access to the NodeFront for its container,
-    // then get it from the walker. This happens when the walker hasn't seen this
-    // particular DOM Node in the tree yet or when we are connected to an older server.
-    if (!nodeFront) {
-      try {
-        nodeFront = await this.walker.getNodeFromActor(flexboxFront.actorID,
-          ["containerEl"]);
-      } catch (e) {
-        // This call might fail if called asynchrously after the toolbox is finished
-        // closing.
-        return;
-      }
-    }
-
-    const highlighted = this._highlighters &&
-      nodeFront == this.highlighters.flexboxHighlighterShown;
-
-    this.store.dispatch(updateFlexbox({
-      actorID: flexboxFront.actorID,
-      highlighted,
-      nodeFront,
-    }));
   }
 }
 

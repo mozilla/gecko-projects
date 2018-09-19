@@ -4,7 +4,10 @@
 
 "use strict";
 
-const {FormAutofillStorage} = ChromeUtils.import("resource://formautofill/FormAutofillStorage.jsm", {});
+let FormAutofillStorage;
+add_task(async function setup() {
+  ({FormAutofillStorage} = ChromeUtils.import("resource://formautofill/FormAutofillStorage.jsm", {}));
+});
 
 const TEST_STORE_FILE_NAME = "test-profile.json";
 
@@ -526,9 +529,11 @@ const CREDIT_CARD_COMPUTE_TESTCASES = [
     description: "Has \"cc-name\"",
     creditCard: {
       "cc-name": "Timothy John Berners-Lee",
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-name": "Timothy John Berners-Lee",
+      "cc-number": "************1045",
       "cc-given-name": "Timothy",
       "cc-additional-name": "John",
       "cc-family-name": "Berners-Lee",
@@ -552,31 +557,37 @@ const CREDIT_CARD_COMPUTE_TESTCASES = [
     creditCard: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
       "cc-exp": "2022-12",
+      "cc-number": "************1045",
     },
   },
   {
     description: "Has only \"cc-exp-month\"",
     creditCard: {
       "cc-exp-month": 12,
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp": undefined,
+      "cc-number": "************1045",
     },
   },
   {
     description: "Has only \"cc-exp-year\"",
     creditCard: {
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-exp-year": 2022,
       "cc-exp": undefined,
+      "cc-number": "************1045",
     },
   },
 ];
@@ -589,9 +600,11 @@ const CREDIT_CARD_NORMALIZE_TESTCASES = [
       "cc-name": "Timothy John Berners-Lee",
       "cc-given-name": "John",
       "cc-family-name": "Doe",
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-name": "Timothy John Berners-Lee",
+      "cc-number": "4929001587121045",
     },
   },
   {
@@ -599,9 +612,11 @@ const CREDIT_CARD_NORMALIZE_TESTCASES = [
     creditCard: {
       "cc-given-name": "John",
       "cc-family-name": "Doe",
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-name": "John Doe",
+      "cc-number": "4929001587121045",
     },
   },
 
@@ -638,151 +653,181 @@ const CREDIT_CARD_NORMALIZE_TESTCASES = [
   {
     description: "Has \"cc-exp\" formatted \"yyyy-mm\"",
     creditCard: {
+      "cc-number": "4929001587121045",
       "cc-exp": "2022-12",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"yyyy/mm\"",
     creditCard: {
+      "cc-number": "4929001587121045",
       "cc-exp": "2022/12",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"yyyy-m\"",
     creditCard: {
+      "cc-number": "4929001587121045",
       "cc-exp": "2022-3",
     },
     expectedResult: {
       "cc-exp-month": 3,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"yyyy/m\"",
     creditCard: {
+      "cc-number": "4929001587121045",
       "cc-exp": "2022/3",
     },
     expectedResult: {
       "cc-exp-month": 3,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"mm-yyyy\"",
     creditCard: {
+      "cc-number": "4929001587121045",
       "cc-exp": "12-2022",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"mm/yyyy\"",
     creditCard: {
+      "cc-number": "4929001587121045",
       "cc-exp": "12/2022",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"m-yyyy\"",
     creditCard: {
+      "cc-number": "4929001587121045",
       "cc-exp": "3-2022",
     },
     expectedResult: {
       "cc-exp-month": 3,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"m/yyyy\"",
     creditCard: {
+      "cc-number": "4929001587121045",
       "cc-exp": "3/2022",
     },
     expectedResult: {
       "cc-exp-month": 3,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"mm-yy\"",
     creditCard: {
+      "cc-number": "4929001587121045",
       "cc-exp": "12-22",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"mm/yy\"",
     creditCard: {
+      "cc-number": "4929001587121045",
       "cc-exp": "12/22",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"yy-mm\"",
     creditCard: {
+      "cc-number": "4929001587121045",
       "cc-exp": "22-12",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"yy/mm\"",
     creditCard: {
       "cc-exp": "22/12",
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"mmyy\"",
     creditCard: {
       "cc-exp": "1222",
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" formatted \"yymm\"",
     creditCard: {
       "cc-exp": "2212",
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
     description: "Has \"cc-exp\" with spaces",
     creditCard: {
       "cc-exp": "  2033-11  ",
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-exp-month": 11,
       "cc-exp-year": 2033,
+      "cc-number": "4929001587121045",
     },
   },
   {
@@ -802,10 +847,12 @@ const CREDIT_CARD_NORMALIZE_TESTCASES = [
       "cc-exp": "2022-12",
       "cc-exp-month": 3,
       "cc-exp-year": 2030,
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-exp-month": 3,
       "cc-exp-year": 2030,
+      "cc-number": "4929001587121045",
     },
   },
   {
@@ -813,10 +860,12 @@ const CREDIT_CARD_NORMALIZE_TESTCASES = [
     creditCard: {
       "cc-exp": "2022-12",
       "cc-exp-year": 2030,
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
   {
@@ -824,10 +873,12 @@ const CREDIT_CARD_NORMALIZE_TESTCASES = [
     creditCard: {
       "cc-exp": "2022-12",
       "cc-exp-month": 3,
+      "cc-number": "4929001587121045",
     },
     expectedResult: {
       "cc-exp-month": 12,
       "cc-exp-year": 2022,
+      "cc-number": "4929001587121045",
     },
   },
 ];
@@ -844,15 +895,17 @@ add_task(async function test_computeAddressFields() {
   let profileStorage = new FormAutofillStorage(path);
   await profileStorage.initialize();
 
-  ADDRESS_COMPUTE_TESTCASES.forEach(testcase => {
+  for (let testcase of ADDRESS_COMPUTE_TESTCASES) {
     info("Verify testcase: " + testcase.description);
 
-    let guid = profileStorage.addresses.add(testcase.address);
-    let address = profileStorage.addresses.get(guid);
+    let guid = await profileStorage.addresses.add(testcase.address);
+    let address = await profileStorage.addresses.get(guid);
     do_check_record_matches(testcase.expectedResult, address);
 
     profileStorage.addresses.remove(guid);
-  });
+  }
+
+  await profileStorage._finalize();
 });
 
 add_task(async function test_normalizeAddressFields() {
@@ -861,15 +914,17 @@ add_task(async function test_normalizeAddressFields() {
   let profileStorage = new FormAutofillStorage(path);
   await profileStorage.initialize();
 
-  ADDRESS_NORMALIZE_TESTCASES.forEach(testcase => {
+  for (let testcase of ADDRESS_NORMALIZE_TESTCASES) {
     info("Verify testcase: " + testcase.description);
 
-    let guid = profileStorage.addresses.add(testcase.address);
-    let address = profileStorage.addresses.get(guid);
+    let guid = await profileStorage.addresses.add(testcase.address);
+    let address = await profileStorage.addresses.get(guid);
     do_check_record_matches(testcase.expectedResult, address);
 
     profileStorage.addresses.remove(guid);
-  });
+  }
+
+  await profileStorage._finalize();
 });
 
 add_task(async function test_computeCreditCardFields() {
@@ -878,15 +933,17 @@ add_task(async function test_computeCreditCardFields() {
   let profileStorage = new FormAutofillStorage(path);
   await profileStorage.initialize();
 
-  CREDIT_CARD_COMPUTE_TESTCASES.forEach(testcase => {
+  for (let testcase of CREDIT_CARD_COMPUTE_TESTCASES) {
     info("Verify testcase: " + testcase.description);
 
-    let guid = profileStorage.creditCards.add(testcase.creditCard);
-    let creditCard = profileStorage.creditCards.get(guid);
+    let guid = await profileStorage.creditCards.add(testcase.creditCard);
+    let creditCard = await profileStorage.creditCards.get(guid);
     do_check_record_matches(testcase.expectedResult, creditCard);
 
     profileStorage.creditCards.remove(guid);
-  });
+  }
+
+  await profileStorage._finalize();
 });
 
 add_task(async function test_normalizeCreditCardFields() {
@@ -895,13 +952,15 @@ add_task(async function test_normalizeCreditCardFields() {
   let profileStorage = new FormAutofillStorage(path);
   await profileStorage.initialize();
 
-  CREDIT_CARD_NORMALIZE_TESTCASES.forEach(testcase => {
+  for (let testcase of CREDIT_CARD_NORMALIZE_TESTCASES) {
     info("Verify testcase: " + testcase.description);
 
-    let guid = profileStorage.creditCards.add(testcase.creditCard);
-    let creditCard = profileStorage.creditCards.get(guid, {rawData: true});
+    let guid = await profileStorage.creditCards.add(testcase.creditCard);
+    let creditCard = await profileStorage.creditCards.get(guid, {rawData: true});
     do_check_record_matches(testcase.expectedResult, creditCard);
 
     profileStorage.creditCards.remove(guid);
-  });
+  }
+
+  await profileStorage._finalize();
 });

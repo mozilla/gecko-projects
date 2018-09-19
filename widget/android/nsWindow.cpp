@@ -610,7 +610,7 @@ public:
 
         ScreenPoint origin = ScreenPoint(aX, aY);
 
-        MouseInput input(mouseType, buttonType, MouseEventBinding::MOZ_SOURCE_MOUSE, ConvertButtons(buttons), origin, aTime, GetEventTimeStamp(aTime), GetModifiers(aMetaState));
+        MouseInput input(mouseType, buttonType, MouseEvent_Binding::MOZ_SOURCE_MOUSE, ConvertButtons(buttons), origin, aTime, GetEventTimeStamp(aTime), GetModifiers(aMetaState));
 
         ScrollableLayerGuid guid;
         uint64_t blockId;
@@ -1239,13 +1239,15 @@ nsWindow::GeckoViewSupport::Transfer(const GeckoSession::Window::LocalRef& inst,
         window.mNPZCSupport.Detach();
     }
 
-    if (window.mLayerViewSupport) {
-        window.mLayerViewSupport.Detach();
-    }
-
     auto compositor = LayerSession::Compositor::LocalRef(
             inst.Env(), LayerSession::Compositor::Ref::From(aCompositor));
-    window.mLayerViewSupport.Attach(compositor, &window, compositor);
+    if (window.mLayerViewSupport &&
+            window.mLayerViewSupport->GetJavaCompositor() != compositor) {
+        window.mLayerViewSupport.Detach();
+    }
+    if (!window.mLayerViewSupport) {
+        window.mLayerViewSupport.Attach(compositor, &window, compositor);
+    }
 
     MOZ_ASSERT(window.mAndroidView);
     window.mAndroidView->mEventDispatcher->Attach(
@@ -1943,24 +1945,6 @@ nsWindow::UpdateOverscrollOffset(const float aX, const float aY)
     }
 }
 
-void
-nsWindow::SetSelectionDragState(bool aState)
-{
-    MOZ_ASSERT(NS_IsMainThread());
-
-    if (!mLayerViewSupport) {
-        return;
-    }
-
-    const auto& compositor = mLayerViewSupport->GetJavaCompositor();
-    DispatchToUiThread(
-            "nsWindow::SetSelectionDragState",
-            [compositor = LayerSession::Compositor::GlobalRef(compositor),
-             aState] {
-                compositor->OnSelectionCaretDrag(aState);
-            });
-}
-
 void *
 nsWindow::GetNativeData(uint32_t aDataType)
 {
@@ -2010,7 +1994,7 @@ nsWindow::DispatchHitTest(const WidgetTouchEvent& aEvent)
                                  WidgetMouseEvent::eReal);
         hittest.mRefPoint = aEvent.mTouches[0]->mRefPoint;
         hittest.mIgnoreRootScrollFrame = true;
-        hittest.inputSource = MouseEventBinding::MOZ_SOURCE_TOUCH;
+        hittest.inputSource = MouseEvent_Binding::MOZ_SOURCE_TOUCH;
         nsEventStatus status;
         DispatchEvent(&hittest, status);
 
@@ -2321,5 +2305,41 @@ nsWindow::RecvScreenPixels(Shmem&& aMem, const ScreenIntSize& aSize)
   if (NativePtr<LayerViewSupport>::Locked lvs{mLayerViewSupport}) {
     lvs->RecvScreenPixels(std::move(aMem), aSize);
   }
+}
+
+nsresult
+nsWindow::SetPrefersReducedMotionOverrideForTest(bool aValue)
+{
+  nsXPLookAndFeel* xpLookAndFeel = nsLookAndFeel::GetInstance();
+
+  static_cast<nsLookAndFeel*>(xpLookAndFeel)->
+    SetPrefersReducedMotionOverrideForTest(aValue);
+
+  java::GeckoSystemStateListener::NotifyPrefersReducedMotionChangedForTest();
+  return NS_OK;
+}
+
+nsresult
+nsWindow::ResetPrefersReducedMotionOverrideForTest()
+{
+  nsXPLookAndFeel* xpLookAndFeel = nsLookAndFeel::GetInstance();
+
+  static_cast<nsLookAndFeel*>(xpLookAndFeel)->
+    ResetPrefersReducedMotionOverrideForTest();
+  return NS_OK;
+}
+
+already_AddRefed<nsIWidget>
+nsIWidget::CreateTopLevelWindow()
+{
+  nsCOMPtr<nsIWidget> window = new nsWindow();
+  return window.forget();
+}
+
+already_AddRefed<nsIWidget>
+nsIWidget::CreateChildWindow()
+{
+  nsCOMPtr<nsIWidget> window = new nsWindow();
+  return window.forget();
 }
 

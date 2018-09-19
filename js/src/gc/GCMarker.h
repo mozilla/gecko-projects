@@ -251,6 +251,15 @@ class GCMarker : public JSTracer
     template <typename S, typename T> void traverseEdge(S source, T* target);
     template <typename S, typename T> void traverseEdge(S source, const T& target);
 
+    // Helper methods that coerce their second argument to the base pointer
+    // type.
+    template <typename S> void traverseObjectEdge(S source, JSObject* target) {
+        traverseEdge(source, target);
+    }
+    template <typename S> void traverseStringEdge(S source, JSString* target) {
+        traverseEdge(source, target);
+    }
+
     // Notes a weak graph edge for later sweeping.
     template <typename T> void noteWeakEdge(T* edge);
 
@@ -296,8 +305,7 @@ class GCMarker : public JSTracer
 
     void setGCMode(JSGCMode mode) { stack.setGCMode(mode); }
 
-    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf,
-                               const AutoAccessAtomsZone& access) const;
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
 #ifdef DEBUG
 

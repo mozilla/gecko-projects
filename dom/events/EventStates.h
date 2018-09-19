@@ -214,8 +214,8 @@ private:
 // Content is URL's target (ref).
 #define NS_EVENT_STATE_URLTARGET     NS_DEFINE_EVENT_STATE_MACRO(8)
 // Content is the full screen element, or a frame containing the
-// current full-screen element.
-#define NS_EVENT_STATE_FULL_SCREEN   NS_DEFINE_EVENT_STATE_MACRO(9)
+// current fullscreen element.
+#define NS_EVENT_STATE_FULLSCREEN    NS_DEFINE_EVENT_STATE_MACRO(9)
 // Content is valid (and can be invalid).
 #define NS_EVENT_STATE_VALID         NS_DEFINE_EVENT_STATE_MACRO(10)
 // Content is invalid.
@@ -243,7 +243,8 @@ private:
 #define NS_EVENT_STATE_REQUIRED      NS_DEFINE_EVENT_STATE_MACRO(21)
 // Content is optional (and can be required).
 #define NS_EVENT_STATE_OPTIONAL      NS_DEFINE_EVENT_STATE_MACRO(22)
-// Free bit                          NS_DEFINE_EVENT_STATE_MACRO(23)
+// Element is either a defined custom element or uncustomized element.
+#define NS_EVENT_STATE_DEFINED       NS_DEFINE_EVENT_STATE_MACRO(23)
 // Link has been visited.
 #define NS_EVENT_STATE_VISITED       NS_DEFINE_EVENT_STATE_MACRO(24)
 // Link hasn't been visited.
@@ -354,11 +355,12 @@ private:
   DISABLED_STATES |                           \
   REQUIRED_STATES |                           \
   NS_EVENT_STATE_ACTIVE |                     \
+  NS_EVENT_STATE_DEFINED |                    \
   NS_EVENT_STATE_DRAGOVER |                   \
   NS_EVENT_STATE_FOCUS |                      \
   NS_EVENT_STATE_FOCUSRING |                  \
   NS_EVENT_STATE_FOCUS_WITHIN |               \
-  NS_EVENT_STATE_FULL_SCREEN |                \
+  NS_EVENT_STATE_FULLSCREEN |                 \
   NS_EVENT_STATE_HOVER |                      \
   NS_EVENT_STATE_URLTARGET                    \
 )

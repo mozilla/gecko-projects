@@ -34,7 +34,6 @@ const SWAPPED_BROWSER_STATE = [
   "_textZoom",
   "_isSyntheticDocument",
   "_innerWindowID",
-  "_manifestURI",
 ];
 
 /**
@@ -381,6 +380,10 @@ MessageManagerTunnel.prototype = {
   INNER_TO_OUTER_MESSAGES: [
     // Messages sent to browser.js
     "Browser:LoadURI",
+    "Link:SetIcon",
+    "Link:SetFailedIcon",
+    "Link:AddFeed",
+    "Link:AddSearch",
     // Messages sent to RemoteWebProgress.jsm
     "Content:LoadURIResult",
     "Content:LocationChange",
@@ -399,9 +402,6 @@ MessageManagerTunnel.prototype = {
     "contextmenu",
     // Messages sent to SelectParentHelper.jsm
     "Forms:UpdateDropDown",
-    // Messages sent to browser.js
-    "PageVisibility:Hide",
-    "PageVisibility:Show",
     // Messages sent to SessionStore.jsm
     "SessionStore:update",
     // Messages sent to BrowserTestUtils.jsm
@@ -475,8 +475,7 @@ MessageManagerTunnel.prototype = {
     // non-remote, so we're able to reach into its window and use the child
     // side message manager there.
     const docShell = this.outer[FRAME_LOADER].docShell;
-    return docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                   .getInterface(Ci.nsIContentFrameMessageManager);
+    return docShell.messageManager;
   },
 
   get inner() {

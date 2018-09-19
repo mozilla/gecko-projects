@@ -27,14 +27,16 @@ class AtomMarkingRuntime
     void markChildren(JSContext* cx, JSAtom*) {}
 
     void markChildren(JSContext* cx, JS::Symbol* symbol) {
-        if (JSAtom* description = symbol->description())
+        if (JSAtom* description = symbol->description()) {
             markAtom(cx, description);
+        }
     }
 
   public:
     // The extent of all allocated and free words in atom mark bitmaps.
     // This monotonically increases and may be read from without locking.
-    mozilla::Atomic<size_t> allocatedWords;
+    mozilla::Atomic<size_t, mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> allocatedWords;
 
     AtomMarkingRuntime()
       : allocatedWords(0)

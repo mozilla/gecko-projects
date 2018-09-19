@@ -25,7 +25,7 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using namespace mozilla::dom::SVGUnitTypesBinding;
+using namespace mozilla::dom::SVGUnitTypes_Binding;
 using namespace mozilla::gfx;
 
 nsSVGFilterInstance::nsSVGFilterInstance(const nsStyleFilter& aFilter,
@@ -51,7 +51,7 @@ nsSVGFilterInstance::nsSVGFilterInstance(const nsStyleFilter& aFilter,
   // Get the filter element.
   mFilterElement = mFilterFrame->GetFilterContent();
   if (!mFilterElement) {
-    NS_NOTREACHED("filter frame should have a related element");
+    MOZ_ASSERT_UNREACHABLE("filter frame should have a related element");
     return;
   }
 
@@ -129,19 +129,27 @@ nsSVGFilterInstance::GetFilterFrame(nsIFrame* aTargetFrame)
 
   // aTargetFrame can be null if this filter belongs to a
   // CanvasRenderingContext2D.
-  nsCOMPtr<nsIURI> url = aTargetFrame
-    ? SVGObserverUtils::GetFilterURI(aTargetFrame, mFilter)
-    : mFilter.GetURL()->ResolveLocalRef(mTargetContent);
+  nsCOMPtr<nsIURI> url;
+  if(aTargetFrame) {
+    RefPtr<URLAndReferrerInfo> urlExtraReferrer =
+      SVGObserverUtils::GetFilterURI(aTargetFrame, mFilter);
+    url = urlExtraReferrer->GetURI();
+  } else {
+    url = mFilter.GetURL()->ResolveLocalRef(mTargetContent);
+  }
 
   if (!url) {
-    NS_NOTREACHED("an nsStyleFilter of type URL should have a non-null URL");
+    MOZ_ASSERT_UNREACHABLE("an nsStyleFilter of type URL should have a non-null URL");
     return nullptr;
   }
 
   // Look up the filter element by URL.
   IDTracker filterElement;
   bool watch = false;
-  filterElement.Reset(mTargetContent, url, watch);
+  filterElement.Reset(mTargetContent, url,
+                      mFilter.GetURL()->mExtraData->GetReferrer(),
+                      mFilter.GetURL()->mExtraData->GetReferrerPolicy(),
+                      watch);
   Element* element = filterElement.get();
   if (!element) {
     // The URL points to no element.
@@ -164,7 +172,7 @@ nsSVGFilterInstance::GetPrimitiveNumber(uint8_t aCtxType, float aValue) const
 {
   nsSVGLength2 val;
   val.Init(aCtxType, 0xff, aValue,
-           SVGLengthBinding::SVG_LENGTHTYPE_NUMBER);
+           SVGLength_Binding::SVG_LENGTHTYPE_NUMBER);
 
   float value;
   if (mPrimitiveUnits == SVG_UNIT_TYPE_OBJECTBOUNDINGBOX) {
@@ -191,14 +199,14 @@ nsSVGFilterInstance::ConvertLocation(const Point3D& aPoint) const
 {
   nsSVGLength2 val[4];
   val[0].Init(SVGContentUtils::X, 0xff, aPoint.x,
-              SVGLengthBinding::SVG_LENGTHTYPE_NUMBER);
+              SVGLength_Binding::SVG_LENGTHTYPE_NUMBER);
   val[1].Init(SVGContentUtils::Y, 0xff, aPoint.y,
-              SVGLengthBinding::SVG_LENGTHTYPE_NUMBER);
+              SVGLength_Binding::SVG_LENGTHTYPE_NUMBER);
   // Dummy width/height values
   val[2].Init(SVGContentUtils::X, 0xff, 0,
-              SVGLengthBinding::SVG_LENGTHTYPE_NUMBER);
+              SVGLength_Binding::SVG_LENGTHTYPE_NUMBER);
   val[3].Init(SVGContentUtils::Y, 0xff, 0,
-              SVGLengthBinding::SVG_LENGTHTYPE_NUMBER);
+              SVGLength_Binding::SVG_LENGTHTYPE_NUMBER);
 
   gfxRect feArea = nsSVGUtils::GetRelativeRect(mPrimitiveUnits,
     val, mTargetBBox, mMetrics);

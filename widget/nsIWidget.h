@@ -34,6 +34,7 @@
 #include "Units.h"
 
 // forward declarations
+class   nsIBidiKeyboard;
 class   nsIRollupListener;
 class   imgIContainer;
 class   nsIContent;
@@ -778,6 +779,11 @@ class nsIWidget : public nsISupports
                         double aHeight,
                         bool   aRepaint) = 0;
 
+    virtual mozilla::Maybe<bool> IsResizingNativeWidget()
+    {
+        return mozilla::Nothing();
+    }
+
     /**
      * Resize the widget so that the inner client area has the given size.
      *
@@ -1305,7 +1311,7 @@ class nsIWidget : public nsISupports
     /**
      * Called when Gecko knows which themed widgets exist in this window.
      * The passed array contains an entry for every themed widget of the right
-     * type (currently only NS_THEME_TOOLBAR) within the window, except for
+     * type (currently only StyleAppearance::Toolbar) within the window, except for
      * themed widgets which are transformed or have effects applied to them
      * (e.g. CSS opacity or filters).
      * This could sometimes be called during display list construction
@@ -1496,20 +1502,25 @@ class nsIWidget : public nsISupports
     virtual MOZ_MUST_USE nsresult
     BeginMoveDrag(mozilla::WidgetMouseEvent* aEvent) = 0;
 
-    enum Modifiers {
-        CAPS_LOCK = 0x01, // when CapsLock is active
-        NUM_LOCK = 0x02, // when NumLock is active
-        SHIFT_L = 0x0100,
-        SHIFT_R = 0x0200,
-        CTRL_L = 0x0400,
-        CTRL_R = 0x0800,
-        ALT_L = 0x1000, // includes Option
-        ALT_R = 0x2000,
-        COMMAND_L = 0x4000,
-        COMMAND_R = 0x8000,
-        HELP = 0x10000,
-        FUNCTION = 0x100000,
-        NUMERIC_KEY_PAD = 0x01000000 // when the key is coming from the keypad
+    enum Modifiers
+    {
+      CAPS_LOCK =       0x00000001, // when CapsLock is active
+      NUM_LOCK =        0x00000002, // when NumLock is active
+      SHIFT_L =         0x00000100,
+      SHIFT_R =         0x00000200,
+      CTRL_L =          0x00000400,
+      CTRL_R =          0x00000800,
+      ALT_L =           0x00001000, // includes Option
+      ALT_R =           0x00002000,
+      COMMAND_L =       0x00004000,
+      COMMAND_R =       0x00008000,
+      HELP =            0x00010000,
+      ALTGRAPH =        0x00020000, // AltGr key on Windows.  This emulates
+                                    // AltRight key behavior of keyboard
+                                    // layouts which maps AltGr to AltRight
+                                    // key.
+      FUNCTION =        0x00100000,
+      NUMERIC_KEY_PAD = 0x01000000 // when the key is coming from the keypad
     };
     /**
      * Utility method intended for testing. Dispatches native key events
@@ -1691,6 +1702,27 @@ class nsIWidget : public nsISupports
     virtual void GetCompositorWidgetInitData(mozilla::widget::CompositorWidgetInitData* aInitData)
     {}
 
+    /**
+     * Setter/Getter of the system font setting for testing.
+     */
+    virtual nsresult SetSystemFont(const nsCString& aFontName)
+    {
+      return NS_ERROR_NOT_IMPLEMENTED;
+    }
+    virtual nsresult GetSystemFont(nsCString& aFontName)
+    {
+      return NS_ERROR_NOT_IMPLEMENTED;
+    }
+
+    virtual nsresult SetPrefersReducedMotionOverrideForTest(bool aValue)
+    {
+      return NS_ERROR_NOT_IMPLEMENTED;
+    }
+    virtual nsresult ResetPrefersReducedMotionOverrideForTest()
+    {
+      return NS_ERROR_NOT_IMPLEMENTED;
+    }
+
 private:
   class LongTapInfo
   {
@@ -1714,6 +1746,9 @@ private:
   };
 
   static void OnLongTapTimerCallback(nsITimer* aTimer, void* aClosure);
+
+  static already_AddRefed<nsIBidiKeyboard> CreateBidiKeyboardContentProcess();
+  static already_AddRefed<nsIBidiKeyboard> CreateBidiKeyboardInner();
 
   mozilla::UniquePtr<LongTapInfo> mLongTapTouchPoint;
   nsCOMPtr<nsITimer> mLongTapTimer;
@@ -1846,7 +1881,7 @@ public:
      * NS_RAW_NATIVE_IME_CONTEXT, the result is unique even if in a remote
      * process.
      */
-    virtual NativeIMEContext GetNativeIMEContext();
+    virtual NativeIMEContext GetNativeIMEContext() = 0;
 
     /*
      * Given a WidgetKeyboardEvent, this method synthesizes a corresponding
@@ -1897,6 +1932,12 @@ public:
     {
       return XRE_IsContentProcess();
     }
+
+    static already_AddRefed<nsIWidget>
+    CreateTopLevelWindow();
+
+    static already_AddRefed<nsIWidget>
+    CreateChildWindow();
 
     /**
      * Allocate and return a "puppet widget" that doesn't directly
@@ -2095,6 +2136,8 @@ public:
      */
     virtual void RecvScreenPixels(mozilla::ipc::Shmem&& aMem, const ScreenIntSize& aSize) = 0;
 #endif
+
+    static already_AddRefed<nsIBidiKeyboard> CreateBidiKeyboard();
 
 protected:
     /**

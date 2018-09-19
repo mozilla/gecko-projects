@@ -23,7 +23,7 @@
   </binding>
 
   <binding id="basetext" extends="chrome://global/content/bindings/general.xml#basecontrol">
-    <implementation implements="nsIDOMXULLabeledControlElement">
+    <implementation>
       <!-- public implementation -->
       <property name="label"      onset="this.setAttribute('label',val); return val;"
                                   onget="return this.getAttribute('label');"/>
@@ -54,25 +54,6 @@
       </property>
 
       <field name="labelElement"/>
-    </implementation>
-  </binding>
-
-  <binding id="iframe">
-    <implementation>
-      <property name="docShell" readonly="true">
-        <getter><![CDATA[
-          let {frameLoader} = this;
-          return frameLoader ? frameLoader.docShell : null;
-        ]]></getter>
-      </property>
-      <property name="contentWindow"
-                readonly="true"
-                onget="return this.docShell.QueryInterface(Components.interfaces.nsIInterfaceRequestor).getInterface(Components.interfaces.nsIDOMWindow);"/>
-      <property name="webNavigation"
-                onget="return this.docShell.QueryInterface(Components.interfaces.nsIWebNavigation);"
-                readonly="true"/>
-      <property name="contentDocument" readonly="true"
-                onget="return this.webNavigation.document;"/>
     </implementation>
   </binding>
 

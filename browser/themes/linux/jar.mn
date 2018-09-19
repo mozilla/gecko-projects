@@ -4,7 +4,6 @@
 
 browser.jar:
 % skin browser classic/1.0 %skin/classic/browser/
-% override chrome://global/skin/icons/warning-16.png moz-icon://stock/gtk-dialog-warning?size=menu
 #include ../shared/jar.inc.mn
   skin/classic/browser/sanitizeDialog.css
 * skin/classic/browser/syncedtabs/sidebar.css     (syncedtabs/sidebar.css)
@@ -32,7 +31,7 @@ browser.jar:
   skin/classic/browser/places/allBookmarks.png        (places/allBookmarks.png)
   skin/classic/browser/places/editBookmark.css        (places/editBookmark.css)
   skin/classic/browser/places/livemark-item.png       (places/livemark-item.png)
-* skin/classic/browser/places/places.css              (places/places.css)
+* skin/classic/browser/places/sidebar.css             (places/sidebar.css)
   skin/classic/browser/places/organizer.css           (places/organizer.css)
   skin/classic/browser/places/organizer.xml           (places/organizer.xml)
   skin/classic/browser/places/toolbarDropMarker.png   (places/toolbarDropMarker.png)
@@ -42,6 +41,9 @@ browser.jar:
 * skin/classic/browser/preferences/in-content/dialog.css      (preferences/in-content/dialog.css)
   skin/classic/browser/preferences/applications.css   (preferences/applications.css)
   skin/classic/browser/tabbrowser/tabDragIndicator.png      (tabbrowser/tabDragIndicator.png)
+  skin/classic/browser/window-controls/close.svg                 (window-controls/close.svg)
+  skin/classic/browser/window-controls/minimize.svg              (window-controls/minimize.svg)
+  skin/classic/browser/window-controls/restore.svg               (window-controls/restore.svg)
 
   skin/classic/browser/e10s-64@2x.png (../shared/e10s-64@2x.png)
 

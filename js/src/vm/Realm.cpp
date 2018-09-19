@@ -21,6 +21,7 @@
 #include "js/RootingAPI.h"
 #include "js/Wrapper.h"
 #include "proxy/DeadObjectProxy.h"
+#include "vm/DateTime.h"
 #include "vm/Debugger.h"
 #include "vm/Iteration.h"
 #include "vm/JSContext.h"
@@ -36,8 +37,6 @@
 #include "vm/UnboxedObject-inl.h"
 
 using namespace js;
-using namespace js::gc;
-using namespace js::jit;
 
 ObjectRealm::ObjectRealm(JS::Zone* zone)
   : innerViews(zone)
@@ -72,14 +71,16 @@ Realm::~Realm()
 
     // Write the code coverage information in a file.
     JSRuntime* rt = runtimeFromMainThread();
-    if (rt->lcovOutput().isEnabled())
+    if (rt->lcovOutput().isEnabled()) {
         rt->lcovOutput().writeLCovResult(lcovOutput);
+    }
 
 #ifdef DEBUG
     // Avoid assertion destroying the unboxed layouts list if the embedding
     // leaked GC things.
-    if (!runtime_->gc.shutdownCollectedEverything())
+    if (!runtime_->gc.shutdownCollectedEverything()) {
         objectGroups_.unboxedLayouts.clear();
+    }
 #endif
 
     MOZ_ASSERT(runtime_->numRealms > 0);
@@ -89,14 +90,10 @@ Realm::~Realm()
 bool
 ObjectRealm::init(JSContext* cx)
 {
-    if (!iteratorCache.init()) {
-        ReportOutOfMemory(cx);
+    NativeIteratorSentinel sentinel(NativeIterator::allocateSentinel(cx));
+    if (!sentinel) {
         return false;
     }
-
-    NativeIteratorSentinel sentinel(NativeIterator::allocateSentinel(cx));
-    if (!sentinel)
-        return false;
 
     iteratorSentinel_ = std::move(sentinel);
     enumerators = iteratorSentinel_.get();
@@ -104,7 +101,7 @@ ObjectRealm::init(JSContext* cx)
 }
 
 bool
-Realm::init(JSContext* cx)
+Realm::init(JSContext* cx, JSPrincipals* principals)
 {
     /*
      * As a hack, we clear our timezone cache every time we create a new realm.
@@ -112,16 +109,18 @@ Realm::init(JSContext* cx)
      * interfere with benchmarks that create tons of date objects (unless they
      * also create tons of iframes, which seems unlikely).
      */
-    JS::ResetTimeZone();
+    js::ResetTimeZoneInternal(ResetTimeZoneMode::DontResetIfOffsetUnchanged);
 
-    if (!objects_.init(cx))
+    if (!objects_.init(cx)) {
         return false;
+    }
 
-    if (!savedStacks_.init() ||
-        !varNames_.init())
-    {
-        ReportOutOfMemory(cx);
-        return false;
+    if (principals) {
+        // Any realm with the trusted principals -- and there can be
+        // multiple -- is a system realm.
+        isSystem_ = (principals == cx->runtime()->trustedPrincipals());
+        JS_HoldPrincipals(principals);
+        principals_ = principals;
     }
 
     return true;
@@ -130,9 +129,7 @@ Realm::init(JSContext* cx)
 jit::JitRuntime*
 JSRuntime::createJitRuntime(JSContext* cx)
 {
-    // The shared stubs are created in the atoms zone, which may be
-    // accessed by other threads with an exclusive context.
-    AutoLockForExclusiveAccess atomsLock(cx);
+    using namespace js::jit;
 
     MOZ_ASSERT(!jitRuntime_);
 
@@ -143,15 +140,16 @@ JSRuntime::createJitRuntime(JSContext* cx)
     }
 
     jit::JitRuntime* jrt = cx->new_<jit::JitRuntime>();
-    if (!jrt)
+    if (!jrt) {
         return nullptr;
+    }
 
     // Unfortunately, initialization depends on jitRuntime_ being non-null, so
     // we can't just wait to assign jitRuntime_.
     jitRuntime_ = jrt;
 
     AutoEnterOOMUnsafeRegion noOOM;
-    if (!jitRuntime_->initialize(cx, atomsLock)) {
+    if (!jitRuntime_->initialize(cx)) {
         // Handling OOM here is complicated: if we delete jitRuntime_ now, we
         // will destroy the ExecutableAllocator, even though there may still be
         // JitCode instances holding references to ExecutablePools.
@@ -165,18 +163,23 @@ bool
 Realm::ensureJitRealmExists(JSContext* cx)
 {
     using namespace js::jit;
-    if (jitRealm_)
-        return true;
 
-    if (!zone()->getJitZone(cx))
+    if (jitRealm_) {
+        return true;
+    }
+
+    if (!zone()->getJitZone(cx)) {
         return false;
+    }
 
     UniquePtr<JitRealm> jitRealm = cx->make_unique<JitRealm>();
-    if (!jitRealm)
+    if (!jitRealm) {
         return false;
+    }
 
-    if (!jitRealm->initialize(cx))
+    if (!jitRealm->initialize(cx)) {
         return false;
+    }
 
     jitRealm_ = std::move(jitRealm);
     return true;
@@ -199,18 +202,39 @@ struct CheckGCThingAfterMovingGCFunctor {
 #endif // JSGC_HASH_TABLE_CHECKS
 
 LexicalEnvironmentObject*
-ObjectRealm::getOrCreateNonSyntacticLexicalEnvironment(JSContext* cx, HandleObject enclosing)
+ObjectRealm::getOrCreateNonSyntacticLexicalEnvironment(JSContext* cx, HandleObject enclosing,
+                                                       HandleObject key, HandleObject thisv)
 {
     MOZ_ASSERT(&ObjectRealm::get(enclosing) == this);
 
     if (!nonSyntacticLexicalEnvironments_) {
         auto map = cx->make_unique<ObjectWeakMap>(cx);
-        if (!map || !map->init())
+        if (!map) {
             return nullptr;
+        }
 
         nonSyntacticLexicalEnvironments_ = std::move(map);
     }
 
+    RootedObject lexicalEnv(cx, nonSyntacticLexicalEnvironments_->lookup(key));
+
+    if (!lexicalEnv) {
+        MOZ_ASSERT(key->is<NonSyntacticVariablesObject>() || !key->is<EnvironmentObject>());
+        lexicalEnv = LexicalEnvironmentObject::createNonSyntactic(cx, enclosing, thisv);
+        if (!lexicalEnv) {
+            return nullptr;
+        }
+        if (!nonSyntacticLexicalEnvironments_->add(cx, key, lexicalEnv)) {
+            return nullptr;
+        }
+    }
+
+    return &lexicalEnv->as<LexicalEnvironmentObject>();
+}
+
+LexicalEnvironmentObject*
+ObjectRealm::getOrCreateNonSyntacticLexicalEnvironment(JSContext* cx, HandleObject enclosing)
+{
     // If a wrapped WithEnvironmentObject was passed in, unwrap it, as we may
     // be creating different WithEnvironmentObject wrappers each time.
     RootedObject key(cx, enclosing);
@@ -218,46 +242,37 @@ ObjectRealm::getOrCreateNonSyntacticLexicalEnvironment(JSContext* cx, HandleObje
         MOZ_ASSERT(!enclosing->as<WithEnvironmentObject>().isSyntactic());
         key = &enclosing->as<WithEnvironmentObject>().object();
     }
-    RootedObject lexicalEnv(cx, nonSyntacticLexicalEnvironments_->lookup(key));
 
-    if (!lexicalEnv) {
-        // NOTE: The default global |this| value is set to key for compatibility
-        // with existing users of the lexical environment cache.
-        //  - When used by shared-global JSM loader, |this| must be the
-        //    NonSyntacticVariablesObject passed as enclosing.
-        //  - When used by SubscriptLoader, |this| must be the target object of
-        //    the WithEnvironmentObject wrapper.
-        //  - When used by XBL/DOM Events, we execute directly as a function and
-        //    do not access the |this| value.
-        // See js::GetFunctionThis / js::GetNonSyntacticGlobalThis
-        MOZ_ASSERT(key->is<NonSyntacticVariablesObject>() || !key->is<EnvironmentObject>());
-        lexicalEnv = LexicalEnvironmentObject::createNonSyntactic(cx, enclosing, /*thisv = */key);
-        if (!lexicalEnv)
-            return nullptr;
-        if (!nonSyntacticLexicalEnvironments_->add(cx, key, lexicalEnv))
-            return nullptr;
-    }
-
-    return &lexicalEnv->as<LexicalEnvironmentObject>();
+    // NOTE: The default global |this| value is set to key for compatibility
+    // with existing users of the lexical environment cache.
+    //  - When used by shared-global JSM loader, |this| must be the
+    //    NonSyntacticVariablesObject passed as enclosing.
+    //  - When used by SubscriptLoader, |this| must be the target object of
+    //    the WithEnvironmentObject wrapper.
+    //  - When used by XBL/DOM Events, we execute directly as a function and
+    //    do not access the |this| value.
+    // See js::GetFunctionThis / js::GetNonSyntacticGlobalThis
+    return getOrCreateNonSyntacticLexicalEnvironment(cx, enclosing, key, /*thisv = */key);
 }
 
 LexicalEnvironmentObject*
-ObjectRealm::getNonSyntacticLexicalEnvironment(JSObject* enclosing) const
+ObjectRealm::getNonSyntacticLexicalEnvironment(JSObject* key) const
 {
-    MOZ_ASSERT(&ObjectRealm::get(enclosing) == this);
+    MOZ_ASSERT(&ObjectRealm::get(key) == this);
 
-    if (!nonSyntacticLexicalEnvironments_)
+    if (!nonSyntacticLexicalEnvironments_) {
         return nullptr;
+    }
     // If a wrapped WithEnvironmentObject was passed in, unwrap it as in
     // getOrCreateNonSyntacticLexicalEnvironment.
-    JSObject* key = enclosing;
-    if (enclosing->is<WithEnvironmentObject>()) {
-        MOZ_ASSERT(!enclosing->as<WithEnvironmentObject>().isSyntactic());
-        key = &enclosing->as<WithEnvironmentObject>().object();
+    if (key->is<WithEnvironmentObject>()) {
+        MOZ_ASSERT(!key->as<WithEnvironmentObject>().isSyntactic());
+        key = &key->as<WithEnvironmentObject>().object();
     }
     JSObject* lexicalEnv = nonSyntacticLexicalEnvironments_->lookup(key);
-    if (!lexicalEnv)
+    if (!lexicalEnv) {
         return nullptr;
+    }
     return &lexicalEnv->as<LexicalEnvironmentObject>();
 }
 
@@ -266,8 +281,9 @@ Realm::addToVarNames(JSContext* cx, JS::Handle<JSAtom*> name)
 {
     MOZ_ASSERT(name);
 
-    if (varNames_.put(name))
+    if (varNames_.put(name)) {
         return true;
+    }
 
     ReportOutOfMemory(cx);
     return false;
@@ -282,21 +298,25 @@ Realm::traceGlobal(JSTracer* trc)
     savedStacks_.trace(trc);
 
     // Atoms are always tenured.
-    if (!JS::RuntimeHeapIsMinorCollecting())
+    if (!JS::RuntimeHeapIsMinorCollecting()) {
         varNames_.trace(trc);
+    }
 }
 
 void
 ObjectRealm::trace(JSTracer* trc)
 {
-    if (lazyArrayBuffers)
+    if (lazyArrayBuffers) {
         lazyArrayBuffers->trace(trc);
+    }
 
-    if (objectMetadataTable)
+    if (objectMetadataTable) {
         objectMetadataTable->trace(trc);
+    }
 
-    if (nonSyntacticLexicalEnvironments_)
+    if (nonSyntacticLexicalEnvironments_) {
         nonSyntacticLexicalEnvironments_->trace(trc);
+    }
 }
 
 void
@@ -314,18 +334,21 @@ Realm::traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime traceOrMa
         //
         // If a compartment is on-stack, we mark its global so that
         // JSContext::global() remains valid.
-        if (shouldTraceGlobal() && global_.unbarrieredGet())
+        if (shouldTraceGlobal() && global_.unbarrieredGet()) {
             TraceRoot(trc, global_.unsafeUnbarrieredForTracing(), "on-stack compartment global");
+        }
     }
 
     // Nothing below here needs to be treated as a root if we aren't marking
     // this zone for a collection.
-    if (traceOrMark == js::gc::GCRuntime::MarkRuntime && !zone()->isCollectingFromAnyThread())
+    if (traceOrMark == js::gc::GCRuntime::MarkRuntime && !zone()->isCollectingFromAnyThread()) {
         return;
+    }
 
     /* Mark debug scopes, if present */
-    if (debugEnvs_)
+    if (debugEnvs_) {
         debugEnvs_->trace(trc);
+    }
 
     objects_.trace(trc);
 
@@ -358,21 +381,25 @@ Realm::traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime traceOrMa
 void
 ObjectRealm::finishRoots()
 {
-    if (lazyArrayBuffers)
+    if (lazyArrayBuffers) {
         lazyArrayBuffers->clear();
+    }
 
-    if (objectMetadataTable)
+    if (objectMetadataTable) {
         objectMetadataTable->clear();
+    }
 
-    if (nonSyntacticLexicalEnvironments_)
+    if (nonSyntacticLexicalEnvironments_) {
         nonSyntacticLexicalEnvironments_->clear();
+    }
 }
 
 void
 Realm::finishRoots()
 {
-    if (debugEnvs_)
+    if (debugEnvs_) {
         debugEnvs_->finish();
+    }
 
     objects_.finishRoots();
 
@@ -384,8 +411,9 @@ void
 ObjectRealm::sweepAfterMinorGC()
 {
     InnerViewTable& table = innerViews.get();
-    if (table.needsSweepAfterMinorGC())
+    if (table.needsSweepAfterMinorGC()) {
         table.sweepAfterMinorGC();
+    }
 }
 
 void
@@ -405,8 +433,9 @@ Realm::sweepSavedStacks()
 void
 Realm::sweepGlobalObject()
 {
-    if (global_ && IsAboutToBeFinalized(&global_))
+    if (global_ && IsAboutToBeFinalized(&global_)) {
         global_.set(nullptr);
+    }
 }
 
 void
@@ -422,8 +451,9 @@ Realm::sweepSelfHostingScriptSource()
 void
 Realm::sweepJitRealm()
 {
-    if (jitRealm_)
+    if (jitRealm_) {
         jitRealm_->sweep(this);
+    }
 }
 
 void
@@ -440,8 +470,9 @@ Realm::sweepRegExps()
 void
 Realm::sweepDebugEnvironments()
 {
-    if (debugEnvs_)
+    if (debugEnvs_) {
         debugEnvs_->sweep();
+    }
 }
 
 void
@@ -452,8 +483,9 @@ ObjectRealm::sweepNativeIterators()
     while (ni != enumerators) {
         JSObject* iterObj = ni->iterObj();
         NativeIterator* next = ni->next();
-        if (gc::IsAboutToBeFinalizedUnbarriered(&iterObj))
+        if (gc::IsAboutToBeFinalizedUnbarriered(&iterObj)) {
             ni->unlink();
+        }
         MOZ_ASSERT_IF(ni->objectBeingIterated(),
                       &ObjectRealm::get(ni->objectBeingIterated()) == this);
         ni = next;
@@ -487,14 +519,17 @@ struct NeedsSweepUnbarrieredFunctor {
 void
 Realm::sweepTemplateObjects()
 {
-    if (mappedArgumentsTemplate_ && IsAboutToBeFinalized(&mappedArgumentsTemplate_))
+    if (mappedArgumentsTemplate_ && IsAboutToBeFinalized(&mappedArgumentsTemplate_)) {
         mappedArgumentsTemplate_.set(nullptr);
+    }
 
-    if (unmappedArgumentsTemplate_ && IsAboutToBeFinalized(&unmappedArgumentsTemplate_))
+    if (unmappedArgumentsTemplate_ && IsAboutToBeFinalized(&unmappedArgumentsTemplate_)) {
         unmappedArgumentsTemplate_.set(nullptr);
+    }
 
-    if (iterResultTemplate_ && IsAboutToBeFinalized(&iterResultTemplate_))
+    if (iterResultTemplate_ && IsAboutToBeFinalized(&iterResultTemplate_)) {
         iterResultTemplate_.set(nullptr);
+    }
 }
 
 void
@@ -510,8 +545,9 @@ void
 Realm::fixupGlobal()
 {
     GlobalObject* global = *global_.unsafeGet();
-    if (global)
+    if (global) {
         global_.set(MaybeForwarded(global));
+    }
 }
 
 void
@@ -523,24 +559,27 @@ Realm::fixupScriptMapsAfterMovingGC()
     if (scriptCountsMap) {
         for (ScriptCountsMap::Enum e(*scriptCountsMap); !e.empty(); e.popFront()) {
             JSScript* script = e.front().key();
-            if (!IsAboutToBeFinalizedUnbarriered(&script) && script != e.front().key())
+            if (!IsAboutToBeFinalizedUnbarriered(&script) && script != e.front().key()) {
                 e.rekeyFront(script);
+            }
         }
     }
 
     if (scriptNameMap) {
         for (ScriptNameMap::Enum e(*scriptNameMap); !e.empty(); e.popFront()) {
             JSScript* script = e.front().key();
-            if (!IsAboutToBeFinalizedUnbarriered(&script) && script != e.front().key())
+            if (!IsAboutToBeFinalizedUnbarriered(&script) && script != e.front().key()) {
                 e.rekeyFront(script);
+            }
         }
     }
 
     if (debugScriptMap) {
         for (DebugScriptMap::Enum e(*debugScriptMap); !e.empty(); e.popFront()) {
             JSScript* script = e.front().key();
-            if (!IsAboutToBeFinalizedUnbarriered(&script) && script != e.front().key())
+            if (!IsAboutToBeFinalizedUnbarriered(&script) && script != e.front().key()) {
                 e.rekeyFront(script);
+            }
         }
     }
 }
@@ -577,8 +616,9 @@ Realm::checkScriptMapsAfterMovingGC()
             DebugScript* ds = r.front().value().get();
             for (uint32_t i = 0; i < ds->numSites; i++) {
                 BreakpointSite* site = ds->breakpoints[i];
-                if (site && site->type() == BreakpointSite::Type::JS)
+                if (site && site->type() == BreakpointSite::Type::JS) {
                     CheckGCThingAfterMovingGC(site->asJS()->script);
+                }
             }
             auto ptr = debugScriptMap->lookup(script);
             MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &r.front());
@@ -593,8 +633,9 @@ Realm::purge()
     dtoaCache.purge();
     newProxyCache.purge();
     objectGroups_.purge();
-    objects_.iteratorCache.clearAndShrink();
+    objects_.iteratorCache.clearAndCompact();
     arraySpeciesLookup.purge();
+    promiseLookup.purge();
 }
 
 void
@@ -610,10 +651,8 @@ Realm::clearTables()
     MOZ_ASSERT(objects_.enumerators->next() == objects_.enumerators);
 
     objectGroups_.clearTables();
-    if (savedStacks_.initialized())
-        savedStacks_.clear();
-    if (varNames_.initialized())
-        varNames_.clear();
+    savedStacks_.clear();
+    varNames_.clear();
 }
 
 void
@@ -643,44 +682,48 @@ void
 Realm::setNewObjectMetadata(JSContext* cx, HandleObject obj)
 {
     MOZ_ASSERT(obj->maybeCCWRealm() == this);
-    assertSameCompartment(cx, compartment(), obj);
+    cx->check(compartment(), obj);
 
     AutoEnterOOMUnsafeRegion oomUnsafe;
     if (JSObject* metadata = allocationMetadataBuilder_->build(cx, obj, oomUnsafe)) {
         MOZ_ASSERT(metadata->maybeCCWRealm() == obj->maybeCCWRealm());
-        assertSameCompartment(cx, metadata);
+        cx->check(metadata);
 
         if (!objects_.objectMetadataTable) {
             auto table = cx->make_unique<ObjectWeakMap>(cx);
-            if (!table || !table->init())
+            if (!table) {
                 oomUnsafe.crash("setNewObjectMetadata");
+            }
 
             objects_.objectMetadataTable = std::move(table);
         }
 
-        if (!objects_.objectMetadataTable->add(cx, obj, metadata))
+        if (!objects_.objectMetadataTable->add(cx, obj, metadata)) {
             oomUnsafe.crash("setNewObjectMetadata");
+        }
     }
 }
 
 static bool
 AddInnerLazyFunctionsFromScript(JSScript* script, AutoObjectVector& lazyFunctions)
 {
-    if (!script->hasObjects())
+    if (!script->hasObjects()) {
         return true;
+    }
     ObjectArray* objects = script->objects();
     for (size_t i = 0; i < objects->length; i++) {
         JSObject* obj = objects->vector[i];
         if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpretedLazy()) {
-            if (!lazyFunctions.append(obj))
+            if (!lazyFunctions.append(obj)) {
                 return false;
+            }
         }
     }
     return true;
 }
 
 static bool
-AddLazyFunctionsForRealm(JSContext* cx, AutoObjectVector& lazyFunctions, AllocKind kind)
+AddLazyFunctionsForRealm(JSContext* cx, AutoObjectVector& lazyFunctions, gc::AllocKind kind)
 {
     // Find all live root lazy functions in the realm: those which have a
     // non-lazy enclosing script, and which do not have an uncompiled enclosing
@@ -706,9 +749,10 @@ AddLazyFunctionsForRealm(JSContext* cx, AutoObjectVector& lazyFunctions, AllocKi
 
         if (fun->isInterpretedLazy()) {
             LazyScript* lazy = fun->lazyScriptOrNull();
-            if (lazy && !lazy->isEnclosingScriptLazy() && !lazy->hasUncompletedEnclosingScript()) {
-                if (!lazyFunctions.append(fun))
+            if (lazy && lazy->enclosingScriptHasEverBeenCompiled()) {
+                if (!lazyFunctions.append(fun)) {
                     return false;
+                }
             }
         }
     }
@@ -721,13 +765,15 @@ CreateLazyScriptsForRealm(JSContext* cx)
 {
     AutoObjectVector lazyFunctions(cx);
 
-    if (!AddLazyFunctionsForRealm(cx, lazyFunctions, AllocKind::FUNCTION))
+    if (!AddLazyFunctionsForRealm(cx, lazyFunctions, gc::AllocKind::FUNCTION)) {
         return false;
+    }
 
     // Methods, for instance {get method() {}}, are extended functions that can
     // be relazified, so we need to handle those as well.
-    if (!AddLazyFunctionsForRealm(cx, lazyFunctions, AllocKind::FUNCTION_EXTENDED))
+    if (!AddLazyFunctionsForRealm(cx, lazyFunctions, gc::AllocKind::FUNCTION_EXTENDED)) {
         return false;
+    }
 
     // Create scripts for each lazy function, updating the list of functions to
     // process with any newly exposed inner functions in created scripts.
@@ -738,16 +784,19 @@ CreateLazyScriptsForRealm(JSContext* cx)
 
         // lazyFunctions may have been populated with multiple functions for
         // a lazy script.
-        if (!fun->isInterpretedLazy())
+        if (!fun->isInterpretedLazy()) {
             continue;
+        }
 
         bool lazyScriptHadNoScript = !fun->lazyScript()->maybeScript();
 
         JSScript* script = JSFunction::getOrCreateScript(cx, fun);
-        if (!script)
+        if (!script) {
             return false;
-        if (lazyScriptHadNoScript && !AddInnerLazyFunctionsFromScript(script, lazyFunctions))
+        }
+        if (lazyScriptHadNoScript && !AddInnerLazyFunctionsFromScript(script, lazyFunctions)) {
             return false;
+        }
     }
 
     return true;
@@ -757,8 +806,9 @@ bool
 Realm::ensureDelazifyScriptsForDebugger(JSContext* cx)
 {
     AutoRealmUnchecked ar(cx, this);
-    if (needsDelazificationForDebugger() && !CreateLazyScriptsForRealm(cx))
+    if (needsDelazificationForDebugger() && !CreateLazyScriptsForRealm(cx)) {
         return false;
+    }
     debugModeBits_ &= ~DebuggerNeedsDelazification;
     return true;
 }
@@ -805,23 +855,26 @@ Realm::updateDebuggerObservesCoverage()
 {
     bool previousState = debuggerObservesCoverage();
     updateDebuggerObservesFlag(DebuggerObservesCoverage);
-    if (previousState == debuggerObservesCoverage())
+    if (previousState == debuggerObservesCoverage()) {
         return;
+    }
 
     if (debuggerObservesCoverage()) {
         // Interrupt any running interpreter frame. The scriptCounts are
         // allocated on demand when a script resumes its execution.
         JSContext* cx = TlsContext.get();
         for (ActivationIterator iter(cx); !iter.done(); ++iter) {
-            if (iter->isInterpreter())
+            if (iter->isInterpreter()) {
                 iter->asInterpreter()->enableInterruptsUnconditionally();
+            }
         }
         return;
     }
 
     // If code coverage is enabled by any other means, keep it.
-    if (collectCoverage())
+    if (collectCoverage()) {
         return;
+    }
 
     clearScriptCounts();
     clearScriptNames();
@@ -837,7 +890,7 @@ Realm::collectCoverage() const
 bool
 Realm::collectCoverageForPGO() const
 {
-    return !JitOptions.disablePgo;
+    return !jit::JitOptions.disablePgo;
 }
 
 bool
@@ -851,13 +904,15 @@ Realm::collectCoverageForDebug() const
 void
 Realm::clearScriptCounts()
 {
-    if (!scriptCountsMap)
+    if (!scriptCountsMap) {
         return;
+    }
 
     // Clear all hasScriptCounts_ flags of JSScript, in order to release all
     // ScriptCounts entries of the current realm.
-    for (ScriptCountsMap::Range r = scriptCountsMap->all(); !r.empty(); r.popFront())
+    for (ScriptCountsMap::Range r = scriptCountsMap->all(); !r.empty(); r.popFront()) {
         r.front().key()->clearHasScriptCounts();
+    }
 
     scriptCountsMap.reset();
 }
@@ -872,8 +927,9 @@ void
 Realm::clearBreakpointsIn(FreeOp* fop, js::Debugger* dbg, HandleObject handler)
 {
     for (auto script = zone()->cellIter<JSScript>(); !script.done(); script.next()) {
-        if (script->realm() == this && script->hasAnyBreakpointsOrStepMode())
+        if (script->realm() == this && script->hasAnyBreakpointsOrStepMode()) {
             script->clearBreakpointsIn(fop, dbg, handler);
+        }
     }
 }
 
@@ -886,14 +942,17 @@ ObjectRealm::addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf,
 {
     *innerViewsArg += innerViews.sizeOfExcludingThis(mallocSizeOf);
 
-    if (lazyArrayBuffers)
+    if (lazyArrayBuffers) {
         *lazyArrayBuffersArg += lazyArrayBuffers->sizeOfIncludingThis(mallocSizeOf);
+    }
 
-    if (objectMetadataTable)
+    if (objectMetadataTable) {
         *objectMetadataTablesArg += objectMetadataTable->sizeOfIncludingThis(mallocSizeOf);
+    }
 
-    if (auto& map = nonSyntacticLexicalEnvironments_)
+    if (auto& map = nonSyntacticLexicalEnvironments_) {
         *nonSyntacticLexicalEnvironmentsArg += map->sizeOfIncludingThis(mallocSizeOf);
+    }
 }
 
 void
@@ -925,15 +984,17 @@ Realm::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                     nonSyntacticLexicalEnvironmentsArg);
 
     *savedStacksSet += savedStacks_.sizeOfExcludingThis(mallocSizeOf);
-    *varNamesSet += varNames_.sizeOfExcludingThis(mallocSizeOf);
+    *varNamesSet += varNames_.shallowSizeOfExcludingThis(mallocSizeOf);
 
-    if (jitRealm_)
+    if (jitRealm_) {
         *jitRealm += jitRealm_->sizeOfIncludingThis(mallocSizeOf);
+    }
 
     if (scriptCountsMap) {
-        *scriptCountsMapArg += scriptCountsMap->sizeOfIncludingThis(mallocSizeOf);
-        for (auto r = scriptCountsMap->all(); !r.empty(); r.popFront())
+        *scriptCountsMapArg += scriptCountsMap->shallowSizeOfIncludingThis(mallocSizeOf);
+        for (auto r = scriptCountsMap->all(); !r.empty(); r.popFront()) {
             *scriptCountsMapArg += r.front().value()->sizeOfIncludingThis(mallocSizeOf);
+        }
     }
 }
 
@@ -951,16 +1012,18 @@ AutoSetNewObjectMetadata::AutoSetNewObjectMetadata(JSContext* cx
     , prevState_(cx->realm()->objectMetadataState_)
 {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    if (cx_)
+    if (cx_) {
         cx_->realm()->objectMetadataState_ = NewObjectMetadataState(DelayMetadata());
+    }
 }
 
 AutoSetNewObjectMetadata::~AutoSetNewObjectMetadata()
 {
     // If we don't have a cx, we didn't change the metadata state, so no need to
     // reset it here.
-    if (!cx_)
+    if (!cx_) {
         return;
+    }
 
     if (!cx_->isExceptionPending() && cx_->realm()->hasObjectPendingMetadata()) {
         // This destructor often runs upon exit from a function that is
@@ -972,7 +1035,7 @@ AutoSetNewObjectMetadata::~AutoSetNewObjectMetadata()
         // capture the JS stack. In fact, we're considering removing general
         // callbacks altogther in bug 1236748. Since it's not running arbitrary
         // code, it's adequate to simply suppress GC while we run the callback.
-        AutoSuppressGC autoSuppressGC(cx_);
+        gc::AutoSuppressGC autoSuppressGC(cx_);
 
         JSObject* obj = cx_->realm()->objectMetadataState_.as<PendingMetadata>();
 
@@ -1019,6 +1082,12 @@ JS::GetObjectRealmOrNull(JSObject* obj)
     return IsCrossCompartmentWrapper(obj) ? nullptr : obj->nonCCWRealm();
 }
 
+JS_PUBLIC_API(JS::Realm*)
+JS::GetScriptRealm(JSScript* script)
+{
+    return script->realm();
+}
+
 JS_PUBLIC_API(void*)
 JS::GetRealmPrivate(JS::Realm* realm)
 {
@@ -1054,41 +1123,41 @@ JS::InitRealmStandardClasses(JSContext* cx)
 {
     MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
-    CHECK_REQUEST(cx);
+    CHECK_THREAD(cx);
     return GlobalObject::initStandardClasses(cx, cx->global());
 }
 
 JS_PUBLIC_API(JSObject*)
 JS::GetRealmObjectPrototype(JSContext* cx)
 {
-    CHECK_REQUEST(cx);
+    CHECK_THREAD(cx);
     return GlobalObject::getOrCreateObjectPrototype(cx, cx->global());
 }
 
 JS_PUBLIC_API(JSObject*)
 JS::GetRealmFunctionPrototype(JSContext* cx)
 {
-    CHECK_REQUEST(cx);
+    CHECK_THREAD(cx);
     return GlobalObject::getOrCreateFunctionPrototype(cx, cx->global());
 }
 
 JS_PUBLIC_API(JSObject*)
 JS::GetRealmArrayPrototype(JSContext* cx)
 {
-    CHECK_REQUEST(cx);
+    CHECK_THREAD(cx);
     return GlobalObject::getOrCreateArrayPrototype(cx, cx->global());
 }
 
 JS_PUBLIC_API(JSObject*)
 JS::GetRealmErrorPrototype(JSContext* cx)
 {
-    CHECK_REQUEST(cx);
+    CHECK_THREAD(cx);
     return GlobalObject::getOrCreateCustomErrorPrototype(cx, cx->global(), JSEXN_ERR);
 }
 
 JS_PUBLIC_API(JSObject*)
 JS::GetRealmIteratorPrototype(JSContext* cx)
 {
-    CHECK_REQUEST(cx);
+    CHECK_THREAD(cx);
     return GlobalObject::getOrCreateIteratorPrototype(cx, cx->global());
 }

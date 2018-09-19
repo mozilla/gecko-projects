@@ -218,6 +218,14 @@ MacroAssembler::callJit(TrampolinePtr code)
     return currentOffset();
 }
 
+uint32_t
+MacroAssembler::callJit(ImmPtr callee)
+{
+    AutoProfilerCallInstrumentation profiler(*this);
+    call(callee);
+    return currentOffset();
+}
+
 void
 MacroAssembler::makeFrameDescriptor(Register frameSizeReg, FrameType type, uint32_t headerSize)
 {
@@ -227,7 +235,7 @@ MacroAssembler::makeFrameDescriptor(Register frameSizeReg, FrameType type, uint3
     lshiftPtr(Imm32(FRAMESIZE_SHIFT), frameSizeReg);
 
     headerSize = EncodeFrameHeaderSize(headerSize);
-    orPtr(Imm32((headerSize << FRAME_HEADER_SIZE_SHIFT) | type), frameSizeReg);
+    orPtr(Imm32((headerSize << FRAME_HEADER_SIZE_SHIFT) | uint32_t(type)), frameSizeReg);
 }
 
 void
@@ -271,7 +279,7 @@ MacroAssembler::buildFakeExitFrame(Register scratch)
 {
     mozilla::DebugOnly<uint32_t> initialDepth = framePushed();
 
-    pushStaticFrameDescriptor(JitFrame_IonJS, ExitFrameLayout::Size());
+    pushStaticFrameDescriptor(FrameType::IonJS, ExitFrameLayout::Size());
     uint32_t retAddr = pushFakeReturnAddress(scratch);
 
     MOZ_ASSERT(framePushed() == initialDepth + ExitFrameLayout::Size());
@@ -403,8 +411,9 @@ MacroAssembler::branchIfFunctionHasNoJitEntry(Register fun, bool isConstructing,
 
     Address address(fun, JSFunction::offsetOfNargs());
     int32_t bit = JSFunction::INTERPRETED;
-    if (!isConstructing)
+    if (!isConstructing) {
         bit |= JSFunction::WASM_OPTIMIZED;
+    }
     bit = IMM32_16ADJ(bit);
     branchTest32(Assembler::Zero, address, Imm32(bit), label);
 }
@@ -459,8 +468,9 @@ MacroAssembler::branchTestObjClass(Condition cond, Register obj, const js::Class
     loadPtr(Address(obj, JSObject::offsetOfGroup()), scratch);
     branchPtr(cond, Address(scratch, ObjectGroup::offsetOfClasp()), ImmPtr(clasp), label);
 
-    if (JitOptions.spectreObjectMitigationsMisc)
+    if (JitOptions.spectreObjectMitigationsMisc) {
         spectreZeroRegister(cond, scratch, spectreRegToZero);
+    }
 }
 
 void
@@ -483,8 +493,9 @@ MacroAssembler::branchTestObjClass(Condition cond, Register obj, const Address& 
     loadPtr(Address(scratch, ObjectGroup::offsetOfClasp()), scratch);
     branchPtr(cond, clasp, scratch, label);
 
-    if (JitOptions.spectreObjectMitigationsMisc)
+    if (JitOptions.spectreObjectMitigationsMisc) {
         spectreZeroRegister(cond, scratch, spectreRegToZero);
+    }
 }
 
 void
@@ -505,13 +516,15 @@ MacroAssembler::branchTestObjShape(Condition cond, Register obj, const Shape* sh
     MOZ_ASSERT(obj != scratch);
     MOZ_ASSERT(spectreRegToZero != scratch);
 
-    if (JitOptions.spectreObjectMitigationsMisc)
+    if (JitOptions.spectreObjectMitigationsMisc) {
         move32(Imm32(0), scratch);
+    }
 
     branchPtr(cond, Address(obj, ShapedObject::offsetOfShape()), ImmGCPtr(shape), label);
 
-    if (JitOptions.spectreObjectMitigationsMisc)
+    if (JitOptions.spectreObjectMitigationsMisc) {
         spectreMovePtr(cond, scratch, spectreRegToZero);
+    }
 }
 
 void
@@ -529,13 +542,15 @@ MacroAssembler::branchTestObjShape(Condition cond, Register obj, Register shape,
     MOZ_ASSERT(obj != shape);
     MOZ_ASSERT(spectreRegToZero != scratch);
 
-    if (JitOptions.spectreObjectMitigationsMisc)
+    if (JitOptions.spectreObjectMitigationsMisc) {
         move32(Imm32(0), scratch);
+    }
 
     branchPtr(cond, Address(obj, ShapedObject::offsetOfShape()), shape, label);
 
-    if (JitOptions.spectreObjectMitigationsMisc)
+    if (JitOptions.spectreObjectMitigationsMisc) {
         spectreMovePtr(cond, scratch, spectreRegToZero);
+    }
 }
 
 void
@@ -559,13 +574,15 @@ MacroAssembler::branchTestObjGroup(Condition cond, Register obj, const ObjectGro
     MOZ_ASSERT(obj != scratch);
     MOZ_ASSERT(spectreRegToZero != scratch);
 
-    if (JitOptions.spectreObjectMitigationsMisc)
+    if (JitOptions.spectreObjectMitigationsMisc) {
         move32(Imm32(0), scratch);
+    }
 
     branchPtr(cond, Address(obj, JSObject::offsetOfGroup()), ImmGCPtr(group), label);
 
-    if (JitOptions.spectreObjectMitigationsMisc)
+    if (JitOptions.spectreObjectMitigationsMisc) {
         spectreMovePtr(cond, scratch, spectreRegToZero);
+    }
 }
 
 void
@@ -590,13 +607,15 @@ MacroAssembler::branchTestObjGroup(Condition cond, Register obj, Register group,
     MOZ_ASSERT(obj != group);
     MOZ_ASSERT(spectreRegToZero != scratch);
 
-    if (JitOptions.spectreObjectMitigationsMisc)
+    if (JitOptions.spectreObjectMitigationsMisc) {
         move32(Imm32(0), scratch);
+    }
 
     branchPtr(cond, Address(obj, JSObject::offsetOfGroup()), group, label);
 
-    if (JitOptions.spectreObjectMitigationsMisc)
+    if (JitOptions.spectreObjectMitigationsMisc) {
         spectreMovePtr(cond, scratch, spectreRegToZero);
+    }
 }
 
 void
@@ -637,8 +656,8 @@ MacroAssembler::branchTestNeedsIncrementalBarrier(Condition cond, Label* label)
 {
     MOZ_ASSERT(cond == Zero || cond == NonZero);
     CompileZone* zone = GetJitContext()->realm->zone();
-    AbsoluteAddress needsBarrierAddr(zone->addressOfNeedsIncrementalBarrier());
-    branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
+    const uint32_t* needsBarrierAddr = zone->addressOfNeedsIncrementalBarrier();
+    branchTest32(cond, AbsoluteAddress(needsBarrierAddr), Imm32(0x1), label);
 }
 
 void
@@ -885,8 +904,9 @@ MacroAssembler::assertStackAlignment(uint32_t alignment, int32_t offset /* = 0 *
 
     // Wrap around the offset to be a non-negative number.
     offset %= alignment;
-    if (offset < 0)
+    if (offset < 0) {
         offset += alignment;
+    }
 
     // Test if each bit from offset is set.
     uint32_t off = offset;
@@ -908,8 +928,9 @@ MacroAssembler::assertStackAlignment(uint32_t alignment, int32_t offset /* = 0 *
 void
 MacroAssembler::storeCallBoolResult(Register reg)
 {
-    if (reg != ReturnReg)
+    if (reg != ReturnReg) {
         mov(ReturnReg, reg);
+    }
     // C++ compilers like to only use the bottom byte for bools, but we
     // need to maintain the entire register.
     and32(Imm32(0xFF), reg);
@@ -935,10 +956,11 @@ MacroAssembler::storeCallResultValue(AnyRegister dest, JSValueType type)
 void
 MacroAssembler::storeCallResultValue(TypedOrValueRegister dest)
 {
-    if (dest.hasValue())
+    if (dest.hasValue()) {
         storeCallResultValue(dest.valueReg());
-    else
+    } else {
         storeCallResultValue(dest.typedReg(), ValueTypeFromMIRType(dest.type()));
+    }
 }
 
 } // namespace jit

@@ -161,9 +161,12 @@ nsSVGForeignObjectFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   if (!static_cast<const nsSVGElement*>(GetContent())->HasValidDimensions()) {
     return;
   }
-  // TODO: wrap items into an nsDisplayForeignObject
-  DisplayOutline(aBuilder, aLists);
-  BuildDisplayListForNonBlockChildren(aBuilder, aLists);
+  nsDisplayList newList;
+  nsDisplayListSet set(&newList, &newList, &newList,
+                       &newList, &newList, &newList);
+  DisplayOutline(aBuilder, set);
+  BuildDisplayListForNonBlockChildren(aBuilder, set);
+  aLists.Content()->AppendToTop(MakeDisplayItem<nsDisplayForeignObject>(aBuilder, this, &newList));
 }
 
 bool
@@ -238,7 +241,7 @@ nsSVGForeignObjectFrame::PaintSVG(gfxContext& aContext,
 
     kidDirtyRect.IntersectRect(kidDirtyRect,
       nsLayoutUtils::RoundGfxRectToAppRect(transDirtyRect,
-                       PresContext()->AppUnitsPerCSSPixel()));
+                       AppUnitsPerCSSPixel()));
 
     // XXX after bug 614732 is fixed, we will compare mRect with aDirtyRect,
     // not with kidDirtyRect. I.e.
@@ -313,7 +316,7 @@ nsSVGForeignObjectFrame::GetFrameForPoint(const gfxPoint& aPoint)
   // Convert the point to app units relative to the top-left corner of the
   // viewport that's established by the foreignObject element:
 
-  gfxPoint pt = (aPoint + gfxPoint(x, y)) * nsPresContext::AppUnitsPerCSSPixel();
+  gfxPoint pt = (aPoint + gfxPoint(x, y)) * AppUnitsPerCSSPixel();
   nsPoint point = nsPoint(NSToIntRound(pt.x), NSToIntRound(pt.y));
 
   return nsLayoutUtils::GetFrameForPoint(kid, point);
@@ -345,7 +348,7 @@ nsSVGForeignObjectFrame::ReflowSVG()
 
   mRect = nsLayoutUtils::RoundGfxRectToAppRect(
                            gfxRect(x, y, w, h),
-                           PresContext()->AppUnitsPerCSSPixel());
+                           AppUnitsPerCSSPixel());
 
   // Fully mark our kid dirty so that it gets resized if necessary
   // (NS_FRAME_HAS_DIRTY_CHILDREN isn't enough in that case):
@@ -563,7 +566,7 @@ nsSVGForeignObjectFrame::GetInvalidRegion()
   nsIFrame* kid = PrincipalChildList().FirstChild();
   if (kid->HasInvalidFrameInSubtree()) {
     gfxRect r(mRect.x, mRect.y, mRect.width, mRect.height);
-    r.Scale(1.0 / nsPresContext::AppUnitsPerCSSPixel());
+    r.Scale(1.0 / AppUnitsPerCSSPixel());
     nsRect rect = nsSVGUtils::ToCanvasBounds(r, GetCanvasTM(), PresContext());
     rect = nsSVGUtils::GetPostFilterVisualOverflowRect(this, rect);
     return rect;

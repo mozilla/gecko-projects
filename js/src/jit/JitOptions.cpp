@@ -34,26 +34,31 @@ ParseInt(const char* str)
 {
     char* endp;
     int retval = strtol(str, &endp, 0);
-    if (*endp == '\0')
+    if (*endp == '\0') {
         return mozilla::Some(retval);
+    }
     return mozilla::Nothing();
 }
 
 template<typename T>
 T overrideDefault(const char* param, T dflt) {
     char* str = getenv(param);
-    if (!str)
+    if (!str) {
         return dflt;
+    }
     if (IsBool<T>::value) {
-        if (strcmp(str, "true") == 0 || strcmp(str, "yes") == 0)
+        if (strcmp(str, "true") == 0 || strcmp(str, "yes") == 0) {
             return true;
-        if (strcmp(str, "false") == 0 || strcmp(str, "no") == 0)
+        }
+        if (strcmp(str, "false") == 0 || strcmp(str, "no") == 0) {
             return false;
+        }
         Warn(param, str);
     } else {
         Maybe<int> value = ParseInt(str);
-        if (value.isSome())
+        if (value.isSome()) {
             return value.ref();
+        }
         Warn(param, str);
     }
     return dflt;
@@ -85,9 +90,6 @@ DefaultJitOptions::DefaultJitOptions()
 
     // Toggles whether Effective Address Analysis is globally disabled.
     SET_DEFAULT(disableEaa, false);
-
-    // Toggle whether eager simd unboxing is globally disabled.
-    SET_DEFAULT(disableEagerSimdUnbox, false);
 
     // Toggles whether Edge Case Analysis is gobally disabled.
     SET_DEFAULT(disableEdgeCaseAnalysis, false);
@@ -125,8 +127,8 @@ DefaultJitOptions::DefaultJitOptions()
     // Toggles whether CacheIR stubs are used.
     SET_DEFAULT(disableCacheIR, false);
 
-    // Toggles whether shared stubs are used in Ionmonkey.
-    SET_DEFAULT(disableSharedStubs, false);
+    // Toggles whether CacheIR stubs for binary arith operations are used
+    SET_DEFAULT(disableCacheIRBinaryArith, false);
 
     // Toggles whether sincos optimization is globally disabled.
     // See bug984018: The MacOS is the only one that has the sincos fast.
@@ -201,10 +203,11 @@ DefaultJitOptions::DefaultJitOptions()
     const char* forcedDefaultIonWarmUpThresholdEnv = "JIT_OPTION_forcedDefaultIonWarmUpThreshold";
     if (const char* env = getenv(forcedDefaultIonWarmUpThresholdEnv)) {
         Maybe<int> value = ParseInt(env);
-        if (value.isSome())
+        if (value.isSome()) {
             forcedDefaultIonWarmUpThreshold.emplace(value.ref());
-        else
+        } else {
             Warn(forcedDefaultIonWarmUpThresholdEnv, env);
+        }
     }
 
     // Same but for compiling small functions.
@@ -212,10 +215,11 @@ DefaultJitOptions::DefaultJitOptions()
         "JIT_OPTION_forcedDefaultIonSmallFunctionWarmUpThreshold";
     if (const char* env = getenv(forcedDefaultIonSmallFunctionWarmUpThresholdEnv)) {
         Maybe<int> value = ParseInt(env);
-        if (value.isSome())
+        if (value.isSome()) {
             forcedDefaultIonSmallFunctionWarmUpThreshold.emplace(value.ref());
-        else
+        } else {
             Warn(forcedDefaultIonSmallFunctionWarmUpThresholdEnv, env);
+        }
     }
 
     // Force the used register allocator instead of letting the optimization
@@ -223,8 +227,9 @@ DefaultJitOptions::DefaultJitOptions()
     const char* forcedRegisterAllocatorEnv = "JIT_OPTION_forcedRegisterAllocator";
     if (const char* env = getenv(forcedRegisterAllocatorEnv)) {
         forcedRegisterAllocator = LookupRegisterAllocator(env);
-        if (!forcedRegisterAllocator.isSome())
+        if (!forcedRegisterAllocator.isSome()) {
             Warn(forcedRegisterAllocatorEnv, env);
+        }
     }
 
     SET_DEFAULT(spectreIndexMasking, true);
@@ -236,9 +241,6 @@ DefaultJitOptions::DefaultJitOptions()
 
     // Toggles whether unboxed plain objects can be created by the VM.
     SET_DEFAULT(disableUnboxedObjects, false);
-
-    // Test whether Atomics are allowed in asm.js code.
-    SET_DEFAULT(asmJSAtomicsEnable, false);
 
     // Toggles the optimization whereby offsets are folded into loads and not
     // included in the bounds check.

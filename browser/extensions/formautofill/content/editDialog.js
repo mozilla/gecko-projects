@@ -7,12 +7,12 @@
 
 "use strict";
 
+// eslint-disable-next-line no-unused-vars
+ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
 ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "formAutofillStorage",
                                "resource://formautofill/FormAutofillStorage.jsm");
-ChromeUtils.defineModuleGetter(this, "MasterPassword",
-                               "resource://formautofill/MasterPassword.jsm");
 
 class AutofillEditDialog {
   constructor(subStorageName, elements, record) {
@@ -49,9 +49,9 @@ class AutofillEditDialog {
   async saveRecord(record, guid) {
     let storage = await this.getStorage();
     if (guid) {
-      storage.update(guid, record);
+      await storage.update(guid, record);
     } else {
-      storage.add(record);
+      await storage.add(record);
     }
   }
 
@@ -172,15 +172,15 @@ class EditCreditCardDialog extends AutofillEditDialog {
 
   async handleSubmit() {
     let creditCard = this._elements.fieldContainer.buildFormObject();
-    if (!this._elements.fieldContainer._elements.form.checkValidity()) {
+    if (!this._elements.fieldContainer._elements.form.reportValidity()) {
       return;
     }
 
-    // TODO: "MasterPassword.ensureLoggedIn" can be removed after the storage
-    // APIs are refactored to be async functions (bug 1399367).
-    if (await MasterPassword.ensureLoggedIn()) {
+    try {
       await this.saveRecord(creditCard, this._record ? this._record.guid : null);
+      window.close();
+    } catch (ex) {
+      Cu.reportError(ex);
     }
-    window.close();
   }
 }

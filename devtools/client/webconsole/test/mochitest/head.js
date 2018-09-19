@@ -19,6 +19,12 @@ Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js",
   this);
 
+// Import helpers for the new debugger
+/* import-globals-from ../../../debugger/new/test/mochitest/helpers/context.js */
+Services.scriptloader.loadSubScript(
+  "chrome://mochitests/content/browser/devtools/client/debugger/new/test/mochitest/helpers/context.js",
+  this);
+
 var {HUDService} = require("devtools/client/webconsole/hudservice");
 var WCUL10n = require("devtools/client/webconsole/webconsole-l10n");
 const DOCS_GA_PARAMS = `?${new URLSearchParams({
@@ -66,7 +72,6 @@ registerCleanupFunction(async function() {
 async function openNewTabAndConsole(url, clearJstermHistory = true) {
   const toolbox = await openNewTabAndToolbox(url, "webconsole");
   const hud = toolbox.getCurrentPanel().hud;
-  hud.jsterm._lazyVariablesView = false;
 
   if (clearJstermHistory) {
     // Clearing history that might have been set in previous tests.
@@ -332,7 +337,7 @@ async function checkClickOnNode(hud, toolbox, frameLinkNode) {
 
   const dbg = toolbox.getPanel("jsdebugger");
   is(
-    dbg._selectors.getSelectedSource(dbg._getState()).get("url"),
+    dbg._selectors.getSelectedSource(dbg._getState()).url,
     url,
     "expected source url"
   );
@@ -347,48 +352,157 @@ function hasFocus(node) {
 }
 
 /**
- * Set the value of the JsTerm and its caret position, and fire a completion request.
+ * Set the value of the JsTerm and its caret position, and wait for the autocompletion
+ * to be updated.
  *
  * @param {JsTerm} jsterm
  * @param {String} value : The value to set the jsterm to.
- * @param {Integer} caretIndexOffset : A number that will be added to value.length
- *                  when setting the caret. A negative number will place the caret
- *                  in (end - offset) position. Default to 0 (caret set at the end)
- * @param {Integer} completionType : One of the following jsterm property
- *                   - COMPLETE_FORWARD
- *                   - COMPLETE_BACKWARD
- *                   - COMPLETE_HINT_ONLY
- *                   - COMPLETE_PAGEUP
- *                   - COMPLETE_PAGEDOWN
- *                  Will default to COMPLETE_HINT_ONLY.
+ * @param {Integer} caretPosition : The index where to place the cursor. A negative
+ *                  number will place the caret at (value.length - offset) position.
+ *                  Default to value.length (caret set at the end).
  * @returns {Promise} resolves when the jsterm is completed.
  */
-function jstermSetValueAndComplete(jsterm, value, caretIndexOffset = 0, completionType) {
-  const {inputNode} = jsterm;
-  inputNode.value = value;
-  const index = value.length + caretIndexOffset;
-  inputNode.setSelectionRange(index, index);
+async function setInputValueForAutocompletion(
+  jsterm,
+  value,
+  caretPosition = value.length,
+) {
+  jsterm.setInputValue("");
+  jsterm.focus();
 
-  return jstermComplete(jsterm, completionType);
+  const updated = jsterm.once("autocomplete-updated");
+  EventUtils.sendString(value);
+  await updated;
+
+  if (caretPosition < 0) {
+    caretPosition = value.length + caretPosition;
+  }
+
+  if (Number.isInteger(caretPosition)) {
+    if (jsterm.inputNode) {
+      const {inputNode} = jsterm;
+      inputNode.value = value;
+      inputNode.setSelectionRange(caretPosition, caretPosition);
+    }
+
+    if (jsterm.editor) {
+      jsterm.editor.setCursor(jsterm.editor.getPosition(caretPosition));
+    }
+  }
 }
 
 /**
- * Fires a completion request on the jsterm with the specified completionType
+ * Checks if the jsterm has the expected completion value.
  *
  * @param {JsTerm} jsterm
- * @param {Integer} completionType : One of the following jsterm property
- *                   - COMPLETE_FORWARD
- *                   - COMPLETE_BACKWARD
- *                   - COMPLETE_HINT_ONLY
- *                   - COMPLETE_PAGEUP
- *                   - COMPLETE_PAGEDOWN
- *                  Will default to COMPLETE_HINT_ONLY.
- * @returns {Promise} resolves when the jsterm is completed.
+ * @param {String} expectedValue
+ * @param {String} assertionInfo: Description of the assertion passed to `is`.
  */
-function jstermComplete(jsterm, completionType = jsterm.COMPLETE_HINT_ONLY) {
-  const updated = jsterm.once("autocomplete-updated");
-  jsterm.complete(completionType);
-  return updated;
+function checkJsTermCompletionValue(jsterm, expectedValue, assertionInfo) {
+  const completionValue = getJsTermCompletionValue(jsterm);
+  if (completionValue === null) {
+    ok(false, "Couldn't retrieve the completion value");
+  }
+
+  info(`Expects "${expectedValue}", is "${completionValue}"`);
+
+  if (jsterm.completeNode) {
+    is(completionValue, expectedValue, assertionInfo);
+  } else {
+    // CodeMirror jsterm doesn't need to add prefix-spaces.
+    is(completionValue, expectedValue.trim(), assertionInfo);
+  }
+}
+
+/**
+ * Checks if the cursor on jsterm is at the expected position.
+ *
+ * @param {JsTerm} jsterm
+ * @param {Integer} expectedCursorIndex
+ * @param {String} assertionInfo: Description of the assertion passed to `is`.
+ */
+function checkJsTermCursor(jsterm, expectedCursorIndex, assertionInfo) {
+  if (jsterm.inputNode) {
+    const {selectionStart, selectionEnd} = jsterm.inputNode;
+    is(selectionStart, expectedCursorIndex, assertionInfo);
+    ok(selectionStart === selectionEnd);
+  } else {
+    is(jsterm.editor.getCursor().ch, expectedCursorIndex, assertionInfo);
+  }
+}
+
+/**
+ * Checks the jsterm value and the cursor position given an expected string containing
+ * a "|" to indicate the expected cursor position.
+ *
+ * @param {JsTerm} jsterm
+ * @param {String} expectedStringWithCursor:
+ *                  String with a "|" to indicate the expected cursor position.
+ *                  For example, this is how you assert an empty value with the focus "|",
+ *                  and this indicates the value should be "test" and the cursor at the
+ *                  end of the input: "test|".
+ * @param {String} assertionInfo: Description of the assertion passed to `is`.
+ */
+function checkJsTermValueAndCursor(jsterm, expectedStringWithCursor, assertionInfo) {
+  info(`Checking jsterm state: \n${expectedStringWithCursor}`);
+  if (!expectedStringWithCursor.includes("|")) {
+    ok(false,
+      `expectedStringWithCursor must contain a "|" char to indicate cursor position`);
+  }
+
+  const inputValue = expectedStringWithCursor.replace("|", "");
+  is(jsterm.getInputValue(), inputValue, "jsterm has expected value");
+  if (jsterm.inputNode) {
+    is(jsterm.inputNode.selectionStart, jsterm.inputNode.selectionEnd);
+    is(jsterm.inputNode.selectionStart, expectedStringWithCursor.indexOf("|"),
+      assertionInfo);
+  } else {
+    const lines = expectedStringWithCursor.split("\n");
+    const lineWithCursor = lines.findIndex(line => line.includes("|"));
+    const {ch, line} = jsterm.editor.getCursor();
+    is(line, lineWithCursor, assertionInfo + " - correct line");
+    is(ch, lines[lineWithCursor].indexOf("|"), assertionInfo + " - correct ch");
+  }
+}
+
+/**
+ * Returns the jsterm completion value, whether there's CodeMirror enabled or not.
+ *
+ * @param {JsTerm} jsterm
+ * @returns {String}
+ */
+function getJsTermCompletionValue(jsterm) {
+  if (jsterm.completeNode) {
+    return jsterm.completeNode.value;
+  }
+
+  if (jsterm.editor) {
+    return jsterm.editor.getAutoCompletionText();
+  }
+
+  return null;
+}
+
+/**
+ * Returns a boolean indicating if the jsterm is focused, whether there's CodeMirror
+ * enabled or not.
+ *
+ * @param {JsTerm} jsterm
+ * @returns {Boolean}
+ */
+function isJstermFocused(jsterm) {
+  const document = jsterm.outputNode.ownerDocument;
+  const documentIsFocused = document.hasFocus();
+
+  if (jsterm.inputNode) {
+    return document.activeElement == jsterm.inputNode && documentIsFocused;
+  }
+
+  if (jsterm.editor) {
+    return documentIsFocused && jsterm.editor.hasFocus();
+  }
+
+  return false;
 }
 
 /**
@@ -427,9 +541,17 @@ async function openDebugger(options = {}) {
   const panel = toolbox.getCurrentPanel();
 
   // Do not clear VariableView lazily so it doesn't disturb test ending.
-  panel._view.Variables.lazyEmpty = false;
+  if (panel._view) {
+    panel._view.Variables.lazyEmpty = false;
+  }
 
-  await panel.panelWin.DebuggerController.waitForSourcesLoaded();
+  // Old debugger
+  if (panel.panelWin && panel.panelWin.DebuggerController) {
+    await panel.panelWin.DebuggerController.waitForSourcesLoaded();
+  } else {
+    // New debugger
+    await toolbox.threadClient.getSources();
+  }
   return {target, toolbox, panel};
 }
 
@@ -753,4 +875,53 @@ async function resetFilters(hud) {
 
   const store = hud.ui.consoleOutput.getStore();
   store.dispatch(wcActions.filtersClear());
+}
+
+/**
+ * Open the reverse search input by simulating the appropriate keyboard shortcut.
+ *
+ * @param {Object} hud
+ * @returns {DOMNode} The reverse search dom node.
+ */
+async function openReverseSearch(hud) {
+  info("Open the reverse search UI with a keyboard shortcut");
+  const onReverseSearchUiOpen = waitFor(() => getReverseSearchElement(hud));
+  const isMacOS = AppConstants.platform === "macosx";
+  if (isMacOS) {
+    EventUtils.synthesizeKey("r", {ctrlKey: true});
+  } else {
+    EventUtils.synthesizeKey("VK_F9");
+  }
+
+  const element = await onReverseSearchUiOpen;
+  return element;
+}
+
+function getReverseSearchElement(hud) {
+  const {outputNode} = hud.ui;
+  return outputNode.querySelector(".reverse-search");
+}
+
+function getReverseSearchInfoElement(hud) {
+  const reverseSearchElement = getReverseSearchElement(hud);
+  if (!reverseSearchElement) {
+    return null;
+  }
+
+  return reverseSearchElement.querySelector(".reverse-search-info");
+}
+
+/**
+ * Returns a boolean indicating if the reverse search input is focused.
+ *
+ * @param {JsTerm} jsterm
+ * @returns {Boolean}
+ */
+function isReverseSearchInputFocused(hud) {
+  const {outputNode} = hud.ui;
+  const document = outputNode.ownerDocument;
+  const documentIsFocused = document.hasFocus();
+  const reverseSearchInput = outputNode.querySelector(".reverse-search-input");
+
+  return document.activeElement == reverseSearchInput && documentIsFocused;
 }

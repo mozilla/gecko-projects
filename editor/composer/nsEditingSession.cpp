@@ -49,6 +49,7 @@
 #include "nsStringFwd.h"                // for nsString
 #include "mozilla/dom/Selection.h"      // for AutoHideSelectionChanges, etc
 #include "nsFrameSelection.h"           // for nsFrameSelection
+#include "nsBaseCommandController.h"    // for nsBaseCommandController
 
 class nsISupports;
 class nsIURI;
@@ -156,7 +157,7 @@ nsEditingSession::MakeWindowEditable(mozIDOMWindowProxy* aWindow,
   // Setup commands common to plaintext and html editors,
   //  including the document creation observers
   // the first is an editing controller
-  rv = SetupEditorCommandController("@mozilla.org/editor/editingcontroller;1",
+  rv = SetupEditorCommandController(nsBaseCommandController::CreateEditingController,
                                     aWindow,
                                     static_cast<nsIEditingSession*>(this),
                                     &mBaseCommandControllerId);
@@ -164,7 +165,7 @@ nsEditingSession::MakeWindowEditable(mozIDOMWindowProxy* aWindow,
 
   // The second is a controller to monitor doc state,
   // such as creation and "dirty flag"
-  rv = SetupEditorCommandController("@mozilla.org/editor/editordocstatecontroller;1",
+  rv = SetupEditorCommandController(nsBaseCommandController::CreateHTMLEditorDocStateController,
                                     aWindow,
                                     static_cast<nsIEditingSession*>(this),
                                     &mDocStateControllerId);
@@ -334,16 +335,13 @@ nsEditingSession::SetupEditorOnWindow(mozIDOMWindowProxy* aWindow)
 
     // Flush out frame construction to make sure that the subframe's
     // presshell is set up if it needs to be.
-    nsCOMPtr<nsIDocument> document = do_QueryInterface(doc);
-    if (document) {
-      document->FlushPendingNotifications(mozilla::FlushType::Frames);
-      if (mMakeWholeDocumentEditable) {
-        document->SetEditableFlag(true);
-        nsCOMPtr<nsIHTMLDocument> htmlDocument = do_QueryInterface(document);
-        if (htmlDocument) {
-          // Enable usage of the execCommand API
-          htmlDocument->SetEditingState(nsIHTMLDocument::eDesignMode);
-        }
+    doc->FlushPendingNotifications(mozilla::FlushType::Frames);
+    if (mMakeWholeDocumentEditable) {
+      doc->SetEditableFlag(true);
+      nsCOMPtr<nsIHTMLDocument> htmlDocument = do_QueryInterface(doc);
+      if (htmlDocument) {
+        // Enable usage of the execCommand API
+        htmlDocument->SetEditingState(nsIHTMLDocument::eDesignMode);
       }
     }
   }
@@ -429,7 +427,7 @@ nsEditingSession::SetupEditorOnWindow(mozIDOMWindowProxy* aWindow)
   // setup the HTML editor command controller
   if (needHTMLController) {
     // The third controller takes an nsIEditor as the context
-    rv = SetupEditorCommandController("@mozilla.org/editor/htmleditorcontroller;1",
+    rv = SetupEditorCommandController(nsBaseCommandController::CreateHTMLEditorController,
                                       aWindow,
                                       static_cast<nsIEditor*>(htmlEditor),
                                       &mHTMLCommandControllerId);
@@ -755,7 +753,7 @@ nsEditingSession::OnProgressChange(nsIWebProgress *aWebProgress,
                                    int32_t aCurTotalProgress,
                                    int32_t aMaxTotalProgress)
 {
-    NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+    MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
     return NS_OK;
 }
 
@@ -804,7 +802,7 @@ nsEditingSession::OnStatusChange(nsIWebProgress *aWebProgress,
                                  nsresult aStatus,
                                  const char16_t *aMessage)
 {
-    NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+    MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
     return NS_OK;
 }
 
@@ -817,7 +815,7 @@ NS_IMETHODIMP
 nsEditingSession::OnSecurityChange(nsIWebProgress *aWebProgress,
                                    nsIRequest *aRequest, uint32_t state)
 {
-    NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+    MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
     return NS_OK;
 }
 
@@ -980,8 +978,8 @@ nsEditingSession::TimerCallback(nsITimer* aTimer, void* aClosure)
   if (docShell) {
     nsCOMPtr<nsIWebNavigation> webNav(do_QueryInterface(docShell));
     if (webNav) {
-      webNav->LoadURI(u"about:blank", 0, nullptr, nullptr, nullptr,
-                      nsContentUtils::GetSystemPrincipal());
+      webNav->LoadURI(NS_LITERAL_STRING("about:blank"), 0, nullptr, nullptr,
+                      nullptr, nsContentUtils::GetSystemPrincipal());
     }
   }
 }
@@ -1097,12 +1095,12 @@ nsEditingSession::PrepareForEditing(nsPIDOMWindowOuter* aWindow)
 ----------------------------------------------------------------------------*/
 nsresult
 nsEditingSession::SetupEditorCommandController(
-                                  const char *aControllerClassName,
-                                  mozIDOMWindowProxy *aWindow,
-                                  nsISupports *aContext,
-                                  uint32_t *aControllerId)
+                                  nsEditingSession::ControllerCreatorFn aControllerCreatorFn,
+                                  mozIDOMWindowProxy* aWindow,
+                                  nsISupports* aContext,
+                                  uint32_t* aControllerId)
 {
-  NS_ENSURE_ARG_POINTER(aControllerClassName);
+  NS_ENSURE_ARG_POINTER(aControllerCreatorFn);
   NS_ENSURE_ARG_POINTER(aWindow);
   NS_ENSURE_ARG_POINTER(aContext);
   NS_ENSURE_ARG_POINTER(aControllerId);
@@ -1117,9 +1115,8 @@ nsEditingSession::SetupEditorCommandController(
   // We only have to create each singleton controller once
   // We know this has happened once we have a controllerId value
   if (!*aControllerId) {
-    nsCOMPtr<nsIController> controller;
-    controller = do_CreateInstance(aControllerClassName, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsIController> controller = aControllerCreatorFn();
+    NS_ENSURE_TRUE(controller, NS_ERROR_FAILURE);
 
     // We must insert at head of the list to be sure our
     //   controller is found before other implementations
@@ -1328,13 +1325,13 @@ nsEditingSession::ReattachToWindow(mozIDOMWindowProxy* aWindow)
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Setup the command controllers again.
-  rv = SetupEditorCommandController("@mozilla.org/editor/editingcontroller;1",
+  rv = SetupEditorCommandController(nsBaseCommandController::CreateEditingController,
                                     aWindow,
                                     static_cast<nsIEditingSession*>(this),
                                     &mBaseCommandControllerId);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = SetupEditorCommandController("@mozilla.org/editor/editordocstatecontroller;1",
+  rv = SetupEditorCommandController(nsBaseCommandController::CreateHTMLEditorDocStateController,
                                     aWindow,
                                     static_cast<nsIEditingSession*>(this),
                                     &mDocStateControllerId);
@@ -1362,7 +1359,7 @@ nsEditingSession::ReattachToWindow(mozIDOMWindowProxy* aWindow)
   }
 
   // The third controller takes an nsIEditor as the context
-  rv = SetupEditorCommandController("@mozilla.org/editor/htmleditorcontroller;1",
+  rv = SetupEditorCommandController(nsBaseCommandController::CreateHTMLEditorController,
                                     aWindow,
                                     static_cast<nsIEditor*>(htmlEditor.get()),
                                     &mHTMLCommandControllerId);

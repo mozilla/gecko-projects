@@ -9,6 +9,7 @@
 
 #include "mozilla/Maybe.h"
 
+#include "frontend/BinSourceRuntimeSupport.h"
 #include "frontend/BinToken.h"
 #include "frontend/BinTokenReaderBase.h"
 
@@ -177,6 +178,13 @@ class MOZ_STACK_CLASS BinTokenReaderMultipart: public BinTokenReaderBase
      */
     MOZ_MUST_USE JS::Result<Ok> enterUntaggedTuple(AutoTuple& guard);
 
+    /**
+     * Read a single unsigned long.
+     */
+    MOZ_MUST_USE JS::Result<uint32_t> readUnsignedLong() {
+        return readInternalUint32();
+    }
+
   private:
     /**
      * Read a single uint32_t.
@@ -278,11 +286,13 @@ class MOZ_STACK_CLASS BinTokenReaderMultipart: public BinTokenReaderBase
     static bool equals(const Chars& left, const char (&right)[N]) {
         MOZ_ASSERT(N > 0);
         MOZ_ASSERT(right[N - 1] == 0);
-        if (left.byteLen_ + 1 /* implicit NUL */ != N)
+        if (left.byteLen_ + 1 /* implicit NUL */ != N) {
             return false;
+        }
 
-        if (!std::equal(left.start_, left.start_ + left.byteLen_, right))
+        if (!std::equal(left.start_, left.start_ + left.byteLen_, right)) {
           return false;
+        }
 
         return true;
     }

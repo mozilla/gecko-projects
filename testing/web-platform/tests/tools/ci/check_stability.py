@@ -17,10 +17,10 @@ from tools.wpt.virtualenv import Virtualenv
 from tools.wpt.utils import Kwargs
 from tools.wpt.run import create_parser, setup_wptrunner
 from tools.wpt import markdown
-from tools import localpaths
+from tools import localpaths  # noqa: F401
 
 logger = None
-stability_run, write_inconsistent, write_results = None, None, None
+run_step, write_inconsistent, write_slow_tests, write_results = None, None, None, None
 wptrunner = None
 
 def setup_logging():
@@ -35,10 +35,9 @@ def setup_logging():
 
 
 def do_delayed_imports():
-    global stability_run, write_inconsistent, write_results, wptrunner
-    from tools.wpt.stability import run as stability_run
-    from tools.wpt.stability import write_inconsistent, write_results
+    global wptrunner, run_step, write_inconsistent, write_slow_tests, write_results
     from wptrunner import wptrunner
+    from wptrunner.stability import run_step, write_inconsistent, write_slow_tests, write_results
 
 
 class TravisFold(object):
@@ -266,10 +265,13 @@ def run(venv, wpt_args, **kwargs):
 
         do_delayed_imports()
 
-        wpt_kwargs["stability"] = True
         wpt_kwargs["prompt"] = False
-        wpt_kwargs["install_browser"] = True
-        wpt_kwargs["install"] = wpt_kwargs["product"].split(":")[0] == "firefox"
+        wpt_kwargs["install_browser"] = wpt_kwargs["product"].split(":")[0] == "firefox"
+
+        wpt_kwargs["pause_after_test"] = False
+        wpt_kwargs["verify_log_full"] = False
+        if wpt_kwargs["repeat"] == 1:
+            wpt_kwargs["repeat"] = 10
 
         wpt_kwargs = setup_wptrunner(venv, **wpt_kwargs)
 
@@ -279,13 +281,15 @@ def run(venv, wpt_args, **kwargs):
     with TravisFold("running_tests"):
         logger.info("Starting tests")
 
-
         wpt_logger = wptrunner.logger
-        iterations, results, inconsistent = stability_run(venv, wpt_logger, **wpt_kwargs)
+        results, inconsistent, slow, iterations = run_step(wpt_logger, wpt_kwargs["repeat"], True, {}, **wpt_kwargs)
 
     if results:
         if inconsistent:
             write_inconsistent(logger.error, inconsistent, iterations)
+            retcode = 2
+        elif slow:
+            write_slow_tests(logger.error, slow)
             retcode = 2
         else:
             logger.info("All results were stable\n")

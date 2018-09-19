@@ -32,7 +32,7 @@ var gFrontProgressListener = {
     ok(gFrontNotificationsPos < gFrontNotifications.length, "Got an expected notification for the front notifications listener");
     is(state, gFrontNotifications[gFrontNotificationsPos], "Got a notification for the front notifications listener");
     gFrontNotificationsPos++;
-  }
+  },
 };
 
 var gAllProgressListener = {
@@ -73,7 +73,7 @@ var gAllProgressListener = {
     ok(gAllNotificationsPos < gAllNotifications.length, "Got an expected notification for the all notifications listener");
     is(state, gAllNotifications[gAllNotificationsPos], "Got a notification for the all notifications listener");
     gAllNotificationsPos++;
-  }
+  },
 };
 
 var gFrontNotifications, gAllNotifications, gFrontNotificationsPos, gAllNotificationsPos;
@@ -95,7 +95,7 @@ function test() {
   // starting tests or we get notifications from that
   let promises = [
     BrowserTestUtils.browserStopped(gBackgroundBrowser, kBasePage),
-    BrowserTestUtils.browserStopped(gForegroundBrowser, kBasePage)
+    BrowserTestUtils.browserStopped(gForegroundBrowser, kBasePage),
   ];
   gBackgroundBrowser.loadURI(kBasePage);
   gForegroundBrowser.loadURI(kBasePage);
@@ -119,7 +119,7 @@ function startTest1() {
     "onStateChange",
     "onLocationChange",
     "onSecurityChange",
-    "onStateChange"
+    "onStateChange",
   ];
   gFrontNotifications = gAllNotifications;
   runTest(gForegroundBrowser, "http://example.org" + gTestPage, startTest2);
@@ -131,8 +131,7 @@ function startTest2() {
     "onStateChange",
     "onLocationChange",
     "onSecurityChange",
-    "onSecurityChange",
-    "onStateChange"
+    "onStateChange",
   ];
   gFrontNotifications = gAllNotifications;
   runTest(gForegroundBrowser, "https://example.com" + gTestPage, startTest3);
@@ -144,7 +143,7 @@ function startTest3() {
     "onStateChange",
     "onLocationChange",
     "onSecurityChange",
-    "onStateChange"
+    "onStateChange",
   ];
   gFrontNotifications = [];
   runTest(gBackgroundBrowser, "http://example.org" + gTestPage, startTest4);
@@ -156,8 +155,7 @@ function startTest4() {
     "onStateChange",
     "onLocationChange",
     "onSecurityChange",
-    "onSecurityChange",
-    "onStateChange"
+    "onStateChange",
   ];
   gFrontNotifications = [];
   runTest(gBackgroundBrowser, "https://example.com" + gTestPage, startTest5);
@@ -177,7 +175,7 @@ function startTest5() {
     "onStateChange",
     "onLocationChange",
     "onSecurityChange",
-    "onStateChange"
+    "onStateChange",
   ];
   gFrontNotifications = gAllNotifications;
   runTest(gForegroundBrowser, "http://example.org" + gTestPage, startTest6);
@@ -189,7 +187,7 @@ function startTest6() {
     "onStateChange",
     "onLocationChange",
     "onSecurityChange",
-    "onStateChange"
+    "onStateChange",
   ];
   gFrontNotifications = [];
   runTest(gBackgroundBrowser, "http://example.org" + gTestPage, finishTest);

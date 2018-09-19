@@ -16,11 +16,7 @@ DEFINES += -DPKG_LOCALE_MANIFEST=$(topobjdir)/browser/installer/locale-manifest.
 MOZ_CHROME_LOCALE_ENTRIES=@RESPATH@/browser/chrome/ @RESPATH@/chrome/
 
 # Some files have been already bundled with xulrunner
-ifndef MOZ_MULET
 MOZ_PKG_FATAL_WARNINGS = 1
-else
-DEFINES += -DMOZ_MULET
-endif
 
 # When packaging an artifact build not all xpt files expected by the
 # packager will be present.
@@ -141,9 +137,6 @@ endif
 endif
 DEFINES += -DLPROJ_ROOT=$(LPROJ_ROOT)
 
-ifdef MOZ_SYSTEM_ICU
-DEFINES += -DMOZ_SYSTEM_ICU
-endif
 ifdef CLANG_CXX
 DEFINES += -DCLANG_CXX
 endif

@@ -13,7 +13,6 @@ UNIFIED_SOURCES += [
     'XULListboxAccessible.cpp',
     'XULMenuAccessible.cpp',
     'XULSelectControlAccessible.cpp',
-    'XULSliderAccessible.cpp',
     'XULTabAccessible.cpp',
     'XULTreeAccessible.cpp',
     'XULTreeGridAccessible.cpp',
@@ -43,6 +42,10 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     LOCAL_INCLUDES += [
         '/accessible/mac',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+    LOCAL_INCLUDES += [
+        '/accessible/android',
     ]
 else:
     LOCAL_INCLUDES += [

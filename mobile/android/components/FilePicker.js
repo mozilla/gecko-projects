@@ -72,11 +72,8 @@ FilePicker.prototype = {
       this.appendFilter("*.xml");
     }
 
-    if (aFilterMask & Ci.nsIFilePicker.xulFilter) {
+    if (aFilterMask & Ci.nsIFilePicker.filterXUL) {
       this.appendFilter("*.xul");
-    }
-
-    if (aFilterMask & Ci.nsIFilePicker.xulFilter) {
       this.appendFilter("..apps");
     }
   },
@@ -141,7 +138,7 @@ FilePicker.prototype = {
   },
 
   get files() {
-    return this.getEnumerator([this.file]);
+    return [this.file].values();
   },
 
   // We don't support directory selection yet.
@@ -150,7 +147,7 @@ FilePicker.prototype = {
   },
 
   get domFileOrDirectoryEnumerator() {
-    return this.getEnumerator([this._domFile]);
+    return [this._domFile].values();
   },
 
   get addToRecentDocs() {
@@ -168,7 +165,7 @@ FilePicker.prototype = {
   show: function() {
     if (this._domWin) {
       this.fireDialogEvent(this._domWin, "DOMWillOpenModalDialog");
-      let winUtils = this._domWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      let winUtils = this._domWin.windowUtils;
       winUtils.enterModalState();
     }
 
@@ -179,7 +176,7 @@ FilePicker.prototype = {
     delete this._promptActive;
 
     if (this._domWin) {
-      let winUtils = this._domWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      let winUtils = this._domWin.windowUtils;
       winUtils.leaveModalState();
       this.fireDialogEvent(this._domWin, "DOMModalDialogClosed");
     }
@@ -251,23 +248,6 @@ FilePicker.prototype = {
     });
   },
 
-  getEnumerator: function(files) {
-    return {
-      QueryInterface: ChromeUtils.generateQI([Ci.nsISimpleEnumerator]),
-      mFiles: files,
-      mIndex: 0,
-      hasMoreElements: function() {
-        return (this.mIndex < this.mFiles.length);
-      },
-      getNext: function() {
-        if (this.mIndex >= this.mFiles.length) {
-          throw Cr.NS_ERROR_FAILURE;
-        }
-        return this.mFiles[this.mIndex++];
-      }
-    };
-  },
-
   fireDialogEvent: function(aDomWin, aEventName) {
     // accessing the document object can throw if this window no longer exists. See bug 789888.
     try {
@@ -275,8 +255,7 @@ FilePicker.prototype = {
         return;
       let event = aDomWin.document.createEvent("Events");
       event.initEvent(aEventName, true, true);
-      let winUtils = aDomWin.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDOMWindowUtils);
+      let winUtils = aDomWin.windowUtils;
       winUtils.dispatchEventToChromeOnly(aDomWin, event);
     } catch (ex) {
     }

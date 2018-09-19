@@ -11,7 +11,7 @@
 
   <!-- bound to <description>s -->
   <binding id="text-base">
-    <implementation implements="nsIDOMXULDescriptionElement">
+    <implementation>
       <property name="disabled" onset="if (val) this.setAttribute('disabled', 'true');
                                        else this.removeAttribute('disabled');
                                        return val;"
@@ -24,7 +24,7 @@
   </binding>
 
   <binding id="text-label" extends="chrome://global/content/bindings/text.xml#text-base">
-    <implementation implements="nsIDOMXULLabelElement">
+    <implementation>
       <property name="accessKey">
         <getter>
           <![CDATA[
@@ -56,7 +56,7 @@
     <content>
       <children/><html:span anonid="accessKeyParens"></html:span>
     </content>
-    <implementation implements="nsIDOMXULLabelElement">
+    <implementation>
       <constructor>
         <![CDATA[
           this.formatAccessKey(true);
@@ -70,12 +70,16 @@
             var control = this.labeledControlElement;
             if (!control) {
               var bindingParent = document.getBindingParent(this);
-              if (bindingParent instanceof Ci.nsIDOMXULLabeledControlElement) {
+              if ("accessKey" in bindingParent) {
                 control = bindingParent; // For controls that make the <label> an anon child
               }
             }
             if (control) {
               control.labelElement = this;
+              var controlAccessKey = control.getAttribute("accesskey");
+              if (controlAccessKey) {
+                this.setAttribute("accesskey", controlAccessKey);
+              }
             }
 
             var accessKey = this.accessKey;
@@ -137,6 +141,8 @@
                 accessKeyIndex =
                   labelText.toUpperCase().indexOf(accessKey.toUpperCase());
               }
+            } else if (labelText.endsWith(`(${accessKey.toUpperCase()})`)) {
+              accessKeyIndex = labelText.length - (1 + accessKey.length); // = index of accessKey.
             }
 
             const HTML_NS = "http://www.w3.org/1999/xhtml";
@@ -232,14 +238,7 @@
       <property name="accessKey">
         <getter>
           <![CDATA[
-            var accessKey = null;
-            var labeledEl = this.labeledControlElement;
-            if (labeledEl) {
-              accessKey = labeledEl.getAttribute("accesskey");
-            }
-            if (!accessKey) {
-              accessKey = this.getAttribute("accesskey");
-            }
+            var accessKey = this.getAttribute("accesskey");
             return accessKey ? accessKey[0] : null;
           ]]>
         </getter>
@@ -275,15 +274,29 @@
           ]]>
         </setter>
       </property>
-
     </implementation>
 
     <handlers>
-      <handler event="click" action="if (this.disabled) return;
-                                     var controlElement = this.labeledControlElement;
-                                     if(controlElement)
-                                       controlElement.focus();
-                                    "/>
+      <handler event="click"><![CDATA[
+        if (this.disabled) {
+          return;
+        }
+        var controlElement = this.labeledControlElement;
+        if (!controlElement) {
+          return;
+        }
+        controlElement.focus();
+        const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+
+        if (controlElement.namespaceURI != XUL_NS) {
+          return;
+        }
+        if (controlElement.localName == "checkbox") {
+          controlElement.checked = !controlElement.checked;
+        } else if (controlElement.localName == "radio") {
+          controlElement.control.selectedItem = controlElement;
+        }
+      ]]></handler>
     </handlers>
   </binding>
 

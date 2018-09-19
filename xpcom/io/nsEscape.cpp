@@ -9,6 +9,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BinarySearch.h"
 #include "mozilla/CheckedInt.h"
+#include "mozilla/TextUtils.h"
 #include "nsTArray.h"
 #include "nsCRT.h"
 #include "plstr.h"
@@ -113,9 +114,6 @@ nsEscape(const char* aStr, size_t aLength, size_t* aOutputLength,
   }
 
   char* result = (char*)moz_xmalloc(dstSize);
-  if (!result) {
-    return nullptr;
-  }
 
   unsigned char* dst = (unsigned char*)result;
   src = (const unsigned char*)aStr;
@@ -310,7 +308,7 @@ T_EscapeURL(const typename T::char_type* aPart, size_t aPartLen,
                 "unexpected char type");
 
   if (!aPart) {
-    NS_NOTREACHED("null pointer");
+    MOZ_ASSERT_UNREACHABLE("null pointer");
     return NS_ERROR_INVALID_ARG;
   }
 
@@ -524,8 +522,6 @@ NS_EscapeURL(const nsString& aStr, const nsTArray<char16_t>& aForbidden,
   return aStr;
 }
 
-#define ISHEX(c) memchr(hexCharsUpperLower, c, sizeof(hexCharsUpperLower)-1)
-
 bool
 NS_UnescapeURL(const char* aStr, int32_t aLen, uint32_t aFlags,
                nsACString& aResult)
@@ -546,15 +542,22 @@ NS_UnescapeURL(const char* aStr, int32_t aLen, uint32_t aFlags,
                const mozilla::fallible_t&)
 {
   if (!aStr) {
-    NS_NOTREACHED("null pointer");
+    MOZ_ASSERT_UNREACHABLE("null pointer");
     return NS_ERROR_INVALID_ARG;
   }
 
   MOZ_ASSERT(aResult.IsEmpty(),
              "Passing a non-empty string as an out parameter!");
 
+  uint32_t len;
   if (aLen < 0) {
-    aLen = strlen(aStr);
+    size_t stringLength = strlen(aStr);
+    if (stringLength >= UINT32_MAX) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+    len = stringLength;
+  } else {
+    len = aLen;
   }
 
   bool ignoreNonAscii = !!(aFlags & esc_OnlyASCII);
@@ -563,50 +566,62 @@ NS_UnescapeURL(const char* aStr, int32_t aLen, uint32_t aFlags,
   bool skipControl = !!(aFlags & esc_SkipControl);
   bool skipInvalidHostChar = !!(aFlags & esc_Host);
 
+  unsigned char* destPtr;
+  uint32_t destPos;
+
   if (writing) {
-    if (!aResult.SetCapacity(aLen, mozilla::fallible)) {
+    if (!aResult.SetLength(len, mozilla::fallible)) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
+    destPos = 0;
+    destPtr = reinterpret_cast<unsigned char*>(aResult.BeginWriting());
   }
 
   const char* last = aStr;
-  const char* p = aStr;
+  const char* end = aStr + len;
 
-  for (int i = 0; i < aLen; ++i, ++p) {
-    if (*p == HEX_ESCAPE && i < aLen - 2) {
+  for (const char* p = aStr; p < end; ++p) {
+    if (*p == HEX_ESCAPE && p + 2 < end) {
       unsigned char c1 = *((unsigned char*)p + 1);
       unsigned char c2 = *((unsigned char*)p + 2);
       unsigned char u = (UNHEX(c1) << 4) + UNHEX(c2);
-      if (ISHEX(c1) && ISHEX(c2) &&
+      if (mozilla::IsAsciiHexDigit(c1) && mozilla::IsAsciiHexDigit(c2) &&
           (!skipInvalidHostChar || dontNeedEscape(u, aFlags) || c1 >= '8') &&
           ((c1 < '8' && !ignoreAscii) || (c1 >= '8' && !ignoreNonAscii)) &&
           !(skipControl &&
             (c1 < '2' || (c1 == '7' && (c2 == 'f' || c2 == 'F'))))) {
-        if (!writing) {
+        if (MOZ_UNLIKELY(!writing)) {
           writing = true;
-          if (!aResult.SetCapacity(aLen, mozilla::fallible)) {
+          if (!aResult.SetLength(len, mozilla::fallible)) {
             return NS_ERROR_OUT_OF_MEMORY;
           }
+          destPos = 0;
+          destPtr = reinterpret_cast<unsigned char*>(aResult.BeginWriting());
         }
         if (p > last) {
-          if (!aResult.Append(last, p - last, mozilla::fallible)) {
-            return NS_ERROR_OUT_OF_MEMORY;
-          }
+          auto toCopy = p - last;
+          memcpy(destPtr + destPos, last, toCopy);
+          destPos += toCopy;
+          MOZ_ASSERT(destPos <= len);
           last = p;
         }
-        if (!aResult.Append(u, mozilla::fallible)) {
-          return NS_ERROR_OUT_OF_MEMORY;
-        }
-        i += 2;
+        destPtr[destPos] = u;
+        destPos += 1;
+        MOZ_ASSERT(destPos <= len);
         p += 2;
         last += 3;
       }
     }
   }
-  if (writing && last < aStr + aLen) {
-    if (!aResult.Append(last, aStr + aLen - last, mozilla::fallible)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
+  if (writing && last < end) {
+    auto toCopy = end - last;
+    memcpy(destPtr + destPos, last, toCopy);
+    destPos += toCopy;
+    MOZ_ASSERT(destPos <= len);
+  }
+
+  if (writing) {
+    aResult.Truncate(destPos);
   }
 
   aDidAppend = writing;

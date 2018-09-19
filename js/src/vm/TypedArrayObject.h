@@ -78,8 +78,9 @@ class TypedArrayObject : public NativeObject
 
     static bool sameBuffer(Handle<TypedArrayObject*> a, Handle<TypedArrayObject*> b) {
         // Inline buffers.
-        if (!a->hasBuffer() || !b->hasBuffer())
+        if (!a->hasBuffer() || !b->hasBuffer()) {
             return a.get() == b.get();
+        }
 
         // Shared buffers.
         if (a->isSharedMemory() && b->isSharedMemory()) {
@@ -116,18 +117,18 @@ class TypedArrayObject : public NativeObject
     inline Scalar::Type type() const;
     inline size_t bytesPerElement() const;
 
-    static Value bufferValue(TypedArrayObject* tarr) {
+    static Value bufferValue(const TypedArrayObject* tarr) {
         return tarr->getFixedSlot(BUFFER_SLOT);
     }
-    static Value byteOffsetValue(TypedArrayObject* tarr) {
+    static Value byteOffsetValue(const TypedArrayObject* tarr) {
         Value v = tarr->getFixedSlot(BYTEOFFSET_SLOT);
         MOZ_ASSERT(v.toInt32() >= 0);
         return v;
     }
-    static Value byteLengthValue(TypedArrayObject* tarr) {
+    static Value byteLengthValue(const TypedArrayObject* tarr) {
         return Int32Value(tarr->getFixedSlot(LENGTH_SLOT).toInt32() * tarr->bytesPerElement());
     }
-    static Value lengthValue(TypedArrayObject* tarr) {
+    static Value lengthValue(const TypedArrayObject* tarr) {
         return tarr->getFixedSlot(LENGTH_SLOT);
     }
 
@@ -135,19 +136,19 @@ class TypedArrayObject : public NativeObject
     ensureHasBuffer(JSContext* cx, Handle<TypedArrayObject*> tarray);
 
     bool hasBuffer() const {
-        return bufferValue(const_cast<TypedArrayObject*>(this)).isObject();
+        return bufferValue(this).isObject();
     }
     JSObject* bufferObject() const {
-        return bufferValue(const_cast<TypedArrayObject*>(this)).toObjectOrNull();
+        return bufferValue(this).toObjectOrNull();
     }
     uint32_t byteOffset() const {
-        return byteOffsetValue(const_cast<TypedArrayObject*>(this)).toInt32();
+        return byteOffsetValue(this).toInt32();
     }
     uint32_t byteLength() const {
-        return byteLengthValue(const_cast<TypedArrayObject*>(this)).toInt32();
+        return byteLengthValue(this).toInt32();
     }
     uint32_t length() const {
-        return lengthValue(const_cast<TypedArrayObject*>(this)).toInt32();
+        return lengthValue(this).toInt32();
     }
 
     bool hasInlineElements() const;
@@ -192,24 +193,28 @@ class TypedArrayObject : public NativeObject
 
     ArrayBufferObject* bufferUnshared() const {
         MOZ_ASSERT(!isSharedMemory());
-        JSObject* obj = bufferValue(const_cast<TypedArrayObject*>(this)).toObjectOrNull();
-        if (!obj)
+        JSObject* obj = bufferObject();
+        if (!obj) {
             return nullptr;
+        }
         return &obj->as<ArrayBufferObject>();
     }
     SharedArrayBufferObject* bufferShared() const {
         MOZ_ASSERT(isSharedMemory());
-        JSObject* obj = bufferValue(const_cast<TypedArrayObject*>(this)).toObjectOrNull();
-        if (!obj)
+        JSObject* obj = bufferObject();
+        if (!obj) {
             return nullptr;
+        }
         return &obj->as<SharedArrayBufferObject>();
     }
     ArrayBufferObjectMaybeShared* bufferEither() const {
-        JSObject* obj = bufferValue(const_cast<TypedArrayObject*>(this)).toObjectOrNull();
-        if (!obj)
+        JSObject* obj = bufferObject();
+        if (!obj) {
             return nullptr;
-        if (isSharedMemory())
+        }
+        if (isSharedMemory()) {
             return &obj->as<SharedArrayBufferObject>();
+        }
         return &obj->as<ArrayBufferObject>();
     }
 
@@ -217,8 +222,9 @@ class TypedArrayObject : public NativeObject
         return SharedMem<void*>::shared(viewDataEither_());
     }
     SharedMem<void*> viewDataEither() const {
-        if (isSharedMemory())
+        if (isSharedMemory()) {
             return SharedMem<void*>::shared(viewDataEither_());
+        }
         return SharedMem<void*>::unshared(viewDataEither_());
     }
     void initViewData(SharedMem<uint8_t*> viewData) {
@@ -238,14 +244,16 @@ class TypedArrayObject : public NativeObject
 
     bool hasDetachedBuffer() const {
         // Shared buffers can't be detached.
-        if (isSharedMemory())
+        if (isSharedMemory()) {
             return false;
+        }
 
         // A typed array with a null buffer has never had its buffer exposed to
         // become detached.
         ArrayBufferObject* buffer = bufferUnshared();
-        if (!buffer)
+        if (!buffer) {
             return false;
+        }
 
         return buffer->isDetached();
     }
@@ -264,7 +272,7 @@ class TypedArrayObject : public NativeObject
 
     /* Initialization bits */
 
-    template<Value ValueGetter(TypedArrayObject* tarr)>
+    template<Value ValueGetter(const TypedArrayObject* tarr)>
     static bool
     GetterImpl(JSContext* cx, const CallArgs& args)
     {
@@ -276,7 +284,7 @@ class TypedArrayObject : public NativeObject
     // ValueGetter is a function that takes an unwrapped typed array object and
     // returns a Value. Given such a function, Getter<> is a native that
     // retrieves a given Value, probably from a slot on the object.
-    template<Value ValueGetter(TypedArrayObject* tarr)>
+    template<Value ValueGetter(const TypedArrayObject* tarr)>
     static bool
     Getter(JSContext* cx, unsigned argc, Value* vp)
     {
@@ -351,12 +359,13 @@ IsTypedArrayIndex(jsid id, uint64_t* indexp)
     if (JSID_IS_INT(id)) {
         int32_t i = JSID_TO_INT(id);
         MOZ_ASSERT(i >= 0);
-        *indexp = (double)i;
+        *indexp = static_cast<uint64_t>(i);
         return true;
     }
 
-    if (MOZ_UNLIKELY(!JSID_IS_STRING(id)))
+    if (MOZ_UNLIKELY(!JSID_IS_STRING(id))) {
         return false;
+    }
 
     JS::AutoCheckCannotGC nogc;
     JSAtom* atom = JSID_TO_ATOM(id);
@@ -364,14 +373,16 @@ IsTypedArrayIndex(jsid id, uint64_t* indexp)
 
     if (atom->hasLatin1Chars()) {
         const Latin1Char* s = atom->latin1Chars(nogc);
-        if (!mozilla::IsAsciiDigit(*s) && *s != '-')
+        if (!mozilla::IsAsciiDigit(*s) && *s != '-') {
             return false;
+        }
         return StringIsTypedArrayIndex(s, length, indexp);
     }
 
     const char16_t* s = atom->twoByteChars(nogc);
-    if (!mozilla::IsAsciiDigit(*s) && *s != '-')
+    if (!mozilla::IsAsciiDigit(*s) && *s != '-') {
         return false;
+    }
     return StringIsTypedArrayIndex(s, length, indexp);
 }
 
@@ -401,11 +412,6 @@ TypedArrayShift(Scalar::Type viewType)
       case Scalar::Int64:
       case Scalar::Float64:
         return 3;
-      case Scalar::Float32x4:
-      case Scalar::Int8x16:
-      case Scalar::Int16x8:
-      case Scalar::Int32x4:
-        return 4;
       default:;
     }
     MOZ_CRASH("Unexpected array type");

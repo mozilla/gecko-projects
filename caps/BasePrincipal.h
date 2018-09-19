@@ -25,6 +25,39 @@ namespace extensions {
   class WebExtensionPolicy;
 }
 
+class BasePrincipal;
+
+// Codebase principals (and codebase principals embedded within expanded
+// principals) stored in SiteIdentifier are guaranteed to contain only the
+// eTLD+1 part of the original domain. This is used to determine whether two
+// origins are same-site: if it's possible for two origins to access each other
+// (maybe after mutating document.domain), then they must have the same site
+// identifier.
+class SiteIdentifier
+{
+public:
+  void Init(BasePrincipal* aPrincipal)
+  {
+    MOZ_ASSERT(aPrincipal);
+    mPrincipal = aPrincipal;
+  }
+
+  bool IsInitialized() const { return !!mPrincipal; }
+
+  bool Equals(const SiteIdentifier& aOther) const;
+
+private:
+  friend class ::ExpandedPrincipal;
+
+  BasePrincipal* GetPrincipal() const
+  {
+    MOZ_ASSERT(IsInitialized());
+    return mPrincipal;
+  }
+
+  RefPtr<BasePrincipal> mPrincipal;
+};
+
 /*
  * Base class from which all nsIPrincipal implementations inherit. Use this for
  * default implementations and other commonalities between principal
@@ -79,12 +112,14 @@ public:
   NS_IMETHOD GetIsCodebasePrincipal(bool* aResult) override;
   NS_IMETHOD GetIsExpandedPrincipal(bool* aResult) override;
   NS_IMETHOD GetIsSystemPrincipal(bool* aResult) override;
+  NS_IMETHOD GetIsAddonOrExpandedAddonPrincipal(bool* aResult) override;
   NS_IMETHOD GetOriginAttributes(JSContext* aCx, JS::MutableHandle<JS::Value> aVal) final;
   NS_IMETHOD GetOriginSuffix(nsACString& aOriginSuffix) final;
   NS_IMETHOD GetAppId(uint32_t* aAppId) final;
   NS_IMETHOD GetIsInIsolatedMozBrowserElement(bool* aIsInIsolatedMozBrowserElement) final;
   NS_IMETHOD GetUserContextId(uint32_t* aUserContextId) final;
   NS_IMETHOD GetPrivateBrowsingId(uint32_t* aPrivateBrowsingId) final;
+  NS_IMETHOD GetSiteOrigin(nsACString& aOrigin) override;
 
   virtual bool AddonHasPermission(const nsAtom* aPerm);
 
@@ -161,6 +196,10 @@ public:
     return (AddonPolicy() &&
             !BasePrincipal::Cast(aDocumentPrincipal)->AddonPolicy());
   }
+
+  uint32_t GetOriginNoSuffixHash() const { return mOriginNoSuffix->hash(); }
+
+  virtual nsresult GetSiteIdentifier(SiteIdentifier& aSite) = 0;
 
 protected:
   virtual ~BasePrincipal();

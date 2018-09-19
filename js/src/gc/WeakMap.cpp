@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "gc/WeakMap.h"
+#include "gc/WeakMap-inl.h"
 
 #include <string.h>
 
@@ -38,8 +38,9 @@ WeakMapBase::~WeakMapBase()
 void
 WeakMapBase::unmarkZone(JS::Zone* zone)
 {
-    for (WeakMapBase* m : zone->gcWeakMapList())
+    for (WeakMapBase* m : zone->gcWeakMapList()) {
         m->marked = false;
+    }
 }
 
 void
@@ -57,8 +58,9 @@ WeakMapBase::markZoneIteratively(JS::Zone* zone, GCMarker* marker)
 {
     bool markedAny = false;
     for (WeakMapBase* m : zone->gcWeakMapList()) {
-        if (m->marked && m->markIteratively(marker))
+        if (m->marked && m->markIteratively(marker)) {
             markedAny = true;
+        }
     }
     return markedAny;
 }
@@ -67,8 +69,9 @@ bool
 WeakMapBase::findInterZoneEdges(JS::Zone* zone)
 {
     for (WeakMapBase* m : zone->gcWeakMapList()) {
-        if (!m->findZoneEdges())
+        if (!m->findZoneEdges()) {
             return false;
+        }
     }
     return true;
 }
@@ -81,16 +84,16 @@ WeakMapBase::sweepZone(JS::Zone* zone)
         if (m->marked) {
             m->sweep();
         } else {
-            /* Destroy the hash map now to catch any use after this point. */
-            m->finish();
+            m->clearAndCompact();
             m->removeFrom(zone->gcWeakMapList());
         }
         m = next;
     }
 
 #ifdef DEBUG
-    for (WeakMapBase* m : zone->gcWeakMapList())
+    for (WeakMapBase* m : zone->gcWeakMapList()) {
         MOZ_ASSERT(m->isInList() && m->marked);
+    }
 #endif
 }
 
@@ -111,8 +114,9 @@ bool
 WeakMapBase::saveZoneMarkedWeakMaps(JS::Zone* zone, WeakMapSet& markedWeakMaps)
 {
     for (WeakMapBase* m : zone->gcWeakMapList()) {
-        if (m->marked && !markedWeakMaps.put(m))
+        if (m->marked && !markedWeakMaps.put(m)) {
             return false;
+        }
     }
     return true;
 }
@@ -139,16 +143,20 @@ ObjectValueMap::findZoneEdges()
     JS::AutoSuppressGCAnalysis nogc;
     for (Range r = all(); !r.empty(); r.popFront()) {
         JSObject* key = r.front().key();
-        if (key->asTenured().isMarkedBlack())
+        if (key->asTenured().isMarkedBlack()) {
             continue;
+        }
         JSObject* delegate = getDelegate(key);
-        if (!delegate)
+        if (!delegate) {
             continue;
+        }
         Zone* delegateZone = delegate->zone();
-        if (delegateZone == zone() || !delegateZone->isGCMarking())
+        if (delegateZone == zone() || !delegateZone->isGCMarking()) {
             continue;
-        if (!delegateZone->gcSweepGroupEdges().put(key->zone()))
+        }
+        if (!delegateZone->gcSweepGroupEdges().put(key->zone())) {
             return false;
+        }
     }
     return true;
 }
@@ -157,18 +165,12 @@ ObjectWeakMap::ObjectWeakMap(JSContext* cx)
   : map(cx, nullptr)
 {}
 
-bool
-ObjectWeakMap::init()
-{
-    return map.init();
-}
-
 JSObject*
 ObjectWeakMap::lookup(const JSObject* obj)
 {
-    MOZ_ASSERT(map.initialized());
-    if (ObjectValueMap::Ptr p = map.lookup(const_cast<JSObject*>(obj)))
+    if (ObjectValueMap::Ptr p = map.lookup(const_cast<JSObject*>(obj))) {
         return &p->value().toObject();
+    }
     return nullptr;
 }
 
@@ -176,7 +178,6 @@ bool
 ObjectWeakMap::add(JSContext* cx, JSObject* obj, JSObject* target)
 {
     MOZ_ASSERT(obj && target);
-    MOZ_ASSERT(map.initialized());
 
     MOZ_ASSERT(!map.has(obj));
     if (!map.put(obj, ObjectValue(*target))) {
@@ -190,7 +191,6 @@ ObjectWeakMap::add(JSContext* cx, JSObject* obj, JSObject* target)
 void
 ObjectWeakMap::clear()
 {
-    MOZ_ASSERT(map.initialized());
     map.clear();
 }
 
@@ -203,15 +203,13 @@ ObjectWeakMap::trace(JSTracer* trc)
 size_t
 ObjectWeakMap::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
 {
-    MOZ_ASSERT(map.initialized());
-    return map.sizeOfExcludingThis(mallocSizeOf);
+    return map.shallowSizeOfExcludingThis(mallocSizeOf);
 }
 
 #ifdef JSGC_HASH_TABLE_CHECKS
 void
 ObjectWeakMap::checkAfterMovingGC()
 {
-    MOZ_ASSERT(map.initialized());
     for (ObjectValueMap::Range r = map.all(); !r.empty(); r.popFront()) {
         CheckGCThingAfterMovingGC(r.front().key().get());
         CheckGCThingAfterMovingGC(&r.front().value().toObject());

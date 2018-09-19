@@ -25,7 +25,6 @@ class AccessCheck {
                                                      JS::Compartment* b);
     static bool isChrome(JS::Compartment* compartment);
     static bool isChrome(JSObject* obj);
-    static nsIPrincipal* getPrincipal(JS::Compartment* compartment);
     static bool isCrossOriginAccessPermitted(JSContext* cx, JS::HandleObject obj,
                                              JS::HandleId id, js::Wrapper::Action act);
     static bool checkPassToPrivilegedCode(JSContext* cx, JS::HandleObject wrapper,
@@ -92,11 +91,13 @@ struct CrossOriginAccessiblePropertiesOnly : public Policy {
     static bool deny(JSContext* cx, js::Wrapper::Action act, JS::HandleId id,
                      bool mayThrow) {
         // Silently fail for enumerate-like operations.
-        if (act == js::Wrapper::ENUMERATE)
+        if (act == js::Wrapper::ENUMERATE) {
             return true;
-        if (mayThrow)
+        }
+        if (mayThrow) {
             AccessCheck::reportCrossOriginDenial(cx, id,
                                                  NS_LITERAL_CSTRING("access"));
+        }
         return false;
     }
     static bool allowNativeCall(JSContext* cx, JS::IsAcceptableThis test, JS::NativeImpl impl) {

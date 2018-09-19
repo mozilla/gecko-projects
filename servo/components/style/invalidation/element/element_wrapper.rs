@@ -43,6 +43,13 @@ pub trait ElementSnapshot: Sized {
     /// If this snapshot contains attribute information.
     fn has_attrs(&self) -> bool;
 
+    /// Gets the attribute information of the snapshot as a string.
+    ///
+    /// Only for debugging purposes.
+    fn debug_list_attributes(&self) -> String {
+        String::new()
+    }
+
     /// The ID attribute per this snapshot. Should only be called if
     /// `has_attrs()` returns true.
     fn id_attr(&self) -> Option<&WeakAtom>;
@@ -183,8 +190,7 @@ where
             // support we don't forget to update this code?
             #[cfg(feature = "gecko")]
             NonTSPseudoClass::Dir(ref dir) => {
-                use invalidation::element::invalidation_map::dir_selector_to_state;
-                let selector_flag = dir_selector_to_state(dir);
+                let selector_flag = dir.element_state();
                 if selector_flag.is_empty() {
                     // :dir() with some random argument; does not match.
                     return false;
@@ -229,7 +235,8 @@ where
             // :lang() needs to match using the closest ancestor xml:lang="" or
             // lang="" attribtue from snapshots.
             NonTSPseudoClass::Lang(ref lang_arg) => {
-                return self.element
+                return self
+                    .element
                     .match_element_lang(Some(self.get_lang()), lang_arg);
             },
 
@@ -238,12 +245,14 @@ where
 
         let flag = pseudo_class.state_flag();
         if flag.is_empty() {
-            return self.element
+            return self
+                .element
                 .match_non_ts_pseudo_class(pseudo_class, context, &mut |_, _| {});
         }
         match self.snapshot().and_then(|s| s.state()) {
             Some(snapshot_state) => snapshot_state.intersects(flag),
-            None => self.element
+            None => self
+                .element
                 .match_non_ts_pseudo_class(pseudo_class, context, &mut |_, _| {}),
         }
     }
@@ -276,16 +285,6 @@ where
     fn containing_shadow_host(&self) -> Option<Self> {
         let host = self.element.containing_shadow_host()?;
         Some(Self::new(host, self.snapshot_map))
-    }
-
-    fn first_child_element(&self) -> Option<Self> {
-        let child = self.element.first_child_element()?;
-        Some(Self::new(child, self.snapshot_map))
-    }
-
-    fn last_child_element(&self) -> Option<Self> {
-        let child = self.element.last_child_element()?;
-        Some(Self::new(child, self.snapshot_map))
     }
 
     fn prev_sibling_element(&self) -> Option<Self> {
@@ -366,9 +365,5 @@ where
         self.element
             .assigned_slot()
             .map(|e| ElementWrapper::new(e, self.snapshot_map))
-    }
-
-    fn blocks_ancestor_combinators(&self) -> bool {
-        self.element.blocks_ancestor_combinators()
     }
 }

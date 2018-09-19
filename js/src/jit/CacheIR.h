@@ -14,7 +14,9 @@
 #include "gc/Rooting.h"
 #include "jit/CompactBuffer.h"
 #include "jit/ICState.h"
-#include "jit/SharedIC.h"
+#include "jit/MacroAssembler.h"
+#include "vm/Iteration.h"
+#include "vm/Shape.h"
 
 namespace js {
 namespace jit {
@@ -22,6 +24,8 @@ namespace jit {
 
 enum class BaselineCacheIRStubKind;
 
+// [SMDOC] CacheIR
+//
 // CacheIR is an (extremely simple) linear IR language for inline caches.
 // From this IR, we can generate machine code for Baseline or Ion IC stubs.
 //
@@ -59,7 +63,7 @@ enum class BaselineCacheIRStubKind;
 // An OperandId represents either a cache input or a value returned by a
 // CacheIR instruction. Most code should use the ValOperandId and ObjOperandId
 // classes below. The ObjOperandId class represents an operand that's known to
-// be an object.
+// be an object, just as StringOperandId represents a known string, etc.
 class OperandId
 {
   protected:
@@ -164,7 +168,9 @@ class TypedOperandId : public OperandId
     _(Compare)              \
     _(ToBool)               \
     _(Call)                 \
-    _(UnaryArith)
+    _(UnaryArith)           \
+    _(BinaryArith)          \
+    _(NewObject)
 
 enum class CacheKind : uint8_t
 {
@@ -173,12 +179,16 @@ enum class CacheKind : uint8_t
 #undef DEFINE_KIND
 };
 
-extern const char* CacheKindNames[];
+extern const char* const CacheKindNames[];
 
 #define CACHE_IR_OPS(_)                   \
     _(GuardIsObject)                      \
     _(GuardIsObjectOrNull)                \
     _(GuardIsNullOrUndefined)             \
+    _(GuardIsNotNullOrUndefined)          \
+    _(GuardIsNull)                        \
+    _(GuardIsUndefined)                   \
+    _(GuardIsBoolean)                     \
     _(GuardIsString)                      \
     _(GuardIsSymbol)                      \
     _(GuardIsNumber)                      \
@@ -207,6 +217,7 @@ extern const char* CacheKindNames[];
     _(GuardNoUnboxedExpando)              \
     _(GuardAndLoadUnboxedExpando)         \
     _(GuardAndGetIndexFromString)         \
+    _(GuardAndGetNumberFromString)        \
     _(GuardAndGetIterator)                \
     _(GuardHasGetterSetter)               \
     _(GuardGroupHasUnanalyzedNewScript)   \
@@ -214,6 +225,8 @@ extern const char* CacheKindNames[];
     _(GuardTagNotEqual)                   \
     _(GuardXrayExpandoShapeAndDefaultProto) \
     _(GuardFunctionPrototype)             \
+    _(GuardNoAllocationMetadataBuilder)   \
+    _(GuardObjectGroupNotPretenured)      \
     _(LoadStackValue)                     \
     _(LoadObject)                         \
     _(LoadProto)                          \
@@ -253,6 +266,8 @@ extern const char* CacheKindNames[];
     _(CallSetArrayLength)                 \
     _(CallProxySet)                       \
     _(CallProxySetByValue)                \
+    _(CallInt32ToString)                  \
+    _(CallNumberToString)                 \
                                           \
     /* The *Result ops load a value into the cache's result register. */ \
     _(LoadFixedSlotResult)                \
@@ -288,6 +303,22 @@ extern const char* CacheKindNames[];
     _(LoadStringResult)                   \
     _(LoadInstanceOfObjectResult)         \
     _(LoadTypeOfObjectResult)             \
+    _(DoubleAddResult)                    \
+    _(DoubleSubResult)                    \
+    _(DoubleMulResult)                    \
+    _(DoubleDivResult)                    \
+    _(DoubleModResult)                    \
+    _(Int32AddResult)                     \
+    _(Int32SubResult)                     \
+    _(Int32MulResult)                     \
+    _(Int32DivResult)                     \
+    _(Int32ModResult)                     \
+    _(Int32BitOrResult)                   \
+    _(Int32BitXorResult)                  \
+    _(Int32BitAndResult)                  \
+    _(Int32LeftShiftResult)               \
+    _(Int32RightShiftResult)              \
+    _(Int32URightShiftResult)             \
     _(Int32NotResult)                     \
     _(Int32NegationResult)                \
     _(DoubleNegationResult)               \
@@ -296,12 +327,18 @@ extern const char* CacheKindNames[];
     _(LoadStringTruthyResult)             \
     _(LoadObjectTruthyResult)             \
     _(LoadValueResult)                    \
+    _(LoadNewObjectFromTemplateResult)    \
                                           \
     _(CallStringSplitResult)              \
+    _(CallStringConcatResult)             \
+    _(CallStringObjectConcatResult)       \
                                           \
     _(CompareStringResult)                \
     _(CompareObjectResult)                \
     _(CompareSymbolResult)                \
+    _(CompareInt32Result)                 \
+    _(CompareDoubleResult)                \
+    _(CompareObjectUndefinedNullResult)   \
                                           \
     _(CallPrintString)                    \
     _(Breakpoint)                         \
@@ -347,8 +384,9 @@ class StubField
         return type >= Type::First64BitType;
     }
     static size_t sizeInBytes(Type type) {
-        if (sizeIsWord(type))
+        if (sizeIsWord(type)) {
             return sizeof(uintptr_t);
+        }
         MOZ_ASSERT(sizeIsInt64(type));
         return sizeof(int64_t);
     }
@@ -390,6 +428,13 @@ enum class GuardClassKind : uint8_t
 // zone, which refer to the actual shape via a reserved slot.
 JSObject* NewWrapperWithObjectShape(JSContext* cx, HandleNativeObject obj);
 
+// Enum for stubs handling a combination of typed arrays and typed objects.
+enum TypedThingLayout {
+    Layout_TypedArray,
+    Layout_OutlineTypedObject,
+    Layout_InlineTypedObject
+};
+
 void LoadShapeWrapperContents(MacroAssembler& masm, Register obj, Register dst, Label* failure);
 
 // Class to record CacheIR + some additional metadata for code generation.
@@ -416,6 +461,10 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     static const size_t MaxStubDataSizeInBytes = 20 * sizeof(uintptr_t);
     bool tooLarge_;
 
+    // Basic caching to avoid quadatic lookup behaviour in readStubFieldForIon.
+    mutable uint32_t lastOffset_;
+    mutable uint32_t lastIndex_;
+
     void assertSameCompartment(JSObject*);
 
     void writeOp(CacheOp op) {
@@ -434,8 +483,9 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         }
         if (opId.id() >= operandLastUsed_.length()) {
             buffer_.propagateOOM(operandLastUsed_.resize(opId.id() + 1));
-            if (buffer_.oom())
+            if (buffer_.oom()) {
                 return;
+            }
         }
         MOZ_ASSERT(nextInstructionId_ > 0);
         operandLastUsed_[opId.id()] = nextInstructionId_ - 1;
@@ -479,7 +529,9 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         nextInstructionId_(0),
         numInputOperands_(0),
         stubDataSize_(0),
-        tooLarge_(false)
+        tooLarge_(false),
+        lastOffset_(0),
+        lastIndex_(0)
     {}
 
     bool failed() const { return buffer_.oom() || tooLarge_; }
@@ -510,8 +562,9 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     bool stubDataEqualsMaybeUpdate(uint8_t* stubData, bool* updated) const;
 
     bool operandIsDead(uint32_t operandId, uint32_t currentInstruction) const {
-        if (operandId >= operandLastUsed_.length())
+        if (operandId >= operandLastUsed_.length()) {
             return false;
+        }
         return currentInstruction > operandLastUsed_[operandId];
     }
     const uint8_t* codeStart() const {
@@ -529,14 +582,17 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
 
     // This should not be used when compiling Baseline code, as Baseline code
     // shouldn't bake in stub values.
-    StubField readStubFieldForIon(size_t i, StubField::Type type) const {
-        MOZ_ASSERT(stubFields_[i].type() == type);
-        return stubFields_[i];
-    }
+    StubField readStubFieldForIon(uint32_t offset, StubField::Type type) const;
 
     ObjOperandId guardIsObject(ValOperandId val) {
         writeOpWithOperandId(CacheOp::GuardIsObject, val);
         return ObjOperandId(val.id());
+    }
+    Int32OperandId guardIsBoolean(ValOperandId val) {
+        Int32OperandId res(nextOperandId_++);
+        writeOpWithOperandId(CacheOp::GuardIsBoolean, val);
+        writeOperandId(res);
+        return res;
     }
     StringOperandId guardIsString(ValOperandId val) {
         writeOpWithOperandId(CacheOp::GuardIsString, val);
@@ -572,6 +628,15 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     void guardIsNullOrUndefined(ValOperandId val) {
         writeOpWithOperandId(CacheOp::GuardIsNullOrUndefined, val);
     }
+    void guardIsNotNullOrUndefined(ValOperandId val) {
+        writeOpWithOperandId(CacheOp::GuardIsNotNullOrUndefined, val);
+    }
+    void guardIsNull(ValOperandId val) {
+        writeOpWithOperandId(CacheOp::GuardIsNull, val);
+    }
+    void guardIsUndefined(ValOperandId val) {
+        writeOpWithOperandId(CacheOp::GuardIsUndefined, val);
+    }
     void guardShape(ObjOperandId obj, Shape* shape) {
         MOZ_ASSERT(shape);
         writeOpWithOperandId(CacheOp::GuardShape, obj);
@@ -599,6 +664,13 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         writeOpWithOperandId(CacheOp::GuardFunctionPrototype, rhs);
         writeOperandId(protoId);
         addStubField(slot, StubField::Type::RawWord);
+    }
+    void guardNoAllocationMetadataBuilder() {
+        writeOp(CacheOp::GuardNoAllocationMetadataBuilder);
+    }
+    void guardObjectGroupNotPretenured(ObjectGroup* group) {
+        writeOp(CacheOp::GuardObjectGroupNotPretenured);
+        addStubField(uintptr_t(group), StubField::Type::ObjectGroup);
     }
   private:
     // Use (or create) a specialization below to clarify what constaint the
@@ -701,6 +773,12 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     Int32OperandId guardAndGetIndexFromString(StringOperandId str) {
         Int32OperandId res(nextOperandId_++);
         writeOpWithOperandId(CacheOp::GuardAndGetIndexFromString, str);
+        writeOperandId(res);
+        return res;
+    }
+    ValOperandId guardAndGetNumberFromString(StringOperandId str) {
+        ValOperandId res(nextOperandId_++);
+        writeOpWithOperandId(CacheOp::GuardAndGetNumberFromString, str);
         writeOperandId(res);
         return res;
     }
@@ -933,6 +1011,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         writeOpWithOperandId(CacheOp::CallScriptedSetter, obj);
         addStubField(uintptr_t(setter), StubField::Type::JSObject);
         writeOperandId(rhs);
+        buffer_.writeByte(cx_->realm() != setter->realm());
     }
     void callNativeSetter(ObjOperandId obj, JSFunction* setter, ValOperandId rhs) {
         writeOpWithOperandId(CacheOp::CallNativeSetter, obj);
@@ -955,6 +1034,18 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         writeOperandId(id);
         writeOperandId(rhs);
         buffer_.writeByte(uint32_t(strict));
+    }
+    StringOperandId callInt32ToString(Int32OperandId id) {
+        StringOperandId res(nextOperandId_++);
+        writeOpWithOperandId(CacheOp::CallInt32ToString, id);
+        writeOperandId(res);
+        return res;
+    }
+    StringOperandId callNumberToString(ValOperandId id) {
+        StringOperandId res(nextOperandId_++);
+        writeOpWithOperandId(CacheOp::CallNumberToString, id);
+        writeOperandId(res);
+        return res;
     }
 
     void megamorphicLoadSlotResult(ObjOperandId obj, PropertyName* name, bool handleMissing) {
@@ -986,6 +1077,72 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         buffer_.writeByte(uint32_t(hasOwn));
     }
 
+    void doubleAddResult(ValOperandId lhsId, ValOperandId rhsId) {
+        writeOpWithOperandId(CacheOp::DoubleAddResult, lhsId);
+        writeOperandId(rhsId);
+    }
+    void doubleSubResult(ValOperandId lhsId, ValOperandId rhsId) {
+        writeOpWithOperandId(CacheOp::DoubleSubResult, lhsId);
+        writeOperandId(rhsId);
+    }
+    void doubleMulResult(ValOperandId lhsId, ValOperandId rhsId) {
+        writeOpWithOperandId(CacheOp::DoubleMulResult, lhsId);
+        writeOperandId(rhsId);
+    }
+    void doubleDivResult(ValOperandId lhsId, ValOperandId rhsId) {
+        writeOpWithOperandId(CacheOp::DoubleDivResult, lhsId);
+        writeOperandId(rhsId);
+    }
+    void doubleModResult(ValOperandId lhsId, ValOperandId rhsId) {
+        writeOpWithOperandId(CacheOp::DoubleModResult, lhsId);
+        writeOperandId(rhsId);
+    }
+
+    void int32AddResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32AddResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32SubResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32SubResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32MulResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32MulResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32DivResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32DivResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32ModResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32ModResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32BitOrResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32BitOrResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32BitXOrResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32BitXorResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32BitAndResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32BitAndResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32LeftShiftResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32LeftShiftResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32RightShiftResult(Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::Int32RightShiftResult, lhs);
+        writeOperandId(rhs);
+    }
+    void int32URightShiftResult(Int32OperandId lhs, Int32OperandId rhs, bool allowDouble) {
+        writeOpWithOperandId(CacheOp::Int32URightShiftResult, lhs);
+        writeOperandId(rhs);
+        buffer_.writeByte(uint32_t(allowDouble));
+    }
     void int32NotResult(Int32OperandId id) {
         writeOpWithOperandId(CacheOp::Int32NotResult, id);
     }
@@ -1079,6 +1236,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     void callScriptedGetterResult(ObjOperandId obj, JSFunction* getter) {
         writeOpWithOperandId(CacheOp::CallScriptedGetterResult, obj);
         addStubField(uintptr_t(getter), StubField::Type::JSObject);
+        buffer_.writeByte(cx_->realm() != getter->realm());
     }
     void callNativeGetterResult(ObjOperandId obj, JSFunction* getter) {
         writeOpWithOperandId(CacheOp::CallNativeGetterResult, obj);
@@ -1136,6 +1294,24 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         writeOp(CacheOp::LoadValueResult);
         addStubField(val.asRawBits(), StubField::Type::Value);
     }
+    void loadNewObjectFromTemplateResult(JSObject* templateObj) {
+        writeOp(CacheOp::LoadNewObjectFromTemplateResult);
+        addStubField(uintptr_t(templateObj), StubField::Type::JSObject);
+        // Bake in a monotonically increasing number to ensure we differentiate
+        // between different baseline stubs that otherwise might share
+        // stub code.
+        uint64_t id = cx_->runtime()->jitRuntime()->nextDisambiguationId();
+        writeUint32Immediate(id & UINT32_MAX);
+        writeUint32Immediate(id >> 32);
+    }
+    void callStringConcatResult(StringOperandId lhs, StringOperandId rhs) {
+        writeOpWithOperandId(CacheOp::CallStringConcatResult, lhs);
+        writeOperandId(rhs);
+    }
+    void callStringObjectConcatResult(ValOperandId lhs, ValOperandId rhs) {
+        writeOpWithOperandId(CacheOp::CallStringObjectConcatResult, lhs);
+        writeOperandId(rhs);
+    }
     void callStringSplitResult(StringOperandId str, StringOperandId sep, ObjectGroup* group) {
         writeOp(CacheOp::CallStringSplitResult);
         writeOperandId(str);
@@ -1153,8 +1329,22 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         writeOperandId(rhs);
         buffer_.writeByte(uint32_t(op));
     }
+    void compareObjectUndefinedNullResult(uint32_t op, ObjOperandId object) {
+        writeOpWithOperandId(CacheOp::CompareObjectUndefinedNullResult, object);
+        buffer_.writeByte(uint32_t(op));
+    }
     void compareSymbolResult(uint32_t op, SymbolOperandId lhs, SymbolOperandId rhs) {
         writeOpWithOperandId(CacheOp::CompareSymbolResult, lhs);
+        writeOperandId(rhs);
+        buffer_.writeByte(uint32_t(op));
+    }
+    void compareInt32Result(uint32_t op, Int32OperandId lhs, Int32OperandId rhs) {
+        writeOpWithOperandId(CacheOp::CompareInt32Result, lhs);
+        writeOperandId(rhs);
+        buffer_.writeByte(uint32_t(op));
+    }
+    void compareDoubleResult(uint32_t op, ValOperandId lhs, ValOperandId rhs) {
+        writeOpWithOperandId(CacheOp::CompareDoubleResult, lhs);
         writeOperandId(rhs);
         buffer_.writeByte(uint32_t(op));
     }
@@ -1240,23 +1430,26 @@ class MOZ_RAII CacheIRReader
 
     bool matchOp(CacheOp op) {
         const uint8_t* pos = buffer_.currentPosition();
-        if (readOp() == op)
+        if (readOp() == op) {
             return true;
+        }
         buffer_.seek(pos, 0);
         return false;
     }
     bool matchOp(CacheOp op, OperandId id) {
         const uint8_t* pos = buffer_.currentPosition();
-        if (readOp() == op && buffer_.readByte() == id.id())
+        if (readOp() == op && buffer_.readByte() == id.id()) {
             return true;
+        }
         buffer_.seek(pos, 0);
         return false;
     }
     bool matchOpEither(CacheOp op1, CacheOp op2) {
         const uint8_t* pos = buffer_.currentPosition();
         CacheOp op = readOp();
-        if (op == op1 || op == op2)
+        if (op == op1 || op == op2) {
             return true;
+        }
         buffer_.seek(pos, 0);
         return false;
     }
@@ -1386,8 +1579,9 @@ class MOZ_RAII GetPropIRGenerator : public IRGenerator
     }
 
     ValOperandId getSuperReceiverValueId() const {
-        if (cacheKind_ == CacheKind::GetPropSuper)
+        if (cacheKind_ == CacheKind::GetPropSuper) {
             return ValOperandId(1);
+        }
 
         MOZ_ASSERT(cacheKind_ == CacheKind::GetElemSuper);
         return ValOperandId(2);
@@ -1512,8 +1706,9 @@ class MOZ_RAII SetPropIRGenerator : public IRGenerator
         return ValOperandId(1);
     }
     ValOperandId rhsValueId() const {
-        if (cacheKind_ == CacheKind::SetProp)
+        if (cacheKind_ == CacheKind::SetProp) {
             return ValOperandId(1);
+        }
         MOZ_ASSERT(cacheKind_ == CacheKind::SetElem);
         return ValOperandId(2);
     }
@@ -1664,6 +1859,8 @@ class MOZ_RAII GetIteratorIRGenerator : public IRGenerator
                            HandleValue value);
 
     bool tryAttachStub();
+
+    void trackAttached(const char *name);
 };
 
 class MOZ_RAII CallIRGenerator : public IRGenerator
@@ -1710,6 +1907,13 @@ class MOZ_RAII CompareIRGenerator : public IRGenerator
     bool tryAttachObject(ValOperandId lhsId, ValOperandId rhsId);
     bool tryAttachSymbol(ValOperandId lhsId, ValOperandId rhsId);
     bool tryAttachStrictDifferentTypes(ValOperandId lhsId, ValOperandId rhsId);
+    bool tryAttachInt32(ValOperandId lhsId, ValOperandId rhsId);
+    bool tryAttachNumber(ValOperandId lhsId, ValOperandId rhsId);
+    bool tryAttachNumberUndefined(ValOperandId lhsId, ValOperandId rhsId);
+    bool tryAttachPrimitiveUndefined(ValOperandId lhsId, ValOperandId rhsId);
+    bool tryAttachObjectUndefined(ValOperandId lhsId, ValOperandId rhsId);
+    bool tryAttachNullUndefined(ValOperandId lhsId, ValOperandId rhsId);
+    bool tryAttachStringNumber(ValOperandId lhsId, ValOperandId rhsId);
 
     void trackAttached(const char* name);
 
@@ -1770,6 +1974,76 @@ class MOZ_RAII UnaryArithIRGenerator : public IRGenerator
 
     bool tryAttachStub();
 };
+
+class MOZ_RAII BinaryArithIRGenerator : public IRGenerator
+{
+    JSOp op_;
+    HandleValue lhs_;
+    HandleValue rhs_;
+    HandleValue res_;
+
+    void trackAttached(const char* name);
+
+    bool tryAttachInt32();
+    bool tryAttachDouble();
+    bool tryAttachBitwise();
+    bool tryAttachStringConcat();
+    bool tryAttachStringObjectConcat();
+    bool tryAttachStringNumberConcat();
+
+  public:
+    BinaryArithIRGenerator(JSContext* cx, HandleScript, jsbytecode* pc, ICState::Mode,
+                           JSOp op, HandleValue lhs, HandleValue rhs, HandleValue res);
+
+    bool tryAttachStub();
+
+};
+
+class MOZ_RAII NewObjectIRGenerator : public IRGenerator
+{
+#ifdef  JS_CACHEIR_SPEW
+    JSOp op_;
+ #endif
+    HandleObject templateObject_;
+
+    void trackAttached(const char* name);
+
+  public:
+    NewObjectIRGenerator(JSContext* cx, HandleScript, jsbytecode* pc, ICState::Mode,
+                         JSOp op, HandleObject templateObj);
+
+    bool tryAttachStub();
+};
+
+static inline uint32_t
+SimpleTypeDescrKey(SimpleTypeDescr* descr)
+{
+    if (descr->is<ScalarTypeDescr>()) {
+        return uint32_t(descr->as<ScalarTypeDescr>().type()) << 1;
+    }
+    return (uint32_t(descr->as<ReferenceTypeDescr>().type()) << 1) | 1;
+}
+
+inline bool
+SimpleTypeDescrKeyIsScalar(uint32_t key)
+{
+    return !(key & 1);
+}
+
+inline ScalarTypeDescr::Type
+ScalarTypeFromSimpleTypeDescrKey(uint32_t key)
+{
+    MOZ_ASSERT(SimpleTypeDescrKeyIsScalar(key));
+    return ScalarTypeDescr::Type(key >> 1);
+}
+
+inline ReferenceType
+ReferenceTypeFromSimpleTypeDescrKey(uint32_t key)
+{
+    MOZ_ASSERT(!SimpleTypeDescrKeyIsScalar(key));
+    return ReferenceType(key >> 1);
+}
+
 
 } // namespace jit
 } // namespace js

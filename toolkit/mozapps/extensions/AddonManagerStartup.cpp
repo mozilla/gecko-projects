@@ -8,6 +8,7 @@
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
+#include "js/JSON.h"
 #include "js/TracingAPI.h"
 #include "xpcpublic.h"
 
@@ -662,6 +663,30 @@ AddonManagerStartup::InitializeURLPreloader()
 namespace {
 static bool sObserverRegistered;
 
+struct ContentEntry final
+{
+  explicit ContentEntry(nsTArray<nsCString>& aArgs, uint8_t aFlags=0)
+    : mArgs(aArgs)
+    , mFlags(aFlags)
+  {}
+
+  ContentEntry(const ContentEntry& other)
+    : mArgs(other.mArgs)
+    , mFlags(other.mFlags)
+  {}
+
+  AutoTArray<nsCString, 2> mArgs;
+  uint8_t mFlags;
+};
+
+}; // anonymous namespace
+}; // namespace mozilla
+
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::ContentEntry);
+
+namespace mozilla {
+namespace {
+
 class RegistryEntries final : public nsIJSRAIIHelper
                             , public LinkedListElement<RegistryEntries>
 {
@@ -672,9 +697,10 @@ public:
   using Override = AutoTArray<nsCString, 2>;
   using Locale = AutoTArray<nsCString, 3>;
 
-  RegistryEntries(FileLocation& location, nsTArray<Override>&& overrides, nsTArray<Locale>&& locales)
+  RegistryEntries(FileLocation& location, nsTArray<Override>&& overrides, nsTArray<ContentEntry>&& content, nsTArray<Locale>&& locales)
     : mLocation(location)
     , mOverrides(std::move(overrides))
+    , mContent(std::move(content))
     , mLocales(std::move(locales))
   {}
 
@@ -689,6 +715,7 @@ protected:
 private:
   FileLocation mLocation;
   const nsTArray<Override> mOverrides;
+  const nsTArray<ContentEntry> mContent;
   const nsTArray<Locale> mLocales;
 };
 
@@ -704,6 +731,11 @@ RegistryEntries::Register()
   for (auto& override : mOverrides) {
     const char* args[] = {override[0].get(), override[1].get()};
     cr->ManifestOverride(context, 0, const_cast<char**>(args), 0);
+  }
+
+  for (auto& content : mContent) {
+    const char* args[] = {content.mArgs[0].get(), content.mArgs[1].get()};
+    cr->ManifestContent(context, 0, const_cast<char**>(args), content.mFlags);
   }
 
   for (auto& locale : mLocales) {
@@ -751,6 +783,7 @@ AddonManagerStartup::RegisterChrome(nsIURI* manifestURI, JS::HandleValue locatio
 
 
   nsTArray<RegistryEntries::Locale> locales;
+  nsTArray<ContentEntry> content;
   nsTArray<RegistryEntries::Override> overrides;
 
   JS::RootedObject locs(cx, &locations.toObject());
@@ -778,6 +811,15 @@ AddonManagerStartup::RegisterChrome(nsIURI* manifestURI, JS::HandleValue locatio
     if (type.EqualsLiteral("override")) {
       NS_ENSURE_TRUE(vals.Length() == 2, NS_ERROR_INVALID_ARG);
       overrides.AppendElement(vals);
+    } else if (type.EqualsLiteral("content")) {
+      if (vals.Length() == 3 && vals[2].EqualsLiteral("contentaccessible=yes")) {
+        NS_ENSURE_TRUE(xpc::IsInAutomation(), NS_ERROR_INVALID_ARG);
+        vals.RemoveElementAt(2);
+        content.AppendElement(ContentEntry(vals, nsChromeRegistry::CONTENT_ACCESSIBLE));
+      } else {
+        NS_ENSURE_TRUE(vals.Length() == 2, NS_ERROR_INVALID_ARG);
+        content.AppendElement(ContentEntry(vals));
+      }
     } else if (type.EqualsLiteral("locale")) {
       NS_ENSURE_TRUE(vals.Length() == 3, NS_ERROR_INVALID_ARG);
       locales.AppendElement(vals);
@@ -796,6 +838,7 @@ AddonManagerStartup::RegisterChrome(nsIURI* manifestURI, JS::HandleValue locatio
 
   auto entry = MakeRefPtr<RegistryEntries>(location,
                                            std::move(overrides),
+                                           std::move(content),
                                            std::move(locales));
 
   entry->Register();

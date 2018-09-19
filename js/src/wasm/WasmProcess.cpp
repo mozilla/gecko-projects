@@ -19,6 +19,7 @@
 #include "wasm/WasmProcess.h"
 
 #include "mozilla/BinarySearch.h"
+#include "mozilla/ScopeExit.h"
 
 #include "vm/MutexIDs.h"
 #include "wasm/WasmBuiltins.h"
@@ -42,6 +43,18 @@ typedef Vector<const CodeSegment*, 0, SystemAllocPolicy> CodeSegmentVector;
 
 Atomic<bool> wasm::CodeExists(false);
 
+// Because of profiling, the thread running wasm might need to know to which
+// CodeSegment the current PC belongs, during a call to lookup(). A lookup
+// is a read-only operation, and we don't want to take a lock then
+// (otherwise, we could have a deadlock situation if an async lookup
+// happened on a given thread that was holding mutatorsMutex_ while getting
+// sampled). Since the writer could be modifying the data that is getting
+// looked up, the writer functions use spin-locks to know if there are any
+// observers (i.e. calls to lookup()) of the atomic data.
+
+static Atomic<size_t> sNumObservers(0);
+static Atomic<bool> sShuttingDown(false);
+
 class ProcessCodeSegmentMap
 {
     // Since writes (insertions or removals) can happen on any background
@@ -51,17 +64,6 @@ class ProcessCodeSegmentMap
 
     CodeSegmentVector segments1_;
     CodeSegmentVector segments2_;
-
-    // Because of profiling, the thread running wasm might need to know to which
-    // CodeSegment the current PC belongs, during a call to lookup(). A lookup
-    // is a read-only operation, and we don't want to take a lock then
-    // (otherwise, we could have a deadlock situation if an async lookup
-    // happened on a given thread that was holding mutatorsMutex_ while getting
-    // sampled). Since the writer could be modifying the data that is getting
-    // looked up, the writer functions use spin-locks to know if there are any
-    // observers (i.e. calls to lookup()) of the atomic data.
-
-    Atomic<size_t> observers_;
 
     // Except during swapAndWait(), there are no lookup() observers of the
     // vector pointed to by mutableCodeSegments_
@@ -74,16 +76,18 @@ class ProcessCodeSegmentMap
         const void* pc;
         explicit CodeSegmentPC(const void* pc) : pc(pc) {}
         int operator()(const CodeSegment* cs) const {
-            if (cs->containsCodePC(pc))
+            if (cs->containsCodePC(pc)) {
                 return 0;
-            if (pc < cs->base())
+            }
+            if (pc < cs->base()) {
                 return -1;
+            }
             return 1;
         }
     };
 
     void swapAndWait() {
-        // Both vectors are consistent for look up at this point, although their
+        // Both vectors are consistent for lookup at this point although their
         // contents are different: there is no way for the looked up PC to be
         // in the code segment that is getting registered, because the code
         // segment is not even fully created yet.
@@ -109,13 +113,12 @@ class ProcessCodeSegmentMap
         // A lookup could have happened on any of the two vectors. Wait for
         // observers to be done using any vector before mutating.
 
-        while (observers_);
+        while (sNumObservers > 0) {}
     }
 
   public:
     ProcessCodeSegmentMap()
       : mutatorsMutex_(mutexid::WasmCodeSegmentMap),
-        observers_(0),
         mutableCodeSegments_(&segments1_),
         readonlyCodeSegments_(&segments2_)
     {
@@ -141,8 +144,9 @@ class ProcessCodeSegmentMap
         MOZ_ALWAYS_FALSE(BinarySearchIf(*mutableCodeSegments_, 0, mutableCodeSegments_->length(),
                                         CodeSegmentPC(cs->base()), &index));
 
-        if (!mutableCodeSegments_->insert(mutableCodeSegments_->begin() + index, cs))
+        if (!mutableCodeSegments_->insert(mutableCodeSegments_->begin() + index, cs)) {
             return false;
+        }
 
         CodeExists = true;
 
@@ -160,8 +164,9 @@ class ProcessCodeSegmentMap
         // consumes multiple pages, it is unlikely this insert() would OOM in
         // practice
         AutoEnterOOMUnsafeRegion oom;
-        if (!mutableCodeSegments_->insert(mutableCodeSegments_->begin() + index, cs))
+        if (!mutableCodeSegments_->insert(mutableCodeSegments_->begin() + index, cs)) {
             oom.crash("when inserting a CodeSegment in the process-wide map");
+        }
 
         return true;
     }
@@ -175,8 +180,9 @@ class ProcessCodeSegmentMap
 
         mutableCodeSegments_->erase(mutableCodeSegments_->begin() + index);
 
-        if (!mutableCodeSegments_->length())
+        if (!mutableCodeSegments_->length()) {
             CodeExists = false;
+        }
 
         swapAndWait();
 
@@ -191,18 +197,12 @@ class ProcessCodeSegmentMap
     }
 
     const CodeSegment* lookup(const void* pc) {
-        auto decObserver = mozilla::MakeScopeExit([&] {
-            observers_--;
-        });
-        observers_++;
-
-        // Once atomically-read, the readonly vector is valid as long as
-        // observers_ has been incremented (see swapAndWait()).
         const CodeSegmentVector* readonly = readonlyCodeSegments_;
 
         size_t index;
-        if (!BinarySearchIf(*readonly, 0, readonly->length(), CodeSegmentPC(pc), &index))
+        if (!BinarySearchIf(*readonly, 0, readonly->length(), CodeSegmentPC(pc), &index)) {
             return nullptr;
+        }
 
         // It is fine returning a raw CodeSegment*, because we assume we are
         // looking up a live PC in code which is on the stack, keeping the
@@ -212,39 +212,66 @@ class ProcessCodeSegmentMap
     }
 };
 
-static ProcessCodeSegmentMap processCodeSegmentMap;
+static ProcessCodeSegmentMap sProcessCodeSegmentMap;
 
 bool
 wasm::RegisterCodeSegment(const CodeSegment* cs)
 {
     MOZ_ASSERT(cs->codeTier().code().initialized());
-    return processCodeSegmentMap.insert(cs);
+    return sProcessCodeSegmentMap.insert(cs);
 }
 
 void
 wasm::UnregisterCodeSegment(const CodeSegment* cs)
 {
-    processCodeSegmentMap.remove(cs);
+    sProcessCodeSegmentMap.remove(cs);
 }
 
 const CodeSegment*
-wasm::LookupCodeSegment(const void* pc, const CodeRange** cr /*= nullptr */)
+wasm::LookupCodeSegment(const void* pc, const CodeRange** codeRange /*= nullptr */)
 {
-    if (const CodeSegment* found = processCodeSegmentMap.lookup(pc)) {
-        if (cr) {
-            *cr = found->isModule()
-                  ? found->asModule()->lookupRange(pc)
-                  : found->asLazyStub()->lookupRange(pc);
+    // Avoid accessing an uninitialized sProcessCodeSegmentMap if there is a
+    // crash early in startup. Returning null will allow the crash to propagate
+    // properly to breakpad.
+    if (!CodeExists) {
+        return nullptr;
+    }
+
+    // Ensure the observer count is above 0 throughout the entire lookup to
+    // ensure swapAndWait() waits for the lookup to complete.
+    auto decObserver = mozilla::MakeScopeExit([&] {
+        MOZ_ASSERT(sNumObservers > 0);
+        sNumObservers--;
+    });
+    sNumObservers++;
+
+    // Check sShuttingDown with sNumObservers > 0 to ensure the spinloop in
+    // wasm::ShutDown() is effective.
+    if (sShuttingDown) {
+        return nullptr;
+    }
+
+    if (const CodeSegment* found = sProcessCodeSegmentMap.lookup(pc)) {
+        if (codeRange) {
+            *codeRange = found->isModule()
+                       ? found->asModule()->lookupRange(pc)
+                       : found->asLazyStub()->lookupRange(pc);
         }
         return found;
     }
+
+    if (codeRange) {
+        *codeRange = nullptr;
+    }
+
     return nullptr;
 }
 
 const Code*
-wasm::LookupCode(const void* pc, const CodeRange** cr /* = nullptr */)
+wasm::LookupCode(const void* pc, const CodeRange** codeRange /* = nullptr */)
 {
-    const CodeSegment* found = LookupCodeSegment(pc, cr);
+    const CodeSegment* found = LookupCodeSegment(pc, codeRange);
+    MOZ_ASSERT_IF(!found && codeRange, !*codeRange);
     return found ? &found->code() : nullptr;
 }
 
@@ -254,9 +281,14 @@ wasm::ShutDown()
     // If there are live runtimes then we are already pretty much leaking the
     // world, so to avoid spurious assertions (which are valid and valuable when
     // there are not live JSRuntimes), don't bother releasing anything here.
-    if (JSRuntime::hasLiveRuntimes())
+    if (JSRuntime::hasLiveRuntimes()) {
         return;
+    }
+
+    // After signalling shutdown, wait for currently-active observers to finish.
+    sShuttingDown = true;
+    while (sNumObservers > 0) {}
 
     ReleaseBuiltinThunks();
-    processCodeSegmentMap.freeAll();
+    sProcessCodeSegmentMap.freeAll();
 }

@@ -24,6 +24,10 @@ else:
         LOCAL_INCLUDES += [
             '/accessible/mac',
         ]
+    elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+        LOCAL_INCLUDES += [
+            '/accessible/android',
+        ]
     else:
         LOCAL_INCLUDES += [
             '/accessible/other',
@@ -62,3 +66,6 @@ FINAL_LIBRARY = 'xul'
 
 # Add libFuzzer configuration directives
 include('/tools/fuzzing/libfuzzer-config.mozbuild')
+
+if CONFIG['CC_TYPE'] == 'clang-cl':
+    AllowCompilerWarnings()  # workaround for bug 1090497

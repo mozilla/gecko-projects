@@ -7,7 +7,7 @@
 var gDialog;
 var gBundleBrand;
 var gPKIBundle;
-var gSSLStatus;
+var gSecInfo;
 var gCert;
 var gChecking;
 var gBroken;
@@ -26,7 +26,9 @@ function initExceptionDialog() {
   gNsISecTel = Ci.nsISecurityUITelemetry;
 
   var brandName = gBundleBrand.getString("brandShortName");
-  setText("warningText", gPKIBundle.getFormattedString("addExceptionBrandedWarning2", [brandName]));
+  setText("warningText",
+          gPKIBundle.getFormattedString("addExceptionBrandedWarning2",
+                                        [brandName]));
   gDialog.getButton("extra1").disabled = true;
 
   var args = window.arguments;
@@ -36,9 +38,9 @@ function initExceptionDialog() {
       document.getElementById("locationTextBox").value = args[0].location;
       document.getElementById("checkCertButton").disabled = false;
 
-      if (args[0].sslStatus) {
-        gSSLStatus = args[0].sslStatus;
-        gCert = gSSLStatus.serverCert;
+      if (args[0].securityInfo) {
+        gSecInfo = args[0].securityInfo;
+        gCert = gSecInfo.serverCert;
         gBroken = true;
         updateCertStatus();
       } else if (args[0].prefetchCert) {
@@ -64,7 +66,7 @@ function initExceptionDialog() {
 
 /**
  * Helper function for checkCert. Set as the onerror/onload callbacks for an
- * XMLHttpRequest. Sets gSSLStatus, gCert, gBroken, and gChecking according to
+ * XMLHttpRequest. Sets gSecInfo, gCert, gBroken, and gChecking according to
  * the load information from the request. Probably should not be used directly.
  *
  * @param {XMLHttpRequest} req
@@ -74,10 +76,9 @@ function initExceptionDialog() {
  */
 function grabCert(req, evt) {
   if (req.channel && req.channel.securityInfo) {
-    gSSLStatus = req.channel.securityInfo
-                    .QueryInterface(Ci.nsISSLStatusProvider).SSLStatus;
-    gCert = gSSLStatus ? gSSLStatus.QueryInterface(Ci.nsISSLStatus).serverCert
-                       : null;
+    gSecInfo = req.channel.securityInfo
+                  .QueryInterface(Ci.nsITransportSecurityInfo);
+    gCert = gSecInfo ? gSecInfo.serverCert : null;
   }
   gBroken = evt.type == "error";
   gChecking = false;
@@ -90,7 +91,7 @@ function grabCert(req, evt) {
  */
 function checkCert() {
   gCert = null;
-  gSSLStatus = null;
+  gSecInfo = null;
   gChecking = true;
   gBroken = false;
   updateCertStatus();
@@ -159,7 +160,8 @@ function resetDialog() {
  */
 function handleTextChange() {
   var checkCertButton = document.getElementById("checkCertButton");
-  checkCertButton.disabled = !(document.getElementById("locationTextBox").value);
+  checkCertButton.disabled =
+                    !(document.getElementById("locationTextBox").value);
   if (gNeedReset) {
     gNeedReset = false;
     resetDialog();
@@ -182,13 +184,13 @@ function updateCertStatus() {
       var uts = "addExceptionUnverifiedOrBadSignatureShort";
       var utl = "addExceptionUnverifiedOrBadSignatureLong2";
       var use1 = false;
-      if (gSSLStatus.isDomainMismatch) {
+      if (gSecInfo.isDomainMismatch) {
         bucketId += gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_FLAG_DOMAIN;
         use1 = true;
         shortDesc = mms;
         longDesc  = mml;
       }
-      if (gSSLStatus.isNotValidAtThisTime) {
+      if (gSecInfo.isNotValidAtThisTime) {
         bucketId += gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_FLAG_TIME;
         if (!use1) {
           use1 = true;
@@ -200,8 +202,9 @@ function updateCertStatus() {
           longDesc2  = exl;
         }
       }
-      if (gSSLStatus.isUntrusted) {
-        bucketId += gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_FLAG_UNTRUSTED;
+      if (gSecInfo.isUntrusted) {
+        bucketId +=
+          gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_FLAG_UNTRUSTED;
         if (!use1) {
           use1 = true;
           shortDesc = uts;
@@ -229,7 +232,8 @@ function updateCertStatus() {
       pe.disabled = inPrivateBrowsing;
       pe.checked = !inPrivateBrowsing;
 
-      setText("headerDescription", gPKIBundle.getString("addExceptionInvalidHeader"));
+      setText("headerDescription",
+              gPKIBundle.getString("addExceptionInvalidHeader"));
     } else {
       shortDesc = "addExceptionValidShort";
       longDesc  = "addExceptionValidLong";
@@ -294,29 +298,34 @@ function viewCertButtonClick() {
  * Handle user request to add an exception for the specified cert
  */
 function addException() {
-  if (!gCert || !gSSLStatus) {
+  if (!gCert || !gSecInfo) {
     return;
   }
 
   var overrideService = Cc["@mozilla.org/security/certoverride;1"]
                           .getService(Ci.nsICertOverrideService);
   var flags = 0;
-  let confirmBucketId = gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_BASE;
-  if (gSSLStatus.isUntrusted) {
+  let confirmBucketId =
+        gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_BASE;
+  if (gSecInfo.isUntrusted) {
     flags |= overrideService.ERROR_UNTRUSTED;
-    confirmBucketId += gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_UNTRUSTED;
+    confirmBucketId +=
+        gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_UNTRUSTED;
   }
-  if (gSSLStatus.isDomainMismatch) {
+  if (gSecInfo.isDomainMismatch) {
     flags |= overrideService.ERROR_MISMATCH;
-    confirmBucketId += gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_DOMAIN;
+    confirmBucketId +=
+           gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_DOMAIN;
   }
-  if (gSSLStatus.isNotValidAtThisTime) {
+  if (gSecInfo.isNotValidAtThisTime) {
     flags |= overrideService.ERROR_TIME;
-    confirmBucketId += gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_TIME;
+    confirmBucketId +=
+           gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_TIME;
   }
 
   var permanentCheckbox = document.getElementById("permanent");
-  var shouldStorePermanently = permanentCheckbox.checked && !inPrivateBrowsingMode();
+  var shouldStorePermanently = permanentCheckbox.checked &&
+                               !inPrivateBrowsingMode();
   if (!permanentCheckbox.checked) {
     gSecHistogram.add(gNsISecTel.WARNING_BAD_CERT_TOP_DONT_REMEMBER_EXCEPTION);
   }

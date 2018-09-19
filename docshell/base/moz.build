@@ -37,22 +37,17 @@ DIRS += [
 
 XPIDL_SOURCES += [
     'nsCDefaultURIFixup.idl',
-    'nsIClipboardCommands.idl',
     'nsIContentViewer.idl',
     'nsIContentViewerEdit.idl',
     'nsIDocShell.idl',
-    'nsIDocShellLoadInfo.idl',
     'nsIDocShellTreeItem.idl',
     'nsIDocShellTreeOwner.idl',
     'nsIDocumentLoaderFactory.idl',
-    'nsIDownloadHistory.idl',
-    'nsIGlobalHistory2.idl',
     'nsILoadContext.idl',
     'nsIPrivacyTransitionObserver.idl',
     'nsIReflowObserver.idl',
     'nsIRefreshURI.idl',
     'nsIScrollable.idl',
-    'nsITextScroll.idl',
     'nsITooltipListener.idl',
     'nsITooltipTextProvider.idl',
     'nsIURIFixup.idl',
@@ -65,11 +60,12 @@ XPIDL_MODULE = 'docshell'
 
 EXPORTS += [
     'nsCTooltipTextProvider.h',
+    'nsDocShell.h',
+    'nsDocShellLoadInfo.h',
     'nsDocShellLoadTypes.h',
     'nsDocShellTreeOwner.h',
     'nsILinkHandler.h',
     'nsIScrollObserver.h',
-    'nsIWebShellServices.h',
     'SerializedLoadContext.h',
 ]
 
@@ -78,7 +74,14 @@ EXPORTS.mozilla += [
     'LoadContext.h',
 ]
 
+EXPORTS.mozilla.dom += [
+    'BrowsingContext.h',
+    'ChromeBrowsingContext.h'
+]
+
 UNIFIED_SOURCES += [
+    'BrowsingContext.cpp',
+    'ChromeBrowsingContext.cpp',
     'LoadContext.cpp',
     'nsAboutRedirector.cpp',
     'nsDefaultURIFixup.cpp',
@@ -94,9 +97,6 @@ UNIFIED_SOURCES += [
     'SerializedLoadContext.cpp',
 ]
 
-if not CONFIG['MOZ_PLACES']:
-    UNIFIED_SOURCES += ['nsDownloadHistory.cpp']
-
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
@@ -110,6 +110,7 @@ LOCAL_INCLUDES += [
     '/netwerk/base',
     '/netwerk/protocol/viewsource',
     '/toolkit/components/browser',
+    '/toolkit/components/find',
     '/tools/profiler',
 ]
 

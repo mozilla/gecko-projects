@@ -24,6 +24,17 @@ cargo_extra_outputs = {
         'libglobal_static.a',
         'src/os/unix/global_static.o',
     ],
+    'lmdb-sys': [
+        'liblmdb.a',
+        'midl.o',
+        'mdb.o',
+    ],
+    'num-integer': [
+        'rust_out.o',
+    ],
+    'num-traits': [
+        'rust_out.o',
+    ],
     'selectors': [
         'ascii_case_insensitive_html_attributes.rs',
     ],

@@ -47,6 +47,21 @@ XPCStringConvert::FinalizeDOMString(const JSStringFinalizer* fin, char16_t* char
 const JSStringFinalizer XPCStringConvert::sDOMStringFinalizer =
     { XPCStringConvert::FinalizeDOMString };
 
+// static
+void
+XPCStringConvert::FinalizeDynamicAtom(const JSStringFinalizer* fin,
+                                      char16_t* chars)
+{
+    nsDynamicAtom* atom = nsDynamicAtom::FromChars(chars);
+    // nsDynamicAtom::Release is always-inline and defined in a translation unit
+    // we can't get to here.  So we need to go through nsAtom::Release to call
+    // it.
+    static_cast<nsAtom*>(atom)->Release();
+}
+
+const JSStringFinalizer XPCStringConvert::sDynamicAtomFinalizer =
+    { XPCStringConvert::FinalizeDynamicAtom };
+
 // convert a readable to a JSString, copying string data
 // static
 bool
@@ -66,17 +81,20 @@ XPCStringConvert::ReadableToJSVal(JSContext* cx,
     nsStringBuffer* buf = nsStringBuffer::FromString(readable);
     if (buf) {
         bool shared;
-        if (!StringBufferToJSVal(cx, buf, length, vp, &shared))
+        if (!StringBufferToJSVal(cx, buf, length, vp, &shared)) {
             return false;
-        if (shared)
+        }
+        if (shared) {
             *sharedBuffer = buf;
+        }
         return true;
     }
 
     // blech, have to copy.
     JSString* str = JS_NewUCStringCopyN(cx, readable.BeginReading(), length);
-    if (!str)
+    if (!str) {
         return false;
+    }
     vp.setString(str);
     return true;
 }
@@ -87,8 +105,9 @@ bool
 NonVoidStringToJsval(JSContext* cx, nsAString& str, MutableHandleValue rval)
 {
     nsStringBuffer* sharedBuffer;
-    if (!XPCStringConvert::ReadableToJSVal(cx, str, &sharedBuffer, rval))
+    if (!XPCStringConvert::ReadableToJSVal(cx, str, &sharedBuffer, rval)) {
       return false;
+    }
 
     if (sharedBuffer) {
         // The string was shared but ReadableToJSVal didn't addref it.

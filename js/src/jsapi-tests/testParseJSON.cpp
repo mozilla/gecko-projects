@@ -10,6 +10,7 @@
 
 #include "builtin/String.h"
 
+#include "js/JSON.h"
 #include "js/Printf.h"
 #include "jsapi-tests/tests.h"
 
@@ -29,15 +30,17 @@ class AutoInflatedString {
     template<size_t N> void operator=(const char (&str)[N]) {
         length_ = N - 1;
         chars_ = InflateString(cx, str, length_);
-        if (!chars_)
+        if (!chars_) {
             abort();
+        }
     }
 
     void operator=(const char* str) {
         length_ = strlen(str);
         chars_ = InflateString(cx, str, length_);
-        if (!chars_)
+        if (!chars_) {
             abort();
+        }
     }
 
     const char16_t* chars() const { return chars_; }

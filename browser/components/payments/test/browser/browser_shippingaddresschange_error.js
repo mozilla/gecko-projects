@@ -37,7 +37,7 @@ add_task(async function test_show_error_on_addresschange() {
     }, PTU.ContentTasks.awaitPaymentRequestEventPromise);
 
     await spawnPaymentDialogTask(frame, expectedText => {
-      let errorText = content.document.querySelector("#error-text");
+      let errorText = content.document.querySelector("header .page-error");
       is(errorText.textContent, expectedText, "Error text should be on dialog");
       ok(content.isVisible(errorText), "Error text should be visible");
     }, PTU.Details.genericShippingError.error);
@@ -59,7 +59,7 @@ add_task(async function test_show_error_on_addresschange() {
     }, PTU.ContentTasks.awaitPaymentRequestEventPromise);
 
     await spawnPaymentDialogTask(frame, () => {
-      let errorText = content.document.querySelector("#error-text");
+      let errorText = content.document.querySelector("header .page-error");
       is(errorText.textContent, "", "Error text should not be on dialog");
       ok(content.isHidden(errorText), "Error text should not be visible");
     });
@@ -92,6 +92,7 @@ add_task(async function test_show_field_specific_error_on_addresschange() {
       eventName: "shippingaddresschange",
       details: Object.assign({},
                              PTU.Details.fieldSpecificErrors,
+                             PTU.Details.noShippingOptions,
                              PTU.Details.total2USD),
     }, PTU.ContentTasks.updateWith);
 
@@ -111,7 +112,7 @@ add_task(async function test_show_field_specific_error_on_addresschange() {
         return Object.keys(state.request.paymentDetails.shippingAddressErrors).length;
       }, "Check that there are shippingAddressErrors");
 
-      is(content.document.querySelector("#error-text").textContent,
+      is(content.document.querySelector("header .page-error").textContent,
          PTU.Details.fieldSpecificErrors.error,
          "Error text should be present on dialog");
 
@@ -130,12 +131,27 @@ add_task(async function test_show_field_specific_error_on_addresschange() {
       let errorFieldMap =
         Cu.waiveXrays(content.document.querySelector("address-form"))._errorFieldMap;
       for (let [errorName, errorValue] of Object.entries(shippingAddressErrors)) {
-        let field = content.document.querySelector(errorFieldMap[errorName]);
+        let fieldSelector = errorFieldMap[errorName];
+        let containerSelector = fieldSelector + "-container";
+        let container = content.document.querySelector(containerSelector);
         try {
-          is(field.querySelector(".error-text").textContent, errorValue,
+          is(container.querySelector(".error-text").textContent, errorValue,
              "Field specific error should be associated with " + errorName);
         } catch (ex) {
-          ok(false, `no field found for ${errorName}. selector= ${errorFieldMap[errorName]}`);
+          ok(false, `no container for ${errorName}. selector= ${containerSelector}`);
+        }
+        try {
+          let field = content.document.querySelector(fieldSelector);
+          let oldValue = field.value;
+          if (field.localName == "select") {
+            // Flip between empty and the selected entry so country fields won't change.
+            content.fillField(field, "");
+            content.fillField(field, oldValue);
+          } else {
+            content.fillField(field, field.value.split("").reverse().join(""));
+          }
+        } catch (ex) {
+          ok(false, `no field found for ${errorName}. selector= ${fieldSelector}`);
         }
       }
     });
@@ -164,7 +180,7 @@ add_task(async function test_show_field_specific_error_on_addresschange() {
         return !Object.keys(state.request.paymentDetails.shippingAddressErrors).length;
       }, "Check that there are no more shippingAddressErrors");
 
-      is(content.document.querySelector("#error-text").textContent,
+      is(content.document.querySelector("header .page-error").textContent,
          "", "Error text should not be present on dialog");
 
       info("click the Edit link again");
@@ -194,4 +210,4 @@ add_task(async function test_show_field_specific_error_on_addresschange() {
 
     await BrowserTestUtils.waitForCondition(() => win.closed, "dialog should be closed");
   });
-}).skip();
+});

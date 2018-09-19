@@ -47,10 +47,11 @@ RematerializedFrame::RematerializedFrame(JSContext* cx, uint8_t* top, unsigned n
     envChain_(nullptr),
     argsObj_(nullptr)
 {
-    if (iter.isFunctionFrame())
+    if (iter.isFunctionFrame()) {
         callee_ = iter.callee(fallback);
-    else
+    } else {
         callee_ = nullptr;
+    }
 
     CopyValueToRematerializedFrame op(slots_);
     iter.readFrameArgsAndLocals(cx, op, op, &envChain_, &hasInitialEnv_, &returnValue_,
@@ -70,15 +71,14 @@ RematerializedFrame::New(JSContext* cx, uint8_t* top, InlineFrameIterator& iter,
     // reduce the extra slot count by one.  However, if there are zero slot
     // allocations total, then reducing the slots by one will lead to
     // the memory allocation being smaller  than sizeof(RematerializedFrame).
-    if (extraSlots > 0)
+    if (extraSlots > 0) {
         extraSlots -= 1;
+    }
 
-    size_t numBytes = sizeof(RematerializedFrame) + (extraSlots * sizeof(Value));
-    MOZ_ASSERT(numBytes >= sizeof(RematerializedFrame));
-
-    void* buf = cx->pod_calloc<uint8_t>(numBytes);
-    if (!buf)
+    RematerializedFrame* buf = cx->pod_calloc_with_extra<RematerializedFrame, Value>(extraSlots);
+    if (!buf) {
         return nullptr;
+    }
 
     return new (buf) RematerializedFrame(cx, top, iter.numActualArgs(), iter, fallback);
 }
@@ -90,21 +90,25 @@ RematerializedFrame::RematerializeInlineFrames(JSContext* cx, uint8_t* top,
                                                GCVector<RematerializedFrame*>& frames)
 {
     Rooted<GCVector<RematerializedFrame*>> tempFrames(cx, GCVector<RematerializedFrame*>(cx));
-    if (!tempFrames.resize(iter.frameCount()))
+    if (!tempFrames.resize(iter.frameCount())) {
         return false;
+    }
 
     while (true) {
         size_t frameNo = iter.frameNo();
         tempFrames[frameNo].set(RematerializedFrame::New(cx, top, iter, fallback));
-        if (!tempFrames[frameNo])
+        if (!tempFrames[frameNo]) {
             return false;
+        }
         if (tempFrames[frameNo]->environmentChain()) {
-            if (!EnsureHasEnvironmentObjects(cx, tempFrames[frameNo].get()))
+            if (!EnsureHasEnvironmentObjects(cx, tempFrames[frameNo].get())) {
                 return false;
+            }
         }
 
-        if (!iter.more())
+        if (!iter.more()) {
             break;
+        }
         ++iter;
     }
 
@@ -130,8 +134,9 @@ RematerializedFrame::callObj() const
     MOZ_ASSERT(hasInitialEnvironment());
 
     JSObject* env = environmentChain();
-    while (!env->is<CallObject>())
+    while (!env->is<CallObject>()) {
         env = env->enclosingEnvironment();
+    }
     return env->as<CallObject>();
 }
 
@@ -152,10 +157,12 @@ RematerializedFrame::trace(JSTracer* trc)
 {
     TraceRoot(trc, &script_, "remat ion frame script");
     TraceRoot(trc, &envChain_, "remat ion frame env chain");
-    if (callee_)
+    if (callee_) {
         TraceRoot(trc, &callee_, "remat ion frame callee");
-    if (argsObj_)
+    }
+    if (argsObj_) {
         TraceRoot(trc, &argsObj_, "remat ion frame argsobj");
+    }
     TraceRoot(trc, &returnValue_, "remat ion frame return value");
     TraceRoot(trc, &thisArgument_, "remat ion frame this");
     TraceRoot(trc, &newTarget_, "remat ion frame newTarget");
@@ -208,10 +215,11 @@ RematerializedFrame::dump()
 #endif
 
         for (unsigned i = 0; i < numActualArgs(); i++) {
-            if (i < numFormalArgs())
+            if (i < numFormalArgs()) {
                 fprintf(stderr, "  formal (arg %d): ", i);
-            else
+            } else {
                 fprintf(stderr, "  overflown (arg %d): ", i);
+            }
 #ifdef DEBUG
             DumpValue(argv()[i]);
 #else

@@ -51,9 +51,6 @@ public:
 
     virtual gfxPlatformFontList* CreatePlatformFontList() override;
 
-    virtual nsresult GetStandardFamilyName(const nsAString& aFontName,
-                                           nsAString& aFamilyName) override;
-
     gfxFontGroup*
     CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
                     const gfxFontStyle *aStyle,
@@ -107,6 +104,21 @@ public:
     }
 #endif // MOZ_X11
 
+#ifdef MOZ_WAYLAND
+    void SetWaylandLastVsync(uint32_t aVsyncTimestamp) {
+      mWaylandLastVsyncTimestamp = aVsyncTimestamp;
+    }
+    int64_t GetWaylandLastVsync() {
+      return mWaylandLastVsyncTimestamp;
+    }
+    void SetWaylandFrameDelay(int64_t aFrameDelay) {
+      mWaylandFrameDelay = aFrameDelay;
+    }
+    int64_t GetWaylandFrameDelay() {
+      return mWaylandFrameDelay;
+    }
+#endif
+
 protected:
     bool CheckVariationFontSupport() override;
 
@@ -118,6 +130,10 @@ private:
 
 #ifdef MOZ_X11
     Display* mCompositorDisplay;
+#endif
+#ifdef MOZ_WAYLAND
+    int64_t  mWaylandLastVsyncTimestamp;
+    int64_t  mWaylandFrameDelay;
 #endif
 };
 

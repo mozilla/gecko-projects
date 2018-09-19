@@ -107,35 +107,37 @@ BinASTParserBase::~BinASTParserBase()
 // ------------- Toplevel constructions
 
 template<typename Tok> JS::Result<ParseNode*>
-BinASTParser<Tok>::parse(const Vector<uint8_t>& data)
+BinASTParser<Tok>::parse(GlobalSharedContext* globalsc, const Vector<uint8_t>& data)
 {
-    return parse(data.begin(), data.length());
+    return parse(globalsc, data.begin(), data.length());
 }
 
 template<typename Tok> JS::Result<ParseNode*>
-BinASTParser<Tok>::parse(const uint8_t* start, const size_t length)
+BinASTParser<Tok>::parse(GlobalSharedContext* globalsc, const uint8_t* start, const size_t length)
 {
-    auto result = parseAux(start, length);
+    auto result = parseAux(globalsc, start, length);
     poison(); // Make sure that the parser is never used again accidentally.
     return result;
 }
 
 
 template<typename Tok> JS::Result<ParseNode*>
-BinASTParser<Tok>::parseAux(const uint8_t* start, const size_t length)
+BinASTParser<Tok>::parseAux(GlobalSharedContext* globalsc,
+                            const uint8_t* start, const size_t length)
 {
+    MOZ_ASSERT(globalsc);
+
     tokenizer_.emplace(cx_, start, length);
 
-    Directives directives(options().strictOption);
-    GlobalSharedContext globalsc(cx_, ScopeKind::Global,
-                                 directives, options().extraWarningsOption);
-    BinParseContext globalpc(cx_, this, &globalsc, /* newDirectives = */ nullptr);
-    if (!globalpc.init())
+    BinParseContext globalpc(cx_, this, globalsc, /* newDirectives = */ nullptr);
+    if (!globalpc.init()) {
         return cx_->alreadyReportedError();
+    }
 
     ParseContext::VarScope varScope(cx_, &globalpc, usedNames_);
-    if (!varScope.init(&globalpc))
+    if (!varScope.init(&globalpc)) {
         return cx_->alreadyReportedError();
+    }
 
     MOZ_TRY(tokenizer_->readHeader());
 
@@ -144,9 +146,10 @@ BinASTParser<Tok>::parseAux(const uint8_t* start, const size_t length)
 
     mozilla::Maybe<GlobalScope::Data*> bindings = NewGlobalScopeData(cx_, varScope, alloc_,
                                                                      parseContext_);
-    if (!bindings)
+    if (!bindings) {
         return cx_->alreadyReportedError();
-    globalsc.bindings = *bindings;
+    }
+    globalsc->bindings = *bindings;
 
     return result; // Magic conversion to Ok.
 }
@@ -159,20 +162,20 @@ BinASTParser<Tok>::buildFunctionBox(GeneratorKind generatorKind,
     ParseNode* name)
 {
     RootedAtom atom(cx_);
-    if (name)
+    if (name) {
         atom = name->name();
+    }
 
     // Allocate the function before walking down the tree.
     RootedFunction fun(cx_);
     BINJS_TRY_VAR(fun, AllocNewFunction(cx_, atom, syntax, generatorKind, functionAsyncKind, nullptr));
-    BINJS_TRY_DECL(funbox, alloc_.new_<FunctionBox>(cx_,
-        traceListHead_,
-        fun,
-        /* toStringStart = */ 0,
-        Directives(parseContext_),
-        /* extraWarning = */ false,
-        generatorKind,
-        functionAsyncKind));
+
+    auto* funbox = alloc_.new_<FunctionBox>(cx_, traceListHead_, fun, /* toStringStart = */ 0,
+                                            Directives(parseContext_), /* extraWarning = */ false,
+                                            generatorKind, functionAsyncKind);
+    if (!funbox) {
+        return raiseOOM();
+    }
 
     traceListHead_ = funbox;
     funbox->initWithEnclosingParseContext(parseContext_, syntax);
@@ -181,19 +184,19 @@ BinASTParser<Tok>::buildFunctionBox(GeneratorKind generatorKind,
 
 template<typename Tok> JS::Result<ParseNode*>
 BinASTParser<Tok>::buildFunction(const size_t start, const BinKind kind, ParseNode* name,
-                                 ParseNode* params, ParseNode* body, FunctionBox* funbox)
+                                 ListNode* params, ParseNode* body, FunctionBox* funbox)
 {
     TokenPos pos = tokenizer_->pos(start);
 
     // Set the argument count for building argument packets. Function.length is handled
     // by setting the appropriate funbox field during argument parsing.
-    funbox->function()->setArgCount(params ? uint16_t(params->pn_count) : 0);
+    funbox->function()->setArgCount(params ? uint16_t(params->count()) : 0);
 
     // ParseNode represents the body as concatenated after the params.
     params->appendWithoutOrderAssumption(body);
 
     bool isStatement = kind == BinKind::EagerFunctionDeclaration ||
-                       kind == BinKind::SkippableFunctionDeclaration;
+                       kind == BinKind::LazyFunctionDeclaration;
 
     BINJS_TRY_DECL(result, isStatement
                      ? factory_.newFunctionStatement(pos)
@@ -237,74 +240,91 @@ BinASTParser<Tok>::buildFunction(const size_t start, const BinKind kind, ParseNo
     return result;
 }
 
-// Try to mark the capture in the given scope, if the variable exists.
-// Return whether it was found in this scope and marked successfully.
-static bool TryMarkCaptureInScope(ParseContext::Scope& scope, HandleAtom atom)
+template<typename Tok> JS::Result<Ok>
+BinASTParser<Tok>::addScopeName(AssertedScopeKind scopeKind, HandleAtom name,
+                                ParseContext::Scope* scope, DeclarationKind declKind,
+                                bool isCaptured)
 {
-    auto name = scope.lookupDeclaredName(atom);
-    if (!name)
-        return false;
-    name->value()->setClosedOver();
-    return true;
+    auto ptr = scope->lookupDeclaredNameForAdd(name);
+    if (ptr) {
+        return raiseError("Variable redeclaration");
+    }
+
+    BINJS_TRY(scope->addDeclaredName(parseContext_, ptr, name.get(), declKind,
+                                     tokenizer_->offset()));
+
+    if (isCaptured) {
+        auto declaredPtr = scope->lookupDeclaredName(name);
+        MOZ_ASSERT(declaredPtr);
+        declaredPtr->value()->setClosedOver();
+    }
+
+    return Ok();
+}
+
+template<typename Tok> void
+BinASTParser<Tok>::captureFunctionName()
+{
+    MOZ_ASSERT(parseContext_->isFunctionBox());
+    MOZ_ASSERT(parseContext_->functionBox()->function()->isNamedLambda());
+
+    RootedAtom funName(cx_, parseContext_->functionBox()->function()->explicitName());
+    MOZ_ASSERT(funName);
+
+    auto ptr = parseContext_->namedLambdaScope().lookupDeclaredName(funName);
+    MOZ_ASSERT(ptr);
+    ptr->value()->setClosedOver();
 }
 
 template<typename Tok> JS::Result<Ok>
-BinASTParser<Tok>::parseAndUpdateCapturedNames(const BinKind kind)
+BinASTParser<Tok>::getDeclaredScope(AssertedScopeKind scopeKind, AssertedDeclaredKind kind,
+                                    ParseContext::Scope*& scope, DeclarationKind& declKind)
 {
-    // For the moment, we do not attempt to validate the list of captured names.
-    AutoList guard(*tokenizer_);
-    uint32_t length = 0;
-
-    MOZ_TRY(tokenizer_->enterList(length, guard));
-    RootedAtom name(cx_);
-    for (uint32_t i = 0; i < length; ++i) {
-        name = nullptr;
-
-        MOZ_TRY_VAR(name, tokenizer_->readAtom());
-        if (kind == BinKind::AssertedParameterScope) {
-            MOZ_ASSERT(parseContext_->isFunctionBox());
-
-            if (parseContext_->functionBox()->function()->isNamedLambda()) {
-                if (TryMarkCaptureInScope(parseContext_->namedLambdaScope(), name))
-                    continue;
-            }
-
-            if (!TryMarkCaptureInScope(parseContext_->functionScope(), name))
-                return raiseUndeclaredCapture(name);
-            continue;
+    MOZ_ASSERT(scopeKind == AssertedScopeKind::Block ||
+               scopeKind == AssertedScopeKind::Global ||
+               scopeKind == AssertedScopeKind::Var);
+    switch (kind) {
+      case AssertedDeclaredKind::Var:
+        if (scopeKind == AssertedScopeKind::Block) {
+            return raiseError("AssertedBlockScope cannot contain 'var' binding");
         }
-
-        if (kind == BinKind::AssertedVarScope) {
-            if (TryMarkCaptureInScope(parseContext_->varScope(), name))
-                continue;
-        }
-
-        if (!TryMarkCaptureInScope(*parseContext_->innermostScope(), name))
-            return raiseUndeclaredCapture(name);
+        declKind = DeclarationKind::Var;
+        scope = &parseContext_->varScope();
+        break;
+      case AssertedDeclaredKind::NonConstLexical:
+        declKind = DeclarationKind::Let;
+        scope = parseContext_->innermostScope();
+        break;
+      case AssertedDeclaredKind::ConstLexical:
+        declKind = DeclarationKind::Const;
+        scope = parseContext_->innermostScope();
+        break;
     }
-    MOZ_TRY(guard.done());
+
     return Ok();
 }
 
 template<typename Tok> JS::Result<Ok>
-BinASTParser<Tok>::parseAndUpdateScopeNames(ParseContext::Scope& scope, DeclarationKind kind)
+BinASTParser<Tok>::getBoundScope(AssertedScopeKind scopeKind,
+                                 ParseContext::Scope*& scope, DeclarationKind& declKind)
 {
-    AutoList guard(*tokenizer_);
-    uint32_t length = 0;
-
-    MOZ_TRY(tokenizer_->enterList(length, guard));
-    RootedAtom name(cx_);
-    for (uint32_t i = 0; i < length; ++i) {
-        name = nullptr;
-
-        MOZ_TRY_VAR(name, tokenizer_->readAtom());
-        auto ptr = scope.lookupDeclaredNameForAdd(name);
-        if (ptr)
-            return raiseError("Variable redeclaration");
-
-        BINJS_TRY(scope.addDeclaredName(parseContext_, ptr, name.get(), kind, tokenizer_->offset()));
+    MOZ_ASSERT(scopeKind == AssertedScopeKind::Catch ||
+               scopeKind == AssertedScopeKind::Parameter);
+    switch (scopeKind) {
+      case AssertedScopeKind::Catch:
+        declKind = DeclarationKind::CatchParameter;
+        scope = parseContext_->innermostScope();
+        break;
+      case AssertedScopeKind::Parameter:
+        MOZ_ASSERT(parseContext_->isFunctionBox());
+        declKind = DeclarationKind::PositionalFormalParameter;
+        scope = &parseContext_->functionScope();
+        break;
+      default:
+        MOZ_ASSERT_UNREACHABLE("Unexpected AssertedScopeKind");
+        break;
     }
-    MOZ_TRY(guard.done());
+
     return Ok();
 }
 
@@ -318,9 +338,64 @@ BinASTParser<Tok>::checkBinding(JSAtom* name)
         : *parseContext_->innermostScope();
 
     auto ptr = scope.lookupDeclaredName(name->asPropertyName());
-    if (!ptr)
+    if (!ptr) {
         return raiseMissingVariableInAssertedScope(name);
+    }
 
+    return Ok();
+}
+
+// Binary AST (revision 8eab67e0c434929a66ff6abe99ff790bca087dda)
+// 3.1.5 CheckPositionalParameterIndices.
+template<typename Tok> JS::Result<Ok>
+BinASTParser<Tok>::checkPositionalParameterIndices(Handle<GCVector<JSAtom*>> positionalParams,
+                                                   ListNode* params)
+{
+    MOZ_ASSERT(positionalParams.get().length() == params->count());
+
+    uint32_t i = 0;
+    for (ParseNode* param : params->contents()) {
+        if (param->isKind(ParseNodeKind::Assign)) {
+            param = param->as<AssignmentNode>().left();
+        }
+        MOZ_ASSERT(param->isKind(ParseNodeKind::Name) ||
+                   param->isKind(ParseNodeKind::Object) ||
+                   param->isKind(ParseNodeKind::Array) ||
+                   param->isKind(ParseNodeKind::Spread));
+
+        if (JSAtom* name = positionalParams.get()[i]) {
+            // Simple or default parameter.
+            if (param->isKind(ParseNodeKind::Object) || param->isKind(ParseNodeKind::Array)) {
+                return raiseError("AssertedPositionalParameterName: expected positional parameter, got destructuring parameter");
+            }
+            if (param->isKind(ParseNodeKind::Spread)) {
+                return raiseError("AssertedPositionalParameterName: expected positional parameter, got rest parameter");
+            }
+
+            if (param->name() != name) {
+                return raiseError("AssertedPositionalParameterName: name mismatch");
+            }
+        } else {
+            // Destructuring or rest parameter.
+            if (param->isKind(ParseNodeKind::Name)) {
+                return raiseError("AssertedParameterName/AssertedRestParameterName: expected destructuring/rest parameter, got positional parameter");
+            }
+        }
+
+        i++;
+    }
+
+    return Ok();
+}
+
+// Binary AST (revision 8eab67e0c434929a66ff6abe99ff790bca087dda)
+// 3.1.13 CheckFunctionLength.
+template<typename Tok> JS::Result<Ok>
+BinASTParser<Tok>::checkFunctionLength(uint32_t expectedLength)
+{
+    if (parseContext_->functionBox()->length != expectedLength) {
+        return raiseError("Function length does't match");
+    }
     return Ok();
 }
 
@@ -331,8 +406,9 @@ BinASTParser<Tok>::checkClosedVars(ParseContext::Scope& scope)
         if (UsedNamePtr p = usedNames_.lookup(bi.name())) {
             bool closedOver;
             p->value().noteBoundInScope(parseContext_->scriptId(), scope.id(), &closedOver);
-            if (closedOver && !bi.closedOver())
+            if (closedOver && !bi.closedOver()) {
                 return raiseInvalidClosedVar(bi.name());
+            }
         }
     }
 
@@ -346,28 +422,32 @@ BinASTParser<Tok>::checkFunctionClosedVars()
 
     MOZ_TRY(checkClosedVars(*parseContext_->innermostScope()));
     MOZ_TRY(checkClosedVars(parseContext_->functionScope()));
-    if (parseContext_->functionBox()->function()->isNamedLambda())
+    if (parseContext_->functionBox()->function()->isNamedLambda()) {
         MOZ_TRY(checkClosedVars(parseContext_->namedLambdaScope()));
+    }
 
     return Ok();
 }
 
 template<typename Tok> JS::Result<ParseNode*>
-BinASTParser<Tok>::appendDirectivesToBody(ParseNode* body, ParseNode* directives)
+BinASTParser<Tok>::appendDirectivesToBody(ListNode* body, ListNode* directives)
 {
-    ParseNode* result = body;
-    if (directives && directives->pn_count >= 1) {
-        MOZ_ASSERT(directives->isArity(PN_LIST));
+    if (!directives) {
+        return body;
+    }
 
+    ParseNode* result = body;
+    if (!directives->empty()) {
         // Convert directive list to a list of strings.
-        BINJS_TRY_DECL(prefix, factory_.newStatementList(directives->pn_head->pn_pos));
-        for (ParseNode* iter = directives->pn_head; iter != nullptr; iter = iter->pn_next) {
+        auto pos = directives->head()->pn_pos;
+        BINJS_TRY_DECL(prefix, factory_.newStatementList(pos));
+        for (ParseNode* iter : directives->contents()) {
             BINJS_TRY_DECL(statement, factory_.newExprStatement(iter, iter->pn_pos.end));
             prefix->appendWithoutOrderAssumption(statement);
         }
 
         // Prepend to the body.
-        ParseNode* iter = body->pn_head;
+        ParseNode* iter = body->head();
         while (iter) {
             ParseNode* next = iter->pn_next;
             prefix->appendWithoutOrderAssumption(iter);
@@ -376,9 +456,6 @@ BinASTParser<Tok>::appendDirectivesToBody(ParseNode* body, ParseNode* directives
         prefix->setKind(body->getKind());
         prefix->setOp(body->getOp());
         result = prefix;
-#if defined(DEBUG)
-        result->checkListConsistency();
-#endif // defined(DEBUG)
     }
 
     return result;
@@ -388,13 +465,6 @@ template<typename Tok> mozilla::GenericErrorResult<JS::Error&>
 BinASTParser<Tok>::raiseInvalidClosedVar(JSAtom* name)
 {
     return raiseError("Captured variable was not declared as captured");
-}
-
-template<typename Tok> mozilla::GenericErrorResult<JS::Error&>
-BinASTParser<Tok>::raiseUndeclaredCapture(JSAtom* name)
-{
-    // As below, don't put the name in a message.
-    return raiseError("Captured variable undeclared in scope");
 }
 
 template<typename Tok> mozilla::GenericErrorResult<JS::Error&>
@@ -502,8 +572,9 @@ BinASTParser<Tok>::errorAtVA(uint32_t offset, unsigned errorNumber, va_list* arg
 template<typename Tok> bool
 BinASTParser<Tok>::reportExtraWarningErrorNumberVA(UniquePtr<JSErrorNotes> notes, uint32_t offset, unsigned errorNumber, va_list* args)
 {
-    if (!options().extraWarningsOption)
+    if (!options().extraWarningsOption) {
         return true;
+    }
 
     ErrorMetadata metadata;
     metadata.filename = getFilename();
@@ -522,8 +593,9 @@ BinASTParser<Tok>::reportExtraWarningErrorNumberVA(UniquePtr<JSErrorNotes> notes
 bool
 BinASTParserBase::hasUsedName(HandlePropertyName name)
 {
-    if (UsedNamePtr p = usedNames_.lookup(name))
+    if (UsedNamePtr p = usedNames_.lookup(name)) {
         return p->value().isUsedInScript(parseContext_->scriptId());
+    }
 
     return false;
 }

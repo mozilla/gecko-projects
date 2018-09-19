@@ -11,6 +11,8 @@
 
 #include "vm/ProxyObject.h"
 
+#include "gc/WeakMap-inl.h"
+
 namespace js {
 
 static bool
@@ -37,10 +39,7 @@ WeakCollectionPutEntryInternal(JSContext* cx, Handle<WeakCollectionObject*> obj,
     ObjectValueMap* map = obj->getMap();
     if (!map) {
         auto newMap = cx->make_unique<ObjectValueMap>(cx, obj.get());
-        if (!newMap)
-            return false;
-        if (!newMap->init()) {
-            JS_ReportOutOfMemory(cx);
+        if (!newMap) {
             return false;
         }
         map = newMap.release();
@@ -48,13 +47,15 @@ WeakCollectionPutEntryInternal(JSContext* cx, Handle<WeakCollectionObject*> obj,
     }
 
     // Preserve wrapped native keys to prevent wrapper optimization.
-    if (!TryPreserveReflector(cx, key))
+    if (!TryPreserveReflector(cx, key)) {
         return false;
+    }
 
     if (JSWeakmapKeyDelegateOp op = key->getClass()->extWeakmapKeyDelegateOp()) {
         RootedObject delegate(cx, op(key));
-        if (delegate && !TryPreserveReflector(cx, delegate))
+        if (delegate && !TryPreserveReflector(cx, delegate)) {
             return false;
+        }
     }
 
     MOZ_ASSERT(key->compartment() == obj->compartment());

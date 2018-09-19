@@ -6,7 +6,6 @@
 
 var EXPORTED_SYMBOLS = ["ContentRestore"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
 ChromeUtils.import("resource://gre/modules/Services.jsm", this);
 
 ChromeUtils.defineModuleGetter(this, "DocShellCapabilities",
@@ -85,7 +84,7 @@ function ContentRestore(chromeGlobal) {
   let EXPORTED_METHODS = ["restoreHistory",
                           "restoreTabContent",
                           "restoreDocument",
-                          "resetRestore"
+                          "resetRestore",
                          ];
 
   for (let method of EXPORTED_METHODS) {
@@ -153,7 +152,7 @@ ContentRestoreInternal.prototype = {
     let activePageData = tabData.entries[activeIndex] || {};
     let uri = activePageData.url || null;
     if (uri && !loadArguments) {
-      webNavigation.setCurrentURI(Utils.makeURI(uri));
+      webNavigation.setCurrentURI(Services.io.newURI(uri));
     }
 
     SessionHistory.restore(this.docShell, tabData);
@@ -190,7 +189,7 @@ ContentRestoreInternal.prototype = {
 
         // Notify the parent.
         callbacks.onLoadStarted();
-      }
+      },
     });
   },
 
@@ -213,7 +212,7 @@ ContentRestoreInternal.prototype = {
     // load happens. Don't bother doing this if we're restoring immediately
     // due to a process switch.
     if (!isRemotenessUpdate) {
-      webNavigation.setCurrentURI(Utils.makeURI("about:blank"));
+      webNavigation.setCurrentURI(Services.io.newURI("about:blank"));
     }
 
     try {
@@ -221,7 +220,7 @@ ContentRestoreInternal.prototype = {
         // A load has been redirected to a new process so get history into the
         // same state it was before the load started then trigger the load.
         let referrer = loadArguments.referrer ?
-                       Utils.makeURI(loadArguments.referrer) : null;
+                       Services.io.newURI(loadArguments.referrer) : null;
         let referrerPolicy = ("referrerPolicy" in loadArguments
             ? loadArguments.referrerPolicy
             : Ci.nsIHttpChannel.REFERRER_POLICY_UNSET);
@@ -299,7 +298,7 @@ ContentRestoreInternal.prototype = {
         this.resetRestore();
 
         finishCallback();
-      }
+      },
     });
   },
 
@@ -315,8 +314,7 @@ ContentRestoreInternal.prototype = {
     let {formdata, scrollPositions} = this._restoringDocument;
     this._restoringDocument = null;
 
-    let window = this.docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIDOMWindow);
+    let window = this.docShell.domWindow;
 
     // Restore form data.
     restoreFrameTreeData(window, formdata, (frame, data) => {
@@ -355,7 +353,7 @@ ContentRestoreInternal.prototype = {
       this._progressListener.uninstall();
     }
     this._progressListener = null;
-  }
+  },
 };
 
 /*
@@ -373,7 +371,7 @@ function HistoryListener(docShell, callback) {
 HistoryListener.prototype = {
   QueryInterface: ChromeUtils.generateQI([
     Ci.nsISHistoryListener,
-    Ci.nsISupportsWeakReference
+    Ci.nsISupportsWeakReference,
   ]),
 
   uninstall() {
@@ -383,10 +381,8 @@ HistoryListener.prototype = {
     }
   },
 
-  OnHistoryGoBack(backURI) { return true; },
-  OnHistoryGoForward(forwardURI) { return true; },
-  OnHistoryGotoIndex(index, gotoURI) { return true; },
-  OnHistoryPurge(numEntries) { return true; },
+  OnHistoryGotoIndex(index, gotoURI) {},
+  OnHistoryPurge(numEntries) {},
   OnHistoryReplaceEntry(index) {},
 
   // This will be called for a pending tab when loadURI(uri) is called where
@@ -403,7 +399,7 @@ HistoryListener.prototype = {
 
     // Reset the tab's URL to what it's actually showing. Without this loadURI()
     // would use the current document and change the displayed URL only.
-    this.webNavigation.setCurrentURI(Utils.makeURI("about:blank"));
+    this.webNavigation.setCurrentURI(Services.io.newURI("about:blank"));
 
     // Kick off a new load so that we navigate away from about:blank to the
     // new URL that was passed to loadURI(). The new load will cause a
@@ -420,14 +416,6 @@ HistoryListener.prototype = {
 
     // Cancel the load.
     return false;
-  },
-
-  OnLengthChanged(aCount) {
-    // Ignore, the method is implemented so that XPConnect doesn't throw!
-  },
-
-  OnIndexChanged(aIndex) {
-    // Ignore, the method is implemented so that XPConnect doesn't throw!
   },
 };
 
@@ -453,7 +441,7 @@ function ProgressListener(docShell, callbacks) {
 ProgressListener.prototype = {
   QueryInterface: ChromeUtils.generateQI([
     Ci.nsIWebProgressListener,
-    Ci.nsISupportsWeakReference
+    Ci.nsISupportsWeakReference,
   ]),
 
   uninstall() {

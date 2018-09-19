@@ -15,9 +15,11 @@
 #include "jsapi.h"
 #include "jsfriendapi.h"
 #include "js/Proxy.h"
+#include "js/CharacterEncoding.h"
 #include "js/Class.h"
 #include "js/MemoryMetrics.h"
 #include "js/Principals.h"
+#include "js/StructuredClone.h"
 #include "js/Wrapper.h"
 #include "assert.h"
 
@@ -917,6 +919,12 @@ WriteBytesToJSStructuredCloneData(const uint8_t* src, size_t len, JSStructuredCl
     assert(dest != nullptr);
 
     return dest->AppendBytes(reinterpret_cast<const char*>(src), len);
+}
+
+char*
+JSEncodeStringToUTF8(JSContext* cx, JS::HandleString string)
+{
+    return JS_EncodeStringToUTF8(cx, string).release();
 }
 
 } // extern "C"

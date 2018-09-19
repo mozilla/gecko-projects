@@ -57,7 +57,7 @@ const GMP_PLUGINS = [
     description:     "cdm_description",
     licenseURL:      "https://www.google.com/policies/privacy/",
     homepageURL:     "https://www.widevine.com/",
-    isEME:           true
+    isEME:           true,
   }];
 XPCOMUtils.defineConstant(this, "GMP_PLUGINS", GMP_PLUGINS);
 
@@ -237,6 +237,10 @@ GMPWrapper.prototype = {
 
   get foreignInstall() {
     return false;
+  },
+
+  get installTelemetryInfo() {
+    return {source: "gmp-plugin"};
   },
 
   isCompatibleWith(aAppVersion, aPlatformVersion) {
@@ -520,7 +524,7 @@ GMPWrapper.prototype = {
       // Not installed -> Valid.
       return {
         installed: false,
-        valid: true
+        valid: true,
       };
     }
 
@@ -532,7 +536,7 @@ GMPWrapper.prototype = {
       return {
         installed: true,
         mismatchedABI: true,
-        valid: false
+        valid: false,
       };
     }
 
@@ -540,7 +544,7 @@ GMPWrapper.prototype = {
     let filesOnDisk = this._arePluginFilesOnDisk();
     return {
       installed: true,
-      valid: filesOnDisk
+      valid: filesOnDisk,
     };
   },
 };
@@ -694,5 +698,5 @@ AddonManagerPrivate.registerProvider(GMPProvider, [
   new AddonManagerPrivate.AddonType("plugin", URI_EXTENSION_STRINGS,
                                     "type.plugin.name",
                                     AddonManager.VIEW_TYPE_LIST, 6000,
-                                    AddonManager.TYPE_SUPPORTS_ASK_TO_ACTIVATE)
+                                    AddonManager.TYPE_SUPPORTS_ASK_TO_ACTIVATE),
 ]);

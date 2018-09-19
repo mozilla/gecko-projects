@@ -6,11 +6,13 @@
 
 #include "DocumentOrShadowRoot.h"
 #include "mozilla/EventStateManager.h"
+#include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/StyleSheetList.h"
 #include "nsDocument.h"
 #include "nsFocusManager.h"
 #include "nsLayoutUtils.h"
 #include "nsSVGUtils.h"
+#include "nsWindowSizes.h"
 
 namespace mozilla {
 namespace dom {
@@ -24,6 +26,43 @@ DocumentOrShadowRoot::DocumentOrShadowRoot(nsIDocument& aDoc)
   : mAsNode(aDoc)
   , mKind(Kind::Document)
 {}
+
+void
+DocumentOrShadowRoot::AddSizeOfOwnedSheetArrayExcludingThis(
+  nsWindowSizes& aSizes,
+  const nsTArray<RefPtr<StyleSheet>>& aSheets) const
+{
+  size_t n = 0;
+  n += aSheets.ShallowSizeOfExcludingThis(aSizes.mState.mMallocSizeOf);
+  for (StyleSheet* sheet : aSheets) {
+    if (!sheet->GetAssociatedDocumentOrShadowRoot()) {
+      // Avoid over-reporting shared sheets.
+      continue;
+    }
+    n += sheet->SizeOfIncludingThis(aSizes.mState.mMallocSizeOf);
+  }
+
+  if (mKind == Kind::ShadowRoot) {
+    aSizes.mLayoutShadowDomStyleSheetsSize += n;
+  } else {
+    aSizes.mLayoutStyleSheetsSize += n;
+  }
+}
+
+void
+DocumentOrShadowRoot::AddSizeOfExcludingThis(nsWindowSizes& aSizes) const
+{
+  AddSizeOfOwnedSheetArrayExcludingThis(aSizes, mStyleSheets);
+  aSizes.mDOMOtherSize +=
+    mIdentifierMap.SizeOfExcludingThis(aSizes.mState.mMallocSizeOf);
+}
+
+DocumentOrShadowRoot::~DocumentOrShadowRoot()
+{
+  for (StyleSheet* sheet : mStyleSheets) {
+    sheet->ClearAssociatedDocumentOrShadowRoot();
+  }
+}
 
 StyleSheetList&
 DocumentOrShadowRoot::EnsureDOMStyleSheets()
@@ -176,9 +215,9 @@ DocumentOrShadowRoot::GetFullscreenElement()
     return nullptr;
   }
 
-  Element* element = AsNode().OwnerDoc()->FullScreenStackTop();
+  Element* element = AsNode().OwnerDoc()->FullscreenStackTop();
   NS_ASSERTION(!element ||
-               element->State().HasState(NS_EVENT_STATE_FULL_SCREEN),
+               element->State().HasState(NS_EVENT_STATE_FULLSCREEN),
     "Fullscreen element should have fullscreen styles applied");
 
   nsIContent* retargeted = Retarget(element);
@@ -339,6 +378,18 @@ DocumentOrShadowRoot::RemoveIDTargetObserver(nsAtom* aID,
   }
 
   entry->RemoveContentChangeCallback(aObserver, aData, aForImage);
+}
+
+
+Element*
+DocumentOrShadowRoot::LookupImageElement(const nsAString& aId)
+{
+  if (aId.IsEmpty()) {
+    return nullptr;
+  }
+
+  nsIdentifierMapEntry* entry = mIdentifierMap.GetEntry(aId);
+  return entry ? entry->GetImageIdElement() : nullptr;
 }
 
 void

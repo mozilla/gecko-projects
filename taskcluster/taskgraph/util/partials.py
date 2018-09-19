@@ -43,6 +43,9 @@ BALROG_PLATFORM_MAP = {
     "win64": [
         "WINNT_x86_64-msvc",
         "WINNT_x86_64-msvc-x64"
+    ],
+    "win64-asan-reporter": [
+        "WINNT_x86_64-msvc-x64-asan"
     ]
 }
 
@@ -54,6 +57,7 @@ FTP_PLATFORM_MAP = {
     "Linux_x86-gcc3": "linux-i686",
     "Linux_x86_64-gcc3": "linux-x86_64",
     "Linux_x86_64-gcc3-asan": "linux-x86_64-asan-reporter",
+    "WINNT_x86_64-msvc-x64-asan": "win64-asan-reporter",
     "WINNT_x86-msvc": "win32",
     "WINNT_x86-msvc-x64": "win32",
     "WINNT_x86-msvc-x86": "win32",
@@ -87,7 +91,10 @@ def get_builds(release_history, platform, locale):
 
 def get_partials_artifacts(release_history, platform, locale):
     platform = _sanitize_platform(platform)
-    return release_history.get(platform, {}).get(locale, {}).keys()
+    return [
+        (artifact, details.get('previousVersion', None))
+        for artifact, details in release_history.get(platform, {}).get(locale, {}).items()
+    ]
 
 
 def get_partials_artifact_map(release_history, platform, locale):

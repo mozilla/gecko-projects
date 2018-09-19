@@ -32,8 +32,9 @@ class ABIArgGenerator
     ABIArg& current() { return current_; }
 
     uint32_t stackBytesConsumedSoFar() const {
-        if (usedArgSlots_ <= 8)
+        if (usedArgSlots_ <= 8) {
             return 0;
+        }
 
         return (usedArgSlots_ - 8) * sizeof(int64_t);
     }
@@ -43,6 +44,7 @@ class ABIArgGenerator
 static constexpr Register ABINonArgReg0 = t0;
 static constexpr Register ABINonArgReg1 = t1;
 static constexpr Register ABINonArgReg2 = t2;
+static constexpr Register ABINonArgReg3 = t3;
 
 // This register may be volatile or nonvolatile. Avoid f23 which is the
 // ScratchDoubleReg.
@@ -66,9 +68,10 @@ static constexpr Register WasmTlsReg = s5;
 
 // Registers used for wasm table calls. These registers must be disjoint
 // from the ABI argument registers, WasmTlsReg and each other.
-static constexpr Register WasmTableCallScratchReg = ABINonArgReg0;
-static constexpr Register WasmTableCallSigReg = ABINonArgReg1;
-static constexpr Register WasmTableCallIndexReg = ABINonArgReg2;
+static constexpr Register WasmTableCallScratchReg0 = ABINonArgReg0;
+static constexpr Register WasmTableCallScratchReg1 = ABINonArgReg1;
+static constexpr Register WasmTableCallSigReg = ABINonArgReg2;
+static constexpr Register WasmTableCallIndexReg = ABINonArgReg3;
 
 static constexpr Register JSReturnReg = v1;
 static constexpr Register JSReturnReg_Type = JSReturnReg;
@@ -231,14 +234,16 @@ GetTempRegForIntArg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register* out)
     // float arguments. If this is needed, we will have to guess.
     MOZ_ASSERT(usedFloatArgs == 0);
 
-    if (GetIntArgReg(usedIntArgs, out))
+    if (GetIntArgReg(usedIntArgs, out)) {
         return true;
+    }
     // Unfortunately, we have to assume things about the point at which
     // GetIntArgReg returns false, because we need to know how many registers it
     // can allocate.
     usedIntArgs -= NumIntArgRegs;
-    if (usedIntArgs >= NumCallTempNonArgRegs)
+    if (usedIntArgs >= NumCallTempNonArgRegs) {
         return false;
+    }
     *out = CallTempNonArgRegs[usedIntArgs];
     return true;
 }

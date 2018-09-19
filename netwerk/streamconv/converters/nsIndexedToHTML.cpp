@@ -22,6 +22,7 @@
 #include "nsIPrefLocalizedString.h"
 #include "nsIStringBundle.h"
 #include "nsITextToSubURI.h"
+#include "nsDirIndexParser.h"
 #include "nsNativeCharsetUtils.h"
 #include "nsString.h"
 #include <algorithm>
@@ -151,8 +152,8 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
 
     channel->SetContentType(NS_LITERAL_CSTRING("text/html"));
 
-    mParser = do_CreateInstance("@mozilla.org/dirIndexParser;1",&rv);
-    if (NS_FAILED(rv)) return rv;
+    mParser = nsDirIndexParser::CreateInstance();
+    if (!mParser) return NS_ERROR_FAILURE;
 
     rv = mParser->SetListener(this);
     if (NS_FAILED(rv)) return rv;
@@ -163,7 +164,15 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
     nsAutoCString baseUri, titleUri;
     rv = uri->GetAsciiSpec(baseUri);
     if (NS_FAILED(rv)) return rv;
-    titleUri = baseUri;
+
+    nsCOMPtr<nsIURI> titleURL;
+    rv = NS_MutateURI(uri)
+           .SetQuery(EmptyCString())
+           .SetRef(EmptyCString())
+           .Finalize(titleURL);
+    if (NS_FAILED(rv)) {
+        titleURL = uri;
+    }
 
     nsCString parentStr;
 
@@ -187,15 +196,13 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
         // that - see above
 
         nsAutoCString pw;
-        rv = uri->GetPassword(pw);
+        rv = titleURL->GetPassword(pw);
         if (NS_FAILED(rv)) return rv;
         if (!pw.IsEmpty()) {
              nsCOMPtr<nsIURI> newUri;
-             rv = NS_MutateURI(uri)
+             rv = NS_MutateURI(titleURL)
                     .SetPassword(EmptyCString())
-                    .Finalize(newUri);
-             if (NS_FAILED(rv)) return rv;
-             rv = newUri->GetAsciiSpec(titleUri);
+                    .Finalize(titleURL);
              if (NS_FAILED(rv)) return rv;
         }
 
@@ -264,6 +271,11 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
             rv = uri->Resolve(NS_LITERAL_CSTRING(".."), parentStr);
             if (NS_FAILED(rv)) return rv;
         }
+    }
+
+    rv = titleURL->GetAsciiSpec(titleUri);
+    if (NS_FAILED(rv)) {
+        return rv;
     }
 
     buffer.AppendLiteral("<style type=\"text/css\">\n"
@@ -687,7 +699,7 @@ nsIndexedToHTML::OnIndexAvailable(nsIRequest *aRequest,
     // We don't know the file's character set yet, so retrieve the raw bytes
     // which will be decoded by the HTML parser.
     nsCString loc;
-    aIndex->GetLocation(getter_Copies(loc));
+    aIndex->GetLocation(loc);
 
     // Adjust the length in case unescaping shortened the string.
     loc.Truncate(nsUnescapeCount(loc.BeginWriting()));

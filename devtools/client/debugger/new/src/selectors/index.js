@@ -28,6 +28,18 @@ Object.keys(_sources).forEach(function (key) {
   });
 });
 
+var _tabs = require("../reducers/tabs");
+
+Object.keys(_tabs).forEach(function (key) {
+  if (key === "default" || key === "__esModule") return;
+  Object.defineProperty(exports, key, {
+    enumerable: true,
+    get: function () {
+      return _tabs[key];
+    }
+  });
+});
+
 var _pause = require("../reducers/pause");
 
 Object.keys(_pause).forEach(function (key) {
@@ -136,18 +148,6 @@ Object.keys(_projectTextSearch).forEach(function (key) {
   });
 });
 
-var _replay = require("../reducers/replay");
-
-Object.keys(_replay).forEach(function (key) {
-  if (key === "default" || key === "__esModule") return;
-  Object.defineProperty(exports, key, {
-    enumerable: true,
-    get: function () {
-      return _replay[key];
-    }
-  });
-});
-
 var _sourceTree = require("../reducers/source-tree");
 
 Object.keys(_sourceTree).forEach(function (key) {
@@ -198,6 +198,12 @@ Object.defineProperty(exports, "getBreakpointAtLocation", {
     return _breakpointAtLocation.getBreakpointAtLocation;
   }
 });
+Object.defineProperty(exports, "getBreakpointsAtLine", {
+  enumerable: true,
+  get: function () {
+    return _breakpointAtLocation.getBreakpointsAtLine;
+  }
+});
 
 var _visibleBreakpoints = require("./visibleBreakpoints");
 
@@ -241,15 +247,6 @@ Object.defineProperty(exports, "getVisibleSelectedFrame", {
   enumerable: true,
   get: function () {
     return _visibleSelectedFrame.getVisibleSelectedFrame;
-  }
-});
-
-var _getRelativeSources = require("./getRelativeSources");
-
-Object.defineProperty(exports, "getRelativeSources", {
-  enumerable: true,
-  get: function () {
-    return _getRelativeSources.getRelativeSources;
   }
 });
 

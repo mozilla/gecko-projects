@@ -83,6 +83,7 @@ class ABIArgGenerator
 static constexpr Register ABINonArgReg0 = eax;
 static constexpr Register ABINonArgReg1 = ebx;
 static constexpr Register ABINonArgReg2 = ecx;
+static constexpr Register ABINonArgReg3 = edx;
 
 // This register may be volatile or nonvolatile. Avoid xmm7 which is the
 // ScratchDoubleReg.
@@ -106,9 +107,10 @@ static constexpr Register WasmTlsReg = esi;
 
 // Registers used for asm.js/wasm table calls. These registers must be disjoint
 // from the ABI argument registers, WasmTlsReg and each other.
-static constexpr Register WasmTableCallScratchReg = ABINonArgReg0;
-static constexpr Register WasmTableCallSigReg = ABINonArgReg1;
-static constexpr Register WasmTableCallIndexReg = ABINonArgReg2;
+static constexpr Register WasmTableCallScratchReg0 = ABINonArgReg0;
+static constexpr Register WasmTableCallScratchReg1 = ABINonArgReg1;
+static constexpr Register WasmTableCallSigReg = ABINonArgReg2;
+static constexpr Register WasmTableCallIndexReg = ABINonArgReg3;
 
 static constexpr Register OsrFrameReg = edx;
 static constexpr Register PreBarrierReg = edx;
@@ -141,7 +143,7 @@ static_assert(JitStackAlignment % sizeof(Value) == 0 && JitStackValueAlignment >
 // this architecture or not. Rather than a method in the LIRGenerator, it is
 // here such that it is accessible from the entire codebase. Once full support
 // for SIMD is reached on all tier-1 platforms, this constant can be deleted.
-static constexpr bool SupportsSimd = true;
+static constexpr bool SupportsSimd = false;
 static constexpr uint32_t SimdMemoryAlignment = 16;
 
 static_assert(CodeAlignment % SimdMemoryAlignment == 0,
@@ -220,10 +222,11 @@ class Assembler : public AssemblerX86Shared
     void writeRelocation(JmpSrc src) {
         jumpRelocations_.writeUnsigned(src.offset());
     }
-    void addPendingJump(JmpSrc src, ImmPtr target, Relocation::Kind kind) {
+    void addPendingJump(JmpSrc src, ImmPtr target, RelocationKind kind) {
         enoughMemory_ &= jumps_.append(RelativePatch(src.offset(), target.value, kind));
-        if (kind == Relocation::JITCODE)
+        if (kind == RelocationKind::JITCODE) {
             writeRelocation(src);
+        }
     }
 
   public:
@@ -311,10 +314,11 @@ class Assembler : public AssemblerX86Shared
         // Use xor for setting registers to zero, as it is specially optimized
         // for this purpose on modern hardware. Note that it does clobber FLAGS
         // though.
-        if (imm.value == 0)
+        if (imm.value == 0) {
             xorl(dest, dest);
-        else
+        } else {
             movl(imm, dest);
+        }
     }
     void mov(ImmPtr imm, Register dest) {
         mov(ImmWord(uintptr_t(imm.value)), dest);
@@ -504,32 +508,31 @@ class Assembler : public AssemblerX86Shared
         }
     }
 
-    void jmp(ImmPtr target, Relocation::Kind reloc = Relocation::HARDCODED) {
+    void jmp(ImmPtr target, RelocationKind reloc = RelocationKind::HARDCODED) {
         JmpSrc src = masm.jmp();
         addPendingJump(src, target, reloc);
     }
-    void j(Condition cond, ImmPtr target,
-           Relocation::Kind reloc = Relocation::HARDCODED) {
+    void j(Condition cond, ImmPtr target, RelocationKind reloc = RelocationKind::HARDCODED) {
         JmpSrc src = masm.jCC(static_cast<X86Encoding::Condition>(cond));
         addPendingJump(src, target, reloc);
     }
 
     void jmp(JitCode* target) {
-        jmp(ImmPtr(target->raw()), Relocation::JITCODE);
+        jmp(ImmPtr(target->raw()), RelocationKind::JITCODE);
     }
     void j(Condition cond, JitCode* target) {
-        j(cond, ImmPtr(target->raw()), Relocation::JITCODE);
+        j(cond, ImmPtr(target->raw()), RelocationKind::JITCODE);
     }
     void call(JitCode* target) {
         JmpSrc src = masm.call();
-        addPendingJump(src, ImmPtr(target->raw()), Relocation::JITCODE);
+        addPendingJump(src, ImmPtr(target->raw()), RelocationKind::JITCODE);
     }
     void call(ImmWord target) {
         call(ImmPtr((void*)target.value));
     }
     void call(ImmPtr target) {
         JmpSrc src = masm.call();
-        addPendingJump(src, target, Relocation::HARDCODED);
+        addPendingJump(src, target, RelocationKind::HARDCODED);
     }
 
     // Emit a CALL or CMP (nop) instruction. ToggleCall can be used to patch
@@ -537,7 +540,7 @@ class Assembler : public AssemblerX86Shared
     CodeOffset toggledCall(JitCode* target, bool enabled) {
         CodeOffset offset(size());
         JmpSrc src = enabled ? masm.call() : masm.cmp_eax();
-        addPendingJump(src, ImmPtr(target->raw()), Relocation::JITCODE);
+        addPendingJump(src, ImmPtr(target->raw()), RelocationKind::JITCODE);
         MOZ_ASSERT_IF(!oom(), size() - offset.offset() == ToggledCallSize(nullptr));
         return offset;
     }
@@ -549,7 +552,7 @@ class Assembler : public AssemblerX86Shared
 
     // Re-routes pending jumps to an external target, flushing the label in the
     // process.
-    void retarget(Label* label, ImmPtr target, Relocation::Kind reloc) {
+    void retarget(Label* label, ImmPtr target, RelocationKind reloc) {
         if (label->used()) {
             bool more;
             X86Encoding::JmpSrc jmp(label->offset());
@@ -1059,10 +1062,6 @@ class Assembler : public AssemblerX86Shared
         masm.vmovups_rm(src.encoding(), dest.addr);
         return CodeOffset(masm.currentOffset());
     }
-
-    static bool canUseInSingleByteInstruction(Register reg) {
-        return X86Encoding::HasSubregL(reg.encoding());
-    }
 };
 
 // Get a register in which we plan to put a quantity that will be used as an
@@ -1073,8 +1072,9 @@ class Assembler : public AssemblerX86Shared
 static inline bool
 GetTempRegForIntArg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register* out)
 {
-    if (usedIntArgs >= NumCallTempNonArgRegs)
+    if (usedIntArgs >= NumCallTempNonArgRegs) {
         return false;
+    }
     *out = CallTempNonArgRegs[usedIntArgs];
     return true;
 }

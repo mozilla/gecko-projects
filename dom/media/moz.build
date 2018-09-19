@@ -41,6 +41,7 @@ DIRS += [
     'gmp-plugin-openh264',
     'imagecapture',
     'ipc',
+    'mediacapabilities',
     'mediasink',
     'mediasource',
     'mp3',
@@ -80,6 +81,7 @@ if CONFIG['MOZ_WEBRTC']:
 
 XPIDL_SOURCES += [
     'nsIAudioDeviceInfo.idl',
+    'nsIAutoplay.idl',
     'nsIDOMNavigatorUserMedia.idl',
     'nsIMediaManager.idl',
 ]
@@ -104,6 +106,7 @@ EXPORTS += [
     'BackgroundVideoDecodingPermissionObserver.h',
     'Benchmark.h',
     'BitReader.h',
+    'BitWriter.h',
     'BufferMediaResource.h',
     'BufferReader.h',
     'ByteWriter.h',
@@ -113,6 +116,7 @@ EXPORTS += [
     'DOMMediaStream.h',
     'FileBlockCache.h',
     'FrameStatistics.h',
+    'ImageToI420.h',
     'Intervals.h',
     'Latency.h',
     'MediaCache.h',
@@ -223,6 +227,7 @@ UNIFIED_SOURCES += [
     'BaseMediaResource.cpp',
     'Benchmark.cpp',
     'BitReader.cpp',
+    'BitWriter.cpp',
     'CanvasCaptureMediaStream.cpp',
     'ChannelMediaDecoder.cpp',
     'ChannelMediaResource.cpp',
@@ -232,6 +237,7 @@ UNIFIED_SOURCES += [
     'FileMediaResource.cpp',
     'GetUserMediaRequest.cpp',
     'GraphDriver.cpp',
+    'ImageToI420.cpp',
     'Latency.cpp',
     'MediaCache.cpp',
     'MediaContainerType.cpp',
@@ -319,6 +325,7 @@ LOCAL_INCLUDES += [
     '/dom/base',
     '/layout/generic',
     '/layout/xul',
+    '/media/libyuv/libyuv/include',
     '/netwerk/base',
 ]
 

@@ -95,7 +95,8 @@ private:
 class RecordedDrawTargetDestruction : public RecordedEventDerived<RecordedDrawTargetDestruction> {
 public:
   MOZ_IMPLICIT RecordedDrawTargetDestruction(ReferencePtr aRefPtr)
-    : RecordedEventDerived(DRAWTARGETDESTRUCTION), mRefPtr(aRefPtr)
+    : RecordedEventDerived(DRAWTARGETDESTRUCTION), mRefPtr(aRefPtr),
+      mBackendType(BackendType::NONE)
   {}
 
   virtual bool PlayEvent(Translator *aTranslator) const override;
@@ -181,7 +182,8 @@ private:
 class RecordedFillRect : public RecordedDrawingEvent<RecordedFillRect> {
 public:
   RecordedFillRect(DrawTarget *aDT, const Rect &aRect, const Pattern &aPattern, const DrawOptions &aOptions)
-    : RecordedDrawingEvent(FILLRECT, aDT), mRect(aRect), mOptions(aOptions)
+    : RecordedDrawingEvent(FILLRECT, aDT), mRect(aRect),
+      mPattern(), mOptions(aOptions)
   {
     StorePattern(mPattern, aPattern);
   }
@@ -210,7 +212,8 @@ public:
   RecordedStrokeRect(DrawTarget *aDT, const Rect &aRect, const Pattern &aPattern,
                      const StrokeOptions &aStrokeOptions, const DrawOptions &aOptions)
     : RecordedDrawingEvent(STROKERECT, aDT), mRect(aRect),
-      mStrokeOptions(aStrokeOptions), mOptions(aOptions)
+      mPattern(), mStrokeOptions(aStrokeOptions),
+      mOptions(aOptions)
   {
     StorePattern(mPattern, aPattern);
   }
@@ -241,7 +244,7 @@ public:
                      const Pattern &aPattern, const StrokeOptions &aStrokeOptions,
                      const DrawOptions &aOptions)
     : RecordedDrawingEvent(STROKELINE, aDT), mBegin(aBegin), mEnd(aEnd),
-      mStrokeOptions(aStrokeOptions), mOptions(aOptions)
+      mPattern(), mStrokeOptions(aStrokeOptions), mOptions(aOptions)
   {
     StorePattern(mPattern, aPattern);
   }
@@ -270,7 +273,8 @@ private:
 class RecordedFill : public RecordedDrawingEvent<RecordedFill> {
 public:
   RecordedFill(DrawTarget *aDT, ReferencePtr aPath, const Pattern &aPattern, const DrawOptions &aOptions)
-    : RecordedDrawingEvent(FILL, aDT), mPath(aPath), mOptions(aOptions)
+    : RecordedDrawingEvent(FILL, aDT), mPath(aPath),
+      mPattern(), mOptions(aOptions)
   {
     StorePattern(mPattern, aPattern);
   }
@@ -297,7 +301,8 @@ class RecordedFillGlyphs : public RecordedDrawingEvent<RecordedFillGlyphs> {
 public:
   RecordedFillGlyphs(DrawTarget *aDT, ReferencePtr aScaledFont, const Pattern &aPattern, const DrawOptions &aOptions,
                      const Glyph *aGlyphs, uint32_t aNumGlyphs)
-    : RecordedDrawingEvent(FILLGLYPHS, aDT), mScaledFont(aScaledFont), mOptions(aOptions)
+    : RecordedDrawingEvent(FILLGLYPHS, aDT), mScaledFont(aScaledFont),
+      mPattern(), mOptions(aOptions)
   {
     StorePattern(mPattern, aPattern);
     mNumGlyphs = aNumGlyphs;
@@ -329,7 +334,7 @@ private:
 class RecordedMask : public RecordedDrawingEvent<RecordedMask> {
 public:
   RecordedMask(DrawTarget *aDT, const Pattern &aSource, const Pattern &aMask, const DrawOptions &aOptions)
-    : RecordedDrawingEvent(MASK, aDT), mOptions(aOptions)
+    : RecordedDrawingEvent(MASK, aDT), mSource(), mMask(), mOptions(aOptions)
   {
     StorePattern(mSource, aSource);
     StorePattern(mMask, aMask);
@@ -357,7 +362,7 @@ class RecordedStroke : public RecordedDrawingEvent<RecordedStroke> {
 public:
   RecordedStroke(DrawTarget *aDT, ReferencePtr aPath, const Pattern &aPattern,
                      const StrokeOptions &aStrokeOptions, const DrawOptions &aOptions)
-    : RecordedDrawingEvent(STROKE, aDT), mPath(aPath),
+    : RecordedDrawingEvent(STROKE, aDT), mPath(aPath), mPattern(),
       mStrokeOptions(aStrokeOptions), mOptions(aOptions)
   {
     StorePattern(mPattern, aPattern);
@@ -1008,6 +1013,7 @@ public:
     : RecordedEventDerived(FONTDATA)
     , mType(aUnscaledFont->GetType())
     , mData(nullptr)
+    , mFontDetails()
   {
     mGetFontFileDataSucceeded = aUnscaledFont->GetFontFileData(&FontDataProc, this) && mData;
   }
@@ -1196,50 +1202,6 @@ private:
   MOZ_IMPLICIT RecordedScaledFontCreation(S &aStream);
 };
 
-class RecordedScaledFontCreationByIndex : public RecordedEventDerived<RecordedScaledFontCreationByIndex> {
-public:
-
-  static void FontInstanceDataProc(const uint8_t* aData, uint32_t aSize,
-                                   const FontVariation* aVariations, uint32_t aNumVariations,
-                                   void* aBaton)
-  {
-    auto recordedScaledFontCreation = static_cast<RecordedScaledFontCreationByIndex*>(aBaton);
-    recordedScaledFontCreation->SetFontInstanceData(aData, aSize, aVariations, aNumVariations);
-  }
-
-  RecordedScaledFontCreationByIndex(ScaledFont* aScaledFont, size_t aUnscaledFontIndex)
-    : RecordedEventDerived(SCALEDFONTCREATIONBYINDEX)
-    , mRefPtr(aScaledFont)
-    , mUnscaledFontIndex(aUnscaledFontIndex)
-    , mGlyphSize(aScaledFont->GetSize())
-  {
-    aScaledFont->GetFontInstanceData(FontInstanceDataProc, this);
-  }
-
-  virtual bool PlayEvent(Translator *aTranslator) const override;
-
-  template<class S> void Record(S &aStream) const;
-  virtual void OutputSimpleEventInfo(std::stringstream &aStringStream) const override;
-
-  virtual std::string GetName() const override { return "ScaledFont Creation"; }
-  virtual ReferencePtr GetObjectRef() const override { return mRefPtr; }
-
-  void SetFontInstanceData(const uint8_t *aData, uint32_t aSize,
-                           const FontVariation* aVariations, uint32_t aNumVariations);
-
-private:
-  friend class RecordedEvent;
-
-  ReferencePtr mRefPtr;
-  size_t mUnscaledFontIndex;
-  Float mGlyphSize;
-  std::vector<uint8_t> mInstanceData;
-  std::vector<FontVariation> mVariations;
-
-  template<class S>
-  MOZ_IMPLICIT RecordedScaledFontCreationByIndex(S &aStream);
-};
-
 class RecordedScaledFontDestruction : public RecordedEventDerived<RecordedScaledFontDestruction> {
 public:
   MOZ_IMPLICIT RecordedScaledFontDestruction(ReferencePtr aRefPtr)
@@ -1269,8 +1231,8 @@ class RecordedMaskSurface : public RecordedDrawingEvent<RecordedMaskSurface> {
 public:
   RecordedMaskSurface(DrawTarget *aDT, const Pattern &aPattern, ReferencePtr aRefMask,
                       const Point &aOffset, const DrawOptions &aOptions)
-    : RecordedDrawingEvent(MASKSURFACE, aDT), mRefMask(aRefMask), mOffset(aOffset)
-    , mOptions(aOptions)
+    : RecordedDrawingEvent(MASKSURFACE, aDT), mPattern(), mRefMask(aRefMask),
+      mOffset(aOffset), mOptions(aOptions)
   {
     StorePattern(mPattern, aPattern);
   }
@@ -3062,7 +3024,7 @@ RecordedFontData::GetFontDetails(RecordedFontDetails& fontDetails)
 template<class S>
 RecordedFontData::RecordedFontData(S &aStream)
   : RecordedEventDerived(FONTDATA)
-  , mType(FontType::SKIA)
+  , mType(FontType::UNKNOWN)
   , mData(nullptr)
 {
   ReadElement(aStream, mType);
@@ -3266,70 +3228,6 @@ RecordedScaledFontCreation::RecordedScaledFontCreation(S &aStream)
 {
   ReadElement(aStream, mRefPtr);
   ReadElement(aStream, mUnscaledFont);
-  ReadElement(aStream, mGlyphSize);
-
-  size_t size;
-  ReadElement(aStream, size);
-  mInstanceData.resize(size);
-  aStream.read((char*)mInstanceData.data(), size);
-  size_t numVariations;
-  ReadElement(aStream, numVariations);
-  mVariations.resize(numVariations);
-  aStream.read((char*)mVariations.data(), sizeof(FontVariation) * numVariations);
-}
-
-inline bool
-RecordedScaledFontCreationByIndex::PlayEvent(Translator *aTranslator) const
-{
-  UnscaledFont* unscaledFont = aTranslator->LookupUnscaledFontByIndex(mUnscaledFontIndex);
-  if (!unscaledFont) {
-    gfxDevCrash(LogReason::UnscaledFontNotFound) <<
-      "UnscaledFont lookup failed for key |" << hexa(mUnscaledFontIndex) << "|.";
-    return false;
-  }
-
-  RefPtr<ScaledFont> scaledFont =
-    unscaledFont->CreateScaledFont(mGlyphSize,
-                                   mInstanceData.data(), mInstanceData.size(),
-                                   mVariations.data(), mVariations.size());
-
-  aTranslator->AddScaledFont(mRefPtr, scaledFont);
-  return true;
-}
-
-template<class S>
-void
-RecordedScaledFontCreationByIndex::Record(S &aStream) const
-{
-  WriteElement(aStream, mRefPtr);
-  WriteElement(aStream, mUnscaledFontIndex);
-  WriteElement(aStream, mGlyphSize);
-  WriteElement(aStream, (size_t)mInstanceData.size());
-  aStream.write((char*)mInstanceData.data(), mInstanceData.size());
-  WriteElement(aStream, (size_t)mVariations.size());
-  aStream.write((char*)mVariations.data(), sizeof(FontVariation) * mVariations.size());
-}
-
-inline void
-RecordedScaledFontCreationByIndex::OutputSimpleEventInfo(std::stringstream &aStringStream) const
-{
-  aStringStream << "[" << mRefPtr << "] ScaledFont Created By Index";
-}
-
-inline void
-RecordedScaledFontCreationByIndex::SetFontInstanceData(const uint8_t *aData, uint32_t aSize,
-                                                const FontVariation* aVariations, uint32_t aNumVariations)
-{
-  mInstanceData.assign(aData, aData + aSize);
-  mVariations.assign(aVariations, aVariations + aNumVariations);
-}
-
-template<class S>
-RecordedScaledFontCreationByIndex::RecordedScaledFontCreationByIndex(S &aStream)
-  : RecordedEventDerived(SCALEDFONTCREATIONBYINDEX)
-{
-  ReadElement(aStream, mRefPtr);
-  ReadElement(aStream, mUnscaledFontIndex);
   ReadElement(aStream, mGlyphSize);
 
   size_t size;
@@ -3557,7 +3455,6 @@ RecordedFilterNodeSetInput::OutputSimpleEventInfo(std::stringstream &aStringStre
     f(GRADIENTSTOPSDESTRUCTION, RecordedGradientStopsDestruction); \
     f(SNAPSHOT, RecordedSnapshot); \
     f(SCALEDFONTCREATION, RecordedScaledFontCreation); \
-    f(SCALEDFONTCREATIONBYINDEX, RecordedScaledFontCreationByIndex); \
     f(SCALEDFONTDESTRUCTION, RecordedScaledFontDestruction); \
     f(MASKSURFACE, RecordedMaskSurface); \
     f(FILTERNODESETATTRIBUTE, RecordedFilterNodeSetAttribute); \

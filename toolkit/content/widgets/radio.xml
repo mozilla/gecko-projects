@@ -11,10 +11,6 @@
 
   <binding id="radiogroup"
            extends="chrome://global/content/bindings/general.xml#basecontrol">
-    <resources>
-      <stylesheet src="chrome://global/skin/radio.css"/>
-    </resources>
-
     <implementation implements="nsIDOMXULSelectControlElement">
       <constructor>
         <![CDATA[
@@ -306,8 +302,7 @@
         <parameter name="value"/>
         <body>
         <![CDATA[
-          var XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-          var radio = document.createElementNS(XULNS, "radio");
+          var radio = document.createXULElement("radio");
           radio.setAttribute("label", label);
           radio.setAttribute("value", value);
           this.appendChild(radio);
@@ -394,10 +389,6 @@
 
   <binding id="radio"
     extends="chrome://global/content/bindings/general.xml#basetext">
-    <resources>
-      <stylesheet src="chrome://global/skin/radio.css"/>
-    </resources>
-
     <content>
       <xul:image class="radio-check" xbl:inherits="disabled,selected"/>
       <xul:hbox class="radio-label-box" align="center" flex="1">

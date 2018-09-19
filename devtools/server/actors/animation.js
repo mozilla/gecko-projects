@@ -25,7 +25,7 @@
  *   /dom/webidl/Animation*.webidl
  */
 
-const {Cu, Ci} = require("chrome");
+const {Cu} = require("chrome");
 const protocol = require("devtools/shared/protocol");
 const {Actor} = protocol;
 const {animationPlayerSpec, animationsSpec} = require("devtools/shared/specs/animation");
@@ -88,6 +88,7 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
     }
 
     this.createdTime = createdTime;
+    this.currentTimeAtCreated = player.currentTime;
   },
 
   destroy: function() {
@@ -294,15 +295,6 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
    * @return {Object}
    */
   getState: function() {
-    // Remember the startTime each time getState is called, it may be useful
-    // when animations get paused. As in, when an animation gets paused, its
-    // startTime goes back to null, but the front-end might still be interested
-    // in knowing what the previous startTime was. So everytime it is set,
-    // remember it and send it along with the newState.
-    if (this.player.startTime) {
-      this.previousStartTime = this.player.startTime;
-    }
-
     // Note that if you add a new property to the state object, make sure you
     // add the corresponding property in the AnimationPlayerFront' initialState
     // getter.
@@ -310,7 +302,6 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
       type: this.getType(),
       // startTime is null whenever the animation is paused or waiting to start.
       startTime: this.player.startTime,
-      previousStartTime: this.previousStartTime,
       currentTime: this.player.currentTime,
       playState: this.player.playState,
       playbackRate: this.player.playbackRate,
@@ -336,6 +327,8 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
       documentCurrentTime: this.node.ownerDocument.timeline.currentTime,
       // The time which this animation created.
       createdTime: this.createdTime,
+      // The time which an animation's current time when this animation has created.
+      currentTimeAtCreated: this.currentTimeAtCreated,
     };
   },
 
@@ -389,9 +382,8 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
       }
 
       if (hasCurrentAnimation(changedAnimations)) {
-        // Only consider the state has having changed if any of delay, duration,
-        // iterationCount, iterationStart, or playbackRate has changed (for now
-        // at least).
+        // Only consider the state has having changed if any of effect timing properties,
+        // animationTimingFunction or playbackRate has changed.
         const newState = this.getState();
         const oldState = this.currentState;
         hasChanged = newState.delay !== oldState.delay ||
@@ -399,6 +391,11 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
                      newState.iterationStart !== oldState.iterationStart ||
                      newState.duration !== oldState.duration ||
                      newState.endDelay !== oldState.endDelay ||
+                     newState.direction !== oldState.direction ||
+                     newState.easing !== oldState.easing ||
+                     newState.fill !== oldState.fill ||
+                     newState.animationTimingFunction !==
+                       oldState.animationTimingFunction ||
                      newState.playbackRate !== oldState.playbackRate;
         break;
       }
@@ -407,76 +404,6 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
     if (hasChanged) {
       this.emit("changed", this.getCurrentState());
     }
-  },
-
-  /**
-   * Pause the player.
-   */
-  pause: function() {
-    this.player.pause();
-    return this.player.ready;
-  },
-
-  /**
-   * Play the player.
-   * This method only returns when the animation has left its pending state.
-   */
-  play: function() {
-    this.player.play();
-    return this.player.ready;
-  },
-
-  /**
-   * Simply exposes the player ready promise.
-   *
-   * When an animation is created/paused then played, there's a short time
-   * during which its playState is pending, before being set to running.
-   *
-   * If you either created a new animation using the Web Animations API or
-   * paused/played an existing one, and then want to access the playState, you
-   * might be interested to call this method.
-   * This is especially important for tests.
-   */
-  ready: function() {
-    return this.player.ready;
-  },
-
-  /**
-   * Set the current time of the animation player.
-   */
-  setCurrentTime: function(currentTime) {
-    // The spec is that the progress of animation is changed
-    // if the time of setCurrentTime is during the endDelay.
-    // We should prevent the time
-    // to make the same animation behavior as the original.
-    // Likewise, in case the time is less than 0.
-    const timing = this.player.effect.getComputedTiming();
-    if (timing.delay < 0) {
-      currentTime += timing.delay;
-    }
-    if (currentTime < 0) {
-      currentTime = 0;
-    } else if (currentTime * this.player.playbackRate > timing.endTime) {
-      currentTime = timing.endTime;
-    }
-    this.player.currentTime = currentTime * this.player.playbackRate;
-  },
-
-  /**
-   * Set the playback rate of the animation player.
-   */
-  setPlaybackRate: function(playbackRate) {
-    this.player.updatePlaybackRate(playbackRate);
-    return this.player.ready;
-  },
-
-  /**
-   * Get data about the keyframes of this animation player.
-   * @return {Object} Returns a list of frames, each frame containing the list
-   * animated properties as well as the frame's offset.
-   */
-  getFrames: function() {
-    return this.player.effect.getKeyframes();
   },
 
   /**
@@ -489,9 +416,7 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
       return {name: property.property, values: property.values};
     });
 
-    const DOMWindowUtils =
-      this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-          .getInterface(Ci.nsIDOMWindowUtils);
+    const DOMWindowUtils = this.window.windowUtils;
 
     // Fill missing keyframe with computed value.
     for (const property of properties) {
@@ -805,53 +730,6 @@ exports.AnimationsActor = protocol.ActorClassWithSpec(animationsSpec, {
   },
 
   /**
-   * Pause all animations in the current targetActor's frames.
-   */
-  pauseAll: function() {
-    // Until the WebAnimations API provides a way to play/pause via the document
-    // timeline, we have to iterate through the whole DOM to find all players.
-    for (const player of
-         this.getAllAnimations(this.targetActor.window.document, true)) {
-      this.pauseSync(player);
-    }
-    this.allAnimationsPaused = true;
-  },
-
-  /**
-   * Play all animations in the current targetActor's frames.
-   * This method only returns when animations have left their pending states.
-   */
-  playAll: function() {
-    // Until the WebAnimations API provides a way to play/pause via the document
-    // timeline, we have to iterate through the whole DOM to find all players.
-    for (const player of
-      this.getAllAnimations(this.targetActor.window.document, true)) {
-      this.playSync(player);
-    }
-    this.allAnimationsPaused = false;
-  },
-
-  toggleAll: function() {
-    if (this.allAnimationsPaused) {
-      this.playAll();
-    } else {
-      this.pauseAll();
-    }
-  },
-
-  /**
-   * Toggle (play/pause) several animations at the same time.
-   * @param {Array} players A list of AnimationPlayerActor objects.
-   * @param {Boolean} shouldPause If set to true, the players will be paused,
-   * otherwise they will be played.
-   */
-  toggleSeveral: function(players, shouldPause) {
-    return Promise.all(players.map(player => {
-      return shouldPause ? player.pause() : player.play();
-    }));
-  },
-
-  /**
    * Pause given animations.
    *
    * @param {Array} actors A list of AnimationPlayerActor.
@@ -882,19 +760,8 @@ exports.AnimationsActor = protocol.ActorClassWithSpec(animationsSpec, {
    * @param {Array} players A list of AnimationPlayerActor.
    * @param {Number} time The new currentTime.
    * @param {Boolean} shouldPause Should the players be paused too.
-   * @param {Object} options
-   *                 - relativeToCreatedTime: Set current path with createdTime.
    */
-  setCurrentTimes: function(players, time, shouldPause, options) {
-    // For backward compatibility for old animation inspector.
-    // We can drop following procedures after dropping old one.
-    if (!options.relativeToCreatedTime) {
-      return Promise.all(players.map(player => {
-        const pause = shouldPause ? player.pause() : Promise.resolve();
-        return pause.then(() => player.setCurrentTime(time));
-      }));
-    }
-
+  setCurrentTimes: function(players, time, shouldPause) {
     for (const actor of players) {
       const player = actor.player;
 
@@ -910,13 +777,14 @@ exports.AnimationsActor = protocol.ActorClassWithSpec(animationsSpec, {
 
   /**
    * Set the playback rate of several animations at the same time.
-   * @param {Array} players A list of AnimationPlayerActor.
+   * @param {Array} actors A list of AnimationPlayerActor.
    * @param {Number} rate The new rate.
    */
   setPlaybackRates: function(players, rate) {
-    return Promise.all(
-      players.map(player => player.setPlaybackRate(rate))
-    );
+    return Promise.all(players.map(({ player }) => {
+      player.updatePlaybackRate(rate);
+      return player.ready;
+    }));
   },
 
   /**
@@ -925,13 +793,6 @@ exports.AnimationsActor = protocol.ActorClassWithSpec(animationsSpec, {
    * @param {Object} player
    */
   pauseSync(player) {
-    // Gecko includes an optimization that means that if the animation is play-pending
-    // and we set the startTime to null, the change will be ignored and the animation
-    // will continue to be play-pending. This violates the spec but until the spec is
-    // clarified[1] on this point we work around this by ensuring the animation's
-    // startTime is set to something non-null before setting it to null.
-    // [1] https://github.com/w3c/csswg-drafts/issues/2691
-    this.playSync(player);
     player.startTime = null;
   },
 

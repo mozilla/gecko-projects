@@ -18,7 +18,11 @@
 namespace mozilla {
 namespace wr {
 
-wr::WrExternalImage LockExternalImage(void* aObj, wr::WrExternalImageId aId, uint8_t aChannelIndex)
+wr::WrExternalImage
+LockExternalImage(void* aObj,
+                  wr::WrExternalImageId aId,
+                  uint8_t aChannelIndex,
+                  wr::ImageRendering aRendering)
 {
   RendererOGL* renderer = reinterpret_cast<RendererOGL*>(aObj);
   RenderTextureHost* texture = renderer->GetRenderTexture(aId);
@@ -27,7 +31,7 @@ wr::WrExternalImage LockExternalImage(void* aObj, wr::WrExternalImageId aId, uin
     gfxCriticalNote << "Failed to lock ExternalImage for extId:" << AsUint64(aId);
     return InvalidToWrExternalImage();
   }
-  return texture->Lock(aChannelIndex, renderer->gl());
+  return texture->Lock(aChannelIndex, renderer->gl(), aRendering);
 }
 
 void UnlockExternalImage(void* aObj, wr::WrExternalImageId aId, uint8_t aChannelIndex)
@@ -95,6 +99,12 @@ RendererOGL::Update()
   }
 }
 
+static void
+DoNotifyWebRenderContextPurge(layers::CompositorBridgeParent* aBridge)
+{
+  aBridge->NotifyWebRenderContextPurge();
+}
+
 bool
 RendererOGL::UpdateAndRender(bool aReadback)
 {
@@ -149,6 +159,18 @@ RendererOGL::UpdateAndRender(bool aReadback)
   // Clear frame start time
   mFrameStartTime = TimeStamp();
 #endif
+
+  gl::GLContext* gl = mCompositor->gl();
+  if (gl->IsSupported(gl::GLFeature::robustness)) {
+    GLenum resetStatus = gl->fGetGraphicsResetStatus();
+    if (resetStatus == LOCAL_GL_PURGED_CONTEXT_RESET_NV) {
+      layers::CompositorThreadHolder::Loop()->PostTask(NewRunnableFunction(
+        "DoNotifyWebRenderContextPurgeRunnable",
+        &DoNotifyWebRenderContextPurge,
+        mBridge
+      ));
+    }
+  }
 
   // TODO: Flush pending actions such as texture deletions/unlocks and
   //       textureHosts recycling.

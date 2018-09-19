@@ -3,10 +3,13 @@ project-repo-param-prefix: ''
 treeherder:
     group-names:
         'cram': 'Cram tests'
-        'js-bench': 'JavaScript shell benchmarks'
+        'js-bench-sm': 'JavaScript shell benchmarks with Spidermonkey'
+        'js-bench-v8': 'JavaScript shell benchmarks with Google V8'
         'mocha': 'Mocha unit tests'
-        'py': 'Python unit tests'
+        'py2': 'Python 2 unit tests'
+        'py3': 'Python 3 unit tests'
         'A': 'Android Gradle tests'
+        'Fetch-URL': 'Fetch and store content'
         'Fxfn-l': 'Firefox functional tests (local)'
         'Fxfn-l-e10s': 'Firefox functional tests (local) with e10s'
         'Fxfn-r': 'Firefox functional tests (remote)'
@@ -27,8 +30,8 @@ treeherder:
         'Tsd-e10s': 'Talos performance tests with e10s, Stylo disabled'
         'Tss-e10s': 'Talos performance tests with e10s, Stylo sequential'
         'T-P-e10s': 'Talos performance tests with e10s and gecko profiling'
-        'tt-c': 'Telemetry client marionette tests'
-        'tt-c-e10s': 'Telemetry client marionette tests with e10s'
+        'tt': 'Telemetry tests'
+        'tt-e10s': 'Telemetry tests with e10s'
         'SY-e10s': 'Are we slim yet tests by TaskCluster with e10s'
         'SYsd-e10s': 'Are we slim yet tests by TaskCluster with e10s, Stylo disabled'
         'SYss-e10s': 'Are we slim yet tests by TaskCluster with e10s, Stylo sequential'
@@ -60,6 +63,7 @@ treeherder:
         'TW64': 'Toolchain builds for Windows 64-bits'
         'WM32': 'MinGW builds for Windows 32-bits'
         'WM64': 'MinGW builds for Windows 64-bits'
+        'WMC64': 'MinGW-Clang builds for Windows 64-bits'
         'Searchfox': 'Searchfox builds'
         'SM': 'Spidermonkey builds'
         'pub': 'APK publishing'
@@ -70,6 +74,7 @@ treeherder:
         'langpack': 'Langpack sigatures and uploads'
         'TPS': 'Sync tests'
         'UV': 'Update verify'
+        'pipfu': 'pipfile update'
 
 index:
     products:
@@ -136,7 +141,7 @@ release-promotion:
             target-tasks-method: promote_desktop
         promote_firefox_rc:
             product: firefox
-            release-type: rc
+            is-rc: true
             target-tasks-method: promote_desktop
             partial-updates: true
         push_devedition:
@@ -158,7 +163,7 @@ release-promotion:
             version-bump: true
         ship_fennec_rc:
             product: fennec
-            release-type: rc
+            is-rc: true
             target-tasks-method: ship_fennec
         ship_firefox:
             product: firefox
@@ -167,7 +172,7 @@ release-promotion:
             partial-updates: true
         ship_firefox_rc:
             product: firefox
-            release-type: rc
+            is-rc: true
             target-tasks-method: ship_desktop
             partial-updates: true
 
@@ -184,9 +189,11 @@ scriptworker:
             - 'project:releng:beetmover:bucket:release'
             - 'project:releng:beetmover:bucket:nightly'
             - 'project:releng:beetmover:bucket:partner'
+            - 'project:releng:beetmover:bucket:maven-production'
         'scriptworker-prov-v1/beetmoverworker-dev':
             - 'project:releng:beetmover:bucket:dep'
             - 'project:releng:beetmover:bucket:dep-partner'
+            - 'project:releng:beetmover:bucket:maven-staging'
         'scriptworker-prov-v1/balrogworker-v1':
             - 'project:releng:balrog:server:nightly'
             - 'project:releng:balrog:server:aurora'

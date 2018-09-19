@@ -24,6 +24,7 @@
 #include "mozilla/WindowsVersion.h"
 #include "mozilla/Unused.h"
 #include "nsIContentPolicy.h"
+#include "nsIWindowsUIUtils.h"
 #include "nsContentUtils.h"
 
 #include "mozilla/Logging.h"
@@ -413,7 +414,6 @@ NS_IMPL_ISUPPORTS(myDownloadObserver, nsIDownloadObserver)
 NS_IMPL_ISUPPORTS(AsyncFaviconDataReady, nsIFaviconDataCallback)
 #endif
 NS_IMPL_ISUPPORTS(AsyncEncodeAndWriteIcon, nsIRunnable)
-NS_IMPL_ISUPPORTS(AsyncDeleteIconFromDisk, nsIRunnable)
 NS_IMPL_ISUPPORTS(AsyncDeleteAllFaviconsFromDisk, nsIRunnable)
 
 
@@ -1078,12 +1078,12 @@ WinUtils::GetNativeMessage(UINT aInternalMessage)
 uint16_t
 WinUtils::GetMouseInputSource()
 {
-  int32_t inputSource = dom::MouseEventBinding::MOZ_SOURCE_MOUSE;
+  int32_t inputSource = dom::MouseEvent_Binding::MOZ_SOURCE_MOUSE;
   LPARAM lParamExtraInfo = ::GetMessageExtraInfo();
   if ((lParamExtraInfo & TABLET_INK_SIGNATURE) == TABLET_INK_CHECK) {
     inputSource = (lParamExtraInfo & TABLET_INK_TOUCH) ?
-      dom::MouseEventBinding::MOZ_SOURCE_TOUCH :
-      dom::MouseEventBinding::MOZ_SOURCE_PEN;
+      dom::MouseEvent_Binding::MOZ_SOURCE_TOUCH :
+      dom::MouseEvent_Binding::MOZ_SOURCE_PEN;
   }
   return static_cast<uint16_t>(inputSource);
 }
@@ -1402,42 +1402,6 @@ NS_IMETHODIMP AsyncEncodeAndWriteIcon::Run()
 }
 
 AsyncEncodeAndWriteIcon::~AsyncEncodeAndWriteIcon()
-{
-}
-
-AsyncDeleteIconFromDisk::AsyncDeleteIconFromDisk(const nsAString &aIconPath)
-  : mIconPath(aIconPath)
-{
-}
-
-NS_IMETHODIMP AsyncDeleteIconFromDisk::Run()
-{
-  // Construct the parent path of the passed in path
-  nsCOMPtr<nsIFile> icoFile = do_CreateInstance("@mozilla.org/file/local;1");
-  NS_ENSURE_TRUE(icoFile, NS_ERROR_FAILURE);
-  nsresult rv = icoFile->InitWithPath(mIconPath);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Check if the cached ICO file exists
-  bool exists;
-  rv = icoFile->Exists(&exists);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Check that we aren't deleting some arbitrary file that is not an icon
-  if (StringTail(mIconPath, 4).LowerCaseEqualsASCII(".ico")) {
-    // Check if the cached ICO file exists
-    bool exists;
-    if (NS_FAILED(icoFile->Exists(&exists)) || !exists)
-      return NS_ERROR_FAILURE;
-
-    // We found an ICO file that exists, so we should remove it
-    icoFile->Remove(false);
-  }
-
-  return NS_OK;
-}
-
-AsyncDeleteIconFromDisk::~AsyncDeleteIconFromDisk()
 {
 }
 
@@ -1763,12 +1727,40 @@ WinUtils::IsIMEEnabled(IMEState::Enabled aIMEState)
 /* static */
 void
 WinUtils::SetupKeyModifiersSequence(nsTArray<KeyPair>* aArray,
-                                    uint32_t aModifiers)
+                                    uint32_t aModifiers,
+                                    UINT aMessage)
 {
-  for (uint32_t i = 0; i < ArrayLength(sModifierKeyMap); ++i) {
-    const uint32_t* map = sModifierKeyMap[i];
-    if (aModifiers & map[0]) {
-      aArray->AppendElement(KeyPair(map[1], map[2]));
+  MOZ_ASSERT(!(aModifiers & nsIWidget::ALTGRAPH) ||
+             !(aModifiers & (nsIWidget::CTRL_L | nsIWidget::ALT_R)));
+  if (aMessage == WM_KEYUP) {
+    // If AltGr is released, ControlLeft key is released first, then,
+    // AltRight key is released.
+    if (aModifiers & nsIWidget::ALTGRAPH) {
+      aArray->AppendElement(
+                KeyPair(VK_CONTROL, VK_LCONTROL, ScanCode::eControlLeft));
+      aArray->AppendElement(
+                KeyPair(VK_MENU, VK_RMENU, ScanCode::eAltRight));
+    }
+    for (uint32_t i = ArrayLength(sModifierKeyMap); i; --i) {
+      const uint32_t* map = sModifierKeyMap[i - 1];
+      if (aModifiers & map[0]) {
+        aArray->AppendElement(KeyPair(map[1], map[2], map[3]));
+      }
+    }
+  } else {
+    for (uint32_t i = 0; i < ArrayLength(sModifierKeyMap); ++i) {
+      const uint32_t* map = sModifierKeyMap[i];
+      if (aModifiers & map[0]) {
+        aArray->AppendElement(KeyPair(map[1], map[2], map[3]));
+      }
+    }
+    // If AltGr is pressed, ControlLeft key is pressed first, then,
+    // AltRight key is pressed.
+    if (aModifiers & nsIWidget::ALTGRAPH) {
+      aArray->AppendElement(
+                KeyPair(VK_CONTROL, VK_LCONTROL, ScanCode::eControlLeft));
+      aArray->AppendElement(
+                KeyPair(VK_MENU, VK_RMENU, ScanCode::eAltRight));
     }
   }
 }
@@ -1791,6 +1783,138 @@ WinUtils::GetMaxTouchPoints()
     return GetSystemMetrics(SM_MAXIMUMTOUCHES);
   }
   return 0;
+}
+
+/* static */
+POWER_PLATFORM_ROLE
+WinUtils::GetPowerPlatformRole()
+{
+  typedef POWER_PLATFORM_ROLE (WINAPI* PowerDeterminePlatformRoleEx)
+    (ULONG Version);
+  static PowerDeterminePlatformRoleEx power_determine_platform_role =
+    reinterpret_cast<PowerDeterminePlatformRoleEx>(::GetProcAddress(
+      ::LoadLibraryW(L"PowrProf.dll"), "PowerDeterminePlatformRoleEx"));
+
+  POWER_PLATFORM_ROLE powerPlatformRole = PlatformRoleUnspecified;
+  if (!power_determine_platform_role) {
+    return powerPlatformRole;
+  }
+
+  return power_determine_platform_role(POWER_PLATFORM_ROLE_V2);
+}
+
+static bool
+IsWindows10TabletMode()
+{
+  nsCOMPtr<nsIWindowsUIUtils>
+    uiUtils(do_GetService("@mozilla.org/windows-ui-utils;1"));
+  if (NS_WARN_IF(!uiUtils)) {
+    return false;
+  }
+  bool isInTabletMode = false;
+  uiUtils->GetInTabletMode(&isInTabletMode);
+  return isInTabletMode;
+}
+
+static bool
+CallGetAutoRotationState(AR_STATE* aRotationState)
+{
+  typedef BOOL (WINAPI* GetAutoRotationStateFunc)(PAR_STATE pState);
+  static GetAutoRotationStateFunc get_auto_rotation_state_func =
+      reinterpret_cast<GetAutoRotationStateFunc>(::GetProcAddress(
+          GetModuleHandleW(L"user32.dll"), "GetAutoRotationState"));
+  if (get_auto_rotation_state_func) {
+    ZeroMemory(aRotationState, sizeof(AR_STATE));
+    return get_auto_rotation_state_func(aRotationState);
+  }
+  return false;
+}
+
+static bool
+IsTabletDevice()
+{
+  // Guarantees that:
+  // - The device has a touch screen.
+  // - It is used as a tablet which means that it has no keyboard connected.
+  // On Windows 10 it means that it is verifying with ConvertibleSlateMode.
+
+  if (!IsWin8OrLater()) {
+    return false;
+  }
+
+  if (IsWindows10TabletMode()) {
+    return true;
+  }
+
+  if (!GetSystemMetrics(SM_MAXIMUMTOUCHES)) {
+    return false;
+  }
+
+  // If the device is docked, the user is treating the device as a PC.
+  if (GetSystemMetrics(SM_SYSTEMDOCKED)) {
+    return false;
+  }
+
+  // If the device is not supporting rotation, it's unlikely to be a tablet,
+  // a convertible or a detachable. See:
+  // https://msdn.microsoft.com/en-us/library/windows/desktop/dn629263(v=vs.85).aspx
+  AR_STATE rotation_state;
+  if (CallGetAutoRotationState(&rotation_state) &&
+      (rotation_state & (AR_NOT_SUPPORTED | AR_LAPTOP | AR_NOSENSOR))) {
+    return false;
+  }
+
+  // PlatformRoleSlate was added in Windows 8+.
+  POWER_PLATFORM_ROLE role = WinUtils::GetPowerPlatformRole();
+  if (role == PlatformRoleMobile || role == PlatformRoleSlate) {
+    return !GetSystemMetrics(SM_CONVERTIBLESLATEMODE);
+  }
+  return false;
+}
+
+static bool
+IsMousePresent()
+{
+  return ::GetSystemMetrics(SM_MOUSEPRESENT);
+}
+
+/* static */
+PointerCapabilities
+WinUtils::GetPrimaryPointerCapabilities()
+{
+  if (IsTabletDevice()) {
+    return PointerCapabilities::Coarse;
+  }
+
+  if (IsMousePresent()) {
+    return PointerCapabilities::Fine|
+           PointerCapabilities::Hover;
+  }
+
+  if (IsTouchDeviceSupportPresent()) {
+    return PointerCapabilities::Coarse;
+  }
+
+  return PointerCapabilities::None;
+}
+
+/* static */
+PointerCapabilities
+WinUtils::GetAllPointerCapabilities()
+{
+  PointerCapabilities result = PointerCapabilities::None;
+
+  if (IsTabletDevice() ||
+      IsTouchDeviceSupportPresent()) {
+    result |= PointerCapabilities::Coarse;
+  }
+
+  if (IsMousePresent()) {
+    result |= PointerCapabilities::Fine |
+              PointerCapabilities::Hover;
+  }
+
+  return result;
 }
 
 /* static */

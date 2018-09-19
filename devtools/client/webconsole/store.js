@@ -23,6 +23,7 @@ const { getPrefsService } = require("devtools/client/webconsole/utils/prefs");
 const { reducers } = require("./reducers/index");
 
 // Middleware
+const eventTelemetry = require("./middleware/event-telemetry");
 const historyPersistence = require("./middleware/history-persistence");
 const thunk = require("./middleware/thunk");
 
@@ -48,6 +49,7 @@ function configureStore(hud, options = {}) {
     || Math.max(getIntPref("devtools.hud.loglimit"), 1);
   const sidebarToggle = getBoolPref(PREFS.FEATURES.SIDEBAR_TOGGLE);
   const jstermCodeMirror = getBoolPref(PREFS.FEATURES.JSTERM_CODE_MIRROR);
+  const jstermReverseSearch = getBoolPref(PREFS.FEATURES.JSTERM_REVERSE_SEARCH);
   const historyCount = getIntPref(PREFS.UI.INPUT_HISTORY_COUNT);
 
   const initialState = {
@@ -55,6 +57,7 @@ function configureStore(hud, options = {}) {
       logLimit,
       sidebarToggle,
       jstermCodeMirror,
+      jstermReverseSearch,
       historyCount,
     }),
     filters: FilterState({
@@ -78,6 +81,7 @@ function configureStore(hud, options = {}) {
   const middleware = applyMiddleware(
     thunk.bind(null, {prefsService}),
     historyPersistence,
+    eventTelemetry.bind(null, options.telemetry, options.sessionId),
   );
 
   return createStore(

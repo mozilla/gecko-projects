@@ -70,8 +70,8 @@
   background-color: transparent;
   border-radius: 0;
   border-width: 0;
-  margin: 0;
-  padding: 0;
+  margin: 0 !important /* override tabbox.css */;
+  padding: 0 !important /* override tabbox.css */;
   -moz-box-align: stretch;
 }
 
@@ -153,6 +153,7 @@
 
 .tab-throbber,
 .tab-throbber-fallback,
+.tab-icon-pending,
 .tab-icon-image,
 .tab-sharing-icon-overlay,
 .tab-icon-sound,
@@ -162,6 +163,7 @@
 
 .tab-throbber,
 .tab-throbber-fallback,
+.tab-icon-pending,
 .tab-icon-image,
 .tab-sharing-icon-overlay {
   height: 16px;
@@ -171,6 +173,7 @@
 .tab-throbber:not([pinned]),
 .tab-throbber-fallback:not([pinned]),
 .tab-sharing-icon-overlay:not([pinned]),
+.tab-icon-pending:not([pinned]),
 .tab-icon-image:not([pinned]) {
   margin-inline-end: 6px;
 }
@@ -324,39 +327,27 @@
 .tab-icon-overlay[muted]:not([crashed]),
 .tab-icon-overlay[activemedia-blocked]:not([crashed]) {
   border-radius: 10px;
+  -moz-context-properties: fill;
+  fill: currentColor;
 }
 
 .tab-icon-overlay[soundplaying]:hover,
 .tab-icon-overlay[muted]:not([crashed]):hover,
 .tab-icon-overlay[activemedia-blocked]:not([crashed]):hover {
   background-color: white;
+  color: black;
 }
 
 .tab-icon-overlay[soundplaying] {
-  list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio");
+  list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-playing-small.svg");
 }
 
 .tab-icon-overlay[muted]:not([crashed]) {
-  list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-muted");
+  list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-muted-small.svg");
 }
 
 .tab-icon-overlay[activemedia-blocked]:not([crashed]) {
-  list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-blocked");
-}
-
-#TabsToolbar[brighttext] .tab-icon-overlay[soundplaying]:not([selected]):not(:hover),
-.tab-icon-overlay[soundplaying][selected]:-moz-lwtheme-brighttext:not(:hover) {
-  list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-white");
-}
-
-#TabsToolbar[brighttext] .tab-icon-overlay[muted]:not([crashed]):not([selected]):not(:hover),
-.tab-icon-overlay[muted][selected]:-moz-lwtheme-brighttext:not(:hover) {
-  list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-white-muted");
-}
-
-#TabsToolbar[brighttext] .tab-icon-overlay[activemedia-blocked]:not([crashed]):not([selected]):not(:hover),
-.tab-icon-overlay[activemedia-blocked][selected]:-moz-lwtheme-brighttext:not(:hover) {
-  list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-small.svg#tab-audio-white-blocked");
+  list-style-image: url("chrome://browser/skin/tabbrowser/tab-audio-blocked-small.svg");
 }
 
 .tab-throbber-fallback[busy] {
@@ -573,14 +564,19 @@
   transition: transform 250ms var(--animation-easing-function), opacity 250ms var(--animation-easing-function);
 }
 
-.tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true]) {
+.tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true]):not([multiselected]) {
   background-color: rgba(0,0,0,.2);
   opacity: 1;
   transform: none;
 }
 
-#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true]) {
+#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true]):not([multiselected]) {
   background-color: rgba(255,255,255,.2);
+}
+
+.tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true])[multiselected],
+#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true])[multiselected] {
+  opacity: 0.5;
 }
 
 /* Tab multi-selected */
@@ -680,7 +676,7 @@
 .tabbrowser-tab:hover::after,
 #tabbrowser-tabs:not([movingtab]) > .tabbrowser-tab[beforehovered]::after,
 .tabbrowser-tab[multiselected]::after,
-.tabbrowser-tab[before-multiselected]::after {
+#tabbrowser-tabs:not([movingtab]) > .tabbrowser-tab[before-multiselected]::after {
   margin-top: var(--tabs-top-border-width);
   margin-bottom: 0;
 }
@@ -792,11 +788,16 @@
 }
 
 .all-tabs-item[selected] {
+  font-weight: bold;
   box-shadow: inset 4px 0 var(--blue-40);
 }
 
 .all-tabs-item[selected]:-moz-locale-dir(rtl) {
   box-shadow: inset -4px 0 var(--blue-40);
+}
+
+.all-tabs-button {
+  list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.svg");
 }
 
 .all-tabs-secondary-button > label {

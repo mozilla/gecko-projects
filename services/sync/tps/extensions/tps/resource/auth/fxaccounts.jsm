@@ -13,7 +13,6 @@ ChromeUtils.import("resource://gre/modules/Timer.jsm");
 ChromeUtils.import("resource://gre/modules/FxAccounts.jsm");
 ChromeUtils.import("resource://gre/modules/FxAccountsClient.jsm");
 ChromeUtils.import("resource://gre/modules/FxAccountsConfig.jsm");
-ChromeUtils.import("resource://services-sync/main.js");
 ChromeUtils.import("resource://tps/logger.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "Services", "resource://gre/modules/Services.jsm");
@@ -65,7 +64,7 @@ var Authentication = {
 
   async _openVerificationPage(uri) {
     let mainWindow = Services.wm.getMostRecentWindow("navigator:browser");
-    let newtab = mainWindow.getBrowser().addTab(uri);
+    let newtab = mainWindow.getBrowser().addWebTab(uri);
     let win = mainWindow.getBrowser().getBrowserForTab(newtab);
     await new Promise(resolve => {
       win.addEventListener("loadend", resolve, { once: true });
@@ -196,5 +195,5 @@ var Authentication = {
       // Note: This will clean up the device ID.
       await fxAccounts.signOut();
     }
-  }
+  },
 };

@@ -14,7 +14,6 @@
 #include "nsIDocument.h"
 #include "nsILayoutHistoryState.h"
 #include "nsISHistory.h"
-#include "nsISHistoryInternal.h"
 #include "nsIWebNavigation.h"
 #include "nsThreadUtils.h"
 
@@ -92,23 +91,21 @@ nsSHEntryShared::Duplicate(nsSHEntryShared* aEntry)
 void
 nsSHEntryShared::RemoveFromExpirationTracker()
 {
-  nsCOMPtr<nsISHistoryInternal> shistory = do_QueryReferent(mSHistory);
+  nsCOMPtr<nsISHistory> shistory = do_QueryReferent(mSHistory);
   if (shistory && GetExpirationState()->IsTracked()) {
     shistory->RemoveFromExpirationTracker(this);
   }
 }
 
-nsresult
+void
 nsSHEntryShared::SyncPresentationState()
 {
   if (mContentViewer && mWindowState) {
     // If we have a content viewer and a window state, we should be ok.
-    return NS_OK;
+    return;
   }
 
   DropPresentationState();
-
-  return NS_OK;
 }
 
 void
@@ -155,7 +152,7 @@ nsSHEntryShared::SetContentViewer(nsIContentViewer* aViewer)
     // mSHistory is only set for root entries, but in general bfcache only
     // applies to root entries as well. BFCache for subframe navigation has been
     // disabled since 2005 in bug 304860.
-    if (nsCOMPtr<nsISHistoryInternal> shistory = do_QueryReferent(mSHistory)) {
+    if (nsCOMPtr<nsISHistory> shistory = do_QueryReferent(mSHistory)) {
       shistory->AddToExpirationTracker(this);
     }
 
@@ -190,7 +187,7 @@ nsSHEntryShared::RemoveFromBFCacheSync()
 
   // Now that we've dropped the viewer, we have to clear associated dynamic
   // subframe entries.
-  nsCOMPtr<nsISHistoryInternal> shistory = do_QueryReferent(mSHistory);
+  nsCOMPtr<nsISHistory> shistory = do_QueryReferent(mSHistory);
   if (shistory) {
     shistory->RemoveDynEntriesForBFCacheEntry(this);
   }
@@ -221,7 +218,7 @@ nsSHEntryShared::RemoveFromBFCacheAsync()
         viewer->Destroy();
       }
 
-      nsCOMPtr<nsISHistoryInternal> shistory = do_QueryReferent(self->mSHistory);
+      nsCOMPtr<nsISHistory> shistory = do_QueryReferent(self->mSHistory);
       if (shistory) {
         shistory->RemoveDynEntriesForBFCacheEntry(self);
       }

@@ -34,6 +34,7 @@
 #include "nsILoadContext.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLObjectElementBinding.h"
+#include "AudioChannelAgent.h"
 #include "AudioChannelService.h"
 
 using namespace mozilla;
@@ -783,7 +784,7 @@ nsNPAPIPluginInstance::DidComposite()
 nsresult
 nsNPAPIPluginInstance::NotifyPainted(void)
 {
-  NS_NOTREACHED("Dead code, shouldn't be called.");
+  MOZ_ASSERT_UNREACHABLE("Dead code, shouldn't be called.");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -855,7 +856,7 @@ nsNPAPIPluginInstance::GetFormValue(nsAString& aValue)
   if (NS_FAILED(rv) || !value)
     return NS_ERROR_FAILURE;
 
-  CopyUTF8toUTF16(value, aValue);
+  CopyUTF8toUTF16(MakeStringSpan(value), aValue);
 
   // NPPVformValue allocates with NPN_MemAlloc(), which uses
   // nsMemory.
@@ -1241,18 +1242,15 @@ nsNPAPIPluginInstance::CreateAudioChannelAgentIfNeeded()
     return NS_OK;
   }
 
-  nsresult rv;
-  mAudioChannelAgent = do_CreateInstance("@mozilla.org/audiochannelagent;1", &rv);
-  if (NS_WARN_IF(!mAudioChannelAgent)) {
-    return NS_ERROR_FAILURE;
-  }
+  mAudioChannelAgent = new AudioChannelAgent();
 
   nsCOMPtr<nsPIDOMWindowOuter> window = GetDOMWindow();
   if (NS_WARN_IF(!window)) {
     return NS_ERROR_FAILURE;
   }
 
-  rv = mAudioChannelAgent->Init(window->GetCurrentInnerWindow(), this);
+  nsresult rv =
+    mAudioChannelAgent->Init(window->GetCurrentInnerWindow(), this);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }

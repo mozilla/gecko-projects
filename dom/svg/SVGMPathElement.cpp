@@ -22,7 +22,7 @@ namespace dom {
 JSObject*
 SVGMPathElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGMPathElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGMPathElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::StringInfo SVGMPathElement::sStringInfo[2] =
@@ -82,21 +82,19 @@ SVGMPathElement::Href()
 nsresult
 SVGMPathElement::BindToTree(nsIDocument* aDocument,
                             nsIContent* aParent,
-                            nsIContent* aBindingParent,
-                            bool aCompileEventHandlers)
+                            nsIContent* aBindingParent)
 {
   MOZ_ASSERT(!mPathTracker.get(),
              "Shouldn't have href-target yet (or it should've been cleared)");
   nsresult rv = SVGMPathElementBase::BindToTree(aDocument, aParent,
-                                                aBindingParent,
-                                                aCompileEventHandlers);
+                                                aBindingParent);
   NS_ENSURE_SUCCESS(rv,rv);
 
   if (aDocument) {
     const nsAttrValue* hrefAttrValue =
       HasAttr(kNameSpaceID_None, nsGkAtoms::href)
-      ? mAttrsAndChildren.GetAttr(nsGkAtoms::href, kNameSpaceID_None)
-      : mAttrsAndChildren.GetAttr(nsGkAtoms::href, kNameSpaceID_XLink);
+        ? mAttrs.GetAttr(nsGkAtoms::href, kNameSpaceID_None)
+        : mAttrs.GetAttr(nsGkAtoms::href, kNameSpaceID_XLink);
     if (hrefAttrValue) {
       UpdateHrefTarget(aParent, hrefAttrValue->GetStringValue());
     }
@@ -156,7 +154,7 @@ SVGMPathElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
       // After unsetting href, we may still have xlink:href, so we should
       // try to add it back.
       const nsAttrValue* xlinkHref =
-        mAttrsAndChildren.GetAttr(nsGkAtoms::href, kNameSpaceID_XLink);
+        mAttrs.GetAttr(nsGkAtoms::href, kNameSpaceID_XLink);
       if (xlinkHref) {
         UpdateHrefTarget(GetParent(), xlinkHref->GetStringValue());
       }
@@ -241,7 +239,10 @@ SVGMPathElement::UpdateHrefTarget(nsIContent* aParent,
     // Pass in |aParent| instead of |this| -- first argument is only used
     // for a call to GetComposedDoc(), and |this| might not have a current
     // document yet (if our caller is BindToTree).
-    mPathTracker.Reset(aParent, targetURI);
+    // Bug 1415044 to investigate which referrer we should use
+    mPathTracker.Reset(aParent, targetURI,
+                       OwnerDoc()->GetDocumentURI(),
+                       OwnerDoc()->GetReferrerPolicy());
   } else {
     // if we don't have a parent, then there's no animateMotion element
     // depending on our target, so there's no point tracking it right now.

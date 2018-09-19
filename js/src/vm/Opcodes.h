@@ -13,6 +13,8 @@
 #include <stddef.h>
 
 /*
+ * [SMDOC] Bytecode Definitions
+ *
  * JavaScript operation bytecodes.  Add a new bytecode by claiming one of the
  * JSOP_UNUSED* here or by extracting the first unused opcode from
  * FOR_EACH_TRAILING_UNUSED_OPCODE and updating js::detail::LastDefinedOpcode
@@ -242,9 +244,9 @@
      *   Operands:
      *   Stack: lval, rval => (lval OP rval)
      */ \
-    macro(JSOP_BITOR,     15, "bitor",      "|",          1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
-    macro(JSOP_BITXOR,    16, "bitxor",     "^",          1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
-    macro(JSOP_BITAND,    17, "bitand",     "&",          1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
+    macro(JSOP_BITOR,     15, "bitor",      "|",          1,  2,  1, JOF_BYTE|JOF_ARITH) \
+    macro(JSOP_BITXOR,    16, "bitxor",     "^",          1,  2,  1, JOF_BYTE|JOF_ARITH) \
+    macro(JSOP_BITAND,    17, "bitand",     "&",          1,  2,  1, JOF_BYTE|JOF_ARITH) \
     /*
      * Pops the top two values from the stack and pushes the result of
      * comparing them.
@@ -253,12 +255,12 @@
      *   Operands:
      *   Stack: lval, rval => (lval OP rval)
      */ \
-    macro(JSOP_EQ,        18, "eq",         "==",         1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH|JOF_DETECTING) \
-    macro(JSOP_NE,        19, "ne",         "!=",         1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH|JOF_DETECTING) \
-    macro(JSOP_LT,        20, "lt",         "<",          1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
-    macro(JSOP_LE,        21, "le",         "<=",         1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
-    macro(JSOP_GT,        22, "gt",         ">",          1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
-    macro(JSOP_GE,        23, "ge",         ">=",         1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
+    macro(JSOP_EQ,        18, "eq",         "==",         1,  2,  1, JOF_BYTE|JOF_ARITH|JOF_DETECTING) \
+    macro(JSOP_NE,        19, "ne",         "!=",         1,  2,  1, JOF_BYTE|JOF_ARITH|JOF_DETECTING) \
+    macro(JSOP_LT,        20, "lt",         "<",          1,  2,  1, JOF_BYTE|JOF_ARITH) \
+    macro(JSOP_LE,        21, "le",         "<=",         1,  2,  1, JOF_BYTE|JOF_ARITH) \
+    macro(JSOP_GT,        22, "gt",         ">",          1,  2,  1, JOF_BYTE|JOF_ARITH) \
+    macro(JSOP_GE,        23, "ge",         ">=",         1,  2,  1, JOF_BYTE|JOF_ARITH) \
     /*
      * Pops the top two values 'lval' and 'rval' from the stack, then pushes
      * the result of the operation applied to the operands.
@@ -267,8 +269,8 @@
      *   Operands:
      *   Stack: lval, rval => (lval OP rval)
      */ \
-    macro(JSOP_LSH,       24, "lsh",        "<<",         1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
-    macro(JSOP_RSH,       25, "rsh",        ">>",         1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
+    macro(JSOP_LSH,       24, "lsh",        "<<",         1,  2,  1, JOF_BYTE|JOF_ARITH) \
+    macro(JSOP_RSH,       25, "rsh",        ">>",         1,  2,  1, JOF_BYTE|JOF_ARITH) \
     /*
      * Pops the top two values 'lval' and 'rval' from the stack, then pushes
      * 'lval >>> rval'.
@@ -277,7 +279,7 @@
      *   Operands:
      *   Stack: lval, rval => (lval >>> rval)
      */ \
-    macro(JSOP_URSH,      26, "ursh",       ">>>",        1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
+    macro(JSOP_URSH,      26, "ursh",       ">>>",        1,  2,  1, JOF_BYTE|JOF_ARITH) \
     /*
      * Pops the top two values 'lval' and 'rval' from the stack, then pushes
      * the result of 'lval + rval'.
@@ -286,7 +288,7 @@
      *   Operands:
      *   Stack: lval, rval => (lval + rval)
      */ \
-    macro(JSOP_ADD,       27, "add",        "+",          1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
+    macro(JSOP_ADD,       27, "add",        "+",          1,  2,  1, JOF_BYTE|JOF_ARITH) \
     /*
      * Pops the top two values 'lval' and 'rval' from the stack, then pushes
      * the result of applying the arithmetic operation to them.
@@ -295,10 +297,10 @@
      *   Operands:
      *   Stack: lval, rval => (lval OP rval)
      */ \
-    macro(JSOP_SUB,       28, "sub",        "-",          1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
-    macro(JSOP_MUL,       29, "mul",        "*",          1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
-    macro(JSOP_DIV,       30, "div",        "/",          1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
-    macro(JSOP_MOD,       31, "mod",        "%",          1,  2,  1, JOF_BYTE|JOF_LEFTASSOC|JOF_ARITH) \
+    macro(JSOP_SUB,       28, "sub",        "-",          1,  2,  1, JOF_BYTE|JOF_ARITH) \
+    macro(JSOP_MUL,       29, "mul",        "*",          1,  2,  1, JOF_BYTE|JOF_ARITH) \
+    macro(JSOP_DIV,       30, "div",        "/",          1,  2,  1, JOF_BYTE|JOF_ARITH) \
+    macro(JSOP_MOD,       31, "mod",        "%",          1,  2,  1, JOF_BYTE|JOF_ARITH) \
     /*
      * Pops the value 'val' from the stack, then pushes '!val'.
      *   Category: Operators
@@ -533,10 +535,10 @@
      *   Operands:
      *   Stack: obj, propval => obj[propval]
      */ \
-    macro(JSOP_GETELEM,   55, "getelem",    NULL,         1,  2,  1, JOF_BYTE |JOF_ELEM|JOF_TYPESET|JOF_LEFTASSOC) \
+    macro(JSOP_GETELEM,   55, "getelem",    NULL,         1,  2,  1, JOF_BYTE |JOF_ELEM|JOF_TYPESET) \
     /*
      * Pops the top three values on the stack as 'val', 'propval' and 'obj',
-     * sets 'propval' property of 'obj' as 'val', pushes 'obj' onto the
+     * sets 'propval' property of 'obj' as 'val', pushes 'val' onto the
      * stack.
      *   Category: Literals
      *   Type: Object
@@ -546,7 +548,7 @@
     macro(JSOP_SETELEM,   56, "setelem",    NULL,         1,  3,  1, JOF_BYTE |JOF_ELEM|JOF_PROPSET|JOF_DETECTING|JOF_CHECKSLOPPY) \
     /*
      * Pops the top three values on the stack as 'val', 'propval' and 'obj',
-     * sets 'propval' property of 'obj' as 'val', pushes 'obj' onto the
+     * sets 'propval' property of 'obj' as 'val', pushes 'val' onto the
      * stack. Throws a TypeError if the set fails, per strict mode
      * semantics.
      *   Category: Literals
@@ -638,7 +640,7 @@
      *   Operands: int32_t offset
      *   Stack: cond => cond
      */ \
-    macro(JSOP_OR,        68, "or",         NULL,         5,  1,  1, JOF_JUMP|JOF_DETECTING|JOF_LEFTASSOC) \
+    macro(JSOP_OR,        68, "or",         NULL,         5,  1,  1, JOF_JUMP|JOF_DETECTING) \
     /*
      * Converts the top of stack value into a boolean, if the result is 'false',
      * jumps to a 32-bit offset from the current bytecode.
@@ -647,12 +649,12 @@
      *   Operands: int32_t offset
      *   Stack: cond => cond
      */ \
-    macro(JSOP_AND,       69, "and",        NULL,         5,  1,  1, JOF_JUMP|JOF_DETECTING|JOF_LEFTASSOC) \
+    macro(JSOP_AND,       69, "and",        NULL,         5,  1,  1, JOF_JUMP|JOF_DETECTING) \
     \
     /*
      * Pops the top of stack value as 'i', if 'low <= i <= high',
-     * jumps to a 32-bit offset: 'offset[i - low]' from the current bytecode,
-     * jumps to a 32-bit offset: 'len' from the current bytecode if not.
+     * jumps to a 32-bit offset: 'offset[i - low]' from the current bytecode, unless the offset is zero (missing case)
+     * jumps to a 32-bit offset: 'len' from the current bytecode otherwise
      *
      * This opcode has variable length.
      *   Category: Statements
@@ -683,8 +685,8 @@
      *   Operands:
      *   Stack: lval, rval => (lval OP rval)
      */ \
-    macro(JSOP_STRICTEQ,  72, "stricteq",   "===",        1,  2,  1, JOF_BYTE|JOF_DETECTING|JOF_LEFTASSOC|JOF_ARITH) \
-    macro(JSOP_STRICTNE,  73, "strictne",   "!==",        1,  2,  1, JOF_BYTE|JOF_DETECTING|JOF_LEFTASSOC|JOF_ARITH) \
+    macro(JSOP_STRICTEQ,  72, "stricteq",   "===",        1,  2,  1, JOF_BYTE|JOF_DETECTING|JOF_ARITH) \
+    macro(JSOP_STRICTNE,  73, "strictne",   "!==",        1,  2,  1, JOF_BYTE|JOF_DETECTING|JOF_ARITH) \
     \
     /*
      * Sometimes we know when emitting that an operation will always throw.
@@ -838,14 +840,11 @@
     /*
      * Pushes newly created object onto the stack.
      *
-     * This opcode takes the kind of initializer (JSProto_Array or
-     * JSProto_Object).
-     *
-     * This opcode has three extra bytes so it can be exchanged with
+     * This opcode has four extra bytes so it can be exchanged with
      * JSOP_NEWOBJECT during emit.
      *   Category: Literals
      *   Type: Object
-     *   Operands: uint8_t kind (, uint24_t extra)
+     *   Operands: (uint32_t extra)
      *   Stack: => obj
      */ \
     macro(JSOP_NEWINIT,   89, "newinit",    NULL,         5,  0,  1, JOF_UINT8) \
@@ -1123,7 +1122,7 @@
      *   Operands:
      *   Stack: id, obj => (id in obj)
      */ \
-    macro(JSOP_IN,        113,js_in_str,    js_in_str,    1,  2,  1, JOF_BYTE|JOF_LEFTASSOC) \
+    macro(JSOP_IN,        113,js_in_str,    js_in_str,    1,  2,  1, JOF_BYTE) \
     /*
      * Pops the top two values 'obj' and 'ctor' from the stack, then pushes
      * 'obj instanceof ctor'.  This will throw a 'TypeError' if 'obj' is not an
@@ -1133,7 +1132,7 @@
      *   Operands:
      *   Stack: obj, ctor => (obj instanceof ctor)
      */ \
-    macro(JSOP_INSTANCEOF,114,js_instanceof_str,js_instanceof_str,1,2,1,JOF_BYTE|JOF_LEFTASSOC) \
+    macro(JSOP_INSTANCEOF,114,js_instanceof_str,js_instanceof_str,1,2,1,JOF_BYTE) \
     \
     /*
      * Invokes debugger.
@@ -1279,9 +1278,9 @@
      *   Category: Literals
      *   Type: Object
      *   Operands:
-     *   Stack: propval, receiver, obj => obj[propval]
+     *   Stack: receiver, propval, obj => obj[propval]
      */ \
-    macro(JSOP_GETELEM_SUPER, 125, "getelem-super", NULL, 1,  3,  1, JOF_BYTE|JOF_ELEM|JOF_TYPESET|JOF_LEFTASSOC) \
+    macro(JSOP_GETELEM_SUPER, 125, "getelem-super", NULL, 1,  3,  1, JOF_BYTE|JOF_ELEM|JOF_TYPESET) \
     macro(JSOP_UNUSED126, 126, "unused126", NULL, 5,  0,  1, JOF_UINT32) \
     \
     /*
@@ -1453,7 +1452,7 @@
      * Pushes a JS_UNINITIALIZED_LEXICAL value onto the stack, representing an
      * uninitialized lexical binding.
      *
-     * This opcode is used with the JSOP_INITLET opcode.
+     * This opcode is used with the JSOP_INITLEXICAL opcode.
      *   Category: Literals
      *   Type: Constants
      *   Operands:
@@ -1637,7 +1636,7 @@
      *   Category: Literals
      *   Type: Object
      *   Operands:
-     *   Stack: propval, receiver, obj, val => val
+     *   Stack: receiver, propval, obj, val => val
      */ \
     macro(JSOP_SETELEM_SUPER,   158, "setelem-super", NULL, 1,  4,  1, JOF_BYTE |JOF_ELEM|JOF_PROPSET|JOF_DETECTING|JOF_CHECKSLOPPY) \
     /*
@@ -1646,7 +1645,7 @@
      *   Category: Literals
      *   Type: Object
      *   Operands:
-     *   Stack: propval, receiver, obj, val => val
+     *   Stack: receiver, propval, obj, val => val
      */ \
     macro(JSOP_STRICTSETELEM_SUPER, 159, "strict-setelem-super", NULL, 1,  4, 1, JOF_BYTE |JOF_ELEM|JOF_PROPSET|JOF_DETECTING|JOF_CHECKSTRICT) \
     \
@@ -1982,7 +1981,7 @@
      *   Operands:
      *   Stack: obj, propval => obj[propval]
      */ \
-    macro(JSOP_CALLELEM,      193, "callelem",   NULL,    1,  2,  1, JOF_BYTE |JOF_ELEM|JOF_TYPESET|JOF_LEFTASSOC) \
+    macro(JSOP_CALLELEM,      193, "callelem",   NULL,    1,  2,  1, JOF_BYTE |JOF_ELEM|JOF_TYPESET) \
     \
     /*
      * '__proto__: v' inside an object initializer.
@@ -2023,7 +2022,7 @@
     /* Lexical environment support. */ \
     /*
      * Replaces the current block on the env chain with a fresh block
-     * that copies all the bindings in the bock.  This operation implements the
+     * that copies all the bindings in the block.  This operation implements the
      * behavior of inducing a fresh lexical environment for every iteration of a
      * for(let ...; ...; ...) loop, if any declarations induced by such a loop
      * are captured within the loop.
@@ -2266,7 +2265,18 @@
      *   Stack: val => val
      */ \
     macro(JSOP_ITERNEXT,      222, "iternext",   NULL,  1,  1,  1,  JOF_BYTE) \
-    macro(JSOP_UNUSED223,     223, "unused223",  NULL,  1,  0,  0,  JOF_BYTE) \
+    /*
+     * Pops the top of stack value as 'value', checks if the await for 'value'
+     * can be skipped.
+     * If the await operation can be skipped and the resolution value for
+     * 'value' can be acquired, pushes the resolution value and 'true' onto the
+     * stack.  Otherwise, pushes 'value' and 'false' on the stack.
+     *   Category: Statements
+     *   Type: Function
+     *   Operands:
+     *   Stack: value => value_or_resolved, canskip
+     */ \
+    macro(JSOP_TRYSKIPAWAIT,  223,"tryskipawait",  NULL,  1,  1,  2,  JOF_BYTE) \
     \
     /*
      * Creates rest parameter array for current function call, and pushes it

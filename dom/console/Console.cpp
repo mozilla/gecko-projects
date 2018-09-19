@@ -24,6 +24,7 @@
 #include "mozilla/dom/WorkletGlobalScope.h"
 #include "mozilla/dom/WorkletThread.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDocument.h"
 #include "nsDOMNavigationTiming.h"
@@ -1356,7 +1357,7 @@ Console::IsEnabled(JSContext* aCx) const
   }
 
   // Make all Console API no-op if DevTools aren't enabled.
-  return DOMPrefs::DevToolsEnabled();
+  return StaticPrefs::devtools_enabled();
 }
 
 void
@@ -1770,8 +1771,9 @@ Console::ProcessCallData(JSContext* aCx, ConsoleCallData* aData,
   // tempted to do that anywhere else, talk to said module owner first.
 
   // aCx and aArguments are in the same compartment.
+  JS::Rooted<JSObject*> targetScope(aCx, xpc::PrivilegedJunkScope());
   if (NS_WARN_IF(!PopulateConsoleNotificationInTheTargetScope(aCx, aArguments,
-                                                              xpc::PrivilegedJunkScope(),
+                                                              targetScope,
                                                               &eventValue, aData))) {
     return;
   }
@@ -1810,15 +1812,14 @@ Console::ProcessCallData(JSContext* aCx, ConsoleCallData* aData,
 bool
 Console::PopulateConsoleNotificationInTheTargetScope(JSContext* aCx,
                                                      const Sequence<JS::Value>& aArguments,
-                                                     JSObject* aTargetScope,
+                                                     JS::Handle<JSObject*> aTargetScope,
                                                      JS::MutableHandle<JS::Value> aEventValue,
                                                      ConsoleCallData* aData)
 {
   MOZ_ASSERT(aCx);
   MOZ_ASSERT(aData);
   MOZ_ASSERT(aTargetScope);
-
-  JS::Rooted<JSObject*> targetScope(aCx, aTargetScope);
+  MOZ_ASSERT(JS_IsGlobalObject(aTargetScope));
 
   ConsoleStackEntry frame;
   if (aData->mTopStackFrame) {
@@ -1927,7 +1928,7 @@ Console::PopulateConsoleNotificationInTheTargetScope(JSContext* aCx,
                                                       aData->mCountValue);
   }
 
-  JSAutoRealm ar2(aCx, targetScope);
+  JSAutoRealm ar2(aCx, aTargetScope);
 
   if (NS_WARN_IF(!ToJSValue(aCx, event, aEventValue))) {
     return false;
@@ -2279,7 +2280,7 @@ Console::ComposeAndStoreGroupName(JSContext* aCx,
 {
   for (uint32_t i = 0; i < aData.Length(); ++i) {
     if (i != 0) {
-      aName.AppendASCII(" ");
+      aName.AppendLiteral(" ");
     }
 
     JS::Rooted<JS::Value> value(aCx, aData[i]);
@@ -2692,16 +2693,18 @@ Console::NotifyHandler(JSContext* aCx, const Sequence<JS::Value>& aArguments,
 
   JS::Rooted<JS::Value> value(aCx);
 
-  JS::Rooted<JSObject*> callable(aCx, mConsoleEventNotifier->CallableOrNull());
-  if (NS_WARN_IF(!callable)) {
+  JS::Rooted<JSObject*> callableGlobal(aCx,
+    mConsoleEventNotifier->CallbackGlobalOrNull());
+  if (NS_WARN_IF(!callableGlobal)) {
     return;
   }
 
   // aCx and aArguments are in the same compartment because this method is
   // called directly when a Console.something() runs.
-  // mConsoleEventNotifier->Callable() is the scope where value will be sent to.
+  // mConsoleEventNotifier->CallbackGlobal() is the scope where value will be
+  // sent to.
   if (NS_WARN_IF(!PopulateConsoleNotificationInTheTargetScope(aCx, aArguments,
-                                                              callable,
+                                                              callableGlobal,
                                                               &value,
                                                               aCallData))) {
     return;

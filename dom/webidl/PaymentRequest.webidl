@@ -5,6 +5,9 @@
  *
  * The origin of this WebIDL file is
  *   https://www.w3.org/TR/payment-request/#paymentrequest-interface
+ *
+ * Copyright © 2018 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
+ * liability, trademark and document use rules apply.
  */
 
 dictionary PaymentMethodData {
@@ -59,7 +62,6 @@ dictionary AddressErrors {
   DOMString city;
   DOMString country;
   DOMString dependentLocality;
-  DOMString languageCode;
   DOMString organization;
   DOMString phone;
   DOMString postalCode;
@@ -69,9 +71,24 @@ dictionary AddressErrors {
   DOMString sortingCode;
 };
 
+dictionary PaymentValidationErrors {
+  PayerErrorFields payer;
+  AddressErrors shippingAddress;
+  DOMString error;
+  object paymentMethod;
+};
+
+dictionary PayerErrorFields {
+  DOMString email;
+  DOMString name;
+  DOMString phone;
+};
+
 dictionary PaymentDetailsUpdate : PaymentDetailsBase {
   DOMString     error;
   AddressErrors shippingAddressErrors;
+  PayerErrorFields payerErrors;
+  object paymentMethodErrors;
   PaymentItem   total;
 };
 
@@ -106,6 +123,8 @@ interface PaymentRequest : EventTarget {
   readonly attribute DOMString?           shippingOption;
   readonly attribute PaymentShippingType? shippingType;
 
+           attribute EventHandler         onmerchantvalidation;
            attribute EventHandler         onshippingaddresschange;
            attribute EventHandler         onshippingoptionchange;
+           attribute EventHandler         onpaymentmethodchange;
 };

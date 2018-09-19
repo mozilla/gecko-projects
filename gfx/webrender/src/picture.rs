@@ -2,23 +2,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{DeviceRect, FilterOp, MixBlendMode, PipelineId, PremultipliedColorF};
-use api::{DeviceIntRect, DeviceIntSize, DevicePoint, LayoutPoint, LayoutRect};
-use api::{DevicePixelScale, PictureIntPoint, PictureIntRect, PictureIntSize};
+use api::{DeviceRect, FilterOp, MixBlendMode, PipelineId, PremultipliedColorF, PictureRect, PicturePoint};
+use api::{DeviceIntRect, DeviceIntSize, DevicePoint, LayoutRect, PictureToRasterTransform};
+use api::{DevicePixelScale, PictureIntPoint, PictureIntRect, PictureIntSize, RasterRect};
+use api::{PicturePixel, RasterPixel, WorldPixel};
 use box_shadow::{BLUR_SAMPLE_SCALE};
-use clip_scroll_node::ClipScrollNode;
-use clip_scroll_tree::ClipScrollNodeIndex;
-use frame_builder::{FrameBuildingContext, FrameBuildingState, PictureState, PrimitiveRunContext};
+use clip::ClipNodeCollector;
+use clip_scroll_tree::{ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex};
+use euclid::TypedScale;
+use frame_builder::{FrameBuildingContext, FrameBuildingState, PictureState};
+use frame_builder::{PictureContext, PrimitiveContext};
 use gpu_cache::{GpuCacheHandle};
 use gpu_types::UvRectKind;
-use prim_store::{PrimitiveIndex, PrimitiveRun, PrimitiveRunLocalRect};
-use prim_store::{PrimitiveMetadata, ScrollNodeAndClipChain};
+use prim_store::{PrimitiveIndex, PrimitiveRun, SpaceMapper};
+use prim_store::{PrimitiveMetadata, get_raster_rects};
 use render_task::{ClearMode, RenderTask, RenderTaskCacheEntryHandle};
 use render_task::{RenderTaskCacheKey, RenderTaskCacheKeyKind, RenderTaskId, RenderTaskLocation};
 use scene::{FilterOpHelpers, SceneProperties};
 use std::mem;
 use tiling::RenderTargetKind;
-use util::TransformedRectKind;
+use util::{TransformedRectKind, MatrixHelpers, MaxRect};
 
 /*
  A picture represents a dynamically rendered image. It consists of:
@@ -29,6 +32,19 @@ use util::TransformedRectKind;
  * A configuration describing how to draw the primitives on
    this picture (e.g. in screen space or local space).
  */
+
+#[derive(Debug)]
+pub struct RasterConfig {
+    pub composite_mode: PictureCompositeMode,
+
+    // If this picture is drawn to an intermediate surface,
+    // the associated target information.
+    pub surface: Option<PictureSurface>,
+
+    // The spatial node of the rasterization root
+    // for this picture.
+    pub raster_spatial_node_index: SpatialNodeIndex,
+}
 
 /// Specifies how this Picture should be composited
 /// onto the target it belongs to.
@@ -62,6 +78,29 @@ pub enum PictureSurface {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct PictureId(pub u64);
 
+// TODO(gw): Having to generate globally unique picture
+//           ids for caching is not ideal. We should be
+//           able to completely remove this once we cache
+//           pictures based on their content, rather than
+//           the current cache key structure.
+pub struct PictureIdGenerator {
+    next: u64,
+}
+
+impl PictureIdGenerator {
+    pub fn new() -> Self {
+        PictureIdGenerator {
+            next: 0,
+        }
+    }
+
+    pub fn next(&mut self) -> PictureId {
+        let id = PictureId(self.next);
+        self.next += 1;
+        id
+    }
+}
+
 // Cache key that determines whether a pre-existing
 // picture in the texture cache matches the content
 // of the current picture.
@@ -80,7 +119,7 @@ pub struct PictureCacheKey {
     //       we relax that, we'll need to consider some
     //       extra parameters, depending on transform.
 
-    // This is a globally unique id of the scene this picture 
+    // This is a globally unique id of the scene this picture
     // is associated with, to avoid picture id collisions.
     scene_id: u64,
 
@@ -117,12 +156,9 @@ pub struct PictureCacheKey {
 
 #[derive(Debug)]
 pub struct PicturePrimitive {
-    // If this picture is drawn to an intermediate surface,
-    // the associated target information.
-    pub surface: Option<PictureSurface>,
-
     // List of primitive runs that make up this picture.
     pub runs: Vec<PrimitiveRun>,
+    pub state: Option<PictureState>,
 
     // The pipeline that the primitives on this picture belong to.
     pub pipeline_id: PipelineId,
@@ -140,18 +176,14 @@ pub struct PicturePrimitive {
     pub secondary_render_task_id: Option<RenderTaskId>,
     /// How this picture should be composited.
     /// If None, don't composite - just draw directly on parent surface.
-    pub composite_mode: Option<PictureCompositeMode>,
+    pub requested_composite_mode: Option<PictureCompositeMode>,
+    pub raster_config: Option<RasterConfig>,
     // If true, this picture is part of a 3D context.
     pub is_in_3d_context: bool,
     // If requested as a frame output (for rendering
     // pages to a texture), this is the pipeline this
     // picture is the root of.
     pub frame_output_pipeline_id: Option<PipelineId>,
-    // The original reference frame ID for this picture.
-    // It is only different if this is part of a 3D
-    // rendering context.
-    pub reference_frame_index: ClipScrollNodeIndex,
-    pub real_local_rect: LayoutRect,
     // An optional cache handle for storing extra data
     // in the GPU cache, depending on the type of
     // picture.
@@ -162,8 +194,8 @@ pub struct PicturePrimitive {
 }
 
 impl PicturePrimitive {
-    pub fn resolve_scene_properties(&mut self, properties: &SceneProperties) -> bool {
-        match self.composite_mode {
+    fn resolve_scene_properties(&mut self, properties: &SceneProperties) -> bool {
+        match self.requested_composite_mode {
             Some(PictureCompositeMode::Filter(ref mut filter)) => {
                 match *filter {
                     FilterOp::Opacity(ref binding, ref mut value) => {
@@ -180,22 +212,20 @@ impl PicturePrimitive {
 
     pub fn new_image(
         id: PictureId,
-        composite_mode: Option<PictureCompositeMode>,
+        requested_composite_mode: Option<PictureCompositeMode>,
         is_in_3d_context: bool,
         pipeline_id: PipelineId,
-        reference_frame_index: ClipScrollNodeIndex,
         frame_output_pipeline_id: Option<PipelineId>,
         apply_local_clip_rect: bool,
     ) -> Self {
         PicturePrimitive {
             runs: Vec::new(),
-            surface: None,
+            state: None,
             secondary_render_task_id: None,
-            composite_mode,
+            requested_composite_mode,
+            raster_config: None,
             is_in_3d_context,
             frame_output_pipeline_id,
-            reference_frame_index,
-            real_local_rect: LayoutRect::zero(),
             extra_gpu_data_handle: GpuCacheHandle::new(),
             apply_local_clip_rect,
             pipeline_id,
@@ -203,14 +233,132 @@ impl PicturePrimitive {
         }
     }
 
+    pub fn take_context(
+        &mut self,
+        prim_context: &PrimitiveContext,
+        surface_spatial_node_index: SpatialNodeIndex,
+        raster_spatial_node_index: SpatialNodeIndex,
+        parent_allows_subpixel_aa: bool,
+        frame_state: &mut FrameBuildingState,
+        frame_context: &FrameBuildingContext,
+        is_chased: bool,
+    ) -> Option<(PictureContext, PictureState)> {
+        if !self.resolve_scene_properties(frame_context.scene_properties) {
+            if cfg!(debug_assertions) && is_chased {
+                println!("\tculled for carrying an invisible composite filter");
+            }
+
+            return None;
+        }
+
+        let actual_composite_mode = match self.requested_composite_mode {
+            Some(PictureCompositeMode::Filter(filter)) if filter.is_noop() => None,
+            mode => mode,
+        };
+
+        let has_surface = actual_composite_mode.is_some();
+
+        let surface_spatial_node_index = if has_surface {
+            prim_context.spatial_node_index
+        } else {
+            surface_spatial_node_index
+        };
+
+        let xf = frame_context.clip_scroll_tree.get_relative_transform(
+            raster_spatial_node_index,
+            surface_spatial_node_index,
+        ).expect("todo");
+
+        let establishes_raster_root = has_surface && xf.has_perspective_component();
+
+        let raster_spatial_node_index = if establishes_raster_root {
+            surface_spatial_node_index
+        } else {
+            raster_spatial_node_index
+        };
+
+        if establishes_raster_root {
+            frame_state.clip_store
+                       .push_raster_root(raster_spatial_node_index);
+        }
+
+        let map_pic_to_world = SpaceMapper::new_with_target(
+            ROOT_SPATIAL_NODE_INDEX,
+            surface_spatial_node_index,
+            frame_context.world_rect,
+            frame_context.clip_scroll_tree,
+        );
+
+        let pic_bounds = map_pic_to_world.unmap(&map_pic_to_world.bounds)
+                                         .unwrap_or(PictureRect::max_rect());
+
+        let map_local_to_pic = SpaceMapper::new(
+            surface_spatial_node_index,
+            pic_bounds,
+        );
+
+        let (map_raster_to_world, map_pic_to_raster) = create_raster_mappers(
+            surface_spatial_node_index,
+            raster_spatial_node_index,
+            frame_context,
+        );
+
+        self.raster_config = actual_composite_mode.map(|composite_mode| {
+            RasterConfig {
+                composite_mode,
+                surface: None,
+                raster_spatial_node_index,
+            }
+        });
+
+        let state = PictureState {
+            tasks: Vec::new(),
+            has_non_root_coord_system: false,
+            is_cacheable: true,
+            local_rect_changed: false,
+            raster_spatial_node_index,
+            surface_spatial_node_index,
+            map_local_to_pic,
+            map_pic_to_world,
+            map_pic_to_raster,
+            map_raster_to_world,
+        };
+
+        // Disallow subpixel AA if an intermediate surface is needed.
+        // TODO(lsalzman): allow overriding parent if intermediate surface is opaque
+        let allow_subpixel_aa = parent_allows_subpixel_aa &&
+            self.raster_config.is_none();
+
+        let inflation_factor = match self.raster_config {
+            Some(RasterConfig { composite_mode: PictureCompositeMode::Filter(FilterOp::Blur(blur_radius)), .. }) => {
+                // The amount of extra space needed for primitives inside
+                // this picture to ensure the visibility check is correct.
+                BLUR_SAMPLE_SCALE * blur_radius
+            }
+            _ => {
+                0.0
+            }
+        };
+
+        let context = PictureContext {
+            pipeline_id: self.pipeline_id,
+            prim_runs: mem::replace(&mut self.runs, Vec::new()),
+            apply_local_clip_rect: self.apply_local_clip_rect,
+            inflation_factor,
+            allow_subpixel_aa,
+            is_passthrough: self.raster_config.is_none(),
+            establishes_raster_root,
+        };
+
+        Some((context, state))
+    }
+
     pub fn add_primitive(
         &mut self,
         prim_index: PrimitiveIndex,
-        clip_and_scroll: ScrollNodeAndClipChain
     ) {
         if let Some(ref mut run) = self.runs.last_mut() {
-            if run.clip_and_scroll == clip_and_scroll &&
-               run.base_prim_index.0 + run.count == prim_index.0 {
+            if run.base_prim_index.0 + run.count == prim_index.0 {
                 run.count += 1;
                 return;
             }
@@ -219,417 +367,431 @@ impl PicturePrimitive {
         self.runs.push(PrimitiveRun {
             base_prim_index: prim_index,
             count: 1,
-            clip_and_scroll,
         });
     }
 
-    pub fn update_local_rect(
+    pub fn restore_context(
         &mut self,
-        prim_run_rect: PrimitiveRunLocalRect,
-    ) -> LayoutRect {
-        let local_content_rect = prim_run_rect.local_rect_in_actual_parent_space;
-
-        self.real_local_rect = prim_run_rect.local_rect_in_original_parent_space;
-
-        match self.composite_mode {
-            Some(PictureCompositeMode::Filter(FilterOp::Blur(blur_radius))) => {
-                let inflate_size = (blur_radius * BLUR_SAMPLE_SCALE).ceil();
-                local_content_rect.inflate(inflate_size, inflate_size)
-            }
-            Some(PictureCompositeMode::Filter(FilterOp::DropShadow(_, blur_radius, _))) => {
-                let inflate_size = (blur_radius * BLUR_SAMPLE_SCALE).ceil();
-                local_content_rect.inflate(inflate_size, inflate_size)
-
-                // TODO(gw): When we support culling rect being separate from
-                //           the task/screen rect, we should include both the
-                //           content and shadow rect here, which will prevent
-                //           drop-shadows from disappearing if the main content
-                //           rect is not visible. Something like:
-                // let shadow_rect = local_content_rect
-                //     .inflate(inflate_size, inflate_size)
-                //     .translate(&offset);
-                // shadow_rect.union(&local_content_rect)
-            }
-            _ => {
-                local_content_rect
-            }
-        }
-    }
-
-    pub fn can_draw_directly_to_parent_surface(&self) -> bool {
-        match self.composite_mode {
-            Some(PictureCompositeMode::Filter(filter)) => {
-                filter.is_noop()
-            }
-            Some(PictureCompositeMode::Blit) |
-            Some(PictureCompositeMode::MixBlend(..)) => {
-                false
-            }
-            None => {
-                true
-            }
-        }
-    }
-
-    // Disallow subpixel AA if an intermediate surface is needed.
-    pub fn allow_subpixel_aa(&self) -> bool {
-        self.can_draw_directly_to_parent_surface()
-    }
-
-    pub fn prepare_for_render_inner(
-        &mut self,
-        prim_index: PrimitiveIndex,
-        prim_metadata: &mut PrimitiveMetadata,
-        prim_run_context: &PrimitiveRunContext,
-        mut pic_state_for_children: PictureState,
-        pic_state: &mut PictureState,
-        frame_context: &FrameBuildingContext,
+        context: PictureContext,
+        state: PictureState,
+        local_rect: Option<PictureRect>,
         frame_state: &mut FrameBuildingState,
-    ) {
-        let prim_screen_rect = prim_metadata
-                                .screen_rect
-                                .as_ref()
-                                .expect("bug: trying to draw an off-screen picture!?");
-        if self.can_draw_directly_to_parent_surface() {
-            pic_state.tasks.extend(pic_state_for_children.tasks);
-            self.surface = None;
-            return;
-        }
+    ) -> (LayoutRect, Option<ClipNodeCollector>) {
+        self.runs = context.prim_runs;
+        self.state = Some(state);
 
-        // TODO(gw): Almost all of the Picture types below use extra_gpu_cache_data
-        //           to store the same type of data. The exception is the filter
-        //           with a ColorMatrix, which stores the color matrix here. It's
-        //           probably worth tidying this code up to be a bit more consistent.
-        //           Perhaps store the color matrix after the common data, even though
-        //           it's not used by that shader.
-        match self.composite_mode {
-            Some(PictureCompositeMode::Filter(FilterOp::Blur(blur_radius))) => {
-                let blur_std_deviation = blur_radius * frame_context.device_pixel_scale.0;
-                let blur_range = (blur_std_deviation * BLUR_SAMPLE_SCALE).ceil() as i32;
+        let local_rect = match local_rect {
+            Some(local_rect) => {
+                let local_content_rect = LayoutRect::from_untyped(&local_rect.to_untyped());
 
-                // The clipped field is the part of the picture that is visible
-                // on screen. The unclipped field is the screen-space rect of
-                // the complete picture, if no screen / clip-chain was applied
-                // (this includes the extra space for blur region). To ensure
-                // that we draw a large enough part of the picture to get correct
-                // blur results, inflate that clipped area by the blur range, and
-                // then intersect with the total screen rect, to minimize the
-                // allocation size.
-                let device_rect = prim_screen_rect
-                    .clipped
-                    .inflate(blur_range, blur_range)
-                    .intersection(&prim_screen_rect.unclipped)
-                    .unwrap();
+                match self.raster_config {
+                    Some(RasterConfig { composite_mode: PictureCompositeMode::Filter(FilterOp::Blur(blur_radius)), .. }) => {
+                        let inflate_size = (blur_radius * BLUR_SAMPLE_SCALE).ceil();
+                        local_content_rect.inflate(inflate_size, inflate_size)
+                    }
+                    Some(RasterConfig { composite_mode: PictureCompositeMode::Filter(FilterOp::DropShadow(_, blur_radius, _)), .. }) => {
+                        let inflate_size = (blur_radius * BLUR_SAMPLE_SCALE).ceil();
+                        local_content_rect.inflate(inflate_size, inflate_size)
 
-                let uv_rect_kind = calculate_uv_rect_kind(
-                    &prim_metadata.local_rect,
-                    &prim_run_context.scroll_node,
-                    &device_rect,
-                    frame_context.device_pixel_scale,
-                );
-
-                // If we are drawing a blur that has primitives or clips that contain
-                // a complex coordinate system, don't bother caching them (for now).
-                // It's likely that they are animating and caching may not help here
-                // anyway. In the future we should relax this a bit, so that we can
-                // cache tasks with complex coordinate systems if we detect the
-                // relevant transforms haven't changed from frame to frame.
-                let surface = if pic_state_for_children.has_non_root_coord_system {
-                    let picture_task = RenderTask::new_picture(
-                        RenderTaskLocation::Dynamic(None, Some(device_rect.size)),
-                        prim_index,
-                        device_rect.origin,
-                        pic_state_for_children.tasks,
-                        uv_rect_kind,
-                    );
-
-                    let picture_task_id = frame_state.render_tasks.add(picture_task);
-
-                    let blur_render_task = RenderTask::new_blur(
-                        blur_std_deviation,
-                        picture_task_id,
-                        frame_state.render_tasks,
-                        RenderTargetKind::Color,
-                        ClearMode::Transparent,
-                    );
-
-                    let render_task_id = frame_state.render_tasks.add(blur_render_task);
-
-                    pic_state.tasks.push(render_task_id);
-
-                    PictureSurface::RenderTask(render_task_id)
-                } else {
-                    // Get the relative clipped rect within the overall prim rect, that
-                    // forms part of the cache key.
-                    let pic_relative_render_rect = PictureIntRect::new(
-                        PictureIntPoint::new(
-                            device_rect.origin.x - prim_screen_rect.unclipped.origin.x,
-                            device_rect.origin.y - prim_screen_rect.unclipped.origin.y,
-                        ),
-                        PictureIntSize::new(
-                            device_rect.size.width,
-                            device_rect.size.height,
-                        ),
-                    );
-
-                    // Request a render task that will cache the output in the
-                    // texture cache.
-                    let cache_item = frame_state.resource_cache.request_render_task(
-                        RenderTaskCacheKey {
-                            size: device_rect.size,
-                            kind: RenderTaskCacheKeyKind::Picture(PictureCacheKey {
-                                scene_id: frame_context.scene_id,
-                                picture_id: self.id,
-                                unclipped_size: prim_screen_rect.unclipped.size,
-                                pic_relative_render_rect,
-                            }),
-                        },
-                        frame_state.gpu_cache,
-                        frame_state.render_tasks,
-                        None,
-                        false,
-                        |render_tasks| {
-                            let child_tasks = mem::replace(&mut pic_state_for_children.tasks, Vec::new());
-
-                            let picture_task = RenderTask::new_picture(
-                                RenderTaskLocation::Dynamic(None, Some(device_rect.size)),
-                                prim_index,
-                                device_rect.origin,
-                                child_tasks,
-                                uv_rect_kind,
-                            );
-
-                            let picture_task_id = render_tasks.add(picture_task);
-
-                            let blur_render_task = RenderTask::new_blur(
-                                blur_std_deviation,
-                                picture_task_id,
-                                render_tasks,
-                                RenderTargetKind::Color,
-                                ClearMode::Transparent,
-                            );
-
-                            let render_task_id = render_tasks.add(blur_render_task);
-
-                            pic_state.tasks.push(render_task_id);
-
-                            render_task_id
-                        }
-                    );
-
-                    PictureSurface::TextureCache(cache_item)
-                };
-
-                self.surface = Some(surface);
-            }
-            Some(PictureCompositeMode::Filter(FilterOp::DropShadow(offset, blur_radius, color))) => {
-                let blur_std_deviation = blur_radius * frame_context.device_pixel_scale.0;
-                let blur_range = (blur_std_deviation * BLUR_SAMPLE_SCALE).ceil() as i32;
-
-                // The clipped field is the part of the picture that is visible
-                // on screen. The unclipped field is the screen-space rect of
-                // the complete picture, if no screen / clip-chain was applied
-                // (this includes the extra space for blur region). To ensure
-                // that we draw a large enough part of the picture to get correct
-                // blur results, inflate that clipped area by the blur range, and
-                // then intersect with the total screen rect, to minimize the
-                // allocation size.
-                let device_rect = prim_screen_rect
-                    .clipped
-                    .inflate(blur_range, blur_range)
-                    .intersection(&prim_screen_rect.unclipped)
-                    .unwrap();
-
-                let uv_rect_kind = calculate_uv_rect_kind(
-                    &prim_metadata.local_rect,
-                    &prim_run_context.scroll_node,
-                    &device_rect,
-                    frame_context.device_pixel_scale,
-                );
-
-                let mut picture_task = RenderTask::new_picture(
-                    RenderTaskLocation::Dynamic(None, Some(device_rect.size)),
-                    prim_index,
-                    device_rect.origin,
-                    pic_state_for_children.tasks,
-                    uv_rect_kind,
-                );
-                picture_task.mark_for_saving();
-
-                let picture_task_id = frame_state.render_tasks.add(picture_task);
-
-                let blur_render_task = RenderTask::new_blur(
-                    blur_std_deviation.round(),
-                    picture_task_id,
-                    frame_state.render_tasks,
-                    RenderTargetKind::Color,
-                    ClearMode::Transparent,
-                );
-
-                self.secondary_render_task_id = Some(picture_task_id);
-
-                let render_task_id = frame_state.render_tasks.add(blur_render_task);
-                pic_state.tasks.push(render_task_id);
-                self.surface = Some(PictureSurface::RenderTask(render_task_id));
-
-                // If the local rect of the contents changed, force the cache handle
-                // to be invalidated so that the primitive data below will get
-                // uploaded to the GPU this frame. This can occur during property
-                // animation.
-                if pic_state.local_rect_changed {
-                    frame_state.gpu_cache.invalidate(&mut self.extra_gpu_data_handle);
-                }
-
-                if let Some(mut request) = frame_state.gpu_cache.request(&mut self.extra_gpu_data_handle) {
-                    // TODO(gw): This is very hacky code below! It stores an extra
-                    //           brush primitive below for the special case of a
-                    //           drop-shadow where we need a different local
-                    //           rect for the shadow. To tidy this up in future,
-                    //           we could consider abstracting the code in prim_store.rs
-                    //           that writes a brush primitive header.
-
-                    // Basic brush primitive header is (see end of prepare_prim_for_render_inner in prim_store.rs)
-                    //  local_rect
-                    //  clip_rect
-                    //  [brush specific data]
-                    //  [segment_rect, segment data]
-                    let shadow_rect = prim_metadata.local_rect.translate(&offset);
-                    let shadow_clip_rect = prim_metadata.local_clip_rect.translate(&offset);
-
-                    // local_rect, clip_rect
-                    request.push(shadow_rect);
-                    request.push(shadow_clip_rect);
-
-                    // ImageBrush colors
-                    request.push(color.premultiplied());
-                    request.push(PremultipliedColorF::WHITE);
-                    request.push([
-                        prim_metadata.local_rect.size.width,
-                        prim_metadata.local_rect.size.height,
-                        0.0,
-                        0.0,
-                    ]);
-
-                    // segment rect / extra data
-                    request.push(shadow_rect);
-                    request.push([0.0, 0.0, 0.0, 0.0]);
-                }
-            }
-            Some(PictureCompositeMode::MixBlend(..)) => {
-                let uv_rect_kind = calculate_uv_rect_kind(
-                    &prim_metadata.local_rect,
-                    &prim_run_context.scroll_node,
-                    &prim_screen_rect.clipped,
-                    frame_context.device_pixel_scale,
-                );
-
-                let picture_task = RenderTask::new_picture(
-                    RenderTaskLocation::Dynamic(None, Some(prim_screen_rect.clipped.size)),
-                    prim_index,
-                    prim_screen_rect.clipped.origin,
-                    pic_state_for_children.tasks,
-                    uv_rect_kind,
-                );
-
-                let readback_task_id = frame_state.render_tasks.add(
-                    RenderTask::new_readback(prim_screen_rect.clipped)
-                );
-
-                self.secondary_render_task_id = Some(readback_task_id);
-                pic_state.tasks.push(readback_task_id);
-
-                let render_task_id = frame_state.render_tasks.add(picture_task);
-                pic_state.tasks.push(render_task_id);
-                self.surface = Some(PictureSurface::RenderTask(render_task_id));
-            }
-            Some(PictureCompositeMode::Filter(filter)) => {
-                if let FilterOp::ColorMatrix(m) = filter {
-                    if let Some(mut request) = frame_state.gpu_cache.request(&mut self.extra_gpu_data_handle) {
-                        for i in 0..5 {
-                            request.push([m[i*4], m[i*4+1], m[i*4+2], m[i*4+3]]);
-                        }
+                        // TODO(gw): When we support culling rect being separate from
+                        //           the task/screen rect, we should include both the
+                        //           content and shadow rect here, which will prevent
+                        //           drop-shadows from disappearing if the main content
+                        //           rect is not visible. Something like:
+                        // let shadow_rect = local_content_rect
+                        //     .inflate(inflate_size, inflate_size)
+                        //     .translate(&offset);
+                        // shadow_rect.union(&local_content_rect)
+                    }
+                    _ => {
+                        local_content_rect
                     }
                 }
-
-                let uv_rect_kind = calculate_uv_rect_kind(
-                    &prim_metadata.local_rect,
-                    &prim_run_context.scroll_node,
-                    &prim_screen_rect.clipped,
-                    frame_context.device_pixel_scale,
-                );
-
-                let picture_task = RenderTask::new_picture(
-                    RenderTaskLocation::Dynamic(None, Some(prim_screen_rect.clipped.size)),
-                    prim_index,
-                    prim_screen_rect.clipped.origin,
-                    pic_state_for_children.tasks,
-                    uv_rect_kind,
-                );
-
-                let render_task_id = frame_state.render_tasks.add(picture_task);
-                pic_state.tasks.push(render_task_id);
-                self.surface = Some(PictureSurface::RenderTask(render_task_id));
             }
-            Some(PictureCompositeMode::Blit) | None => {
-                let uv_rect_kind = calculate_uv_rect_kind(
-                    &prim_metadata.local_rect,
-                    &prim_run_context.scroll_node,
-                    &prim_screen_rect.clipped,
-                    frame_context.device_pixel_scale,
-                );
-
-                let picture_task = RenderTask::new_picture(
-                    RenderTaskLocation::Dynamic(None, Some(prim_screen_rect.clipped.size)),
-                    prim_index,
-                    prim_screen_rect.clipped.origin,
-                    pic_state_for_children.tasks,
-                    uv_rect_kind,
-                );
-
-                let render_task_id = frame_state.render_tasks.add(picture_task);
-                pic_state.tasks.push(render_task_id);
-                self.surface = Some(PictureSurface::RenderTask(render_task_id));
+            None => {
+                assert!(self.raster_config.is_none());
+                LayoutRect::zero()
             }
-        }
+        };
+
+        let clip_node_collector = if context.establishes_raster_root {
+            Some(frame_state.clip_store.pop_raster_root())
+        } else {
+            None
+        };
+
+        (local_rect, clip_node_collector)
+    }
+
+    pub fn take_state(&mut self) -> PictureState {
+        self.state.take().expect("bug: no state present!")
     }
 
     pub fn prepare_for_render(
         &mut self,
         prim_index: PrimitiveIndex,
         prim_metadata: &mut PrimitiveMetadata,
-        prim_run_context: &PrimitiveRunContext,
-        pic_state_for_children: PictureState,
         pic_state: &mut PictureState,
         frame_context: &FrameBuildingContext,
         frame_state: &mut FrameBuildingState,
-    ) {
-        self.prepare_for_render_inner(
-            prim_index,
-            prim_metadata,
-            prim_run_context,
-            pic_state_for_children,
-            pic_state,
-            frame_context,
-            frame_state,
-        );
+    ) -> bool {
+        let mut pic_state_for_children = self.take_state();
+
+        match self.raster_config {
+            Some(ref mut raster_config) => {
+                let (map_raster_to_world, map_pic_to_raster) = create_raster_mappers(
+                    prim_metadata.spatial_node_index,
+                    raster_config.raster_spatial_node_index,
+                    frame_context,
+                );
+
+                let pic_rect = PictureRect::from_untyped(&prim_metadata.local_rect.to_untyped());
+
+                let (clipped, unclipped, transform) = match get_raster_rects(
+                    pic_rect,
+                    &map_pic_to_raster,
+                    &map_raster_to_world,
+                    prim_metadata.clipped_world_rect.expect("bug1"),
+                    frame_context.device_pixel_scale,
+                ) {
+                    Some(info) => info,
+                    None => return false,
+                };
+
+                // TODO(gw): Almost all of the Picture types below use extra_gpu_cache_data
+                //           to store the same type of data. The exception is the filter
+                //           with a ColorMatrix, which stores the color matrix here. It's
+                //           probably worth tidying this code up to be a bit more consistent.
+                //           Perhaps store the color matrix after the common data, even though
+                //           it's not used by that shader.
+
+                match raster_config.composite_mode {
+                    PictureCompositeMode::Filter(FilterOp::Blur(blur_radius)) => {
+                        let blur_std_deviation = blur_radius * frame_context.device_pixel_scale.0;
+                        let blur_range = (blur_std_deviation * BLUR_SAMPLE_SCALE).ceil() as i32;
+
+                        // The clipped field is the part of the picture that is visible
+                        // on screen. The unclipped field is the screen-space rect of
+                        // the complete picture, if no screen / clip-chain was applied
+                        // (this includes the extra space for blur region). To ensure
+                        // that we draw a large enough part of the picture to get correct
+                        // blur results, inflate that clipped area by the blur range, and
+                        // then intersect with the total screen rect, to minimize the
+                        // allocation size.
+                        let device_rect = clipped
+                            .inflate(blur_range, blur_range)
+                            .intersection(&unclipped.to_i32())
+                            .unwrap();
+
+                        let uv_rect_kind = calculate_uv_rect_kind(
+                            &pic_rect,
+                            &transform,
+                            &device_rect,
+                            frame_context.device_pixel_scale,
+                        );
+
+                        // If we are drawing a blur that has primitives or clips that contain
+                        // a complex coordinate system, don't bother caching them (for now).
+                        // It's likely that they are animating and caching may not help here
+                        // anyway. In the future we should relax this a bit, so that we can
+                        // cache tasks with complex coordinate systems if we detect the
+                        // relevant transforms haven't changed from frame to frame.
+                        let surface = if pic_state_for_children.has_non_root_coord_system ||
+                                         !pic_state_for_children.is_cacheable {
+                            let picture_task = RenderTask::new_picture(
+                                RenderTaskLocation::Dynamic(None, device_rect.size),
+                                unclipped.size,
+                                prim_index,
+                                device_rect.origin,
+                                pic_state_for_children.tasks,
+                                uv_rect_kind,
+                                pic_state_for_children.raster_spatial_node_index,
+                            );
+
+                            let picture_task_id = frame_state.render_tasks.add(picture_task);
+
+                            let blur_render_task = RenderTask::new_blur(
+                                blur_std_deviation,
+                                picture_task_id,
+                                frame_state.render_tasks,
+                                RenderTargetKind::Color,
+                                ClearMode::Transparent,
+                            );
+
+                            let render_task_id = frame_state.render_tasks.add(blur_render_task);
+
+                            pic_state.tasks.push(render_task_id);
+
+                            PictureSurface::RenderTask(render_task_id)
+                        } else {
+                            // Get the relative clipped rect within the overall prim rect, that
+                            // forms part of the cache key.
+                            let pic_relative_render_rect = PictureIntRect::new(
+                                PictureIntPoint::new(
+                                    device_rect.origin.x - unclipped.origin.x as i32,
+                                    device_rect.origin.y - unclipped.origin.y as i32,
+                                ),
+                                PictureIntSize::new(
+                                    device_rect.size.width,
+                                    device_rect.size.height,
+                                ),
+                            );
+
+                            // Request a render task that will cache the output in the
+                            // texture cache.
+                            let cache_item = frame_state.resource_cache.request_render_task(
+                                RenderTaskCacheKey {
+                                    size: device_rect.size,
+                                    kind: RenderTaskCacheKeyKind::Picture(PictureCacheKey {
+                                        scene_id: frame_context.scene_id,
+                                        picture_id: self.id,
+                                        unclipped_size: unclipped.size.to_i32(),
+                                        pic_relative_render_rect,
+                                    }),
+                                },
+                                frame_state.gpu_cache,
+                                frame_state.render_tasks,
+                                None,
+                                false,
+                                |render_tasks| {
+                                    let child_tasks = mem::replace(&mut pic_state_for_children.tasks, Vec::new());
+
+                                    let picture_task = RenderTask::new_picture(
+                                        RenderTaskLocation::Dynamic(None, device_rect.size),
+                                        unclipped.size,
+                                        prim_index,
+                                        device_rect.origin,
+                                        child_tasks,
+                                        uv_rect_kind,
+                                        pic_state_for_children.raster_spatial_node_index,
+                                    );
+
+                                    let picture_task_id = render_tasks.add(picture_task);
+
+                                    let blur_render_task = RenderTask::new_blur(
+                                        blur_std_deviation,
+                                        picture_task_id,
+                                        render_tasks,
+                                        RenderTargetKind::Color,
+                                        ClearMode::Transparent,
+                                    );
+
+                                    let render_task_id = render_tasks.add(blur_render_task);
+
+                                    pic_state.tasks.push(render_task_id);
+
+                                    render_task_id
+                                }
+                            );
+
+                            PictureSurface::TextureCache(cache_item)
+                        };
+
+                        raster_config.surface = Some(surface);
+                    }
+                    PictureCompositeMode::Filter(FilterOp::DropShadow(offset, blur_radius, color)) => {
+                        let blur_std_deviation = blur_radius * frame_context.device_pixel_scale.0;
+                        let blur_range = (blur_std_deviation * BLUR_SAMPLE_SCALE).ceil() as i32;
+
+                        // The clipped field is the part of the picture that is visible
+                        // on screen. The unclipped field is the screen-space rect of
+                        // the complete picture, if no screen / clip-chain was applied
+                        // (this includes the extra space for blur region). To ensure
+                        // that we draw a large enough part of the picture to get correct
+                        // blur results, inflate that clipped area by the blur range, and
+                        // then intersect with the total screen rect, to minimize the
+                        // allocation size.
+                        let device_rect = clipped
+                            .inflate(blur_range, blur_range)
+                            .intersection(&unclipped.to_i32())
+                            .unwrap();
+
+                        let uv_rect_kind = calculate_uv_rect_kind(
+                            &pic_rect,
+                            &transform,
+                            &device_rect,
+                            frame_context.device_pixel_scale,
+                        );
+
+                        let mut picture_task = RenderTask::new_picture(
+                            RenderTaskLocation::Dynamic(None, device_rect.size),
+                            unclipped.size,
+                            prim_index,
+                            device_rect.origin,
+                            pic_state_for_children.tasks,
+                            uv_rect_kind,
+                            pic_state_for_children.raster_spatial_node_index,
+                        );
+                        picture_task.mark_for_saving();
+
+                        let picture_task_id = frame_state.render_tasks.add(picture_task);
+
+                        let blur_render_task = RenderTask::new_blur(
+                            blur_std_deviation.round(),
+                            picture_task_id,
+                            frame_state.render_tasks,
+                            RenderTargetKind::Color,
+                            ClearMode::Transparent,
+                        );
+
+                        self.secondary_render_task_id = Some(picture_task_id);
+
+                        let render_task_id = frame_state.render_tasks.add(blur_render_task);
+                        pic_state.tasks.push(render_task_id);
+                        raster_config.surface = Some(PictureSurface::RenderTask(render_task_id));
+
+                        // If the local rect of the contents changed, force the cache handle
+                        // to be invalidated so that the primitive data below will get
+                        // uploaded to the GPU this frame. This can occur during property
+                        // animation.
+                        if pic_state.local_rect_changed {
+                            frame_state.gpu_cache.invalidate(&mut self.extra_gpu_data_handle);
+                        }
+
+                        if let Some(mut request) = frame_state.gpu_cache.request(&mut self.extra_gpu_data_handle) {
+                            // TODO(gw): This is very hacky code below! It stores an extra
+                            //           brush primitive below for the special case of a
+                            //           drop-shadow where we need a different local
+                            //           rect for the shadow. To tidy this up in future,
+                            //           we could consider abstracting the code in prim_store.rs
+                            //           that writes a brush primitive header.
+
+                            // Basic brush primitive header is (see end of prepare_prim_for_render_inner in prim_store.rs)
+                            //  [brush specific data]
+                            //  [segment_rect, segment data]
+                            let shadow_rect = prim_metadata.local_rect.translate(&offset);
+
+                            // ImageBrush colors
+                            request.push(color.premultiplied());
+                            request.push(PremultipliedColorF::WHITE);
+                            request.push([
+                                prim_metadata.local_rect.size.width,
+                                prim_metadata.local_rect.size.height,
+                                0.0,
+                                0.0,
+                            ]);
+
+                            // segment rect / extra data
+                            request.push(shadow_rect);
+                            request.push([0.0, 0.0, 0.0, 0.0]);
+                        }
+                    }
+                    PictureCompositeMode::MixBlend(..) => {
+                        let uv_rect_kind = calculate_uv_rect_kind(
+                            &pic_rect,
+                            &transform,
+                            &clipped,
+                            frame_context.device_pixel_scale,
+                        );
+
+                        let picture_task = RenderTask::new_picture(
+                            RenderTaskLocation::Dynamic(None, clipped.size),
+                            unclipped.size,
+                            prim_index,
+                            clipped.origin,
+                            pic_state_for_children.tasks,
+                            uv_rect_kind,
+                            pic_state_for_children.raster_spatial_node_index,
+                        );
+
+                        let readback_task_id = frame_state.render_tasks.add(
+                            RenderTask::new_readback(clipped)
+                        );
+
+                        self.secondary_render_task_id = Some(readback_task_id);
+                        pic_state.tasks.push(readback_task_id);
+
+                        let render_task_id = frame_state.render_tasks.add(picture_task);
+                        pic_state.tasks.push(render_task_id);
+                        raster_config.surface = Some(PictureSurface::RenderTask(render_task_id));
+                    }
+                    PictureCompositeMode::Filter(filter) => {
+                        if let FilterOp::ColorMatrix(m) = filter {
+                            if let Some(mut request) = frame_state.gpu_cache.request(&mut self.extra_gpu_data_handle) {
+                                for i in 0..5 {
+                                    request.push([m[i*4], m[i*4+1], m[i*4+2], m[i*4+3]]);
+                                }
+                            }
+                        }
+
+                        let uv_rect_kind = calculate_uv_rect_kind(
+                            &pic_rect,
+                            &transform,
+                            &clipped,
+                            frame_context.device_pixel_scale,
+                        );
+
+                        let picture_task = RenderTask::new_picture(
+                            RenderTaskLocation::Dynamic(None, clipped.size),
+                            unclipped.size,
+                            prim_index,
+                            clipped.origin,
+                            pic_state_for_children.tasks,
+                            uv_rect_kind,
+                            pic_state_for_children.raster_spatial_node_index,
+                        );
+
+                        let render_task_id = frame_state.render_tasks.add(picture_task);
+                        pic_state.tasks.push(render_task_id);
+                        raster_config.surface = Some(PictureSurface::RenderTask(render_task_id));
+                    }
+                    PictureCompositeMode::Blit => {
+                        let uv_rect_kind = calculate_uv_rect_kind(
+                            &pic_rect,
+                            &transform,
+                            &clipped,
+                            frame_context.device_pixel_scale,
+                        );
+
+                        let picture_task = RenderTask::new_picture(
+                            RenderTaskLocation::Dynamic(None, clipped.size),
+                            unclipped.size,
+                            prim_index,
+                            clipped.origin,
+                            pic_state_for_children.tasks,
+                            uv_rect_kind,
+                            pic_state_for_children.raster_spatial_node_index,
+                        );
+
+                        let render_task_id = frame_state.render_tasks.add(picture_task);
+                        pic_state.tasks.push(render_task_id);
+                        raster_config.surface = Some(PictureSurface::RenderTask(render_task_id));
+                    }
+                }
+            }
+            None => {
+                pic_state.tasks.extend(pic_state_for_children.tasks);
+            }
+        }
+
+        true
     }
 }
 
 // Calculate a single screen-space UV for a picture.
 fn calculate_screen_uv(
-    local_pos: &LayoutPoint,
-    clip_scroll_node: &ClipScrollNode,
+    local_pos: &PicturePoint,
+    transform: &PictureToRasterTransform,
     rendered_rect: &DeviceRect,
     device_pixel_scale: DevicePixelScale,
 ) -> DevicePoint {
-    let world_pos = clip_scroll_node
-        .world_content_transform
-        .transform_point2d(local_pos);
+    let raster_pos = match transform.transform_point2d(local_pos) {
+        Some(pos) => pos,
+        None => {
+            //Warning: this is incorrect and needs to be fixed properly.
+            // The transformation has put a local vertex behind the near clipping plane...
+            // Proper solution would be to keep the near-clipping-plane results around
+            // (currently produced by calculate_screen_bounding_rect) and use them here.
+            return DevicePoint::new(0.5, 0.5);
+        }
+    };
 
-    let mut device_pos = world_pos * device_pixel_scale;
+    let raster_to_device_space = TypedScale::new(1.0) * device_pixel_scale;
+
+    let mut device_pos = raster_pos * raster_to_device_space;
 
     // Apply snapping for axis-aligned scroll nodes, as per prim_shared.glsl.
-    if clip_scroll_node.transform_kind == TransformedRectKind::AxisAligned {
+    if transform.transform_kind() == TransformedRectKind::AxisAligned {
         device_pos.x = (device_pos.x + 0.5).floor();
         device_pos.y = (device_pos.y + 0.5).floor();
     }
@@ -643,37 +805,37 @@ fn calculate_screen_uv(
 // Calculate a UV rect within an image based on the screen space
 // vertex positions of a picture.
 fn calculate_uv_rect_kind(
-    local_rect: &LayoutRect,
-    clip_scroll_node: &ClipScrollNode,
+    pic_rect: &PictureRect,
+    transform: &PictureToRasterTransform,
     rendered_rect: &DeviceIntRect,
     device_pixel_scale: DevicePixelScale,
 ) -> UvRectKind {
     let rendered_rect = rendered_rect.to_f32();
 
     let top_left = calculate_screen_uv(
-        &local_rect.origin,
-        clip_scroll_node,
+        &pic_rect.origin,
+        transform,
         &rendered_rect,
         device_pixel_scale,
     );
 
     let top_right = calculate_screen_uv(
-        &local_rect.top_right(),
-        clip_scroll_node,
+        &pic_rect.top_right(),
+        transform,
         &rendered_rect,
         device_pixel_scale,
     );
 
     let bottom_left = calculate_screen_uv(
-        &local_rect.bottom_left(),
-        clip_scroll_node,
+        &pic_rect.bottom_left(),
+        transform,
         &rendered_rect,
         device_pixel_scale,
     );
 
     let bottom_right = calculate_screen_uv(
-        &local_rect.bottom_right(),
-        clip_scroll_node,
+        &pic_rect.bottom_right(),
+        transform,
         &rendered_rect,
         device_pixel_scale,
     );
@@ -684,4 +846,29 @@ fn calculate_uv_rect_kind(
         bottom_left,
         bottom_right,
     }
+}
+
+fn create_raster_mappers(
+    surface_spatial_node_index: SpatialNodeIndex,
+    raster_spatial_node_index: SpatialNodeIndex,
+    frame_context: &FrameBuildingContext,
+) -> (SpaceMapper<RasterPixel, WorldPixel>, SpaceMapper<PicturePixel, RasterPixel>) {
+    let map_raster_to_world = SpaceMapper::new_with_target(
+        ROOT_SPATIAL_NODE_INDEX,
+        raster_spatial_node_index,
+        frame_context.world_rect,
+        frame_context.clip_scroll_tree,
+    );
+
+    let raster_bounds = map_raster_to_world.unmap(&frame_context.world_rect)
+                                           .unwrap_or(RasterRect::max_rect());
+
+    let map_pic_to_raster = SpaceMapper::new_with_target(
+        raster_spatial_node_index,
+        surface_spatial_node_index,
+        raster_bounds,
+        frame_context.clip_scroll_tree,
+    );
+
+    (map_raster_to_world, map_pic_to_raster)
 }

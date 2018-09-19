@@ -34,7 +34,7 @@ push_apk_description_schema = Schema({
     Required('attributes'): task_description_schema['attributes'],
     Required('treeherder'): task_description_schema['treeherder'],
     Required('run-on-projects'): task_description_schema['run-on-projects'],
-    Required('worker-type'): optionally_keyed_by('project', basestring),
+    Required('worker-type'): optionally_keyed_by('release-level', basestring),
     Required('worker'): object,
     Required('scopes'): None,
     Required('requires'): task_description_schema['requires'],
@@ -90,30 +90,25 @@ def make_task_description(config, jobs):
             job, job['dependencies']
         )
 
-        # Use the rc-google-play-track and rc-rollout-percentage in RC relpro flavors
-        if config.params['release_type'] == 'rc':
-            job['worker']['google-play-track'] = job['worker']['rc-google-play-track']
-            job['worker']['rollout-percentage'] = job['worker']['rc-rollout-percentage']
-
         resolve_keyed_by(
             job, 'worker.google-play-track', item_name=job['name'],
-            project=config.params['project']
+            **{'release-type': config.params['release_type']}
         )
         resolve_keyed_by(
             job, 'worker.commit', item_name=job['name'],
-            project=config.params['project']
+            **{'release-level': config.params.release_level()}
         )
 
         resolve_keyed_by(
             job, 'worker.rollout-percentage', item_name=job['name'],
-            project=config.params['project']
+            **{'release-type': config.params['release_type']}
         )
 
         job['scopes'] = [get_push_apk_scope(config)]
 
         resolve_keyed_by(
             job, 'worker-type', item_name=job['name'],
-            project=config.params['project']
+            **{'release-level': config.params.release_level()}
         )
 
         yield job
@@ -138,7 +133,7 @@ def generate_upstream_artifacts(job, dependencies):
         'taskType': 'signing',
         'paths': ['{}/target.apk'.format(artifact_prefix)],
     } for task_kind in dependencies.keys()
-      if task_kind not in ('google-play-strings', 'beetmover-checksums')
+      if 'google-play-strings' not in task_kind
     ]
 
     google_play_strings = [{
@@ -158,8 +153,4 @@ def delete_non_required_fields(_, jobs):
     for job in jobs:
         del job['name']
         del job['dependent-tasks']
-
-        del(job['worker']['rc-google-play-track'])
-        del(job['worker']['rc-rollout-percentage'])
-
         yield job

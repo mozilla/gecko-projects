@@ -169,8 +169,7 @@ class BuildBackend(LoggingMixin):
                 pass
 
         # Write out the list of backend files generated, if it changed.
-        if self._deleted_count or self._created_count or \
-                not os.path.exists(list_file):
+        if backend_output_list != self._backend_output_files:
             with self._write_file(list_file) as fh:
                 fh.write('\n'.join(sorted(self._backend_output_files)))
         else:
@@ -318,6 +317,7 @@ class BuildBackend(LoggingMixin):
             top_srcdir=obj.topsrcdir,
             topobjdir=obj.topobjdir,
             srcdir=srcdir,
+            srcdir_rel=mozpath.relpath(srcdir, mozpath.dirname(obj.output_path)),
             relativesrcdir=mozpath.relpath(srcdir, obj.topsrcdir) or '.',
             DEPTH=mozpath.relpath(obj.topobjdir, mozpath.dirname(obj.output_path)) or '.',
         )

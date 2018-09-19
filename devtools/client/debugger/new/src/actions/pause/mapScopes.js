@@ -29,21 +29,20 @@ function mapScopes(scopes, frame) {
     client,
     sourceMaps
   }) {
-    const generatedSourceRecord = (0, _selectors.getSource)(getState(), frame.generatedLocation.sourceId);
-    const sourceRecord = (0, _selectors.getSource)(getState(), frame.location.sourceId);
-    const shouldMapScopes = _prefs.features.mapScopes && !generatedSourceRecord.isWasm && !sourceRecord.isPrettyPrinted && !(0, _devtoolsSourceMap.isGeneratedId)(frame.location.sourceId);
+    const generatedSource = (0, _selectors.getSource)(getState(), frame.generatedLocation.sourceId);
+    const source = (0, _selectors.getSource)(getState(), frame.location.sourceId);
     await dispatch({
       type: "MAP_SCOPES",
       frame,
       [_promise.PROMISE]: async function () {
-        if (!shouldMapScopes) {
+        if (!_prefs.features.mapScopes || !source || !generatedSource || generatedSource.isWasm || source.isPrettyPrinted || (0, _devtoolsSourceMap.isGeneratedId)(frame.location.sourceId)) {
           return null;
         }
 
-        await dispatch((0, _loadSourceText.loadSourceText)(sourceRecord));
+        await dispatch((0, _loadSourceText.loadSourceText)(source));
 
         try {
-          return await (0, _mapScopes.buildMappedScopes)(sourceRecord.toJS(), frame, (await scopes), sourceMaps, client);
+          return await (0, _mapScopes.buildMappedScopes)(source, frame, (await scopes), sourceMaps, client);
         } catch (e) {
           (0, _log.log)(e);
           return null;

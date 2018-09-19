@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Generated with cbindgen:0.6.0 */
+/* Generated with cbindgen:0.6.3 */
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
@@ -93,6 +93,7 @@ enum class ImageFormat : uint32_t {
   BGRA8 = 3,
   RGBAF32 = 4,
   RG8 = 5,
+  RGBAI32 = 6,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -147,6 +148,14 @@ enum class RepeatMode : uint32_t {
   Repeat,
   Round,
   Space,
+
+  Sentinel /* this must be last for serialization purposes. */
+};
+
+enum class TelemetryProbe {
+  SceneBuildTime = 0,
+  SceneSwapTime = 1,
+  RenderTime = 2,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -218,6 +227,9 @@ struct DocumentHandle;
 // Geometry in a stacking context's local coordinate space (logical pixels).
 struct LayoutPixel;
 
+// Coordinates in normalized space (between zero and one).
+struct NormalizedCoordinates;
+
 // The renderer is responsible for submitting to the GPU the work prepared by the
 // RenderBackend.
 struct Renderer;
@@ -225,12 +237,7 @@ struct Renderer;
 // Offset in number of tiles.
 struct Tiles;
 
-// A Transaction is a group of commands to apply atomically to a document.
-//
-// This mechanism ensures that:
-//  - no other message can be interleaved between two commands that need to be applied together.
-//  - no redundant work is performed if two commands in the same transaction cause the scene or
-//    the frame to be rebuilt.
+// Represents the work associated to a transaction before scene building.
 struct Transaction;
 
 // The default unit.
@@ -265,6 +272,18 @@ struct IdNamespace {
   }
 };
 
+struct FontInstanceKey {
+  IdNamespace mNamespace;
+  uint32_t mHandle;
+
+  bool operator==(const FontInstanceKey& aOther) const {
+    return mNamespace == aOther.mNamespace &&
+           mHandle == aOther.mHandle;
+  }
+};
+
+using WrFontInstanceKey = FontInstanceKey;
+
 struct FontKey {
   IdNamespace mNamespace;
   uint32_t mHandle;
@@ -276,6 +295,92 @@ struct FontKey {
 };
 
 using WrFontKey = FontKey;
+
+// Represents RGBA screen colors with one byte per channel.
+//
+// If the alpha value `a` is 255 the color is opaque.
+struct ColorU {
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+  uint8_t a;
+
+  bool operator==(const ColorU& aOther) const {
+    return r == aOther.r &&
+           g == aOther.g &&
+           b == aOther.b &&
+           a == aOther.a;
+  }
+};
+
+struct SyntheticItalics {
+  int16_t angle;
+
+  bool operator==(const SyntheticItalics& aOther) const {
+    return angle == aOther.angle;
+  }
+};
+
+struct FontInstanceOptions {
+  FontRenderMode render_mode;
+  FontInstanceFlags flags;
+  // When bg_color.a is != 0 and render_mode is FontRenderMode::Subpixel,
+  // the text will be rendered with bg_color.r/g/b as an opaque estimated
+  // background color.
+  ColorU bg_color;
+  SyntheticItalics synthetic_italics;
+
+  bool operator==(const FontInstanceOptions& aOther) const {
+    return render_mode == aOther.render_mode &&
+           flags == aOther.flags &&
+           bg_color == aOther.bg_color &&
+           synthetic_italics == aOther.synthetic_italics;
+  }
+};
+
+#if defined(XP_WIN)
+struct FontInstancePlatformOptions {
+  uint16_t gamma;
+  uint16_t contrast;
+
+  bool operator==(const FontInstancePlatformOptions& aOther) const {
+    return gamma == aOther.gamma &&
+           contrast == aOther.contrast;
+  }
+};
+#endif
+
+#if defined(XP_MACOSX)
+struct FontInstancePlatformOptions {
+  uint32_t unused;
+
+  bool operator==(const FontInstancePlatformOptions& aOther) const {
+    return unused == aOther.unused;
+  }
+};
+#endif
+
+#if !(defined(XP_MACOSX) || defined(XP_WIN))
+struct FontInstancePlatformOptions {
+  FontLCDFilter lcd_filter;
+  FontHinting hinting;
+
+  bool operator==(const FontInstancePlatformOptions& aOther) const {
+    return lcd_filter == aOther.lcd_filter &&
+           hinting == aOther.hinting;
+  }
+};
+#endif
+
+struct FontVariation {
+  uint32_t tag;
+  float value;
+
+  bool operator==(const FontVariation& aOther) const {
+    return tag == aOther.tag &&
+           value == aOther.value;
+  }
+};
 
 using VecU8 = Vec<uint8_t>;
 
@@ -366,6 +471,25 @@ struct WrPipelineInfo {
   }
 };
 
+// Collection of heap sizes, in bytes.
+struct MemoryReport {
+  uintptr_t primitive_stores;
+  uintptr_t clip_stores;
+  uintptr_t gpu_cache_metadata;
+  uintptr_t gpu_cache_cpu_mirror;
+  uintptr_t render_tasks;
+  uintptr_t hit_testers;
+
+  bool operator==(const MemoryReport& aOther) const {
+    return primitive_stores == aOther.primitive_stores &&
+           clip_stores == aOther.clip_stores &&
+           gpu_cache_metadata == aOther.gpu_cache_metadata &&
+           gpu_cache_cpu_mirror == aOther.gpu_cache_cpu_mirror &&
+           render_tasks == aOther.render_tasks &&
+           hit_testers == aOther.hit_testers;
+  }
+};
+
 template<typename T, typename U>
 struct TypedSize2D {
   T width;
@@ -392,14 +516,17 @@ struct BuiltDisplayListDescriptor {
   uint64_t builder_finish_time;
   // The third IPC time stamp: just before sending
   uint64_t send_start_time;
-  // The amount of clips ids assigned while building this display list.
-  uintptr_t total_clip_ids;
+  // The amount of clipping nodes created while building this display list.
+  uintptr_t total_clip_nodes;
+  // The amount of spatial nodes created while building this display list.
+  uintptr_t total_spatial_nodes;
 
   bool operator==(const BuiltDisplayListDescriptor& aOther) const {
     return builder_start_time == aOther.builder_start_time &&
            builder_finish_time == aOther.builder_finish_time &&
            send_start_time == aOther.send_start_time &&
-           total_clip_ids == aOther.total_clip_ids;
+           total_clip_nodes == aOther.total_clip_nodes &&
+           total_spatial_nodes == aOther.total_spatial_nodes;
   }
 };
 
@@ -532,19 +659,22 @@ struct TypedVector2D {
 
 using LayoutVector2D = TypedVector2D<float, LayoutPixel>;
 
-struct BorderWidths {
-  float left;
-  float top;
-  float right;
-  float bottom;
+template<typename T, typename U>
+struct TypedSideOffsets2D {
+  T top;
+  T right;
+  T bottom;
+  T left;
 
-  bool operator==(const BorderWidths& aOther) const {
-    return left == aOther.left &&
-           top == aOther.top &&
+  bool operator==(const TypedSideOffsets2D& aOther) const {
+    return top == aOther.top &&
            right == aOther.right &&
-           bottom == aOther.bottom;
+           bottom == aOther.bottom &&
+           left == aOther.left;
   }
 };
+
+using LayoutSideOffsets = TypedSideOffsets2D<float, LayoutPixel>;
 
 // Represents RGBA screen colors with floating point numbers.
 //
@@ -574,6 +704,10 @@ struct BorderSide {
   }
 };
 
+// The default side offset type with no unit.
+template<typename T>
+using SideOffsets2D = TypedSideOffsets2D<T, UnknownUnit>;
+
 using LayoutPoint = TypedPoint2D<float, LayoutPixel>;
 
 struct GradientStop {
@@ -585,25 +719,6 @@ struct GradientStop {
            color == aOther.color;
   }
 };
-
-template<typename T, typename U>
-struct TypedSideOffsets2D {
-  T top;
-  T right;
-  T bottom;
-  T left;
-
-  bool operator==(const TypedSideOffsets2D& aOther) const {
-    return top == aOther.top &&
-           right == aOther.right &&
-           bottom == aOther.bottom &&
-           left == aOther.left;
-  }
-};
-
-// The default side offset type with no unit.
-template<typename T>
-using SideOffsets2D = TypedSideOffsets2D<T, UnknownUnit>;
 
 struct Shadow {
   LayoutVector2D offset;
@@ -700,8 +815,7 @@ union GlyphRasterSpace {
     float _0;
 
     bool operator==(const Local_Body& aOther) const {
-      return tag == aOther.tag &&
-             _0 == aOther._0;
+      return _0 == aOther._0;
     }
   };
 
@@ -730,19 +844,17 @@ union GlyphRasterSpace {
   bool IsScreen() const {
     return tag == Tag::Screen;
   }
-};
 
-struct FontInstanceKey {
-  IdNamespace mNamespace;
-  uint32_t mHandle;
-
-  bool operator==(const FontInstanceKey& aOther) const {
-    return mNamespace == aOther.mNamespace &&
-           mHandle == aOther.mHandle;
+  bool operator==(const GlyphRasterSpace& aOther) const {
+    if (tag != aOther.tag) {
+      return false;
+    }
+    switch (tag) {
+      case Tag::Local: return local == aOther.local;
+      default: return true;
+    }
   }
 };
-
-using WrFontInstanceKey = FontInstanceKey;
 
 using GlyphIndex = uint32_t;
 
@@ -830,7 +942,7 @@ struct WrExternalImageId {
   }
 };
 
-using LockExternalImageCallback = WrExternalImage(*)(void*, WrExternalImageId, uint8_t);
+using LockExternalImageCallback = WrExternalImage(*)(void*, WrExternalImageId, uint8_t, ImageRendering);
 
 using UnlockExternalImageCallback = void(*)(void*, WrExternalImageId, uint8_t);
 
@@ -862,69 +974,7 @@ struct WrImageDescriptor {
   }
 };
 
-// Represents RGBA screen colors with one byte per channel.
-//
-// If the alpha value `a` is 255 the color is opaque.
-struct ColorU {
-  uint8_t r;
-  uint8_t g;
-  uint8_t b;
-  uint8_t a;
-
-  bool operator==(const ColorU& aOther) const {
-    return r == aOther.r &&
-           g == aOther.g &&
-           b == aOther.b &&
-           a == aOther.a;
-  }
-};
-
-struct FontInstanceOptions {
-  FontRenderMode render_mode;
-  FontInstanceFlags flags;
-  // When bg_color.a is != 0 and render_mode is FontRenderMode::Subpixel,
-  // the text will be rendered with bg_color.r/g/b as an opaque estimated
-  // background color.
-  ColorU bg_color;
-
-  bool operator==(const FontInstanceOptions& aOther) const {
-    return render_mode == aOther.render_mode &&
-           flags == aOther.flags &&
-           bg_color == aOther.bg_color;
-  }
-};
-
-#if defined(XP_WIN)
-struct FontInstancePlatformOptions {
-  uint32_t unused;
-
-  bool operator==(const FontInstancePlatformOptions& aOther) const {
-    return unused == aOther.unused;
-  }
-};
-#endif
-
-#if defined(XP_MACOSX)
-struct FontInstancePlatformOptions {
-  uint32_t unused;
-
-  bool operator==(const FontInstancePlatformOptions& aOther) const {
-    return unused == aOther.unused;
-  }
-};
-#endif
-
-#if !(defined(XP_MACOSX) || defined(XP_WIN))
-struct FontInstancePlatformOptions {
-  FontLCDFilter lcd_filter;
-  FontHinting hinting;
-
-  bool operator==(const FontInstancePlatformOptions& aOther) const {
-    return lcd_filter == aOther.lcd_filter &&
-           hinting == aOther.hinting;
-  }
-};
-#endif
+using NormalizedRect = TypedRect<float, NormalizedCoordinates>;
 
 struct WrTransformProperty {
   uint64_t id;
@@ -941,14 +991,21 @@ struct WrOpacityProperty {
   }
 };
 
+// A C function that takes a pointer to a heap allocation and returns its size.
+//
+// This is borrowed from the malloc_size_of crate, upon which we want to avoid
+// a dependency from WebRender.
+using VoidPtrToSizeFn = uintptr_t(*)(const void*);
+
 extern "C" {
 
-/* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
- * To generate this file:
- *   1. Get the latest cbindgen using `cargo install --force cbindgen`
- *      a. Alternatively, you can clone `https://github.com/eqrion/cbindgen` and use a tagged release
- *   2. Run `rustup run nightly cbindgen toolkit/library/rust/ --lockfile Cargo.lock --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
- */
+extern void AddBlobFont(WrFontInstanceKey aInstanceKey,
+                        WrFontKey aFontKey,
+                        float aSize,
+                        const FontInstanceOptions *aOptions,
+                        const FontInstancePlatformOptions *aPlatformOptions,
+                        const FontVariation *aVariations,
+                        uintptr_t aNumVariations);
 
 extern void AddFontData(WrFontKey aKey,
                         const uint8_t *aData,
@@ -961,6 +1018,8 @@ extern void AddNativeFontHandle(WrFontKey aKey,
                                 uint32_t aIndex);
 
 extern void ClearBlobImageResources(WrIdNamespace aNamespace);
+
+extern void DeleteBlobFont(WrFontInstanceKey aKey);
 
 extern void DeleteFontData(WrFontKey aKey);
 
@@ -1004,6 +1063,9 @@ extern bool is_in_main_thread();
 
 extern bool is_in_render_thread();
 
+extern void record_telemetry_time(TelemetryProbe aProbe,
+                                  uint64_t aTimeNs);
+
 WR_INLINE
 bool remove_program_binary_disk_cache(const nsAString *aProfPath)
 WR_FUNC;
@@ -1013,10 +1075,19 @@ const VecU8 *wr_add_ref_arc(const ArcVecU8 *aArc)
 WR_FUNC;
 
 WR_INLINE
+void wr_api_accumulate_memory_report(DocumentHandle *aDh,
+                                     MemoryReport *aReport)
+WR_FUNC;
+
+WR_INLINE
 void wr_api_capture(DocumentHandle *aDh,
                     const char *aPath,
                     uint32_t aBitsRaw)
 WR_FUNC;
+
+WR_INLINE
+void wr_api_clear_all_caches(DocumentHandle *aDh)
+WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
 void wr_api_clone(DocumentHandle *aDh,
@@ -1059,6 +1130,10 @@ bool wr_api_hit_test(DocumentHandle *aDh,
                      WrPipelineId *aOutPipelineId,
                      uint64_t *aOutScrollId,
                      uint16_t *aOutHitInfo)
+WR_FUNC;
+
+WR_INLINE
+void wr_api_notify_memory_pressure(DocumentHandle *aDh)
 WR_FUNC;
 
 WR_INLINE
@@ -1154,7 +1229,7 @@ void wr_dp_push_border(WrState *aState,
                        LayoutRect aRect,
                        LayoutRect aClip,
                        bool aIsBackfaceVisible,
-                       BorderWidths aWidths,
+                       LayoutSideOffsets aWidths,
                        BorderSide aTop,
                        BorderSide aRight,
                        BorderSide aBottom,
@@ -1167,7 +1242,10 @@ void wr_dp_push_border_gradient(WrState *aState,
                                 LayoutRect aRect,
                                 LayoutRect aClip,
                                 bool aIsBackfaceVisible,
-                                BorderWidths aWidths,
+                                LayoutSideOffsets aWidths,
+                                uint32_t aWidth,
+                                uint32_t aHeight,
+                                SideOffsets2D<uint32_t> aSlice,
                                 LayoutPoint aStartPoint,
                                 LayoutPoint aEndPoint,
                                 const GradientStop *aStops,
@@ -1181,7 +1259,7 @@ void wr_dp_push_border_image(WrState *aState,
                              LayoutRect aRect,
                              LayoutRect aClip,
                              bool aIsBackfaceVisible,
-                             BorderWidths aWidths,
+                             LayoutSideOffsets aWidths,
                              WrImageKey aImage,
                              uint32_t aWidth,
                              uint32_t aHeight,
@@ -1196,7 +1274,7 @@ void wr_dp_push_border_radial_gradient(WrState *aState,
                                        LayoutRect aRect,
                                        LayoutRect aClip,
                                        bool aIsBackfaceVisible,
-                                       BorderWidths aWidths,
+                                       LayoutSideOffsets aWidths,
                                        LayoutPoint aCenter,
                                        LayoutSize aRadius,
                                        const GradientStop *aStops,
@@ -1221,7 +1299,8 @@ WR_FUNC;
 
 WR_INLINE
 void wr_dp_push_clear_rect(WrState *aState,
-                           LayoutRect aRect)
+                           LayoutRect aRect,
+                           LayoutRect aClip)
 WR_FUNC;
 
 WR_INLINE
@@ -1238,6 +1317,7 @@ WR_FUNC;
 WR_INLINE
 void wr_dp_push_iframe(WrState *aState,
                        LayoutRect aRect,
+                       LayoutRect aClip,
                        bool aIsBackfaceVisible,
                        WrPipelineId aPipelineId,
                        bool aIgnoreMissingPipeline)
@@ -1252,7 +1332,8 @@ void wr_dp_push_image(WrState *aState,
                       LayoutSize aTileSpacing,
                       ImageRendering aImageRendering,
                       WrImageKey aKey,
-                      bool aPremultipliedAlpha)
+                      bool aPremultipliedAlpha,
+                      ColorF aColor)
 WR_FUNC;
 
 WR_INLINE
@@ -1390,7 +1471,10 @@ void wr_dp_save(WrState *aState)
 WR_FUNC;
 
 WR_INLINE
-void wr_dump_display_list(WrState *aState)
+uintptr_t wr_dump_display_list(WrState *aState,
+                               uintptr_t aIndent,
+                               const uintptr_t *aStart,
+                               const uintptr_t *aEnd)
 WR_FUNC;
 
 extern bool wr_moz2d_render_cb(ByteSlice aBlob,
@@ -1422,6 +1506,11 @@ WR_DESTRUCTOR_SAFE_FUNC;
 WR_INLINE
 WrProgramCache *wr_program_cache_new(const nsAString *aProfPath,
                                      WrThreadPool *aThreadPool)
+WR_FUNC;
+
+WR_INLINE
+void wr_renderer_accumulate_memory_report(Renderer *aRenderer,
+                                          MemoryReport *aReport)
 WR_FUNC;
 
 WR_INLINE
@@ -1542,6 +1631,12 @@ void wr_resource_updates_delete_image(Transaction *aTxn,
 WR_FUNC;
 
 WR_INLINE
+void wr_resource_updates_set_image_visible_area(Transaction *aTxn,
+                                                WrImageKey aKey,
+                                                const NormalizedRect *aArea)
+WR_FUNC;
+
+WR_INLINE
 void wr_resource_updates_update_blob_image(Transaction *aTxn,
                                            WrImageKey aImageKey,
                                            const WrImageDescriptor *aDescriptor,
@@ -1556,6 +1651,16 @@ void wr_resource_updates_update_external_image(Transaction *aTxn,
                                                WrExternalImageId aExternalImageId,
                                                WrExternalImageBufferType aImageType,
                                                uint8_t aChannelIndex)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_update_external_image_with_dirty_rect(Transaction *aTxn,
+                                                               WrImageKey aKey,
+                                                               const WrImageDescriptor *aDescriptor,
+                                                               WrExternalImageId aExternalImageId,
+                                                               WrExternalImageBufferType aImageType,
+                                                               uint8_t aChannelIndex,
+                                                               DeviceUintRect aDirtyRect)
 WR_FUNC;
 
 WR_INLINE
@@ -1648,6 +1753,11 @@ void wr_transaction_set_display_list(Transaction *aTxn,
 WR_FUNC;
 
 WR_INLINE
+void wr_transaction_set_low_priority(Transaction *aTxn,
+                                     bool aLowPriority)
+WR_FUNC;
+
+WR_INLINE
 void wr_transaction_set_root_pipeline(Transaction *aTxn,
                                       WrPipelineId aPipelineId)
 WR_FUNC;
@@ -1689,8 +1799,10 @@ WR_INLINE
 bool wr_window_new(WrWindowId aWindowId,
                    uint32_t aWindowWidth,
                    uint32_t aWindowHeight,
+                   bool aSupportLowPriorityTransactions,
                    void *aGlContext,
                    WrThreadPool *aThreadPool,
+                   VoidPtrToSizeFn aSizeOfOp,
                    DocumentHandle **aOutHandle,
                    Renderer **aOutRenderer,
                    uint32_t *aOutMaxTextureSize)
@@ -1700,10 +1812,3 @@ WR_FUNC;
 
 } // namespace wr
 } // namespace mozilla
-
-/* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
- * To generate this file:
- *   1. Get the latest cbindgen using `cargo install --force cbindgen`
- *      a. Alternatively, you can clone `https://github.com/eqrion/cbindgen` and use a tagged release
- *   2. Run `rustup run nightly cbindgen toolkit/library/rust/ --lockfile Cargo.lock --crate webrender_bindings -o gfx/webrender_bindings/webrender_ffi_generated.h`
- */

@@ -46,7 +46,11 @@
         margin-top: .5em;
       }
       h2 {
-        margin-top: 1cm;
+        font-size: 1.46em;
+        font-weight: 300;
+        line-height: 1.3em;
+        margin: 16px 0;
+        -moz-user-select: none;
       }
       button.show_all_items {
         margin-top: .5cm;
@@ -103,45 +107,67 @@
         border-left-color: rgb(255, 0, 0);
       }
 
-      #subprocess-reports {
-        background-color: var(--aboutSupport-table-background);
+      #dispatch-table {
+        -moz-user-select: none;
+        font-size: 1em;
+        border: 1px solid var(--in-content-box-border-color);
+        border-radius: 2px;
+        border-spacing: 0;
+        background-color: var(--in-content-box-background);
+        margin: 0;
+      }
+      #dispatch-table > tbody {
+        border-top: 1px solid var(--in-content-border-color);
+      }
+      #dispatch-table > thead > tr > td {
+        border: none;
+        background-color: var(--in-content-box-background-hover);
+        color: #808080;
+        padding: 5px 10px;
+      }
+      #dispatch-table > thead > tr > td:not(:first-child) {
+        border-inline-start-width: 1px;
+        border-inline-start-style: solid;
+        border-image: linear-gradient(transparent 0%, transparent 20%, #c1c1c1 20%, #c1c1c1 80%, transparent 80%, transparent 100%) 1 1;
+        border-bottom: 1px solid var(--in-content-border-color);
+      }
+      #dispatch-tbody > tr > td {
+        padding: 5px 10px;
+        min-height: 2em;
         color: var(--in-content-text-color);
-        font: message-box;
-        text-align: start;
-        border: 1px solid var(--in-content-border-color);
-        border-spacing: 0px;
-        float: right;
-        margin-bottom: 20px;
-        -moz-margin-start: 20px;
-        -moz-margin-end: 0;
-        width: 100%;
+        max-width: 70vw;
+        text-overflow: ellipsis;
+        overflow: hidden;
+        white-space: nowrap;
       }
-      #subprocess-reports:dir(rtl) {
-        float: left;
+      #dispatch-tbody > tr > td:first-child {
+        padding-inline-start: 32px;
+        background-repeat: no-repeat;
+        background-size: 16px 16px;
+        background-position: 8px;
       }
-      #subprocess-reports th,
-      #subprocess-reports td {
-        border: 1px solid var(--in-content-border-color);
-        padding: 4px;
+      #dispatch-tbody > tr > td.indent {
+        padding-inline-start: 62px;
       }
-      #subprocess-reports thead th {
-        text-align: center;
+      #dispatch-tbody > tr > td.tracking {
+        background: url(chrome://browser/skin/controlcenter/trackers.svg) no-repeat 41px center;
+        -moz-context-properties: fill;
+        fill: rgb(224, 41, 29);
       }
-      #subprocess-reports th {
-        text-align: start;
-        background-color: var(--in-content-table-header-background);
+      #dispatch-tbody > tr > td.worker {
+        background: url(chrome://devtools/skin/images/debugging-workers.svg) no-repeat 41px center;
+        -moz-context-properties: fill;
+        fill: #808080;
+      }
+
+      #dispatch-tbody > tr[selected] > td {
+        background-color: var(--in-content-item-selected);
         color: var(--in-content-selected-text);
       }
-      #subprocess-reports th.column {
-        white-space: nowrap;
-        width: 0px;
+      #dispatch-tbody > tr:hover {
+        background-color: var(--in-content-item-hover);
       }
-      #subprocess-reports td {
-        background-color: #ebebeb;
-        text-align: start;
-        border-color: var(--in-content-table-border-dark-color);
-        border-spacing: 40px;
-      }
+
       .options {
         width: 100%;
       }
@@ -154,16 +180,6 @@
     </style>
   </head>
   <body onload="go()">
-    <div>
-      <h2>Memory usage of Subprocesses</h2>
-      <table id="subprocess-reports">
-        <tr>
-          <th>Process ID</th>
-          <th title="RSS measures the pages resident in the main memory for the process">Resident Set Size</th>
-          <th title="USS gives a count of unshared pages, unique to the process">Unique Set Size</th>
-        </tr>
-      </table>
-    </div>
     <div class="options">
       <div class="toggle-container-with-text">
         <input type="checkbox" checked="false" id="check-display-recent" role="checkbox"></input>
@@ -178,6 +194,18 @@
       <h2>Performance of Web pages</h2>
       <div id="webpages" class="measuring">
       </div>
+    </div>
+    <div>
+      <h2>Resource usage per tab</h2>
+      <table id="dispatch-table">
+        <thead>
+          <tr>
+            <td>Tab title</td>
+            <td>Energy Impact</td>
+          </tr>
+        </thead>
+        <tbody id="dispatch-tbody"></tbody>
+      </table>
     </div>
   </body>
 </html>

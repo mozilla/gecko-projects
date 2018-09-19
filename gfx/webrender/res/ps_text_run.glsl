@@ -15,6 +15,9 @@ varying vec4 vUvClip;
 
 #ifdef WR_VERTEX_SHADER
 
+#define VECS_PER_TEXT_RUN           3
+#define GLYPHS_PER_GPU_BLOCK        2U
+
 struct Glyph {
     vec2 offset;
 };
@@ -24,12 +27,13 @@ Glyph fetch_glyph(int specific_prim_address,
     // Two glyphs are packed in each texel in the GPU cache.
     int glyph_address = specific_prim_address +
                         VECS_PER_TEXT_RUN +
-                        glyph_index / 2;
+                        int(uint(glyph_index) / GLYPHS_PER_GPU_BLOCK);
     vec4 data = fetch_from_resource_cache_1(glyph_address);
     // Select XY or ZW based on glyph index.
     // We use "!= 0" instead of "== 1" here in order to work around a driver
     // bug with equality comparisons on integers.
-    vec2 glyph = mix(data.xy, data.zw, bvec2(glyph_index % 2 != 0));
+    vec2 glyph = mix(data.xy, data.zw,
+                     bvec2(uint(glyph_index) % GLYPHS_PER_GPU_BLOCK != 0U));
 
     return Glyph(glyph);
 }
@@ -57,176 +61,55 @@ TextRun fetch_text_run(int address) {
     return TextRun(data[0], data[1], data[2].xy);
 }
 
-struct PrimitiveInstance {
-    int prim_address;
-    int specific_prim_address;
-    int render_task_index;
-    int clip_task_index;
-    int scroll_node_id;
-    int clip_chain_rect_index;
-    int z;
-    int user_data0;
-    int user_data1;
-    int user_data2;
-};
-
-PrimitiveInstance fetch_prim_instance() {
-    PrimitiveInstance pi;
-
-    pi.prim_address = aData0.x;
-    pi.specific_prim_address = pi.prim_address + VECS_PER_PRIM_HEADER;
-    pi.render_task_index = aData0.y % 0x10000;
-    pi.clip_task_index = aData0.y / 0x10000;
-    pi.clip_chain_rect_index = aData0.z;
-    pi.scroll_node_id = aData0.w;
-    pi.z = aData1.x;
-    pi.user_data0 = aData1.y;
-    pi.user_data1 = aData1.z;
-    pi.user_data2 = aData1.w;
-
-    return pi;
-}
-
-struct Primitive {
-    ClipScrollNode scroll_node;
-    ClipArea clip_area;
-    PictureTask task;
-    RectWithSize local_rect;
-    RectWithSize local_clip_rect;
-    int specific_prim_address;
-    int user_data0;
-    int user_data1;
-    int user_data2;
-    float z;
-};
-
-struct PrimitiveGeometry {
-    RectWithSize local_rect;
-    RectWithSize local_clip_rect;
-};
-
-PrimitiveGeometry fetch_primitive_geometry(int address) {
-    vec4 geom[2] = fetch_from_resource_cache_2(address);
-    return PrimitiveGeometry(RectWithSize(geom[0].xy, geom[0].zw),
-                             RectWithSize(geom[1].xy, geom[1].zw));
-}
-
-Primitive load_primitive() {
-    PrimitiveInstance pi = fetch_prim_instance();
-
-    Primitive prim;
-
-    prim.scroll_node = fetch_clip_scroll_node(pi.scroll_node_id);
-    prim.clip_area = fetch_clip_area(pi.clip_task_index);
-    prim.task = fetch_picture_task(pi.render_task_index);
-
-    RectWithSize clip_chain_rect = fetch_clip_chain_rect(pi.clip_chain_rect_index);
-
-    PrimitiveGeometry geom = fetch_primitive_geometry(pi.prim_address);
-    prim.local_rect = geom.local_rect;
-    prim.local_clip_rect = intersect_rects(clip_chain_rect, geom.local_clip_rect);
-
-    prim.specific_prim_address = pi.specific_prim_address;
-    prim.user_data0 = pi.user_data0;
-    prim.user_data1 = pi.user_data1;
-    prim.user_data2 = pi.user_data2;
-    prim.z = float(pi.z);
-
-    return prim;
-}
-
-VertexInfo write_text_vertex(vec2 clamped_local_pos,
-                             RectWithSize local_clip_rect,
+VertexInfo write_text_vertex(RectWithSize local_clip_rect,
                              float z,
-                             ClipScrollNode scroll_node,
+                             Transform transform,
                              PictureTask task,
                              vec2 text_offset,
-                             RectWithSize snap_rect,
+                             vec2 glyph_offset,
+                             RectWithSize glyph_rect,
                              vec2 snap_bias) {
-    // Transform the current vertex to world space.
-    vec4 world_pos = scroll_node.transform * vec4(clamped_local_pos, 0.0, 1.0);
+    // The offset to snap the glyph rect to a device pixel
+    vec2 snap_offset = vec2(0.0);
+    mat2 local_transform;
 
-    // Convert the world positions to device pixel space.
-    float device_scale = uDevicePixelRatio / world_pos.w;
-    vec2 device_pos = world_pos.xy * device_scale;
-
-    // Apply offsets for the render task to get correct screen location.
-    vec2 final_pos = device_pos -
-                     task.content_origin +
-                     task.common_data.task_rect.p0;
-
-#if defined(WR_FEATURE_GLYPH_TRANSFORM)
+#ifdef WR_FEATURE_GLYPH_TRANSFORM
     bool remove_subpx_offset = true;
 #else
-    // Compute the snapping offset only if the scroll node transform is axis-aligned.
-    bool remove_subpx_offset = scroll_node.is_axis_aligned;
+    bool remove_subpx_offset = transform.is_axis_aligned;
 #endif
+    // Compute the snapping offset only if the scroll node transform is axis-aligned.
     if (remove_subpx_offset) {
+        // Transform from local space to device space.
+        float device_scale = uDevicePixelRatio / transform.m[3].w;
+        mat2 device_transform = mat2(transform.m) * device_scale;
+
         // Ensure the transformed text offset does not contain a subpixel translation
         // such that glyph snapping is stable for equivalent glyph subpixel positions.
-        vec2 world_text_offset = mat2(scroll_node.transform) * text_offset;
-        vec2 device_text_pos = (scroll_node.transform[3].xy + world_text_offset) * device_scale;
-        final_pos += floor(device_text_pos + 0.5) - device_text_pos;
+        vec2 device_text_pos = device_transform * text_offset + transform.m[3].xy * device_scale;
+        snap_offset = floor(device_text_pos + 0.5) - device_text_pos;
 
-#ifdef WR_FEATURE_GLYPH_TRANSFORM
-        // For transformed subpixels, we just need to align the glyph origin to a device pixel.
-        // The transformed text offset has already been snapped, so remove it from the glyph
-        // origin when snapping the glyph.
-        vec2 snap_offset = snap_rect.p0 - world_text_offset * device_scale;
-        final_pos += floor(snap_offset + snap_bias) - snap_offset;
-#else
-        // The transformed text offset has already been snapped, so remove it from the transform
-        // when snapping the glyph.
-        mat4 snap_transform = scroll_node.transform;
-        snap_transform[3].xy = -world_text_offset;
-        final_pos += compute_snap_offset(
-            clamped_local_pos,
-            snap_transform,
-            snap_rect,
-            snap_bias
-        );
+        // Snap the glyph offset to a device pixel, using an appropriate bias depending
+        // on whether subpixel positioning is required.
+        vec2 device_glyph_offset = device_transform * glyph_offset;
+        snap_offset += floor(device_glyph_offset + snap_bias) - device_glyph_offset;
+
+        // Transform from device space back to local space.
+        local_transform = inverse(device_transform);
+
+#ifndef WR_FEATURE_GLYPH_TRANSFORM
+        // If not using transformed subpixels, the glyph rect is actually in local space.
+        // So convert the snap offset back to local space.
+        snap_offset = local_transform * snap_offset;
 #endif
     }
 
-    gl_Position = uTransform * vec4(final_pos, z, 1.0);
-
-    VertexInfo vi = VertexInfo(
-        clamped_local_pos,
-        device_pos,
-        world_pos.w,
-        final_pos
-    );
-
-    return vi;
-}
-
-void main(void) {
-    Primitive prim = load_primitive();
-    TextRun text = fetch_text_run(prim.specific_prim_address);
-
-    int glyph_index = prim.user_data0;
-    int resource_address = prim.user_data1;
-    int subpx_dir = prim.user_data2 >> 16;
-    int color_mode = prim.user_data2 & 0xffff;
-
-    if (color_mode == COLOR_MODE_FROM_PASS) {
-        color_mode = uMode;
-    }
-
-    Glyph glyph = fetch_glyph(prim.specific_prim_address, glyph_index);
-    GlyphResource res = fetch_glyph_resource(resource_address);
+    // Actually translate the glyph rect to a device pixel using the snap offset.
+    glyph_rect.p0 += snap_offset;
 
 #ifdef WR_FEATURE_GLYPH_TRANSFORM
-    // Transform from local space to glyph space.
-    mat2 transform = mat2(prim.scroll_node.transform) * uDevicePixelRatio;
-
-    // Compute the glyph rect in glyph space.
-    RectWithSize glyph_rect = RectWithSize(res.offset + transform * (text.offset + glyph.offset),
-                                           res.uv_rect.zw - res.uv_rect.xy);
-
-    // Transform the glyph rect back to local space.
-    mat2 inv = inverse(transform);
-    RectWithSize local_rect = transform_rect(glyph_rect, inv);
+    // The glyph rect is in device space, so transform it back to local space.
+    RectWithSize local_rect = transform_rect(glyph_rect, local_transform);
 
     // Select the corner of the glyph's local space rect that we are processing.
     vec2 local_pos = local_rect.p0 + local_rect.size * aPosition.xy;
@@ -234,9 +117,67 @@ void main(void) {
     // If the glyph's local rect would fit inside the local clip rect, then select a corner from
     // the device space glyph rect to reduce overdraw of clipped pixels in the fragment shader.
     // Otherwise, fall back to clamping the glyph's local rect to the local clip rect.
-    local_pos = rect_inside_rect(local_rect, prim.local_clip_rect) ?
-                    inv * (glyph_rect.p0 + glyph_rect.size * aPosition.xy) :
-                    clamp_rect(local_pos, prim.local_clip_rect);
+    if (rect_inside_rect(local_rect, local_clip_rect)) {
+        local_pos = local_transform * (glyph_rect.p0 + glyph_rect.size * aPosition.xy);
+    }
+#else
+    // Select the corner of the glyph rect that we are processing.
+    vec2 local_pos = glyph_rect.p0 + glyph_rect.size * aPosition.xy;
+#endif
+
+    // Clamp to the local clip rect.
+    local_pos = clamp_rect(local_pos, local_clip_rect);
+
+    // Map the clamped local space corner into device space.
+    vec4 world_pos = transform.m * vec4(local_pos, 0.0, 1.0);
+    vec2 device_pos = world_pos.xy / world_pos.w * uDevicePixelRatio;
+
+    // Apply offsets for the render task to get correct screen location.
+    vec2 final_pos = device_pos -
+                     task.content_origin +
+                     task.common_data.task_rect.p0;
+
+    gl_Position = uTransform * vec4(final_pos, z, 1.0);
+
+    VertexInfo vi = VertexInfo(
+        local_pos,
+        snap_offset,
+        world_pos
+    );
+
+    return vi;
+}
+
+void main(void) {
+    int prim_header_address = aData.x;
+    int glyph_index = aData.y;
+    int resource_address = aData.z;
+    int subpx_dir = aData.w >> 16;
+    int color_mode = aData.w & 0xffff;
+
+    PrimitiveHeader ph = fetch_prim_header(prim_header_address);
+
+    Transform transform = fetch_transform(ph.transform_id);
+    ClipArea clip_area = fetch_clip_area(ph.clip_task_index);
+    PictureTask task = fetch_picture_task(ph.render_task_index);
+
+    TextRun text = fetch_text_run(ph.specific_prim_address);
+
+    if (color_mode == COLOR_MODE_FROM_PASS) {
+        color_mode = uMode;
+    }
+
+    Glyph glyph = fetch_glyph(ph.specific_prim_address, glyph_index);
+    GlyphResource res = fetch_glyph_resource(resource_address);
+
+#ifdef WR_FEATURE_GLYPH_TRANSFORM
+    // Transform from local space to glyph space.
+    mat2 glyph_transform = mat2(transform.m) * uDevicePixelRatio;
+
+    // Compute the glyph rect in glyph space.
+    RectWithSize glyph_rect = RectWithSize(res.offset + glyph_transform * (text.offset + glyph.offset),
+                                           res.uv_rect.zw - res.uv_rect.xy);
+
 #else
     // Scale from glyph space to local space.
     float scale = res.scale / uDevicePixelRatio;
@@ -244,12 +185,6 @@ void main(void) {
     // Compute the glyph rect in local space.
     RectWithSize glyph_rect = RectWithSize(scale * res.offset + text.offset + glyph.offset,
                                            scale * (res.uv_rect.zw - res.uv_rect.xy));
-
-    // Select the corner of the glyph rect that we are processing.
-    vec2 local_pos = glyph_rect.p0 + glyph_rect.size * aPosition.xy;
-
-    // Clamp to the local clip rect.
-    local_pos = clamp_rect(local_pos, prim.local_clip_rect);
 #endif
 
     vec2 snap_bias;
@@ -277,23 +212,24 @@ void main(void) {
             break;
     }
 
-    VertexInfo vi = write_text_vertex(local_pos,
-                                      prim.local_clip_rect,
-                                      prim.z,
-                                      prim.scroll_node,
-                                      prim.task,
+    VertexInfo vi = write_text_vertex(ph.local_clip_rect,
+                                      ph.z,
+                                      transform,
+                                      task,
                                       text.offset,
+                                      glyph.offset,
                                       glyph_rect,
                                       snap_bias);
+    glyph_rect.p0 += vi.snap_offset;
 
 #ifdef WR_FEATURE_GLYPH_TRANSFORM
-    vec2 f = (transform * vi.local_pos - glyph_rect.p0) / glyph_rect.size;
+    vec2 f = (glyph_transform * vi.local_pos - glyph_rect.p0) / glyph_rect.size;
     vUvClip = vec4(f, 1.0 - f);
 #else
     vec2 f = (vi.local_pos - glyph_rect.p0) / glyph_rect.size;
 #endif
 
-    write_clip(vi.screen_pos, prim.clip_area);
+    write_clip(vi.world_pos, clip_area);
 
     switch (color_mode) {
         case COLOR_MODE_ALPHA:
@@ -341,7 +277,9 @@ void main(void) {
     alpha *= float(all(greaterThanEqual(vUvClip, vec4(0.0))));
 #endif
 
-#ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
+#if defined(WR_FEATURE_DEBUG_OVERDRAW)
+    oFragColor = WR_DEBUG_OVERDRAW_COLOR;
+#elif defined(WR_FEATURE_DUAL_SOURCE_BLENDING)
     vec4 alpha_mask = mask * alpha;
     oFragColor = vColor * alpha_mask;
     oFragBlend = alpha_mask * vColor.a;

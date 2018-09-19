@@ -2,16 +2,29 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{BorderRadius, BorderSide, BorderStyle, BorderWidths, ColorF};
-use api::{ColorU, DeviceRect, DeviceSize, LayoutSizeAu, LayoutPrimitiveInfo, LayoutToDeviceScale};
-use api::{DevicePixel, DeviceVector2D, DevicePoint, DeviceIntSize, LayoutRect, LayoutSize, NormalBorder};
+use api::{BorderRadius, BorderSide, BorderStyle, ColorF, ColorU, DeviceRect, DeviceSize};
+use api::{LayoutSizeAu, LayoutSideOffsets, LayoutPrimitiveInfo, LayoutToDeviceScale};
+use api::{DeviceVector2D, DevicePoint, DeviceIntSize, LayoutRect, LayoutSize, NormalBorder};
 use app_units::Au;
 use ellipse::Ellipse;
 use display_list_flattener::DisplayListFlattener;
 use gpu_types::{BorderInstance, BorderSegment, BrushFlags};
 use prim_store::{BrushKind, BrushPrimitive, BrushSegment};
-use prim_store::{BorderSource, EdgeAaSegmentMask, PrimitiveContainer, ScrollNodeAndClipChain};
+use prim_store::{EdgeAaSegmentMask, PrimitiveContainer, ScrollNodeAndClipChain};
 use util::{lerp, RectHelpers};
+
+// Using 2048 as the maximum radius in device space before which we
+// start stretching is up for debate.
+// the value must be chosen so that the corners will not use an
+// unreasonable amount of memory but should allow crisp corners in the
+// common cases.
+
+/// Maximum resolution in device pixels at which borders are rasterized.
+pub const MAX_BORDER_RESOLUTION: u32 = 2048;
+/// Maximum number of dots or dashes per segment to avoid freezing and filling up
+/// memory with unreasonable inputs. It would be better to address this by not building
+/// a list of per-dot information in the first place.
+pub const MAX_DASH_COUNT: u32 = 2048;
 
 trait AuSizeConverter {
     fn to_au(&self) -> LayoutSizeAu;
@@ -62,8 +75,8 @@ pub struct BorderWidthsAu {
     pub bottom: Au,
 }
 
-impl From<BorderWidths> for BorderWidthsAu {
-    fn from(widths: BorderWidths) -> Self {
+impl From<LayoutSideOffsets> for BorderWidthsAu {
+    fn from(widths: LayoutSideOffsets) -> Self {
         BorderWidthsAu {
             left: Au::from_f32_px(widths.left),
             top: Au::from_f32_px(widths.top),
@@ -101,6 +114,20 @@ pub struct BorderCacheKey {
     pub radius: BorderRadiusAu,
     pub widths: BorderWidthsAu,
     pub scale: Au,
+}
+
+impl BorderCacheKey {
+    pub fn new(border: &NormalBorder, widths: &LayoutSideOffsets) -> Self {
+        BorderCacheKey {
+            left: border.left.into(),
+            top: border.top.into(),
+            right: border.right.into(),
+            bottom: border.bottom.into(),
+            widths: (*widths).into(),
+            radius: border.radius.into(),
+            scale: Au(0),
+        }
+    }
 }
 
 pub fn ensure_no_corner_overlap(
@@ -153,30 +180,14 @@ impl<'a> DisplayListFlattener<'a> {
         &mut self,
         info: &LayoutPrimitiveInfo,
         border: &NormalBorder,
-        widths: &BorderWidths,
+        widths: &LayoutSideOffsets,
         clip_and_scroll: ScrollNodeAndClipChain,
     ) {
         let mut border = *border;
         ensure_no_corner_overlap(&mut border.radius, &info.rect);
 
         let prim = BrushPrimitive::new(
-            BrushKind::Border {
-                source: BorderSource::Border {
-                    border,
-                    widths: *widths,
-                    cache_key: BorderCacheKey {
-                        left: border.left.into(),
-                        top: border.top.into(),
-                        right: border.right.into(),
-                        bottom: border.bottom.into(),
-                        widths: (*widths).into(),
-                        radius: border.radius.into(),
-                        scale: Au::from_f32_px(0.0),
-                    },
-                    task_info: None,
-                    handle: None,
-                },
-            },
+            BrushKind::new_border(border, *widths),
             None,
         );
 
@@ -190,317 +201,311 @@ impl<'a> DisplayListFlattener<'a> {
 }
 
 pub trait BorderSideHelpers {
-    fn border_color(
-        &self,
-        scale_factor_0: f32,
-        scale_factor_1: f32,
-        black_color_0: f32,
-        black_color_1: f32,
-    ) -> ColorF;
+    fn border_color(&self, is_inner_border: bool) -> ColorF;
 }
 
 impl BorderSideHelpers for BorderSide {
-    fn border_color(
-        &self,
-        scale_factor_0: f32,
-        scale_factor_1: f32,
-        black_color_0: f32,
-        black_color_1: f32,
-    ) -> ColorF {
-        match self.style {
-            BorderStyle::Inset => {
-                if self.color.r != 0.0 || self.color.g != 0.0 || self.color.b != 0.0 {
-                    self.color.scale_rgb(scale_factor_1)
-                } else {
-                    ColorF::new(black_color_0, black_color_0, black_color_0, self.color.a)
-                }
-            }
-            BorderStyle::Outset => {
-                if self.color.r != 0.0 || self.color.g != 0.0 || self.color.b != 0.0 {
-                    self.color.scale_rgb(scale_factor_0)
-                } else {
-                    ColorF::new(black_color_1, black_color_1, black_color_1, self.color.a)
-                }
-            }
-            _ => self.color,
+    fn border_color(&self, is_inner_border: bool) -> ColorF {
+        let lighter = match self.style {
+            BorderStyle::Inset => is_inner_border,
+            BorderStyle::Outset => !is_inner_border,
+            _ => return self.color,
+        };
+
+        // The modulate colors below are not part of the specification. They are
+        // derived from the Gecko source code and experimentation, and used to
+        // modulate the colors in order to generate colors for the inset/outset
+        // and groove/ridge border styles.
+        //
+        // NOTE(emilio): Gecko at least takes the background color into
+        // account, should we do the same? Looks a bit annoying for this.
+        //
+        // NOTE(emilio): If you change this algorithm, do the same change on
+        // get_colors_for_side in cs_border_segment.glsl.
+        if self.color.r != 0.0 || self.color.g != 0.0 || self.color.b != 0.0 {
+            let scale = if lighter { 1.0 } else { 2.0 / 3.0 };
+            return self.color.scale_rgb(scale)
         }
+
+        let black = if lighter { 0.7 } else { 0.3 };
+        ColorF::new(black, black, black, self.color.a)
     }
 }
 
 /// The kind of border corner clip.
 #[repr(C)]
 #[derive(Copy, Debug, Clone, PartialEq)]
-pub enum BorderCornerClipKind {
-    Dash = 1,
-    Dot = 2,
+pub enum BorderClipKind {
+    DashCorner = 1,
+    DashEdge = 2,
+    Dot = 3,
 }
 
-/// The source data for a border corner clip mask.
-#[derive(Debug, Clone)]
-pub struct BorderCornerClipSource {
-    pub max_clip_count: usize,
-    kind: BorderCornerClipKind,
-    widths: DeviceSize,
+fn compute_outer_and_clip_sign(
+    corner_segment: BorderSegment,
     radius: DeviceSize,
-    ellipse: Ellipse<DevicePixel>,
+) -> (DevicePoint, DeviceVector2D) {
+    let outer_scale = match corner_segment {
+        BorderSegment::TopLeft => DeviceVector2D::new(0.0, 0.0),
+        BorderSegment::TopRight => DeviceVector2D::new(1.0, 0.0),
+        BorderSegment::BottomRight => DeviceVector2D::new(1.0, 1.0),
+        BorderSegment::BottomLeft => DeviceVector2D::new(0.0, 1.0),
+        _ => panic!("bug: expected a corner segment"),
+    };
+    let outer = DevicePoint::new(
+        outer_scale.x * radius.width,
+        outer_scale.y * radius.height,
+    );
+
+    let clip_sign = DeviceVector2D::new(
+        1.0 - 2.0 * outer_scale.x,
+        1.0 - 2.0 * outer_scale.y,
+    );
+
+    (outer, clip_sign)
 }
 
-impl BorderCornerClipSource {
-    pub fn new(
-        corner_radius: DeviceSize,
-        widths: DeviceSize,
-        kind: BorderCornerClipKind,
-    ) -> BorderCornerClipSource {
-        // Work out a dash length (and therefore dash count)
-        // based on the width of the border edges. The "correct"
-        // dash length is not mentioned in the CSS borders
-        // spec. The calculation below is similar, but not exactly
-        // the same as what Gecko uses.
-        // TODO(gw): Iterate on this to get it closer to what Gecko
-        //           uses for dash length.
+fn write_dashed_corner_instances(
+    corner_radius: DeviceSize,
+    widths: DeviceSize,
+    segment: BorderSegment,
+    base_instance: &BorderInstance,
+    instances: &mut Vec<BorderInstance>,
+) -> Result<(), ()> {
+    let ellipse = Ellipse::new(corner_radius);
 
-        let (ellipse, max_clip_count) = match kind {
-            BorderCornerClipKind::Dash => {
-                let ellipse = Ellipse::new(corner_radius);
+    let average_border_width = 0.5 * (widths.width + widths.height);
 
-                // The desired dash length is ~3x the border width.
-                let average_border_width = 0.5 * (widths.width + widths.height);
-                let desired_dash_arc_length = average_border_width * 3.0;
+    let (_half_dash, num_half_dashes) =
+        compute_half_dash(average_border_width, ellipse.total_arc_length);
 
-                // Get the ideal number of dashes for that arc length.
-                // This is scaled by 0.5 since there is an on/off length
-                // for each dash.
-                let desired_count = 0.5 * ellipse.total_arc_length / desired_dash_arc_length;
+    if num_half_dashes == 0 {
+        return Err(());
+    }
 
-                // Round that up to the nearest integer, so that the dash length
-                // doesn't exceed the ratio above. Add one extra dash to cover
-                // the last half-dash of the arc.
-                (ellipse, desired_count.ceil() as usize)
-            }
-            BorderCornerClipKind::Dot => {
-                let mut corner_radius = corner_radius;
-                if corner_radius.width < (widths.width / 2.0) {
-                    corner_radius.width = 0.0;
-                }
-                if corner_radius.height < (widths.height / 2.0) {
-                    corner_radius.height = 0.0;
-                }
+    let num_half_dashes = num_half_dashes.min(MAX_DASH_COUNT);
 
-                if corner_radius.width == 0. && corner_radius.height == 0. {
-                    (Ellipse::new(corner_radius), 1)
-                } else {
-                    // The centers of dots follow an ellipse along the middle of the
-                    // border radius.
-                    let inner_radius = (corner_radius - widths * 0.5).abs();
-                    let ellipse = Ellipse::new(inner_radius);
+    let (outer, clip_sign) = compute_outer_and_clip_sign(segment, corner_radius);
 
-                    // Allocate a "worst case" number of dot clips. This can be
-                    // calculated by taking the minimum edge radius, since that
-                    // will result in the maximum number of dots along the path.
-                    let min_diameter = widths.width.min(widths.height);
+    let instance_count = num_half_dashes / 4 + 1;
+    instances.reserve(instance_count as usize);
 
-                    // Get the number of circles (assuming spacing of one diameter
-                    // between dots).
-                    let max_dot_count = 0.5 * ellipse.total_arc_length / min_diameter;
+    let half_dash_arc_length =
+        ellipse.total_arc_length / num_half_dashes as f32;
+    let dash_length = 2. * half_dash_arc_length;
 
-                    // Add space for one extra dot since they are centered at the
-                    // start of the arc.
-                    (ellipse, max_dot_count.ceil() as usize)
-                }
-            }
+    let mut current_length = 0.;
+    for i in 0..instance_count {
+        let arc_length0 = current_length;
+        current_length += if i == 0 {
+            half_dash_arc_length
+        } else {
+            dash_length
         };
 
-        BorderCornerClipSource {
-            kind,
-            max_clip_count,
-            ellipse,
-            widths,
-            radius: corner_radius,
+        let arc_length1 = current_length;
+        current_length += dash_length;
+
+        let alpha = ellipse.find_angle_for_arc_length(arc_length0);
+        let beta = ellipse.find_angle_for_arc_length(arc_length1);
+
+        let (point0, tangent0) = ellipse.get_point_and_tangent(alpha);
+        let (point1, tangent1) = ellipse.get_point_and_tangent(beta);
+
+        let point0 = DevicePoint::new(
+            outer.x + clip_sign.x * (corner_radius.width - point0.x),
+            outer.y + clip_sign.y * (corner_radius.height - point0.y),
+        );
+
+        let tangent0 = DeviceVector2D::new(
+            -tangent0.x * clip_sign.x,
+            -tangent0.y * clip_sign.y,
+        );
+
+        let point1 = DevicePoint::new(
+            outer.x + clip_sign.x * (corner_radius.width - point1.x),
+            outer.y + clip_sign.y * (corner_radius.height - point1.y),
+        );
+
+        let tangent1 = DeviceVector2D::new(
+            -tangent1.x * clip_sign.x,
+            -tangent1.y * clip_sign.y,
+        );
+
+        instances.push(BorderInstance {
+            flags: base_instance.flags | ((BorderClipKind::DashCorner as i32) << 24),
+            clip_params: [
+                point0.x,
+                point0.y,
+                tangent0.x,
+                tangent0.y,
+                point1.x,
+                point1.y,
+                tangent1.x,
+                tangent1.y,
+            ],
+            .. *base_instance
+        });
+    }
+
+    Ok(())
+}
+
+fn write_dotted_corner_instances(
+    corner_radius: DeviceSize,
+    widths: DeviceSize,
+    segment: BorderSegment,
+    base_instance: &BorderInstance,
+    instances: &mut Vec<BorderInstance>,
+) -> Result<(), ()> {
+    let mut corner_radius = corner_radius;
+    if corner_radius.width < (widths.width / 2.0) {
+        corner_radius.width = 0.0;
+    }
+    if corner_radius.height < (widths.height / 2.0) {
+        corner_radius.height = 0.0;
+    }
+
+    let (ellipse, max_dot_count) =
+        if corner_radius.width == 0. && corner_radius.height == 0. {
+            (Ellipse::new(corner_radius), 1)
+        } else {
+            // The centers of dots follow an ellipse along the middle of the
+            // border radius.
+            let inner_radius = (corner_radius - widths * 0.5).abs();
+            let ellipse = Ellipse::new(inner_radius);
+
+            // Allocate a "worst case" number of dot clips. This can be
+            // calculated by taking the minimum edge radius, since that
+            // will result in the maximum number of dots along the path.
+            let min_diameter = widths.width.min(widths.height);
+
+            // Get the number of circles (assuming spacing of one diameter
+            // between dots).
+            let max_dot_count = 0.5 * ellipse.total_arc_length / min_diameter;
+
+            // Add space for one extra dot since they are centered at the
+            // start of the arc.
+            (ellipse, max_dot_count.ceil() as usize)
+        };
+
+    if max_dot_count == 0 {
+        return Err(());
+    }
+
+    if max_dot_count == 1 {
+        let dot_diameter = lerp(widths.width, widths.height, 0.5);
+        instances.push(BorderInstance {
+            flags: base_instance.flags | ((BorderClipKind::Dot as i32) << 24),
+            clip_params: [
+                widths.width / 2.0, widths.height / 2.0, 0.5 * dot_diameter, 0.,
+                0., 0., 0., 0.,
+            ],
+            .. *base_instance
+        });
+        return Ok(());
+    }
+
+    let max_dot_count = max_dot_count.min(MAX_DASH_COUNT as usize);
+
+    // FIXME(emilio): Should probably use SmallVec.
+    let mut forward_dots = Vec::with_capacity(max_dot_count / 2 + 1);
+    let mut back_dots = Vec::with_capacity(max_dot_count / 2 + 1);
+    let mut leftover_arc_length = 0.0;
+
+    // Alternate between adding dots at the start and end of the
+    // ellipse arc. This ensures that we always end up with an exact
+    // half dot at each end of the arc, to match up with the edges.
+    forward_dots.push(DotInfo::new(widths.width, widths.width));
+    back_dots.push(DotInfo::new(
+        ellipse.total_arc_length - widths.height,
+        widths.height,
+    ));
+
+    let (outer, clip_sign) = compute_outer_and_clip_sign(segment, corner_radius);
+    for dot_index in 0 .. max_dot_count {
+        let prev_forward_pos = *forward_dots.last().unwrap();
+        let prev_back_pos = *back_dots.last().unwrap();
+
+        // Select which end of the arc to place a dot from.
+        // This just alternates between the start and end of
+        // the arc, which ensures that there is always an
+        // exact half-dot at each end of the ellipse.
+        let going_forward = dot_index & 1 == 0;
+
+        let (next_dot_pos, leftover) = if going_forward {
+            let next_dot_pos =
+                prev_forward_pos.arc_pos + 2.0 * prev_forward_pos.diameter;
+            (next_dot_pos, prev_back_pos.arc_pos - next_dot_pos)
+        } else {
+            let next_dot_pos = prev_back_pos.arc_pos - 2.0 * prev_back_pos.diameter;
+            (next_dot_pos, next_dot_pos - prev_forward_pos.arc_pos)
+        };
+
+        // Use a lerp between each edge's dot
+        // diameter, based on the linear distance
+        // along the arc to get the diameter of the
+        // dot at this arc position.
+        let t = next_dot_pos / ellipse.total_arc_length;
+        let dot_diameter = lerp(widths.width, widths.height, t);
+
+        // If we can't fit a dot, bail out.
+        if leftover < dot_diameter {
+            leftover_arc_length = leftover;
+            break;
+        }
+
+        // We can place a dot!
+        let dot = DotInfo::new(next_dot_pos, dot_diameter);
+        if going_forward {
+            forward_dots.push(dot);
+        } else {
+            back_dots.push(dot);
         }
     }
 
-    // TODO(gw): The naming and structure of BorderCornerClipSource
-    //           don't really make sense. I've left it this way
-    //           for now in order to reduce the size of the
-    //           patch a bit. In the future, when we spent some
-    //           time working on dot/dash placement, we should
-    //           restructure this code to be more consistent
-    //           with how border rendering works now.
-    pub fn write(self, segment: BorderSegment) -> Vec<[f32; 8]> {
-        let mut dot_dash_data = Vec::new();
+    // Now step through the dots, and distribute any extra
+    // leftover space on the arc between them evenly. Once
+    // the final arc position is determined, generate the correct
+    // arc positions and angles that get passed to the clip shader.
+    let number_of_dots = forward_dots.len() + back_dots.len();
+    let extra_space_per_dot = leftover_arc_length / (number_of_dots - 1) as f32;
 
-        let outer_scale = match segment {
-            BorderSegment::TopLeft => DeviceVector2D::new(0.0, 0.0),
-            BorderSegment::TopRight => DeviceVector2D::new(1.0, 0.0),
-            BorderSegment::BottomRight => DeviceVector2D::new(1.0, 1.0),
-            BorderSegment::BottomLeft => DeviceVector2D::new(0.0, 1.0),
-            _ => unreachable!(),
-        };
-        let outer = DevicePoint::new(
-            outer_scale.x * self.radius.width,
-            outer_scale.y * self.radius.height,
-        );
-        let clip_sign = DeviceVector2D::new(
-            1.0 - 2.0 * outer_scale.x,
-            1.0 - 2.0 * outer_scale.y,
+    let create_dot_data = |arc_length: f32, dot_radius: f32| -> [f32; 8] {
+        // Represents the GPU data for drawing a single dot to a clip mask. The order
+        // these are specified must stay in sync with the way this data is read in the
+        // dot clip shader.
+        let theta = ellipse.find_angle_for_arc_length(arc_length);
+        let (center, _) = ellipse.get_point_and_tangent(theta);
+
+        let center = DevicePoint::new(
+            outer.x + clip_sign.x * (corner_radius.width - center.x),
+            outer.y + clip_sign.y * (corner_radius.height - center.y),
         );
 
-        match self.kind {
-            BorderCornerClipKind::Dash => {
-                // Get the correct dash arc length.
-                let dash_arc_length =
-                    0.5 * self.ellipse.total_arc_length / self.max_clip_count as f32;
-                // Start the first dash at one quarter the length of a single dash
-                // along the arc line. This is arbitrary but looks reasonable in
-                // most cases. We need to spend some time working on a more
-                // sophisticated dash placement algorithm that takes into account
-                // the offset of the dashes along edge segments.
-                let mut current_arc_length = 0.25 * dash_arc_length;
-                for _ in 0 .. self.max_clip_count {
-                    let arc_length0 = current_arc_length;
-                    current_arc_length += dash_arc_length;
+        [center.x, center.y, dot_radius, 0.0, 0.0, 0.0, 0.0, 0.0]
+    };
 
-                    let arc_length1 = current_arc_length;
-                    current_arc_length += dash_arc_length;
-
-                    let alpha = self.ellipse.find_angle_for_arc_length(arc_length0);
-                    let beta =  self.ellipse.find_angle_for_arc_length(arc_length1);
-
-                    let (point0, tangent0) =  self.ellipse.get_point_and_tangent(alpha);
-                    let (point1, tangent1) =  self.ellipse.get_point_and_tangent(beta);
-
-                    let point0 = DevicePoint::new(
-                        outer.x + clip_sign.x * (self.radius.width - point0.x),
-                        outer.y + clip_sign.y * (self.radius.height - point0.y),
-                    );
-
-                    let tangent0 = DeviceVector2D::new(
-                        -tangent0.x * clip_sign.x,
-                        -tangent0.y * clip_sign.y,
-                    );
-
-                    let point1 = DevicePoint::new(
-                        outer.x + clip_sign.x * (self.radius.width - point1.x),
-                        outer.y + clip_sign.y * (self.radius.height - point1.y),
-                    );
-
-                    let tangent1 = DeviceVector2D::new(
-                        -tangent1.x * clip_sign.x,
-                        -tangent1.y * clip_sign.y,
-                    );
-
-                    dot_dash_data.push([
-                        point0.x,
-                        point0.y,
-                        tangent0.x,
-                        tangent0.y,
-                        point1.x,
-                        point1.y,
-                        tangent1.x,
-                        tangent1.y,
-                    ]);
-                }
-            }
-            BorderCornerClipKind::Dot if self.max_clip_count == 1 => {
-                let dot_diameter = lerp(self.widths.width, self.widths.height, 0.5);
-                dot_dash_data.push([
-                    self.widths.width / 2.0, self.widths.height / 2.0, 0.5 * dot_diameter, 0.,
-                    0., 0., 0., 0.,
-                ]);
-            }
-            BorderCornerClipKind::Dot => {
-                let mut forward_dots = Vec::new();
-                let mut back_dots = Vec::new();
-                let mut leftover_arc_length = 0.0;
-
-                // Alternate between adding dots at the start and end of the
-                // ellipse arc. This ensures that we always end up with an exact
-                // half dot at each end of the arc, to match up with the edges.
-                forward_dots.push(DotInfo::new(self.widths.width, self.widths.width));
-                back_dots.push(DotInfo::new(
-                    self.ellipse.total_arc_length - self.widths.height,
-                    self.widths.height,
-                ));
-
-                for dot_index in 0 .. self.max_clip_count {
-                    let prev_forward_pos = *forward_dots.last().unwrap();
-                    let prev_back_pos = *back_dots.last().unwrap();
-
-                    // Select which end of the arc to place a dot from.
-                    // This just alternates between the start and end of
-                    // the arc, which ensures that there is always an
-                    // exact half-dot at each end of the ellipse.
-                    let going_forward = dot_index & 1 == 0;
-
-                    let (next_dot_pos, leftover) = if going_forward {
-                        let next_dot_pos =
-                            prev_forward_pos.arc_pos + 2.0 * prev_forward_pos.diameter;
-                        (next_dot_pos, prev_back_pos.arc_pos - next_dot_pos)
-                    } else {
-                        let next_dot_pos = prev_back_pos.arc_pos - 2.0 * prev_back_pos.diameter;
-                        (next_dot_pos, next_dot_pos - prev_forward_pos.arc_pos)
-                    };
-
-                    // Use a lerp between each edge's dot
-                    // diameter, based on the linear distance
-                    // along the arc to get the diameter of the
-                    // dot at this arc position.
-                    let t = next_dot_pos / self.ellipse.total_arc_length;
-                    let dot_diameter = lerp(self.widths.width, self.widths.height, t);
-
-                    // If we can't fit a dot, bail out.
-                    if leftover < dot_diameter {
-                        leftover_arc_length = leftover;
-                        break;
-                    }
-
-                    // We can place a dot!
-                    let dot = DotInfo::new(next_dot_pos, dot_diameter);
-                    if going_forward {
-                        forward_dots.push(dot);
-                    } else {
-                        back_dots.push(dot);
-                    }
-                }
-
-                // Now step through the dots, and distribute any extra
-                // leftover space on the arc between them evenly. Once
-                // the final arc position is determined, generate the correct
-                // arc positions and angles that get passed to the clip shader.
-                let number_of_dots = forward_dots.len() + back_dots.len();
-                let extra_space_per_dot = leftover_arc_length / (number_of_dots - 1) as f32;
-
-                let create_dot_data = |ellipse: &Ellipse<DevicePixel>, arc_length: f32, radius: f32| -> [f32; 8] {
-                    // Represents the GPU data for drawing a single dot to a clip mask. The order
-                    // these are specified must stay in sync with the way this data is read in the
-                    // dot clip shader.
-                    let theta = ellipse.find_angle_for_arc_length(arc_length);
-                    let (center, _) = ellipse.get_point_and_tangent(theta);
-
-                    let center = DevicePoint::new(
-                        outer.x + clip_sign.x * (self.radius.width - center.x),
-                        outer.y + clip_sign.y * (self.radius.height - center.y),
-                    );
-
-                    [center.x, center.y, radius, 0.0, 0.0, 0.0, 0.0, 0.0]
-                };
-
-                for (i, dot) in forward_dots.iter().enumerate() {
-                    let extra_dist = i as f32 * extra_space_per_dot;
-                    let dot_data = create_dot_data(&self.ellipse, dot.arc_pos + extra_dist, 0.5 * dot.diameter);
-                    dot_dash_data.push(dot_data);
-                }
-
-                for (i, dot) in back_dots.iter().enumerate() {
-                    let extra_dist = i as f32 * extra_space_per_dot;
-                    let dot_data = create_dot_data(&self.ellipse, dot.arc_pos - extra_dist, 0.5 * dot.diameter);
-                    dot_dash_data.push(dot_data);
-                }
-            }
-        }
-
-        dot_dash_data
+    instances.reserve(number_of_dots);
+    for (i, dot) in forward_dots.iter().enumerate() {
+        let extra_dist = i as f32 * extra_space_per_dot;
+        instances.push(BorderInstance {
+            flags: base_instance.flags | ((BorderClipKind::Dot as i32) << 24),
+            clip_params: create_dot_data(dot.arc_pos + extra_dist, 0.5 * dot.diameter),
+            .. *base_instance
+        });
     }
+
+    for (i, dot) in back_dots.iter().enumerate() {
+        let extra_dist = i as f32 * extra_space_per_dot;
+        instances.push(BorderInstance {
+            flags: base_instance.flags | ((BorderClipKind::Dot as i32) << 24),
+            clip_params: create_dot_data(dot.arc_pos - extra_dist, 0.5 * dot.diameter),
+            .. *base_instance
+        });
+    }
+
+    Ok(())
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -523,20 +528,76 @@ pub struct BorderSegmentInfo {
     widths: DeviceSize,
 }
 
+bitflags! {
+    /// Whether we depend on the available size for the border (effectively in
+    /// the local rect of the primitive), and in which direction.
+    ///
+    /// Note that this relies on the corners being only dependent on the border
+    /// widths and radius.
+    ///
+    /// This is not just a single boolean to allow instance caching for border
+    /// boxes where one of the directions differ but not the one on the affected
+    /// border is.
+    ///
+    /// This allows sharing instances for stuff like paragraphs of different
+    /// heights separated by horizontal borders.
+    pub struct AvailableSizeDependence : u8 {
+        /// There's a dependence on the vertical direction, that is, at least
+        /// one of the right or left edges is dashed or dotted.
+        const VERTICAL = 1 << 0;
+        /// Same but for the horizontal direction.
+        const HORIZONTAL = 1 << 1;
+    }
+}
+
+/// This is the data that describes a single border with (up to) four sides and
+/// four corners.
+///
+/// This object gets created for each border primitive at least once. Note,
+/// however, that the instances this produces via `build_instances()` can and
+/// will be shared by multiple borders, as long as they share the same cache
+/// key.
+///
+/// Segments, however, also get build once per primitive.
+///
+/// So the important invariant to preserve when going through this code is that
+/// the result of `build_instances()` would remain invariant for a given cache
+/// key.
+///
+/// That means, then, that `border_segments` can't depend at all on something
+/// that isn't on the key like the available_size, while the brush segments can
+/// (and will, since we skip painting empty segments caused by things like edges
+/// getting constrained by huge border-radius).
+///
+/// Note that the cache key is not only `BorderCacheKey`, but also a
+/// `size` from `RenderTaskCacheKey`, which will always be zero unless
+/// `available_size_dependence` is non-empty, which is effectively just dashed
+/// and dotted borders for now, since the spacing between the dash and dots
+/// changes depending on that size.
 #[derive(Debug)]
 pub struct BorderRenderTaskInfo {
     pub border_segments: Vec<BorderSegmentInfo>,
     pub size: DeviceIntSize,
+    pub available_size_dependence: AvailableSizeDependence,
 }
 
-// Information needed to place and draw a border edge.
+#[derive(PartialEq, Eq)]
+enum DependsOnAvailableSize {
+    No,
+    Yes,
+}
+
+/// Information needed to place and draw a border edge.
+#[derive(Debug)]
 struct EdgeInfo {
-    // Offset in local space to place the edge from origin.
+    /// Offset in local space to place the edge from origin.
     local_offset: f32,
-    // Size of the edge in local space.
+    /// Size of the edge in local space.
     local_size: f32,
-    // Size in device pixels needed in the render task.
+    /// Size in device pixels needed in the render task.
     device_size: f32,
+    /// Whether this edge depends on the available size.
+    depends_on_available_size: bool,
 }
 
 impl EdgeInfo {
@@ -544,14 +605,40 @@ impl EdgeInfo {
         local_offset: f32,
         local_size: f32,
         device_size: f32,
-    ) -> EdgeInfo {
-        EdgeInfo {
+        depends_on_avail_size: DependsOnAvailableSize,
+    ) -> Self {
+        Self {
             local_offset,
             local_size,
             device_size,
+            depends_on_available_size: depends_on_avail_size == DependsOnAvailableSize::Yes,
         }
     }
 }
+
+// Given a side width and the available space, compute the half-dash (half of
+// the 'on' segment) and the count of them for a given segment.
+fn compute_half_dash(side_width: f32, total_size: f32) -> (f32, u32) {
+    let half_dash = side_width * 1.5;
+    let num_half_dashes = (total_size / half_dash).ceil() as u32;
+
+    if num_half_dashes == 0 {
+        return (0., 0);
+    }
+
+    // TODO(emilio): Gecko has some other heuristics here to start with a full
+    // dash when the border side is zero, for example. We might consider those
+    // in the future.
+    let num_half_dashes = if num_half_dashes % 4 != 0 {
+        num_half_dashes + 4 - num_half_dashes % 4
+    } else {
+        num_half_dashes
+    };
+
+    let half_dash = total_size / num_half_dashes as f32;
+    (half_dash, num_half_dashes)
+}
+
 
 // Get the needed size in device pixels for an edge,
 // based on the border style of that edge. This is used
@@ -564,24 +651,21 @@ fn get_edge_info(
 ) -> EdgeInfo {
     // To avoid division by zero below.
     if side_width <= 0.0 {
-        return EdgeInfo::new(0.0, 0.0, 0.0);
+        return EdgeInfo::new(0.0, 0.0, 0.0, DependsOnAvailableSize::No);
     }
 
     match style {
         BorderStyle::Dashed => {
-            let dash_size = 3.0 * side_width;
-            let approx_dash_count = (avail_size - dash_size) / dash_size;
-            let dash_count = 1.0 + 2.0 * (approx_dash_count / 2.0).floor();
-            let used_size = dash_count * dash_size;
-            let extra_space = avail_size - used_size;
-            let device_size = 2.0 * dash_size * scale;
-            let offset = (extra_space * 0.5).round();
-            EdgeInfo::new(offset, used_size, device_size)
+            // Basically, two times the dash size.
+            let (half_dash, _num_half_dashes) =
+                compute_half_dash(side_width, avail_size);
+            let device_size = (2.0 * 2.0 * half_dash * scale).round();
+            EdgeInfo::new(0., avail_size, device_size, DependsOnAvailableSize::Yes)
         }
         BorderStyle::Dotted => {
             let dot_and_space_size = 2.0 * side_width;
             if avail_size < dot_and_space_size * 0.75 {
-                return EdgeInfo::new(0.0, 0.0, 0.0);
+                return EdgeInfo::new(0.0, 0.0, 0.0, DependsOnAvailableSize::Yes);
             }
             let approx_dot_count = avail_size / dot_and_space_size;
             let dot_count = approx_dot_count.floor().max(1.0);
@@ -589,10 +673,10 @@ fn get_edge_info(
             let extra_space = avail_size - used_size;
             let device_size = dot_and_space_size * scale;
             let offset = (extra_space * 0.5).round();
-            EdgeInfo::new(offset, used_size, device_size)
+            EdgeInfo::new(offset, used_size, device_size, DependsOnAvailableSize::Yes)
         }
         _ => {
-            EdgeInfo::new(0.0, avail_size, 8.0)
+            EdgeInfo::new(0.0, avail_size, 8.0, DependsOnAvailableSize::No)
         }
     }
 }
@@ -601,7 +685,7 @@ impl BorderRenderTaskInfo {
     pub fn new(
         rect: &LayoutRect,
         border: &NormalBorder,
-        widths: &BorderWidths,
+        widths: &LayoutSideOffsets,
         scale: LayoutToDeviceScale,
         brush_segments: &mut Vec<BrushSegment>,
     ) -> Option<Self> {
@@ -677,6 +761,7 @@ impl BorderRenderTaskInfo {
             rect.size.height - local_size_tr.height - local_size_br.height,
             scale.0,
         );
+
         let inner_height = left_edge_info.device_size.max(right_edge_info.device_size).ceil();
 
         let size = DeviceSize::new(
@@ -686,6 +771,19 @@ impl BorderRenderTaskInfo {
 
         if size.width == 0.0 || size.height == 0.0 {
             return None;
+        }
+
+        let mut size_dependence = AvailableSizeDependence::empty();
+        if top_edge_info.depends_on_available_size ||
+            bottom_edge_info.depends_on_available_size
+        {
+            size_dependence.insert(AvailableSizeDependence::HORIZONTAL);
+        }
+
+        if left_edge_info.depends_on_available_size ||
+            right_edge_info.depends_on_available_size
+        {
+            size_dependence.insert(AvailableSizeDependence::VERTICAL);
         }
 
         add_edge_segment(
@@ -867,7 +965,31 @@ impl BorderRenderTaskInfo {
         Some(BorderRenderTaskInfo {
             border_segments,
             size: size.to_i32(),
+            available_size_dependence: size_dependence,
         })
+    }
+
+    /// Returns the cache key size for this task, based on our available size
+    /// dependence computed earlier.
+    #[inline]
+    pub fn cache_key_size(
+        &self,
+        local_size: &LayoutSize,
+        scale: LayoutToDeviceScale,
+    ) -> DeviceIntSize {
+        let mut size = DeviceIntSize::zero();
+        if self.available_size_dependence.is_empty() {
+            return size;
+        }
+
+        let device_size = (*local_size * scale).to_i32();
+        if self.available_size_dependence.contains(AvailableSizeDependence::VERTICAL) {
+            size.height = device_size.height;
+        }
+        if self.available_size_dependence.contains(AvailableSizeDependence::HORIZONTAL) {
+            size.width = device_size.width;
+        }
+        size
     }
 
     pub fn build_instances(&self, border: &NormalBorder) -> Vec<BorderInstance> {
@@ -896,21 +1018,8 @@ impl BorderRenderTaskInfo {
                 side1.style
             };
 
-            // These modulate colors are not part of the specification. They
-            // are derived from the Gecko source code and experimentation, and
-            // used to modulate the colors in order to generate colors for
-            // the inset/outset and groove/ridge border styles.
-            let color0 = if flip0 {
-                side0.border_color(2.0 / 3.0, 1.0, 0.7, 0.3)
-            } else {
-                side0.border_color(1.0, 2.0 / 3.0, 0.3, 0.7)
-            };
-
-            let color1 = if flip1 {
-                side1.border_color(2.0 / 3.0, 1.0, 0.7, 0.3)
-            } else {
-                side1.border_color(1.0, 2.0 / 3.0, 0.3, 0.7)
-            };
+            let color0 = side0.border_color(flip0);
+            let color1 = side1.border_color(flip1);
 
             add_segment(
                 info.task_rect,
@@ -927,6 +1036,30 @@ impl BorderRenderTaskInfo {
 
         instances
     }
+
+    /// Computes the maximum scale that we allow for this set of border parameters.
+    /// capping the scale will result in rendering very large corners at a lower
+    /// resolution and stretching them, so they will have the right shape, but
+    /// blurrier.
+    pub fn get_max_scale(
+        radii: &BorderRadius,
+        widths: &LayoutSideOffsets
+    ) -> LayoutToDeviceScale {
+        let r = radii.top_left.width
+            .max(radii.top_left.height)
+            .max(radii.top_right.width)
+            .max(radii.top_right.height)
+            .max(radii.bottom_left.width)
+            .max(radii.bottom_left.height)
+            .max(radii.bottom_right.width)
+            .max(radii.bottom_right.height)
+            .max(widths.top)
+            .max(widths.bottom)
+            .max(widths.left)
+            .max(widths.right);
+
+        LayoutToDeviceScale::new(MAX_BORDER_RESOLUTION as f32 / r)
+    }
 }
 
 fn add_brush_segment(
@@ -936,10 +1069,14 @@ fn add_brush_segment(
     edge_flags: EdgeAaSegmentMask,
     brush_segments: &mut Vec<BrushSegment>,
 ) {
+    if image_rect.size.width <= 0. || image_rect.size.width <= 0. {
+        return;
+    }
+
     brush_segments.push(
         BrushSegment::new(
             image_rect,
-            true,
+            /* may_need_clip_mask = */ true,
             edge_flags,
             [
                 task_rect.origin.x,
@@ -992,35 +1129,30 @@ fn add_segment(
                 warn!("TODO: Handle a corner with dotted / dashed transition.");
             }
 
-            let clip_kind = match style0 {
-                BorderStyle::Dashed => Some(BorderCornerClipKind::Dash),
-                BorderStyle::Dotted => Some(BorderCornerClipKind::Dot),
-                _ => None,
-            };
-
-            match clip_kind {
-                Some(clip_kind) => {
-                    let clip_source = BorderCornerClipSource::new(
+            let dashed_or_dotted_corner = match style0 {
+                BorderStyle::Dashed => {
+                    write_dashed_corner_instances(
                         radius,
                         widths,
-                        clip_kind,
-                    );
-
-                    // TODO(gw): Restructure the BorderCornerClipSource code
-                    //           so that we don't allocate a Vec here.
-                    let clip_list = clip_source.write(segment);
-
-                    for params in clip_list {
-                        instances.push(BorderInstance {
-                            flags: base_flags | ((clip_kind as i32) << 24),
-                            clip_params: params,
-                            ..base_instance
-                        });
-                    }
+                        segment,
+                        &base_instance,
+                        instances,
+                    )
                 }
-                None => {
-                    instances.push(base_instance);
+                BorderStyle::Dotted => {
+                    write_dotted_corner_instances(
+                        radius,
+                        widths,
+                        segment,
+                        &base_instance,
+                        instances,
+                    )
                 }
+                _ => Err(()),
+            };
+
+            if dashed_or_dotted_corner.is_err() {
+                instances.push(base_instance);
             }
         }
         BorderSegment::Top |
@@ -1032,32 +1164,19 @@ fn add_segment(
 
             match style0 {
                 BorderStyle::Dashed => {
-                    let rect = if is_vertical {
-                        let half_dash_size = task_rect.size.height * 0.5;
-                        let y0 = task_rect.origin.y;
-                        let y1 = y0 + half_dash_size.round();
-
-                        DeviceRect::from_floats(
-                            task_rect.origin.x,
-                            y0,
-                            task_rect.origin.x + task_rect.size.width,
-                            y1,
-                        )
+                    let (x, y) = if is_vertical {
+                        let half_dash_size = task_rect.size.height * 0.25;
+                        (0., half_dash_size)
                     } else {
-                        let half_dash_size = task_rect.size.width * 0.5;
-                        let x0 = task_rect.origin.x;
-                        let x1 = x0 + half_dash_size.round();
-
-                        DeviceRect::from_floats(
-                            x0,
-                            task_rect.origin.y,
-                            x1,
-                            task_rect.origin.y + task_rect.size.height,
-                        )
+                        let half_dash_size = task_rect.size.width * 0.25;
+                        (half_dash_size, 0.)
                     };
 
                     instances.push(BorderInstance {
-                        local_rect: rect,
+                        flags: base_flags | ((BorderClipKind::DashEdge as i32) << 24),
+                        clip_params: [
+                            x, y, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                        ],
                         ..base_instance
                     });
                 }
@@ -1073,7 +1192,7 @@ fn add_segment(
                     };
 
                     instances.push(BorderInstance {
-                        flags: base_flags | ((BorderCornerClipKind::Dot as i32) << 24),
+                        flags: base_flags | ((BorderClipKind::Dot as i32) << 24),
                         clip_params: [
                             x, y, r, 0.0, 0.0, 0.0, 0.0, 0.0,
                         ],

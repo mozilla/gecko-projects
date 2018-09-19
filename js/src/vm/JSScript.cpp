@@ -35,8 +35,11 @@
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "jit/IonCode.h"
+#include "jit/JitRealm.h"
+#include "js/CompileOptions.h"
 #include "js/MemoryMetrics.h"
 #include "js/Printf.h"
+#include "js/SourceBufferHolder.h"
 #include "js/UniquePtr.h"
 #include "js/Utility.h"
 #include "js/Wrapper.h"
@@ -67,27 +70,13 @@
 #include "vm/Stack-inl.h"
 
 using namespace js;
-using namespace js::gc;
-using namespace js::frontend;
 
 using mozilla::Maybe;
 using mozilla::PodCopy;
 
-
-// Check that JSScript::data hasn't experienced obvious memory corruption.
-// This is a diagnositic for Bug 1367896.
-static void
-CheckScriptDataIntegrity(JSScript* script)
-{
-    ScopeArray* sa = script->scopes();
-    uint8_t* ptr = reinterpret_cast<uint8_t*>(sa->vector);
-
-    // Check that scope data - who's pointer is stored in data region - also
-    // points within the data region.
-    MOZ_RELEASE_ASSERT(ptr >= script->data &&
-                       ptr + sa->length <= script->data + script->dataSize(),
-                       "Corrupt JSScript::data");
-}
+using JS::CompileOptions;
+using JS::ReadOnlyCompileOptions;
+using JS::SourceBufferHolder;
 
 template<XDRMode mode>
 XDRResult
@@ -136,61 +125,74 @@ js::XDRScriptConst(XDRState<mode>* xdr, MutableHandleValue vp)
     switch (tag) {
       case SCRIPT_INT: {
         uint32_t i;
-        if (mode == XDR_ENCODE)
+        if (mode == XDR_ENCODE) {
             i = uint32_t(vp.toInt32());
+        }
         MOZ_TRY(xdr->codeUint32(&i));
-        if (mode == XDR_DECODE)
+        if (mode == XDR_DECODE) {
             vp.set(Int32Value(int32_t(i)));
+        }
         break;
       }
       case SCRIPT_DOUBLE: {
         double d;
-        if (mode == XDR_ENCODE)
+        if (mode == XDR_ENCODE) {
             d = vp.toDouble();
+        }
         MOZ_TRY(xdr->codeDouble(&d));
-        if (mode == XDR_DECODE)
+        if (mode == XDR_DECODE) {
             vp.set(DoubleValue(d));
+        }
         break;
       }
       case SCRIPT_ATOM: {
         RootedAtom atom(cx);
-        if (mode == XDR_ENCODE)
+        if (mode == XDR_ENCODE) {
             atom = &vp.toString()->asAtom();
+        }
         MOZ_TRY(XDRAtom(xdr, &atom));
-        if (mode == XDR_DECODE)
+        if (mode == XDR_DECODE) {
             vp.set(StringValue(atom));
+        }
         break;
       }
       case SCRIPT_TRUE:
-        if (mode == XDR_DECODE)
+        if (mode == XDR_DECODE) {
             vp.set(BooleanValue(true));
+        }
         break;
       case SCRIPT_FALSE:
-        if (mode == XDR_DECODE)
+        if (mode == XDR_DECODE) {
             vp.set(BooleanValue(false));
+        }
         break;
       case SCRIPT_NULL:
-        if (mode == XDR_DECODE)
+        if (mode == XDR_DECODE) {
             vp.set(NullValue());
+        }
         break;
       case SCRIPT_OBJECT: {
         RootedObject obj(cx);
-        if (mode == XDR_ENCODE)
+        if (mode == XDR_ENCODE) {
             obj = &vp.toObject();
+        }
 
         MOZ_TRY(XDRObjectLiteral(xdr, &obj));
 
-        if (mode == XDR_DECODE)
+        if (mode == XDR_DECODE) {
             vp.setObject(*obj);
+        }
         break;
       }
       case SCRIPT_VOID:
-        if (mode == XDR_DECODE)
+        if (mode == XDR_DECODE) {
             vp.set(UndefinedValue());
+        }
         break;
       case SCRIPT_HOLE:
-        if (mode == XDR_DECODE)
+        if (mode == XDR_DECODE) {
             vp.setMagic(JS_ELEMENTS_HOLE);
+        }
         break;
       default:
         // Fail in debug, but only soft-fail in release
@@ -222,13 +224,15 @@ XDRLazyClosedOverBindings(XDRState<mode>* xdr, MutableHandle<LazyScript*> lazy)
 
         MOZ_TRY(xdr->codeUint8(&endOfScopeSentinel));
 
-        if (endOfScopeSentinel)
+        if (endOfScopeSentinel) {
             atom = nullptr;
-        else
+        } else {
             MOZ_TRY(XDRAtom(xdr, &atom));
+        }
 
-        if (mode == XDR_DECODE)
+        if (mode == XDR_DECODE) {
             lazy->closedOverBindings()[i] = atom;
+        }
     }
 
     return Ok();
@@ -272,11 +276,12 @@ XDRRelazificationInfo(XDRState<mode>* xdr, HandleFunction fun, HandleScript scri
 
         if (mode == XDR_DECODE) {
             RootedScriptSourceObject sourceObject(cx, &script->scriptSourceUnwrap());
-            lazy.set(LazyScript::Create(cx, fun, script, enclosingScope, sourceObject,
-                                        packedFields, sourceStart, sourceEnd, toStringStart,
-                                        lineno, column));
-            if (!lazy)
+            lazy.set(LazyScript::CreateForXDR(cx, fun, script, enclosingScope, sourceObject,
+                                              packedFields, sourceStart, sourceEnd, toStringStart,
+                                              lineno, column));
+            if (!lazy) {
                 return xdr->fail(JS::TranscodeResult_Throw);
+            }
 
             lazy->setToStringEnd(toStringEnd);
 
@@ -303,8 +308,9 @@ FindScopeIndex(JSScript* script, Scope& scope)
     GCPtrScope* vector = scopes->vector;
     unsigned length = scopes->length;
     for (uint32_t i = 0; i < length; ++i) {
-        if (vector[i] == &scope)
+        if (vector[i] == &scope) {
             return i;
+        }
     }
 
     MOZ_CRASH("Scope not found");
@@ -369,8 +375,6 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
         script = scriptp.get();
         MOZ_ASSERT(script->functionNonDelazifying() == fun);
 
-        CheckScriptDataIntegrity(script);
-
         if (!fun && script->treatAsRunOnce() && script->hasRunOnce()) {
             // This is a toplevel or eval script that's runOnce.  We want to
             // make sure that we're not XDR-saving an object we emitted for
@@ -386,8 +390,9 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
         }
     }
 
-    if (mode == XDR_ENCODE)
+    if (mode == XDR_ENCODE) {
         length = script->length();
+    }
     MOZ_TRY(xdr->codeUint32(&length));
 
     if (mode == XDR_ENCODE) {
@@ -402,70 +407,99 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
 
         nsrcnotes = script->numNotes();
 
-        if (script->hasConsts())
+        if (script->hasConsts()) {
             nconsts = script->consts()->length;
-        if (script->hasObjects())
+        }
+        if (script->hasObjects()) {
             nobjects = script->objects()->length;
+        }
         nscopes = script->scopes()->length;
-        if (script->hasTrynotes())
+        if (script->hasTrynotes()) {
             ntrynotes = script->trynotes()->length;
-        if (script->hasScopeNotes())
+        }
+        if (script->hasScopeNotes()) {
             nscopenotes = script->scopeNotes()->length;
-        if (script->hasYieldAndAwaitOffsets())
+        }
+        if (script->hasYieldAndAwaitOffsets()) {
             nyieldoffsets = script->yieldAndAwaitOffsets().length();
+        }
 
         nTypeSets = script->nTypeSets();
         funLength = script->funLength();
 
-        if (script->noScriptRval())
+        if (script->noScriptRval()) {
             scriptBits |= (1 << NoScriptRval);
-        if (script->strict())
+        }
+        if (script->strict()) {
             scriptBits |= (1 << Strict);
-        if (script->explicitUseStrict())
+        }
+        if (script->explicitUseStrict()) {
             scriptBits |= (1 << ExplicitUseStrict);
-        if (script->selfHosted())
+        }
+        if (script->selfHosted()) {
             scriptBits |= (1 << SelfHosted);
-        if (script->bindingsAccessedDynamically())
+        }
+        if (script->bindingsAccessedDynamically()) {
             scriptBits |= (1 << ContainsDynamicNameAccess);
-        if (script->funHasExtensibleScope())
+        }
+        if (script->funHasExtensibleScope()) {
             scriptBits |= (1 << FunHasExtensibleScope);
-        if (script->funHasAnyAliasedFormal())
+        }
+        if (script->funHasAnyAliasedFormal()) {
             scriptBits |= (1 << FunHasAnyAliasedFormal);
-        if (script->argumentsHasVarBinding())
+        }
+        if (script->argumentsHasVarBinding()) {
             scriptBits |= (1 << ArgumentsHasVarBinding);
-        if (script->analyzedArgsUsage() && script->needsArgsObj())
+        }
+        if (script->analyzedArgsUsage() && script->needsArgsObj()) {
             scriptBits |= (1 << NeedsArgsObj);
-        if (script->hasMappedArgsObj())
+        }
+        if (script->hasMappedArgsObj()) {
             scriptBits |= (1 << HasMappedArgsObj);
-        if (script->functionHasThisBinding())
+        }
+        if (script->functionHasThisBinding()) {
             scriptBits |= (1 << FunctionHasThisBinding);
-        if (script->functionHasExtraBodyVarScope())
+        }
+        if (script->functionHasExtraBodyVarScope()) {
             scriptBits |= (1 << FunctionHasExtraBodyVarScope);
+        }
         MOZ_ASSERT_IF(sourceObjectArg, sourceObjectArg->source() == script->scriptSource());
-        if (!sourceObjectArg)
+        if (!sourceObjectArg) {
             scriptBits |= (1 << OwnSource);
-        if (script->isGenerator())
+        }
+        if (script->isGenerator()) {
             scriptBits |= (1 << IsGenerator);
-        if (script->isAsync())
+        }
+        if (script->isAsync()) {
             scriptBits |= (1 << IsAsync);
-        if (script->hasRest())
+        }
+        if (script->hasRest()) {
             scriptBits |= (1 << HasRest);
-        if (script->hasSingletons())
+        }
+        if (script->hasSingletons()) {
             scriptBits |= (1 << HasSingleton);
-        if (script->treatAsRunOnce())
+        }
+        if (script->treatAsRunOnce()) {
             scriptBits |= (1 << TreatAsRunOnce);
-        if (script->isRelazifiable())
+        }
+        if (script->isRelazifiable()) {
             scriptBits |= (1 << HasLazyScript);
-        if (script->hasNonSyntacticScope())
+        }
+        if (script->hasNonSyntacticScope()) {
             scriptBits |= (1 << HasNonSyntacticScope);
-        if (script->hasInnerFunctions())
+        }
+        if (script->hasInnerFunctions()) {
             scriptBits |= (1 << HasInnerFunctions);
-        if (script->needsHomeObject())
+        }
+        if (script->needsHomeObject()) {
             scriptBits |= (1 << NeedsHomeObject);
-        if (script->isDerivedClassConstructor())
+        }
+        if (script->isDerivedClassConstructor()) {
             scriptBits |= (1 << IsDerivedClassConstructor);
-        if (script->isDefaultClassConstructor())
+        }
+        if (script->isDefaultClassConstructor()) {
             scriptBits |= (1 << IsDefaultClassConstructor);
+        }
     }
 
     MOZ_TRY(xdr->codeUint32(&prologueLength));
@@ -507,8 +541,9 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
 
         if (scriptBits & (1 << OwnSource)) {
             ScriptSource* ss = cx->new_<ScriptSource>();
-            if (!ss)
+            if (!ss) {
                 return xdr->fail(JS::TranscodeResult_Throw);
+            }
             ScriptSourceHolder ssHolder(ss);
 
             /*
@@ -517,12 +552,14 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
              * ScriptSourceObject, and those that are (element; elementAttributeName)
              * aren't preserved by XDR. So this can be simple.
              */
-            if (!ss->initFromOptions(cx, *options))
+            if (!ss->initFromOptions(cx, *options)) {
                 return xdr->fail(JS::TranscodeResult_Throw);
+            }
 
             sourceObject = ScriptSourceObject::create(cx, ss);
-            if (!sourceObject)
+            if (!sourceObject) {
                 return xdr->fail(JS::TranscodeResult_Throw);
+            }
 
             if (xdr->hasScriptSourceObjectOut()) {
                 // When the ScriptSourceObjectOut is provided by ParseTask, it
@@ -534,13 +571,15 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
         }
 
         script = JSScript::Create(cx, *options, sourceObject, 0, 0, 0, 0);
-        if (!script)
+        if (!script) {
             return xdr->fail(JS::TranscodeResult_Throw);
+        }
 
         // Set the script in its function now so that inner scripts to be
         // decoded may iterate the static scope chain.
-        if (fun)
+        if (fun) {
             fun->initScript(script);
+        }
     } else {
         // When encoding, we do not mutate any of the JSScript or LazyScript, so
         // we can safely unwrap it here.
@@ -549,7 +588,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
 
     if (mode == XDR_DECODE) {
         if (!JSScript::partiallyInit(cx, script, nscopes, nconsts, nobjects, ntrynotes,
-                                     nscopenotes, nyieldoffsets, nTypeSets))
+                                     nscopenotes, nyieldoffsets))
         {
             return xdr->fail(JS::TranscodeResult_Throw);
         }
@@ -558,55 +597,79 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
         script->mainOffset_ = prologueLength;
         script->funLength_ = funLength;
 
+        MOZ_ASSERT(nTypeSets <= UINT16_MAX);
+        script->nTypeSets_ = uint16_t(nTypeSets);
+
         scriptp.set(script);
 
-        if (scriptBits & (1 << Strict))
+        if (scriptBits & (1 << Strict)) {
             script->bitFields_.strict_ = true;
-        if (scriptBits & (1 << ExplicitUseStrict))
+        }
+        if (scriptBits & (1 << ExplicitUseStrict)) {
             script->bitFields_.explicitUseStrict_ = true;
-        if (scriptBits & (1 << ContainsDynamicNameAccess))
+        }
+        if (scriptBits & (1 << ContainsDynamicNameAccess)) {
             script->bitFields_.bindingsAccessedDynamically_ = true;
-        if (scriptBits & (1 << FunHasExtensibleScope))
+        }
+        if (scriptBits & (1 << FunHasExtensibleScope)) {
             script->bitFields_.funHasExtensibleScope_ = true;
-        if (scriptBits & (1 << FunHasAnyAliasedFormal))
+        }
+        if (scriptBits & (1 << FunHasAnyAliasedFormal)) {
             script->bitFields_.funHasAnyAliasedFormal_ = true;
-        if (scriptBits & (1 << ArgumentsHasVarBinding))
+        }
+        if (scriptBits & (1 << ArgumentsHasVarBinding)) {
             script->setArgumentsHasVarBinding();
-        if (scriptBits & (1 << NeedsArgsObj))
+        }
+        if (scriptBits & (1 << NeedsArgsObj)) {
             script->setNeedsArgsObj(true);
-        if (scriptBits & (1 << HasMappedArgsObj))
+        }
+        if (scriptBits & (1 << HasMappedArgsObj)) {
             script->bitFields_.hasMappedArgsObj_ = true;
-        if (scriptBits & (1 << FunctionHasThisBinding))
+        }
+        if (scriptBits & (1 << FunctionHasThisBinding)) {
             script->bitFields_.functionHasThisBinding_ = true;
-        if (scriptBits & (1 << FunctionHasExtraBodyVarScope))
+        }
+        if (scriptBits & (1 << FunctionHasExtraBodyVarScope)) {
             script->bitFields_.functionHasExtraBodyVarScope_ = true;
-        if (scriptBits & (1 << HasSingleton))
+        }
+        if (scriptBits & (1 << HasSingleton)) {
             script->bitFields_.hasSingletons_ = true;
-        if (scriptBits & (1 << TreatAsRunOnce))
+        }
+        if (scriptBits & (1 << TreatAsRunOnce)) {
             script->bitFields_.treatAsRunOnce_ = true;
-        if (scriptBits & (1 << HasNonSyntacticScope))
+        }
+        if (scriptBits & (1 << HasNonSyntacticScope)) {
             script->bitFields_.hasNonSyntacticScope_ = true;
-        if (scriptBits & (1 << HasInnerFunctions))
+        }
+        if (scriptBits & (1 << HasInnerFunctions)) {
             script->bitFields_.hasInnerFunctions_ = true;
-        if (scriptBits & (1 << NeedsHomeObject))
+        }
+        if (scriptBits & (1 << NeedsHomeObject)) {
             script->bitFields_.needsHomeObject_ = true;
-        if (scriptBits & (1 << IsDerivedClassConstructor))
+        }
+        if (scriptBits & (1 << IsDerivedClassConstructor)) {
             script->bitFields_.isDerivedClassConstructor_ = true;
-        if (scriptBits & (1 << IsDefaultClassConstructor))
+        }
+        if (scriptBits & (1 << IsDefaultClassConstructor)) {
             script->bitFields_.isDefaultClassConstructor_ = true;
-        if (scriptBits & (1 << IsGenerator))
+        }
+        if (scriptBits & (1 << IsGenerator)) {
             script->setGeneratorKind(GeneratorKind::Generator);
-        if (scriptBits & (1 << IsAsync))
+        }
+        if (scriptBits & (1 << IsAsync)) {
             script->setAsyncKind(FunctionAsyncKind::AsyncFunction);
-        if (scriptBits & (1 << HasRest))
+        }
+        if (scriptBits & (1 << HasRest)) {
             script->setHasRest();
+        }
     }
 
     JS_STATIC_ASSERT(sizeof(jsbytecode) == 1);
     JS_STATIC_ASSERT(sizeof(jssrcnote) == 1);
 
-    if (scriptBits & (1 << OwnSource))
+    if (scriptBits & (1 << OwnSource)) {
         MOZ_TRY(sourceObject->source()->performXDR<mode>(xdr));
+    }
     MOZ_TRY(xdr->codeUint32(&script->sourceStart_));
     MOZ_TRY(xdr->codeUint32(&script->sourceEnd_));
     MOZ_TRY(xdr->codeUint32(&script->toStringStart_));
@@ -626,13 +689,15 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
     }
 
     if (mode == XDR_DECODE) {
-        if (!script->createScriptData(cx, length, nsrcnotes, natoms))
+        if (!script->createScriptData(cx, length, nsrcnotes, natoms)) {
             return xdr->fail(JS::TranscodeResult_Throw);
+        }
     }
 
     auto scriptDataGuard = mozilla::MakeScopeExit([&] {
-        if (mode == XDR_DECODE)
+        if (mode == XDR_DECODE) {
             script->freeScriptData();
+        }
     });
 
     jsbytecode* code = script->code();
@@ -652,19 +717,22 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
 
     scriptDataGuard.release();
     if (mode == XDR_DECODE) {
-        if (!script->shareScriptData(cx))
+        if (!script->shareScriptData(cx)) {
             return xdr->fail(JS::TranscodeResult_Throw);
+        }
     }
 
     if (nconsts) {
         GCPtrValue* vector = script->consts()->vector;
         RootedValue val(cx);
         for (i = 0; i != nconsts; ++i) {
-            if (mode == XDR_ENCODE)
+            if (mode == XDR_ENCODE) {
                 val = vector[i];
+            }
             MOZ_TRY(XDRScriptConst(xdr, &val));
-            if (mode == XDR_DECODE)
+            if (mode == XDR_DECODE) {
                 vector[i].init(val);
+            }
         }
     }
 
@@ -725,8 +793,9 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
               case ScopeKind::With:
                 if (mode == XDR_DECODE) {
                     scope = WithScope::create(cx, enclosing);
-                    if (!scope)
+                    if (!scope) {
                         return xdr->fail(JS::TranscodeResult_Throw);
+                    }
                 }
                 break;
               case ScopeKind::Eval:
@@ -750,8 +819,9 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
                 return xdr->fail(JS::TranscodeResult_Failure_BadDecode);
             }
 
-            if (mode == XDR_DECODE)
+            if (mode == XDR_DECODE) {
                 vector[i].init(scope);
+            }
         }
 
         // Verify marker to detect data corruption after decoding scope data. A
@@ -770,14 +840,15 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
 
         if (mode == XDR_ENCODE) {
             JSObject* obj = *objp;
-            if (obj->is<RegExpObject>())
+            if (obj->is<RegExpObject>()) {
                 classk = CK_RegexpObject;
-            else if (obj->is<JSFunction>())
+            } else if (obj->is<JSFunction>()) {
                 classk = CK_JSFunction;
-            else if (obj->is<PlainObject>() || obj->is<ArrayObject>())
+            } else if (obj->is<PlainObject>() || obj->is<ArrayObject>()) {
                 classk = CK_JSObject;
-            else
+            } else {
                 MOZ_CRASH("Cannot encode this class of object.");
+            }
         }
 
         MOZ_TRY(xdr->codeEnum32(&classk));
@@ -785,11 +856,13 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
         switch (classk) {
           case CK_RegexpObject: {
             Rooted<RegExpObject*> regexp(cx);
-            if (mode == XDR_ENCODE)
+            if (mode == XDR_ENCODE) {
                 regexp = &(*objp)->as<RegExpObject>();
+            }
             MOZ_TRY(XDRScriptRegExpObject(xdr, &regexp));
-            if (mode == XDR_DECODE)
+            if (mode == XDR_DECODE) {
                 *objp = regexp;
+            }
             break;
           }
 
@@ -821,8 +894,9 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
 
             // Code nested function and script.
             RootedFunction tmp(cx);
-            if (mode == XDR_ENCODE)
+            if (mode == XDR_ENCODE) {
                 tmp = &(*objp)->as<JSFunction>();
+            }
             MOZ_TRY(XDRInterpretedFunction(xdr, funEnclosingScope, sourceObject, &tmp));
             *objp = tmp;
             break;
@@ -876,23 +950,24 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
 
     if (scriptBits & (1 << HasLazyScript)) {
         Rooted<LazyScript*> lazy(cx);
-        if (mode == XDR_ENCODE)
+        if (mode == XDR_ENCODE) {
             lazy = script->maybeLazyScript();
+        }
 
         MOZ_TRY(XDRRelazificationInfo(xdr, fun, script, scriptEnclosingScope, &lazy));
 
-        if (mode == XDR_DECODE)
+        if (mode == XDR_DECODE) {
             script->setLazyScript(lazy);
+        }
     }
 
     if (mode == XDR_DECODE) {
-        CheckScriptDataIntegrity(script);
-
         scriptp.set(script);
 
         /* see BytecodeEmitter::tellDebuggerAboutCompiledScript */
-        if (!fun && !cx->helperThread())
+        if (!fun && !cx->helperThread()) {
             Debugger::onNewScript(cx, script);
+        }
     }
 
     return Ok();
@@ -950,11 +1025,12 @@ js::XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope,
         MOZ_TRY(xdr->codeUint64(&packedFields));
 
         if (mode == XDR_DECODE) {
-            lazy.set(LazyScript::Create(cx, fun, nullptr, enclosingScope, sourceObject,
-                                        packedFields, sourceStart, sourceEnd, toStringStart,
-                                        lineno, column));
-            if (!lazy)
+            lazy.set(LazyScript::CreateForXDR(cx, fun, nullptr, enclosingScope, sourceObject,
+                                              packedFields, sourceStart, sourceEnd, toStringStart,
+                                              lineno, column));
+            if (!lazy) {
                 return xdr->fail(JS::TranscodeResult_Throw);
+            }
             lazy->setToStringEnd(toStringEnd);
             fun->initLazyScript(lazy);
         }
@@ -969,13 +1045,18 @@ js::XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope,
         GCPtrFunction* innerFunctions = lazy->innerFunctions();
         size_t numInnerFunctions = lazy->numInnerFunctions();
         for (size_t i = 0; i < numInnerFunctions; i++) {
-            if (mode == XDR_ENCODE)
+            if (mode == XDR_ENCODE) {
                 func = innerFunctions[i];
+            }
 
             MOZ_TRY(XDRInterpretedFunction(xdr, nullptr, sourceObject, &func));
 
-            if (mode == XDR_DECODE)
+            if (mode == XDR_DECODE) {
                 innerFunctions[i] = func;
+                if (innerFunctions[i]->isInterpretedLazy()) {
+                    innerFunctions[i]->lazyScript()->setEnclosingLazyScript(lazy);
+                }
+            }
         }
     }
 
@@ -998,12 +1079,20 @@ JSScript::setSourceObject(JSObject* object)
 }
 
 void
-JSScript::setDefaultClassConstructorSpan(JSObject* sourceObject, uint32_t start, uint32_t end)
+JSScript::setDefaultClassConstructorSpan(JSObject* sourceObject, uint32_t start, uint32_t end,
+                                         unsigned line, unsigned column)
 {
     MOZ_ASSERT(isDefaultClassConstructor());
     setSourceObject(sourceObject);
     toStringStart_ = start;
     toStringEnd_ = end;
+    sourceStart_ = start;
+    sourceEnd_ = end;
+    lineno_ = line;
+    column_ = column;
+    // Since this script has been changed to point into the user's source, we
+    // can clear its self-hosted flag, allowing Debugger to see it.
+    bitFields_.selfHosted_ = false;
 }
 
 js::ScriptSourceObject&
@@ -1051,14 +1140,14 @@ JSScript::initScriptCounts(JSContext* cx)
         return false;
     }
 
-    for (size_t i = 0; i < jumpTargets.length(); i++)
+    for (size_t i = 0; i < jumpTargets.length(); i++) {
         base.infallibleEmplaceBack(pcToOffset(jumpTargets[i]));
+    }
 
     // Create realm's scriptCountsMap if necessary.
     if (!realm()->scriptCountsMap) {
         auto map = cx->make_unique<ScriptCountsMap>();
-        if (!map || !map->init()) {
-            ReportOutOfMemory(cx);
+        if (!map) {
             return false;
         }
 
@@ -1084,8 +1173,9 @@ JSScript::initScriptCounts(JSContext* cx)
     // Enable interrupts in any interpreter frames running on this script. This
     // is used to let the interpreter increment the PCCounts, if present.
     for (ActivationIterator iter(cx); !iter.done(); ++iter) {
-        if (iter->isInterpreter())
+        if (iter->isInterpreter()) {
             iter->asInterpreter()->enableInterruptsIfRunning(this);
+        }
     }
 
     return true;
@@ -1126,8 +1216,9 @@ js::PCCounts*
 ScriptCounts::maybeGetPCCounts(size_t offset) {
     PCCounts searched = PCCounts(offset);
     PCCounts* elem = std::lower_bound(pcCounts_.begin(), pcCounts_.end(), searched);
-    if (elem == pcCounts_.end() || elem->pcOffset() != offset)
+    if (elem == pcCounts_.end() || elem->pcOffset() != offset) {
         return nullptr;
+    }
     return elem;
 }
 
@@ -1135,8 +1226,9 @@ const js::PCCounts*
 ScriptCounts::maybeGetPCCounts(size_t offset) const {
     PCCounts searched = PCCounts(offset);
     const PCCounts* elem = std::lower_bound(pcCounts_.begin(), pcCounts_.end(), searched);
-    if (elem == pcCounts_.end() || elem->pcOffset() != offset)
+    if (elem == pcCounts_.end() || elem->pcOffset() != offset) {
         return nullptr;
+    }
     return elem;
 }
 
@@ -1145,12 +1237,15 @@ ScriptCounts::getImmediatePrecedingPCCounts(size_t offset)
 {
     PCCounts searched = PCCounts(offset);
     PCCounts* elem = std::lower_bound(pcCounts_.begin(), pcCounts_.end(), searched);
-    if (elem == pcCounts_.end())
+    if (elem == pcCounts_.end()) {
         return &pcCounts_.back();
-    if (elem->pcOffset() == offset)
+    }
+    if (elem->pcOffset() == offset) {
         return elem;
-    if (elem != pcCounts_.begin())
+    }
+    if (elem != pcCounts_.begin()) {
         return elem - 1;
+    }
     return nullptr;
 }
 
@@ -1158,8 +1253,9 @@ const js::PCCounts*
 ScriptCounts::maybeGetThrowCounts(size_t offset) const {
     PCCounts searched = PCCounts(offset);
     const PCCounts* elem = std::lower_bound(throwCounts_.begin(), throwCounts_.end(), searched);
-    if (elem == throwCounts_.end() || elem->pcOffset() != offset)
+    if (elem == throwCounts_.end() || elem->pcOffset() != offset) {
         return nullptr;
+    }
     return elem;
 }
 
@@ -1169,14 +1265,17 @@ ScriptCounts::getImmediatePrecedingThrowCounts(size_t offset) const
     PCCounts searched = PCCounts(offset);
     const PCCounts* elem = std::lower_bound(throwCounts_.begin(), throwCounts_.end(), searched);
     if (elem == throwCounts_.end()) {
-        if (throwCounts_.begin() == throwCounts_.end())
+        if (throwCounts_.begin() == throwCounts_.end()) {
             return nullptr;
+        }
         return &throwCounts_.back();
     }
-    if (elem->pcOffset() == offset)
+    if (elem->pcOffset() == offset) {
         return elem;
-    if (elem != throwCounts_.begin())
+    }
+    if (elem != throwCounts_.begin()) {
         return elem - 1;
+    }
     return nullptr;
 }
 
@@ -1184,8 +1283,9 @@ js::PCCounts*
 ScriptCounts::getThrowCounts(size_t offset) {
     PCCounts searched = PCCounts(offset);
     PCCounts* elem = std::lower_bound(throwCounts_.begin(), throwCounts_.end(), searched);
-    if (elem == throwCounts_.end() || elem->pcOffset() != offset)
+    if (elem == throwCounts_.end() || elem->pcOffset() != offset) {
         elem = throwCounts_.insert(elem, searched);
+    }
     return elem;
 }
 
@@ -1201,8 +1301,9 @@ void
 JSScript::setIonScript(JSRuntime* rt, js::jit::IonScript* ionScript)
 {
     MOZ_ASSERT_IF(ionScript != ION_DISABLED_SCRIPT, !baselineScript()->hasPendingIonBuilder());
-    if (hasIonScript())
+    if (hasIonScript()) {
         js::jit::IonScript::writeBarrierPre(zone(), ion);
+    }
     ion = ionScript;
     MOZ_ASSERT_IF(hasIonScript(), hasBaselineScript());
     updateJitCodeRaw(rt);
@@ -1230,24 +1331,29 @@ uint64_t
 JSScript::getHitCount(jsbytecode* pc)
 {
     MOZ_ASSERT(containsPC(pc));
-    if (pc < main())
+    if (pc < main()) {
         pc = main();
+    }
 
     ScriptCounts& sc = getScriptCounts();
     size_t targetOffset = pcToOffset(pc);
     const js::PCCounts* baseCount = sc.getImmediatePrecedingPCCounts(targetOffset);
-    if (!baseCount)
+    if (!baseCount) {
         return 0;
-    if (baseCount->pcOffset() == targetOffset)
+    }
+    if (baseCount->pcOffset() == targetOffset) {
         return baseCount->numExec();
+    }
     MOZ_ASSERT(baseCount->pcOffset() < targetOffset);
     uint64_t count = baseCount->numExec();
     do {
         const js::PCCounts* throwCount = sc.getImmediatePrecedingThrowCounts(targetOffset);
-        if (!throwCount)
+        if (!throwCount) {
             return count;
-        if (throwCount->pcOffset() <= baseCount->pcOffset())
+        }
+        if (throwCount->pcOffset() <= baseCount->pcOffset()) {
             return count;
+        }
         count -= throwCount->numExec();
         targetOffset = throwCount->pcOffset() - 1;
     } while (true);
@@ -1257,13 +1363,15 @@ void
 JSScript::incHitCount(jsbytecode* pc)
 {
     MOZ_ASSERT(containsPC(pc));
-    if (pc < main())
+    if (pc < main()) {
         pc = main();
+    }
 
     ScriptCounts& sc = getScriptCounts();
     js::PCCounts* baseCount = sc.getImmediatePrecedingPCCounts(pcToOffset(pc));
-    if (!baseCount)
+    if (!baseCount) {
         return;
+    }
     baseCount->numExec()++;
 }
 
@@ -1271,8 +1379,9 @@ void
 JSScript::addIonCounts(jit::IonScriptCounts* ionCounts)
 {
     ScriptCounts& sc = getScriptCounts();
-    if (sc.ionCounts_)
+    if (sc.ionCounts_) {
         ionCounts->setPrevious(sc.ionCounts_);
+    }
     sc.ionCounts_ = ionCounts;
 }
 
@@ -1316,8 +1425,9 @@ JSScript::destroyScriptName()
 bool
 JSScript::hasScriptName()
 {
-    if (!realm()->scriptNameMap)
+    if (!realm()->scriptNameMap) {
         return false;
+    }
 
     auto p = realm()->scriptNameMap->lookup(this);
     return p.found();
@@ -1357,8 +1467,9 @@ ScriptSourceObject*
 ScriptSourceObject::create(JSContext* cx, ScriptSource* source)
 {
     RootedScriptSourceObject sourceObject(cx, NewObjectWithGivenProto<ScriptSourceObject>(cx, nullptr));
-    if (!sourceObject)
+    if (!sourceObject) {
         return nullptr;
+    }
 
     source->incref();    // The matching decref is in ScriptSourceObject::finalize.
     sourceObject->initReservedSlot(SOURCE_SLOT, PrivateValue(source));
@@ -1376,15 +1487,16 @@ ScriptSourceObject::create(JSContext* cx, ScriptSource* source)
 ScriptSourceObject::initFromOptions(JSContext* cx, HandleScriptSourceObject source,
                                     const ReadOnlyCompileOptions& options)
 {
-    releaseAssertSameCompartment(cx, source);
+    cx->releaseCheck(source);
     MOZ_ASSERT(source->getReservedSlot(ELEMENT_SLOT).isMagic(JS_GENERIC_MAGIC));
     MOZ_ASSERT(source->getReservedSlot(ELEMENT_PROPERTY_SLOT).isMagic(JS_GENERIC_MAGIC));
     MOZ_ASSERT(source->getReservedSlot(INTRODUCTION_SCRIPT_SLOT).isMagic(JS_GENERIC_MAGIC));
 
     RootedObject element(cx, options.element());
     RootedString elementAttributeName(cx, options.elementAttributeName());
-    if (!initElementProperties(cx, source, element, elementAttributeName))
+    if (!initElementProperties(cx, source, element, elementAttributeName)) {
         return false;
+    }
 
     // There is no equivalent of cross-compartment wrappers for scripts. If the
     // introduction script and ScriptSourceObject are in different compartments,
@@ -1407,14 +1519,17 @@ ScriptSourceObject::initElementProperties(JSContext* cx, HandleScriptSourceObjec
                                           HandleObject element, HandleString elementAttrName)
 {
     RootedValue elementValue(cx, ObjectOrNullValue(element));
-    if (!cx->compartment()->wrap(cx, &elementValue))
+    if (!cx->compartment()->wrap(cx, &elementValue)) {
         return false;
+    }
 
     RootedValue nameValue(cx);
-    if (elementAttrName)
+    if (elementAttrName) {
         nameValue = StringValue(elementAttrName);
-    if (!cx->compartment()->wrap(cx, &nameValue))
+    }
+    if (!cx->compartment()->wrap(cx, &nameValue)) {
         return false;
+    }
 
     source->setReservedSlot(ELEMENT_SLOT, elementValue);
     source->setReservedSlot(ELEMENT_PROPERTY_SLOT, nameValue);
@@ -1427,16 +1542,20 @@ JSScript::loadSource(JSContext* cx, ScriptSource* ss, bool* worked)
 {
     MOZ_ASSERT(!ss->hasSourceData());
     *worked = false;
-    if (!cx->runtime()->sourceHook.ref() || !ss->sourceRetrievable())
+    if (!cx->runtime()->sourceHook.ref() || !ss->sourceRetrievable()) {
         return true;
+    }
     char16_t* src = nullptr;
     size_t length;
-    if (!cx->runtime()->sourceHook->load(cx, ss->filename(), &src, &length))
+    if (!cx->runtime()->sourceHook->load(cx, ss->filename(), &src, &length)) {
         return false;
-    if (!src)
+    }
+    if (!src) {
         return true;
-    if (!ss->setSource(cx, UniqueTwoByteChars(src), length))
+    }
+    if (!ss->setSource(cx, UniqueTwoByteChars(src), length)) {
         return false;
+    }
 
     *worked = true;
     return true;
@@ -1517,8 +1636,9 @@ const char16_t*
 UncompressedSourceCache::lookup(const ScriptSourceChunk& ssc, AutoHoldEntry& holder)
 {
     MOZ_ASSERT(!holder_);
-    if (!map_)
+    if (!map_) {
         return nullptr;
+    }
     if (Map::Ptr p = map_->lookup(ssc)) {
         holdEntry(holder, ssc);
         return p->value().get();
@@ -1534,14 +1654,16 @@ UncompressedSourceCache::put(const ScriptSourceChunk& ssc, UniqueTwoByteChars st
 
     if (!map_) {
         UniquePtr<Map> map = MakeUnique<Map>();
-        if (!map || !map->init())
+        if (!map) {
             return false;
+        }
 
         map_ = std::move(map);
     }
 
-    if (!map_->put(ssc, std::move(str)))
+    if (!map_->put(ssc, std::move(str))) {
         return false;
+    }
 
     holdEntry(holder, ssc);
     return true;
@@ -1550,8 +1672,9 @@ UncompressedSourceCache::put(const ScriptSourceChunk& ssc, UniqueTwoByteChars st
 void
 UncompressedSourceCache::purge()
 {
-    if (!map_)
+    if (!map_) {
         return;
+    }
 
     for (Map::Range r = map_->all(); !r.empty(); r.popFront()) {
         if (holder_ && r.front().key() == holder_->sourceChunk()) {
@@ -1568,9 +1691,10 @@ UncompressedSourceCache::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
 {
     size_t n = 0;
     if (map_ && !map_->empty()) {
-        n += map_->sizeOfIncludingThis(mallocSizeOf);
-        for (Map::Range r = map_->all(); !r.empty(); r.popFront())
+        n += map_->shallowSizeOfIncludingThis(mallocSizeOf);
+        for (Map::Range r = map_->all(); !r.empty(); r.popFront()) {
             n += mallocSizeOf(r.front().value().get());
+        }
     }
     return n;
 }
@@ -1582,8 +1706,9 @@ ScriptSource::chunkChars(JSContext* cx, UncompressedSourceCache::AutoHoldEntry& 
     const Compressed& c = data.as<Compressed>();
 
     ScriptSourceChunk ssc(this, chunk);
-    if (const char16_t* decompressed = cx->caches().uncompressedSourceCache.lookup(ssc, holder))
+    if (const char16_t* decompressed = cx->caches().uncompressedSourceCache.lookup(ssc, holder)) {
         return decompressed;
+    }
 
     size_t totalLengthInBytes = length() * sizeof(char16_t);
     size_t chunkBytes = Compressor::chunkSize(totalLengthInBytes, chunk);
@@ -1635,16 +1760,18 @@ ScriptSource::PinnedChars::~PinnedChars()
     if (chars_) {
         MOZ_ASSERT(*stack_ == this);
         *stack_ = prev_;
-        if (!prev_)
+        if (!prev_) {
             source_->movePendingCompressedSource();
+        }
     }
 }
 
 void
 ScriptSource::movePendingCompressedSource()
 {
-    if (!pendingCompressed_)
+    if (!pendingCompressed_) {
         return;
+    }
 
     MOZ_ASSERT(data.is<Missing>() || data.is<Uncompressed>());
     MOZ_ASSERT_IF(data.is<Uncompressed>(),
@@ -1664,13 +1791,15 @@ ScriptSource::chars(JSContext* cx, UncompressedSourceCache::AutoHoldEntry& holde
 
     if (data.is<Uncompressed>()) {
         const char16_t* chars = data.as<Uncompressed>().string.chars();
-        if (!chars)
+        if (!chars) {
             return nullptr;
+        }
         return chars + begin;
     }
 
-    if (data.is<Missing>())
+    if (data.is<Missing>()) {
         MOZ_CRASH("ScriptSource::chars() on ScriptSource with SourceType = Missing");
+    }
 
     MOZ_ASSERT(data.is<Compressed>());
 
@@ -1687,8 +1816,9 @@ ScriptSource::chars(JSContext* cx, UncompressedSourceCache::AutoHoldEntry& holde
 
     if (firstChunk == lastChunk) {
         const char16_t* chars = chunkChars(cx, holder, firstChunk);
-        if (!chars)
+        if (!chars) {
             return nullptr;
+        }
         return chars + firstChar;
     }
 
@@ -1711,8 +1841,9 @@ ScriptSource::chars(JSContext* cx, UncompressedSourceCache::AutoHoldEntry& holde
     for (size_t i = firstChunk; i <= lastChunk; i++) {
         UncompressedSourceCache::AutoHoldEntry chunkHolder;
         const char16_t* chars = chunkChars(cx, chunkHolder, i);
-        if (!chars)
+        if (!chars) {
             return nullptr;
+        }
 
         size_t numChars = Compressor::chunkSize(totalLengthInBytes, i) / sizeof(char16_t);
         if (i == firstChunk) {
@@ -1744,8 +1875,9 @@ ScriptSource::substring(JSContext* cx, size_t start, size_t stop)
     size_t len = stop - start;
     UncompressedSourceCache::AutoHoldEntry holder;
     PinnedChars chars(cx, this, holder, start, len);
-    if (!chars.get())
+    if (!chars.get()) {
         return nullptr;
+    }
     return NewStringCopyN<CanGC>(cx, chars.get(), len);
 }
 
@@ -1756,8 +1888,9 @@ ScriptSource::substringDontDeflate(JSContext* cx, size_t start, size_t stop)
     size_t len = stop - start;
     UncompressedSourceCache::AutoHoldEntry holder;
     PinnedChars chars(cx, this, holder, start, len);
-    if (!chars.get())
+    if (!chars.get()) {
         return nullptr;
+    }
     return NewStringCopyNDontDeflate<CanGC>(cx, chars.get(), len);
 }
 
@@ -1768,10 +1901,12 @@ ScriptSource::appendSubstring(JSContext* cx, StringBuffer& buf, size_t start, si
     size_t len = stop - start;
     UncompressedSourceCache::AutoHoldEntry holder;
     PinnedChars chars(cx, this, holder, start, len);
-    if (!chars.get())
+    if (!chars.get()) {
         return false;
-    if (len > SourceDeflateLimit && !buf.ensureTwoByteChars())
+    }
+    if (len > SourceDeflateLimit && !buf.ensureTwoByteChars()) {
         return false;
+    }
     return buf.append(chars.get(), len);
 }
 
@@ -1808,8 +1943,9 @@ ScriptSource::setSource(SharedImmutableTwoByteString&& string)
 bool
 ScriptSource::tryCompressOffThread(JSContext* cx)
 {
-    if (!data.is<Uncompressed>())
+    if (!data.is<Uncompressed>()) {
         return true;
+    }
 
     // There are several cases where source compression is not a good idea:
     //  - If the script is tiny, then compression will save little or no space.
@@ -1824,8 +1960,9 @@ ScriptSource::tryCompressOffThread(JSContext* cx)
         HelperThreadState().threadCount >= 2 &&
         CanUseExtraThreads();
     const size_t TINY_SCRIPT = 256;
-    if (TINY_SCRIPT > length() || !canCompressOffThread)
+    if (TINY_SCRIPT > length() || !canCompressOffThread) {
         return true;
+    }
 
     // The SourceCompressionTask needs to record the major GC number for
     // scheduling. If we're parsing off thread, this number is not safe to
@@ -1836,8 +1973,9 @@ ScriptSource::tryCompressOffThread(JSContext* cx)
     //
     // When parsing off-thread, the above attempts will fail and the attempt
     // made in ParseTask::finish will succeed.
-    if (!CurrentThreadCanAccessRuntime(cx->runtime()))
+    if (!CurrentThreadCanAccessRuntime(cx->runtime())) {
         return true;
+    }
 
     // Heap allocate the task. It will be freed upon compression
     // completing in AttachFinishedCompressedSources.
@@ -1870,10 +2008,11 @@ ScriptSource::setCompressedSource(SharedImmutableString&& raw, size_t uncompress
     MOZ_ASSERT(data.is<Missing>() || data.is<Uncompressed>());
     MOZ_ASSERT_IF(data.is<Uncompressed>(),
                   data.as<Uncompressed>().string.length() == uncompressedLength);
-    if (pinnedCharsStack_)
+    if (pinnedCharsStack_) {
         pendingCompressed_ = mozilla::Some(Compressed(std::move(raw), uncompressedLength));
-    else
+    } else {
         data = SourceType(Compressed(std::move(raw), uncompressedLength));
+    }
 }
 
 bool
@@ -1901,8 +2040,9 @@ static MOZ_MUST_USE bool
 reallocUniquePtr(UniqueChars& unique, size_t size)
 {
     auto newPtr = static_cast<char*>(js_realloc(unique.get(), size));
-    if (!newPtr)
+    if (!newPtr) {
         return false;
+    }
 
     // Since the realloc succeeded, unique is now holding a freed pointer.
     mozilla::Unused << unique.release();
@@ -1913,8 +2053,9 @@ reallocUniquePtr(UniqueChars& unique, size_t size)
 void
 SourceCompressionTask::work()
 {
-    if (shouldCancel())
+    if (shouldCancel()) {
         return;
+    }
 
     ScriptSource* source = sourceHolder_.get();
     MOZ_ASSERT(source->data.is<ScriptSource::Uncompressed>());
@@ -1924,21 +2065,24 @@ SourceCompressionTask::work()
     size_t inputBytes = source->length() * sizeof(char16_t);
     size_t firstSize = inputBytes / 2;
     UniqueChars compressed(js_pod_malloc<char>(firstSize));
-    if (!compressed)
+    if (!compressed) {
         return;
+    }
 
     const char16_t* chars = source->data.as<ScriptSource::Uncompressed>().string.chars();
     Compressor comp(reinterpret_cast<const unsigned char*>(chars),
                     inputBytes);
-    if (!comp.init())
+    if (!comp.init()) {
         return;
+    }
 
     comp.setOutput(reinterpret_cast<unsigned char*>(compressed.get()), firstSize);
     bool cont = true;
     bool reallocated = false;
     while (cont) {
-        if (shouldCancel())
+        if (shouldCancel()) {
             return;
+        }
 
         switch (comp.compressMore()) {
           case Compressor::CONTINUE:
@@ -1951,8 +2095,9 @@ SourceCompressionTask::work()
 
             // The compressed output is greater than half the size of the
             // original string. Reallocate to the full size.
-            if (!reallocUniquePtr(compressed, inputBytes))
+            if (!reallocUniquePtr(compressed, inputBytes)) {
                 return;
+            }
 
             comp.setOutput(reinterpret_cast<unsigned char*>(compressed.get()), inputBytes);
             reallocated = true;
@@ -1969,13 +2114,15 @@ SourceCompressionTask::work()
     size_t totalBytes = comp.totalBytesNeeded();
 
     // Shrink the buffer to the size of the compressed data.
-    if (!reallocUniquePtr(compressed, totalBytes))
+    if (!reallocUniquePtr(compressed, totalBytes)) {
         return;
+    }
 
     comp.finish(compressed.get(), totalBytes);
 
-    if (shouldCancel())
+    if (shouldCancel()) {
         return;
+    }
 
     auto& strings = runtime_->sharedImmutableStrings();
     resultString_ = strings.getOrCreate(std::move(compressed), totalBytes);
@@ -2004,8 +2151,9 @@ bool
 ScriptSource::xdrEncodeTopLevel(JSContext* cx, HandleScript script)
 {
     // Encoding failures are reported by the xdrFinalizeEncoder function.
-    if (containsAsmJS())
+    if (containsAsmJS()) {
         return true;
+    }
 
     xdrEncoder_ = js::MakeUnique<XDRIncrementalEncoder>(cx);
     if (!xdrEncoder_) {
@@ -2018,18 +2166,14 @@ ScriptSource::xdrEncodeTopLevel(JSContext* cx, HandleScript script)
         xdrEncoder_.reset(nullptr);
     });
 
-    if (!xdrEncoder_->init()) {
-        ReportOutOfMemory(cx);
-        return false;
-    }
-
     RootedScript s(cx, script);
     XDRResult res = xdrEncoder_->codeScript(&s);
     if (res.isErr()) {
         // On encoding failure, let failureCase destroy encoder and return true
         // to avoid failing any currently executing script.
-        if (res.unwrapErr() & JS::TranscodeResult_Failure)
+        if (res.unwrapErr() & JS::TranscodeResult_Failure) {
             return true;
+        }
 
         return false;
     }
@@ -2053,8 +2197,9 @@ ScriptSource::xdrEncodeFunction(JSContext* cx, HandleFunction fun,
     if (res.isErr()) {
         // On encoding failure, let failureCase destroy encoder and return true
         // to avoid failing any currently executing script.
-        if (res.unwrapErr() & JS::TranscodeResult_Failure)
+        if (res.unwrapErr() & JS::TranscodeResult_Failure) {
             return true;
+        }
         return false;
     }
 
@@ -2065,8 +2210,9 @@ ScriptSource::xdrEncodeFunction(JSContext* cx, HandleFunction fun,
 bool
 ScriptSource::xdrFinalizeEncoder(JS::TranscodeBuffer& buffer)
 {
-    if (!hasEncoder())
+    if (!hasEncoder()) {
         return false;
+    }
 
     auto cleanup = mozilla::MakeScopeExit([&] {
         xdrEncoder_.reset(nullptr);
@@ -2121,8 +2267,9 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
 
     if (hasSource && !sourceRetrievable_) {
         uint32_t len = 0;
-        if (mode == XDR_ENCODE)
+        if (mode == XDR_ENCODE) {
             len = length();
+        }
         MOZ_TRY(xdr->codeUint32(&len));
 
         uint32_t compressedLength;
@@ -2134,18 +2281,21 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
 
         size_t byteLen = compressedLength ? compressedLength : (len * sizeof(char16_t));
         if (mode == XDR_DECODE) {
-            UniqueChars bytes(xdr->cx()->template pod_malloc<char>(Max<size_t>(byteLen, 1)));
-            if (!bytes)
+            auto bytes = xdr->cx()->template make_pod_array<char>(Max<size_t>(byteLen, 1));
+            if (!bytes) {
                 return xdr->fail(JS::TranscodeResult_Throw);
+            }
             MOZ_TRY(xdr->codeBytes(bytes.get(), byteLen));
 
             if (compressedLength) {
-                if (!setCompressedSource(xdr->cx(), std::move(bytes), byteLen, len))
+                if (!setCompressedSource(xdr->cx(), std::move(bytes), byteLen, len)) {
                     return xdr->fail(JS::TranscodeResult_Throw);
+                }
             } else {
                 UniqueTwoByteChars source(reinterpret_cast<char16_t*>(bytes.release()));
-                if (!setSource(xdr->cx(), std::move(source), len))
+                if (!setSource(xdr->cx(), std::move(source), len)) {
                     return xdr->fail(JS::TranscodeResult_Throw);
+                }
             }
         } else {
             RawDataMatcher rdm;
@@ -2163,12 +2313,14 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
 
         if (mode == XDR_DECODE) {
             sourceMapURL_ = xdr->cx()->template make_pod_array<char16_t>(sourceMapURLLen + 1);
-            if (!sourceMapURL_)
+            if (!sourceMapURL_) {
                 return xdr->fail(JS::TranscodeResult_Throw);
+            }
         }
         auto guard = mozilla::MakeScopeExit([&] {
-            if (mode == XDR_DECODE)
+            if (mode == XDR_DECODE) {
                 sourceMapURL_ = nullptr;
+            }
         });
         MOZ_TRY(xdr->codeChars(sourceMapURL_.get(), sourceMapURLLen));
         guard.release();
@@ -2184,12 +2336,14 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
 
         if (mode == XDR_DECODE) {
             displayURL_ = xdr->cx()->template make_pod_array<char16_t>(displayURLLen + 1);
-            if (!displayURL_)
+            if (!displayURL_) {
                 return xdr->fail(JS::TranscodeResult_Throw);
+            }
         }
         auto guard = mozilla::MakeScopeExit([&] {
-            if (mode == XDR_DECODE)
+            if (mode == XDR_DECODE) {
                 displayURL_ = nullptr;
+            }
         });
         MOZ_TRY(xdr->codeChars(displayURL_.get(), displayURLLen));
         guard.release();
@@ -2205,14 +2359,26 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
         // Note: If the decoder has an option, then the filename is defined by
         // the CompileOption from the document.
         MOZ_ASSERT_IF(mode == XDR_DECODE && xdr->hasOptions(), filename());
-        if (mode == XDR_DECODE && !xdr->hasOptions() && !setFilename(xdr->cx(), fn))
+        if (mode == XDR_DECODE && !xdr->hasOptions() && !setFilename(xdr->cx(), fn)) {
             return xdr->fail(JS::TranscodeResult_Throw);
+        }
+
+        // Note the content of sources decoded when recording or replaying.
+        if (mode == XDR_DECODE && hasSourceData() && mozilla::recordreplay::IsRecordingOrReplaying()) {
+            UncompressedSourceCache::AutoHoldEntry holder;
+            ScriptSource::PinnedChars chars(xdr->cx(), this, holder, 0, length());
+            if (!chars.get()) {
+                return xdr->fail(JS::TranscodeResult_Throw);
+            }
+            mozilla::recordreplay::NoteContentParse(this, filename(), "application/javascript",
+                                                    chars.get(), length());
+        }
     }
 
     return Ok();
 }
 
-// Format and return a cx->zone()->pod_malloc'ed URL for a generated script like:
+// Format and return a cx->pod_malloc'ed URL for a generated script like:
 //   {filename} line {lineno} > {introducer}
 // For example:
 //   foo.js line 7 > eval
@@ -2237,11 +2403,11 @@ js::FormatIntroducedFilename(JSContext* cx, const char* filename, unsigned linen
                  3 /* == strlen(" > ") */       +
                  introducerLen                  +
                  1 /* \0 */;
-    char* formatted = cx->zone()->pod_malloc<char>(len);
+    char* formatted = cx->pod_malloc<char>(len);
     if (!formatted) {
-        ReportOutOfMemory(cx);
         return nullptr;
     }
+
     mozilla::DebugOnly<size_t> checkLen = snprintf(formatted, len, "%s line %s > %s",
                                                    filename, linenoBuf, introducer);
     MOZ_ASSERT(checkLen == len - 1);
@@ -2267,18 +2433,21 @@ ScriptSource::initFromOptions(JSContext* cx, const ReadOnlyCompileOptions& optio
         const char* filename = options.filename() ? options.filename() : "<unknown>";
         char* formatted = FormatIntroducedFilename(cx, filename, options.introductionLineno,
                                                    options.introductionType);
-        if (!formatted)
+        if (!formatted) {
             return false;
+        }
         filename_.reset(formatted);
     } else if (options.filename()) {
-        if (!setFilename(cx, options.filename()))
+        if (!setFilename(cx, options.filename())) {
             return false;
+        }
     }
 
     if (options.introducerFilename()) {
         introducerFilename_ = DuplicateString(cx, options.introducerFilename());
-        if (!introducerFilename_)
+        if (!introducerFilename_) {
             return false;
+        }
     }
 
     return true;
@@ -2308,8 +2477,9 @@ ScriptSource::setDisplayURL(JSContext* cx, const char16_t* displayURL)
         }
     }
     size_t len = js_strlen(displayURL) + 1;
-    if (len == 1)
+    if (len == 1) {
         return true;
+    }
 
     displayURL_ = DuplicateString(cx, displayURL);
     return displayURL_ != nullptr;
@@ -2321,14 +2491,17 @@ ScriptSource::setSourceMapURL(JSContext* cx, const char16_t* sourceMapURL)
     MOZ_ASSERT(sourceMapURL);
 
     size_t len = js_strlen(sourceMapURL) + 1;
-    if (len == 1)
+    if (len == 1) {
         return true;
+    }
 
     sourceMapURL_ = DuplicateString(cx, sourceMapURL);
     return sourceMapURL_ != nullptr;
 }
 
 /*
+ * [SMDOC] JSScript data layout (shared)
+ *
  * Shared script data management.
  *
  * SharedScriptData::data contains data that can be shared within a
@@ -2347,7 +2520,7 @@ js::SharedScriptData::new_(JSContext* cx, uint32_t codeLength,
 {
     size_t dataLength = natoms * sizeof(GCPtrAtom) + codeLength + srcnotesLength;
     size_t allocLength = offsetof(SharedScriptData, data_) + dataLength;
-    auto entry = reinterpret_cast<SharedScriptData*>(cx->zone()->pod_malloc<uint8_t>(allocLength));
+    auto entry = reinterpret_cast<SharedScriptData*>(cx->pod_malloc<uint8_t>(allocLength));
     if (!entry) {
         ReportOutOfMemory(cx);
         return nullptr;
@@ -2369,8 +2542,9 @@ js::SharedScriptData::new_(JSContext* cx, uint32_t codeLength,
     static_assert(offsetof(SharedScriptData, data_) % sizeof(GCPtrAtom) == 0,
                   "atoms must have GCPtrAtom alignment");
     GCPtrAtom* atoms = entry->atoms();
-    for (unsigned i = 0; i < natoms; ++i)
+    for (unsigned i = 0; i < natoms; ++i) {
         new (&atoms[i]) GCPtrAtom();
+    }
 
     // Sanity check the dataLength() computation
     MOZ_ASSERT(entry->dataLength() == dataLength);
@@ -2398,8 +2572,9 @@ JSScript::createScriptData(JSContext* cx, uint32_t codeLength, uint32_t srcnotes
 {
     MOZ_ASSERT(!scriptData());
     SharedScriptData* ssd = SharedScriptData::new_(cx, codeLength, srcnotesLength, natoms);
-    if (!ssd)
+    if (!ssd) {
         return false;
+    }
 
     setScriptData(ssd);
     return true;
@@ -2483,8 +2658,6 @@ js::FreeScriptData(JSRuntime* rt)
     AutoLockScriptData lock(rt);
 
     ScriptDataTable& table = rt->scriptDataTable(lock);
-    if (!table.initialized())
-        return;
 
     // The table should be empty unless the embedding leaked GC things.
     MOZ_ASSERT_IF(rt->gc.shutdownCollectedEverything(), table.empty());
@@ -2502,6 +2675,8 @@ js::FreeScriptData(JSRuntime* rt)
 }
 
 /*
+ * [SMDOC] JSScript data layout (unshared)
+ *
  * JSScript::data and SharedScriptData::data have complex,
  * manually-controlled, memory layouts.
  *
@@ -2599,16 +2774,21 @@ ScriptDataSize(uint32_t nscopes, uint32_t nconsts, uint32_t nobjects,
 
     MOZ_ASSERT(nscopes != 0);
     size += sizeof(ScopeArray) + nscopes * sizeof(Scope*);
-    if (nconsts != 0)
+    if (nconsts != 0) {
         size += sizeof(ConstArray) + nconsts * sizeof(Value);
-    if (nobjects != 0)
+    }
+    if (nobjects != 0) {
         size += sizeof(ObjectArray) + nobjects * sizeof(NativeObject*);
-    if (ntrynotes != 0)
+    }
+    if (ntrynotes != 0) {
         size += sizeof(TryNoteArray) + ntrynotes * sizeof(JSTryNote);
-    if (nscopenotes != 0)
+    }
+    if (nscopenotes != 0) {
         size += sizeof(ScopeNoteArray) + nscopenotes * sizeof(ScopeNote);
-    if (nyieldoffsets != 0)
+    }
+    if (nyieldoffsets != 0) {
         size += sizeof(YieldAndAwaitOffsetArray) + nyieldoffsets * sizeof(uint32_t);
+    }
 
      return size;
 }
@@ -2654,8 +2834,9 @@ JSScript::createInitialized(JSContext* cx, const ReadOnlyCompileOptions& options
                             uint32_t toStringStart, uint32_t toStringEnd)
 {
     void* script = Allocate<JSScript>(cx);
-    if (!script)
+    if (!script) {
         return nullptr;
+    }
 
     uint8_t* stubEntry =
 #ifndef JS_CODEGEN_NONE
@@ -2676,12 +2857,14 @@ JSScript::Create(JSContext* cx, const ReadOnlyCompileOptions& options,
 {
     RootedScript script(cx, createInitialized(cx, options, sourceObject, bufStart, bufEnd,
                                               toStringStart, toStringEnd));
-    if (!script)
+    if (!script) {
         return nullptr;
+    }
 
     if (cx->runtime()->lcovOutput().isEnabled()) {
-        if (!script->initScriptName(cx))
+        if (!script->initScriptName(cx)) {
             return nullptr;
+        }
     }
 
     return script;
@@ -2692,14 +2875,14 @@ JSScript::initScriptName(JSContext* cx)
 {
     MOZ_ASSERT(!hasScriptName());
 
-    if (!filename())
+    if (!filename()) {
         return true;
+    }
 
     // Create realm's scriptNameMap if necessary.
     if (!realm()->scriptNameMap) {
         auto map = cx->make_unique<ScriptNameMap>();
-        if (!map || !map->init()) {
-            ReportOutOfMemory(cx);
+        if (!map) {
             return false;
         }
 
@@ -2722,14 +2905,16 @@ JSScript::initScriptName(JSContext* cx)
 }
 
 static inline uint8_t*
-AllocScriptData(JS::Zone* zone, size_t size)
+AllocScriptData(JSContext* cx, size_t size)
 {
-    if (!size)
+    if (!size) {
         return nullptr;
+    }
 
-    uint8_t* data = zone->pod_calloc<uint8_t>(JS_ROUNDUP(size, sizeof(Value)));
-    if (!data)
+    uint8_t* data = cx->pod_calloc<uint8_t>(JS_ROUNDUP(size, sizeof(Value)));
+    if (!data) {
         return nullptr;
+    }
     MOZ_ASSERT(size_t(data) % sizeof(Value) == 0);
     return data;
 }
@@ -2737,19 +2922,18 @@ AllocScriptData(JS::Zone* zone, size_t size)
 /* static */ bool
 JSScript::partiallyInit(JSContext* cx, HandleScript script, uint32_t nscopes,
                         uint32_t nconsts, uint32_t nobjects, uint32_t ntrynotes,
-                        uint32_t nscopenotes, uint32_t nyieldoffsets, uint32_t nTypeSets)
+                        uint32_t nscopenotes, uint32_t nyieldoffsets)
 {
+    cx->check(script);
+
     size_t size = ScriptDataSize(nscopes, nconsts, nobjects, ntrynotes,
                                  nscopenotes, nyieldoffsets);
-    script->data = AllocScriptData(script->zone(), size);
+    script->data = AllocScriptData(cx, size);
     if (size && !script->data) {
-        ReportOutOfMemory(cx);
         return false;
     }
-    script->dataSize_ = size;
 
-    MOZ_ASSERT(nTypeSets <= UINT16_MAX);
-    script->nTypeSets_ = uint16_t(nTypeSets);
+    script->dataSize_ = size;
 
     uint8_t* cursor = script->data;
 
@@ -2841,25 +3025,28 @@ JSScript::initFunctionPrototype(JSContext* cx, Handle<JSScript*> script,
     uint32_t numTryNotes = 0;
     uint32_t numScopeNotes = 0;
     uint32_t numYieldAndAwaitOffsets = 0;
-    uint32_t numTypeSets = 0;
     if (!partiallyInit(cx, script, numScopes, numConsts, numObjects, numTryNotes,
-                       numScopeNotes, numYieldAndAwaitOffsets, numTypeSets))
+                       numScopeNotes, numYieldAndAwaitOffsets))
     {
         return false;
     }
 
+    script->nTypeSets_ = 0;
+
     RootedScope enclosing(cx, &cx->global()->emptyGlobalScope());
     Scope* functionProtoScope = FunctionScope::create(cx, nullptr, false, false, functionProto,
                                                       enclosing);
-    if (!functionProtoScope)
+    if (!functionProtoScope) {
         return false;
+    }
     script->scopes()->vector[0].init(functionProtoScope);
 
     uint32_t codeLength = 1;
     uint32_t srcNotesLength = 1;
     uint32_t numAtoms = 0;
-    if (!script->createScriptData(cx, codeLength, srcNotesLength, numAtoms))
+    if (!script->createScriptData(cx, codeLength, srcNotesLength, numAtoms)) {
         return false;
+    }
 
     jsbytecode* code = script->code();
     code[0] = JSOP_RETRVAL;
@@ -2870,7 +3057,7 @@ JSScript::initFunctionPrototype(JSContext* cx, Handle<JSScript*> script,
 static void
 InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms)
 {
-    for (AtomIndexMap::Range r = indices.all(); !r.empty(); r.popFront()) {
+    for (frontend::AtomIndexMap::Range r = indices.all(); !r.empty(); r.popFront()) {
         JSAtom* atom = r.front().key();
         uint32_t index = r.front().value();
         MOZ_ASSERT(index < indices.count());
@@ -2882,10 +3069,11 @@ InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms)
 JSScript::initFromFunctionBox(HandleScript script, frontend::FunctionBox* funbox)
 {
     JSFunction* fun = funbox->function();
-    if (fun->isInterpretedLazy())
+    if (fun->isInterpretedLazy()) {
         fun->setUnlazifiedScript(script);
-    else
+    } else {
         fun->setScript(script);
+    }
 
     script->bitFields_.funHasExtensibleScope_ = funbox->hasExtensibleScope();
     script->bitFields_.needsHomeObject_ = funbox->needsHomeObject();
@@ -2893,8 +3081,9 @@ JSScript::initFromFunctionBox(HandleScript script, frontend::FunctionBox* funbox
 
     if (funbox->argumentsHasLocalBinding()) {
         script->setArgumentsHasVarBinding();
-        if (funbox->definitelyNeedsArgsObj())
+        if (funbox->definitelyNeedsArgsObj()) {
             script->setNeedsArgsObj(true);
+        }
     } else {
         MOZ_ASSERT(!funbox->definitelyNeedsArgsObj());
     }
@@ -2907,12 +3096,14 @@ JSScript::initFromFunctionBox(HandleScript script, frontend::FunctionBox* funbox
 
     script->setGeneratorKind(funbox->generatorKind());
     script->setAsyncKind(funbox->asyncKind());
-    if (funbox->hasRest())
+    if (funbox->hasRest()) {
         script->setHasRest();
+    }
 
     PositionalFormalParameterIter fi(script);
-    while (fi && !fi.closedOver())
+    while (fi && !fi.closedOver()) {
         fi++;
+    }
     script->bitFields_.funHasAnyAliasedFormal_ = !!fi;
 
     script->setHasInnerFunctions(funbox->hasInnerFunctions());
@@ -2935,57 +3126,11 @@ JSScript::initFromModuleContext(HandleScript script)
 }
 
 /* static */ bool
-JSScript::fullyInitFromEmitter(JSContext* cx, HandleScript script, BytecodeEmitter* bce)
+JSScript::fullyInitFromEmitter(JSContext* cx, HandleScript script, frontend::BytecodeEmitter* bce)
 {
     /* The counts of indexed things must be checked during code generation. */
     MOZ_ASSERT(bce->atomIndices->count() <= INDEX_LIMIT);
     MOZ_ASSERT(bce->objectList.length <= INDEX_LIMIT);
-
-    uint32_t mainLength = bce->offset();
-    uint32_t prologueLength = bce->prologueOffset();
-    uint32_t nsrcnotes;
-    if (!bce->finishTakingSrcNotes(&nsrcnotes))
-        return false;
-    uint32_t natoms = bce->atomIndices->count();
-    if (!partiallyInit(cx, script,
-                       bce->scopeList.length(), bce->constList.length(), bce->objectList.length,
-                       bce->tryNoteList.length(), bce->scopeNoteList.length(),
-                       bce->yieldAndAwaitOffsetList.length(), bce->typesetCount))
-    {
-        return false;
-    }
-
-    MOZ_ASSERT(script->mainOffset() == 0);
-    script->mainOffset_ = prologueLength;
-
-    script->lineno_ = bce->firstLine;
-
-    if (!script->createScriptData(cx, prologueLength + mainLength, nsrcnotes, natoms))
-        return false;
-
-    jsbytecode* code = script->code();
-    PodCopy<jsbytecode>(code, bce->prologue.code.begin(), prologueLength);
-    PodCopy<jsbytecode>(code + prologueLength, bce->main.code.begin(), mainLength);
-    bce->copySrcNotes((jssrcnote*)(code + script->length()), nsrcnotes);
-    InitAtomMap(*bce->atomIndices, script->atoms());
-
-    if (!script->shareScriptData(cx))
-        return false;
-
-    if (bce->constList.length() != 0)
-        bce->constList.finish(script->consts());
-    if (bce->objectList.length != 0)
-        bce->objectList.finish(script->objects());
-    if (bce->scopeList.length() != 0)
-        bce->scopeList.finish(script->scopes());
-    if (bce->tryNoteList.length() != 0)
-        bce->tryNoteList.finish(script->trynotes());
-    if (bce->scopeNoteList.length() != 0)
-        bce->scopeNoteList.finish(script->scopeNotes(), prologueLength);
-    script->bitFields_.strict_ = bce->sc->strict();
-    script->bitFields_.explicitUseStrict_ = bce->sc->hasExplicitUseStrict();
-    script->bitFields_.bindingsAccessedDynamically_ = bce->sc->bindingsAccessedDynamically();
-    script->bitFields_.hasSingletons_ = bce->hasSingletons;
 
     uint64_t nslots = bce->maxFixedSlots + static_cast<uint64_t>(bce->maxStackDepth);
     if (nslots > UINT32_MAX) {
@@ -2993,21 +3138,85 @@ JSScript::fullyInitFromEmitter(JSContext* cx, HandleScript script, BytecodeEmitt
         return false;
     }
 
+    uint32_t mainLength = bce->offset();
+    uint32_t prologueLength = bce->prologueOffset();
+    uint32_t nsrcnotes;
+    if (!bce->finishTakingSrcNotes(&nsrcnotes)) {
+        return false;
+    }
+    uint32_t natoms = bce->atomIndices->count();
+    if (!partiallyInit(cx, script,
+                       bce->scopeList.length(), bce->numberList.length(), bce->objectList.length,
+                       bce->tryNoteList.length(), bce->scopeNoteList.length(),
+                       bce->yieldAndAwaitOffsetList.length()))
+    {
+        return false;
+    }
+
+    MOZ_ASSERT(script->mainOffset() == 0);
+    script->mainOffset_ = prologueLength;
+    script->nTypeSets_ = bce->typesetCount;
+    script->lineno_ = bce->firstLine;
+
+    if (!script->createScriptData(cx, prologueLength + mainLength, nsrcnotes, natoms)) {
+        return false;
+    }
+
+    // Any fallible operation after JSScript::createScriptData should reset
+    // JSScript.scriptData_, in order to treat this script as uncompleted,
+    // in JSScript::isUncompleted.
+    // JSScript::shareScriptData resets it before returning false.
+
+    jsbytecode* code = script->code();
+    PodCopy<jsbytecode>(code, bce->prologue.code.begin(), prologueLength);
+    PodCopy<jsbytecode>(code + prologueLength, bce->main.code.begin(), mainLength);
+    bce->copySrcNotes((jssrcnote*)(code + script->length()), nsrcnotes);
+    InitAtomMap(*bce->atomIndices, script->atoms());
+
+    if (!script->shareScriptData(cx)) {
+        return false;
+    }
+
+    if (bce->numberList.length() != 0) {
+        bce->numberList.finish(script->consts());
+    }
+    if (bce->objectList.length != 0) {
+        bce->objectList.finish(script->objects());
+    }
+    if (bce->scopeList.length() != 0) {
+        bce->scopeList.finish(script->scopes());
+    }
+    if (bce->tryNoteList.length() != 0) {
+        bce->tryNoteList.finish(script->trynotes());
+    }
+    if (bce->scopeNoteList.length() != 0) {
+        bce->scopeNoteList.finish(script->scopeNotes(), prologueLength);
+    }
+    script->bitFields_.strict_ = bce->sc->strict();
+    script->bitFields_.explicitUseStrict_ = bce->sc->hasExplicitUseStrict();
+    script->bitFields_.bindingsAccessedDynamically_ = bce->sc->bindingsAccessedDynamically();
+    script->bitFields_.hasSingletons_ = bce->hasSingletons;
+
     script->nfixed_ = bce->maxFixedSlots;
     script->nslots_ = nslots;
     script->bodyScopeIndex_ = bce->bodyScopeIndex;
     script->bitFields_.hasNonSyntacticScope_ =
         bce->outermostScope()->hasOnChain(ScopeKind::NonSyntactic);
 
-    if (bce->sc->isFunctionBox())
+    // There shouldn't be any fallible operation after initFromFunctionBox,
+    // JSFunction::hasUncompletedScript relies on the fact that the existence
+    // of the pointer to JSScript means the pointed JSScript is complete.
+    if (bce->sc->isFunctionBox()) {
         initFromFunctionBox(script, bce->sc->asFunctionBox());
-    else if (bce->sc->isModuleContext())
+    } else if (bce->sc->isModuleContext()) {
         initFromModuleContext(script);
+    }
 
     // Copy yield offsets last, as the generator kind is set in
     // initFromFunctionBox.
-    if (bce->yieldAndAwaitOffsetList.length() != 0)
+    if (bce->yieldAndAwaitOffsetList.length() != 0) {
         bce->yieldAndAwaitOffsetList.finish(script->yieldAndAwaitOffsets(), prologueLength);
+    }
 
 #ifdef DEBUG
     script->assertValidJumpTargets();
@@ -3068,8 +3277,9 @@ JSScript::assertValidJumpTargets() const
         for (; tn < tnlimit; tn++) {
             jsbytecode* tryStart = mainEntry + tn->start;
             jsbytecode* tryPc = tryStart - 1;
-            if (tn->kind != JSTRY_CATCH && tn->kind != JSTRY_FINALLY)
+            if (tn->kind != JSTRY_CATCH && tn->kind != JSTRY_FINALLY) {
                 continue;
+            }
 
             MOZ_ASSERT(JSOp(*tryPc) == JSOP_TRY);
             jsbytecode* tryTarget = tryStart + tn->length;
@@ -3122,8 +3332,9 @@ JSScript::finalize(FreeOp* fop)
 
     fop->runtime()->geckoProfiler().onScriptFinalized(this);
 
-    if (types_)
+    if (types_) {
         types_->destroy();
+    }
 
     jit::DestroyJitScripts(fop, this);
 
@@ -3135,8 +3346,9 @@ JSScript::finalize(FreeOp* fop)
         fop->free_(data);
     }
 
-    if (scriptData_)
+    if (scriptData_) {
         scriptData_->decRefCount();
+    }
 
     // In most cases, our LazyScript's script pointer will reference this
     // script, and thus be nulled out by normal weakref processing. However, if
@@ -3152,19 +3364,18 @@ void
 GSNCache::purge()
 {
     code = nullptr;
-    if (map.initialized())
-        map.finish();
+    map.clearAndCompact();
 }
 
 jssrcnote*
 js::GetSrcNote(GSNCache& cache, JSScript* script, jsbytecode* pc)
 {
     size_t target = pc - script->code();
-    if (target >= script->length())
+    if (target >= script->length()) {
         return nullptr;
+    }
 
     if (cache.code == script->code()) {
-        MOZ_ASSERT(cache.map.initialized());
         GSNCache::Map::Ptr p = cache.map.lookup(pc);
         return p ? p->value() : nullptr;
     }
@@ -3185,25 +3396,24 @@ js::GetSrcNote(GSNCache& cache, JSScript* script, jsbytecode* pc)
 
     if (cache.code != script->code() && script->length() >= GSN_CACHE_THRESHOLD) {
         unsigned nsrcnotes = 0;
-        for (jssrcnote* sn = script->notes(); !SN_IS_TERMINATOR(sn);
-             sn = SN_NEXT(sn))
-        {
-            if (SN_IS_GETTABLE(sn))
+        for (jssrcnote* sn = script->notes(); !SN_IS_TERMINATOR(sn); sn = SN_NEXT(sn)) {
+            if (SN_IS_GETTABLE(sn)) {
                 ++nsrcnotes;
+            }
         }
         if (cache.code) {
-            MOZ_ASSERT(cache.map.initialized());
-            cache.map.finish();
+            cache.map.clear();
             cache.code = nullptr;
         }
-        if (cache.map.init(nsrcnotes)) {
+        if (cache.map.reserve(nsrcnotes)) {
             pc = script->code();
             for (jssrcnote* sn = script->notes(); !SN_IS_TERMINATOR(sn);
                  sn = SN_NEXT(sn))
             {
                 pc += SN_DELTA(sn);
-                if (SN_IS_GETTABLE(sn))
+                if (SN_IS_GETTABLE(sn)) {
                     cache.map.putNewInfallible(pc, sn);
+                }
             }
             cache.code = script->code();
         }
@@ -3234,25 +3444,27 @@ js::PCToLineNumber(unsigned startLine, jssrcnote* notes, jsbytecode* code, jsbyt
     ptrdiff_t target = pc - code;
     for (jssrcnote* sn = notes; !SN_IS_TERMINATOR(sn); sn = SN_NEXT(sn)) {
         offset += SN_DELTA(sn);
-        if (offset > target)
+        if (offset > target) {
             break;
+        }
 
         SrcNoteType type = SN_TYPE(sn);
         if (type == SRC_SETLINE) {
-            lineno = unsigned(GetSrcNoteOffset(sn, 0));
+            lineno = unsigned(GetSrcNoteOffset(sn, SrcNote::SetLine::Line));
             column = 0;
         } else if (type == SRC_NEWLINE) {
             lineno++;
             column = 0;
         } else if (type == SRC_COLSPAN) {
-            ptrdiff_t colspan = SN_OFFSET_TO_COLSPAN(GetSrcNoteOffset(sn, 0));
+            ptrdiff_t colspan = SN_OFFSET_TO_COLSPAN(GetSrcNoteOffset(sn, SrcNote::ColSpan::Span));
             MOZ_ASSERT(ptrdiff_t(column) + colspan >= 0);
             column += colspan;
         }
     }
 
-    if (columnp)
+    if (columnp) {
         *columnp = column;
+    }
 
     return lineno;
 }
@@ -3261,8 +3473,9 @@ unsigned
 js::PCToLineNumber(JSScript* script, jsbytecode* pc, unsigned* columnp)
 {
     /* Cope with InterpreterFrame.pc value prior to entering Interpret. */
-    if (!pc)
+    if (!pc) {
         return 0;
+    }
 
     return PCToLineNumber(script->lineno(), script->notes(), script->code(), pc, columnp);
 }
@@ -3279,8 +3492,9 @@ js::LineNumberToPC(JSScript* script, unsigned target)
          * Exact-match only if offset is not in the prologue; otherwise use
          * nearest greater-or-equal line number match.
          */
-        if (lineno == target && offset >= ptrdiff_t(script->mainOffset()))
+        if (lineno == target && offset >= ptrdiff_t(script->mainOffset())) {
             goto out;
+        }
         if (lineno >= target) {
             unsigned diff = lineno - target;
             if (diff < bestdiff) {
@@ -3291,13 +3505,14 @@ js::LineNumberToPC(JSScript* script, unsigned target)
         offset += SN_DELTA(sn);
         SrcNoteType type = SN_TYPE(sn);
         if (type == SRC_SETLINE) {
-            lineno = unsigned(GetSrcNoteOffset(sn, 0));
+            lineno = unsigned(GetSrcNoteOffset(sn, SrcNote::SetLine::Line));
         } else if (type == SRC_NEWLINE) {
             lineno++;
         }
     }
-    if (best >= 0)
+    if (best >= 0) {
         offset = best;
+    }
 out:
     return script->offsetToPC(offset);
 }
@@ -3309,13 +3524,15 @@ js::GetScriptLineExtent(JSScript* script)
     unsigned maxLineNo = lineno;
     for (jssrcnote* sn = script->notes(); !SN_IS_TERMINATOR(sn); sn = SN_NEXT(sn)) {
         SrcNoteType type = SN_TYPE(sn);
-        if (type == SRC_SETLINE)
-            lineno = unsigned(GetSrcNoteOffset(sn, 0));
-        else if (type == SRC_NEWLINE)
+        if (type == SRC_SETLINE) {
+            lineno = unsigned(GetSrcNoteOffset(sn, SrcNote::SetLine::Line));
+        } else if (type == SRC_NEWLINE) {
             lineno++;
+        }
 
-        if (maxLineNo < lineno)
+        if (maxLineNo < lineno) {
             maxLineNo = lineno;
+        }
     }
 
     return 1 + maxLineNo - script->lineno();
@@ -3393,8 +3610,9 @@ CloneInnerInterpretedFunction(JSContext* cx, HandleScope enclosingScope, HandleF
     RootedObject cloneProto(cx);
     if (srcFun->isGenerator() || srcFun->isAsync()) {
         cloneProto = GlobalObject::getOrCreateGeneratorFunctionPrototype(cx, cx->global());
-        if (!cloneProto)
+        if (!cloneProto) {
             return nullptr;
+        }
     }
 
     gc::AllocKind allocKind = srcFun->getAllocKind();
@@ -3407,23 +3625,28 @@ CloneInnerInterpretedFunction(JSContext* cx, HandleScope enclosingScope, HandleF
         flags |= JSFunction::Flags::EXTENDED;
     }
     RootedAtom atom(cx, srcFun->displayAtom());
-    if (atom)
+    if (atom) {
         cx->markAtom(atom);
+    }
     RootedFunction clone(cx, NewFunctionWithProto(cx, nullptr, srcFun->nargs(),
                                                   JSFunction::Flags(flags), nullptr, atom,
                                                   cloneProto, allocKind, TenuredObject));
-    if (!clone)
+    if (!clone) {
         return nullptr;
+    }
 
     JSScript::AutoDelazify srcScript(cx, srcFun);
-    if (!srcScript)
+    if (!srcScript) {
         return nullptr;
+    }
     JSScript* cloneScript = CloneScriptIntoFunction(cx, enclosingScope, clone, srcScript);
-    if (!cloneScript)
+    if (!cloneScript) {
         return nullptr;
+    }
 
-    if (!JSFunction::setTypeForScriptedFunction(cx, clone))
+    if (!JSFunction::setTypeForScriptedFunction(cx, clone)) {
         return nullptr;
+    }
 
     return clone;
 }
@@ -3439,8 +3662,6 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
 
     /* NB: Keep this in sync with XDRScript. */
 
-    CheckScriptDataIntegrity(src);
-
     /* Some embeddings are not careful to use ExposeObjectToActiveJS as needed. */
     MOZ_ASSERT(!src->sourceObject()->isMarkedGray());
 
@@ -3454,9 +3675,8 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
     /* Script data */
 
     size_t size = src->dataSize();
-    UniquePtr<uint8_t, JS::FreePolicy> data(AllocScriptData(cx->zone(), size));
+    UniquePtr<uint8_t, JS::FreePolicy> data(AllocScriptData(cx, size));
     if (size && !data) {
-        ReportOutOfMemory(cx);
         return false;
     }
 
@@ -3475,8 +3695,9 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
         for (uint32_t i = scopes.length(); i < nscopes; i++) {
             original = vector[i];
             clone = Scope::clone(cx, original, scopes[FindScopeIndex(src, *original->enclosing())]);
-            if (!clone || !scopes.append(clone))
+            if (!clone || !scopes.append(clone)) {
                 return false;
+            }
         }
     }
 
@@ -3504,8 +3725,9 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
                 } else {
                     if (innerFun->isInterpretedLazy()) {
                         AutoRealm ar(cx, innerFun);
-                        if (!JSFunction::getOrCreateScript(cx, innerFun))
+                        if (!JSFunction::getOrCreateScript(cx, innerFun)) {
                             return false;
+                        }
                     }
 
                     Scope* enclosing = innerFun->nonLazyScript()->enclosingScope();
@@ -3516,8 +3738,9 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
                 clone = DeepCloneObjectLiteral(cx, obj, TenuredObject);
             }
 
-            if (!clone || !objects.append(clone))
+            if (!clone || !objects.append(clone)) {
                 return false;
+            }
         }
     }
 
@@ -3525,12 +3748,14 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
     dst->data = data.release();
     dst->dataSize_ = size;
     MOZ_ASSERT(bool(dst->data) == bool(src->data));
-    if (dst->data)
+    if (dst->data) {
         memcpy(dst->data, src->data, size);
+    }
 
     if (cx->zone() != src->zoneFromAnyThread()) {
-        for (size_t i = 0; i < src->scriptData()->natoms(); i++)
+        for (size_t i = 0; i < src->scriptData()->natoms(); i++) {
             cx->markAtom(src->scriptData()->atoms()[i]);
+        }
     }
 
     /* Script filenames, bytecodes and atoms are runtime-wide. */
@@ -3545,8 +3770,9 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
     dst->nTypeSets_ = src->nTypeSets();
     if (src->argumentsHasVarBinding()) {
         dst->setArgumentsHasVarBinding();
-        if (src->analyzedArgsUsage())
+        if (src->analyzedArgsUsage()) {
             dst->setNeedsArgsObj(src->needsArgsObj());
+        }
     }
     dst->bitFields_.hasMappedArgsObj_ = src->hasMappedArgsObj();
     dst->bitFields_.functionHasThisBinding_ = src->functionHasThisBinding();
@@ -3572,25 +3798,30 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
     if (nconsts != 0) {
         GCPtrValue* vector = Rebase<GCPtrValue>(dst, src, src->consts()->vector);
         dst->consts()->vector = vector;
-        for (unsigned i = 0; i < nconsts; ++i)
+        for (unsigned i = 0; i < nconsts; ++i) {
             MOZ_ASSERT_IF(vector[i].isGCThing(), vector[i].toString()->isAtom());
+        }
     }
     if (nobjects != 0) {
         GCPtrObject* vector = Rebase<GCPtrObject>(dst, src, src->objects()->vector);
         dst->objects()->vector = vector;
-        for (unsigned i = 0; i < nobjects; ++i)
+        for (unsigned i = 0; i < nobjects; ++i) {
             vector[i].init(&objects[i]->as<NativeObject>());
+        }
     }
     {
         GCPtrScope* vector = Rebase<GCPtrScope>(dst, src, src->scopes()->vector);
         dst->scopes()->vector = vector;
-        for (uint32_t i = 0; i < nscopes; ++i)
+        for (uint32_t i = 0; i < nscopes; ++i) {
             vector[i].init(scopes[i]);
+        }
     }
-    if (ntrynotes != 0)
+    if (ntrynotes != 0) {
         dst->trynotes()->vector = Rebase<JSTryNote>(dst, src, src->trynotes()->vector);
-    if (nscopenotes != 0)
+    }
+    if (nscopenotes != 0) {
         dst->scopeNotes()->vector = Rebase<ScopeNote>(dst, src, src->scopeNotes()->vector);
+    }
     if (nyieldoffsets != 0) {
         dst->yieldAndAwaitOffsets().vector_ =
             Rebase<uint32_t>(dst, src, src->yieldAndAwaitOffsets().vector_);
@@ -3614,15 +3845,17 @@ CreateEmptyScriptForClone(JSContext* cx, HandleScript src)
             FillSelfHostingCompileOptions(options);
 
             ScriptSourceObject* obj = frontend::CreateScriptSourceObject(cx, options);
-            if (!obj)
+            if (!obj) {
                 return nullptr;
+            }
             cx->realm()->selfHostingScriptSource.set(obj);
         }
         sourceObject = cx->realm()->selfHostingScriptSource;
     } else {
         sourceObject = src->sourceObject();
-        if (!cx->compartment()->wrap(cx, &sourceObject))
+        if (!cx->compartment()->wrap(cx, &sourceObject)) {
             return nullptr;
+        }
     }
 
     CompileOptions options(cx);
@@ -3640,18 +3873,21 @@ js::CloneGlobalScript(JSContext* cx, ScopeKind scopeKind, HandleScript src)
     MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
 
     RootedScript dst(cx, CreateEmptyScriptForClone(cx, src));
-    if (!dst)
+    if (!dst) {
         return nullptr;
+    }
 
     MOZ_ASSERT(src->bodyScopeIndex() == 0);
     Rooted<GCVector<Scope*>> scopes(cx, GCVector<Scope*>(cx));
     Rooted<GlobalScope*> original(cx, &src->bodyScope()->as<GlobalScope>());
     GlobalScope* clone = GlobalScope::clone(cx, original, scopeKind);
-    if (!clone || !scopes.append(clone))
+    if (!clone || !scopes.append(clone)) {
         return nullptr;
+    }
 
-    if (!detail::CopyScript(cx, src, dst, &scopes))
+    if (!detail::CopyScript(cx, src, dst, &scopes)) {
         return nullptr;
+    }
 
     return dst;
 }
@@ -3664,8 +3900,9 @@ js::CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFun
     MOZ_ASSERT(!fun->hasScript() || fun->hasUncompletedScript());
 
     RootedScript dst(cx, CreateEmptyScriptForClone(cx, src));
-    if (!dst)
+    if (!dst) {
         return nullptr;
+    }
 
     // Clone the non-intra-body scopes.
     Rooted<GCVector<Scope*>> scopes(cx, GCVector<Scope*>(cx));
@@ -3682,13 +3919,15 @@ js::CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFun
         }
 
         Scope* clone;
-        if (original->is<FunctionScope>())
+        if (original->is<FunctionScope>()) {
             clone = FunctionScope::clone(cx, original.as<FunctionScope>(), fun, enclosingClone);
-        else
+        } else {
             clone = Scope::clone(cx, original, enclosingClone);
+        }
 
-        if (!clone || !scopes.append(clone))
+        if (!clone || !scopes.append(clone)) {
             return nullptr;
+        }
     }
 
     // Save flags in case we need to undo the early mutations.
@@ -3699,10 +3938,11 @@ js::CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFun
     }
 
     // Finally set the script after all the fallible operations.
-    if (fun->isInterpretedLazy())
+    if (fun->isInterpretedLazy()) {
         fun->setUnlazifiedScript(dst);
-    else
+    } else {
         fun->initScript(dst);
+    }
 
     return dst;
 }
@@ -3752,25 +3992,30 @@ JSScript::destroyDebugScript(FreeOp* fop)
 bool
 JSScript::ensureHasDebugScript(JSContext* cx)
 {
-    if (bitFields_.hasDebugScript_)
+    if (bitFields_.hasDebugScript_) {
         return true;
+    }
 
     size_t nbytes = offsetof(DebugScript, breakpoints) + length() * sizeof(BreakpointSite*);
-    UniqueDebugScript debug(reinterpret_cast<DebugScript*>(zone()->pod_calloc<uint8_t>(nbytes)));
-    if (!debug)
+    UniqueDebugScript debug(reinterpret_cast<DebugScript*>(cx->pod_calloc<uint8_t>(nbytes)));
+    if (!debug) {
         return false;
+    }
 
     /* Create realm's debugScriptMap if necessary. */
     if (!realm()->debugScriptMap) {
         auto map = cx->make_unique<DebugScriptMap>();
-        if (!map || !map->init())
+        if (!map) {
             return false;
+        }
 
         realm()->debugScriptMap = std::move(map);
     }
 
-    if (!realm()->debugScriptMap->putNew(this, std::move(debug)))
+    if (!realm()->debugScriptMap->putNew(this, std::move(debug))) {
+        ReportOutOfMemory(cx);
         return false;
+    }
 
     bitFields_.hasDebugScript_ = true; // safe to set this;  we can't fail after this point
 
@@ -3780,8 +4025,9 @@ JSScript::ensureHasDebugScript(JSContext* cx)
      * debug state is destroyed.
      */
     for (ActivationIterator iter(cx); !iter.done(); ++iter) {
-        if (iter->isInterpreter())
+        if (iter->isInterpreter()) {
             iter->asInterpreter()->enableInterruptsIfRunning(this);
+        }
     }
 
     return true;
@@ -3795,22 +4041,27 @@ JSScript::setNewStepMode(FreeOp* fop, uint32_t newValue)
     debug->stepMode = newValue;
 
     if (!prior != !newValue) {
-        if (hasBaselineScript())
+        if (hasBaselineScript()) {
             baseline->toggleDebugTraps(this, nullptr);
+        }
 
-        if (!stepModeEnabled() && !debug->numSites)
+        if (!stepModeEnabled() && !debug->numSites) {
             fop->free_(releaseDebugScript());
+        }
     }
 }
 
 bool
 JSScript::incrementStepModeCount(JSContext* cx)
 {
-    assertSameCompartment(cx, this);
+    cx->check(this);
     MOZ_ASSERT(cx->realm()->isDebuggee());
 
-    if (!ensureHasDebugScript(cx))
+    AutoRealm ar(cx, this);
+
+    if (!ensureHasDebugScript(cx)) {
         return false;
+    }
 
     DebugScript* debug = debugScript();
     uint32_t count = debug->stepMode;
@@ -3830,16 +4081,18 @@ JSScript::decrementStepModeCount(FreeOp* fop)
 BreakpointSite*
 JSScript::getOrCreateBreakpointSite(JSContext* cx, jsbytecode* pc)
 {
-    if (!ensureHasDebugScript(cx))
+    AutoRealm ar(cx, this);
+
+    if (!ensureHasDebugScript(cx)) {
         return nullptr;
+    }
 
     DebugScript* debug = debugScript();
     BreakpointSite*& site = debug->breakpoints[pcToOffset(pc)];
 
     if (!site) {
-        site = cx->zone()->new_<JSBreakpointSite>(this, pc);
+        site = cx->new_<JSBreakpointSite>(this, pc);
         if (!site) {
-            ReportOutOfMemory(cx);
             return nullptr;
         }
         debug->numSites++;
@@ -3858,15 +4111,17 @@ JSScript::destroyBreakpointSite(FreeOp* fop, jsbytecode* pc)
     fop->delete_(site);
     site = nullptr;
 
-    if (--debug->numSites == 0 && !stepModeEnabled())
+    if (--debug->numSites == 0 && !stepModeEnabled()) {
         fop->free_(releaseDebugScript());
+    }
 }
 
 void
 JSScript::clearBreakpointsIn(FreeOp* fop, js::Debugger* dbg, JSObject* handler)
 {
-    if (!hasAnyBreakpointsOrStepMode())
+    if (!hasAnyBreakpointsOrStepMode()) {
         return;
+    }
 
     for (jsbytecode* pc = code(); pc < codeEnd(); pc++) {
         BreakpointSite* site = getBreakpointSite(pc);
@@ -3874,8 +4129,9 @@ JSScript::clearBreakpointsIn(FreeOp* fop, js::Debugger* dbg, JSObject* handler)
             Breakpoint* nextbp;
             for (Breakpoint* bp = site->firstBreakpoint(); bp; bp = nextbp) {
                 nextbp = bp->nextInSite();
-                if ((!dbg || bp->debugger == dbg) && (!handler || bp->getHandler() == handler))
+                if ((!dbg || bp->debugger == dbg) && (!handler || bp->getHandler() == handler)) {
                     bp->destroy(fop);
+                }
             }
         }
     }
@@ -3885,8 +4141,9 @@ bool
 JSScript::hasBreakpointsAt(jsbytecode* pc)
 {
     BreakpointSite* site = getBreakpointSite(pc);
-    if (!site)
+    if (!site) {
         return false;
+    }
 
     return site->enabledCount > 0;
 }
@@ -3895,8 +4152,9 @@ void
 SharedScriptData::traceChildren(JSTracer* trc)
 {
     MOZ_ASSERT(refCount() != 0);
-    for (uint32_t i = 0; i < natoms(); ++i)
+    for (uint32_t i = 0; i < natoms(); ++i) {
         TraceNullableEdge(trc, &atoms()[i], "atom");
+    }
 }
 
 void
@@ -3911,11 +4169,13 @@ JSScript::traceChildren(JSTracer* trc)
                   GCMarker::fromTracer(trc)->shouldCheckCompartments(),
                   zone()->isCollecting());
 
-    if (scriptData())
+    if (scriptData()) {
         scriptData()->traceChildren(trc);
+    }
 
-    if (ScopeArray* scopearray = scopes())
+    if (ScopeArray* scopearray = scopes()) {
         TraceRange(trc, scopearray->length, scopearray->vector, "scopes");
+    }
 
     if (hasConsts()) {
         ConstArray* constarray = consts();
@@ -3930,11 +4190,13 @@ JSScript::traceChildren(JSTracer* trc)
     MOZ_ASSERT_IF(sourceObject(), MaybeForwarded(sourceObject())->compartment() == compartment());
     TraceNullableEdge(trc, &sourceObject_, "sourceObject");
 
-    if (maybeLazyScript())
+    if (maybeLazyScript()) {
         TraceManuallyBarrieredEdge(trc, &lazyScript, "lazyScript");
+    }
 
-    if (trc->isMarkingTracer())
+    if (trc->isMarkingTracer()) {
         realm()->mark();
+    }
 
     jit::TraceJitScripts(trc, this);
 }
@@ -3952,21 +4214,24 @@ JSScript::calculateLiveFixed(jsbytecode* pc)
 
     if (nfixed() != nlivefixed) {
         Scope* scope = lookupScope(pc);
-        if (scope)
+        if (scope) {
             scope = MaybeForwarded(scope);
+        }
 
         // Find the nearest LexicalScope in the same script.
         while (scope && scope->is<WithScope>()) {
             scope = scope->enclosing();
-            if (scope)
+            if (scope) {
                 scope = MaybeForwarded(scope);
+            }
         }
 
         if (scope) {
-            if (scope->is<LexicalScope>())
+            if (scope->is<LexicalScope>()) {
                 nlivefixed = scope->as<LexicalScope>().nextFrameSlot();
-            else if (scope->is<VarScope>())
+            } else if (scope->is<VarScope>()) {
                 nlivefixed = scope->as<VarScope>().nextFrameSlot();
+            }
         }
     }
 
@@ -3981,8 +4246,9 @@ JSScript::lookupScope(jsbytecode* pc)
 {
     MOZ_ASSERT(containsPC(pc));
 
-    if (!hasScopeNotes())
+    if (!hasScopeNotes()) {
         return nullptr;
+    }
 
     size_t offset = pc - code();
 
@@ -4009,14 +4275,16 @@ JSScript::lookupScope(jsbytecode* pc)
                 if (offset < checkNote->start + checkNote->length) {
                     // We found a matching block chain but there may be inner ones
                     // at a higher block chain index than mid. Continue the binary search.
-                    if (checkNote->index == ScopeNote::NoScopeIndex)
+                    if (checkNote->index == ScopeNote::NoScopeIndex) {
                         scope = nullptr;
-                    else
+                    } else {
                         scope = getScope(checkNote->index);
+                    }
                     break;
                 }
-                if (checkNote->parent == UINT32_MAX)
+                if (checkNote->parent == UINT32_MAX) {
                     break;
+                }
                 check = checkNote->parent;
             }
             bottom = mid + 1;
@@ -4031,8 +4299,9 @@ JSScript::lookupScope(jsbytecode* pc)
 Scope*
 JSScript::innermostScope(jsbytecode* pc)
 {
-    if (Scope* scope = lookupScope(pc))
+    if (Scope* scope = lookupScope(pc)) {
         return scope;
+    }
     return bodyScope();
 }
 
@@ -4061,10 +4330,12 @@ js::SetFrameArgumentsObject(JSContext* cx, AbstractFramePtr frame,
      */
 
     Rooted<BindingIter> bi(cx, BindingIter(script));
-    while (bi && bi.name() != cx->names().arguments)
+    while (bi && bi.name() != cx->names().arguments) {
         bi++;
-    if (!bi)
+    }
+    if (!bi) {
         return;
+    }
 
     if (bi.location().kind() == BindingLocation::Kind::Environment) {
         /*
@@ -4072,8 +4343,9 @@ js::SetFrameArgumentsObject(JSContext* cx, AbstractFramePtr frame,
          * is assigned to.
          */
         jsbytecode* pc = script->code();
-        while (*pc != JSOP_ARGUMENTS)
+        while (*pc != JSOP_ARGUMENTS) {
             pc += GetBytecodeLength(pc);
+        }
         pc += JSOP_ARGUMENTS_LENGTH;
         MOZ_ASSERT(*pc == JSOP_SETALIASEDVAR);
 
@@ -4081,13 +4353,15 @@ js::SetFrameArgumentsObject(JSContext* cx, AbstractFramePtr frame,
         // JS_OPTIMIZED_ARGUMENTS, as Ion could have optimized out the
         // arguments slot.
         EnvironmentObject& env = frame.callObj().as<EnvironmentObject>();
-        if (IsOptimizedPlaceholderMagicValue(env.aliasedBinding(bi)))
+        if (IsOptimizedPlaceholderMagicValue(env.aliasedBinding(bi))) {
             env.setAliasedBinding(cx, bi, ObjectValue(*argsobj));
+        }
     } else {
         MOZ_ASSERT(bi.location().kind() == BindingLocation::Kind::Frame);
         uint32_t frameSlot = bi.location().slot();
-        if (IsOptimizedPlaceholderMagicValue(frame.unaliasedLocal(frameSlot)))
+        if (IsOptimizedPlaceholderMagicValue(frame.unaliasedLocal(frameSlot))) {
             frame.unaliasedLocal(frameSlot) = ObjectValue(*argsobj);
+        }
     }
 }
 
@@ -4105,8 +4379,9 @@ JSScript::argumentsOptimizationFailed(JSContext* cx, HandleScript script)
      * is nothing to do; GuardFunApplySpeculation will patch in the real
      * argsobj.
      */
-    if (script->needsArgsObj())
+    if (script->needsArgsObj()) {
         return true;
+    }
 
     MOZ_ASSERT(!script->isGenerator());
     MOZ_ASSERT(!script->isAsync());
@@ -4118,8 +4393,9 @@ JSScript::argumentsOptimizationFailed(JSContext* cx, HandleScript script)
      * JIT code to indicate the arguments optimization failed and JSOP_ARGUMENTS
      * should create an arguments object next time.
      */
-    if (script->hasBaselineScript())
+    if (script->hasBaselineScript()) {
         script->baselineScript()->setNeedsArgsObj();
+    }
 
     /*
      * By design, the arguments optimization is only made when there are no
@@ -4142,15 +4418,17 @@ JSScript::argumentsOptimizationFailed(JSContext* cx, HandleScript script)
          * arguments object right after restoring the BaselineFrame and before
          * entering Baseline code (in jit::FinishBailoutToBaseline).
          */
-        if (i.isIon())
+        if (i.isIon()) {
             continue;
+        }
         AbstractFramePtr frame = i.abstractFramePtr();
         if (frame.isFunctionFrame() && frame.script() == script) {
             /* We crash on OOM since cleaning up here would be complicated. */
             AutoEnterOOMUnsafeRegion oomUnsafe;
             ArgumentsObject* argsobj = ArgumentsObject::createExpected(cx, frame);
-            if (!argsobj)
+            if (!argsobj) {
                 oomUnsafe.crash("JSScript::argumentsOptimizationFailed");
+            }
             SetFrameArgumentsObject(cx, frame, script, argsobj);
         }
     }
@@ -4161,12 +4439,14 @@ JSScript::argumentsOptimizationFailed(JSContext* cx, HandleScript script)
 bool
 JSScript::formalIsAliased(unsigned argSlot)
 {
-    if (functionHasParameterExprs())
+    if (functionHasParameterExprs()) {
         return false;
+    }
 
     for (PositionalFormalParameterIter fi(this); fi; fi++) {
-        if (fi.argumentSlot() == argSlot)
+        if (fi.argumentSlot() == argSlot) {
             return fi.closedOver();
+        }
     }
     MOZ_CRASH("Argument slot not found");
 }
@@ -4183,7 +4463,6 @@ LazyScript::LazyScript(JSFunction* fun, ScriptSourceObject& sourceObject,
                        uint32_t toStringStart, uint32_t lineno, uint32_t column)
   : script_(nullptr),
     function_(fun),
-    enclosingScope_(nullptr),
     sourceObject_(&sourceObject),
     table_(table),
     packedFields_(packedFields),
@@ -4209,19 +4488,39 @@ LazyScript::initScript(JSScript* script)
     script_.set(script);
 }
 
-void
-LazyScript::resetScript()
+JS::Compartment*
+LazyScript::compartment() const
 {
-    MOZ_ASSERT(script_.unbarrieredGet());
-    script_.set(nullptr);
+    return function_->compartment();
+}
+
+Realm*
+LazyScript::realm() const
+{
+    return function_->realm();
+}
+
+void
+LazyScript::setEnclosingLazyScript(LazyScript* enclosingLazyScript)
+{
+    MOZ_ASSERT(enclosingLazyScript);
+
+    // We never change an existing LazyScript.
+    MOZ_ASSERT(!hasEnclosingLazyScript());
+
+    // Enclosing scopes never transition back to enclosing lazy scripts.
+    MOZ_ASSERT(!hasEnclosingScope());
+
+    enclosingLazyScriptOrScope_ = enclosingLazyScript;
 }
 
 void
 LazyScript::setEnclosingScope(Scope* enclosingScope)
 {
-    // This method may be called to update the enclosing scope. See comment
-    // above the callsite in BytecodeEmitter::emitFunction.
-    enclosingScope_ = enclosingScope;
+    MOZ_ASSERT(enclosingScope);
+    MOZ_ASSERT(!hasEnclosingScope());
+
+    enclosingLazyScriptOrScope_ = enclosingScope;
 }
 
 ScriptSourceObject&
@@ -4243,6 +4542,8 @@ LazyScript::CreateRaw(JSContext* cx, HandleFunction fun,
                       uint64_t packedFields, uint32_t sourceStart, uint32_t sourceEnd,
                       uint32_t toStringStart, uint32_t lineno, uint32_t column)
 {
+    cx->check(fun);
+
     MOZ_ASSERT(sourceObject);
     union {
         PackedView p;
@@ -4260,16 +4561,16 @@ LazyScript::CreateRaw(JSContext* cx, HandleFunction fun,
 
     UniquePtr<uint8_t, JS::FreePolicy> table;
     if (bytes) {
-        table.reset(fun->zone()->pod_malloc<uint8_t>(bytes));
+        table.reset(cx->pod_malloc<uint8_t>(bytes));
         if (!table) {
-            ReportOutOfMemory(cx);
             return nullptr;
         }
     }
 
     LazyScript* res = Allocate<LazyScript>(cx);
-    if (!res)
+    if (!res) {
         return nullptr;
+    }
 
     cx->realm()->scheduleDelazificationForDebugger();
 
@@ -4310,26 +4611,32 @@ LazyScript::Create(JSContext* cx, HandleFunction fun,
     LazyScript* res = LazyScript::CreateRaw(cx, fun, sourceObject, packedFields,
                                             sourceStart, sourceEnd,
                                             toStringStart, lineno, column);
-    if (!res)
+    if (!res) {
         return nullptr;
+    }
 
     JSAtom** resClosedOverBindings = res->closedOverBindings();
-    for (size_t i = 0; i < res->numClosedOverBindings(); i++)
+    for (size_t i = 0; i < res->numClosedOverBindings(); i++) {
         resClosedOverBindings[i] = closedOverBindings[i];
+    }
 
     GCPtrFunction* resInnerFunctions = res->innerFunctions();
-    for (size_t i = 0; i < res->numInnerFunctions(); i++)
+    for (size_t i = 0; i < res->numInnerFunctions(); i++) {
         resInnerFunctions[i].init(innerFunctions[i]);
+        if (resInnerFunctions[i]->isInterpretedLazy()) {
+            resInnerFunctions[i]->lazyScript()->setEnclosingLazyScript(res);
+        }
+    }
 
     return res;
 }
 
 /* static */ LazyScript*
-LazyScript::Create(JSContext* cx, HandleFunction fun,
-                   HandleScript script, HandleScope enclosingScope,
-                   HandleScriptSourceObject sourceObject,
-                   uint64_t packedFields, uint32_t sourceStart, uint32_t sourceEnd,
-                   uint32_t toStringStart, uint32_t lineno, uint32_t column)
+LazyScript::CreateForXDR(JSContext* cx, HandleFunction fun,
+                         HandleScript script, HandleScope enclosingScope,
+                         HandleScriptSourceObject sourceObject,
+                         uint64_t packedFields, uint32_t sourceStart, uint32_t sourceEnd,
+                         uint32_t toStringStart, uint32_t lineno, uint32_t column)
 {
     // Dummy atom which is not a valid property name.
     RootedAtom dummyAtom(cx, cx->names().comma);
@@ -4341,31 +4648,37 @@ LazyScript::Create(JSContext* cx, HandleFunction fun,
     LazyScript* res = LazyScript::CreateRaw(cx, fun, sourceObject, packedFields,
                                             sourceStart, sourceEnd,
                                             toStringStart, lineno, column);
-    if (!res)
+    if (!res) {
         return nullptr;
+    }
 
     // Fill with dummies, to be GC-safe after the initialization of the free
     // variables and inner functions.
     size_t i, num;
     JSAtom** closedOverBindings = res->closedOverBindings();
-    for (i = 0, num = res->numClosedOverBindings(); i < num; i++)
+    for (i = 0, num = res->numClosedOverBindings(); i < num; i++) {
         closedOverBindings[i] = dummyAtom;
+    }
 
     GCPtrFunction* functions = res->innerFunctions();
-    for (i = 0, num = res->numInnerFunctions(); i < num; i++)
+    for (i = 0, num = res->numInnerFunctions(); i < num; i++) {
         functions[i].init(dummyFun);
+    }
 
     // Set the enclosing scope of the lazy function. This value should only be
-    // non-null if we have a non-lazy enclosing script.
-    // LazyScript::isEnclosingScriptLazy relies on the enclosing scope being
-    // null if we're nested inside another lazy function.
-    MOZ_ASSERT(!res->enclosingScope());
-    if (enclosingScope)
+    // set if we have a non-lazy enclosing script at this point.
+    // LazyScript::enclosingScriptHasEverBeenCompiled relies on the enclosing
+    // scope being non-null if we have ever been nested inside non-lazy
+    // function.
+    MOZ_ASSERT(!res->hasEnclosingScope());
+    if (enclosingScope) {
         res->setEnclosingScope(enclosingScope);
+    }
 
     MOZ_ASSERT(!res->hasScript());
-    if (script)
+    if (script) {
         res->initScript(script);
+    }
 
     return res;
 }
@@ -4381,24 +4694,6 @@ LazyScript::initRuntimeFields(uint64_t packedFields)
     packed = packedFields;
     p_.hasBeenCloned = p.hasBeenCloned;
     p_.treatAsRunOnce = p.treatAsRunOnce;
-}
-
-bool
-LazyScript::hasUncompletedEnclosingScript() const
-{
-    // It can happen that we created lazy scripts while compiling an enclosing
-    // script, but we errored out while compiling that script. When we iterate
-    // over lazy script in a compartment, we might see lazy scripts that never
-    // escaped to script and should be ignored.
-    //
-    // If the enclosing scope is a function with a null script or has a script
-    // without code, it was not successfully compiled.
-
-    if (!enclosingScope() || !enclosingScope()->is<FunctionScope>())
-        return false;
-
-    JSFunction* fun = enclosingScope()->as<FunctionScope>().canonicalFunction();
-    return !fun->hasScript() || fun->hasUncompletedScript() || !fun->nonLazyScript()->code();
 }
 
 void
@@ -4426,13 +4721,26 @@ JSScript::updateJitCodeRaw(JSRuntime* rt)
 bool
 JSScript::hasLoops()
 {
-    if (!hasTrynotes())
+    if (!hasTrynotes()) {
         return false;
+    }
     JSTryNote* tn = trynotes()->vector;
     JSTryNote* tnlimit = tn + trynotes()->length;
     for (; tn < tnlimit; tn++) {
-        if (tn->kind == JSTRY_FOR_IN || tn->kind == JSTRY_LOOP)
+        switch (tn->kind) {
+          case JSTRY_FOR_IN:
+          case JSTRY_FOR_OF:
+          case JSTRY_LOOP:
             return true;
+          case JSTRY_CATCH:
+          case JSTRY_FINALLY:
+          case JSTRY_FOR_OF_ITERCLOSE:
+          case JSTRY_DESTRUCTURING_ITERCLOSE:
+            break;
+          default:
+            MOZ_ASSERT(false, "Add new try note type to JSScript::hasLoops");
+            break;
+        }
     }
     return false;
 }
@@ -4469,15 +4777,48 @@ JSScript::AutoDelazify::dropScript()
 {
     // Don't touch script_ if it's in the self-hosting realm, see the comment
     // in holdScript.
-    if (script_ && !script_->realm()->isSelfHostingRealm())
+    if (script_ && !script_->realm()->isSelfHostingRealm()) {
         script_->setDoNotRelazify(oldDoNotRelazify_);
+    }
     script_ = nullptr;
 }
 
-JS::ubi::Node::Size
+void
+JSScript::setTopLevelPrivate(void* value)
+{
+    MOZ_ASSERT(module() || isGlobalCode());
+
+    Scope* scope = bodyScope();
+    if (scope->is<GlobalScope>()) {
+        scope->as<GlobalScope>().setTopLevelPrivate(value);
+    } else if (scope->is<ModuleScope>()) {
+        scope->as<ModuleScope>().setTopLevelPrivate(value);
+    } else {
+        MOZ_CRASH("Unexpected scope kind");
+    }
+}
+
+void*
+JSScript::maybeTopLevelPrivate() const
+{
+    if (!module() && !isGlobalCode()) {
+        return nullptr;
+    }
+
+    Scope* scope = bodyScope();
+    if (scope->is<GlobalScope>()) {
+        return scope->as<GlobalScope>().topLevelPrivate();
+    } else if (scope->is<ModuleScope>()) {
+        return scope->as<ModuleScope>().topLevelPrivate();
+    }
+
+    MOZ_CRASH("Unexpected scope kind");
+}
+
+JS::ubi::Base::Size
 JS::ubi::Concrete<JSScript>::size(mozilla::MallocSizeOf mallocSizeOf) const
 {
-    Size size = Arena::thingSize(get().asTenured().getAllocKind());
+    Size size = gc::Arena::thingSize(get().asTenured().getAllocKind());
 
     size += get().sizeOfData(mallocSizeOf);
     size += get().sizeOfTypeScript(mallocSizeOf);
@@ -4503,7 +4844,7 @@ JS::ubi::Concrete<JSScript>::scriptFilename() const
 JS::ubi::Node::Size
 JS::ubi::Concrete<js::LazyScript>::size(mozilla::MallocSizeOf mallocSizeOf) const
 {
-    Size size = js::gc::Arena::thingSize(get().asTenured().getAllocKind());
+    Size size = gc::Arena::thingSize(get().asTenured().getAllocKind());
     size += get().sizeOfExcludingThis(mallocSizeOf);
     return size;
 }
@@ -4512,8 +4853,9 @@ const char*
 JS::ubi::Concrete<js::LazyScript>::scriptFilename() const
 {
     auto source = get().sourceObject().source();
-    if (!source)
+    if (!source) {
         return nullptr;
+    }
 
     return source->filename();
 }

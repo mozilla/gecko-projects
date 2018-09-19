@@ -3,6 +3,8 @@ linux64/opt:
     index:
         product: firefox
         job-name: linux64-opt
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux64/opt
         symbol: B
@@ -20,11 +22,13 @@ linux64/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux64-plain/opt:
     description: "Linux64 Opt Plain"
@@ -50,9 +54,11 @@ linux64-plain/opt:
         tooltool-downloads: public
     run-on-projects: [trunk]
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
+        - linux64-node
+        - linux64-cbindgen
 
 linux64-dmd/opt:
     description: "Linux64 DMD Opt"
@@ -80,17 +86,21 @@ linux64-dmd/opt:
         need-xvfb: true
     run-on-projects: []
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux64/pgo:
     description: "Linux64 PGO"
     index:
         product: firefox
         job-name: linux64-pgo
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux64/pgo
         symbol: B
@@ -109,11 +119,13 @@ linux64/pgo:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux64-fuzzing/debug:
     description: "Linux64 Fuzzing Debug"
@@ -128,6 +140,7 @@ linux64-fuzzing/debug:
         max-run-time: 3600
         env:
             PERFHERDER_EXTRA_OPTIONS: fuzzing
+            FORCE_GCC: '1'
     run:
         using: mozharness
         actions: [get-secrets build check-test update]
@@ -142,15 +155,19 @@ linux64-fuzzing/debug:
     toolchains:
         - linux64-clang
         - linux64-gcc
+        - linux64-cbindgen
         - linux64-sccache
         - linux64-rust
         - linux64-rust-size
+        - linux64-node
 
 linux64/debug:
     description: "Linux64 Debug"
     index:
         product: firefox
         job-name: linux64-debug
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux64/debug
         symbol: B
@@ -169,11 +186,13 @@ linux64/debug:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
+        - linux64-cbindgen
         - linux64-sccache
         - linux64-rust
         - linux64-rust-size
+        - linux64-node
 
 linux64-plain/debug:
     description: "Linux64 Debug Plain"
@@ -199,14 +218,17 @@ linux64-plain/debug:
         tooltool-downloads: public
     run-on-projects: [trunk]
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
+        - linux64-node
+        - linux64-cbindgen
 
 linux64-devedition-nightly/opt:
     description: "Linux64 devedition Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: build
     shipping-product: devedition
     index:
@@ -233,11 +255,13 @@ linux64-devedition-nightly/opt:
         custom-build-variant-cfg: devedition
     run-on-projects: ['mozilla-beta']
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux64-base-toolchains/opt:
     description: "Linux64 base toolchains Opt"
@@ -252,6 +276,7 @@ linux64-base-toolchains/opt:
         max-run-time: 7200
         env:
             PERFHERDER_EXTRA_OPTIONS: base-toolchains
+            FORCE_GCC: '1'
     run:
         using: mozharness
         actions: [get-secrets build check-test update]
@@ -265,8 +290,10 @@ linux64-base-toolchains/opt:
     toolchains:
         - linux64-clang-3.9
         - linux64-gcc-6
-        - linux64-rust-1.24
+        - linux64-rust-1.28
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux64-base-toolchains/debug:
     description: "Linux64 base toolchains Debug"
@@ -281,6 +308,7 @@ linux64-base-toolchains/debug:
         max-run-time: 3600
         env:
             PERFHERDER_EXTRA_OPTIONS: base-toolchains
+            FORCE_GCC: '1'
     run:
         using: mozharness
         actions: [get-secrets build check-test update]
@@ -295,14 +323,18 @@ linux64-base-toolchains/debug:
     toolchains:
         - linux64-clang-3.9
         - linux64-gcc-6
-        - linux64-rust-1.24
+        - linux64-rust-1.28
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux/opt:
     description: "Linux32 Opt"
     index:
         product: firefox
         job-name: linux-opt
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux32/opt
         symbol: B
@@ -321,17 +353,21 @@ linux/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux/debug:
     description: "Linux32 Debug"
     index:
         product: firefox
         job-name: linux-debug
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux32/debug
         symbol: B
@@ -351,17 +387,21 @@ linux/debug:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux/pgo:
     description: "Linux32 PGO"
     index:
         product: firefox
         job-name: linux-pgo
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: linux32/pgo
         symbol: B
@@ -381,11 +421,13 @@ linux/pgo:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux-rusttests/opt:
     description: "Linux32 Rust tests Opt"
@@ -416,10 +458,12 @@ linux-rusttests/opt:
         need-xvfb: true
     run-on-projects: ['trunk', 'try']
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux-rusttests/debug:
     description: "Linux32 Rust tests Debug"
@@ -450,15 +494,18 @@ linux-rusttests/debug:
         need-xvfb: true
     run-on-projects: ['trunk', 'try']
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux-devedition-nightly/opt:
     description: "Linux32 devedition Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: build
     shipping-product: devedition
     index:
@@ -486,16 +533,19 @@ linux-devedition-nightly/opt:
         custom-build-variant-cfg: devedition
     run-on-projects: ['mozilla-beta']
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux-nightly/opt:
     description: "Linux32 Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: build
     shipping-product: firefox
     index:
@@ -521,12 +571,13 @@ linux-nightly/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
-
+        - linux64-node
 
 linux64-asan/opt:
     description: "Linux64 Opt ASAN"
@@ -553,12 +604,13 @@ linux64-asan/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
-
+        - linux64-node
 
 linux64-asan-fuzzing/opt:
     description: "Linux64 Fuzzing Opt ASAN"
@@ -585,11 +637,84 @@ linux64-asan-fuzzing/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
+        - linux64-clang
+        - linux64-rust
+        - linux64-rust-size
+        - linux64-cbindgen
+        - linux64-sccache
+        - linux64-node
+
+linux64-asan-fuzzing-ccov/opt:
+    description: "Linux64 Fuzzing Opt ASAN w/ Coverage"
+    index:
+        product: firefox
+        job-name: linux64-ccov-fuzzing-asan-opt
+    treeherder:
+        platform: linux64/asan
+        symbol: Bocf
+    run-on-projects: ['mozilla-central', 'try']
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        env:
+            PERFHERDER_EXTRA_OPTIONS: asan-fuzzing-ccov
+        max-run-time: 3600
+    run:
+        using: mozharness
+        actions: [get-secrets build check-test update]
+        config:
+            - builds/releng_base_firefox.py
+            - builds/releng_base_linux_64_builds.py
+        script: "mozharness/scripts/fx_desktop_build.py"
+        secrets: true
+        extra-config:
+            mozconfig_variant: 'asan-fuzzing-ccov'
+        tooltool-downloads: public
+        need-xvfb: true
+    toolchains:
+        - linux64-binutils
+        - linux64-clang
+        - linux64-rust
+        - linux64-rust-size
+        - linux64-cbindgen
+        - linux64-sccache
+        - linux64-node
+
+linux64-fuzzing-ccov/opt:
+    description: "Linux64 Fuzzing Opt w/ Coverage"
+    index:
+        product: firefox
+        job-name: linux64-ccov-fuzzing-opt
+    treeherder:
+        platform: linux64/opt
+        symbol: Bocf
+    run-on-projects: ['mozilla-central', 'try']
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        max-run-time: 3600
+        env:
+            PERFHERDER_EXTRA_OPTIONS: fuzzing-ccov
+            FORCE_GCC: '1'
+    run:
+        using: mozharness
+        actions: [get-secrets build check-test update]
+        config:
+            - builds/releng_base_firefox.py
+            - builds/releng_base_linux_64_builds.py
+        script: "mozharness/scripts/fx_desktop_build.py"
+        secrets: true
+        extra-config:
+            mozconfig_variant: 'fuzzing-ccov'
+        tooltool-downloads: public
+        need-xvfb: true
+    toolchains:
         - linux64-clang
         - linux64-gcc
+        - linux64-cbindgen
         - linux64-rust
         - linux64-rust-size
         - linux64-sccache
+        - linux64-node
 
 linux64-asan-reporter-nightly/opt:
     description: "Linux64 Opt ASAN Reporter Nightly"
@@ -620,11 +745,13 @@ linux64-asan-reporter-nightly/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux64-asan/debug:
     description: "Linux64 Debug ASAN"
@@ -651,80 +778,19 @@ linux64-asan/debug:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
-
-linux64-lto/opt:
-    description: "Linux64 Opt LTO"
-    index:
-        product: firefox
-        job-name: linux64-lto-opt
-    treeherder:
-        platform: linux64/lto
-        symbol: Bo
-        tier: 2
-    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
-    worker:
-        env:
-            PERFHERDER_EXTRA_OPTIONS: "opt lto"
-        max-run-time: 7200
-    run:
-        using: mozharness
-        actions: [get-secrets build check-test update]
-        config:
-            - builds/releng_base_firefox.py
-            - builds/releng_base_linux_64_builds.py
-        script: "mozharness/scripts/fx_desktop_build.py"
-        secrets: true
-        custom-build-variant-cfg: lto-tc
-        tooltool-downloads: public
-        need-xvfb: true
-    toolchains:
-        - linux64-clang
-        - linux64-gcc
-        - linux64-rust
-        - linux64-rust-size
-        - linux64-sccache
-
-linux64-lto/debug:
-    description: "Linux64 Debug LTO"
-    index:
-        product: firefox
-        job-name: linux64-lto-debug
-    treeherder:
-        platform: linux64/lto
-        symbol: Bd
-        tier: 2
-    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
-    worker:
-        env:
-            PERFHERDER_EXTRA_OPTIONS: "debug lto"
-        max-run-time: 7200
-    run:
-        using: mozharness
-        actions: [get-secrets build check-test update]
-        config:
-            - builds/releng_base_firefox.py
-            - builds/releng_base_linux_64_builds.py
-        script: "mozharness/scripts/fx_desktop_build.py"
-        secrets: true
-        custom-build-variant-cfg: lto-tc-and-debug
-        tooltool-downloads: public
-        need-xvfb: true
-    toolchains:
-        - linux64-clang
-        - linux64-gcc
-        - linux64-rust
-        - linux64-rust-size
-        - linux64-sccache
+        - linux64-node
 
 linux64-nightly/opt:
     description: "Linux64 Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: build
     shipping-product: firefox
     index:
@@ -749,11 +815,13 @@ linux64-nightly/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux64-noopt/debug:
     description: "Linux64 No-optimize Debug"
@@ -781,11 +849,13 @@ linux64-noopt/debug:
         need-xvfb: true
     run-on-projects: ['trunk', 'try']
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux64-rusttests/opt:
     description: "Linux64 Rust tests Opt"
@@ -815,10 +885,12 @@ linux64-rusttests/opt:
         need-xvfb: true
     run-on-projects: ['trunk', 'try']
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux64-rusttests/debug:
     description: "Linux64 Rust tests Debug"
@@ -848,10 +920,12 @@ linux64-rusttests/debug:
         need-xvfb: true
     run-on-projects: ['trunk', 'try']
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux64-tup/opt:
     description: "Linux64 Tup"
@@ -879,11 +953,13 @@ linux64-tup/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust-nightly
+        - linux64-cbindgen
         - linux64-sccache
         - linux64-tup
+        - linux64-node
 
 linux64-jsdcov/opt:
     description: "Linux64-JSDCov Opt"
@@ -909,10 +985,12 @@ linux64-jsdcov/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node
 
 linux64-ccov/debug:
     description: "Linux64-CCov Debug"
@@ -927,6 +1005,8 @@ linux64-ccov/debug:
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
         max-run-time: 7200
+        env:
+            FORCE_GCC: '1'
     run:
         using: mozharness
         actions: [get-secrets build check-test update]
@@ -939,9 +1019,12 @@ linux64-ccov/debug:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
-        - linux64-clang
-        - linux64-rust
+        - linux64-clang-7
+        - linux64-rust-nightly
         - linux64-gcc
+        - linux64-cbindgen
+        - linux64-sccache
+        - linux64-node
 
 linux64-ccov/opt:
     description: "Linux64-CCov Opt"
@@ -952,10 +1035,12 @@ linux64-ccov/opt:
         platform: linux64-ccov/opt
         symbol: B
         tier: 2
-    run-on-projects: ['try']
+    run-on-projects: ['mozilla-central', 'try']
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
         max-run-time: 7200
+        env:
+            FORCE_GCC: '1'
     run:
         using: mozharness
         actions: [get-secrets build check-test update]
@@ -968,9 +1053,12 @@ linux64-ccov/opt:
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
-        - linux64-clang
+        - linux64-clang-7
         - linux64-rust
         - linux64-gcc
+        - linux64-cbindgen
+        - linux64-sccache
+        - linux64-node
 
 linux64-add-on-devel/opt:
     description: "Linux64 add-on-devel"
@@ -997,8 +1085,10 @@ linux64-add-on-devel/opt:
         need-xvfb: true
     run-on-projects: ['mozilla-beta', 'mozilla-release', 'mozilla-esr45']
     toolchains:
+        - linux64-binutils
         - linux64-clang
-        - linux64-gcc
         - linux64-rust
         - linux64-rust-size
+        - linux64-cbindgen
         - linux64-sccache
+        - linux64-node

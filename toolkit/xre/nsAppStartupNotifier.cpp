@@ -12,15 +12,8 @@
 #include "nsAppStartupNotifier.h"
 #include "nsISimpleEnumerator.h"
 
-NS_IMPL_ISUPPORTS(nsAppStartupNotifier, nsIObserver)
-
-nsAppStartupNotifier::nsAppStartupNotifier()
-{
-}
-
-nsAppStartupNotifier::~nsAppStartupNotifier() = default;
-
-NS_IMETHODIMP nsAppStartupNotifier::Observe(nsISupports *aSubject, const char *aTopic, const char16_t *someData)
+/* static */ nsresult
+nsAppStartupNotifier::NotifyObservers(const char* aTopic)
 {
     NS_ENSURE_ARG(aTopic);
     nsresult rv;
@@ -30,8 +23,10 @@ NS_IMETHODIMP nsAppStartupNotifier::Observe(nsISupports *aSubject, const char *a
                     do_GetService(NS_CATEGORYMANAGER_CONTRACTID, &rv);
     NS_ENSURE_SUCCESS(rv, rv);
 
+    nsDependentCString topic(aTopic);
+
     nsCOMPtr<nsISimpleEnumerator> enumerator;
-    rv = categoryManager->EnumerateCategory(aTopic,
+    rv = categoryManager->EnumerateCategory(topic,
                                getter_AddRefs(enumerator));
     if (NS_FAILED(rv)) return rv;
 
@@ -44,9 +39,8 @@ NS_IMETHODIMP nsAppStartupNotifier::Observe(nsISupports *aSubject, const char *a
             rv = category->GetData(categoryEntry);
 
             nsCString contractId;
-            categoryManager->GetCategoryEntry(aTopic,
-                                              categoryEntry.get(),
-                                              getter_Copies(contractId));
+            categoryManager->GetCategoryEntry(topic, categoryEntry,
+                                              contractId);
 
             if (NS_SUCCEEDED(rv)) {
 

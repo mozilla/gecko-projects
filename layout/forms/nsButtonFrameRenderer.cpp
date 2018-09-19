@@ -30,6 +30,7 @@ using namespace mozilla::image;
 using namespace mozilla::layers;
 
 nsButtonFrameRenderer::nsButtonFrameRenderer()
+  : mFrame(nullptr)
 {
   MOZ_COUNT_CTOR(nsButtonFrameRenderer);
 }
@@ -210,7 +211,8 @@ nsDisplayButtonBoxShadowOuter::CreateWebRenderCommands(
   return true;
 }
 
-class nsDisplayButtonBorder : public nsDisplayItem {
+class nsDisplayButtonBorder final : public nsDisplayItem
+{
 public:
   nsDisplayButtonBorder(nsDisplayListBuilder* aBuilder,
                                   nsButtonFrameRenderer* aRenderer)
@@ -333,7 +335,8 @@ nsDisplayButtonBorder::GetBounds(nsDisplayListBuilder* aBuilder,
           : mFrame->GetVisualOverflowRectRelativeToSelf() + ToReferenceFrame();
 }
 
-class nsDisplayButtonForeground : public nsDisplayItem {
+class nsDisplayButtonForeground final : public nsDisplayItem
+{
 public:
   nsDisplayButtonForeground(nsDisplayListBuilder* aBuilder,
                             nsButtonFrameRenderer* aRenderer)
@@ -574,7 +577,7 @@ nsButtonFrameRenderer::ReResolveStyles(nsPresContext* aPresContext)
 
   // get styles assigned to -moz-focus-inner (ie dotted border on Windows)
   mInnerFocusStyle =
-    styleSet->ProbePseudoElementStyle(mFrame->GetContent()->AsElement(),
+    styleSet->ProbePseudoElementStyle(*mFrame->GetContent()->AsElement(),
                                       CSSPseudoElementType::mozFocusInner,
                                       context);
 }

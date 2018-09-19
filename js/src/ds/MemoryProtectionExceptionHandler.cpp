@@ -33,7 +33,9 @@
 
 namespace js {
 
-static mozilla::Atomic<bool> sProtectedRegionsInit(false);
+// Memory protection occurs at non-deterministic points when recording/replaying.
+static mozilla::Atomic<bool, mozilla::SequentiallyConsistent,
+                       mozilla::recordreplay::Behavior::DontPreserve> sProtectedRegionsInit(false);
 
 /*
  * A class to store the addresses of the regions recognized as protected
@@ -49,6 +51,10 @@ class ProtectedRegionTree
         Region(uintptr_t addr, size_t size) : first(addr),
                                               last(addr + (size - 1)) {}
 
+        // This function compares 2 memory regions. If they overlap they are
+        // considered as identical. This is used for querying if an address is
+        // included in a range, or if an address is already registered as a
+        // protected region.
         static int compare(const Region& A, const Region& B) {
             if (A.last < B.first)
                 return -1;
@@ -67,18 +73,14 @@ class ProtectedRegionTree
       : lock(mutexid::ProtectedRegionTree),
         // Here "false" is used to not use the memory protection mechanism of
         // LifoAlloc in order to prevent dead-locks.
-        alloc(4096, false),
+        alloc(4096),
         tree(&alloc)
     {
         sProtectedRegionsInit = true;
     }
 
     ~ProtectedRegionTree() {
-        // See Bug 1445619: Currently many users of the JS engine are leaking
-        // the world, unfortunately LifoAlloc owned by JSRuntimes have
-        // registered memory regions.
         sProtectedRegionsInit = false;
-        MOZ_ASSERT_IF(!JSRuntime::hasLiveRuntimes(), tree.empty());
     }
 
     void insert(uintptr_t addr, size_t size) {
@@ -189,6 +191,7 @@ VectoredExceptionHandler(EXCEPTION_POINTERS* ExceptionInfo)
             // Restore the previous handler. We're going to forward to it
             // anyway, and if we crash while doing so we don't want to hang.
             MOZ_ALWAYS_TRUE(RemoveVectoredExceptionHandler(sVectoredExceptionHandler));
+            sExceptionHandlerInstalled = false;
 
             // Get the address that the offending code tried to access.
             uintptr_t address = uintptr_t(ExceptionRecord->ExceptionInformation[1]);

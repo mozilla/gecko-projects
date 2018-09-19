@@ -24,17 +24,16 @@ add_task(async function() {
     ok(pageMenuSep && !pageMenuSep.hidden,
        "Page menu separator should be shown");
 
-    let testMenuSep = pageMenuSep.previousSibling;
+    let testMenuSep = pageMenuSep.previousElementSibling;
     ok(testMenuSep && !testMenuSep.hidden,
        "User-added menu separator should be shown");
 
-    let testMenuItem = testMenuSep.previousSibling;
+    let testMenuItem = testMenuSep.previousElementSibling;
     is(testMenuItem.label, "Test Context Menu Click", "Got context menu item");
 
     let promiseCtxMenuClick = ContentTask.spawn(aBrowser, null, async function() {
       await new Promise(resolve => {
-        let windowUtils = content.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDOMWindowUtils);
+        let windowUtils = content.windowUtils;
         let menuitem = content.document.getElementById("menuitem");
         menuitem.addEventListener("click", function() {
           Assert.ok(windowUtils.isHandlingUserInput,

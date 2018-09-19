@@ -6,12 +6,11 @@
  * Contributor: Igor Bukanov
  */
 
+#include "js/CompilationAndEvaluation.h"
 #include "jsapi-tests/tests.h"
 
 BEGIN_TEST(testGCOutOfMemory)
 {
-    JS::RootedValue root(cx);
-
     // Count the number of allocations until we hit OOM, and store it in 'max'.
     static const char source[] =
         "var max = 0; (function() {"
@@ -20,8 +19,11 @@ BEGIN_TEST(testGCOutOfMemory)
         "        array.push({});"
         "    array = []; array.push(0);"
         "})();";
+
     JS::CompileOptions opts(cx);
-    bool ok = JS::Evaluate(cx, opts, source, strlen(source), &root);
+
+    JS::RootedValue root(cx);
+    bool ok = JS::EvaluateUtf8(cx, opts, source, strlen(source), &root);
 
     /* Check that we get OOM. */
     CHECK(!ok);
@@ -56,8 +58,9 @@ virtual JSContext* createContext() override {
     // the nursery will start out with only a single chunk before triggering a
     // major GC.)
     JSContext* cx = JS_NewContext(1024 * 1024, 128 * 1024);
-    if (!cx)
+    if (!cx) {
         return nullptr;
+    }
     setNativeStackQuota(cx);
     return cx;
 }

@@ -37,6 +37,19 @@ class WebRenderFallbackData;
 class WebRenderLayerManager;
 class WebRenderGroupData;
 
+class WebRenderBackgroundData
+{
+public:
+  WebRenderBackgroundData(wr::LayoutRect aBounds, wr::ColorF aColor)
+    : mBounds(aBounds)
+    , mColor(aColor)
+  { }
+  void AddWebRenderCommands(wr::DisplayListBuilder& aBuilder);
+protected:
+  wr::LayoutRect mBounds;
+  wr::ColorF mColor;
+};
+
 class WebRenderUserData
 {
 public:
@@ -138,9 +151,8 @@ public:
 
 protected:
   void ClearImageKey();
-  void CreateExternalImageIfNeeded();
 
-  wr::MaybeExternalImageId mExternalImageId;
+  RefPtr<TextureClient> mTextureOfImage;
   Maybe<wr::ImageKey> mKey;
   RefPtr<ImageClient> mImageClient;
   Maybe<wr::PipelineId> mPipelineId;
@@ -165,6 +177,7 @@ public:
   void SetScale(gfx::Size aScale) { mScale = aScale; }
   gfx::Size GetScale() { return mScale; }
   bool IsInvalid() { return mInvalid; }
+  void SetFonts(const std::vector<RefPtr<gfx::ScaledFont>>& aFonts) { mFonts = aFonts; }
 
   RefPtr<BasicLayerManager> mBasicLayerManager;
   std::vector<RefPtr<gfx::SourceSurface>> mExternalSurfaces;
@@ -173,6 +186,7 @@ protected:
   nsRect mBounds;
   bool mInvalid;
   gfx::Size mScale;
+  std::vector<RefPtr<gfx::ScaledFont>> mFonts;
 };
 
 class WebRenderAnimationData : public WebRenderUserData

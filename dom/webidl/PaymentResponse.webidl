@@ -5,6 +5,9 @@
  *
  * The origin of this WebIDL file is
  *   https://www.w3.org/TR/payment-request/#paymentresponse-interface
+ *
+ * Copyright © 2018 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
+ * liability, trademark and document use rules apply.
  */
 
 enum PaymentComplete {
@@ -29,4 +32,8 @@ interface PaymentResponse {
 
   [NewObject]
   Promise<void> complete(optional PaymentComplete result = "unknown");
+
+  // If the dictionary argument has no required members, it must be optional.
+  [NewObject]
+  Promise<void> retry(optional PaymentValidationErrors errorFields);
 };

@@ -7,11 +7,13 @@ ChromeUtils.import("resource://gre/modules/GeckoViewContentModule.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  Services: "resource://gre/modules/Services.jsm",
-  SessionHistory: "resource://gre/modules/sessionstore/SessionHistory.jsm",
   FormData: "resource://gre/modules/FormData.jsm",
+  FormLikeFactory: "resource://gre/modules/FormLikeFactory.jsm",
+  GeckoViewAutoFill: "resource://gre/modules/GeckoViewAutoFill.jsm",
   PrivacyFilter: "resource://gre/modules/sessionstore/PrivacyFilter.jsm",
   ScrollPosition: "resource://gre/modules/ScrollPosition.jsm",
+  Services: "resource://gre/modules/Services.jsm",
+  SessionHistory: "resource://gre/modules/sessionstore/SessionHistory.jsm",
 });
 
 class GeckoViewContent extends GeckoViewContentModule {
@@ -34,6 +36,26 @@ class GeckoViewContent extends GeckoViewContentModule {
                                            this);
     this.messageManager.addMessageListener("GeckoView:ZoomToInput",
                                            this);
+    this.messageManager.addMessageListener("GeckoView:SetActive",
+                                           this);
+
+    const options = {
+        mozSystemGroup: true,
+        capture: false,
+    };
+    addEventListener("DOMFormHasPassword", this, options);
+    addEventListener("DOMInputPasswordAdded", this, options);
+    addEventListener("pagehide", this, options);
+    addEventListener("pageshow", this, options);
+    addEventListener("focusin", this, options);
+    addEventListener("focusout", this, options);
+    addEventListener("mozcaretstatechanged", this, options);
+
+    XPCOMUtils.defineLazyGetter(this, "_autoFill", () =>
+        new GeckoViewAutoFill(this.eventDispatcher));
+
+    // Notify WebExtension process script that this tab is ready for extension content to load.
+    Services.obs.notifyObservers(this.messageManager, "tab-content-frameloader-created");
   }
 
   onEnable() {
@@ -68,7 +90,7 @@ class GeckoViewContent extends GeckoViewContentModule {
 
     // Save the current document resolution.
     let zoom = { value: 1 };
-    let domWindowUtils = content.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+    let domWindowUtils = content.windowUtils;
     domWindowUtils.getResolution(zoom);
     scrolldata = scrolldata || {};
     scrolldata.zoom = {};
@@ -96,23 +118,20 @@ class GeckoViewContent extends GeckoViewContentModule {
     switch (aMsg.name) {
       case "GeckoView:DOMFullscreenEntered":
         if (content) {
-          content.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIDOMWindowUtils)
+          content.windowUtils
                  .handleFullscreenRequests();
         }
         break;
 
       case "GeckoView:DOMFullscreenExited":
         if (content) {
-          content.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIDOMWindowUtils)
+          content.windowUtils
                  .exitFullscreen();
         }
         break;
 
       case "GeckoView:ZoomToInput": {
-        let dwu = content.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIDOMWindowUtils);
+        let dwu = content.windowUtils;
 
         let zoomToFocusedInput = function() {
           if (!dwu.flushApzRepaints()) {
@@ -179,8 +198,20 @@ class GeckoViewContent extends GeckoViewContentModule {
         if (this._savedState.history) {
           let restoredHistory = SessionHistory.restore(docShell, this._savedState.history);
 
-          addEventListener("load", this, {capture: true, mozSystemGroup: true, once: true});
-          addEventListener("pageshow", this, {capture: true, mozSystemGroup: true, once: true});
+          addEventListener("load", _ => {
+            const formdata = this._savedState.formdata;
+            if (formdata) {
+              FormData.restoreTree(content, formdata);
+            }
+          }, {capture: true, mozSystemGroup: true, once: true});
+
+          addEventListener("pageshow", _ => {
+            const scrolldata = this._savedState.scrolldata;
+            if (scrolldata) {
+              ScrollPosition.restoreTree(content, scrolldata);
+            }
+            delete this._savedState;
+          }, {capture: true, mozSystemGroup: true, once: true});
 
           if (!this.progressFilter) {
             this.progressFilter =
@@ -197,9 +228,16 @@ class GeckoViewContent extends GeckoViewContentModule {
           restoredHistory.QueryInterface(Ci.nsISHistory).reloadCurrentEntry();
         }
         break;
+
+      case "GeckoView:SetActive":
+          if (content && aMsg.data.suspendMedia) {
+              content.windowUtils.mediaSuspend = aMsg.data.active ? Ci.nsISuspendedTypes.NONE_SUSPENDED : Ci.nsISuspendedTypes.SUSPENDED_PAUSE;
+          }
+        break;
     }
   }
 
+  // eslint-disable-next-line complexity
   handleEvent(aEvent) {
     debug `handleEvent: ${aEvent.type}`;
 
@@ -233,6 +271,17 @@ class GeckoViewContent extends GeckoViewContentModule {
           aEvent.preventDefault();
         }
         break;
+      case "DOMFormHasPassword":
+        this._autoFill.addElement(
+            FormLikeFactory.createFromForm(aEvent.composedTarget));
+        break;
+      case "DOMInputPasswordAdded": {
+        const input = aEvent.composedTarget;
+        if (!input.form) {
+          this._autoFill.addElement(FormLikeFactory.createFromField(input));
+        }
+        break;
+      }
       case "MozDOMFullscreen:Request":
         sendAsyncMessage("GeckoView:DOMFullscreenRequest");
         break;
@@ -269,21 +318,34 @@ class GeckoViewContent extends GeckoViewContentModule {
           type: "GeckoView:DOMWindowClose"
         });
         break;
-      case "load": {
-        const formdata = this._savedState.formdata;
-        if (formdata) {
-          FormData.restoreTree(content, formdata);
+      case "focusin":
+        if (aEvent.composedTarget instanceof content.HTMLInputElement) {
+          this._autoFill.onFocus(aEvent.composedTarget);
         }
         break;
-      }
-      case "pageshow": {
-        const scrolldata = this._savedState.scrolldata;
-        if (scrolldata) {
-          ScrollPosition.restoreTree(content, scrolldata);
+      case "focusout":
+        if (aEvent.composedTarget instanceof content.HTMLInputElement) {
+          this._autoFill.onFocus(null);
         }
-        delete this._savedState;
         break;
-      }
+      case "pagehide":
+        if (aEvent.target === content.document) {
+          this._autoFill.clearElements();
+        }
+        break;
+      case "pageshow":
+        if (aEvent.target === content.document && aEvent.persisted) {
+          this._autoFill.scanDocument(aEvent.target);
+        }
+        break;
+      case "mozcaretstatechanged":
+        if (aEvent.reason === "presscaret" || aEvent.reason === "releasecaret") {
+          this.eventDispatcher.sendRequest({
+            type: "GeckoView:PinOnScreen",
+            pinned: aEvent.reason === "presscaret",
+          });
+        }
+        break;
     }
   }
 
@@ -294,7 +356,7 @@ class GeckoViewContent extends GeckoViewContentModule {
     if (this._savedState) {
       const scrolldata = this._savedState.scrolldata;
       if (scrolldata && scrolldata.zoom && scrolldata.zoom.displaySize) {
-        let utils = content.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+        let utils = content.windowUtils;
         // Restore zoom level.
         utils.setRestoreResolution(scrolldata.zoom.resolution,
                                    scrolldata.zoom.displaySize.width,

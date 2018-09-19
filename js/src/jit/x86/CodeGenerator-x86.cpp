@@ -41,8 +41,9 @@ FrameSizeClass
 FrameSizeClass::FromDepth(uint32_t frameDepth)
 {
     for (uint32_t i = 0; i < mozilla::ArrayLength(FrameSizes); i++) {
-        if (frameDepth < FrameSizes[i])
+        if (frameDepth < FrameSizes[i]) {
             return FrameSizeClass(i);
+        }
     }
 
     return FrameSizeClass::None();
@@ -152,10 +153,11 @@ CodeGenerator::visitCompareB(LCompareB* lir)
     Label notBoolean, done;
     masm.branchTestBoolean(Assembler::NotEqual, lhs, &notBoolean);
     {
-        if (rhs->isConstant())
+        if (rhs->isConstant()) {
             masm.cmp32(lhs.payloadReg(), Imm32(rhs->toConstant()->toBoolean()));
-        else
+        } else {
             masm.cmp32(lhs.payloadReg(), ToRegister(rhs));
+        }
         masm.emitSet(JSOpToCondition(mir->compareType(), mir->jsop()), output);
         masm.jump(&done);
     }
@@ -179,10 +181,11 @@ CodeGenerator::visitCompareBAndBranch(LCompareBAndBranch* lir)
     Assembler::Condition cond = masm.testBoolean(Assembler::NotEqual, lhs);
     jumpToBlock((mir->jsop() == JSOP_STRICTEQ) ? lir->ifFalse() : lir->ifTrue(), cond);
 
-    if (rhs->isConstant())
+    if (rhs->isConstant()) {
         masm.cmp32(lhs.payloadReg(), Imm32(rhs->toConstant()->toBoolean()));
-    else
+    } else {
         masm.cmp32(lhs.payloadReg(), ToRegister(rhs));
+    }
     emitBranch(JSOpToCondition(mir->compareType(), mir->jsop()), lir->ifTrue(), lir->ifFalse());
 }
 
@@ -238,8 +241,9 @@ CodeGenerator::visitWasmUint32ToDouble(LWasmUint32ToDouble* lir)
     Register input = ToRegister(lir->input());
     Register temp = ToRegister(lir->temp());
 
-    if (input != temp)
+    if (input != temp) {
         masm.mov(input, temp);
+    }
 
     // Beware: convertUInt32ToDouble clobbers input.
     masm.convertUInt32ToDouble(temp, ToFloatRegister(lir->output()));
@@ -252,8 +256,9 @@ CodeGenerator::visitWasmUint32ToFloat32(LWasmUint32ToFloat32* lir)
     Register temp = ToRegister(lir->temp());
     FloatRegister output = ToFloatRegister(lir->output());
 
-    if (input != temp)
+    if (input != temp) {
         masm.mov(input, temp);
+    }
 
     // Beware: convertUInt32ToFloat32 clobbers input.
     masm.convertUInt32ToFloat32(temp, output);
@@ -350,7 +355,6 @@ CodeGenerator::visitAsmJSLoadHeap(LAsmJSLoadHeap* ins)
     AnyRegister out = ToAnyRegister(ins->output());
 
     Scalar::Type accessType = mir->accessType();
-    MOZ_ASSERT(!Scalar::isSimdType(accessType));
 
     OutOfLineLoadTypedArrayOutOfBounds* ool = nullptr;
     if (mir->needsBoundsCheck()) {
@@ -367,8 +371,9 @@ CodeGenerator::visitAsmJSLoadHeap(LAsmJSLoadHeap* ins)
 
     masm.wasmLoad(mir->access(), srcAddr, out);
 
-    if (ool)
+    if (ool) {
         masm.bind(ool->rejoin());
+    }
 }
 
 void
@@ -383,7 +388,6 @@ CodeGenerator::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
     const LAllocation* memoryBase = ins->memoryBase();
 
     Scalar::Type accessType = mir->accessType();
-    MOZ_ASSERT(!Scalar::isSimdType(accessType));
     canonicalizeIfDeterministic(accessType, value);
 
     Operand dstAddr = ptr->isBogus()
@@ -398,8 +402,9 @@ CodeGenerator::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
 
     masm.wasmStore(mir->access(), ToAnyRegister(value), dstAddr);
 
-    if (rejoin.used())
+    if (rejoin.used()) {
         masm.bind(&rejoin);
+    }
 }
 
 void
@@ -407,7 +412,6 @@ CodeGenerator::visitWasmCompareExchangeHeap(LWasmCompareExchangeHeap* ins)
 {
     MWasmCompareExchangeHeap* mir = ins->mir();
 
-    Scalar::Type accessType = mir->access().type();
     Register ptrReg = ToRegister(ins->ptr());
     Register oldval = ToRegister(ins->oldValue());
     Register newval = ToRegister(ins->newValue());
@@ -418,7 +422,7 @@ CodeGenerator::visitWasmCompareExchangeHeap(LWasmCompareExchangeHeap* ins)
     masm.leal(Operand(memoryBase, ptrReg, TimesOne, mir->access().offset()), addrTemp);
 
     Address memAddr(addrTemp, 0);
-    masm.compareExchange(accessType, Synchronization::Full(), memAddr, oldval, newval, output);
+    masm.wasmCompareExchange(mir->access(), memAddr, oldval, newval, output);
 }
 
 void
@@ -426,7 +430,6 @@ CodeGenerator::visitWasmAtomicExchangeHeap(LWasmAtomicExchangeHeap* ins)
 {
     MWasmAtomicExchangeHeap* mir = ins->mir();
 
-    Scalar::Type accessType = mir->access().type();
     Register ptrReg = ToRegister(ins->ptr());
     Register value = ToRegister(ins->value());
     Register addrTemp = ToRegister(ins->addrTemp());
@@ -436,7 +439,7 @@ CodeGenerator::visitWasmAtomicExchangeHeap(LWasmAtomicExchangeHeap* ins)
     masm.leal(Operand(memoryBase, ptrReg, TimesOne, mir->access().offset()), addrTemp);
 
     Address memAddr(addrTemp, 0);
-    masm.atomicExchange(accessType, Synchronization::Full(), memAddr, value, output);
+    masm.wasmAtomicExchange(mir->access(), memAddr, value, output);
 }
 
 void
@@ -444,7 +447,6 @@ CodeGenerator::visitWasmAtomicBinopHeap(LWasmAtomicBinopHeap* ins)
 {
     MWasmAtomicBinopHeap* mir = ins->mir();
 
-    Scalar::Type accessType = mir->access().type();
     Register ptrReg = ToRegister(ins->ptr());
     Register temp = ins->temp()->isBogusTemp() ? InvalidReg : ToRegister(ins->temp());
     Register addrTemp = ToRegister(ins->addrTemp());
@@ -457,11 +459,9 @@ CodeGenerator::visitWasmAtomicBinopHeap(LWasmAtomicBinopHeap* ins)
 
     Address memAddr(addrTemp, 0);
     if (value->isConstant()) {
-        masm.atomicFetchOp(accessType, Synchronization::Full(), op, Imm32(ToInt32(value)),
-                           memAddr, temp, out);
+        masm.wasmAtomicFetchOp(mir->access(), op, Imm32(ToInt32(value)), memAddr, temp, out);
     } else {
-        masm.atomicFetchOp(accessType, Synchronization::Full(), op, ToRegister(value),
-                           memAddr, temp, out);
+        masm.wasmAtomicFetchOp(mir->access(), op, ToRegister(value), memAddr, temp, out);
     }
 }
 
@@ -471,7 +471,6 @@ CodeGenerator::visitWasmAtomicBinopHeapForEffect(LWasmAtomicBinopHeapForEffect* 
     MWasmAtomicBinopHeap* mir = ins->mir();
     MOZ_ASSERT(!mir->hasUses());
 
-    Scalar::Type accessType = mir->access().type();
     Register ptrReg = ToRegister(ins->ptr());
     Register addrTemp = ToRegister(ins->addrTemp());
     const LAllocation* value = ins->value();
@@ -482,11 +481,9 @@ CodeGenerator::visitWasmAtomicBinopHeapForEffect(LWasmAtomicBinopHeapForEffect* 
 
     Address memAddr(addrTemp, 0);
     if (value->isConstant()) {
-        masm.atomicEffectOp(accessType, Synchronization::Full(), op, Imm32(ToInt32(value)), memAddr,
-                            InvalidReg);
+        masm.wasmAtomicEffectOp(mir->access(), op, Imm32(ToInt32(value)), memAddr, InvalidReg);
     } else {
-        masm.atomicEffectOp(accessType, Synchronization::Full(), op, ToRegister(value), memAddr,
-                            InvalidReg);
+        masm.wasmAtomicEffectOp(mir->access(), op, ToRegister(value), memAddr, InvalidReg);
     }
 }
 
@@ -498,19 +495,15 @@ CodeGenerator::visitWasmAtomicLoadI64(LWasmAtomicLoadI64* ins)
 
     const LAllocation* memoryBase = ins->memoryBase();
     const LAllocation* ptr = ins->ptr();
-    Operand srcAddr(ToRegister(memoryBase), ToRegister(ptr), TimesOne, offset);
+    BaseIndex srcAddr(ToRegister(memoryBase), ToRegister(ptr), TimesOne, offset);
 
     MOZ_ASSERT(ToRegister(ins->t1()) == ecx);
     MOZ_ASSERT(ToRegister(ins->t2()) == ebx);
     MOZ_ASSERT(ToOutRegister64(ins).high == edx);
     MOZ_ASSERT(ToOutRegister64(ins).low == eax);
 
-    // We must have the same values in ecx:ebx and edx:eax, but we don't care
-    // what they are.  It's safe to clobber ecx:ebx for sure because they are
-    // fixed temp registers.
-    masm.movl(eax, ebx);
-    masm.movl(edx, ecx);
-    masm.lock_cmpxchg8b(edx, eax, ecx, ebx, srcAddr);
+    masm.wasmAtomicLoad64(ins->mir()->access(), srcAddr, Register64(ecx,ebx),
+                          Register64(edx,eax));
 }
 
 void
@@ -530,18 +523,19 @@ CodeGenerator::visitWasmCompareExchangeI64(LWasmCompareExchangeI64* ins)
     MOZ_ASSERT(ToOutRegister64(ins).low == eax);
     MOZ_ASSERT(ToOutRegister64(ins).high == edx);
 
+    masm.append(ins->mir()->access(), masm.size());
     masm.lock_cmpxchg8b(edx, eax, ecx, ebx, srcAddr);
 }
 
 template<typename T>
 void
-CodeGeneratorX86::emitWasmStoreOrExchangeAtomicI64(T* ins, uint32_t offset)
+CodeGeneratorX86::emitWasmStoreOrExchangeAtomicI64(T* ins, const wasm::MemoryAccessDesc& access)
 {
-    MOZ_ASSERT(offset < wasm::OffsetGuardLimit);
+    MOZ_ASSERT(access.offset() < wasm::OffsetGuardLimit);
 
     const LAllocation* memoryBase = ins->memoryBase();
     const LAllocation* ptr = ins->ptr();
-    Operand srcAddr(ToRegister(memoryBase), ToRegister(ptr), TimesOne, offset);
+    Operand srcAddr(ToRegister(memoryBase), ToRegister(ptr), TimesOne, access.offset());
 
     DebugOnly<const LInt64Allocation> value = ins->value();
     MOZ_ASSERT(ToRegister64(value).low == ebx);
@@ -555,6 +549,7 @@ CodeGeneratorX86::emitWasmStoreOrExchangeAtomicI64(T* ins, uint32_t offset)
 
     Label again;
     masm.bind(&again);
+    masm.append(access, masm.size());
     masm.lock_cmpxchg8b(edx, eax, ecx, ebx, srcAddr);
     masm.j(Assembler::Condition::NonZero, &again);
 }
@@ -565,7 +560,7 @@ CodeGenerator::visitWasmAtomicStoreI64(LWasmAtomicStoreI64* ins)
     MOZ_ASSERT(ToRegister(ins->t1()) == edx);
     MOZ_ASSERT(ToRegister(ins->t2()) == eax);
 
-    emitWasmStoreOrExchangeAtomicI64(ins, ins->mir()->access().offset());
+    emitWasmStoreOrExchangeAtomicI64(ins, ins->mir()->access());
 }
 
 void
@@ -574,7 +569,7 @@ CodeGenerator::visitWasmAtomicExchangeI64(LWasmAtomicExchangeI64* ins)
     MOZ_ASSERT(ToOutRegister64(ins).high == edx);
     MOZ_ASSERT(ToOutRegister64(ins).low == eax);
 
-    emitWasmStoreOrExchangeAtomicI64(ins, ins->access().offset());
+    emitWasmStoreOrExchangeAtomicI64(ins, ins->access());
 }
 
 void
@@ -607,7 +602,7 @@ CodeGenerator::visitWasmAtomicBinopI64(LWasmAtomicBinopI64* ins)
     Address valueAddr(esp, 0);
 
     // Here the `value` register acts as a temp, we'll restore it below.
-    masm.atomicFetchOp64(Synchronization::Full(), ins->operation(), valueAddr, srcAddr, value, output);
+    masm.wasmAtomicFetchOp64(ins->access(), ins->operation(), valueAddr, srcAddr, value, output);
 
     masm.Pop(ebx);
     masm.Pop(ecx);
@@ -832,10 +827,11 @@ CodeGeneratorX86::visitOutOfLineTruncateFloat32(OutOfLineTruncateFloat32* ool)
 
         masm.Push(input);
 
-        if (gen->compilingWasm())
+        if (gen->compilingWasm()) {
             masm.setupWasmABICall();
-        else
+        } else {
             masm.setupUnalignedABICall(output);
+        }
 
         masm.vcvtss2sd(input, input, input);
         masm.passABIArg(input.asDouble(), MoveOp::DOUBLE);
@@ -947,10 +943,11 @@ CodeGenerator::visitDivOrModI64(LDivOrModI64* lir)
         Label notOverflow;
         masm.branch64(Assembler::NotEqual, lhs, Imm64(INT64_MIN), &notOverflow);
         masm.branch64(Assembler::NotEqual, rhs, Imm64(-1), &notOverflow);
-        if (mir->isMod())
+        if (mir->isMod()) {
             masm.xor64(output, output);
-        else
+        } else {
             masm.wasmTrap(wasm::Trap::IntegerOverflow, lir->bytecodeOffset());
+        }
         masm.jump(&done);
         masm.bind(&notOverflow);
     }
@@ -962,10 +959,11 @@ CodeGenerator::visitDivOrModI64(LDivOrModI64* lir)
     masm.passABIArg(rhs.low);
 
     MOZ_ASSERT(gen->compilingWasm());
-    if (mir->isMod())
+    if (mir->isMod()) {
         masm.callWithABI(lir->bytecodeOffset(), wasm::SymbolicAddress::ModI64);
-    else
+    } else {
         masm.callWithABI(lir->bytecodeOffset(), wasm::SymbolicAddress::DivI64);
+    }
 
     // output in edx:eax, move to output register.
     masm.movl(edx, output.high);
@@ -1000,10 +998,11 @@ CodeGenerator::visitUDivOrModI64(LUDivOrModI64* lir)
 
     MOZ_ASSERT(gen->compilingWasm());
     MDefinition* mir = lir->mir();
-    if (mir->isMod())
+    if (mir->isMod()) {
         masm.callWithABI(lir->bytecodeOffset(), wasm::SymbolicAddress::UModI64);
-    else
+    } else {
         masm.callWithABI(lir->bytecodeOffset(), wasm::SymbolicAddress::UDivI64);
+    }
 
     // output in edx:eax, move to output register.
     masm.movl(edx, output.high);
@@ -1061,8 +1060,9 @@ CodeGenerator::visitExtendInt32ToInt64(LExtendInt32ToInt64* lir)
     Register input = ToRegister(lir->input());
 
     if (lir->mir()->isUnsigned()) {
-        if (output.low != input)
+        if (output.low != input) {
             masm.movl(input, output.low);
+        }
         masm.xorl(output.high, output.high);
     } else {
         MOZ_ASSERT(output.low == input);
@@ -1102,10 +1102,11 @@ CodeGenerator::visitWrapInt64ToInt32(LWrapInt64ToInt32* lir)
     const LInt64Allocation& input = lir->getInt64Operand(0);
     Register output = ToRegister(lir->output());
 
-    if (lir->mir()->bottomHalf())
+    if (lir->mir()->bottomHalf()) {
         masm.movl(ToRegister(input.low()), output);
-    else
+    } else {
         masm.movl(ToRegister(input.high()), output);
+    }
 }
 
 void
@@ -1165,19 +1166,21 @@ CodeGenerator::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir)
 
     bool isSaturating = mir->isSaturating();
     if (mir->input()->type() == MIRType::Float32) {
-        if (mir->isUnsigned())
+        if (mir->isUnsigned()) {
             masm.wasmTruncateFloat32ToUInt64(input, output, isSaturating,
                                              ool->entry(), ool->rejoin(), floatTemp);
-        else
+        } else {
             masm.wasmTruncateFloat32ToInt64(input, output, isSaturating,
                                             ool->entry(), ool->rejoin(), floatTemp);
+        }
     } else {
-        if (mir->isUnsigned())
+        if (mir->isUnsigned()) {
             masm.wasmTruncateDoubleToUInt64(input, output, isSaturating,
                                             ool->entry(), ool->rejoin(), floatTemp);
-        else
+        } else {
             masm.wasmTruncateDoubleToInt64(input, output, isSaturating,
                                            ool->entry(), ool->rejoin(), floatTemp);
+        }
     }
 }
 
@@ -1192,15 +1195,17 @@ CodeGenerator::visitInt64ToFloatingPoint(LInt64ToFloatingPoint* lir)
     MOZ_ASSERT(outputType == MIRType::Double || outputType == MIRType::Float32);
 
     if (outputType == MIRType::Double) {
-        if (lir->mir()->isUnsigned())
+        if (lir->mir()->isUnsigned()) {
             masm.convertUInt64ToDouble(input, output, temp);
-        else
+        } else {
             masm.convertInt64ToDouble(input, output);
+        }
     } else {
-        if (lir->mir()->isUnsigned())
+        if (lir->mir()->isUnsigned()) {
             masm.convertUInt64ToFloat32(input, output, temp);
-        else
+        } else {
             masm.convertInt64ToFloat32(input, output);
+        }
     }
 }
 

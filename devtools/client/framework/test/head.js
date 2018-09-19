@@ -56,18 +56,18 @@ function getSourceActor(aSources, aURL) {
  *         The new window object that holds Scratchpad.
  */
 async function openScratchpadWindow() {
-  const { promise: p, resolve } = defer();
   const win = ScratchpadManager.openScratchpad();
 
   await once(win, "load");
 
-  win.Scratchpad.addObserver({
-    onReady: function() {
-      win.Scratchpad.removeObserver(this);
-      resolve(win);
-    }
+  return new Promise(resolve => {
+    win.Scratchpad.addObserver({
+      onReady: function() {
+        win.Scratchpad.removeObserver(this);
+        resolve(win);
+      }
+    });
   });
-  return p;
 }
 
 /**
@@ -82,12 +82,12 @@ function waitForContentMessage(name) {
 
   const mm = gBrowser.selectedBrowser.messageManager;
 
-  const def = defer();
-  mm.addMessageListener(name, function onMessage(msg) {
-    mm.removeMessageListener(name, onMessage);
-    def.resolve(msg.data);
+  return new Promise(resolve => {
+    mm.addMessageListener(name, function onMessage(msg) {
+      mm.removeMessageListener(name, onMessage);
+      resolve(msg.data);
+    });
   });
-  return def.promise;
 }
 
 /**
@@ -207,15 +207,13 @@ function DevToolPanel(iframeWindow, toolbox) {
 
 DevToolPanel.prototype = {
   open: function() {
-    const deferred = defer();
-
-    executeSoon(() => {
-      this._isReady = true;
-      this.emit("ready");
-      deferred.resolve(this);
+    return new Promise(resolve => {
+      executeSoon(() => {
+        this._isReady = true;
+        this.emit("ready");
+        resolve(this);
+      });
     });
-
-    return deferred.promise;
   },
 
   get document() {
@@ -237,7 +235,7 @@ DevToolPanel.prototype = {
   _isReady: false,
 
   destroy: function() {
-    return defer(null);
+    return Promise.resolve(null);
   },
 };
 
@@ -253,13 +251,24 @@ async function openChevronMenu(toolbox) {
   const chevronMenuButton = toolbox.doc.querySelector(".tools-chevron-menu");
   EventUtils.synthesizeMouseAtCenter(chevronMenuButton, {}, toolbox.win);
 
-  const menuPopup = toolbox.doc.querySelector("#tools-chevron-menupopup");
+  const menuPopup = toolbox.doc.getElementById("tools-chevron-menu-button-panel");
   ok(menuPopup, "tools-chevron-menupopup is available");
 
   info("Waiting for the menu popup to be displayed");
-  await waitUntil(() => menuPopup && menuPopup.state === "open");
+  await waitUntil(() => menuPopup.classList.contains("tooltip-visible"));
+}
 
-  return menuPopup;
+async function closeChevronMenu(toolbox) {
+  // In order to close the popup menu with escape key, set the focus to the chevron
+  // button at first.
+  const chevronMenuButton = toolbox.doc.querySelector(".tools-chevron-menu");
+  chevronMenuButton.focus();
+
+  EventUtils.sendKey("ESCAPE", toolbox.doc.defaultView);
+  const menuPopup = toolbox.doc.getElementById("tools-chevron-menu-button-panel");
+
+  info("Closing the chevron popup menu");
+  await waitUntil(() => !menuPopup.classList.contains("tooltip-visible"));
 }
 
 function prepareToolTabReorderTest(toolbox, startingOrder) {
@@ -268,8 +277,7 @@ function prepareToolTabReorderTest(toolbox, startingOrder) {
      "The size of the screen being too small");
 
   for (const id of startingOrder) {
-    ok(getElementByToolIdOrExtensionIdOrSelector(toolbox, id),
-       `Tab element should exist for ${ id }`);
+    ok(getElementByToolId(toolbox, id), `Tab element should exist for ${ id }`);
   }
 }
 
@@ -332,15 +340,20 @@ function assertToolTabPreferenceOrder(expectedOrder) {
      "The preference should be correct");
 }
 
-function getElementByToolIdOrExtensionIdOrSelector(toolbox, idOrSelector) {
+function getElementByToolId(toolbox, id) {
   for (const tabEl of toolbox.doc.querySelectorAll(".devtools-tab")) {
-    if (tabEl.dataset.id === idOrSelector ||
-        tabEl.dataset.extensionId === idOrSelector) {
+    if (tabEl.dataset.id === id ||
+        tabEl.dataset.extensionId === id) {
       return tabEl;
     }
   }
 
-  return toolbox.doc.querySelector(idOrSelector);
+  return null;
+}
+
+function getElementByToolIdOrExtensionIdOrSelector(toolbox, idOrSelector) {
+  const tabEl = getElementByToolId(toolbox, idOrSelector);
+  return tabEl ? tabEl : toolbox.doc.querySelector(idOrSelector);
 }
 
 function getWindow(toolbox) {
@@ -357,4 +370,12 @@ async function resizeWindow(toolbox, width, height) {
   const onResize = once(hostWindow, "resize");
   hostWindow.resizeTo(toWidth, toHeight);
   await onResize;
+}
+
+function assertSelectedLocationInDebugger(debuggerPanel, line, column) {
+  const location = debuggerPanel._selectors.getSelectedLocation(
+    debuggerPanel._getState()
+  );
+  is(location.line, line);
+  is(location.column, column);
 }

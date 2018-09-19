@@ -22,7 +22,6 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using js::GetGlobalForObjectCrossCompartment;
 using js::AssertSameCompartment;
 
 nsresult
@@ -82,10 +81,10 @@ nsXBLProtoImpl::InstallImplementation(nsXBLPrototypeBinding* aPrototypeBinding,
   // First, start by entering the realm of the XBL scope. This may or may
   // not be the same realm as globalObject.
   JS::Rooted<JSObject*> globalObject(cx,
-    GetGlobalForObjectCrossCompartment(targetClassObject));
+    JS::GetNonCCWObjectGlobal(targetClassObject));
   JS::Rooted<JSObject*> scopeObject(cx, xpc::GetXBLScopeOrGlobal(cx, globalObject));
   NS_ENSURE_TRUE(scopeObject, NS_ERROR_OUT_OF_MEMORY);
-  MOZ_ASSERT(js::GetGlobalForObjectCrossCompartment(scopeObject) == scopeObject);
+  MOZ_ASSERT(JS_IsGlobalObject(scopeObject));
   JSAutoRealm ar(cx, scopeObject);
 
   // Determine the appropriate property holder.
@@ -208,14 +207,19 @@ nsXBLProtoImpl::InitTargetObjects(nsXBLPrototypeBinding* aBinding,
   JSAutoRealm ar(cx, global);
   // Make sure the interface object is created before the prototype object
   // so that XULElement is hidden from content. See bug 909340.
-  bool defineOnGlobal = dom::XULElementBinding::ConstructorEnabled(cx, global);
-  dom::XULElementBinding::GetConstructorObjectHandle(cx, defineOnGlobal);
+  bool defineOnGlobal = dom::XULElement_Binding::ConstructorEnabled(cx, global);
+  dom::XULElement_Binding::GetConstructorObjectHandle(cx, defineOnGlobal);
 
   rv = nsContentUtils::WrapNative(cx, aBoundElement, &v,
                                   /* aAllowWrapping = */ false);
   NS_ENSURE_SUCCESS(rv, rv);
 
   JS::Rooted<JSObject*> value(cx, &v.toObject());
+
+  // We passed aAllowWrapping = false to nsContentUtils::WrapNative so we
+  // should not have a wrapper.
+  MOZ_ASSERT(!js::IsWrapper(value));
+
   JSAutoRealm ar2(cx, value);
 
   // All of the above code was just obtaining the bound element's script object and its immediate
@@ -330,7 +334,6 @@ nsXBLProtoImpl::ResolveAllFields(JSContext *cx, JS::Handle<JSObject*> obj) const
 void
 nsXBLProtoImpl::UndefineFields(JSContext *cx, JS::Handle<JSObject*> obj) const
 {
-  JSAutoRequest ar(cx);
   for (nsXBLProtoImplField* f = mFields; f; f = f->GetNext()) {
     nsDependentString name(f->GetName());
 

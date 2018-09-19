@@ -739,7 +739,7 @@ nsMathMLContainerFrame::AppendFrames(ChildListID     aListID,
 {
   MOZ_ASSERT(aListID == kPrincipalList);
   mFrames.AppendFrames(this, aFrameList);
-  ChildListChanged(dom::MutationEventBinding::ADDITION);
+  ChildListChanged(dom::MutationEvent_Binding::ADDITION);
 }
 
 void
@@ -749,7 +749,7 @@ nsMathMLContainerFrame::InsertFrames(ChildListID     aListID,
 {
   MOZ_ASSERT(aListID == kPrincipalList);
   mFrames.InsertFrames(this, aPrevFrame, aFrameList);
-  ChildListChanged(dom::MutationEventBinding::ADDITION);
+  ChildListChanged(dom::MutationEvent_Binding::ADDITION);
 }
 
 void
@@ -758,7 +758,7 @@ nsMathMLContainerFrame::RemoveFrame(ChildListID     aListID,
 {
   MOZ_ASSERT(aListID == kPrincipalList);
   mFrames.DestroyFrame(aOldFrame);
-  ChildListChanged(dom::MutationEventBinding::REMOVAL);
+  ChildListChanged(dom::MutationEvent_Binding::REMOVAL);
 }
 
 nsresult
@@ -977,7 +977,7 @@ nsMathMLContainerFrame::UpdateIntrinsicWidth(gfxContext* aRenderingContext)
 nsMathMLContainerFrame::GetMinISize(gfxContext* aRenderingContext)
 {
   nscoord result;
-  DISPLAY_MIN_WIDTH(this, result);
+  DISPLAY_MIN_INLINE_SIZE(this, result);
   UpdateIntrinsicWidth(aRenderingContext);
   result = mIntrinsicWidth;
   return result;
@@ -987,7 +987,7 @@ nsMathMLContainerFrame::GetMinISize(gfxContext* aRenderingContext)
 nsMathMLContainerFrame::GetPrefISize(gfxContext* aRenderingContext)
 {
   nscoord result;
-  DISPLAY_PREF_WIDTH(this, result);
+  DISPLAY_PREF_INLINE_SIZE(this, result);
   UpdateIntrinsicWidth(aRenderingContext);
   result = mIntrinsicWidth;
   return result;
@@ -1347,7 +1347,7 @@ GetInterFrameSpacingFor(int32_t         aScriptLevel,
     childFrame = childFrame->GetNextSibling();
   }
 
-  NS_NOTREACHED("child not in the childlist of its parent");
+  MOZ_ASSERT_UNREACHABLE("child not in the childlist of its parent");
   return 0;
 }
 

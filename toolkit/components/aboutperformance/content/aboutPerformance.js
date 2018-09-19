@@ -9,8 +9,9 @@
 const { PerformanceStats } = ChromeUtils.import("resource://gre/modules/PerformanceStats.jsm", {});
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
 const { ObjectUtils } = ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm", {});
-const { Memory } = ChromeUtils.import("resource://gre/modules/Memory.jsm", {});
-const { DownloadUtils } = ChromeUtils.import("resource://gre/modules/DownloadUtils.jsm", {});
+const { ExtensionParent } = ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm", {});
+
+const {WebExtensionPolicy} = Cu.getGlobalForObject(Services);
 
 // about:performance observes notifications on this topic.
 // if a notification is sent, this causes the page to be updated immediately,
@@ -28,7 +29,7 @@ const BUFFER_SAMPLING_RATE_MS = 1000;
 const BUFFER_DURATION_MS = 10000;
 
 // How often we should update
-const UPDATE_INTERVAL_MS = 5000;
+const UPDATE_INTERVAL_MS = 2000;
 
 // The name of the application
 const BRAND_BUNDLE = Services.strings.createBundle(
@@ -66,18 +67,31 @@ const MIN_PROPORTION_FOR_NOTICEABLE_IMPACT = .1;
 const MODE_GLOBAL = "global";
 const MODE_RECENT = "recent";
 
+// Decide if we show the old style about:performance or if we can show data
+// based on the new performance counters.
+function performanceCountersEnabled() {
+  return Services.prefs.getBoolPref("dom.performance.enable_scheduler_timing", false);
+}
+
+function extensionCountersEnabled() {
+  return Services.prefs.getBoolPref("extensions.webextensions.enablePerformanceCounters", false);
+}
+
 let tabFinder = {
   update() {
     this._map = new Map();
-    let windows = Services.wm.getEnumerator("navigator:browser");
-    while (windows.hasMoreElements()) {
-      let win = windows.getNext();
+    for (let win of Services.wm.getEnumerator("navigator:browser")) {
       let tabbrowser = win.gBrowser;
       for (let browser of tabbrowser.browsers) {
         let id = browser.outerWindowID; // May be `null` if the browser isn't loaded yet
         if (id != null) {
           this._map.set(id, browser);
         }
+      }
+      if (tabbrowser._preloadedBrowser) {
+        let browser = tabbrowser._preloadedBrowser;
+        if (browser.outerWindowID)
+          this._map.set(browser.outerWindowID, browser);
       }
     }
   },
@@ -98,6 +112,10 @@ let tabFinder = {
       return null;
     }
     let tabbrowser = browser.getTabBrowser();
+    if (!tabbrowser)
+      return {tabbrowser: null,
+              tab: {getAttribute() { return ""; },
+                    linkedBrowser: browser}};
     return {tabbrowser, tab: tabbrowser.getTabForBrowser(browser)};
   },
 
@@ -109,7 +127,7 @@ let tabFinder = {
       }
     }
     return null;
-  }
+  },
 };
 
 /**
@@ -273,7 +291,7 @@ Delta.prototype = {
   },
   toString() {
     return `[Delta] ${this.diff.key} => ${this.readableName}, ${this.fullName}`;
-  }
+  },
 };
 
 Delta.compare = function(a, b) {
@@ -302,12 +320,12 @@ Delta.MAX_DELTA_FOR_GOOD_RECENT_PERFORMANCE = {
     jank: {
       longestDuration: 3,
       totalUserTime: Number.POSITIVE_INFINITY,
-      totalSystemTime: Number.POSITIVE_INFINITY
+      totalSystemTime: Number.POSITIVE_INFINITY,
     },
     ticks: {
       ticks: Number.POSITIVE_INFINITY,
-    }
-  }
+    },
+  },
 };
 
 /**
@@ -321,12 +339,12 @@ Delta.MAX_DELTA_FOR_AVERAGE_RECENT_PERFORMANCE = {
     jank: {
       longestDuration: 7,
       totalUserTime: Number.POSITIVE_INFINITY,
-      totalSystemTime: Number.POSITIVE_INFINITY
+      totalSystemTime: Number.POSITIVE_INFINITY,
     },
     ticks: {
       ticks: Number.POSITIVE_INFINITY,
-    }
-  }
+    },
+  },
 };
 
 /**
@@ -382,6 +400,73 @@ var State = {
    */
   _firstSeen: new Map(),
 
+  async _promiseSnapshot() {
+    if (!performanceCountersEnabled()) {
+      return this._monitor.promiseSnapshot();
+    }
+
+    let addons = WebExtensionPolicy.getActiveExtensions();
+    let addonHosts = new Map();
+    for (let addon of addons)
+      addonHosts.set(addon.mozExtensionHostname, addon.id);
+
+    let counters = await ChromeUtils.requestPerformanceMetrics();
+    let tabs = {};
+    for (let counter of counters) {
+      let {items, host, pid, counterId, windowId, duration, isWorker,
+           isTopLevel} = counter;
+      // If a worker has a windowId of 0 or max uint64, attach it to the
+      // browser UI (doc group with id 1).
+      if (isWorker && (windowId == 18446744073709552000 || !windowId))
+        windowId = 1;
+      let dispatchCount = 0;
+      for (let {count} of items) {
+        dispatchCount += count;
+      }
+
+      let tab;
+      let id = windowId;
+      if (addonHosts.has(host)) {
+        id = addonHosts.get(host);
+      }
+      if (id in tabs) {
+        tab = tabs[id];
+      } else {
+        tab = {windowId, host, dispatchCount: 0, duration: 0, children: []};
+        tabs[id] = tab;
+      }
+      tab.dispatchCount += dispatchCount;
+      tab.duration += duration;
+      if (!isTopLevel || isWorker) {
+        tab.children.push({host, isWorker, dispatchCount, duration,
+                           counterId: pid + ":" + counterId});
+      }
+    }
+
+    if (extensionCountersEnabled()) {
+      let extCounters = await ExtensionParent.ParentAPIManager.retrievePerformanceCounters();
+      for (let [id, apiMap] of extCounters) {
+        let dispatchCount = 0, duration = 0;
+        for (let [, counter] of apiMap) {
+          dispatchCount += counter.calls;
+          duration += counter.duration;
+        }
+
+        let tab;
+        if (id in tabs) {
+          tab = tabs[id];
+        } else {
+          tab = {windowId: 0, host: id, dispatchCount: 0, duration: 0, children: []};
+          tabs[id] = tab;
+        }
+        tab.dispatchCount += dispatchCount;
+        tab.duration += duration;
+      }
+    }
+
+    return {tabs, date: Cu.now()};
+  },
+
   /**
    * Update the internal state.
    *
@@ -393,7 +478,7 @@ var State = {
       if (this._oldest) {
         throw new Error("Internal Error, we shouldn't have a `_oldest` value yet.");
       }
-      this._latest = this._oldest = await this._monitor.promiseSnapshot();
+      this._latest = this._oldest = await this._promiseSnapshot();
       this._buffer.push(this._oldest);
       await wait(BUFFER_SAMPLING_RATE_MS * 1.1);
     }
@@ -405,7 +490,7 @@ var State = {
     let latestInBuffer = this._buffer[this._buffer.length - 1];
     let deltaT = now - latestInBuffer.date;
     if (deltaT > BUFFER_SAMPLING_RATE_MS) {
-      this._latest = await this._monitor.promiseSnapshot();
+      this._latest = await this._promiseSnapshot();
       this._buffer.push(this._latest);
     }
 
@@ -460,7 +545,7 @@ var State = {
     let result = {
       webpages: [],
       deltas: new Set(),
-      duration: current.date - oldest.date
+      duration: current.date - oldest.date,
     };
 
     for (let kind of ["webpages"]) {
@@ -484,6 +569,134 @@ var State = {
     this._firstSeen = cleanedUpFirstSeen;
     this._alerts = cleanedUpAlerts;
     return result;
+  },
+
+  // We can only know asynchronously if an origin is matched by the tracking
+  // protection list, so we cache the result for faster future lookups.
+  _trackingState: new Map(),
+  isTracker(host) {
+    if (!this._trackingState.has(host)) {
+      // Temporarily set to false to avoid doing several lookups if a site has
+      // several subframes on the same domain.
+      this._trackingState.set(host, false);
+      if (host.startsWith("about:") || host.startsWith("moz-nullprincipal"))
+        return false;
+
+      let principal =
+        Services.scriptSecurityManager.createCodebasePrincipalFromOrigin("http://" + host);
+      let classifier =
+        Cc["@mozilla.org/url-classifier/dbservice;1"].getService(Ci.nsIURIClassifier);
+      classifier.classify(principal, null, true,
+                          (aErrorCode, aList, aProvider, aFullHash) => {
+        this._trackingState.set(host, aErrorCode == Cr.NS_ERROR_TRACKING_URI);
+      });
+    }
+    return this._trackingState.get(host);
+  },
+
+  getCounters() {
+    tabFinder.update();
+    // We rebuild the maps during each iteration to make sure that
+    // we do not maintain references to groups that has been removed
+    // (e.g. pages that have been closed).
+
+    let previous = this._buffer[Math.max(this._buffer.length - 2, 0)].tabs;
+    let current = this._latest.tabs;
+    return Object.keys(current).map(id => {
+      let tab = current[id];
+      let oldest;
+      for (let index = 0; index <= this._buffer.length - 2; ++index) {
+        if (id in this._buffer[index].tabs) {
+          oldest = this._buffer[index].tabs[id];
+          break;
+        }
+      }
+      let prev = previous[id];
+      let host = tab.host;
+
+      let name = `${host} (${id})`;
+      let image = "chrome://mozapps/skin/places/defaultFavicon.svg";
+      let found = tabFinder.get(parseInt(id));
+      if (found) {
+        if (found.tabbrowser) {
+          name = found.tab.getAttribute("label");
+          image = found.tab.getAttribute("image");
+        } else {
+          name = "Preloaded: " + found.tab.linkedBrowser.contentTitle;
+        }
+      } else if (id == 1) {
+        name = BRAND_NAME;
+        image = "chrome://branding/content/icon32.png";
+      } else if (/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(host)) {
+        let addon = WebExtensionPolicy.getByHostname(host);
+        name = `${addon.name} (${addon.id})`;
+        image = "chrome://mozapps/skin/extensions/extensionGeneric-16.svg";
+      } else if (id == 0 && !tab.isWorker) {
+        name = "Ghost windows";
+      }
+
+      // Create a map of all the child items from the previous time we read the
+      // counters, indexed by counterId so that we can quickly find the previous
+      // value for any subitem.
+      let prevChildren = new Map();
+      if (prev) {
+        for (let child of prev.children) {
+          prevChildren.set(child.counterId, child);
+        }
+      }
+      // For each subitem, create a new object including the deltas since the previous time.
+      let children = tab.children.map(child => {
+        let {host, dispatchCount, duration, isWorker, counterId} = child;
+
+        let dispatchesSincePrevious = dispatchCount;
+        let durationSincePrevious = duration;
+        if (prevChildren.has(counterId)) {
+          let prevCounter = prevChildren.get(counterId);
+          dispatchesSincePrevious -= prevCounter.dispatchCount;
+          durationSincePrevious -= prevCounter.duration;
+          prevChildren.delete(counterId);
+        }
+
+        return {host, dispatchCount, duration, isWorker,
+                dispatchesSincePrevious, durationSincePrevious};
+      });
+
+      // Any item that remains in prevChildren is a subitem that no longer
+      // exists in the current sample; remember the values of its counters
+      // so that the values don't go down for the parent item.
+      tab.dispatchesFromFormerChildren = prev && prev.dispatchesFromFormerChildren || 0;
+      tab.durationFromFormerChildren = prev && prev.durationFromFormerChildren || 0;
+      for (let [, counter] of prevChildren) {
+        tab.dispatchesFromFormerChildren += counter.dispatchCount;
+        tab.durationFromFormerChildren += counter.duration;
+      }
+
+      // Create the object representing the counters of the parent item including
+      // the deltas from the previous times.
+      let dispatches = tab.dispatchCount + tab.dispatchesFromFormerChildren;
+      let duration = tab.duration + tab.durationFromFormerChildren;
+      let durationSincePrevious = NaN;
+      let dispatchesSincePrevious = NaN;
+      let dispatchesSinceStartOfBuffer = NaN;
+      let durationSinceStartOfBuffer = NaN;
+      if (prev) {
+        durationSincePrevious =
+          duration - prev.duration - (prev.durationFromFormerChildren || 0);
+        dispatchesSincePrevious =
+          dispatches - prev.dispatchCount - (prev.dispatchesFromFormerChildren || 0);
+      }
+      if (oldest) {
+        dispatchesSinceStartOfBuffer =
+          dispatches - oldest.dispatchCount - (oldest.dispatchesFromFormerChildren || 0);
+        durationSinceStartOfBuffer =
+          duration - oldest.duration - (oldest.durationFromFormerChildren || 0);
+      }
+      return ({id, name, image,
+               totalDispatches: dispatches, totalDuration: duration,
+               durationSincePrevious, dispatchesSincePrevious,
+               durationSinceStartOfBuffer, dispatchesSinceStartOfBuffer,
+               children});
+    });
   },
 };
 
@@ -522,7 +735,7 @@ var View = {
       for (let key of remove) {
         this._map.delete(key);
       }
-    }
+    },
   },
   /**
    * Display the items in a category.
@@ -773,37 +986,196 @@ var View = {
 
     return cachedElements;
   },
+
+  _fragment: document.createDocumentFragment(),
+  commit() {
+    let tbody = document.getElementById("dispatch-tbody");
+
+    while (tbody.firstChild)
+      tbody.firstChild.remove();
+    tbody.appendChild(this._fragment);
+    this._fragment = document.createDocumentFragment();
+  },
+  appendRow(name, value, tooltip, classes, image = "") {
+    let row = document.createElement("tr");
+
+    let elt = document.createElement("td");
+    elt.textContent = name;
+    if (image)
+      elt.style.backgroundImage = `url('${image}')`;
+    if (classes)
+      elt.classList.add(...classes);
+    row.appendChild(elt);
+
+    elt = document.createElement("td");
+    elt.textContent = value;
+    row.appendChild(elt);
+
+    if (tooltip)
+      row.title = tooltip;
+
+    this._fragment.appendChild(row);
+    return row;
+  },
 };
 
 var Control = {
   init() {
     this._initAutorefresh();
     this._initDisplayMode();
+    let tbody = document.getElementById("dispatch-tbody");
+    tbody.addEventListener("click", () => {
+      let row = event.target.parentNode;
+      if (this.selectedRow) {
+        this.selectedRow.removeAttribute("selected");
+      }
+      if (row.windowId) {
+        row.setAttribute("selected", "true");
+        this.selectedRow = row;
+      } else if (this.selectedRow) {
+        this.selectedRow = null;
+      }
+    });
+    tbody.addEventListener("dblclick", () => {
+      let id = parseInt(event.target.parentNode.windowId);
+      if (isNaN(id))
+        return;
+      let found = tabFinder.get(id);
+      if (!found || !found.tabbrowser)
+        return;
+      let {tabbrowser, tab} = found;
+      tabbrowser.selectedTab = tab;
+      tabbrowser.ownerGlobal.focus();
+    });
   },
   async update() {
     let mode = this._displayMode;
     if (this._autoRefreshInterval || !State._buffer[0]) {
       // Update the state only if we are not on pause.
       await State.update();
+      if (document.hidden)
+        return;
     }
     await wait(0);
-    let state = await (mode == MODE_GLOBAL ?
-      State.promiseDeltaSinceStartOfTime() :
-      State.promiseDeltaSinceStartOfBuffer());
+    if (!performanceCountersEnabled()) {
+      let state = await (mode == MODE_GLOBAL ?
+        State.promiseDeltaSinceStartOfTime() :
+        State.promiseDeltaSinceStartOfBuffer());
 
-    for (let category of ["webpages"]) {
+      for (let category of ["webpages"]) {
+        await wait(0);
+        await View.updateCategory(state[category], category, category, mode);
+      }
       await wait(0);
-      await View.updateCategory(state[category], category, category, mode);
-    }
-    await wait(0);
 
-    // Make sure that we do not keep obsolete stuff around.
-    View.DOMCache.trimTo(state.deltas);
+      // Make sure that we do not keep obsolete stuff around.
+      View.DOMCache.trimTo(state.deltas);
+    } else {
+
+      let selectedId = -1;
+      if (this.selectedRow) {
+        selectedId = this.selectedRow.windowId;
+        this.selectedRow = null;
+      }
+
+      let counters = this._sortCounters(State.getCounters());
+      for (let {id, name, image, totalDispatches, dispatchesSincePrevious,
+                totalDuration, durationSincePrevious, children} of counters) {
+
+        function dispatchesAndDuration(dispatches, duration) {
+          let result = dispatches;
+          if (duration) {
+            duration /= 1000;
+            duration = Math.round(duration);
+            if (duration)
+              result += duration >= 1000 ? ` (${duration / 1000}s)` : ` (${duration}ms)`;
+            else
+              result += " (< 1ms)";
+          }
+          return result;
+        }
+
+        function formatTooltip(totalDispatches, totalDuration,
+                               dispatchesSincePrevious, durationSincePrevious) {
+          return `${dispatchesAndDuration(totalDispatches, totalDuration)} dispatches since load\n` +
+            `${dispatchesAndDuration(dispatchesSincePrevious, durationSincePrevious)} in the last seconds`;
+        }
+
+        let formatEnergyImpact = (dispatches, duration) => {
+          let energyImpact = this._computeEnergyImpact(dispatches, duration);
+          if (!energyImpact)
+            return "None";
+          energyImpact = Math.ceil(energyImpact * 100) / 100;
+          if (energyImpact < 1)
+            return `Low (${energyImpact})`;
+          if (energyImpact < 25)
+            return `Medium (${energyImpact})`;
+          return `High (${energyImpact})`;
+        };
+
+        let row =
+          View.appendRow(name,
+                         formatEnergyImpact(dispatchesSincePrevious, durationSincePrevious),
+                         formatTooltip(totalDispatches, totalDuration,
+                                       dispatchesSincePrevious, durationSincePrevious),
+                         null, image);
+        row.windowId = id;
+        if (id == selectedId) {
+          row.setAttribute("selected", "true");
+          this.selectedRow = row;
+        }
+
+        children.sort((a, b) => b.dispatchesSincePrevious - a.dispatchesSincePrevious);
+        for (let row of children) {
+          let host = row.host.replace(/^blob:https?:\/\//, "");
+          let classes = ["indent"];
+          if (State.isTracker(host))
+            classes.push("tracking");
+          if (row.isWorker)
+            classes.push("worker");
+          View.appendRow(row.host,
+                         formatEnergyImpact(row.dispatchesSincePrevious,
+                                            row.durationSincePrevious),
+                         formatTooltip(row.dispatchCount, row.duration,
+                                       row.dispatchesSincePrevious,
+                                       row.durationSincePrevious),
+                         classes);
+        }
+      }
+
+      View.commit();
+    }
 
     await wait(0);
 
     // Inform watchers
     Services.obs.notifyObservers(null, UPDATE_COMPLETE_TOPIC, mode);
+  },
+  _computeEnergyImpact(dispatches, duration) {
+    // 'Dispatches' doesn't make sense to users, and it's difficult to present
+    // two numbers in a meaningful way, so we need to somehow aggregate the
+    // dispatches and duration values we have.
+    // The current formula to aggregate the numbers assumes that the cost of
+    // a dispatch is equivalent to 1ms of CPU time.
+    // Dividing the result by the sampling interval and by 10 gives a number that
+    // looks like a familiar percentage to users, as fullying using one core will
+    // result in a number close to 100.
+    return Math.max(duration || 0, dispatches * 1000) / UPDATE_INTERVAL_MS / 10;
+  },
+  _sortCounters(counters) {
+    return counters.sort((a, b) => {
+      // Note: _computeEnergyImpact uses UPDATE_INTERVAL_MS which doesn't match
+      // the time between the most recent sample and the start of the buffer,
+      // BUFFER_DURATION_MS would be better, but the values is never displayed
+      // so this is OK.
+      let aEI = this._computeEnergyImpact(a.dispatchesSinceStartOfBuffer,
+                                          a.durationSinceStartOfBuffer);
+      let bEI = this._computeEnergyImpact(b.dispatchesSinceStartOfBuffer,
+                                          b.durationSinceStartOfBuffer);
+      if (aEI != bEI)
+        return bEI - aEI;
+      return a.name.localeCompare(b.name);
+    });
   },
   _setOptions(options) {
     dump(`about:performance _setOptions ${JSON.stringify(options)}\n`);
@@ -862,124 +1234,17 @@ var Control = {
   _displayMode: MODE_GLOBAL,
 };
 
-/**
- * This functionality gets memory related information of sub-processes and
- * updates the performance table regularly.
- * If the page goes hidden, it also handles visibility change by not
- * querying the content processes unnecessarily.
- */
-var SubprocessMonitor = {
-  _timeout: null,
-
-  /**
-   * Init will start the process of updating the table if the page is not hidden,
-   * and set up an event listener for handling visibility changes.
-   */
-  init() {
-    if (!document.hidden) {
-      SubprocessMonitor.updateTable();
-    }
-    document.addEventListener("visibilitychange", SubprocessMonitor.handleVisibilityChange);
-  },
-
-  /**
-   * This function updates the table after an interval if the page is visible
-   * and clears the interval otherwise.
-   */
-  handleVisibilityChange() {
-    if (!document.hidden) {
-      SubprocessMonitor.queueUpdate();
-    } else {
-      clearTimeout(this._timeout);
-      this._timeout = null;
-    }
-  },
-
-  /**
-   * This function queues a timer to request the next summary using updateTable
-   * after some delay.
-   */
-  queueUpdate() {
-    this._timeout = setTimeout(() => this.updateTable(), UPDATE_INTERVAL_MS);
-  },
-
-  /**
-   * This is a helper function for updateTable, which updates a particular row.
-   * @param {<tr> node} row The row to be updated.
-   * @param {object} summaries The object with the updated RSS and USS values.
-   * @param {string} pid The pid represented by the row for which we update.
-   */
-  updateRow(row, summaries, pid) {
-    row.cells[0].textContent = pid;
-    let RSSval = DownloadUtils.convertByteUnits(summaries[pid].rss);
-    row.cells[1].textContent = RSSval.join(" ");
-    let USSval = DownloadUtils.convertByteUnits(summaries[pid].uss);
-    row.cells[2].textContent = USSval.join(" ");
-  },
-
-  /**
-   * This function adds a row to the subprocess-performance table for every new pid
-   * and populates and regularly updates it with RSS/USS measurements.
-   */
-  updateTable() {
-    if (!document.hidden) {
-      Memory.summary().then((summaries) => {
-        if (!(Object.keys(summaries).length)) {
-          // The summaries list was empty, which means we timed out getting
-          // the memory reports. We'll try again later.
-          SubprocessMonitor.queueUpdate();
-          return;
-        }
-        let resultTable = document.getElementById("subprocess-reports");
-        let recycle = [];
-        // We first iterate the table to check if summaries exist for rowPids,
-        // if yes, update them and delete the pid's summary or else hide the row
-        // for recycling it. Start at row 1 instead of 0 (to skip the header row).
-        for (let i = 1, row; (row = resultTable.rows[i]); i++) {
-          let rowPid = row.dataset.pid;
-          let summary = summaries[rowPid];
-          if (summary) {
-            // Now we update the values in the row, which is hardcoded for now,
-            // but we might want to make this more adaptable in the future.
-            SubprocessMonitor.updateRow(row, summaries, rowPid);
-            delete summaries[rowPid];
-          } else {
-            // Take this unnecessary row, hide it and stash it for potential re-use.
-            row.hidden = true;
-            recycle.push(row);
-          }
-        }
-        // For the remaining pids in summaries, we choose from the recyclable
-        // (hidden) nodes, and if they get exhausted, append a row to the table.
-        for (let pid in summaries) {
-          let row = recycle.pop();
-          if (row) {
-            row.hidden = false;
-          } else {
-            // We create a new row here, and set it to row
-            row = document.createElement("tr");
-            // Insert cell for pid
-            row.insertCell();
-            // Insert a cell for USS.
-            row.insertCell();
-            // Insert another cell for RSS.
-            row.insertCell();
-          }
-          row.dataset.pid = pid;
-          // Update the row and put it at the bottom
-          SubprocessMonitor.updateRow(row, summaries, pid);
-          resultTable.appendChild(row);
-        }
-      });
-      SubprocessMonitor.queueUpdate();
-    }
-  },
-};
-
 var go = async function() {
 
-  SubprocessMonitor.init();
   Control.init();
+
+  if (performanceCountersEnabled()) {
+    let opt = document.querySelector(".options");
+    opt.style.display = "none";
+    opt.nextElementSibling.style.display = "none";
+  } else {
+    document.getElementById("dispatch-table").parentNode.style.display = "none";
+  }
 
   // Setup a hook to allow tests to configure and control this page
   let testUpdate = function(subject, topic, value) {

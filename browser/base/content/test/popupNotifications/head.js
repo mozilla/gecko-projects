@@ -114,14 +114,20 @@ function BasicNotification(testId) {
   this.mainAction = {
     label: "Main Action",
     accessKey: "M",
-    callback: () => this.mainActionClicked = true
+    callback: ({source}) => {
+      this.mainActionClicked = true;
+      this.mainActionSource = source;
+    },
   };
   this.secondaryActions = [
     {
       label: "Secondary Action",
       accessKey: "S",
-      callback: () => this.secondaryActionClicked = true
-    }
+      callback: ({source}) => {
+        this.secondaryActionClicked = true;
+        this.secondaryActionSource = source;
+      },
+    },
   ];
   this.options = {
     name: "http://example.com",
@@ -143,7 +149,7 @@ function BasicNotification(testId) {
           this.swappingCallbackTriggered = true;
           break;
       }
-    }
+    },
   };
 }
 
@@ -283,7 +289,7 @@ function triggerSecondaryCommand(popup, index) {
   }
 
   // Extra secondary actions appear in a menu.
-  notification.secondaryButton.nextSibling.nextSibling.focus();
+  notification.secondaryButton.nextElementSibling.nextElementSibling.focus();
 
   popup.addEventListener("popupshown", function() {
     info("Command popup open for notification " + notification.id);

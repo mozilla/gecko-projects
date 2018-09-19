@@ -7,7 +7,6 @@
 #include "frontend/BinTokenReaderBase.h"
 
 #include "frontend/BinSource-macros.h"
-#include "gc/Zone.h"
 #include "js/Result.h"
 
 namespace js {
@@ -64,6 +63,13 @@ BinTokenReaderBase::raiseInvalidField(const char* kind, const BinField field)
     return raiseError(out.string());
 }
 
+#ifdef DEBUG
+bool
+BinTokenReaderBase::hasRaisedError() const
+{
+    return cx_->isExceptionPending();
+}
+#endif
 
 size_t
 BinTokenReaderBase::offset() const
@@ -93,11 +99,13 @@ BinTokenReaderBase::readBuf(uint8_t* bytes, uint32_t len)
     MOZ_ASSERT(!cx_->isExceptionPending());
     MOZ_ASSERT(len > 0);
 
-    if (stop_ < current_ + len)
+    if (stop_ < current_ + len) {
         return raiseError("Buffer exceeds length");
+    }
 
-    for (uint32_t i = 0; i < len; ++i)
+    for (uint32_t i = 0; i < len; ++i) {
         *bytes++ = *current_++;
+    }
 
     return Ok();
 }

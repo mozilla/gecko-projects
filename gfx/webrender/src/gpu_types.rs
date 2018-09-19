@@ -2,29 +2,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{DevicePoint, DeviceSize, DeviceRect, LayoutToWorldTransform};
-use api::{PremultipliedColorF, WorldToLayoutTransform};
+use api::{DevicePoint, DeviceSize, DeviceRect, LayoutRect, LayoutToWorldTransform, LayoutTransform};
+use api::{PremultipliedColorF, LayoutToPictureTransform, PictureToLayoutTransform, PicturePixel, WorldPixel};
+use clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex};
 use gpu_cache::{GpuCacheAddress, GpuDataRequest};
-use prim_store::{VECS_PER_SEGMENT, EdgeAaSegmentMask};
+use internal_types::FastHashMap;
+use prim_store::EdgeAaSegmentMask;
 use render_task::RenderTaskAddress;
-use renderer::MAX_VERTEX_TEXTURE_WIDTH;
+use util::{TransformedRectKind, MatrixHelpers};
 
 // Contains type that must exactly match the same structures declared in GLSL.
 
-const INT_BITS: usize = 31; //TODO: convert to unsigned
-const CLIP_CHAIN_RECT_BITS: usize = 22;
-const SEGMENT_BITS: usize = INT_BITS - CLIP_CHAIN_RECT_BITS;
-// The guard ensures (at compile time) that the designated number of bits cover
-// the maximum supported segment count for the texture width.
-const _SEGMENT_GUARD: usize = (1 << SEGMENT_BITS) * VECS_PER_SEGMENT - MAX_VERTEX_TEXTURE_WIDTH;
-const EDGE_FLAG_BITS: usize = 4;
-const BRUSH_FLAG_BITS: usize = 4;
-const CLIP_SCROLL_INDEX_BITS: usize = INT_BITS - EDGE_FLAG_BITS - BRUSH_FLAG_BITS;
-
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct ZBufferId(i32);
 
+#[derive(Debug)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct ZBufferIdGenerator {
     next: i32,
 }
@@ -119,7 +116,8 @@ pub struct BorderInstance {
 #[repr(C)]
 pub struct ClipMaskInstance {
     pub render_task_address: RenderTaskAddress,
-    pub scroll_node_data_index: ClipScrollNodeIndex,
+    pub clip_transform_id: TransformPaletteId,
+    pub prim_transform_id: TransformPaletteId,
     pub segment: i32,
     pub clip_data_address: GpuCacheAddress,
     pub resource_address: GpuCacheAddress,
@@ -135,50 +133,125 @@ pub struct ClipMaskBorderCornerDotDash {
     pub dot_dash_data: [f32; 8],
 }
 
-// 32 bytes per instance should be enough for anyone!
+// 16 bytes per instance should be enough for anyone!
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct PrimitiveInstance {
-    data: [i32; 8],
+    data: [i32; 4],
+}
+
+#[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct PrimitiveHeaderIndex(pub i32);
+
+#[derive(Debug)]
+#[repr(C)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct PrimitiveHeaders {
+    // The integer-type headers for a primitive.
+    pub headers_int: Vec<PrimitiveHeaderI>,
+    // The float-type headers for a primitive.
+    pub headers_float: Vec<PrimitiveHeaderF>,
+    // Used to generated a unique z-buffer value per primitive.
+    pub z_generator: ZBufferIdGenerator,
+}
+
+impl PrimitiveHeaders {
+    pub fn new() -> PrimitiveHeaders {
+        PrimitiveHeaders {
+            headers_int: Vec::new(),
+            headers_float: Vec::new(),
+            z_generator: ZBufferIdGenerator::new(),
+        }
+    }
+
+    // Add a new primitive header.
+    pub fn push(
+        &mut self,
+        prim_header: &PrimitiveHeader,
+        user_data: [i32; 3],
+    ) -> PrimitiveHeaderIndex {
+        debug_assert_eq!(self.headers_int.len(), self.headers_float.len());
+        let id = self.headers_float.len();
+
+        self.headers_float.push(PrimitiveHeaderF {
+            local_rect: prim_header.local_rect,
+            local_clip_rect: prim_header.local_clip_rect,
+        });
+
+        self.headers_int.push(PrimitiveHeaderI {
+            z: self.z_generator.next(),
+            task_address: prim_header.task_address,
+            specific_prim_address: prim_header.specific_prim_address.as_int(),
+            clip_task_address: prim_header.clip_task_address,
+            transform_id: prim_header.transform_id,
+            user_data,
+        });
+
+        PrimitiveHeaderIndex(id as i32)
+    }
+}
+
+// This is a convenience type used to make it easier to pass
+// the common parts around during batching.
+#[derive(Debug)]
+pub struct PrimitiveHeader {
+    pub local_rect: LayoutRect,
+    pub local_clip_rect: LayoutRect,
+    pub task_address: RenderTaskAddress,
+    pub specific_prim_address: GpuCacheAddress,
+    pub clip_task_address: RenderTaskAddress,
+    pub transform_id: TransformPaletteId,
+}
+
+// f32 parts of a primitive header
+#[derive(Debug)]
+#[repr(C)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct PrimitiveHeaderF {
+    pub local_rect: LayoutRect,
+    pub local_clip_rect: LayoutRect,
+}
+
+// i32 parts of a primitive header
+// TODO(gw): Compress parts of these down to u16
+#[derive(Debug)]
+#[repr(C)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct PrimitiveHeaderI {
+    pub z: ZBufferId,
+    pub task_address: RenderTaskAddress,
+    pub specific_prim_address: i32,
+    pub clip_task_address: RenderTaskAddress,
+    pub transform_id: TransformPaletteId,
+    pub user_data: [i32; 3],
 }
 
 pub struct GlyphInstance {
-    pub specific_prim_address: GpuCacheAddress,
-    pub task_address: RenderTaskAddress,
-    pub clip_task_address: RenderTaskAddress,
-    pub clip_chain_rect_index: ClipChainRectIndex,
-    pub scroll_id: ClipScrollNodeIndex,
-    pub z: ZBufferId,
+    pub prim_header_index: PrimitiveHeaderIndex,
 }
 
 impl GlyphInstance {
     pub fn new(
-        specific_prim_address: GpuCacheAddress,
-        task_address: RenderTaskAddress,
-        clip_task_address: RenderTaskAddress,
-        clip_chain_rect_index: ClipChainRectIndex,
-        scroll_id: ClipScrollNodeIndex,
-        z: ZBufferId,
+        prim_header_index: PrimitiveHeaderIndex,
     ) -> Self {
         GlyphInstance {
-            specific_prim_address,
-            task_address,
-            clip_task_address,
-            clip_chain_rect_index,
-            scroll_id,
-            z,
+            prim_header_index,
         }
     }
 
+    // TODO(gw): Some of these fields can be moved to the primitive
+    //           header since they are constant, and some can be
+    //           compressed to a smaller size.
     pub fn build(&self, data0: i32, data1: i32, data2: i32) -> PrimitiveInstance {
         PrimitiveInstance {
             data: [
-                self.specific_prim_address.as_int(),
-                self.task_address.0 as i32 | (self.clip_task_address.0 as i32) << 16,
-                self.clip_chain_rect_index.0 as i32,
-                self.scroll_id.0 as i32,
-                self.z.0,
+                self.prim_header_index.0 as i32,
                 data0,
                 data1,
                 data2,
@@ -188,22 +261,19 @@ impl GlyphInstance {
 }
 
 pub struct SplitCompositeInstance {
-    pub task_address: RenderTaskAddress,
-    pub src_task_address: RenderTaskAddress,
+    pub prim_header_index: PrimitiveHeaderIndex,
     pub polygons_address: GpuCacheAddress,
     pub z: ZBufferId,
 }
 
 impl SplitCompositeInstance {
     pub fn new(
-        task_address: RenderTaskAddress,
-        src_task_address: RenderTaskAddress,
+        prim_header_index: PrimitiveHeaderIndex,
         polygons_address: GpuCacheAddress,
         z: ZBufferId,
     ) -> Self {
         SplitCompositeInstance {
-            task_address,
-            src_task_address,
+            prim_header_index,
             polygons_address,
             z,
         }
@@ -214,13 +284,9 @@ impl From<SplitCompositeInstance> for PrimitiveInstance {
     fn from(instance: SplitCompositeInstance) -> Self {
         PrimitiveInstance {
             data: [
-                instance.task_address.0 as i32,
-                instance.src_task_address.0 as i32,
+                instance.prim_header_index.0,
                 instance.polygons_address.as_int(),
                 instance.z.0,
-                0,
-                0,
-                0,
                 0,
             ],
         }
@@ -243,80 +309,206 @@ bitflags! {
     }
 }
 
-// TODO(gw): While we are converting things over, we
-//           need to have the instance be the same
-//           size as an old PrimitiveInstance. In the
-//           future, we can compress this vertex
-//           format a lot - e.g. z, render task
-//           addresses etc can reasonably become
-//           a u16 type.
+// TODO(gw): Some of these fields can be moved to the primitive
+//           header since they are constant, and some can be
+//           compressed to a smaller size.
 #[repr(C)]
 pub struct BrushInstance {
-    pub picture_address: RenderTaskAddress,
-    pub prim_address: GpuCacheAddress,
-    pub clip_chain_rect_index: ClipChainRectIndex,
-    pub scroll_id: ClipScrollNodeIndex,
+    pub prim_header_index: PrimitiveHeaderIndex,
     pub clip_task_address: RenderTaskAddress,
-    pub z: ZBufferId,
     pub segment_index: i32,
     pub edge_flags: EdgeAaSegmentMask,
     pub brush_flags: BrushFlags,
-    pub user_data: [i32; 3],
 }
 
 impl From<BrushInstance> for PrimitiveInstance {
     fn from(instance: BrushInstance) -> Self {
-        debug_assert_eq!(0, instance.clip_chain_rect_index.0 >> CLIP_CHAIN_RECT_BITS);
-        debug_assert_eq!(0, instance.scroll_id.0 >> CLIP_SCROLL_INDEX_BITS);
-        debug_assert_eq!(0, instance.segment_index >> SEGMENT_BITS);
         PrimitiveInstance {
             data: [
-                instance.picture_address.0 as i32 | (instance.clip_task_address.0 as i32) << 16,
-                instance.prim_address.as_int(),
-                instance.clip_chain_rect_index.0 as i32 | (instance.segment_index << CLIP_CHAIN_RECT_BITS),
-                instance.z.0,
-                instance.scroll_id.0 as i32 |
-                    ((instance.edge_flags.bits() as i32) << CLIP_SCROLL_INDEX_BITS) |
-                    ((instance.brush_flags.bits() as i32) << (CLIP_SCROLL_INDEX_BITS + EDGE_FLAG_BITS)),
-                instance.user_data[0],
-                instance.user_data[1],
-                instance.user_data[2],
+                instance.prim_header_index.0,
+                instance.clip_task_address.0 as i32,
+                instance.segment_index |
+                ((instance.edge_flags.bits() as i32) << 16) |
+                ((instance.brush_flags.bits() as i32) << 24),
+                0,
             ]
         }
     }
 }
 
+// Represents the information about a transform palette
+// entry that is passed to shaders. It includes an index
+// into the transform palette, and a set of flags. The
+// only flag currently used determines whether the
+// transform is axis-aligned (and this should have
+// pixel snapping applied).
 #[derive(Copy, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 #[repr(C)]
-pub struct ClipScrollNodeIndex(pub u32);
+pub struct TransformPaletteId(pub u32);
 
-#[derive(Debug)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[repr(C)]
-pub struct ClipScrollNodeData {
-    pub transform: LayoutToWorldTransform,
-    pub inv_transform: WorldToLayoutTransform,
-    pub transform_kind: f32,
-    pub padding: [f32; 3],
-}
+impl TransformPaletteId {
+    /// Identity transform ID.
+    pub const IDENTITY: Self = TransformPaletteId(0);
 
-impl ClipScrollNodeData {
-    pub fn invalid() -> Self {
-        ClipScrollNodeData {
-            transform: LayoutToWorldTransform::identity(),
-            inv_transform: WorldToLayoutTransform::identity(),
-            transform_kind: 0.0,
-            padding: [0.0; 3],
+    /// Extract the transform kind from the id.
+    pub fn transform_kind(&self) -> TransformedRectKind {
+        if (self.0 >> 24) == 0 {
+            TransformedRectKind::AxisAligned
+        } else {
+            TransformedRectKind::Complex
         }
     }
 }
 
-#[derive(Copy, Debug, Clone, PartialEq)]
+// The GPU data payload for a transform palette entry.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 #[repr(C)]
-pub struct ClipChainRectIndex(pub usize);
+pub struct TransformData {
+    transform: LayoutToPictureTransform,
+    inv_transform: PictureToLayoutTransform,
+}
+
+impl TransformData {
+    fn invalid() -> Self {
+        TransformData {
+            transform: LayoutToPictureTransform::identity(),
+            inv_transform: PictureToLayoutTransform::identity(),
+        }
+    }
+}
+
+// Extra data stored about each transform palette entry.
+#[derive(Clone)]
+pub struct TransformMetadata {
+    transform_kind: TransformedRectKind,
+}
+
+impl TransformMetadata {
+    pub fn invalid() -> Self {
+        TransformMetadata {
+            transform_kind: TransformedRectKind::AxisAligned,
+        }
+    }
+}
+
+#[derive(Debug, Hash, Eq, PartialEq)]
+struct RelativeTransformKey {
+    from_index: SpatialNodeIndex,
+    to_index: SpatialNodeIndex,
+}
+
+// Stores a contiguous list of TransformData structs, that
+// are ready for upload to the GPU.
+// TODO(gw): For now, this only stores the complete local
+//           to world transform for each spatial node. In
+//           the future, the transform palette will support
+//           specifying a coordinate system that the transform
+//           should be relative to.
+pub struct TransformPalette {
+    pub transforms: Vec<TransformData>,
+    metadata: Vec<TransformMetadata>,
+    map: FastHashMap<RelativeTransformKey, usize>,
+}
+
+impl TransformPalette {
+    pub fn new(spatial_node_count: usize) -> Self {
+        TransformPalette {
+            transforms: vec![TransformData::invalid(); spatial_node_count],
+            metadata: vec![TransformMetadata::invalid(); spatial_node_count],
+            map: FastHashMap::default(),
+        }
+    }
+
+    pub fn set_world_transform(
+        &mut self,
+        index: SpatialNodeIndex,
+        transform: LayoutToWorldTransform,
+    ) {
+        register_transform(
+            &mut self.metadata,
+            &mut self.transforms,
+            index,
+            ROOT_SPATIAL_NODE_INDEX,
+            // We know the root picture space == world space
+            transform.with_destination::<PicturePixel>(),
+        );
+    }
+
+    fn get_index(
+        &mut self,
+        from_index: SpatialNodeIndex,
+        to_index: SpatialNodeIndex,
+        clip_scroll_tree: &ClipScrollTree,
+    ) -> usize {
+        if to_index == ROOT_SPATIAL_NODE_INDEX {
+            from_index.0
+        } else if from_index == to_index {
+            0
+        } else {
+            let key = RelativeTransformKey {
+                from_index,
+                to_index,
+            };
+
+            let metadata = &mut self.metadata;
+            let transforms = &mut self.transforms;
+
+            *self.map
+                .entry(key)
+                .or_insert_with(|| {
+                    let transform = clip_scroll_tree.get_relative_transform(
+                        from_index,
+                        to_index,
+                    )
+                    .unwrap_or(LayoutTransform::identity())
+                    .with_destination::<PicturePixel>();
+
+                    register_transform(
+                        metadata,
+                        transforms,
+                        from_index,
+                        to_index,
+                        transform,
+                    )
+                })
+        }
+    }
+
+    pub fn get_world_transform(
+        &self,
+        index: SpatialNodeIndex,
+    ) -> LayoutToWorldTransform {
+        self.transforms[index.0]
+            .transform
+            .with_destination::<WorldPixel>()
+    }
+
+    // Get a transform palette id for the given spatial node.
+    // TODO(gw): In the future, it will be possible to specify
+    //           a coordinate system id here, to allow retrieving
+    //           transforms in the local space of a given spatial node.
+    pub fn get_id(
+        &mut self,
+        from_index: SpatialNodeIndex,
+        to_index: SpatialNodeIndex,
+        clip_scroll_tree: &ClipScrollTree,
+    ) -> TransformPaletteId {
+        let index = self.get_index(
+            from_index,
+            to_index,
+            clip_scroll_tree,
+        );
+        let transform_kind = self.metadata[index].transform_kind as u32;
+        TransformPaletteId(
+            (index as u32) |
+            (transform_kind << 24)
+        )
+    }
+}
 
 // Texture cache resources can be either a simple rect, or define
 // a polygon within a rect by specifying a UV coordinate for each
@@ -383,5 +575,46 @@ impl ImageSource {
                 bottom_right.y,
             ]);
         }
+    }
+}
+
+// Set the local -> world transform for a given spatial
+// node in the transform palette.
+fn register_transform(
+    metadatas: &mut Vec<TransformMetadata>,
+    transforms: &mut Vec<TransformData>,
+    from_index: SpatialNodeIndex,
+    to_index: SpatialNodeIndex,
+    transform: LayoutToPictureTransform,
+) -> usize {
+    // TODO(gw): This shouldn't ever happen - should be eliminated before
+    //           we get an uninvertible transform here. But maybe do
+    //           some investigation on if this ever happens?
+    let inv_transform = match transform.inverse() {
+        Some(inv_transform) => inv_transform,
+        None => {
+            error!("Unable to get inverse transform");
+            PictureToLayoutTransform::identity()
+        }
+    };
+
+    let metadata = TransformMetadata {
+        transform_kind: transform.transform_kind()
+    };
+    let data = TransformData {
+        transform,
+        inv_transform,
+    };
+
+    if to_index == ROOT_SPATIAL_NODE_INDEX {
+        let index = from_index.0 as usize;
+        metadatas[index] = metadata;
+        transforms[index] = data;
+        index
+    } else {
+        let index = transforms.len();
+        metadatas.push(metadata);
+        transforms.push(data);
+        index
     }
 }

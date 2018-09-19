@@ -9,10 +9,9 @@
 
 var EXPORTED_SYMBOLS = ["ExtensionChild"];
 
-/*
- * This file handles addon logic that is independent of the chrome process.
- * When addons run out-of-process, this is the main entry point.
- * Its primary function is managing addon globals.
+/**
+ * This file handles addon logic that is independent of the chrome process and
+ * may run in all web content and extension processes.
  *
  * Don't put contentscript logic here, use ExtensionContent.jsm instead.
  */
@@ -29,6 +28,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionPageChild: "resource://gre/modules/ExtensionPageChild.jsm",
   MessageChannel: "resource://gre/modules/MessageChannel.jsm",
   NativeApp: "resource://gre/modules/NativeMessaging.jsm",
+  PerformanceCounters: "resource://gre/modules/PerformanceCounters.jsm",
   PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
 });
 
@@ -37,27 +37,32 @@ XPCOMUtils.defineLazyGetter(
   () => Cc["@mozilla.org/webextensions/extension-process-script;1"]
           .getService().wrappedJSObject);
 
+// We're using the pref to avoid loading PerformanceCounters.jsm for nothing.
+XPCOMUtils.defineLazyPreferenceGetter(this, "gTimingEnabled",
+                                      "extensions.webextensions.enablePerformanceCounters",
+                                      false);
 ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
 ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
 const {
   DefaultMap,
-  EventEmitter,
   LimitedSet,
-  defineLazyGetter,
   getMessageManager,
   getUniqueId,
   getWinUtils,
-  withHandlingUserInput,
 } = ExtensionUtils;
 
 const {
+  EventEmitter,
   EventManager,
   LocalAPIImplementation,
   LocaleData,
   NoCloneSpreadArgs,
   SchemaAPIInterface,
+  withHandlingUserInput,
 } = ExtensionCommon;
+
+const {sharedData} = Services.cpmm;
 
 const isContentProcess = Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT;
 
@@ -594,43 +599,32 @@ var ExtensionManager = {
 
 // Represents a browser extension in the content process.
 class BrowserExtensionContent extends EventEmitter {
-  constructor(data) {
+  constructor(policy) {
     super();
 
-    this.data = data;
-    this.id = data.id;
-    this.uuid = data.uuid;
-    this.instanceId = data.instanceId;
+    this.policy = policy;
+    this.instanceId = policy.instanceId;
+    this.optionalPermissions = policy.optionalPermissions;
 
-    this.childModules = data.childModules;
-    this.dependencies = data.dependencies;
-    this.schemaURLs = data.schemaURLs;
-
-    this.storageIDBBackend = data.storageIDBBackend;
+    if (WebExtensionPolicy.isExtensionProcess) {
+      Object.assign(this, this.getSharedData("extendedData"));
+    }
 
     this.MESSAGE_EMIT_EVENT = `Extension:EmitEvent:${this.instanceId}`;
     Services.cpmm.addMessageListener(this.MESSAGE_EMIT_EVENT, this);
 
-    defineLazyGetter(this, "scripts", () => {
-      return data.contentScripts.map(scriptData => new ExtensionContent.Script(this, scriptData));
-    });
-
-    this.webAccessibleResources = data.webAccessibleResources.map(res => new MatchGlob(res));
-    this.permissions = data.permissions;
-    this.optionalPermissions = data.optionalPermissions;
-    this.principal = data.principal;
-
     let restrictSchemes = !this.hasPermission("mozillaAddons");
-
-    this.whiteListedHosts = new MatchPatternSet(data.whiteListedHosts, {restrictSchemes, ignorePath: true});
 
     this.apiManager = this.getAPIManager();
 
-    this.localeData = new LocaleData(data.localeData);
+    this._manifest = null;
+    this._localeData = null;
 
-    this.manifest = data.manifest;
-    this.baseURL = data.baseURL;
-    this.baseURI = Services.io.newURI(data.baseURL);
+    this.baseURI = Services.io.newURI(`moz-extension://${this.uuid}/`);
+    this.baseURL = this.baseURI.spec;
+
+    this.principal = Services.scriptSecurityManager.createCodebasePrincipal(
+      this.baseURI, {});
 
     // Only used in addon processes.
     this.views = new Set();
@@ -641,43 +635,38 @@ class BrowserExtensionContent extends EventEmitter {
     /* eslint-disable mozilla/balanced-listeners */
     this.on("add-permissions", (ignoreEvent, permissions) => {
       if (permissions.permissions.length > 0) {
+        let perms = new Set(this.policy.permissions);
         for (let perm of permissions.permissions) {
-          this.permissions.add(perm);
+          perms.add(perm);
         }
+        this.policy.permissions = perms;
       }
 
       if (permissions.origins.length > 0) {
         let patterns = this.whiteListedHosts.patterns.map(host => host.pattern);
 
-        this.whiteListedHosts = new MatchPatternSet([...patterns, ...permissions.origins],
-                                                    {restrictSchemes, ignorePath: true});
-      }
-
-      if (this.policy) {
-        this.policy.permissions = Array.from(this.permissions);
-        this.policy.allowedOrigins = this.whiteListedHosts;
+        this.policy.allowedOrigins =
+          new MatchPatternSet([...patterns, ...permissions.origins],
+                              {restrictSchemes, ignorePath: true});
       }
     });
 
     this.on("remove-permissions", (ignoreEvent, permissions) => {
       if (permissions.permissions.length > 0) {
+        let perms = new Set(this.policy.permissions);
         for (let perm of permissions.permissions) {
-          this.permissions.delete(perm);
+          perms.delete(perm);
         }
+        this.policy.permissions = perms;
       }
 
       if (permissions.origins.length > 0) {
         let origins = permissions.origins.map(
           origin => new MatchPattern(origin, {ignorePath: true}).pattern);
 
-        this.whiteListedHosts = new MatchPatternSet(
+        this.policy.allowedOrigins = new MatchPatternSet(
           this.whiteListedHosts.patterns
               .filter(host => !origins.includes(host.pattern)));
-      }
-
-      if (this.policy) {
-        this.policy.permissions = Array.from(this.permissions);
-        this.policy.allowedOrigins = this.whiteListedHosts;
       }
     });
     /* eslint-enable mozilla/balanced-listeners */
@@ -685,13 +674,53 @@ class BrowserExtensionContent extends EventEmitter {
     ExtensionManager.extensions.set(this.id, this);
   }
 
+  get id() {
+    return this.policy.id;
+  }
+
+  get uuid() {
+    return this.policy.mozExtensionHostname;
+  }
+
+  get permissions() {
+    return new Set(this.policy.permissions);
+  }
+
+  get whiteListedHosts() {
+    return this.policy.allowedOrigins;
+  }
+
+  get webAccessibleResources() {
+    return this.policy.webAccessibleResources;
+  }
+
+  getSharedData(key, value) {
+    return sharedData.get(`extension/${this.id}/${key}`);
+  }
+
+  get localeData() {
+    if (!this._localeData) {
+      this._localeData = new LocaleData(this.getSharedData("locales"));
+    }
+    return this._localeData;
+  }
+
+  get manifest() {
+    if (!this._manifest) {
+      this._manifest = this.getSharedData("manifest");
+    }
+    return this._manifest;
+  }
+
   getAPIManager() {
     let apiManagers = [ExtensionPageChild.apiManager];
 
-    for (let id of this.dependencies) {
-      let extension = processScript.getExtensionChild(id);
-      if (extension) {
-        apiManagers.push(extension.experimentAPIManager);
+    if (this.dependencies) {
+      for (let id of this.dependencies) {
+        let extension = processScript.getExtensionChild(id);
+        if (extension) {
+          apiManagers.push(extension.experimentAPIManager);
+        }
       }
     }
 
@@ -836,6 +865,39 @@ class ProxyAPIImplementation extends SchemaAPIInterface {
   hasListener(listener) {
     let map = this.childApiManager.listeners.get(this.path);
     return map.listeners.has(listener);
+  }
+}
+
+class ChildLocalAPIImplementation extends LocalAPIImplementation {
+  constructor(pathObj, name, childApiManager) {
+    super(pathObj, name, childApiManager.context);
+    this.childApiManagerId = childApiManager.id;
+  }
+
+  withTiming(callable) {
+    if (!gTimingEnabled) {
+      return callable();
+    }
+    let start = Cu.now() * 1000;
+    try {
+      return callable();
+    } finally {
+      let end = Cu.now() * 1000;
+      PerformanceCounters.storeExecutionTime(this.context.extension.id, this.name,
+                                             end - start, this.childApiManagerId);
+    }
+  }
+
+  callFunction(args) {
+    return this.withTiming(() => super.callFunction(args));
+  }
+
+  callFunctionNoReturn(args) {
+    return this.withTiming(() => super.callFunctionNoReturn(args));
+  }
+
+  callAsyncFunction(args, callback, requireUserInput) {
+    return this.withTiming(() => super.callAsyncFunction(args, callback, requireUserInput));
   }
 }
 
@@ -1035,9 +1097,6 @@ class ChildAPIManager {
         !allowedContexts.includes("content")) {
       return false;
     }
-    if (allowedContexts.includes("addon_parent_only")) {
-      return false;
-    }
 
     // Do not generate devtools APIs, unless explicitly allowed.
     if (this.context.envType === "devtools_child" &&
@@ -1051,6 +1110,12 @@ class ChildAPIManager {
       return false;
     }
 
+    // Do not generate content_only APIs, unless explicitly allowed.
+    if (this.context.envType !== "content_child" &&
+        allowedContexts.includes("content_only")) {
+      return false;
+    }
+
     return true;
   }
 
@@ -1059,7 +1124,7 @@ class ChildAPIManager {
     let obj = this.apiCan.findAPIPath(namespace);
 
     if (obj && name in obj) {
-      return new LocalAPIImplementation(obj, name, this.context);
+      return new ChildLocalAPIImplementation(obj, name, this);
     }
 
     return this.getFallbackImplementation(namespace, name);

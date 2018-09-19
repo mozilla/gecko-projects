@@ -245,12 +245,6 @@ LocalStorageCache::ProcessUsageDelta(uint32_t aGetDataSetIndex,
                                      const int64_t aDelta,
                                      const MutationSource aSource)
 {
-  // Check if we are in a low disk space situation
-  if (aSource == ContentMutation &&
-      aDelta > 0 && mManager && mManager->IsLowDiskSpace()) {
-    return false;
-  }
-
   // Check limit per this origin
   Data& data = mData[aGetDataSetIndex];
   uint64_t newOriginUsage = data.mOriginQuotaUsage + aDelta;
@@ -430,7 +424,7 @@ LocalStorageCache::SetItem(const LocalStorage* aStorage, const nsAString& aKey,
            static_cast<int64_t>(aOld.Length());
 
   if (!ProcessUsageDelta(aStorage, delta, aSource)) {
-    return NS_ERROR_DOM_QUOTA_REACHED;
+    return NS_ERROR_DOM_QUOTA_EXCEEDED_ERR;
   }
 
   if (aValue == aOld && DOMStringIsNull(aValue) == DOMStringIsNull(aOld)) {
@@ -443,7 +437,9 @@ LocalStorageCache::SetItem(const LocalStorage* aStorage, const nsAString& aKey,
     return NS_OK;
   }
 
+#if !defined(MOZ_WIDGET_ANDROID)
   NotifyObservers(aStorage, nsString(aKey), aOld, aValue);
+#endif
 
   if (Persist(aStorage)) {
     StorageDBChild* storageChild = StorageDBChild::Get();
@@ -491,7 +487,9 @@ LocalStorageCache::RemoveItem(const LocalStorage* aStorage,
     return NS_OK;
   }
 
+#if !defined(MOZ_WIDGET_ANDROID)
   NotifyObservers(aStorage, nsString(aKey), aOld, VoidString());
+#endif
 
   if (Persist(aStorage)) {
     StorageDBChild* storageChild = StorageDBChild::Get();
@@ -539,9 +537,11 @@ LocalStorageCache::Clear(const LocalStorage* aStorage,
     return hadData ? NS_OK : NS_SUCCESS_DOM_NO_OPERATION;
   }
 
+#if !defined(MOZ_WIDGET_ANDROID)
   if (hadData) {
     NotifyObservers(aStorage, VoidString(), VoidString(), VoidString());
   }
+#endif
 
   if (Persist(aStorage) && (refresh || hadData)) {
     StorageDBChild* storageChild = StorageDBChild::Get();

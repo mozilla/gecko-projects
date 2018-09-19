@@ -11,18 +11,17 @@
 
 #include "gc/Rooting.h"
 #include "js/TypeDecls.h"
+#include "js/Utility.h"
 #include "vm/CommonPropertyNames.h"
-
-class JSAutoByteString;
 
 namespace js {
 
 /*
  * Return a printable, lossless char[] representation of a string-type atom.
- * The lifetime of the result matches the lifetime of bytes.
+ * The returned string is guaranteed to contain only ASCII characters.
  */
-extern const char*
-AtomToPrintableString(JSContext* cx, JSAtom* atom, JSAutoByteString* bytes);
+extern UniqueChars
+AtomToPrintableString(JSContext* cx, JSAtom* atom);
 
 class PropertyName;
 
@@ -45,10 +44,7 @@ class AutoAccessAtomsZone;
  * Atom tracing and garbage collection hooks.
  */
 void
-TraceAtoms(JSTracer* trc, const AutoAccessAtomsZone& atomsAccess);
-
-void
-TracePermanentAtoms(JSTracer* trc);
+TraceAtoms(JSTracer* trc, const AutoAccessAtomsZone& access);
 
 void
 TraceWellKnownSymbols(JSTracer* trc);
@@ -88,10 +84,6 @@ ToAtom(JSContext* cx, typename MaybeRooted<JS::Value, allowGC>::HandleType v);
 
 extern JS::Handle<PropertyName*>
 ClassName(JSProtoKey key, JSContext* cx);
-
-namespace gc {
-void MergeAtomsAddedWhileSweeping(JSRuntime* rt);
-} // namespace gc
 
 #ifdef DEBUG
 

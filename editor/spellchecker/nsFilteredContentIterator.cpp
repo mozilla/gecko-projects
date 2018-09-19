@@ -22,14 +22,14 @@
 using namespace mozilla;
 
 //------------------------------------------------------------
-nsFilteredContentIterator::nsFilteredContentIterator(nsComposeTxtSrvFilter* aFilter) :
-  mFilter(aFilter),
+nsFilteredContentIterator::nsFilteredContentIterator(UniquePtr<nsComposeTxtSrvFilter> aFilter) :
+  mIterator(NS_NewContentIterator()),
+  mPreIterator(NS_NewPreContentIterator()),
+  mFilter(std::move(aFilter)),
   mDidSkip(false),
   mIsOutOfRange(false),
   mDirection(eDirNotSet)
 {
-  mIterator = do_CreateInstance("@mozilla.org/content/post-content-iterator;1");
-  mPreIterator = do_CreateInstance("@mozilla.org/content/pre-content-iterator;1");
 }
 
 //------------------------------------------------------------
@@ -51,7 +51,6 @@ NS_IMPL_CYCLE_COLLECTION(nsFilteredContentIterator,
                          mCurrentIterator,
                          mIterator,
                          mPreIterator,
-                         mFilter,
                          mRange)
 
 //------------------------------------------------------------

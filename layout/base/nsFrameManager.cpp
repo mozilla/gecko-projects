@@ -18,10 +18,8 @@
 #include "mozilla/PresState.h"
 #include "mozilla/ComputedStyle.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/UndisplayedNode.h"
 #include "nsIDocument.h"
 
-#include "nsContentUtils.h"
 #include "nsError.h"
 #include "nsAutoPtr.h"
 #include "nsAbsoluteContainingBlock.h"

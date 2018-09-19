@@ -62,6 +62,8 @@ ReflowInput::ReflowInput(nsPresContext*       aPresContext,
   : SizeComputationInput(aFrame, aRenderingContext)
   , mBlockDelta(0)
   , mOrthogonalLimit(NS_UNCONSTRAINEDSIZE)
+  , mAvailableWidth(0)
+  , mAvailableHeight(0)
   , mContainingBlockSize(mWritingMode)
   , mReflowDepth(0)
 {
@@ -182,6 +184,8 @@ ReflowInput::ReflowInput(
   : SizeComputationInput(aFrame, aParentReflowInput.mRenderingContext)
   , mBlockDelta(0)
   , mOrthogonalLimit(NS_UNCONSTRAINEDSIZE)
+  , mAvailableWidth(0)
+  , mAvailableHeight(0)
   , mContainingBlockSize(mWritingMode)
   , mFlags(aParentReflowInput.mFlags)
   , mReflowDepth(aParentReflowInput.mReflowDepth + 1)
@@ -485,6 +489,13 @@ ReflowInput::Init(nsPresContext*     aPresContext,
     }
   }
 
+  if (mStyleDisplay->IsContainSize()) {
+    // In the case that a box is size contained, we want to ensure
+    // that it is also monolithic. We do this by unsetting
+    // AvailableBSize() to avoid fragmentaiton.
+    AvailableBSize() = NS_UNCONSTRAINEDSIZE;
+  }
+
   LAYOUT_WARN_IF_FALSE((mFrameType == NS_CSS_FRAME_TYPE_INLINE &&
                         !mFrame->IsFrameOfType(nsIFrame::eReplaced)) ||
                        type == LayoutFrameType::Text ||
@@ -672,7 +683,7 @@ ReflowInput::InitResizeFlags(nsPresContext* aPresContext,
 
   // XXX Should we really need to null check mCBReflowInput?  (We do for
   // at least nsBoxFrame).
-  if (IS_TABLE_CELL(aFrameType) &&
+  if (IsTableCell(aFrameType) &&
       (mFlags.mSpecialBSizeReflow ||
        (mFrame->FirstInFlow()->GetStateBits() &
          NS_TABLE_CELL_HAD_SPECIAL_REFLOW)) &&
@@ -752,7 +763,7 @@ ReflowInput::InitResizeFlags(nsPresContext* aPresContext,
   // the special bsize reflow, since in that case it will already be
   // set correctly above if we need it set.
   if (!IsBResize() && mCBReflowInput &&
-      (IS_TABLE_CELL(mCBReflowInput->mFrame->Type()) ||
+      (IsTableCell(mCBReflowInput->mFrame->Type()) ||
        mCBReflowInput->mFlags.mHeightDependsOnAncestorCell) &&
       !mCBReflowInput->mFlags.mSpecialBSizeReflow &&
       dependsOnCBBSize) {
@@ -825,13 +836,6 @@ ReflowInput::InitFrameType(LayoutFrameType aFrameType)
 {
   const nsStyleDisplay *disp = mStyleDisplay;
   nsCSSFrameType frameType;
-
-  // Section 9.7 of the CSS2 spec indicates that absolute position
-  // takes precedence over float which takes precedence over display.
-  // XXXldb nsRuleNode::ComputeDisplayData should take care of this, right?
-  // Make sure the frame was actually moved out of the flow, and don't
-  // just assume what the style says, because we might not have had a
-  // useful float/absolute containing block
 
   DISPLAY_INIT_TYPE(mFrame, this);
 
@@ -2243,14 +2247,12 @@ ReflowInput::InitConstraints(nsPresContext* aPresContext,
 
     // See if the containing block height is based on the size of its
     // content
-    LayoutFrameType fType;
     if (NS_AUTOHEIGHT == cbSize.BSize(wm)) {
       // See if the containing block is a cell frame which needs
       // to use the mComputedHeight of the cell instead of what the cell block passed in.
       // XXX It seems like this could lead to bugs with min-height and friends
       if (cbri->mParentReflowInput) {
-        fType = cbri->mFrame->Type();
-        if (IS_TABLE_CELL(fType)) {
+        if (IsTableCell(cbri->mFrame->Type())) {
           // use the cell's computed block size
           cbSize.BSize(wm) = cbri->ComputedSize(wm).BSize(wm);
         }
@@ -2287,7 +2289,7 @@ ReflowInput::InitConstraints(nsPresContext* aPresContext,
           // in quirks mode, get the cb height using the special quirk method
           if (!wm.IsVertical() &&
               eCompatibility_NavQuirks == aPresContext->CompatibilityMode()) {
-            if (!IS_TABLE_CELL(fType)) {
+            if (!IsTableCell(cbri->mFrame->Type())) {
               cbSize.BSize(wm) = CalcQuirkContainingBlockHeight(cbri);
               if (cbSize.BSize(wm) == NS_AUTOHEIGHT) {
                 blockSizeUnit = eStyleUnit_Auto;
@@ -2457,7 +2459,7 @@ ReflowInput::InitConstraints(nsPresContext* aPresContext,
         // Also shrink-wrap blocks that are orthogonal to their container.
         if (isBlock &&
             ((aFrameType == LayoutFrameType::Legend &&
-              mFrame->Style()->GetPseudo() != nsCSSAnonBoxes::scrolledContent) ||
+              mFrame->Style()->GetPseudo() != nsCSSAnonBoxes::scrolledContent()) ||
              (aFrameType == LayoutFrameType::Scroll &&
               mFrame->GetContentInsertionFrame()->IsLegendFrame()) ||
              (mCBReflowInput &&

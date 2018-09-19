@@ -19,6 +19,8 @@
 using namespace js;
 using namespace js::jit;
 
+// [SMDOC] IonMonkey Snapshot encoding
+//
 // Encodings:
 //   [ptr] A fixed-size pointer.
 //   [vwu] A variable-width unsigned integer.
@@ -257,10 +259,12 @@ RValueAllocation::layoutFromMode(Mode mode)
             "typed value"
         };
 
-        if (mode >= TYPED_REG_MIN && mode <= TYPED_REG_MAX)
+        if (mode >= TYPED_REG_MIN && mode <= TYPED_REG_MAX) {
             return regLayout;
-        if (mode >= TYPED_STACK_MIN && mode <= TYPED_STACK_MAX)
+        }
+        if (mode >= TYPED_STACK_MIN && mode <= TYPED_STACK_MAX) {
             return stackLayout;
+        }
       }
     }
 
@@ -360,8 +364,9 @@ void
 RValueAllocation::writePadding(CompactBufferWriter& writer)
 {
     // Write 0x7f in all padding bytes.
-    while (writer.length() % ALLOCATION_TABLE_ALIGNMENT)
+    while (writer.length() % ALLOCATION_TABLE_ALIGNMENT) {
         writer.writeByte(0x7f);
+    }
 }
 
 void
@@ -439,14 +444,17 @@ RValueAllocation::dump(GenericPrinter& out) const
     const Layout& layout = layoutFromMode(mode());
     out.printf("%s", layout.name);
 
-    if (layout.type1 != PAYLOAD_NONE)
+    if (layout.type1 != PAYLOAD_NONE) {
         out.printf(" (");
+    }
     dumpPayload(out, layout.type1, arg1_);
-    if (layout.type2 != PAYLOAD_NONE)
+    if (layout.type2 != PAYLOAD_NONE) {
         out.printf(", ");
+    }
     dumpPayload(out, layout.type2, arg2_);
-    if (layout.type1 != PAYLOAD_NONE)
+    if (layout.type1 != PAYLOAD_NONE) {
         out.printf(")");
+    }
 }
 
 SnapshotReader::SnapshotReader(const uint8_t* snapshots, uint32_t offset,
@@ -456,8 +464,9 @@ SnapshotReader::SnapshotReader(const uint8_t* snapshots, uint32_t offset,
     allocTable_(snapshots + listSize),
     allocRead_(0)
 {
-    if (!snapshots)
+    if (!snapshots) {
         return;
+    }
     JitSpew(JitSpew_IonSnapshots, "Creating snapshot reader");
     readSnapshotHeader();
 }
@@ -545,14 +554,12 @@ SnapshotReader::readAllocation()
     return RValueAllocation::read(allocReader_);
 }
 
-bool
-SnapshotWriter::init()
-{
-    // Based on the measurements made in Bug 962555 comment 20, this should be
-    // enough to prevent the reallocation of the hash table for at least half of
-    // the compilations.
-    return allocMap_.init(32);
-}
+SnapshotWriter::SnapshotWriter()
+    // Based on the measurements made in Bug 962555 comment 20, this length
+    // should be enough to prevent the reallocation of the hash table for at
+    // least half of the compilations.
+  : allocMap_(32)
+{}
 
 RecoverReader::RecoverReader(SnapshotReader& snapshot, const uint8_t* recovers, uint32_t size)
   : reader_(nullptr, nullptr),
@@ -560,8 +567,9 @@ RecoverReader::RecoverReader(SnapshotReader& snapshot, const uint8_t* recovers, 
     numInstructionsRead_(0),
     resumeAfter_(false)
 {
-    if (!recovers)
+    if (!recovers) {
         return;
+    }
     reader_ = CompactBufferReader(recovers + snapshot.recoverOffset(), recovers + size);
     readRecoverHeader();
     readInstruction();
@@ -573,8 +581,9 @@ RecoverReader::RecoverReader(const RecoverReader& rr)
     numInstructionsRead_(rr.numInstructionsRead_),
     resumeAfter_(rr.resumeAfter_)
 {
-    if (reader_.currentPosition())
+    if (reader_.currentPosition()) {
         rr.instruction()->cloneInto(&rawData_);
+    }
 }
 
 RecoverReader&
@@ -584,8 +593,9 @@ RecoverReader::operator=(const RecoverReader& rr)
     numInstructions_ = rr.numInstructions_;
     numInstructionsRead_ = rr.numInstructionsRead_;
     resumeAfter_ = rr.resumeAfter_;
-    if (reader_.currentPosition())
+    if (reader_.currentPosition()) {
         rr.instruction()->cloneInto(&rawData_);
+    }
     return *this;
 }
 
@@ -645,8 +655,6 @@ SnapshotWriter::trackSnapshot(uint32_t pcOpcode, uint32_t mirOpcode, uint32_t mi
 bool
 SnapshotWriter::add(const RValueAllocation& alloc)
 {
-    MOZ_ASSERT(allocMap_.initialized());
-
     uint32_t offset;
     RValueAllocMap::AddPtr p = allocMap_.lookupForAdd(alloc);
     if (!p) {
@@ -709,8 +717,9 @@ RecoverWriter::startRecover(uint32_t instructionCount, bool resumeAfter)
 void
 RecoverWriter::writeInstruction(const MNode* rp)
 {
-    if (!rp->writeRecoverData(writer_))
+    if (!rp->writeRecoverData(writer_)) {
         writer_.setOOM();
+    }
     instructionsWritten_++;
 }
 

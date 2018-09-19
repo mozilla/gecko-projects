@@ -26,6 +26,11 @@ public:
 
   static GPUParent* GetSingleton();
 
+  // Gets the name of the GPU process, in the format expected by about:memory.
+  // There must be a GPU process active, and the caller must be either in that
+  // process or the parent process.
+  static void GetGPUProcessName(nsACString& aStr);
+
   bool Init(base::ProcessId aParentPid,
             const char* aParentBuildID,
             MessageLoop* aIOLoop,
@@ -43,6 +48,7 @@ public:
   mozilla::ipc::IPCResult RecvInitVsyncBridge(Endpoint<PVsyncBridgeParent>&& aVsyncEndpoint) override;
   mozilla::ipc::IPCResult RecvInitImageBridge(Endpoint<PImageBridgeParent>&& aEndpoint) override;
   mozilla::ipc::IPCResult RecvInitVRManager(Endpoint<PVRManagerParent>&& aEndpoint) override;
+  mozilla::ipc::IPCResult RecvInitVR(Endpoint<PVRGPUChild>&& aVRGPUChild) override;
   mozilla::ipc::IPCResult RecvInitUiCompositorController(const LayersId& aRootLayerTreeId, Endpoint<PUiCompositorControllerParent>&& aEndpoint) override;
   mozilla::ipc::IPCResult RecvInitProfiler(Endpoint<PProfilerChild>&& aEndpoint) override;
   mozilla::ipc::IPCResult RecvUpdatePref(const GfxPrefSetting& pref) override;
@@ -61,6 +67,7 @@ public:
     const bool& anonymize,
     const bool& minimizeMemoryUsage,
     const MaybeFileDesc& DMDFile) override;
+  mozilla::ipc::IPCResult RecvShutdownVR() override;
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 

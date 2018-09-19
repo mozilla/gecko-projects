@@ -10,7 +10,7 @@
 #include "mozilla/ThrottledEventQueue.h"
 #include "nsComponentManagerUtils.h"
 #include "nsCOMPtr.h"
-#include "nsIThreadPool.h"
+#include "nsThreadPool.h"
 #include "nsThreadUtils.h"
 #include "nsXPCOM.h"
 #include "nsXPCOMCIDInternal.h"
@@ -20,8 +20,7 @@ using namespace mozilla;
 
 TEST(TestEventTargetQI, ThreadPool)
 {
-  nsCOMPtr<nsIThreadPool> thing = do_CreateInstance(NS_THREADPOOL_CONTRACTID);
-  EXPECT_TRUE(thing);
+  nsCOMPtr<nsIThreadPool> thing = new nsThreadPool();
 
   nsCOMPtr<nsISerialEventTarget> serial = do_QueryInterface(thing);
   EXPECT_FALSE(serial);

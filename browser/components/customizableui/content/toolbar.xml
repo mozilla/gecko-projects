@@ -10,8 +10,6 @@
 
   <binding id="toolbar">
     <implementation>
-      <field name="overflowedDuringConstruction">null</field>
-
       <constructor><![CDATA[
           let scope = {};
           ChromeUtils.import("resource:///modules/CustomizableUI.jsm", scope);
@@ -19,7 +17,7 @@
 
           // Searching for the toolbox palette in the toolbar binding because
           // toolbars are constructed first.
-          let toolbox = this.toolbox;
+          let toolbox = this.closest("toolbox");
           if (toolbox && !toolbox.palette) {
             for (let node of toolbox.children) {
               if (node.localName == "toolbarpalette") {
@@ -32,7 +30,7 @@
           }
 
           // pass the current set of children for comparison with placements:
-          let children = Array.from(this.childNodes)
+          let children = Array.from(this.children)
                               .filter(node => node.getAttribute("skipintoolbarset") != "true" && node.id)
                               .map(node => node.id);
           CustomizableUI.registerToolbarNode(this, children);
@@ -67,10 +65,6 @@
         ]]></body>
       </method>
 
-      <property name="toolbarName"
-                onget="return this.getAttribute('toolbarname');"
-                onset="this.setAttribute('toolbarname', val); return val;"/>
-
       <property name="customizationTarget" readonly="true">
         <getter><![CDATA[
           if (this._customizationTarget)
@@ -89,33 +83,11 @@
         ]]></getter>
       </property>
 
-      <property name="toolbox" readonly="true">
-        <getter><![CDATA[
-          if (this._toolbox)
-            return this._toolbox;
-
-          let toolboxId = this.getAttribute("toolboxid");
-          if (toolboxId) {
-            let toolbox = document.getElementById(toolboxId);
-            if (toolbox) {
-              this._toolbox = toolbox;
-            }
-          }
-
-          if (!this._toolbox && this.parentNode &&
-              this.parentNode.localName == "toolbox") {
-            this._toolbox = this.parentNode;
-          }
-
-          return this._toolbox;
-        ]]></getter>
-      </property>
-
       <property name="currentSet">
         <getter><![CDATA[
           let currentWidgets = new Set();
           for (let node of this.customizationTarget.children) {
-            let realNode = node.localName == "toolbarpaletteitem" ? node.firstChild : node;
+            let realNode = node.localName == "toolbarpaletteitem" ? node.firstElementChild : node;
             if (realNode.getAttribute("skipintoolbarset") != "true") {
               currentWidgets.add(realNode.id);
             }
@@ -124,7 +96,7 @@
             let overflowTarget = this.getAttribute("overflowtarget");
             let overflowList = this.ownerDocument.getElementById(overflowTarget);
             for (let node of overflowList.children) {
-              let realNode = node.localName == "toolbarpaletteitem" ? node.firstChild : node;
+              let realNode = node.localName == "toolbarpaletteitem" ? node.firstElementChild : node;
               if (realNode.getAttribute("skipintoolbarset") != "true") {
                 currentWidgets.add(realNode.id);
               }
@@ -176,18 +148,6 @@
 
   <binding id="toolbar-menubar-stub">
     <implementation>
-      <property name="toolbox" readonly="true">
-        <getter><![CDATA[
-          if (this._toolbox)
-            return this._toolbox;
-
-          if (this.parentNode && this.parentNode.localName == "toolbox") {
-            this._toolbox = this.parentNode;
-          }
-
-          return this._toolbox;
-        ]]></getter>
-      </property>
       <property name="currentSet" readonly="true">
         <getter><![CDATA[
           return this.getAttribute("defaultset");
@@ -261,7 +221,7 @@
               this.contextMenu = null;
               break;
           }
-        }
+        },
       })]]></field>
 
       <method name="_setInactive">
@@ -323,7 +283,7 @@
     </implementation>
   </binding>
 
-  <binding id="toolbarpaletteitem" extends="xul:button">
+  <binding id="toolbarpaletteitem">
     <content>
       <xul:hbox class="toolbarpaletteitem-box">
         <children/>

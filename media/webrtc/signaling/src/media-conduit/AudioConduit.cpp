@@ -142,7 +142,7 @@ bool WebrtcAudioConduit::SetLocalSSRCs(const std::vector<unsigned int> & aSSRCs)
   return true;
 }
 
-std::vector<unsigned int> WebrtcAudioConduit::GetLocalSSRCs() const {
+std::vector<unsigned int> WebrtcAudioConduit::GetLocalSSRCs() {
   unsigned int ssrc;
   if (!mPtrRTP->GetLocalSSRC(mChannel, ssrc)) {
     return std::vector<unsigned int>(1,ssrc);
@@ -798,7 +798,7 @@ WebrtcAudioConduit::GetAudioFrame(int16_t speechData[],
         Telemetry::Accumulate(Telemetry::WEBRTC_AVSYNC_WHEN_AUDIO_LAGS_VIDEO_MS,
                               avsync_offset_ms);
       }
-      CSFLogError(LOGTAG,
+      CSFLogDebug(LOGTAG,
                   "A/V sync: sync delta: %dms, audio jitter delay %dms, playout delay %dms",
                   avsync_offset_ms, jitter_buffer_delay_ms, playout_buffer_delay_ms);
     } else {

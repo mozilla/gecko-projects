@@ -120,7 +120,6 @@ async function runTestWithIcons(icons) {
     ["synced_tabs", "#sync-button", "sync-button"],
     ["open_file", "#open-file-button", "open-file-button"],
     ["sidebars", "#sidebar-button", "sidebar-button"],
-    ["subscribe", "#feed-button", "feed-button"],
     ["text_encoding", "#characterencoding-button", "characterencoding-button"],
     ["email_link", "#email-link-button", "email-link-button"],
     ["forget", "#panic-button", "panic-button"],
@@ -162,8 +161,7 @@ async function runTestWithIcons(icons) {
 
 add_task(async function setup() {
   await SpecialPowers.pushPrefEnv({
-    set: [["extensions.webextensions.themes.enabled", true],
-          ["extensions.webextensions.themes.icons.enabled", true]],
+    set: [["extensions.webextensions.themes.icons.enabled", true]],
   });
 });
 
@@ -194,7 +192,6 @@ add_task(async function test_all_icons() {
     ["synced_tabs", "fox.svg"],
     ["open_file", "fox.svg"],
     ["sidebars", "fox.svg"],
-    ["subscribe", "fox.svg"],
     ["text_encoding", "fox.svg"],
     ["email_link", "fox.svg"],
     ["forget", "fox.svg"],
@@ -234,7 +231,6 @@ add_task(async function test_some_icons() {
     ["synced_tabs", ""],
     ["open_file", ""],
     ["sidebars", ""],
-    ["subscribe", ""],
     ["text_encoding", ""],
     ["email_link", ""],
     ["forget", ""],

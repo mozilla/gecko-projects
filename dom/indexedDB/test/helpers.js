@@ -17,7 +17,7 @@ var testGenerator = testSteps();
 // is whether the property is read-only or not.
 var c = Object.getOwnPropertyDescriptor(this, "Components");
 if ((!c || !c.value || c.writable) && typeof SpecialPowers === "object") {
-  // eslint-disable-next-line no-native-reassign
+  // eslint-disable-next-line no-global-assign
   Components = SpecialPowers.wrap(SpecialPowers.Components);
 }
 
@@ -212,10 +212,6 @@ if (!window.runTest) {
 
 function finishTest()
 {
-  SpecialPowers.notifyObserversInParentProcess(null,
-                                               "disk-space-watcher",
-                                               "free");
-
   SimpleTest.executeSoon(function() {
     clearAllDatabases(function() { SimpleTest.finish(); });
   });

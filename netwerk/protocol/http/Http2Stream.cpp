@@ -80,7 +80,8 @@ Http2Stream::Http2Stream(nsAHttpTransaction *httpTransaction,
 {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
-  LOG3(("Http2Stream::Http2Stream %p", this));
+  nsHttpTransaction *trans = mTransaction->QueryHttpTransaction();
+  LOG3(("Http2Stream::Http2Stream %p trans=%p atrans=%p", this, trans, httpTransaction));
 
   mServerReceiveWindow = session->GetServerInitialStreamWindow();
   mClientReceiveWindow = session->PushAllowance();
@@ -104,7 +105,6 @@ Http2Stream::Http2Stream(nsAHttpTransaction *httpTransaction,
   MOZ_ASSERT(httpPriority >= 0);
   SetPriority(static_cast<uint32_t>(httpPriority));
 
-  nsHttpTransaction *trans = mTransaction->QueryHttpTransaction();
   if (trans) {
     mTransactionTabId = trans->TopLevelOuterContentWindowId();
   }
@@ -508,6 +508,13 @@ Http2Stream::ParseHttpRequestHeaders(const char *buf,
       // as we can't rely on future network events to do it
       mSession->ConnectPushedStream(this);
       mOpenGenerated = 1;
+
+      // if the "mother stream" had TRR, this one is a TRR stream too!
+      RefPtr<nsHttpConnectionInfo> ci(Transaction()->ConnectionInfo());
+      if (ci && ci->GetTrrUsed()) {
+        mSession->IncrementTrrCounter();
+      }
+
       return NS_OK;
     }
   }
@@ -1022,11 +1029,6 @@ Http2Stream::ConvertResponseHeaders(Http2Decompressor *decompressor,
                                     nsACString &aHeadersOut,
                                     int32_t &httpResponseCode)
 {
-  aHeadersOut.Truncate();
-  // Add in some space to hopefully not have to reallocate while decompressing
-  // the headers. 512 bytes seems like a good enough number.
-  aHeadersOut.SetCapacity(aHeadersIn.Length() + 512);
-
   nsresult rv =
     decompressor->DecodeHeaderBlock(reinterpret_cast<const uint8_t *>(aHeadersIn.BeginReading()),
                                     aHeadersIn.Length(),
@@ -1107,10 +1109,6 @@ Http2Stream::ConvertPushHeaders(Http2Decompressor *decompressor,
                                 nsACString &aHeadersIn,
                                 nsACString &aHeadersOut)
 {
-  aHeadersOut.Truncate();
-  // Add in some space to hopefully not have to reallocate while decompressing
-  // the headers. 512 bytes seems like a good enough number.
-  aHeadersOut.SetCapacity(aHeadersIn.Length() + 512);
   nsresult rv =
     decompressor->DecodeHeaderBlock(reinterpret_cast<const uint8_t *>(aHeadersIn.BeginReading()),
                                     aHeadersIn.Length(),
@@ -1152,9 +1150,6 @@ Http2Stream::ConvertResponseTrailers(Http2Decompressor *decompressor,
 {
   LOG3(("Http2Stream::ConvertResponseTrailers %p", this));
   nsAutoCString flatTrailers;
-  // Add in some space to hopefully not have to reallocate while decompressing
-  // the headers. 512 bytes seems like a good enough number.
-  flatTrailers.SetCapacity(aTrailersIn.Length() + 512);
 
   nsresult rv =
     decompressor->DecodeHeaderBlock(reinterpret_cast<const uint8_t *>(aTrailersIn.BeginReading()),

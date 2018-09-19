@@ -225,6 +225,7 @@ class TestRecursiveMakeBackend(BackendTester):
             'topobjdir := %s' % env.topobjdir,
             'topsrcdir := %s' % env.topsrcdir,
             'srcdir := %s' % env.topsrcdir,
+            'srcdir_rel := %s' % mozpath.relpath(env.topsrcdir, env.topobjdir),
             'VPATH := %s' % env.topsrcdir,
             'relativesrcdir := .',
             'include $(DEPTH)/config/autoconf.mk',
@@ -242,7 +243,7 @@ class TestRecursiveMakeBackend(BackendTester):
         self.assertTrue(os.path.exists(p))
 
         lines = [l.strip() for l in open(p, 'rt').readlines()]
-        self.assertEqual(len(lines), 10)
+        self.assertEqual(len(lines), 11)
 
         self.assertTrue(lines[0].startswith('# THIS FILE WAS AUTOMATICALLY'))
 
@@ -325,8 +326,10 @@ class TestRecursiveMakeBackend(BackendTester):
             'RCINCLUDE': [
                 'RCINCLUDE := bar.rc',
             ],
-            'DEFFILE': [
-                'DEFFILE := baz.def',
+            'EXTRA_DEPS': [
+                'EXTRA_DEPS += %s' % mozpath.join(mozpath.relpath(env.topsrcdir,
+                                                                  env.topobjdir),
+                                                  'baz.def'),
             ],
             'WIN32_EXE_LDFLAGS': [
                 'WIN32_EXE_LDFLAGS += -subsystem:console',
@@ -829,7 +832,9 @@ class TestRecursiveMakeBackend(BackendTester):
         env = self._consume('rust-library', RecursiveMakeBackend)
 
         backend_path = mozpath.join(env.topobjdir, 'backend.mk')
-        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]]
+        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]
+                 # Strip out computed flags, they're a PITA to test.
+                 if not l.startswith('COMPUTED_')]
 
         expected = [
             'RUST_LIBRARY_FILE := ./x86_64-unknown-linux-gnu/release/libtest_library.a',
@@ -844,7 +849,9 @@ class TestRecursiveMakeBackend(BackendTester):
         env = self._consume('host-rust-library', RecursiveMakeBackend)
 
         backend_path = mozpath.join(env.topobjdir, 'backend.mk')
-        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]]
+        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]
+                 # Strip out computed flags, they're a PITA to test.
+                 if not l.startswith('COMPUTED_')]
 
         expected = [
             'HOST_RUST_LIBRARY_FILE := ./x86_64-unknown-linux-gnu/release/libhostrusttool.a',
@@ -859,7 +866,9 @@ class TestRecursiveMakeBackend(BackendTester):
         env = self._consume('host-rust-library-features', RecursiveMakeBackend)
 
         backend_path = mozpath.join(env.topobjdir, 'backend.mk')
-        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]]
+        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]
+                 # Strip out computed flags, they're a PITA to test.
+                 if not l.startswith('COMPUTED_')]
 
         expected = [
             'HOST_RUST_LIBRARY_FILE := ./x86_64-unknown-linux-gnu/release/libhostrusttool.a',
@@ -875,7 +884,9 @@ class TestRecursiveMakeBackend(BackendTester):
         env = self._consume('rust-library-features', RecursiveMakeBackend)
 
         backend_path = mozpath.join(env.topobjdir, 'backend.mk')
-        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]]
+        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]
+                 # Strip out computed flags, they're a PITA to test.
+                 if not l.startswith('COMPUTED_')]
 
         expected = [
             'RUST_LIBRARY_FILE := ./x86_64-unknown-linux-gnu/release/libfeature_library.a',
@@ -891,7 +902,9 @@ class TestRecursiveMakeBackend(BackendTester):
         env = self._consume('rust-programs', RecursiveMakeBackend)
 
         backend_path = mozpath.join(env.topobjdir, 'code/backend.mk')
-        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]]
+        lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]
+                 # Strip out computed flags, they're a PITA to test.
+                 if not l.startswith('COMPUTED_')]
 
         expected = [
             'CARGO_FILE := %s/code/Cargo.toml' % env.topsrcdir,

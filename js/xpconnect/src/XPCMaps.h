@@ -34,14 +34,7 @@ class JSObject2WrappedJSMap
 
 public:
     static JSObject2WrappedJSMap* newMap(int length) {
-        auto* map = new JSObject2WrappedJSMap();
-        if (!map->mTable.init(length)) {
-            // This is a decent estimate of the size of the hash table's
-            // entry storage. The |2| is because on average the capacity is
-            // twice the requested length.
-            NS_ABORT_OOM(length * 2 * sizeof(Map::Entry));
-        }
-        return map;
+        return new JSObject2WrappedJSMap(length);
     }
 
     inline nsXPCWrappedJS* Find(JSObject* Obj) {
@@ -52,9 +45,10 @@ public:
 
 #ifdef DEBUG
     inline bool HasWrapper(nsXPCWrappedJS* wrapper) {
-        for (auto r = mTable.all(); !r.empty(); r.popFront()) {
-            if (r.front().value() == wrapper)
+        for (auto iter = mTable.iter(); !iter.done(); iter.next()) {
+            if (iter.get().value() == wrapper) {
                 return true;
+            }
         }
         return false;
     }
@@ -64,10 +58,12 @@ public:
         MOZ_ASSERT(wrapper,"bad param");
         JSObject* obj = wrapper->GetJSObjectPreserveColor();
         Map::AddPtr p = mTable.lookupForAdd(obj);
-        if (p)
+        if (p) {
             return p->value();
-        if (!mTable.add(p, obj, wrapper))
+        }
+        if (!mTable.add(p, obj, wrapper)) {
             return nullptr;
+        }
         return wrapper;
     }
 
@@ -79,8 +75,9 @@ public:
     inline uint32_t Count() {return mTable.count();}
 
     inline void Dump(int16_t depth) {
-        for (Map::Range r = mTable.all(); !r.empty(); r.popFront())
-            r.front().value()->DebugDump(depth);
+        for (auto iter = mTable.iter(); !iter.done(); iter.next()) {
+            iter.get().value()->DebugDump(depth);
+        }
     }
 
     void UpdateWeakPointersAfterGC();
@@ -94,7 +91,7 @@ public:
     size_t SizeOfWrappedJS(mozilla::MallocSizeOf mallocSizeOf) const;
 
 private:
-    JSObject2WrappedJSMap() {}
+    explicit JSObject2WrappedJSMap(size_t length) : mTable(length) {}
 
     Map mTable;
 };
@@ -112,7 +109,7 @@ public:
 
     static Native2WrappedNativeMap* newMap(int length);
 
-    inline XPCWrappedNative* Find(nsISupports* Obj)
+    inline XPCWrappedNative* Find(nsISupports* Obj) const
     {
         MOZ_ASSERT(Obj,"bad param");
         auto entry = static_cast<Entry*>(mTable.Search(Obj));
@@ -125,10 +122,12 @@ public:
         nsISupports* obj = wrapper->GetIdentityObject();
         MOZ_ASSERT(!Find(obj), "wrapper already in new scope!");
         auto entry = static_cast<Entry*>(mTable.Add(obj, mozilla::fallible));
-        if (!entry)
+        if (!entry) {
             return nullptr;
-        if (entry->key)
+        }
+        if (entry->key) {
             return entry->value;
+        }
         entry->key = obj;
         entry->value = wrapper;
         return wrapper;
@@ -178,7 +177,7 @@ public:
 
     static IID2WrappedJSClassMap* newMap(int length);
 
-    inline nsXPCWrappedJSClass* Find(REFNSIID iid)
+    inline nsXPCWrappedJSClass* Find(REFNSIID iid) const
     {
         auto entry = static_cast<Entry*>(mTable.Search(&iid));
         return entry ? entry->value : nullptr;
@@ -189,10 +188,12 @@ public:
         MOZ_ASSERT(clazz,"bad param");
         const nsIID* iid = &clazz->GetIID();
         auto entry = static_cast<Entry*>(mTable.Add(iid, mozilla::fallible));
-        if (!entry)
+        if (!entry) {
             return nullptr;
-        if (entry->key)
+        }
+        if (entry->key) {
             return entry->value;
+        }
         entry->key = iid;
         entry->value = clazz;
         return clazz;
@@ -232,7 +233,7 @@ public:
 
     static IID2NativeInterfaceMap* newMap(int length);
 
-    inline XPCNativeInterface* Find(REFNSIID iid)
+    inline XPCNativeInterface* Find(REFNSIID iid) const
     {
         auto entry = static_cast<Entry*>(mTable.Search(&iid));
         return entry ? entry->value : nullptr;
@@ -243,10 +244,12 @@ public:
         MOZ_ASSERT(iface,"bad param");
         const nsIID* iid = iface->GetIID();
         auto entry = static_cast<Entry*>(mTable.Add(iid, mozilla::fallible));
-        if (!entry)
+        if (!entry) {
             return nullptr;
-        if (entry->key)
+        }
+        if (entry->key) {
             return entry->value;
+        }
         entry->key = iid;
         entry->value = iface;
         return iface;
@@ -290,7 +293,7 @@ public:
 
     static ClassInfo2NativeSetMap* newMap(int length);
 
-    inline XPCNativeSet* Find(nsIClassInfo* info)
+    inline XPCNativeSet* Find(nsIClassInfo* info) const
     {
         auto entry = static_cast<Entry*>(mTable.Search(info));
         return entry ? entry->value : nullptr;
@@ -300,10 +303,12 @@ public:
     {
         MOZ_ASSERT(info,"bad param");
         auto entry = static_cast<Entry*>(mTable.Add(info, mozilla::fallible));
-        if (!entry)
+        if (!entry) {
             return nullptr;
-        if (entry->key)
+        }
+        if (entry->key) {
             return entry->value;
+        }
         entry->key = info;
         NS_ADDREF(entry->value = set);
         return set;
@@ -343,7 +348,7 @@ public:
 
     static ClassInfo2WrappedNativeProtoMap* newMap(int length);
 
-    inline XPCWrappedNativeProto* Find(nsIClassInfo* info)
+    inline XPCWrappedNativeProto* Find(nsIClassInfo* info) const
     {
         auto entry = static_cast<Entry*>(mTable.Search(info));
         return entry ? entry->value : nullptr;
@@ -353,10 +358,12 @@ public:
     {
         MOZ_ASSERT(info,"bad param");
         auto entry = static_cast<Entry*>(mTable.Add(info, mozilla::fallible));
-        if (!entry)
+        if (!entry) {
             return nullptr;
-        if (entry->key)
+        }
+        if (entry->key) {
             return entry->value;
+        }
         entry->key = info;
         entry->value = proto;
         return proto;
@@ -401,7 +408,7 @@ public:
 
     static NativeSetMap* newMap(int length);
 
-    inline XPCNativeSet* Find(XPCNativeSetKey* key)
+    inline XPCNativeSet* Find(XPCNativeSetKey* key) const
     {
         auto entry = static_cast<Entry*>(mTable.Search(key));
         return entry ? entry->key_value : nullptr;
@@ -412,10 +419,12 @@ public:
         MOZ_ASSERT(key, "bad param");
         MOZ_ASSERT(set, "bad param");
         auto entry = static_cast<Entry*>(mTable.Add(key, mozilla::fallible));
-        if (!entry)
+        if (!entry) {
             return nullptr;
-        if (entry->key_value)
+        }
+        if (entry->key_value) {
             return entry->key_value;
+        }
         entry->key_value = set;
         return set;
     }
@@ -470,10 +479,12 @@ public:
         MOZ_ASSERT(proto,"bad param");
         auto entry = static_cast<PLDHashEntryStub*>
                                 (mTable.Add(proto, mozilla::fallible));
-        if (!entry)
+        if (!entry) {
             return nullptr;
-        if (entry->key)
+        }
+        if (entry->key) {
             return (XPCWrappedNativeProto*) entry->key;
+        }
         entry->key = proto;
         return proto;
     }
@@ -506,20 +517,14 @@ class JSObject2JSObjectMap
 
 public:
     static JSObject2JSObjectMap* newMap(int length) {
-        auto* map = new JSObject2JSObjectMap();
-        if (!map->mTable.init(length)) {
-            // This is a decent estimate of the size of the hash table's
-            // entry storage. The |2| is because on average the capacity is
-            // twice the requested length.
-            NS_ABORT_OOM(length * 2 * sizeof(Map::Entry));
-        }
-        return map;
+        return new JSObject2JSObjectMap(length);
     }
 
     inline JSObject* Find(JSObject* key) {
         MOZ_ASSERT(key, "bad param");
-        if (Map::Ptr p = mTable.lookup(key))
+        if (Map::Ptr p = mTable.lookup(key)) {
             return p->value();
+        }
         return nullptr;
     }
 
@@ -527,10 +532,12 @@ public:
     inline JSObject* Add(JSContext* cx, JSObject* key, JSObject* value) {
         MOZ_ASSERT(key,"bad param");
         Map::AddPtr p = mTable.lookupForAdd(key);
-        if (p)
+        if (p) {
             return p->value();
-        if (!mTable.add(p, key, value))
+        }
+        if (!mTable.add(p, key, value)) {
             return nullptr;
+        }
         MOZ_ASSERT(xpc::RealmPrivate::Get(key)->scope->mWaiverWrapperMap == this);
         return value;
     }
@@ -547,7 +554,7 @@ public:
     }
 
 private:
-    JSObject2JSObjectMap() {}
+    explicit JSObject2JSObjectMap(size_t length) : mTable(length) {}
 
     Map mTable;
 };

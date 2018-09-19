@@ -141,16 +141,17 @@ gfxGDIFont::GetScaledFont(DrawTarget *aTarget)
 {
     if (!mAzureScaledFont) {
         NativeFont nativeFont;
-        nativeFont.mType = NativeFontType::GDI_FONT_FACE;
+        nativeFont.mType = NativeFontType::GDI_LOGFONT;
         LOGFONT lf;
         GetObject(GetHFONT(), sizeof(LOGFONT), &lf);
         nativeFont.mFont = &lf;
 
         mAzureScaledFont =
-          Factory::CreateScaledFontWithCairo(nativeFont,
-                                             GetUnscaledFont(),
-                                             GetAdjustedSize(),
-                                             GetCairoScaledFont());
+          Factory::CreateScaledFontForNativeFont(nativeFont,
+                                                 GetUnscaledFont(),
+                                                 GetAdjustedSize(),
+                                                 GetCairoScaledFont());
+        InitializeScaledFont();
     }
 
     RefPtr<ScaledFont> scaledFont(mAzureScaledFont);
@@ -418,7 +419,7 @@ gfxGDIFont::Initialize()
 #ifdef DEBUG
         char warnBuf[1024];
         SprintfLiteral(warnBuf, "Failed to create scaled font: %s status: %d",
-                       NS_ConvertUTF16toUTF8(mFontEntry->Name()).get(),
+                       mFontEntry->Name().get(),
                        mScaledFont ? cairo_scaled_font_status(mScaledFont) : 0);
         NS_WARNING(warnBuf);
 #endif
@@ -429,7 +430,7 @@ gfxGDIFont::Initialize()
 
 #if 0
     printf("Font: %p (%s) size: %f adjusted size: %f valid: %s\n", this,
-           NS_ConvertUTF16toUTF8(GetName()).get(), mStyle.size, mAdjustedSize, (mIsValid ? "yes" : "no"));
+           GetName().get(), mStyle.size, mAdjustedSize, (mIsValid ? "yes" : "no"));
     printf("    emHeight: %f emAscent: %f emDescent: %f\n", mMetrics->emHeight, mMetrics->emAscent, mMetrics->emDescent);
     printf("    maxAscent: %f maxDescent: %f maxAdvance: %f\n", mMetrics->maxAscent, mMetrics->maxDescent, mMetrics->maxAdvance);
     printf("    internalLeading: %f externalLeading: %f\n", mMetrics->internalLeading, mMetrics->externalLeading);

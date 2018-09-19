@@ -8,7 +8,6 @@
 
 #include <stdio.h>
 
-#include "jit/AliasAnalysisShared.h"
 #include "jit/Ion.h"
 #include "jit/IonBuilder.h"
 #include "jit/JitSpewer.h"
@@ -55,10 +54,185 @@ class LoopAliasInfo : public TempObject
 } // namespace jit
 } // namespace js
 
-AliasAnalysis::AliasAnalysis(MIRGenerator* mir, MIRGraph& graph)
-  : AliasAnalysisShared(mir, graph),
-    loop_(nullptr)
+void
+AliasAnalysis::spewDependencyList()
 {
+#ifdef JS_JITSPEW
+    if (JitSpewEnabled(JitSpew_AliasSummaries)) {
+        Fprinter &print = JitSpewPrinter();
+        JitSpewHeader(JitSpew_AliasSummaries);
+        print.printf("Dependency list for other passes:\n");
+
+        for (ReversePostorderIterator block(graph_.rpoBegin()); block != graph_.rpoEnd(); block++) {
+            for (MInstructionIterator def(block->begin()), end(block->begin(block->lastIns()));
+                 def != end;
+                 ++def)
+            {
+                if (!def->dependency()) {
+                    continue;
+                }
+                if (!def->getAliasSet().isLoad()) {
+                    continue;
+                }
+
+                JitSpewHeader(JitSpew_AliasSummaries);
+                print.printf(" ");
+                MDefinition::PrintOpcodeName(print, def->op());
+                print.printf("%d marked depending on ", def->id());
+                MDefinition::PrintOpcodeName(print, def->dependency()->op());
+                print.printf("%d\n", def->dependency()->id());
+            }
+        }
+    }
+#endif
+}
+
+// Unwrap any slot or element to its corresponding object.
+static inline const MDefinition*
+MaybeUnwrap(const MDefinition* object)
+{
+
+    while (object->isSlots() || object->isElements() || object->isConvertElementsToDoubles()) {
+        MOZ_ASSERT(object->numOperands() == 1);
+        object = object->getOperand(0);
+    }
+
+    if (object->isTypedArrayElements()) {
+        return nullptr;
+    }
+    if (object->isTypedObjectElements()) {
+        return nullptr;
+    }
+    if (object->isConstantElements()) {
+        return nullptr;
+    }
+
+    return object;
+}
+
+// Get the object of any load/store. Returns nullptr if not tied to
+// an object.
+static inline const MDefinition*
+GetObject(const MDefinition* ins)
+{
+    if (!ins->getAliasSet().isStore() && !ins->getAliasSet().isLoad()) {
+        return nullptr;
+    }
+
+    // Note: only return the object if that objects owns that property.
+    // I.e. the poperty isn't on the prototype chain.
+    const MDefinition* object = nullptr;
+    switch (ins->op()) {
+      case MDefinition::Opcode::InitializedLength:
+      case MDefinition::Opcode::LoadElement:
+      case MDefinition::Opcode::LoadUnboxedScalar:
+      case MDefinition::Opcode::LoadUnboxedObjectOrNull:
+      case MDefinition::Opcode::LoadUnboxedString:
+      case MDefinition::Opcode::StoreElement:
+      case MDefinition::Opcode::StoreUnboxedObjectOrNull:
+      case MDefinition::Opcode::StoreUnboxedString:
+      case MDefinition::Opcode::StoreUnboxedScalar:
+      case MDefinition::Opcode::SetInitializedLength:
+      case MDefinition::Opcode::ArrayLength:
+      case MDefinition::Opcode::SetArrayLength:
+      case MDefinition::Opcode::StoreElementHole:
+      case MDefinition::Opcode::FallibleStoreElement:
+      case MDefinition::Opcode::TypedObjectDescr:
+      case MDefinition::Opcode::Slots:
+      case MDefinition::Opcode::Elements:
+      case MDefinition::Opcode::MaybeCopyElementsForWrite:
+      case MDefinition::Opcode::MaybeToDoubleElement:
+      case MDefinition::Opcode::TypedArrayLength:
+      case MDefinition::Opcode::SetTypedObjectOffset:
+      case MDefinition::Opcode::SetDisjointTypedElements:
+      case MDefinition::Opcode::ArrayPopShift:
+      case MDefinition::Opcode::ArrayPush:
+      case MDefinition::Opcode::ArraySlice:
+      case MDefinition::Opcode::LoadTypedArrayElementHole:
+      case MDefinition::Opcode::StoreTypedArrayElementHole:
+      case MDefinition::Opcode::LoadFixedSlot:
+      case MDefinition::Opcode::LoadFixedSlotAndUnbox:
+      case MDefinition::Opcode::StoreFixedSlot:
+      case MDefinition::Opcode::GetPropertyPolymorphic:
+      case MDefinition::Opcode::SetPropertyPolymorphic:
+      case MDefinition::Opcode::GuardShape:
+      case MDefinition::Opcode::GuardReceiverPolymorphic:
+      case MDefinition::Opcode::GuardObjectGroup:
+      case MDefinition::Opcode::GuardObjectIdentity:
+      case MDefinition::Opcode::GuardUnboxedExpando:
+      case MDefinition::Opcode::LoadUnboxedExpando:
+      case MDefinition::Opcode::LoadSlot:
+      case MDefinition::Opcode::StoreSlot:
+      case MDefinition::Opcode::InArray:
+      case MDefinition::Opcode::LoadElementHole:
+      case MDefinition::Opcode::TypedArrayElements:
+      case MDefinition::Opcode::TypedObjectElements:
+      case MDefinition::Opcode::CopyLexicalEnvironmentObject:
+      case MDefinition::Opcode::IsPackedArray:
+        object = ins->getOperand(0);
+        break;
+      case MDefinition::Opcode::GetPropertyCache:
+      case MDefinition::Opcode::GetDOMProperty:
+      case MDefinition::Opcode::GetDOMMember:
+      case MDefinition::Opcode::Call:
+      case MDefinition::Opcode::Compare:
+      case MDefinition::Opcode::GetArgumentsObjectArg:
+      case MDefinition::Opcode::SetArgumentsObjectArg:
+      case MDefinition::Opcode::GetFrameArgument:
+      case MDefinition::Opcode::SetFrameArgument:
+      case MDefinition::Opcode::CompareExchangeTypedArrayElement:
+      case MDefinition::Opcode::AtomicExchangeTypedArrayElement:
+      case MDefinition::Opcode::AtomicTypedArrayElementBinop:
+      case MDefinition::Opcode::AsmJSLoadHeap:
+      case MDefinition::Opcode::AsmJSStoreHeap:
+      case MDefinition::Opcode::WasmLoadTls:
+      case MDefinition::Opcode::WasmLoad:
+      case MDefinition::Opcode::WasmStore:
+      case MDefinition::Opcode::WasmCompareExchangeHeap:
+      case MDefinition::Opcode::WasmAtomicBinopHeap:
+      case MDefinition::Opcode::WasmAtomicExchangeHeap:
+      case MDefinition::Opcode::WasmLoadGlobalVar:
+      case MDefinition::Opcode::WasmLoadGlobalCell:
+      case MDefinition::Opcode::WasmStoreGlobalVar:
+      case MDefinition::Opcode::WasmStoreGlobalCell:
+      case MDefinition::Opcode::ArrayJoin:
+        return nullptr;
+      default:
+#ifdef DEBUG
+        // Crash when the default aliasSet is overriden, but when not added in the list above.
+        if (!ins->getAliasSet().isStore() || ins->getAliasSet().flags() != AliasSet::Flag::Any) {
+            MOZ_CRASH("Overridden getAliasSet without updating AliasAnalysis GetObject");
+        }
+#endif
+
+        return nullptr;
+    }
+
+    MOZ_ASSERT(!ins->getAliasSet().isStore() || ins->getAliasSet().flags() != AliasSet::Flag::Any);
+    object = MaybeUnwrap(object);
+    MOZ_ASSERT_IF(object, object->type() == MIRType::Object);
+    return object;
+}
+
+// Generic comparing if a load aliases a store using TI information.
+MDefinition::AliasType
+AliasAnalysis::genericMightAlias(const MDefinition* load, const MDefinition* store)
+{
+    const MDefinition* loadObject = GetObject(load);
+    const MDefinition* storeObject = GetObject(store);
+    if (!loadObject || !storeObject) {
+        return MDefinition::AliasType::MayAlias;
+    }
+
+    if (!loadObject->resultTypeSet() || !storeObject->resultTypeSet()) {
+        return MDefinition::AliasType::MayAlias;
+    }
+
+    if (loadObject->resultTypeSet()->objectsIntersect(storeObject->resultTypeSet())) {
+        return MDefinition::AliasType::MayAlias;
+    }
+
+    return MDefinition::AliasType::NoAlias;
 }
 
 // Whether there might be a path from src to dest, excluding loop backedges. This is
@@ -67,15 +241,17 @@ static inline bool
 BlockMightReach(MBasicBlock* src, MBasicBlock* dest)
 {
     while (src->id() <= dest->id()) {
-        if (src == dest)
+        if (src == dest) {
             return true;
+        }
         switch (src->numSuccessors()) {
           case 0:
             return false;
           case 1: {
             MBasicBlock* successor = src->getSuccessor(0);
-            if (successor->id() <= src->id())
+            if (successor->id() <= src->id()) {
                 return true; // Don't iloop.
+            }
             src = successor;
             break;
           }
@@ -90,8 +266,9 @@ static void
 IonSpewDependency(MInstruction* load, MInstruction* store, const char* verb, const char* reason)
 {
 #ifdef JS_JITSPEW
-    if (!JitSpewEnabled(JitSpew_Alias))
+    if (!JitSpewEnabled(JitSpew_Alias)) {
         return;
+    }
 
     Fprinter& out = JitSpewPrinter();
     out.printf("Load ");
@@ -106,8 +283,9 @@ static void
 IonSpewAliasInfo(const char* pre, MInstruction* ins, const char* post)
 {
 #ifdef JS_JITSPEW
-    if (!JitSpewEnabled(JitSpew_Alias))
+    if (!JitSpewEnabled(JitSpew_Alias)) {
         return;
+    }
 
     Fprinter& out = JitSpewPrinter();
     out.printf("%s ", pre);
@@ -116,6 +294,8 @@ IonSpewAliasInfo(const char* pre, MInstruction* ins, const char* post)
 #endif
 }
 
+// [SMDOC] IonMonkey Alias Analysis
+//
 // This pass annotates every load instruction with the last store instruction
 // on which it depends. The algorithm is optimistic in that it ignores explicit
 // dependencies and only considers loads and stores.
@@ -139,10 +319,12 @@ AliasAnalysis::analyze()
     MInstruction* firstIns = *graph_.entryBlock()->begin();
     for (unsigned i = 0; i < AliasSet::NumCategories; i++) {
         MInstructionVector defs(alloc());
-        if (!defs.append(firstIns))
+        if (!defs.append(firstIns)) {
             return false;
-        if (!stores.append(std::move(defs)))
+        }
+        if (!stores.append(std::move(defs))) {
             return false;
+        }
     }
 
     // Type analysis may have inserted new instructions. Since this pass depends
@@ -150,18 +332,21 @@ AliasAnalysis::analyze()
     uint32_t newId = 0;
 
     for (ReversePostorderIterator block(graph_.rpoBegin()); block != graph_.rpoEnd(); block++) {
-        if (mir->shouldCancel("Alias Analysis (main loop)"))
+        if (mir->shouldCancel("Alias Analysis (main loop)")) {
             return false;
+        }
 
         if (block->isLoopHeader()) {
             JitSpew(JitSpew_Alias, "Processing loop header %d", block->id());
             loop_ = new(alloc().fallible()) LoopAliasInfo(alloc(), loop_, *block);
-            if (!loop_)
+            if (!loop_) {
                 return false;
+            }
         }
 
-        for (MPhiIterator def(block->phisBegin()), end(block->phisEnd()); def != end; ++def)
+        for (MPhiIterator def(block->phisBegin()), end(block->phisEnd()); def != end; ++def) {
             def->setId(newId++);
+        }
 
         for (MInstructionIterator def(block->begin()), end(block->begin(block->lastIns()));
              def != end;
@@ -170,19 +355,22 @@ AliasAnalysis::analyze()
             def->setId(newId++);
 
             AliasSet set = def->getAliasSet();
-            if (set.isNone())
+            if (set.isNone()) {
                 continue;
+            }
 
             // For the purposes of alias analysis, all recoverable operations
             // are treated as effect free as the memory represented by these
             // operations cannot be aliased by others.
-            if (def->canRecoverOnBailout())
+            if (def->canRecoverOnBailout()) {
                 continue;
+            }
 
             if (set.isStore()) {
                 for (AliasSetIterator iter(set); iter; iter++) {
-                    if (!stores[*iter].append(*def))
+                    if (!stores[*iter].append(*def)) {
                         return false;
+                    }
                 }
 
 #ifdef JS_JITSPEW
@@ -205,8 +393,9 @@ AliasAnalysis::analyze()
                             def->mightAlias(store) != MDefinition::AliasType::NoAlias &&
                             BlockMightReach(store->block(), *block))
                         {
-                            if (lastStore->id() < store->id())
+                            if (lastStore->id() < store->id()) {
                                 lastStore = store;
+                            }
                             break;
                         }
                     }
@@ -219,8 +408,9 @@ AliasAnalysis::analyze()
                 // is loop invariant. If a later instruction writes to the same location,
                 // we will fix this at the end of the loop.
                 if (loop_ && lastStore->id() < loop_->firstInstruction()->id()) {
-                    if (!loop_->addInvariantLoad(*def))
+                    if (!loop_->addInvariantLoad(*def)) {
                         return false;
+                    }
                 }
             }
         }
@@ -247,8 +437,9 @@ AliasAnalysis::analyze()
                     MInstructionVector& aliasedStores = stores[*iter];
                     for (int i = aliasedStores.length() - 1;; i--) {
                         MInstruction* store = aliasedStores[i];
-                        if (store->id() < firstLoopIns->id())
+                        if (store->id() < firstLoopIns->id()) {
                             break;
+                        }
                         if (genericMightAlias(ins, store) != MDefinition::AliasType::NoAlias &&
                             ins->mightAlias(store) != MDefinition::AliasType::NoAlias)
                         {
@@ -257,8 +448,9 @@ AliasAnalysis::analyze()
                             break;
                         }
                     }
-                    if (hasAlias)
+                    if (hasAlias) {
                         break;
+                    }
                 }
 
                 if (hasAlias) {
@@ -273,8 +465,9 @@ AliasAnalysis::analyze()
 
                     if (outerLoop && ins->dependency()->id() < outerLoop->firstInstruction()->id()) {
                         IonSpewAliasInfo("Load", ins, "may be invariant in outer loop");
-                        if (!outerLoop->addInvariantLoad(ins))
+                        if (!outerLoop->addInvariantLoad(ins)) {
                             return false;
+                        }
                     }
                 }
             }

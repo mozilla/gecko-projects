@@ -13,7 +13,7 @@
 var statsExpectedByType = {
   "inbound-rtp": {
     expected: ["id", "timestamp", "type", "ssrc", "isRemote", "mediaType",
-      "packetsReceived", "packetsLost", "bytesReceived", "jitter",],
+      "kind", "packetsReceived", "packetsLost", "bytesReceived", "jitter",],
     optional: ["roundTripTime", "remoteId", "nackCount",],
     localVideoOnly: ["discardedPackets", "framerateStdDev", "framerateMean",
       "bitrateMean", "bitrateStdDev", "firCount", "pliCount", "framesDecoded",],
@@ -26,7 +26,7 @@ var statsExpectedByType = {
   },
   "outbound-rtp": {
     expected: ["id", "timestamp", "type", "ssrc", "isRemote", "mediaType",
-      "packetsSent", "bytesSent", "remoteId",],
+      "kind", "packetsSent", "bytesSent", "remoteId",],
     optional: ["remoteId", "nackCount",],
     localVideoOnly: ["droppedFrames", "bitrateMean", "bitrateStdDev",
       "framerateMean", "framerateStdDev", "framesEncoded", "firCount",
@@ -56,8 +56,23 @@ var statsExpectedByType = {
       "consentRequestsSent",],
     deprecated: [],
   },
-  "local-candidate": { skip: true },
-  "remote-candidate": { skip: true },
+  "local-candidate": {
+    expected: ["id", "timestamp", "type", "componentId", "ipAddress",
+               "transport", "mozLocalTransport", "portNumber",
+               "candidateType"],
+    optional: [],
+    unimplemented: ["address", "port", "networkType", "protocol",
+                    "relayProtocol", "priority", "url"],
+    deprecated: ["candidateId"],
+  },
+  "remote-candidate": {
+    expected: ["id", "timestamp", "type", "componentId", "ipAddress",
+               "transport", "portNumber", "candidateType"],
+    optional: [],
+    unimplemented: ["address", "port", "networkType", "protocol",
+                    "relayProtocol", "priority", "url"],
+    deprecated: ["candidateId"],
+  },
   "certificate": { skip: true },
 };
 ["in", "out"].forEach(pre => {
@@ -148,9 +163,15 @@ var pedanticChecks = report => {
       // isRemote
       ok(stat.isRemote !== undefined, stat.type + ".isRemote exists.");
 
-      // mediaType
+      // kind
+      ok(["audio", "video"].includes(stat.kind),
+        stat.type + ".kind is 'audio' or 'video'");
+
+      // mediaType, renamed to kind but remains for backward compability.
       ok(["audio", "video"].includes(stat.mediaType),
         stat.type + ".mediaType is 'audio' or 'video'");
+
+      ok(stat.kind == stat.mediaType, "kind equals legacy mediaType");
 
       // remote id
       if (stat.remoteId) {
@@ -169,14 +190,14 @@ var pedanticChecks = report => {
           + ".nackCount is only set when isRemote is false");
       }
 
-      if (!stat.inner.isRemote && stat.inner.mediaType == "video") {
+      if (!stat.inner.isRemote && stat.inner.kind == "video") {
         // firCount
         ok(stat.firCount >= 0 && stat.firCount < 100,
           stat.type + ".firCount is a sane number for a short test. value="
           + stat.firCount);
 
         // pliCount
-        ok(stat.pliCount >= 0 && stat.pliCount < 100,
+        ok(stat.pliCount >= 0 && stat.pliCount < 200,
           stat.type + ".pliCount is a sane number for a short test. value="
           + stat.pliCount);
       }
@@ -205,7 +226,7 @@ var pedanticChecks = report => {
         + stat.packetsLost);
 
       // This should be much lower for audio, TODO: Bug 1330575
-      let expectedJitter = stat.mediaType == "video" ? 0.5 : 1;
+      let expectedJitter = stat.kind == "video" ? 0.5 : 1;
       // jitter
       ok(stat.jitter < expectedJitter,
         stat.type + ".jitter is sane number for a local only test. value="
@@ -240,20 +261,20 @@ var pedanticChecks = report => {
       //
       // Local video only stats
       //
-      if (stat.inner.isRemote || stat.inner.mediaType != "video") {
+      if (stat.inner.isRemote || stat.inner.kind != "video") {
         expectations.localVideoOnly.forEach(field => {
           if (stat.inner.isRemote) {
             ok(stat[field] === undefined, stat.type + " does not have field "
               + field + " when isRemote is true");
-          } else { // mediaType != video
+          } else { // kind != video
             ok(stat[field] === undefined, stat.type + " does not have field "
-              + field + " when mediaType is not 'video'");
+              + field + " when kind is not 'video'");
           }
         });
       } else {
         expectations.localVideoOnly.forEach(field => {
           ok(stat.inner[field] !== undefined, stat.type + " has field " + field
-            + " when mediaType is video");
+            + " when kind is video");
         });
         // discardedPackets
         ok(stat.discardedPackets < 100, stat.type
@@ -321,20 +342,20 @@ var pedanticChecks = report => {
       //
       // Local video only stats
       //
-      if (stat.inner.isRemote || stat.inner.mediaType != "video") {
+      if (stat.inner.isRemote || stat.inner.kind != "video") {
         expectations.localVideoOnly.forEach(field => {
           if (stat.inner.isRemote) {
             ok(stat[field] === undefined, stat.type + " does not have field "
               + field + " when isRemote is true");
-          } else { // mediaType != video
+          } else { // kind != video
             ok(stat[field] === undefined, stat.type + " does not have field "
-              + field + " when mediaType is not 'video'");
+              + field + " when kind is not 'video'");
           }
         });
       } else {
         expectations.localVideoOnly.forEach(field => {
           ok(stat.inner[field] !== undefined, stat.type + " has field " + field
-            + " when mediaType is video and isRemote is false");
+            + " when kind is video and isRemote is false");
         });
 
         // bitrateMean
@@ -476,6 +497,30 @@ var pedanticChecks = report => {
         stat.type + ".selected is undefined, true when state is succeeded, "
         + "or false. value="
         + stat.selected);
+
+    } else if (stat.type == "local-candidate" || stat.type == "remote-candidate") {
+      info(`candidate is ${JSON.stringify(stat)}`);
+
+      // componentId
+      ok(stat.componentId, `${stat.type} has componentId. value=${stat.componentId}`);
+
+      // ipAddress
+      ok(stat.ipAddress, `${stat.type} has ipAddress. value=${stat.ipAddress}`);
+
+      // transport
+      ok(stat.transport, `${stat.type} has transport. value=${stat.transport}`);
+
+      if (stat.type == "local-candidate") {
+        // mozLocalTransport
+        ok(stat.mozLocalTransport, `${stat.type} has mozLocalTransport. value=${stat.mozLocalTransport}`);
+      }
+
+      // portNumber
+      ok(stat.portNumber >= 0, `${stat.type} has portNumber >= 0. value=${stat.portNumber}`);
+      ok(stat.portNumber <= 65535, `${stat.type} has portNumber <= 65535. value=${stat.portNumber}`);
+
+      // candidateType
+      ok(stat.candidateType, `${stat.type} has candidateType. value=${stat.candidateType}`);
 
     }
 

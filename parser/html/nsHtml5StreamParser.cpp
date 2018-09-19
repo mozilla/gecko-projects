@@ -9,6 +9,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Encoding.h"
 #include "nsContentUtils.h"
+#include "nsCyrillicDetector.h"
 #include "nsHtml5Tokenizer.h"
 #include "nsIHttpChannel.h"
 #include "nsHtml5Parser.h"
@@ -31,6 +32,7 @@
 #include "nsIThreadRetargetableRequest.h"
 #include "nsPrintfCString.h"
 #include "nsNetUtil.h"
+#include "nsUdetXPCOMWrapper.h"
 #include "nsXULAppAPI.h"
 #include "mozilla/SchedulerGroup.h"
 #include "nsJSEnvironment.h"
@@ -203,10 +205,17 @@ nsHtml5StreamParser::nsHtml5StreamParser(nsHtml5TreeOpExecutor* aExecutor,
   nsAutoCString detectorName;
   Preferences::GetLocalizedCString("intl.charset.detector", detectorName);
   if (!detectorName.IsEmpty()) {
-    nsAutoCString detectorContractID;
-    detectorContractID.AssignLiteral(NS_CHARSET_DETECTOR_CONTRACTID_BASE);
-    detectorContractID += detectorName;
-    if ((mChardet = do_CreateInstance(detectorContractID.get()))) {
+    // We recognize one of the three magic strings for the following languages.
+    if (detectorName.EqualsLiteral("ruprob")) {
+      mChardet = new nsRUProbDetector();
+    } else if (detectorName.EqualsLiteral("ukprob")) {
+      mChardet = new nsUKProbDetector();
+    } else if (detectorName.EqualsLiteral("ja_parallel_state_machine")) {
+      mChardet = new nsJAPSMDetector();
+    } else {
+      mChardet = nullptr;
+    }
+    if (mChardet) {
       (void)mChardet->Init(this);
       mFeedChardet = true;
     }
@@ -219,6 +228,9 @@ nsHtml5StreamParser::~nsHtml5StreamParser()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   mTokenizer->end();
+  if (recordreplay::IsRecordingOrReplaying()) {
+    recordreplay::EndContentParse(this);
+  }
 #ifdef DEBUG
   {
     mozilla::MutexAutoLock flushTimerLock(mFlushTimerMutex);
@@ -284,6 +296,12 @@ nsHtml5StreamParser::Notify(const char* aCharset, nsDetectionConfident aConf)
 void
 nsHtml5StreamParser::SetViewSourceTitle(nsIURI* aURL)
 {
+  if (recordreplay::IsRecordingOrReplaying()) {
+    nsAutoCString spec;
+    aURL->GetSpec(spec);
+    recordreplay::BeginContentParse(this, spec.get(), "text/html");
+  }
+
   if (aURL) {
     nsCOMPtr<nsIURI> temp;
     bool isViewSource;
@@ -336,7 +354,7 @@ nsHtml5StreamParser::SetupDecodingFromBom(NotNull<const Encoding*> aEncoding)
 {
   NS_ASSERTION(IsParserThread(), "Wrong thread!");
   mEncoding = aEncoding;
-  mUnicodeDecoder = mEncoding->NewDecoderWithBOMRemoval();
+  mUnicodeDecoder = mEncoding->NewDecoderWithoutBOMHandling();
   mCharsetSource = kCharsetFromByteOrderMark;
   mFeedChardet = false;
   mTreeBuilder->SetDocumentCharset(mEncoding, mCharsetSource);
@@ -835,6 +853,9 @@ nsHtml5StreamParser::WriteStreamBytes(const uint8_t* aFromSegment,
     bool hadErrors;
     Tie(result, read, written, hadErrors) =
       mUnicodeDecoder->DecodeToUTF16(src, dst, false);
+    if (recordreplay::IsRecordingOrReplaying()) {
+      recordreplay::AddContentParseData(this, dst.data(), written);
+    }
     if (hadErrors && !mHasHadErrors) {
       mHasHadErrors = true;
       if (mEncoding == UTF_8_ENCODING) {
@@ -1091,6 +1112,9 @@ nsHtml5StreamParser::DoStopRequest()
     bool hadErrors;
     Tie(result, read, written, hadErrors) =
       mUnicodeDecoder->DecodeToUTF16(src, dst, true);
+    if (recordreplay::IsRecordingOrReplaying()) {
+      recordreplay::AddContentParseData(this, dst.data(), written);
+    }
     if (hadErrors && !mHasHadErrors) {
       mHasHadErrors = true;
       if (mEncoding == UTF_8_ENCODING) {
@@ -1484,7 +1508,7 @@ nsHtml5StreamParser::ParseAvailableData()
             FlushTreeOpsAndDisarmTimer();
             return; // no more data and not expecting more
           default:
-            NS_NOTREACHED("It should be impossible to reach this.");
+            MOZ_ASSERT_UNREACHABLE("It should be impossible to reach this.");
             return;
         }
       }
@@ -1572,9 +1596,11 @@ nsHtml5StreamParser::ContinueAfterScripts(nsHtml5Tokenizer* aTokenizer,
   {
     mozilla::MutexAutoLock speculationAutoLock(mSpeculationMutex);
     if (mSpeculations.IsEmpty()) {
-      NS_NOTREACHED("ContinueAfterScripts called without speculations.");
+      MOZ_ASSERT_UNREACHABLE("ContinueAfterScripts called without "
+                             "speculations.");
       return;
     }
+
     nsHtml5Speculation* speculation = mSpeculations.ElementAt(0);
     if (aLastWasCR || !aTokenizer->isInDataState() ||
         !aTreeBuilder->snapshotMatches(speculation->GetSnapshot())) {

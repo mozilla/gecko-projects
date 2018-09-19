@@ -14,11 +14,11 @@
 #include "mozilla/gfx/Matrix.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/gfx/Tools.h"
+#include "mozilla/gfx/Rect.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
 #include "mozilla/Variant.h"
 #include "Units.h"
-#include "RoundedRect.h"
 #include "nsStyleConsts.h"
 
 namespace mozilla {
@@ -28,6 +28,11 @@ class ByteBuf;
 } // namespace ipc
 
 namespace wr {
+
+// Using uintptr_t in C++ code for "size" types seems weird, so let's use a
+// better-sounding typedef. The name comes from the fact that we generally
+// have to deal with uintptr_t because that's what rust's usize maps to.
+typedef uintptr_t usize;
 
 typedef wr::WrWindowId WindowId;
 typedef wr::WrPipelineId PipelineId;
@@ -315,7 +320,7 @@ static inline wr::LayoutRect ToLayoutRect(const mozilla::LayoutDeviceRect& rect)
   return r;
 }
 
-static inline wr::LayoutRect ToLayoutRect(const gfxRect& rect)
+static inline wr::LayoutRect ToLayoutRect(const gfx::Rect& rect)
 {
   wr::LayoutRect r;
   r.origin.x = rect.X();
@@ -346,6 +351,23 @@ static inline wr::LayoutRect ToRoundedLayoutRect(const mozilla::LayoutDeviceRect
   return wr::ToLayoutRect(rect);
 }
 
+static inline wr::LayoutRect IntersectLayoutRect(const wr::LayoutRect& aRect,
+                                                 const wr::LayoutRect& aOther)
+{
+  wr::LayoutRect r;
+  r.origin.x = std::max(aRect.origin.x, aOther.origin.x);
+  r.origin.y = std::max(aRect.origin.y, aOther.origin.y);
+  r.size.width = std::min(aRect.origin.x + aRect.size.width,
+                          aOther.origin.x + aOther.size.width) - r.origin.x;
+  r.size.height = std::min(aRect.origin.y + aRect.size.height,
+                           aOther.origin.y + aOther.size.height) - r.origin.y;
+  if (r.size.width < 0 || r.size.height < 0) {
+    r.size.width = 0;
+    r.size.height = 0;
+  }
+  return r;
+}
+
 static inline wr::LayoutSize ToLayoutSize(const mozilla::LayoutDeviceSize& size)
 {
   wr::LayoutSize ls;
@@ -354,7 +376,7 @@ static inline wr::LayoutSize ToLayoutSize(const mozilla::LayoutDeviceSize& size)
   return ls;
 }
 
-static inline wr::ComplexClipRegion ToComplexClipRegion(const RoundedRect& rect)
+static inline wr::ComplexClipRegion ToComplexClipRegion(const gfx::RoundedRect& rect)
 {
   wr::ComplexClipRegion ret;
   ret.rect               = ToLayoutRect(rect.rect);
@@ -362,6 +384,19 @@ static inline wr::ComplexClipRegion ToComplexClipRegion(const RoundedRect& rect)
   ret.radii.top_right    = ToLayoutSize(LayoutDeviceSize::FromUnknownSize(rect.corners.radii[mozilla::eCornerTopRight]));
   ret.radii.bottom_left  = ToLayoutSize(LayoutDeviceSize::FromUnknownSize(rect.corners.radii[mozilla::eCornerBottomLeft]));
   ret.radii.bottom_right = ToLayoutSize(LayoutDeviceSize::FromUnknownSize(rect.corners.radii[mozilla::eCornerBottomRight]));
+  ret.mode = wr::ClipMode::Clip;
+  return ret;
+}
+
+static inline wr::ComplexClipRegion SimpleRadii(const wr::LayoutRect& aRect, float aRadii)
+{
+  wr::ComplexClipRegion ret;
+  wr::LayoutSize radii { aRadii, aRadii };
+  ret.rect = aRect;
+  ret.radii.top_left = radii;
+  ret.radii.top_right = radii;
+  ret.radii.bottom_left = radii;
+  ret.radii.bottom_right = radii;
   ret.mode = wr::ClipMode::Clip;
   return ret;
 }
@@ -451,9 +486,9 @@ static inline wr::BorderRadius ToBorderRadius(const mozilla::LayoutDeviceSize& t
   return br;
 }
 
-static inline wr::BorderWidths ToBorderWidths(float top, float right, float bottom, float left)
+static inline wr::LayoutSideOffsets ToBorderWidths(float top, float right, float bottom, float left)
 {
-  wr::BorderWidths bw;
+  wr::LayoutSideOffsets bw;
   bw.top = top;
   bw.right = right;
   bw.bottom = bottom;
@@ -802,6 +837,12 @@ static inline wr::WrYuvColorSpace ToWrYuvColorSpace(YUVColorSpace aYUVColorSpace
       MOZ_ASSERT_UNREACHABLE("Tried to convert invalid YUVColorSpace.");
   }
   return wr::WrYuvColorSpace::Rec601;
+}
+
+static inline wr::SyntheticItalics DegreesToSyntheticItalics(float aDegrees) {
+  wr::SyntheticItalics synthetic_italics;
+  synthetic_italics.angle = int16_t(std::min(std::max(aDegrees, -89.0f), 89.0f) * 256.0f);
+  return synthetic_italics;
 }
 
 } // namespace wr

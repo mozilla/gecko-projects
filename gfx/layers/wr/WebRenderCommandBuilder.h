@@ -38,6 +38,8 @@ public:
   explicit WebRenderCommandBuilder(WebRenderLayerManager* aManager)
   : mManager(aManager)
   , mLastAsr(nullptr)
+  , mBuilderDumpIndex(0)
+  , mDumpIndent(0)
   , mDoGrouping(false)
   {}
 
@@ -63,6 +65,7 @@ public:
                                      ImageContainer* aContainer,
                                      mozilla::wr::DisplayListBuilder& aBuilder,
                                      mozilla::wr::IpcResourceUpdateQueue& aResources,
+                                     mozilla::wr::ImageRendering aRendering,
                                      const StackingContextHelper& aSc,
                                      gfx::IntSize& aSize,
                                      const Maybe<LayoutDeviceRect>& aAsyncImageBounds);
@@ -113,6 +116,9 @@ public:
 
   void RemoveUnusedAndResetWebRenderUserData();
   void ClearCachedResources();
+
+  bool ShouldDumpDisplayList();
+  wr::usize GetBuilderDumpIndex() { return mBuilderDumpIndex; }
 
   // Those are data that we kept between transactions. We used to cache some
   // data in the layer. But in layers free mode, we don't have layer which
@@ -182,6 +188,9 @@ private:
   // Store of WebRenderCanvasData objects for use in empty transactions
   CanvasDataSet mLastCanvasDatas;
 
+  wr::usize mBuilderDumpIndex;
+  wr::usize mDumpIndent;
+public:
   // Whether consecutive inactive display items should be grouped into one
   // blob image.
   bool mDoGrouping;

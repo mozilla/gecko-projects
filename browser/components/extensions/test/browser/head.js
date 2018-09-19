@@ -398,7 +398,7 @@ async function openChromeContextMenu(menuId, target, win = window) {
 }
 
 async function openSubmenu(submenuItem, win = window) {
-  const submenu = submenuItem.firstChild;
+  const submenu = submenuItem.firstElementChild;
   const shown = BrowserTestUtils.waitForEvent(submenu, "popupshown");
   EventUtils.synthesizeMouseAtCenter(submenuItem, {}, win);
   await shown;
@@ -508,9 +508,7 @@ function awaitEvent(eventName, id) {
 }
 
 function* BrowserWindowIterator() {
-  let windowsEnum = Services.wm.getEnumerator("navigator:browser");
-  while (windowsEnum.hasMoreElements()) {
-    let currentWindow = windowsEnum.getNext();
+  for (let currentWindow of Services.wm.getEnumerator("navigator:browser")) {
     if (!currentWindow.closed) {
       yield currentWindow;
     }

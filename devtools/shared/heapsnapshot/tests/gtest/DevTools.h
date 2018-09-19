@@ -46,8 +46,6 @@ struct DevTools : public ::testing::Test {
     if (!cx)
       return;
 
-    JS_BeginRequest(cx);
-
     global.init(cx, createGlobal());
     if (!global)
       return;
@@ -111,8 +109,6 @@ struct DevTools : public ::testing::Test {
       JS::LeaveRealm(cx, nullptr);
       global = nullptr;
     }
-    if (cx)
-      JS_EndRequest(cx);
   }
 };
 
@@ -187,8 +183,7 @@ const char16_t Concrete<FakeNode>::concreteTypeName[] = u"FakeNode";
 void AddEdge(FakeNode& node, FakeNode& referent, const char16_t* edgeName = nullptr) {
   char16_t* ownedEdgeName = nullptr;
   if (edgeName) {
-    ownedEdgeName = NS_strdup(edgeName);
-    ASSERT_NE(ownedEdgeName, nullptr);
+    ownedEdgeName = NS_xstrdup(edgeName);
   }
 
   JS::ubi::Edge edge(ownedEdgeName, &referent);

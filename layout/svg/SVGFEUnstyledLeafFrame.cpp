@@ -11,7 +11,7 @@
 #include "SVGObserverUtils.h"
 #include "nsSVGFilters.h"
 
-class SVGFEUnstyledLeafFrame : public nsFrame
+class SVGFEUnstyledLeafFrame final : public nsFrame
 {
   friend nsIFrame*
   NS_NewSVGFEUnstyledLeafFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle);
@@ -30,6 +30,10 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
+    if (aFlags & eSupportsContainLayoutAndPaint) {
+      return false;
+    }
+
     return nsFrame::IsFrameOfType(aFlags & ~(nsIFrame::eSVG));
   }
 

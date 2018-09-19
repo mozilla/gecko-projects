@@ -172,29 +172,26 @@ ScaledFontDWrite::GetPathForGlyphs(const GlyphBuffer &aBuffer, const DrawTarget 
 
 #ifdef USE_SKIA
 SkTypeface*
-ScaledFontDWrite::GetSkTypeface()
+ScaledFontDWrite::CreateSkTypeface()
 {
-  if (!mTypeface) {
-    RefPtr<IDWriteFactory> factory = Factory::GetDWriteFactory();
-    if (!factory) {
-      return nullptr;
-    }
-
-    Float gamma = mGamma;
-    // Skia doesn't support a gamma value outside of 0-4, so default to 2.2
-    if (gamma < 0.0f || gamma > 4.0f) {
-      gamma = 2.2f;
-    }
-
-    Float contrast = mContrast;
-    // Skia doesn't support a contrast value outside of 0-1, so default to 1.0
-    if (contrast < 0.0f || contrast > 1.0f) {
-      contrast = 1.0f;
-    }
-
-    mTypeface = SkCreateTypefaceFromDWriteFont(factory, mFontFace, mStyle, mForceGDIMode, gamma, contrast);
+  RefPtr<IDWriteFactory> factory = Factory::GetDWriteFactory();
+  if (!factory) {
+    return nullptr;
   }
-  return mTypeface;
+
+  Float gamma = mGamma;
+  // Skia doesn't support a gamma value outside of 0-4, so default to 2.2
+  if (gamma < 0.0f || gamma > 4.0f) {
+    gamma = 2.2f;
+  }
+
+  Float contrast = mContrast;
+  // Skia doesn't support a contrast value outside of 0-1, so default to 1.0
+  if (contrast < 0.0f || contrast > 1.0f) {
+    contrast = 1.0f;
+  }
+
+  return SkCreateTypefaceFromDWriteFont(factory, mFontFace, mStyle, mForceGDIMode, gamma, contrast);
 }
 #endif
 
@@ -400,6 +397,27 @@ UnscaledFontDWrite::GetWRFontDescriptor(WRFontDescriptorOutput aCb, void* aBaton
   return true;
 }
 
+ScaledFontDWrite::InstanceData::InstanceData(const wr::FontInstanceOptions* aOptions,
+                                             const wr::FontInstancePlatformOptions* aPlatformOptions)
+  : mUseEmbeddedBitmap(false)
+  , mForceGDIMode(false)
+  , mGamma(2.2f)
+  , mContrast(1.0f)
+{
+  if (aOptions) {
+    if (aOptions->flags & wr::FontInstanceFlags::EMBEDDED_BITMAPS) {
+      mUseEmbeddedBitmap = true;
+    }
+    if (aOptions->flags & wr::FontInstanceFlags::FORCE_GDI) {
+      mForceGDIMode = true;
+    }
+  }
+  if (aPlatformOptions) {
+    mGamma = aPlatformOptions->gamma / 100.0f;
+    mContrast = aPlatformOptions->contrast / 100.0f;
+  }
+}
+
 // Helper for ScaledFontDWrite::GetFontInstanceData: if the font has variation
 // axes, get their current values into the aOutput vector.
 static void
@@ -463,7 +481,7 @@ ScaledFontDWrite::GetWRFontInstanceOptions(Maybe<wr::FontInstanceOptions>* aOutO
 {
   wr::FontInstanceOptions options;
   options.render_mode = wr::ToFontRenderMode(GetDefaultAAMode());
-  options.flags = wr::FontInstanceFlags::SUBPIXEL_POSITION;
+  options.flags = 0;
   if (mFontFace->GetSimulations() & DWRITE_FONT_SIMULATIONS_BOLD) {
     options.flags |= wr::FontInstanceFlags::SYNTHETIC_BOLD;
   }
@@ -472,9 +490,18 @@ ScaledFontDWrite::GetWRFontInstanceOptions(Maybe<wr::FontInstanceOptions>* aOutO
   }
   if (ForceGDIMode()) {
     options.flags |= wr::FontInstanceFlags::FORCE_GDI;
+  } else {
+    options.flags |= wr::FontInstanceFlags::SUBPIXEL_POSITION;
   }
   options.bg_color = wr::ToColorU(Color());
+  options.synthetic_italics = wr::DegreesToSyntheticItalics(GetSyntheticObliqueAngle());
+
+  wr::FontInstancePlatformOptions platformOptions;
+  platformOptions.gamma = uint16_t(std::round(mGamma * 100.0f));
+  platformOptions.contrast = uint16_t(std::round(std::min(mContrast, 1.0f) * 100.0f));
+
   *aOutOptions = Some(options);
+  *aOutPlatformOptions = Some(platformOptions);
   return true;
 }
 
@@ -537,6 +564,8 @@ UnscaledFontDWrite::CreateScaledFont(Float aGlyphSize,
     gfxWarning() << "DWrite scaled font instance data is truncated.";
     return nullptr;
   }
+  const ScaledFontDWrite::InstanceData& instanceData =
+    *reinterpret_cast<const ScaledFontDWrite::InstanceData*>(aInstanceData);
 
   IDWriteFontFace* face = mFontFace;
 
@@ -552,15 +581,13 @@ UnscaledFontDWrite::CreateScaledFont(Float aGlyphSize,
     }
   }
 
-  const ScaledFontDWrite::InstanceData *instanceData =
-    reinterpret_cast<const ScaledFontDWrite::InstanceData*>(aInstanceData);
   RefPtr<ScaledFontBase> scaledFont =
     new ScaledFontDWrite(face, this, aGlyphSize,
-                         instanceData->mUseEmbeddedBitmap,
-                         instanceData->mForceGDIMode,
+                         instanceData.mUseEmbeddedBitmap,
+                         instanceData.mForceGDIMode,
                          nullptr,
-                         instanceData->mGamma,
-                         instanceData->mContrast);
+                         instanceData.mGamma,
+                         instanceData.mContrast);
 
   if (mNeedsCairo && !scaledFont->PopulateCairoScaledFont()) {
     gfxWarning() << "Unable to create cairo scaled font DWrite font.";
@@ -568,6 +595,20 @@ UnscaledFontDWrite::CreateScaledFont(Float aGlyphSize,
   }
 
   return scaledFont.forget();
+}
+
+already_AddRefed<ScaledFont>
+UnscaledFontDWrite::CreateScaledFontFromWRFont(Float aGlyphSize,
+                                               const wr::FontInstanceOptions* aOptions,
+                                               const wr::FontInstancePlatformOptions* aPlatformOptions,
+                                               const FontVariation* aVariations,
+                                               uint32_t aNumVariations)
+{
+  ScaledFontDWrite::InstanceData instanceData(aOptions, aPlatformOptions);
+  return CreateScaledFont(aGlyphSize,
+                          reinterpret_cast<uint8_t*>(&instanceData),
+                          sizeof(instanceData),
+                          aVariations, aNumVariations);
 }
 
 AntialiasMode

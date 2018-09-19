@@ -15,6 +15,7 @@
 #include "nsIURLParser.h"
 #include "nsJSUtils.h"
 #include "jsfriendapi.h"
+#include "js/CompilationAndEvaluation.h"
 #include "prnetdb.h"
 #include "nsITimer.h"
 #include "mozilla/net/DNS.h"
@@ -412,7 +413,7 @@ bool PACResolve(const nsCString &aHostName, NetAddr *aNetAddr,
 ProxyAutoConfig::ProxyAutoConfig()
   : mJSContext(nullptr)
   , mJSNeedsSetup(false)
-  , mShutdown(false)
+  , mShutdown(true)
   , mIncludePath(false)
   , mExtraHeapSize(0)
 {
@@ -452,7 +453,17 @@ ProxyAutoConfig::ResolveAddress(const nsCString &aHostName,
   // Spin the event loop of the pac thread until lookup is complete.
   // nsPACman is responsible for keeping a queue and only allowing
   // one PAC execution at a time even when it is called re-entrantly.
-  SpinEventLoopUntil([&, helper]() { return !helper->mRequest; });
+  SpinEventLoopUntil([&, helper, this]() {
+    if (!helper->mRequest) {
+      return true;
+    }
+    if (this->mShutdown) {
+      NS_WARNING("mShutdown set with PAC request not cancelled");
+      MOZ_ASSERT(NS_FAILED(helper->mStatus));
+      return true;
+    }
+    return false;
+  });
 
   if (NS_FAILED(helper->mStatus) ||
       NS_FAILED(helper->mResponse->GetNextAddr(0, aNetAddr)))
@@ -651,8 +662,6 @@ private:
       return NS_ERROR_OUT_OF_MEMORY;
     }
 
-    JSAutoRequest areq(mContext);
-
     JS::RealmOptions options;
     options.creationOptions().setNewCompartmentInSystemZone();
     mGlobal = JS_NewGlobalObject(mContext, &sGlobalClass, nullptr,
@@ -704,6 +713,8 @@ ProxyAutoConfig::Init(const nsCString &aPACURI,
                       uint32_t aExtraHeapSize,
                       nsIEventTarget *aEventTarget)
 {
+  mShutdown = false; // Shutdown needs to be called prior to destruction
+
   mPACURI = aPACURI;
   mPACScript = sPacUtils;
   mPACScript.Append(aPACScript);
@@ -737,7 +748,6 @@ ProxyAutoConfig::SetupJS()
     return NS_ERROR_FAILURE;
 
   JSContext* cx = mJSContext->Context();
-  JSAutoRequest areq(cx);
   JSAutoRealm ar(cx, mJSContext->Global());
   AutoPACErrorReporter aper(cx);
 
@@ -747,12 +757,15 @@ ProxyAutoConfig::SetupJS()
   bool isDataURI = nsDependentCSubstring(mPACURI, 0, 5).LowerCaseEqualsASCII("data:", 5);
 
   SetRunning(this);
+
   JS::Rooted<JSObject*> global(cx, mJSContext->Global());
+
   JS::CompileOptions options(cx);
   options.setFileAndLine(mPACURI.get(), 1);
+
   JS::Rooted<JSScript*> script(cx);
-  if (!JS_CompileScript(cx, mPACScript.get(), mPACScript.Length(), options,
-                        &script) ||
+  if (!JS::CompileLatin1(cx, options, mPACScript.get(), mPACScript.Length(),
+                         &script) ||
       !JS_ExecuteScript(cx, script))
   {
     nsString alertMessage(NS_LITERAL_STRING("PAC file failed to install from "));
@@ -797,7 +810,6 @@ ProxyAutoConfig::GetProxyForURI(const nsCString &aTestURI,
     return NS_ERROR_NOT_AVAILABLE;
 
   JSContext *cx = mJSContext->Context();
-  JSAutoRequest areq(cx);
   JSAutoRealm ar(cx, mJSContext->Global());
   AutoPACErrorReporter aper(cx);
 

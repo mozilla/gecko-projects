@@ -16,8 +16,8 @@
 
 using namespace mozilla;
 
-class nsImageControlFrame : public nsImageFrame,
-                            public nsIFormControlFrame
+class nsImageControlFrame final : public nsImageFrame,
+                                  public nsIFormControlFrame
 {
 public:
   explicit nsImageControlFrame(ComputedStyle* aStyle);
@@ -176,7 +176,7 @@ nsImageControlFrame::GetCursor(const nsPoint&    aPoint,
 {
   // Use style defined cursor if one is provided, otherwise when
   // the cursor style is "auto" we use the pointer cursor.
-  FillCursorInformationFromStyle(StyleUserInterface(), aCursor);
+  FillCursorInformationFromStyle(StyleUI(), aCursor);
 
   if (NS_STYLE_CURSOR_AUTO == aCursor.mCursor) {
     aCursor.mCursor = NS_STYLE_CURSOR_POINTER;

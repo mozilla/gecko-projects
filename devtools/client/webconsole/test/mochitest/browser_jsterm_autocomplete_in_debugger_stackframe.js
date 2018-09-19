@@ -8,13 +8,25 @@
 
 "use strict";
 
+// Import helpers for the new debugger
+/* import-globals-from ../../../debugger/new/test/mochitest/helpers.js */
+Services.scriptloader.loadSubScript(
+  "chrome://mochitests/content/browser/devtools/client/debugger/new/test/mochitest/helpers.js",
+  this);
+
 const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
                  "test/mochitest/test-autocomplete-in-stackframe.html";
 
 add_task(async function() {
-  // Force the old debugger UI since it's directly used (see Bug 1301705)
-  await pushPref("devtools.debugger.new-debugger-frontend", false);
+  // Run test with legacy JsTerm
+  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
+  await performTests();
+  // And then run it with the CodeMirror-powered one.
+  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
+  await performTests();
+});
 
+async function performTests() {
   const { jsterm } = await openNewTabAndConsole(TEST_URI);
   const {
     autocompletePopup: popup,
@@ -23,7 +35,7 @@ add_task(async function() {
   const target = TargetFactory.forTab(gBrowser.selectedTab);
   const toolbox = gDevTools.getToolbox(target);
 
-  const jstermComplete = value => jstermSetValueAndComplete(jsterm, value);
+  const jstermComplete = value => setInputValueForAutocompletion(jsterm, value);
 
   // Test that document.title gives string methods. Native getters must execute.
   await jstermComplete("document.title.");
@@ -36,12 +48,13 @@ add_task(async function() {
 
   // Test if 'foo' gives 'foo1' but not 'foo2' or 'foo3'
   await jstermComplete("foo");
-  is(getPopupLabels(popup).join("-"), "foo1Obj-foo1",
+  is(getPopupLabels(popup).join("-"), "foo1-foo1Obj",
     `"foo" gave the expected suggestions`);
 
   // Test if 'foo1Obj.' gives 'prop1' and 'prop2'
   await jstermComplete("foo1Obj.");
-  is(getPopupLabels(popup).join("-"), "prop2-prop1",
+  checkJsTermCompletionValue(jsterm, "        prop1", "foo1Obj completion");
+  is(getPopupLabels(popup).join("-"), "prop1-prop2",
     `"foo1Obj." gave the expected suggestions`);
 
   // Test if 'foo1Obj.prop2.' gives 'prop21'
@@ -50,10 +63,12 @@ add_task(async function() {
     `"foo1Obj.prop2." gave the expected suggestions`);
 
   info("Opening Debugger");
-  const {panel} = await openDebugger();
+  await openDebugger();
+  const dbg = createDebuggerContext(toolbox);
 
   info("Waiting for pause");
-  const stackFrames = await pauseDebugger(panel);
+  await pauseDebugger(dbg);
+  const stackFrames = dbg.selectors.getCallStackFrames(dbg.getState());
 
   info("Opening Console again");
   await toolbox.selectTool("webconsole");
@@ -61,13 +76,13 @@ add_task(async function() {
   // Test if 'foo' gives 'foo3' and 'foo1' but not 'foo2', since we are paused in
   // the `secondCall` function (called by `firstCall`, which we call in `pauseDebugger`).
   await jstermComplete("foo");
-  is(getPopupLabels(popup).join("-"), "foo3Obj-foo3-foo1Obj-foo1",
+  is(getPopupLabels(popup).join("-"), "foo1-foo1Obj-foo3-foo3Obj",
     `"foo" gave the expected suggestions`);
 
   await openDebugger();
 
   // Select the frame for the `firstCall` function.
-  stackFrames.selectFrame(1);
+  await dbg.actions.selectFrame(stackFrames[1]);
 
   info("openConsole");
   await toolbox.selectTool("webconsole");
@@ -75,7 +90,7 @@ add_task(async function() {
   // Test if 'foo' gives 'foo2' and 'foo1' but not 'foo3', since we are now in the
   // `firstCall` frame.
   await jstermComplete("foo");
-  is(getPopupLabels(popup).join("-"), "foo2Obj-foo2-foo1Obj-foo1",
+  is(getPopupLabels(popup).join("-"), "foo1-foo1Obj-foo2-foo2Obj",
     `"foo" gave the expected suggestions`);
 
   // Test if 'foo2Obj.' gives 'prop1'
@@ -93,24 +108,16 @@ add_task(async function() {
   // Test if 'foo2Obj[0].' throws no errors.
   await jstermComplete("foo2Obj[0].");
   is(getPopupLabels(popup).length, 0, "no items for foo2Obj[0]");
-});
+}
 
 function getPopupLabels(popup) {
   return popup.getItems().map(item => item.label);
 }
 
-function pauseDebugger(debuggerPanel) {
-  const debuggerWin = debuggerPanel.panelWin;
-  const debuggerController = debuggerWin.DebuggerController;
-  const thread = debuggerController.activeThread;
-
-  return new Promise(resolve => {
-    thread.addOneTimeListener("framesadded", () =>
-      resolve(debuggerController.StackFrames));
-
-    info("firstCall()");
-    ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
-      content.wrappedJSObject.firstCall();
-    });
+async function pauseDebugger(dbg) {
+  info("Waiting for debugger to pause");
+  ContentTask.spawn(gBrowser.selectedBrowser, {}, async function() {
+    content.wrappedJSObject.firstCall();
   });
+  await waitForPaused(dbg);
 }

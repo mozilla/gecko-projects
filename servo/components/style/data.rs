@@ -16,7 +16,6 @@ use selector_parser::{PseudoElement, RestyleDamage, EAGER_PSEUDO_COUNT};
 use selectors::NthIndexCache;
 use servo_arc::Arc;
 use shared_lock::StylesheetGuards;
-use smallvec::SmallVec;
 use std::fmt;
 use std::mem;
 use std::ops::{Deref, DerefMut};
@@ -273,20 +272,8 @@ impl ElementData {
             return InvalidationResult::empty();
         }
 
-        let mut non_document_styles = SmallVec::<[_; 3]>::new();
-        let matches_doc_author_rules =
-            element.each_applicable_non_document_style_rule_data(|data, quirks_mode, host| {
-                non_document_styles.push((data, quirks_mode, host.map(|h| h.opaque())))
-            });
-
-        let mut processor = StateAndAttrInvalidationProcessor::new(
-            shared_context,
-            &non_document_styles,
-            matches_doc_author_rules,
-            element,
-            self,
-            nth_index_cache,
-        );
+        let mut processor =
+            StateAndAttrInvalidationProcessor::new(shared_context, element, self, nth_index_cache);
 
         let invalidator = TreeStyleInvalidator::new(element, stack_limit_checker, &mut processor);
 
@@ -314,7 +301,8 @@ impl ElementData {
 
     /// Returns this element's primary style as a resolved style to use for sharing.
     pub fn share_primary_style(&self) -> PrimaryStyle {
-        let reused_via_rule_node = self.flags
+        let reused_via_rule_node = self
+            .flags
             .contains(ElementDataFlags::PRIMARY_STYLE_REUSED_VIA_RULE_NODE);
 
         PrimaryStyle {
@@ -399,7 +387,8 @@ impl ElementData {
         guards: &StylesheetGuards,
     ) -> bool {
         debug_assert!(self.has_styles());
-        let (important_rules, _custom) = self.styles
+        let (important_rules, _custom) = self
+            .styles
             .primary()
             .rules()
             .get_properties_overriding_animations(&guards);

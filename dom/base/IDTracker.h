@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ShadowRoot.h"
 #include "nsAtom.h"
 #include "nsIDocument.h"
 #include "nsThreadUtils.h"
@@ -39,10 +40,10 @@ class IDTracker {
 public:
   typedef mozilla::dom::Element Element;
 
-  IDTracker()
-    : mReferencingImage(false)
-  {}
-  ~IDTracker() {
+  IDTracker() = default;
+
+  ~IDTracker()
+  {
     Unlink();
   }
 
@@ -57,13 +58,16 @@ public:
    * do not trigger ElementChanged.
    * @param aFrom the source element for context
    * @param aURI the URI containing a hash-reference to the element
+   * @param aReferrer the referrer URI for loading external resource
+   * @param aReferrerPolicy the referrer policy for loading external resource
    * @param aWatch if false, then we do not set up the notifications to track
    * changes, so ElementChanged won't fire and get() will always return the same
    * value, the current element for the ID.
    * @param aReferenceImage whether the ID references image elements which are
    * subject to the document's mozSetImageElement overriding mechanism.
    */
-  void Reset(nsIContent* aFrom, nsIURI* aURI, bool aWatch = true,
+  void Reset(nsIContent* aFrom, nsIURI* aURI, nsIURI* aReferrer,
+             uint32_t aReferrerPolicy, bool aWatch = true,
              bool aReferenceImage = false);
 
   /**
@@ -75,8 +79,7 @@ public:
    * changes, so ElementChanged won't fire and get() will always return the same
    * value, the current element for the ID.
    */
-  void ResetWithID(nsIContent* aFrom, const nsString& aID,
-                   bool aWatch = true);
+  void ResetWithID(Element& aFrom, nsAtom* aID, bool aWatch = true);
 
   /**
    * Clears the reference. ElementChanged is not triggered. get() will return
@@ -92,7 +95,8 @@ protected:
    * to call this superclass method to change mElement. This is called
    * at script-runnable time.
    */
-  virtual void ElementChanged(Element* aFrom, Element* aTo) {
+  virtual void ElementChanged(Element* aFrom, Element* aTo)
+  {
     mElement = aTo;
   }
 
@@ -106,8 +110,9 @@ protected:
    * Set ourselves up with our new document.  Note that aDocument might be
    * null.  Either aWatch must be false or aRef must be empty.
    */
-  void HaveNewDocument(nsIDocument* aDocument, bool aWatch,
-                       const nsString& aRef);
+  void HaveNewDocumentOrShadowRoot(DocumentOrShadowRoot*,
+                                   bool aWatch,
+                                   const nsString& aRef);
 
 private:
   static bool Observe(Element* aOldElement,
@@ -167,9 +172,8 @@ private:
                                    public nsIObserver
   {
   public:
-    DocumentLoadNotification(IDTracker* aTarget,
-                             const nsString& aRef) :
-      Notification(aTarget)
+    DocumentLoadNotification(IDTracker* aTarget, const nsString& aRef)
+      : Notification(aTarget)
     {
       if (!mTarget->IsPersistent()) {
         mRef = aRef;
@@ -187,11 +191,24 @@ private:
   };
   friend class DocumentLoadNotification;
 
-  RefPtr<nsAtom>      mWatchID;
-  nsCOMPtr<nsIDocument>  mWatchDocument;
+  DocumentOrShadowRoot* GetWatchDocOrShadowRoot() const
+  {
+    if (!mWatchDocumentOrShadowRoot) {
+      return nullptr;
+    }
+    MOZ_ASSERT(mWatchDocumentOrShadowRoot->IsDocument() ||
+               mWatchDocumentOrShadowRoot->IsShadowRoot());
+    if (ShadowRoot* shadow = ShadowRoot::FromNode(*mWatchDocumentOrShadowRoot)) {
+      return shadow;
+    }
+    return mWatchDocumentOrShadowRoot->AsDocument();
+  }
+
+  RefPtr<nsAtom> mWatchID;
+  nsCOMPtr<nsINode> mWatchDocumentOrShadowRoot; // Always a `DocumentOrShadowRoot`.
   RefPtr<Element> mElement;
   RefPtr<Notification> mPendingNotification;
-  bool                   mReferencingImage;
+  bool mReferencingImage = false;
 };
 
 inline void

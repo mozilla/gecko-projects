@@ -19,6 +19,8 @@ from .taskgraph import TaskGraph
 from .try_option_syntax import parse_message
 from .actions import render_actions_json
 from taskgraph.util.partials import populate_release_history
+from taskgraph.util.yaml import load_yaml
+
 
 logger = logging.getLogger(__name__)
 
@@ -66,30 +68,35 @@ PER_PROJECT_PARAMETERS = {
         'target_tasks_method': 'mozilla_beta_tasks',
         'optimize_target_tasks': True,
         'include_nightly': True,
+        'release_type': 'beta',
     },
 
     'mozilla-release': {
         'target_tasks_method': 'mozilla_release_tasks',
         'optimize_target_tasks': True,
         'include_nightly': True,
+        'release_type': 'release',
     },
 
     'mozilla-esr60': {
         'target_tasks_method': 'mozilla_esr60_tasks',
         'optimize_target_tasks': True,
         'include_nightly': True,
+        'release_type': 'esr60',
     },
 
     'comm-beta': {
         'target_tasks_method': 'mozilla_beta_tasks',
         'optimize_target_tasks': True,
         'include_nightly': True,
+        'release_type': 'beta',
     },
 
     'comm-esr60': {
-        'target_tasks_method': 'mozilla_beta_tasks',
+        'target_tasks_method': 'mozilla_esr60_tasks',
         'optimize_target_tasks': True,
         'include_nightly': True,
+        'release_type': 'release',
     },
 
     'pine': {
@@ -214,7 +221,7 @@ def get_decision_parameters(options):
     parameters['version'] = get_version()
     parameters['app_version'] = get_app_version()
     parameters['next_version'] = None
-    parameters['release_type'] = ''
+    parameters['release_type'] = 'nightly'
     parameters['release_eta'] = ''
     parameters['release_enable_partners'] = False
     parameters['release_partners'] = []
@@ -315,3 +322,18 @@ def write_artifact(filename, data):
             f.write(json.dumps(data))
     else:
         raise TypeError("Don't know how to write to {}".format(filename))
+
+
+def read_artifact(filename):
+    path = os.path.join(ARTIFACTS_DIR, filename)
+    if filename.endswith('.yml'):
+        return load_yaml(path, filename)
+    elif filename.endswith('.json'):
+        with open(path, 'r') as f:
+            return json.load(f)
+    elif filename.endswith('.gz'):
+        import gzip
+        with gzip.open(path, 'rb') as f:
+            return json.load(f)
+    else:
+        raise TypeError("Don't know how to read {}".format(filename))

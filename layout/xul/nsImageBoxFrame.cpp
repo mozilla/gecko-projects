@@ -182,12 +182,14 @@ nsImageBoxFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDest
     nsLayoutUtils::DeregisterImageRequest(PresContext(), mImageRequest,
                                           &mRequestRegistered);
 
+    mImageRequest->UnlockImage();
+
     // Release image loader first so that it's refcnt can go to zero
     mImageRequest->CancelAndForgetObserver(NS_ERROR_FAILURE);
   }
 
   if (mListener)
-    reinterpret_cast<nsImageBoxListener*>(mListener.get())->SetFrame(nullptr); // set the frame to null so we don't send messages to a dead object.
+    reinterpret_cast<nsImageBoxListener*>(mListener.get())->ClearFrame(); // set the frame to null so we don't send messages to a dead object.
 
   nsLeafBoxFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
@@ -199,8 +201,7 @@ nsImageBoxFrame::Init(nsIContent*       aContent,
                       nsIFrame*         aPrevInFlow)
 {
   if (!mListener) {
-    RefPtr<nsImageBoxListener> listener = new nsImageBoxListener();
-    listener->SetFrame(this);
+    RefPtr<nsImageBoxListener> listener = new nsImageBoxListener(this);
     mListener = listener.forget();
   }
 
@@ -268,9 +269,9 @@ nsImageBoxFrame::UpdateImage()
   } else {
     // Only get the list-style-image if we aren't being drawn
     // by a native theme.
-    uint8_t appearance = StyleDisplay()->mAppearance;
-    if (!(appearance && nsBox::gTheme &&
-          nsBox::gTheme->ThemeSupportsWidget(nullptr, this, appearance))) {
+    auto* display = StyleDisplay();
+    if (!(display->HasAppearance() && nsBox::gTheme &&
+          nsBox::gTheme->ThemeSupportsWidget(nullptr, this, display->mAppearance))) {
       // get the list-style-image
       imgRequestProxy *styleRequest = StyleList()->GetListStyleImage();
       if (styleRequest) {
@@ -417,7 +418,7 @@ nsImageBoxFrame::PaintImage(gfxContext& aRenderingContext,
            hasSubRect ? &mSubRect : nullptr);
 }
 
-Maybe<ImgDrawResult>
+ImgDrawResult
 nsImageBoxFrame::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                          mozilla::wr::IpcResourceUpdateQueue& aResources,
                                          const StackingContextHelper& aSc,
@@ -433,7 +434,7 @@ nsImageBoxFrame::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
                                                                 anchorPoint,
                                                                 dest);
   if (!imgCon) {
-    return Nothing();
+    return result;
   }
 
   uint32_t containerFlags = imgIContainer::FLAG_ASYNC_NOTIFY;
@@ -451,29 +452,35 @@ nsImageBoxFrame::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
   gfx::IntSize decodeSize =
     nsLayoutUtils::ComputeImageContainerDrawingParameters(imgCon, aItem->Frame(), fillRect,
                                                           aSc, containerFlags, svgContext);
-  RefPtr<layers::ImageContainer> container =
-    imgCon->GetImageContainerAtSize(aManager, decodeSize, svgContext, containerFlags);
+
+  RefPtr<layers::ImageContainer> container;
+  result = imgCon->GetImageContainerAtSize(aManager, decodeSize, svgContext,
+                                           containerFlags, getter_AddRefs(container));
   if (!container) {
     NS_WARNING("Failed to get image container");
-    return Nothing();
+    return result;
   }
 
+  mozilla::wr::ImageRendering rendering = wr::ToImageRendering(
+    nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame()));
   gfx::IntSize size;
-  Maybe<wr::ImageKey> key = aManager->CommandBuilder().CreateImageKey(aItem, container,
-                                                                      aBuilder, aResources,
-                                                                      aSc, size, Nothing());
+  Maybe<wr::ImageKey> key = aManager->CommandBuilder().CreateImageKey(
+    aItem, container, aBuilder, aResources, rendering, aSc, size, Nothing());
   if (key.isNothing()) {
-    return Some(ImgDrawResult::NOT_READY);
+    return result;
   }
   wr::LayoutRect fill = wr::ToRoundedLayoutRect(fillRect);
 
   LayoutDeviceSize gapSize(0, 0);
-  SamplingFilter sampleFilter = nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame());
-  aBuilder.PushImage(fill, fill, !BackfaceIsHidden(),
-                     wr::ToLayoutSize(fillRect.Size()), wr::ToLayoutSize(gapSize),
-                     wr::ToImageRendering(sampleFilter), key.value());
+  aBuilder.PushImage(fill,
+                     fill,
+                     !BackfaceIsHidden(),
+                     wr::ToLayoutSize(fillRect.Size()),
+                     wr::ToLayoutSize(gapSize),
+                     rendering,
+                     key.value());
 
-  return Some(ImgDrawResult::SUCCESS);
+  return result;
 }
 
 nsRect
@@ -553,7 +560,7 @@ nsDisplayXULImage::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBui
   }
 
   if (!imageFrame->mImageRequest) {
-    return false;
+    return true;
   }
 
   uint32_t flags = imgIContainer::FLAG_SYNC_DECODE_IF_FAST;
@@ -564,13 +571,13 @@ nsDisplayXULImage::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBui
     flags |= imgIContainer::FLAG_HIGH_QUALITY_SCALING;
   }
 
-  Maybe<ImgDrawResult> result = imageFrame->
+  ImgDrawResult result = imageFrame->
     CreateWebRenderCommands(aBuilder, aResources, aSc, aManager, this, ToReferenceFrame(), flags);
-  if (!result) {
+  if (result == ImgDrawResult::NOT_SUPPORTED) {
     return false;
   }
 
-  nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, *result);
+  nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
   return true;
 }
 
@@ -662,7 +669,7 @@ nsImageBoxFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
 
   // If we're using a native theme implementation, we shouldn't draw anything.
   const nsStyleDisplay* disp = StyleDisplay();
-  if (disp->mAppearance && nsBox::gTheme &&
+  if (disp->HasAppearance() && nsBox::gTheme &&
       nsBox::gTheme->ThemeSupportsWidget(nullptr, this, disp->mAppearance))
     return;
 
@@ -901,6 +908,19 @@ nsImageBoxFrame::OnFrameUpdate(imgIRequest* aRequest)
     return NS_OK;
   }
 
+  // Check if WebRender has interacted with this frame. If it has
+  // we need to let it know that things have changed.
+  if (HasProperty(WebRenderUserDataProperty::Key())) {
+    uint32_t key = static_cast<uint32_t>(DisplayItemType::TYPE_XUL_IMAGE);
+    RefPtr<WebRenderFallbackData> data =
+      GetWebRenderUserData<WebRenderFallbackData>(this, key);
+    if (data) {
+      data->SetInvalid(true);
+    }
+    SchedulePaint();
+    return NS_OK;
+  }
+
   InvalidateLayer(DisplayItemType::TYPE_XUL_IMAGE);
 
   return NS_OK;
@@ -908,7 +928,8 @@ nsImageBoxFrame::OnFrameUpdate(imgIRequest* aRequest)
 
 NS_IMPL_ISUPPORTS(nsImageBoxListener, imgINotificationObserver)
 
-nsImageBoxListener::nsImageBoxListener()
+nsImageBoxListener::nsImageBoxListener(nsImageBoxFrame *frame)
+  : mFrame(frame)
 {
 }
 

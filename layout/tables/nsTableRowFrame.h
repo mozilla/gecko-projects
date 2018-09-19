@@ -211,8 +211,8 @@ public:
   nscoord GetUnpaginatedBSize();
   void    SetUnpaginatedBSize(nsPresContext* aPresContext, nscoord aValue);
 
-  nscoord GetBStartBCBorderWidth() const { return mBStartBorderWidth; }
-  nscoord GetBEndBCBorderWidth() const { return mBEndBorderWidth; }
+  BCPixelSize GetBStartBCBorderWidth() const { return mBStartBorderWidth; }
+  BCPixelSize GetBEndBCBorderWidth() const { return mBEndBorderWidth; }
   void SetBStartBCBorderWidth(BCPixelSize aWidth) { mBStartBorderWidth = aWidth; }
   void SetBEndBCBorderWidth(BCPixelSize aWidth) { mBEndBorderWidth = aWidth; }
   mozilla::LogicalMargin GetBCBorderWidth(mozilla::WritingMode aWM);
@@ -239,6 +239,10 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
+    if (aFlags & eSupportsContainLayoutAndPaint) {
+      return false;
+    }
+
     return nsContainerFrame::IsFrameOfType(aFlags & ~(nsIFrame::eTablePart));
   }
 
@@ -447,7 +451,7 @@ nsTableRowFrame::GetContinuousBCBorderWidth(mozilla::WritingMode aWM,
 
 inline nscoord nsTableRowFrame::GetOuterBStartContBCBorderWidth()
 {
-  int32_t aPixelsToTwips = nsPresContext::AppUnitsPerCSSPixel();
+  int32_t aPixelsToTwips = mozilla::AppUnitsPerCSSPixel();
   return BC_BORDER_START_HALF_COORD(aPixelsToTwips, mBStartContBorderWidth);
 }
 

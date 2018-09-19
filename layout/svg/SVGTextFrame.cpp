@@ -53,7 +53,7 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using namespace mozilla::dom::SVGTextContentElementBinding;
+using namespace mozilla::dom::SVGTextContentElement_Binding;
 using namespace mozilla::gfx;
 using namespace mozilla::image;
 
@@ -350,7 +350,7 @@ GetBaselinePosition(nsTextFrame* aFrame,
     case NS_STYLE_DOMINANT_BASELINE_MIDDLE:
       return aFrame->GetLogicalBaseline(writingMode) -
         SVGContentUtils::GetFontXHeight(aFrame) / 2.0 *
-        aFrame->PresContext()->AppUnitsPerCSSPixel() * aFontSizeScaleFactor;
+        AppUnitsPerCSSPixel() * aFontSizeScaleFactor;
 
     case NS_STYLE_DOMINANT_BASELINE_TEXT_AFTER_EDGE:
     case NS_STYLE_DOMINANT_BASELINE_IDEOGRAPHIC:
@@ -362,7 +362,7 @@ GetBaselinePosition(nsTextFrame* aFrame,
       return (metrics.mAscent + metrics.mDescent) / 2.0;
   }
 
-  NS_NOTREACHED("unexpected dominant-baseline value");
+  MOZ_ASSERT_UNREACHABLE("unexpected dominant-baseline value");
   return aFrame->GetLogicalBaseline(writingMode);
 }
 
@@ -888,7 +888,7 @@ TextRenderedRun::GetTransformFromRunUserSpaceToFrameUserSpace(
 
   // Translate by the horizontal distance into the text frame this
   // rendered run is.
-  gfxFloat appPerCssPx = nsPresContext::AppUnitsPerCSSPixel();
+  gfxFloat appPerCssPx = AppUnitsPerCSSPixel();
   gfxPoint t = IsVertical() ? gfxPoint(0, start / appPerCssPx)
                             : gfxPoint(start / appPerCssPx, 0);
   return m.PreTranslate(t);
@@ -1333,8 +1333,9 @@ GetUndisplayedCharactersBeforeFrame(nsTextFrame* aFrame)
   TextNodeCorrespondence* correspondence =
     static_cast<TextNodeCorrespondence*>(value);
   if (!correspondence) {
-    NS_NOTREACHED("expected a TextNodeCorrespondenceProperty on nsTextFrame "
-                  "used for SVG text");
+    // FIXME bug 903785
+    NS_ERROR("expected a TextNodeCorrespondenceProperty on nsTextFrame "
+             "used for SVG text");
     return 0;
   }
   return correspondence->mUndisplayedCharacters;
@@ -1475,8 +1476,8 @@ TextNodeCorrespondenceRecorder::TraverseAndRecord(nsIFrame* aFrame)
     NS_ASSERTION(mNodeCharIndex == 0, "incorrect tracking of undisplayed "
                                       "characters in text nodes");
     if (!mNodeIterator.Current()) {
-      NS_NOTREACHED("incorrect tracking of correspondence between text frames "
-                    "and text nodes");
+      MOZ_ASSERT_UNREACHABLE("incorrect tracking of correspondence between "
+                             "text frames and text nodes");
     } else {
       // Each whole nsTextNode we find before we get to the text node for the
       // first text frame must be undisplayed.
@@ -2723,7 +2724,8 @@ CharIterator::MatchesFilter() const
  * An nsCharClipDisplayItem that obtains its left and right clip edges from a
  * TextRenderedRun object.
  */
-class SVGCharClipDisplayItem : public nsCharClipDisplayItem {
+class SVGCharClipDisplayItem final : public nsCharClipDisplayItem
+{
 public:
   explicit SVGCharClipDisplayItem(const TextRenderedRun& aRun)
     : nsCharClipDisplayItem(aRun.mFrame)
@@ -2746,7 +2748,7 @@ public:
  * cannot be done directly (e.g. if we are using an SVG pattern fill, stroking
  * the text, etc.).
  */
-class SVGTextDrawPathCallbacks : public nsTextFrame::DrawPathCallbacks
+class SVGTextDrawPathCallbacks final : public nsTextFrame::DrawPathCallbacks
 {
   typedef mozilla::image::imgDrawingParams imgDrawingParams;
 
@@ -3065,7 +3067,8 @@ SVGTextDrawPathCallbacks::StrokeGeometry()
 // ----------------------------------------------------------------------------
 // Display list item
 
-class nsDisplaySVGText : public nsDisplayItem {
+class nsDisplaySVGText final : public nsDisplayItem
+{
 public:
   nsDisplaySVGText(nsDisplayListBuilder* aBuilder, SVGTextFrame* aFrame)
     : nsDisplayItem(aBuilder, aFrame)
@@ -3110,7 +3113,7 @@ nsDisplaySVGText::HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
 
   gfxPoint userSpacePt =
     gfxPoint(userSpacePtInAppUnits.x, userSpacePtInAppUnits.y) /
-      frame->PresContext()->AppUnitsPerCSSPixel();
+      AppUnitsPerCSSPixel();
 
   nsIFrame* target = frame->GetFrameForPoint(userSpacePt);
   if (target) {
@@ -3811,7 +3814,7 @@ SVGTextFrame::ReflowSVG()
     mRect.SetEmpty();
   } else {
     mRect =
-      nsLayoutUtils::RoundGfxRectToAppRect(r.ToThebesRect(), nsPresContext::AppUnitsPerCSSPixel());
+      nsLayoutUtils::RoundGfxRectToAppRect(r.ToThebesRect(), AppUnitsPerCSSPixel());
 
     // Due to rounding issues when we have a transform applied, we sometimes
     // don't include an additional row of pixels.  For now, just inflate our
@@ -3872,7 +3875,7 @@ SVGTextFrame::GetBBoxContribution(const Matrix &aToBBoxUserspace,
   SVGBBox bbox;
 
   if (aFlags & nsSVGUtils::eForGetClientRects) {
-    Rect rect = NSRectToRect(mRect, PresContext()->AppUnitsPerCSSPixel());
+    Rect rect = NSRectToRect(mRect, AppUnitsPerCSSPixel());
     if (!rect.IsEmpty()) {
       bbox = aToBBoxUserspace.TransformBounds(rect);
     }
@@ -4884,7 +4887,7 @@ ShiftAnchoredChunk(nsTArray<CharPosition>& aCharPositions,
       shift -= aVisIEndEdge;
       break;
     default:
-      NS_NOTREACHED("unexpected value for aAnchorSide");
+      MOZ_ASSERT_UNREACHABLE("unexpected value for aAnchorSide");
   }
 
   if (shift != 0.0) {
@@ -4983,7 +4986,7 @@ SVGTextFrame::AdjustPositionsForClusters()
 SVGGeometryElement*
 SVGTextFrame::GetTextPathGeometryElement(nsIFrame* aTextPathFrame)
 {
-  nsSVGTextPathProperty *property =
+  SVGTextPathObserver *property =
     aTextPathFrame->GetProperty(SVGObserverUtils::HrefAsTextPathProperty());
 
   if (!property) {
@@ -5007,8 +5010,15 @@ SVGTextFrame::GetTextPathGeometryElement(nsIFrame* aTextPathFrame)
     nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI), href,
                                               content->GetUncomposedDoc(), base);
 
+    // There's no clear refererer policy spec about non-CSS SVG resource references
+    // Bug 1415044 to investigate which referrer we should use
+    RefPtr<URLAndReferrerInfo> target =
+      new URLAndReferrerInfo(targetURI,
+                             mContent->OwnerDoc()->GetDocumentURI(),
+                             mContent->OwnerDoc()->GetReferrerPolicy());
+
     property = SVGObserverUtils::GetTextPathProperty(
-      targetURI,
+      target,
       aTextPathFrame,
       SVGObserverUtils::HrefAsTextPathProperty());
     if (!property)
@@ -5682,7 +5692,7 @@ SVGTextFrame::TransformFramePointToTextChild(const Point& aPoint,
   // account when transforming the point from the ancestor frame down
   // to this one.
   float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(presContext->AppUnitsPerDevPixel());
-  float factor = nsPresContext::AppUnitsPerCSSPixel();
+  float factor = AppUnitsPerCSSPixel();
   Point framePosition(NSAppUnitsToFloatPixels(mRect.x, factor),
                       NSAppUnitsToFloatPixels(mRect.y, factor));
   Point pointInUserSpace = aPoint * cssPxPerDevPx + framePosition;
@@ -5789,7 +5799,7 @@ SVGTextFrame::TransformFrameRectFromTextChild(const nsRect& aRect,
 
   // Subtract the mRect offset from the result, as our user space for
   // this frame is relative to the top-left of mRect.
-  float factor = nsPresContext::AppUnitsPerCSSPixel();
+  float factor = AppUnitsPerCSSPixel();
   gfxPoint framePosition(NSAppUnitsToFloatPixels(mRect.x, factor),
                          NSAppUnitsToFloatPixels(mRect.y, factor));
 

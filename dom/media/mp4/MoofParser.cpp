@@ -53,7 +53,6 @@ bool
 MoofParser::RebuildFragmentedIndex(BoxContext& aContext)
 {
   bool foundValidMoof = false;
-  bool foundMdat = false;
 
   for (Box box(&aContext, mOffset); box.IsAvailable(); box = box.Next()) {
     if (box.IsType("moov") && mInitRange.IsEmpty()) {
@@ -149,16 +148,18 @@ MoofParser::BlockingReadNextMoof()
 {
   int64_t length = std::numeric_limits<int64_t>::max();
   mSource->Length(&length);
-  MediaByteRangeSet byteRanges;
-  byteRanges += MediaByteRange(0, length);
   RefPtr<BlockingStream> stream = new BlockingStream(mSource);
+  MediaByteRangeSet byteRanges(MediaByteRange(0, length));
 
   BoxContext context(stream, byteRanges);
   for (Box box(&context, mOffset); box.IsAvailable(); box = box.Next()) {
     if (box.IsType("moof")) {
-      byteRanges.Clear();
-      byteRanges += MediaByteRange(mOffset, box.Range().mEnd);
-      return RebuildFragmentedIndex(context);
+      MediaByteRangeSet parseByteRanges(
+        MediaByteRange(mOffset, box.Range().mEnd));
+      BoxContext parseContext(stream, parseByteRanges);
+      if (RebuildFragmentedIndex(parseContext)) {
+        return true;
+      }
     }
   }
   return false;
@@ -606,7 +607,6 @@ Moof::ParseTrun(Box& aBox, Tfhd& aTfhd, Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts, u
   }
   uint32_t flags;
   MOZ_TRY_VAR(flags, reader->ReadU32());
-  uint8_t version = flags >> 24;
 
   if (!reader->CanReadType<uint32_t>()) {
     LOG(Moof, "Incomplete Box (missing sampleCount)");

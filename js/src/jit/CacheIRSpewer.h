@@ -37,6 +37,7 @@ class CacheIRSpewer
 
     void beginCache(const IRGenerator& generator);
     void valueProperty(const char* name, const Value& v);
+    void opcodeProperty(const char* name, const JSOp op);
     void attached(const char* name);
     void endCache();
 
@@ -63,8 +64,9 @@ class CacheIRSpewer
 
         ~Guard() {
           if (sp_.enabled()) {
-            if (name_ != nullptr)
+            if (name_ != nullptr) {
               sp_.attached(name_);
+            }
             sp_.endCache();
             sp_.lock().unlock();
           }
@@ -72,6 +74,10 @@ class CacheIRSpewer
 
         void valueProperty(const char* name, const Value& v) const {
           sp_.valueProperty(name, v);
+        }
+
+        void opcodeProperty(const char* name, const JSOp op) const {
+          sp_.opcodeProperty(name, op);
         }
 
         explicit operator bool() const {

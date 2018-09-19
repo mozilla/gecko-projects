@@ -16,6 +16,7 @@ from mozbuild.util import ReadOnlyDict, memoize
 from mozversioncontrol import get_repository_object
 
 from . import APP_VERSION_PATH, GECKO, VERSION_PATH
+from .util.attributes import RELEASE_PROJECTS
 
 
 class ParameterMismatch(Exception):
@@ -67,7 +68,7 @@ PARAMETERS = {
     'release_partners': None,
     'release_partner_config': None,
     'release_partner_build_number': 1,
-    'release_type': '',
+    'release_type': 'nightly',
     'release_product': None,
     'target_tasks_method': 'default',
     'try_mode': None,
@@ -142,9 +143,10 @@ class Parameters(ReadOnlyDict):
 
     def is_try(self):
         """
-        Determine whether this graph is being built on a try project.
+        Determine whether this graph is being built on a try project or for
+        `mach try fuzzy`.
         """
-        return 'try' in self['project']
+        return 'try' in self['project'] or self['try_mode'] == 'try_select'
 
     def file_url(self, path):
         """
@@ -165,8 +167,16 @@ class Parameters(ReadOnlyDict):
 
         return '{}/file/{}/{}'.format(repo, rev, path)
 
+    def release_level(self):
+        """
+        Whether this is a staging release or not.
 
-def load_parameters_file(filename, strict=True):
+        :return basestring: One of "production" or "staging".
+        """
+        return 'production' if self['project'] in RELEASE_PROJECTS else 'staging'
+
+
+def load_parameters_file(filename, strict=True, overrides=None):
     """
     Load parameters from a path, url, decision task-id or project.
 
@@ -177,8 +187,11 @@ def load_parameters_file(filename, strict=True):
     import urllib
     from taskgraph.util.taskcluster import get_artifact_url, find_task_id
 
+    if overrides is None:
+        overrides = {}
+
     if not filename:
-        return Parameters(strict=strict)
+        return Parameters(strict=strict, **overrides)
 
     try:
         # reading parameters from a local parameters.yml file
@@ -199,8 +212,12 @@ def load_parameters_file(filename, strict=True):
         f = urllib.urlopen(filename)
 
     if filename.endswith('.yml'):
-        return Parameters(strict=strict, **yaml.safe_load(f))
+        kwargs = yaml.safe_load(f)
     elif filename.endswith('.json'):
-        return Parameters(strict=strict, **json.load(f))
+        kwargs = json.load(f)
     else:
         raise TypeError("Parameters file `{}` is not JSON or YAML".format(filename))
+
+    kwargs.update(overrides)
+
+    return Parameters(strict=strict, **kwargs)

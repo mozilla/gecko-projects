@@ -30,7 +30,9 @@ var _actions2 = _interopRequireDefault(_actions);
 
 var _CommandBarButton = require("../shared/Button/CommandBarButton");
 
-var _devtoolsModules = require("devtools/client/debugger/new/dist/vendors").vendored["devtools-modules"];
+var _devtoolsServices = require("Services");
+
+var _devtoolsServices2 = _interopRequireDefault(_devtoolsServices);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -41,7 +43,7 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 const {
   appinfo
-} = _devtoolsModules.Services;
+} = _devtoolsServices2.default;
 const isMacOS = appinfo.OS === "Darwin";
 const COMMANDS = ["resume", "stepOver", "stepIn", "stepOut"];
 const KEYS = {
@@ -117,10 +119,6 @@ class CommandBar extends _react.Component {
     this.props[action]();
   }
 
-  setHistory(offset) {
-    this.props.timeTravelTo(this.props.historyPosition + offset);
-  }
-
   renderStepButtons() {
     const {
       isPaused,
@@ -138,7 +136,6 @@ class CommandBar extends _react.Component {
 
   resume() {
     this.props.resume();
-    this.props.clearHistory();
   }
 
   renderPauseButton() {
@@ -149,11 +146,11 @@ class CommandBar extends _react.Component {
       canRewind
     } = this.props;
 
-    if (canRewind) {
-      return;
-    }
-
     if (isPaused) {
+      if (canRewind) {
+        return null;
+      }
+
       return (0, _CommandBarButton.debugBtn)(() => this.resume(), "resume", "active", L10N.getFormatStr("resumeButtonTooltip", formatKey("resume")));
     }
 
@@ -179,72 +176,13 @@ class CommandBar extends _react.Component {
     }
 
     const isDisabled = !isPaused;
-    return [(0, _CommandBarButton.debugBtn)(this.props.rewind, "rewind", "active", "Rewind Execution"), (0, _CommandBarButton.debugBtn)(() => this.props.resume, "resume", "active", L10N.getFormatStr("resumeButtonTooltip", formatKey("resume"))), _react2.default.createElement("div", {
+    return [(0, _CommandBarButton.debugBtn)(this.props.rewind, "rewind", "active", "Rewind Execution"), (0, _CommandBarButton.debugBtn)(this.props.resume, "resume", "active", L10N.getFormatStr("resumeButtonTooltip", formatKey("resume"))), _react2.default.createElement("div", {
       key: "divider-1",
       className: "divider"
     }), (0, _CommandBarButton.debugBtn)(this.props.reverseStepOver, "reverseStepOver", "active", "Reverse step over"), (0, _CommandBarButton.debugBtn)(this.props.stepOver, "stepOver", "active", L10N.getFormatStr("stepOverTooltip", formatKey("stepOver")), isDisabled), _react2.default.createElement("div", {
       key: "divider-2",
       className: "divider"
     }), (0, _CommandBarButton.debugBtn)(this.props.stepOut, "stepOut", "active", L10N.getFormatStr("stepOutTooltip", formatKey("stepOut")), isDisabled), (0, _CommandBarButton.debugBtn)(this.props.stepIn, "stepIn", "active", L10N.getFormatStr("stepInTooltip", formatKey("stepIn")), isDisabled)];
-  }
-
-  replayPreviousButton() {
-    const {
-      history,
-      historyPosition,
-      canRewind
-    } = this.props;
-    const historyLength = history.length;
-
-    if (canRewind || !historyLength || historyLength <= 1 || !_prefs.features.replay) {
-      return null;
-    }
-
-    const enabled = historyPosition === 0;
-    const activeClass = enabled ? "replay-inactive" : "";
-    return (0, _CommandBarButton.debugBtn)(() => this.setHistory(-1), `replay-previous ${activeClass}`, "active", L10N.getStr("replayPrevious"), enabled);
-  }
-
-  replayNextButton() {
-    const {
-      history,
-      historyPosition,
-      canRewind
-    } = this.props;
-    const historyLength = history.length;
-
-    if (canRewind || !historyLength || historyLength <= 1 || !_prefs.features.replay) {
-      return null;
-    }
-
-    const enabled = historyPosition + 1 === historyLength;
-    const activeClass = enabled ? "replay-inactive" : "";
-    return (0, _CommandBarButton.debugBtn)(() => this.setHistory(1), `replay-next ${activeClass}`, "active", L10N.getStr("replayNext"), enabled);
-  }
-
-  renderStepPosition() {
-    const {
-      history,
-      historyPosition,
-      canRewind
-    } = this.props;
-    const historyLength = history.length;
-
-    if (canRewind || !historyLength || !_prefs.features.replay) {
-      return null;
-    }
-
-    const position = historyPosition + 1;
-    const total = historyLength;
-    const activePrev = position > 1 ? "replay-active" : "replay-inactive";
-    const activeNext = position < total ? "replay-active" : "replay-inactive";
-    return _react2.default.createElement("div", {
-      className: "step-position"
-    }, _react2.default.createElement("span", {
-      className: activePrev
-    }, position), _react2.default.createElement("span", null, " | "), _react2.default.createElement("span", {
-      className: activeNext
-    }, total));
   }
 
   renderSkipPausingButton() {
@@ -258,7 +196,7 @@ class CommandBar extends _react.Component {
     }
 
     return _react2.default.createElement("button", {
-      className: (0, _classnames2.default)("command-bar-button", {
+      className: (0, _classnames2.default)("command-bar-button", "command-bar-skip-pausing", {
         active: skipPausing
       }),
       title: L10N.getStr("skipPausingTooltip"),
@@ -275,7 +213,7 @@ class CommandBar extends _react.Component {
       })
     }, this.renderPauseButton(), this.renderStepButtons(), this.renderTimeTravelButtons(), _react2.default.createElement("div", {
       className: "filler"
-    }), this.replayPreviousButton(), this.renderStepPosition(), this.replayNextButton(), this.renderSkipPausingButton());
+    }), this.renderSkipPausingButton());
   }
 
 }
@@ -286,11 +224,21 @@ CommandBar.contextTypes = {
 
 const mapStateToProps = state => ({
   isPaused: (0, _selectors.isPaused)(state),
-  history: (0, _selectors.getHistory)(state),
-  historyPosition: (0, _selectors.getHistoryPosition)(state),
   isWaitingOnBreak: (0, _selectors.getIsWaitingOnBreak)(state),
   canRewind: (0, _selectors.getCanRewind)(state),
   skipPausing: (0, _selectors.getSkipPausing)(state)
 });
 
-exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(CommandBar);
+exports.default = (0, _reactRedux.connect)(mapStateToProps, {
+  resume: _actions2.default.resume,
+  stepIn: _actions2.default.stepIn,
+  stepOut: _actions2.default.stepOut,
+  stepOver: _actions2.default.stepOver,
+  breakOnNext: _actions2.default.breakOnNext,
+  rewind: _actions2.default.rewind,
+  reverseStepIn: _actions2.default.reverseStepIn,
+  reverseStepOut: _actions2.default.reverseStepOut,
+  reverseStepOver: _actions2.default.reverseStepOver,
+  pauseOnExceptions: _actions2.default.pauseOnExceptions,
+  toggleSkipPausing: _actions2.default.toggleSkipPausing
+})(CommandBar);

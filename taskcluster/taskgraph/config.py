@@ -43,7 +43,7 @@ graph_config_schema = Schema({
         Required('flavors'): {basestring: {
             Required('product'): basestring,
             Required('target-tasks-method'): basestring,
-            Optional('release-type'): basestring,
+            Optional('is-rc'): bool,
             Optional('rebuild-kinds'): [basestring],
             Optional('version-bump'): bool,
             Optional('partial-updates'): bool,
@@ -96,7 +96,7 @@ def load_graph_config(root_dir):
 
     logger.debug("loading config from `{}`".format(config_yml))
     with open(config_yml) as f:
-        config = yaml.load(f)
+        config = yaml.safe_load(f)
 
     validate_graph_config(config)
     return GraphConfig(config=config, root_dir=root_dir)

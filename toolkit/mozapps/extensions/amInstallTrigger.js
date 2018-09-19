@@ -34,14 +34,10 @@ function CallbackObject(id, callback, mediator) {
 }
 
 function RemoteMediator(window) {
-  window.QueryInterface(Ci.nsIInterfaceRequestor);
-  let utils = window.getInterface(Ci.nsIDOMWindowUtils);
+  let utils = window.windowUtils;
   this._windowID = utils.currentInnerWindowID;
 
-  this.mm = window
-    .getInterface(Ci.nsIDocShell)
-    .QueryInterface(Ci.nsIInterfaceRequestor)
-    .getInterface(Ci.nsIContentFrameMessageManager);
+  this.mm = window.docShell.messageManager;
   this.mm.addWeakMessageListener(MSG_INSTALL_CALLBACK, this);
 
   this._lastCallbackID = 0;
@@ -61,7 +57,7 @@ RemoteMediator.prototype = {
 
   enabled(url) {
     let params = {
-      mimetype: XPINSTALL_MIMETYPE
+      mimetype: XPINSTALL_MIMETYPE,
     };
     return this.mm.sendSyncMessage(MSG_INSTALL_ENABLED, params)[0];
   },
@@ -93,11 +89,7 @@ RemoteMediator.prototype = {
     }
 
     // Fall back to sending through the message manager
-    let messageManager = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIWebNavigation)
-                               .QueryInterface(Ci.nsIDocShell)
-                               .QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIContentFrameMessageManager);
+    let messageManager = window.docShell.messageManager;
 
     return messageManager.sendSyncMessage(MSG_INSTALL_ADDON, install)[0];
   },
@@ -112,7 +104,7 @@ RemoteMediator.prototype = {
     return callbackID;
   },
 
-  QueryInterface: ChromeUtils.generateQI([Ci.nsISupportsWeakReference])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsISupportsWeakReference]),
 };
 
 
@@ -174,11 +166,22 @@ InstallTrigger.prototype = {
       }
     }
 
+    let sourceHost;
+
+    try {
+      sourceHost = this._principal.URI.host;
+    } catch (err) {
+      // Ignore errors when retrieving the host for the principal (e.g. null principals raise
+      // an NS_ERROR_FAILURE when principal.URI.host is accessed).
+    }
+
     let installData = {
       uri: url.spec,
       hash: item.Hash || null,
       name: item.name,
       icon: iconUrl ? iconUrl.spec : null,
+      method: "installTrigger",
+      sourceHost,
     };
 
     return this._mediator.install(installData, this._principal, callback, this._window);
@@ -215,7 +218,7 @@ InstallTrigger.prototype = {
 
   classID: Components.ID("{9df8ef2b-94da-45c9-ab9f-132eb55fddf1}"),
   contractID: "@mozilla.org/addons/installtrigger;1",
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer]),
 };
 
 

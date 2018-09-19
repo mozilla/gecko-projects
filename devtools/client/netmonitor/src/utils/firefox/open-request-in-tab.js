@@ -21,7 +21,7 @@ const { gDevTools } = require("devtools/client/framework/devtools");
 /**
  * Opens given request in a new tab.
  */
-function openRequestInTab(url, requestPostData) {
+function openRequestInTab(url, requestHeaders, requestPostData) {
   const win = Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
   const rawData = requestPostData ? requestPostData.postData : null;
   let postData;
@@ -30,11 +30,24 @@ function openRequestInTab(url, requestPostData) {
     const stringStream = getInputStreamFromString(rawData.text);
     postData = Cc["@mozilla.org/network/mime-input-stream;1"]
       .createInstance(Ci.nsIMIMEInputStream);
-    postData.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+    const contentTypeHeader = requestHeaders.headers.find(e => {
+      return e.name.toLowerCase() === "content-type";
+    });
+
+    postData.addHeader("Content-Type", contentTypeHeader ?
+      contentTypeHeader.value : "application/x-www-form-urlencoded");
     postData.setData(stringStream);
   }
-
-  win.gBrowser.selectedTab = win.gBrowser.addTab(url, null, null, postData);
+  const userContextId = win.gBrowser.contentPrincipal.userContextId;
+  win.gBrowser.selectedTab = win.gBrowser.addWebTab(url, {
+    // TODO this should be using the original request principal
+    triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({
+      userContextId,
+    }),
+    userContextId,
+    postData,
+  });
 }
 
 function getInputStreamFromString(data) {

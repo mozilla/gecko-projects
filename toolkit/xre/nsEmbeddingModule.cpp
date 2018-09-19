@@ -6,15 +6,8 @@
 #include "mozilla/ModuleUtils.h"
 #include "nsDialogParamBlock.h"
 #include "nsWindowWatcher.h"
-#include "nsAppStartupNotifier.h"
 #include "nsFind.h"
-#include "nsWebBrowserFind.h"
 #include "nsWebBrowserPersist.h"
-#include "nsCommandManager.h"
-#include "nsControllerCommandTable.h"
-#include "nsCommandParams.h"
-#include "nsCommandGroup.h"
-#include "nsBaseCommandController.h"
 #include "nsNetCID.h"
 #include "nsEmbedCID.h"
 
@@ -25,15 +18,8 @@
 
 
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsWindowWatcher, Init)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsAppStartupNotifier)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsFind)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsWebBrowserFind)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsWebBrowserPersist)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsControllerCommandTable)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsCommandManager)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsCommandParams)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsControllerCommandGroup)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsBaseCommandController)
 
 #ifdef MOZ_XUL
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsDialogParamBlock)
@@ -55,14 +41,7 @@ NS_DEFINE_NAMED_CID(NS_PRINTINGPROMPTSERVICE_CID);
 #endif
 NS_DEFINE_NAMED_CID(NS_WINDOWWATCHER_CID);
 NS_DEFINE_NAMED_CID(NS_FIND_CID);
-NS_DEFINE_NAMED_CID(NS_WEB_BROWSER_FIND_CID);
-NS_DEFINE_NAMED_CID(NS_APPSTARTUPNOTIFIER_CID);
 NS_DEFINE_NAMED_CID(NS_WEBBROWSERPERSIST_CID);
-NS_DEFINE_NAMED_CID(NS_CONTROLLERCOMMANDTABLE_CID);
-NS_DEFINE_NAMED_CID(NS_COMMAND_MANAGER_CID);
-NS_DEFINE_NAMED_CID(NS_COMMAND_PARAMS_CID);
-NS_DEFINE_NAMED_CID(NS_CONTROLLER_COMMAND_GROUP_CID);
-NS_DEFINE_NAMED_CID(NS_BASECOMMANDCONTROLLER_CID);
 
 static const mozilla::Module::CIDEntry kEmbeddingCIDs[] = {
 #ifdef MOZ_XUL
@@ -81,14 +60,7 @@ static const mozilla::Module::CIDEntry kEmbeddingCIDs[] = {
 #endif
     { &kNS_WINDOWWATCHER_CID, false, nullptr, nsWindowWatcherConstructor },
     { &kNS_FIND_CID, false, nullptr, nsFindConstructor },
-    { &kNS_WEB_BROWSER_FIND_CID, false, nullptr, nsWebBrowserFindConstructor },
-    { &kNS_APPSTARTUPNOTIFIER_CID, false, nullptr, nsAppStartupNotifierConstructor },
     { &kNS_WEBBROWSERPERSIST_CID, false, nullptr, nsWebBrowserPersistConstructor },
-    { &kNS_CONTROLLERCOMMANDTABLE_CID, false, nullptr, nsControllerCommandTableConstructor },
-    { &kNS_COMMAND_MANAGER_CID, false, nullptr, nsCommandManagerConstructor },
-    { &kNS_COMMAND_PARAMS_CID, false, nullptr, nsCommandParamsConstructor },
-    { &kNS_CONTROLLER_COMMAND_GROUP_CID, false, nullptr, nsControllerCommandGroupConstructor },
-    { &kNS_BASECOMMANDCONTROLLER_CID, false, nullptr, nsBaseCommandControllerConstructor },
     { nullptr }
 };
 
@@ -101,14 +73,7 @@ static const mozilla::Module::ContractIDEntry kEmbeddingContracts[] = {
 #endif
     { NS_WINDOWWATCHER_CONTRACTID, &kNS_WINDOWWATCHER_CID },
     { NS_FIND_CONTRACTID, &kNS_FIND_CID },
-    { NS_WEB_BROWSER_FIND_CONTRACTID, &kNS_WEB_BROWSER_FIND_CID },
-    { NS_APPSTARTUPNOTIFIER_CONTRACTID, &kNS_APPSTARTUPNOTIFIER_CID },
     { NS_WEBBROWSERPERSIST_CONTRACTID, &kNS_WEBBROWSERPERSIST_CID },
-    { NS_CONTROLLERCOMMANDTABLE_CONTRACTID, &kNS_CONTROLLERCOMMANDTABLE_CID },
-    { NS_COMMAND_MANAGER_CONTRACTID, &kNS_COMMAND_MANAGER_CID },
-    { NS_COMMAND_PARAMS_CONTRACTID, &kNS_COMMAND_PARAMS_CID },
-    { NS_CONTROLLER_COMMAND_GROUP_CONTRACTID, &kNS_CONTROLLER_COMMAND_GROUP_CID },
-    { NS_BASECOMMANDCONTROLLER_CONTRACTID, &kNS_BASECOMMANDCONTROLLER_CID },
     { nullptr }
 };
 

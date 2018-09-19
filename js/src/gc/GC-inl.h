@@ -158,8 +158,9 @@ class ArenaCellIterImpl
         // This can result in a a new reference being created to an object that
         // an ongoing incremental GC may find to be unreachable, so we may need
         // a barrier here.
-        if (needsBarrier)
+        if (needsBarrier) {
             ExposeGCThingToActiveJS(JS::GCCellPtr(cell, traceKind));
+        }
 
         return cell;
     }
@@ -173,8 +174,9 @@ class ArenaCellIterImpl
     void next() {
         MOZ_ASSERT(!done());
         thing += thingSize;
-        if (thing < ArenaSize)
+        if (thing < ArenaSize) {
             moveForwardIfFree();
+        }
     }
 };
 
@@ -226,19 +228,23 @@ class ZoneCellIter<TenuredCell> {
         // against other threads iterating or allocating. However, we do have
         // background finalization; we may have to wait for this to finish if
         // it's currently active.
-        if (IsBackgroundFinalized(kind) && zone->arenas.needBackgroundFinalizeWait(kind))
+        if (IsBackgroundFinalized(kind) && zone->arenas.needBackgroundFinalizeWait(kind)) {
             rt->gc.waitBackgroundSweepEnd();
+        }
         arenaIter.init(zone, kind);
-        if (!arenaIter.done())
+        if (!arenaIter.done()) {
             cellIter.init(arenaIter.get(), CellIterMayNeedBarrier);
+            settle();
+        }
     }
 
   public:
     ZoneCellIter(JS::Zone* zone, AllocKind kind) {
         // If we are iterating a nursery-allocated kind then we need to
         // evict first so that we can see all things.
-        if (IsNurseryAllocable(kind))
+        if (IsNurseryAllocable(kind)) {
             zone->runtimeFromMainThread()->gc.evictNursery();
+        }
 
         init(zone, kind);
     }
@@ -264,15 +270,19 @@ class ZoneCellIter<TenuredCell> {
         return cellIter.getCell();
     }
 
+    void settle() {
+        while (cellIter.done() && !arenaIter.done()) {
+            arenaIter.next();
+            if (!arenaIter.done()) {
+                cellIter.reset(arenaIter.get());
+            }
+        }
+    }
+
     void next() {
         MOZ_ASSERT(!done());
         cellIter.next();
-        if (cellIter.done()) {
-            MOZ_ASSERT(!arenaIter.done());
-            arenaIter.next();
-            if (!arenaIter.done())
-                cellIter.reset(arenaIter.get());
-        }
+        settle();
     }
 };
 

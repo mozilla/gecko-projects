@@ -45,8 +45,6 @@
 #include "mozilla/dom/MouseEvent.h"
 #include "mozilla/dom/Selection.h"
 #include "mozInlineSpellWordUtil.h"
-#include "mozISpellI18NManager.h"
-#include "mozISpellI18NUtil.h"
 #include "nsCOMPtr.h"
 #include "nsCRT.h"
 #include "nsGenericHTMLElement.h"
@@ -57,7 +55,6 @@
 #include "nsIRunnable.h"
 #include "nsISelectionController.h"
 #include "nsIServiceManager.h"
-#include "nsITextServicesFilter.h"
 #include "nsString.h"
 #include "nsThreadUtils.h"
 #include "nsUnicharUtils.h"
@@ -320,7 +317,7 @@ mozInlineSpellStatus::FinishInitOnEvent(mozInlineSpellWordUtil& aWordUtil)
       // everything should be initialized already in this case
       break;
     default:
-      NS_NOTREACHED("Bad operation");
+      MOZ_ASSERT_UNREACHABLE("Bad operation");
       return NS_ERROR_NOT_INITIALIZED;
   }
   return NS_OK;
@@ -670,16 +667,13 @@ nsresult mozInlineSpellChecker::Cleanup(bool aDestroyingFrames)
 bool // static
 mozInlineSpellChecker::CanEnableInlineSpellChecking()
 {
-  nsresult rv;
   if (gCanEnableSpellChecking == SpellCheck_Uninitialized) {
     gCanEnableSpellChecking = SpellCheck_NotAvailable;
 
-    nsCOMPtr<nsIEditorSpellCheck> spellchecker =
-      do_CreateInstance("@mozilla.org/editor/editorspellchecker;1", &rv);
-    NS_ENSURE_SUCCESS(rv, false);
+    nsCOMPtr<nsIEditorSpellCheck> spellchecker = new EditorSpellCheck();
 
     bool canSpellCheck = false;
-    rv = spellchecker->CanSpellCheck(&canSpellCheck);
+    nsresult rv = spellchecker->CanSpellCheck(&canSpellCheck);
     NS_ENSURE_SUCCESS(rv, false);
 
     if (canSpellCheck)
@@ -772,14 +766,8 @@ mozInlineSpellChecker::SetEnableRealTimeSpell(bool aEnabled)
     return NS_OK;
   }
 
-  nsCOMPtr<nsITextServicesFilter> filter =
-    do_CreateInstance("@mozilla.org/editor/txtsrvfiltermail;1");
-  if (NS_WARN_IF(!filter)) {
-    return NS_ERROR_FAILURE;
-  }
-
   mPendingSpellCheck = new EditorSpellCheck();
-  mPendingSpellCheck->SetFilter(filter);
+  mPendingSpellCheck->SetFilterType(nsIEditorSpellCheck::FILTERTYPE_MAIL);
 
   mPendingInitEditorSpellCheckCallback = new InitEditorSpellCheckCallback(this);
   nsresult rv = mPendingSpellCheck->InitSpellChecker(
@@ -944,25 +932,12 @@ mozInlineSpellChecker::ReplaceWord(nsINode *aNode, int32_t aOffset,
   nsresult res = GetMisspelledWord(aNode, aOffset, getter_AddRefs(range));
   NS_ENSURE_SUCCESS(res, res);
 
-  if (range)
-  {
-    // This range was retrieved from the spellchecker selection. As
-    // ranges cannot be shared between selections, we must clone it
-    // before adding it to the editor's selection.
-    RefPtr<nsRange> editorRange = range->CloneRange();
-
-    AutoPlaceholderBatch phb(mTextEditor, nullptr);
-
-    RefPtr<Selection> selection = mTextEditor->GetSelection();
-    NS_ENSURE_TRUE(selection, NS_ERROR_UNEXPECTED);
-    selection->RemoveAllRanges(IgnoreErrors());
-    selection->AddRange(*editorRange, IgnoreErrors());
-
-    MOZ_ASSERT(mTextEditor);
-    DebugOnly<nsresult> rv = mTextEditor->InsertTextAsAction(newword);
-    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to insert the new word");
+  if (!range) {
+    return NS_OK;
   }
 
+  DebugOnly<nsresult> rv = mTextEditor->ReplaceTextAsAction(newword, range);
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to insert the new word");
   return NS_OK;
 }
 
@@ -1866,18 +1841,18 @@ mozInlineSpellChecker::OnKeyPress(Event* aKeyEvent)
   // we only care about navigation keys that moved selection
   switch (keyCode)
   {
-    case KeyboardEventBinding::DOM_VK_RIGHT:
-    case KeyboardEventBinding::DOM_VK_LEFT:
+    case KeyboardEvent_Binding::DOM_VK_RIGHT:
+    case KeyboardEvent_Binding::DOM_VK_LEFT:
       HandleNavigationEvent(false,
-                            keyCode == KeyboardEventBinding::DOM_VK_RIGHT ?
+                            keyCode == KeyboardEvent_Binding::DOM_VK_RIGHT ?
                               1 : -1);
       break;
-    case KeyboardEventBinding::DOM_VK_UP:
-    case KeyboardEventBinding::DOM_VK_DOWN:
-    case KeyboardEventBinding::DOM_VK_HOME:
-    case KeyboardEventBinding::DOM_VK_END:
-    case KeyboardEventBinding::DOM_VK_PAGE_UP:
-    case KeyboardEventBinding::DOM_VK_PAGE_DOWN:
+    case KeyboardEvent_Binding::DOM_VK_UP:
+    case KeyboardEvent_Binding::DOM_VK_DOWN:
+    case KeyboardEvent_Binding::DOM_VK_HOME:
+    case KeyboardEvent_Binding::DOM_VK_END:
+    case KeyboardEvent_Binding::DOM_VK_PAGE_UP:
+    case KeyboardEvent_Binding::DOM_VK_PAGE_DOWN:
       HandleNavigationEvent(true /* force a spelling correction */);
       break;
   }

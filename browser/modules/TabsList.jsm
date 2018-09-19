@@ -8,7 +8,6 @@ ChromeUtils.defineModuleGetter(this, "PanelMultiView",
                                "resource:///modules/PanelMultiView.jsm");
 
 var EXPORTED_SYMBOLS = ["TabsPanel"];
-const NSXUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
 function setAttributes(element, attrs) {
   for (let [name, value] of Object.entries(attrs)) {
@@ -67,25 +66,16 @@ class TabsListBase {
 
     for (let tab of this.gBrowser.tabs) {
       if (this.filterFn(tab)) {
-        let row = this._createRow(tab);
-        row.tab = tab;
-        row.addEventListener("command", this);
-        this.tabToElement.set(tab, row);
-        if (this.className) {
-          row.classList.add(this.className);
-        }
-
-        fragment.appendChild(row);
+        fragment.appendChild(this._createRow(tab));
       }
     }
 
-    if (this.insertBefore) {
-      this.insertBefore.parentNode.insertBefore(fragment, this.insertBefore);
-    } else {
-      this.containerNode.appendChild(fragment);
-    }
-
+    this._addElement(fragment);
     this._setupListeners();
+  }
+
+  _addElement(elementOrFragment) {
+    this.containerNode.insertBefore(elementOrFragment, this.insertBefore);
   }
 
   /*
@@ -115,11 +105,32 @@ class TabsListBase {
     let item = this.tabToElement.get(tab);
     if (item) {
       if (!this.filterFn(tab)) {
-        // If the tab is no longer in this set of tabs, hide the item.
+        // The tab no longer matches our criteria, remove it.
         this._removeItem(item, tab);
       } else {
         this._setRowAttributes(item, tab);
       }
+    } else if (this.filterFn(tab)) {
+      // The tab now matches our criteria, add a row for it.
+      this._addTab(tab);
+    }
+  }
+
+  _addTab(newTab) {
+    let newRow = this._createRow(newTab);
+    let nextTab = newTab.nextElementSibling;
+
+    while (nextTab && !this.filterFn(nextTab)) {
+      nextTab = nextTab.nextElementSibling;
+    }
+
+    if (nextTab) {
+      // If we found a tab after this one in the list, insert the new row before it.
+      let nextRow = this.tabToElement.get(nextTab);
+      nextRow.parentNode.insertBefore(newRow, nextRow);
+    } else {
+      // If there's no next tab then insert it as usual.
+      this._addElement(newRow);
     }
   }
 
@@ -145,7 +156,7 @@ class TabsPanel extends TabsListBase {
   constructor(opts) {
     super({
       ...opts,
-      containerNode: opts.containerNode || opts.view.firstChild,
+      containerNode: opts.containerNode || opts.view.firstElementChild,
     });
     this.view = opts.view;
     this.view.addEventListener(TABS_PANEL_EVENTS.show, this);
@@ -204,10 +215,16 @@ class TabsPanel extends TabsListBase {
 
   _createRow(tab) {
     let {doc} = this;
-    let row = doc.createElementNS(NSXUL, "toolbaritem");
+    let row = doc.createXULElement("toolbaritem");
     row.setAttribute("class", "all-tabs-item");
+    if (this.className) {
+      row.classList.add(this.className);
+    }
+    row.tab = tab;
+    row.addEventListener("command", this);
+    this.tabToElement.set(tab, row);
 
-    let button = doc.createElementNS(NSXUL, "toolbarbutton");
+    let button = doc.createXULElement("toolbarbutton");
     button.setAttribute("class", "all-tabs-button subviewbutton subviewbutton-iconic");
     button.setAttribute("flex", "1");
     button.setAttribute("crop", "right");
@@ -215,7 +232,7 @@ class TabsPanel extends TabsListBase {
 
     row.appendChild(button);
 
-    let secondaryButton = doc.createElementNS(NSXUL, "toolbarbutton");
+    let secondaryButton = doc.createXULElement("toolbarbutton");
     secondaryButton.setAttribute(
       "class", "all-tabs-secondary-button subviewbutton subviewbutton-iconic");
     secondaryButton.setAttribute("closemenu", "none");
@@ -232,7 +249,7 @@ class TabsPanel extends TabsListBase {
     setAttributes(row, {selected: tab.selected});
 
     let busy = tab.getAttribute("busy");
-    let button = row.firstChild;
+    let button = row.firstElementChild;
     setAttributes(button, {
       busy,
       label: tab.label,
@@ -251,7 +268,7 @@ class TabsPanel extends TabsListBase {
   }
 
   _setImageAttributes(row, tab) {
-    let button = row.firstChild;
+    let button = row.firstElementChild;
     let image = this.doc.getAnonymousElementByAttribute(
       button, "class", "toolbarbutton-icon") ||
       this.doc.getAnonymousElementByAttribute(

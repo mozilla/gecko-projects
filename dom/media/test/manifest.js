@@ -170,7 +170,6 @@ var gMediaRecorderVideoTests = [
 var gPlayTests = [
   // Test playback of a WebM file with vp9 video
   { name:"vp9cake-short.webm", type:"video/webm", duration:1.00 },
-
   // 8-bit samples
   { name:"r11025_u8_c1.wav", type:"audio/x-wav", duration:1.0 },
   // 8-bit samples, file is truncated
@@ -264,6 +263,8 @@ var gPlayTests = [
   { name:"detodos-short.opus", type:"audio/ogg; codecs=opus", duration:0.22 },
   // Opus data in a webm container
   { name:"detodos-short.webm", type:"audio/webm; codecs=opus", duration:0.26 },
+  // Opus in webm channel mapping=2 sample file
+  { name:"opus-mapping2.webm", type:"audio/webm; codecs=opus", duration:10.01 },
   { name:"bug1066943.webm", type:"audio/webm; codecs=opus", duration:1.383 },
 
   // Multichannel Opus in an ogg container
@@ -283,6 +284,10 @@ var gPlayTests = [
   // Ambisonics AAC, requires AAC extradata to be set when creating decoder (see bug 1431169)
   // Also test 4.0 decoding.
   { name:"ambisonics.mp4", type:"audio/mp4", duration:16.48 },
+  // Opus in MP4 channel mapping=0 sample file
+  { name:"opus-sample.mp4", type:"audio/mp4; codecs=opus", duration:10.92 },
+  // Opus in MP4 channel mapping=2 sample file
+  { name:"opus-mapping2.mp4", type:"audio/mp4; codecs=opus", duration:10.0 },
 
   { name:"small-shot.m4a", type:"audio/mp4", duration:0.29 },
   { name:"small-shot.mp3", type:"audio/mpeg", duration:0.27 },
@@ -308,12 +313,18 @@ var gPlayTests = [
   // It is necessary to parse the file to find an audio frame instead.
   { name:"flac-noheader-s16.flac", type:"audio/flac", duration:4.0 },
   { name:"flac-s24.flac", type:"audio/flac", duration:4.04 },
+  { name:"flac-sample.mp4", type:"audio/mp4; codecs=flac", duration:4.95 },
   // Ogg with theora video and flac audio.
   { name:"A4.ogv", type:"video/ogg", width:320, height:240, duration:3.13 },
 
   // Invalid file
   { name:"bogus.duh", type:"bogus/duh", duration:Number.NaN },
 ];
+
+if (!(manifestNavigator().userAgent.includes("Windows") &&
+      !manifestNavigator().userAgent.includes("x64"))) {
+  gPlayTests.push({ name: "av1.mp4", type:"video/mp4", duration:1.00 });
+}
 
 var gSeekToNextFrameTests = [
   // Test playback of a WebM file with vp9 video
@@ -622,6 +633,15 @@ var gCuelessWebMTests = [
 var gUnseekableTests = [
   { name:"bogus.duh", type:"bogus/duh"}
 ];
+
+function isWindows32() {
+    return navigator.userAgent.includes("Windows") &&
+        !navigator.userAgent.includes("Win64");
+}
+
+function isAndroid() {
+    return navigator.userAgent.includes("Android");
+}
 
 var androidVersion = -1; // non-Android platforms
 if (manifestNavigator().userAgent.includes("Mobile") ||
@@ -1426,6 +1446,46 @@ var gEMETests = [
     sessionType:"temporary",
     sessionCount:3,
     duration:1.60,
+  },
+  {
+    // File generated with shaka packager:
+    // packager-osx --enable_raw_key_encryption --keys label=:key_id=7e571d047e571d047e571d047e571d21:key=7e5744447e5744447e5744447e574421 --segment_duration 1 --clear_lead 0 in=test-flac.mp4,stream=audio,output=flac-sample-cenc.mp4
+    name: "flac in mp4 clearkey",
+    tracks: [
+      {
+        name:"audio",
+        type:"audio/mp4; codecs=\"flac\"",
+        fragments:[ "flac-sample-cenc.mp4",
+                  ],
+      },
+    ],
+    keys: {
+      // "keyid" : "key"
+      "7e571d047e571d047e571d047e571d21" : "7e5744447e5744447e5744447e574421",
+    },
+    sessionType:"temporary",
+    sessionCount:1,
+    duration:2.05,
+  },
+  {
+    // File generated with shaka packager:
+    // packager-osx --enable_raw_key_encryption --keys label=:key_id=7e571d047e571d047e571d047e571d21:key=7e5744447e5744447e5744447e574421 --segment_duration 1 --clear_lead 0 in=test-opus.mp4,stream=audio,output=opus-sample-cenc.mp4
+    name: "opus in mp4 clearkey",
+    tracks: [
+      {
+        name:"audio",
+        type:"audio/mp4; codecs=\"opus\"",
+        fragments:[ "opus-sample-cenc.mp4",
+                  ],
+      },
+    ],
+    keys: {
+      // "keyid" : "key"
+      "7e571d047e571d047e571d047e571d21" : "7e5744447e5744447e5744447e574421",
+    },
+    sessionType:"temporary",
+    sessionCount:1,
+    duration:1.98,
   },
   {
     name: "WebM vorbis audio & vp8 video clearkey",

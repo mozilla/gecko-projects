@@ -56,7 +56,8 @@ class TPSTestRunner(object):
     }
 
     default_preferences = {
-        'app.update.enabled': False,
+        'app.update.disabledForTesting': True,
+        'security.turn_off_all_security_so_that_viruses_can_take_over_this_computer': True,
         'browser.dom.window.dump.enabled': True,
         'browser.sessionstore.resume_from_crash': False,
         'browser.shell.checkDefaultBrowser': False,
@@ -234,7 +235,7 @@ class TPSTestRunner(object):
 
             # create the profile if necessary
             if not profilename in profiles:
-                profiles[profilename] = Profile(preferences = self.preferences,
+                profiles[profilename] = Profile(preferences = self.preferences.copy(),
                                                 addons = self.extensions)
 
             # create the test phase
@@ -261,6 +262,7 @@ class TPSTestRunner(object):
                 break;
 
         for profilename in profiles:
+            print "### Cleanup Profile ", profilename
             cleanup_phase = TPSTestPhase(
                 'cleanup-' + profilename,
                 profiles[profilename], testname,

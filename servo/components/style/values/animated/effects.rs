@@ -6,18 +6,17 @@
 
 #[cfg(not(feature = "gecko"))]
 use values::Impossible;
-use values::animated::color::RGBA;
+use values::animated::color::Color;
 use values::computed::{Angle, Number};
 use values::computed::length::Length;
 #[cfg(feature = "gecko")]
 use values::computed::url::ComputedUrl;
-use values::distance::{ComputeSquaredDistance, SquaredDistance};
 use values::generics::effects::BoxShadow as GenericBoxShadow;
 use values::generics::effects::Filter as GenericFilter;
 use values::generics::effects::SimpleShadow as GenericSimpleShadow;
 
 /// An animated value for a single `box-shadow`.
-pub type BoxShadow = GenericBoxShadow<Option<RGBA>, Length, Length, Length>;
+pub type BoxShadow = GenericBoxShadow<Color, Length, Length, Length>;
 
 /// An animated value for a single `filter`.
 #[cfg(feature = "gecko")]
@@ -28,15 +27,4 @@ pub type Filter = GenericFilter<Angle, Number, Length, SimpleShadow, ComputedUrl
 pub type Filter = GenericFilter<Angle, Number, Length, Impossible, Impossible>;
 
 /// An animated value for the `drop-shadow()` filter.
-pub type SimpleShadow = GenericSimpleShadow<Option<RGBA>, Length, Length>;
-
-impl ComputeSquaredDistance for BoxShadow {
-    #[inline]
-    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
-        if self.inset != other.inset {
-            return Err(());
-        }
-        Ok(self.base.compute_squared_distance(&other.base)? +
-            self.spread.compute_squared_distance(&other.spread)?)
-    }
-}
+pub type SimpleShadow = GenericSimpleShadow<Color, Length, Length>;

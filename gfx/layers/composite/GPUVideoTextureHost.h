@@ -15,8 +15,10 @@ namespace layers {
 class GPUVideoTextureHost : public TextureHost
 {
 public:
- GPUVideoTextureHost(TextureFlags aFlags,
-                     const SurfaceDescriptorGPUVideo& aDescriptor);
+  static GPUVideoTextureHost* CreateFromDescriptor(
+    TextureFlags aFlags,
+    const SurfaceDescriptorGPUVideo& aDescriptor);
+
   virtual ~GPUVideoTextureHost();
 
   virtual void DeallocateDeviceData() override {}
@@ -62,7 +64,11 @@ public:
                                 wr::ImageRendering aFilter,
                                 const Range<wr::ImageKey>& aImageKeys) override;
 
+  virtual bool SupportsWrNativeTexture() override;
+
 protected:
+  GPUVideoTextureHost(TextureFlags aFlags, TextureHost* aWrappedTextureHost);
+
   RefPtr<TextureHost> mWrappedTextureHost;
 };
 

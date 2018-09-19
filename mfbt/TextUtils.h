@@ -47,6 +47,30 @@ IsAscii(Char aChar)
   return uc < 0x80;
 }
 
+template<typename Char>
+constexpr bool
+IsNonAsciiLatin1(Char aChar)
+{
+  using UnsignedChar = typename detail::MakeUnsignedChar<Char>::Type;
+  auto uc = static_cast<UnsignedChar>(aChar);
+  return uc >= 0x80 && uc <= 0xFF;
+}
+
+/**
+ * Returns true iff |aChar| matches Ascii Whitespace.
+ *
+ * This function is intended to match the Infra standard
+ * (https://infra.spec.whatwg.org/#ascii-whitespace)
+ */
+template<typename Char>
+constexpr bool
+IsAsciiWhitespace(Char aChar)
+{
+  using UnsignedChar = typename detail::MakeUnsignedChar<Char>::Type;
+  auto uc = static_cast<UnsignedChar>(aChar);
+  return uc == 0x9 || uc == 0xA || uc == 0xC || uc == 0xD || uc == 0x20;
+}
+
 /**
  * Returns true iff |aChar| matches [a-z].
  *
@@ -103,6 +127,22 @@ IsAsciiDigit(Char aChar)
   using UnsignedChar = typename detail::MakeUnsignedChar<Char>::Type;
   auto uc = static_cast<UnsignedChar>(aChar);
   return '0' <= uc && uc <= '9';
+}
+
+/**
+ * Returns true iff |aChar| matches [0-9a-fA-F].
+ *
+ * This function is basically isxdigit, but guaranteed to be only for ASCII.
+ */
+template<typename Char>
+constexpr bool
+IsAsciiHexDigit(Char aChar)
+{
+  using UnsignedChar = typename detail::MakeUnsignedChar<Char>::Type;
+  auto uc = static_cast<UnsignedChar>(aChar);
+  return ('0' <= uc && uc <= '9') ||
+         ('a' <= uc && uc <= 'f') ||
+         ('A' <= uc && uc <= 'F');
 }
 
 /**

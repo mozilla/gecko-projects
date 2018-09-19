@@ -10,7 +10,10 @@ const {
   APPEND_TO_HISTORY,
   CLEAR_HISTORY,
   HISTORY_LOADED,
-  UPDATE_HISTORY_PLACEHOLDER,
+  UPDATE_HISTORY_POSITION,
+  REVERSE_SEARCH_INPUT_CHANGE,
+  REVERSE_SEARCH_BACK,
+  REVERSE_SEARCH_NEXT,
 } = require("devtools/client/webconsole/constants");
 
 /**
@@ -49,11 +52,30 @@ function historyLoaded(entries) {
 /**
  * Update place-holder position in the history list.
  */
-function updatePlaceHolder(direction, expression) {
+function updateHistoryPosition(direction, expression) {
   return {
-    type: UPDATE_HISTORY_PLACEHOLDER,
+    type: UPDATE_HISTORY_POSITION,
     direction,
     expression,
+  };
+}
+
+function reverseSearchInputChange(value) {
+  return {
+    type: REVERSE_SEARCH_INPUT_CHANGE,
+    value,
+  };
+}
+
+function showReverseSearchNext() {
+  return {
+    type: REVERSE_SEARCH_NEXT,
+  };
+}
+
+function showReverseSearchBack() {
+  return {
+    type: REVERSE_SEARCH_BACK
   };
 }
 
@@ -61,5 +83,8 @@ module.exports = {
   appendToHistory,
   clearHistory,
   historyLoaded,
-  updatePlaceHolder,
+  updateHistoryPosition,
+  reverseSearchInputChange,
+  showReverseSearchNext,
+  showReverseSearchBack,
 };

@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "js/CompilationAndEvaluation.h"
 #include "jsapi-tests/tests.h"
 #include "vm/JSScript.h"
 
 BEGIN_TEST(testBug795104)
 {
-    JS::CompileOptions opts(cx);
     JS::RealmBehaviorsRef(cx->realm()).setDiscardSource(true);
 
     const size_t strLen = 60002;
@@ -18,11 +18,13 @@ BEGIN_TEST(testBug795104)
     memset(s + 1, 'x', strLen - 2);
     s[strLen - 1] = '"';
 
+    JS::CompileOptions opts(cx);
+
     // We don't want an rval for our Evaluate call
     opts.setNoScriptRval(true);
 
     JS::RootedValue unused(cx);
-    CHECK(JS::Evaluate(cx, opts, s, strLen, &unused));
+    CHECK(JS::EvaluateUtf8(cx, opts, s, strLen, &unused));
 
     JS::RootedFunction fun(cx);
     JS::AutoObjectVector emptyScopeChain(cx);
@@ -31,7 +33,7 @@ BEGIN_TEST(testBug795104)
     // mode, since it's not supported for functions.
     opts.setNoScriptRval(false);
 
-    CHECK(JS::CompileFunction(cx, emptyScopeChain, opts, "f", 0, nullptr, s, strLen, &fun));
+    CHECK(JS::CompileFunctionUtf8(cx, emptyScopeChain, opts, "f", 0, nullptr, s, strLen, &fun));
     CHECK(fun);
 
     JS_free(cx, s);

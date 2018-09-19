@@ -75,6 +75,12 @@ elif CONFIG['CPU_ARCH'] == 'arm':
         ASFLAGS += [
             '-no-integrated-as',
         ]
+elif CONFIG['CPU_ARCH'] == 'aarch64' and CONFIG['OS_TARGET'] == 'WINNT':
+    # Generic C-only configuration
+    EXPORTS.vpx += files['GENERIC_EXPORTS']
+    SOURCES += files['GENERIC_SOURCES']
+    ASFLAGS += [ '-I%s/media/libvpx/config/win/aarch64/' % TOPSRCDIR ]
+    LOCAL_INCLUDES += [ '/media/libvpx/config/win/aarch64/' ]
 else:
     # Generic C-only configuration
     EXPORTS.vpx += files['GENERIC_EXPORTS']
@@ -112,7 +118,7 @@ if CONFIG['CC_TYPE'] != 'msvc':
             if 'avx2.c' in f:
                 SOURCES[f].flags += ['-mavx2']
 
-if CONFIG['CC_TYPE'] == 'msvc':
+if CONFIG['CC_TYPE'] == 'msvc' and CONFIG['INTEL_ARCHITECTURE']:
     for f in SOURCES:
         if f.endswith('.c'):
             if 'avx.c' in f:

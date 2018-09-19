@@ -34,14 +34,14 @@ class Response final : public nsISupports
 
 public:
   Response(nsIGlobalObject* aGlobal, InternalResponse* aInternalResponse,
-           AbortSignal* aSignal);
+           AbortSignalImpl* aSignalImpl);
 
   Response(const Response& aOther) = delete;
 
   JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return ResponseBinding::Wrap(aCx, this, aGivenProto);
+    return Response_Binding::Wrap(aCx, this, aGivenProto);
   }
 
   ResponseType
@@ -112,6 +112,14 @@ public:
 
   using FetchBody::GetBody;
 
+  using FetchBody::BodyLocalPath;
+
+  const nsAString&
+  BodyLocalPath() const
+  {
+    return mInternalResponse->BodyLocalPath();
+  }
+
   static already_AddRefed<Response>
   Error(const GlobalObject& aGlobal);
 
@@ -140,10 +148,10 @@ public:
   already_AddRefed<InternalResponse>
   GetInternalResponse() const;
 
-  AbortSignal*
-  GetSignal() const override
+  AbortSignalImpl*
+  GetSignalImpl() const override
   {
-    return mSignal;
+    return mSignalImpl;
   }
 
 private:
@@ -152,7 +160,7 @@ private:
   RefPtr<InternalResponse> mInternalResponse;
   // Lazily created
   RefPtr<Headers> mHeaders;
-  RefPtr<AbortSignal> mSignal;
+  RefPtr<AbortSignalImpl> mSignalImpl;
 };
 
 } // namespace dom

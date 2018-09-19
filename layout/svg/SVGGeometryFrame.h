@@ -18,6 +18,7 @@
 
 namespace mozilla {
 class SVGGeometryFrame;
+class SVGMarkerObserver;
 namespace gfx {
 class DrawTarget;
 } // namespace gfx
@@ -29,7 +30,6 @@ class nsAtom;
 class nsIFrame;
 class nsIPresShell;
 class nsSVGMarkerFrame;
-class nsSVGMarkerProperty;
 
 struct nsRect;
 
@@ -70,6 +70,10 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
+    if (aFlags & eSupportsContainLayoutAndPaint) {
+      return false;
+    }
+
     return nsFrame::IsFrameOfType(aFlags & ~(nsIFrame::eSVG | nsIFrame::eSVGGeometry));
   }
 
@@ -127,9 +131,9 @@ private:
                     imgDrawingParams& aImgParams);
 
   struct MarkerProperties {
-    nsSVGMarkerProperty* mMarkerStart;
-    nsSVGMarkerProperty* mMarkerMid;
-    nsSVGMarkerProperty* mMarkerEnd;
+    SVGMarkerObserver* mMarkerStart;
+    SVGMarkerObserver* mMarkerMid;
+    SVGMarkerObserver* mMarkerEnd;
 
     bool MarkersExist() const {
       return mMarkerStart || mMarkerMid || mMarkerEnd;

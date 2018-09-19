@@ -625,14 +625,18 @@ VROculusSession::LoadOvrLib()
   nsString libName;
   nsString searchPath;
 
-  static const char dirSep = '\\';
-  static const int pathLen = 260;
-  searchPath.SetCapacity(pathLen);
-  int realLen = ::GetSystemDirectoryW(char16ptr_t(searchPath.BeginWriting()),
-                                      pathLen);
-  if (realLen != 0 && realLen < pathLen) {
-    searchPath.SetLength(realLen);
-    libSearchPaths.AppendElement(searchPath);
+  for (;;) {
+    UINT requiredLength = ::GetSystemDirectoryW(char16ptr_t(searchPath.BeginWriting()),
+                                                searchPath.Length());
+    if (!requiredLength) {
+      break;
+    }
+    if (requiredLength < searchPath.Length()) {
+      searchPath.Truncate(requiredLength);
+      libSearchPaths.AppendElement(searchPath);
+      break;
+    }
+    searchPath.SetLength(requiredLength);
   }
   libName.AppendPrintf("LibOVRRT%d_%d.dll", BUILD_BITS, OVR_PRODUCT_VERSION);
 
@@ -655,7 +659,7 @@ VROculusSession::LoadOvrLib()
     if (libPath.Length() == 0) {
       fullName.Assign(libName);
     } else {
-      fullName.AppendPrintf("%s%c%s", libPath.get(), dirSep, libName.get());
+      fullName.Assign(libPath + NS_LITERAL_STRING(u"\\") + libName);
     }
 
     mOvrLib = LoadLibraryWithFlags(fullName.get());
@@ -952,7 +956,7 @@ VRDisplayOculus::GetSensorState()
       predictedFrameTime = ovr_GetPredictedDisplayTime(mSession->Get(), 0);
     }
     result = GetSensorState(predictedFrameTime);
-    result.position[1] -= mEyeHeight;
+    result.pose.position[1] -= mEyeHeight;
     result.CalcViewMatrices(headToEyeTransforms);
   }
   result.inputFrameID = mDisplayInfo.mFrameId;
@@ -973,41 +977,41 @@ VRDisplayOculus::GetSensorState(double absTime)
   if (state.StatusFlags & ovrStatus_OrientationTracked) {
     result.flags |= VRDisplayCapabilityFlags::Cap_Orientation;
 
-    result.orientation[0] = pose.ThePose.Orientation.x;
-    result.orientation[1] = pose.ThePose.Orientation.y;
-    result.orientation[2] = pose.ThePose.Orientation.z;
-    result.orientation[3] = pose.ThePose.Orientation.w;
+    result.pose.orientation[0] = pose.ThePose.Orientation.x;
+    result.pose.orientation[1] = pose.ThePose.Orientation.y;
+    result.pose.orientation[2] = pose.ThePose.Orientation.z;
+    result.pose.orientation[3] = pose.ThePose.Orientation.w;
 
-    result.angularVelocity[0] = pose.AngularVelocity.x;
-    result.angularVelocity[1] = pose.AngularVelocity.y;
-    result.angularVelocity[2] = pose.AngularVelocity.z;
+    result.pose.angularVelocity[0] = pose.AngularVelocity.x;
+    result.pose.angularVelocity[1] = pose.AngularVelocity.y;
+    result.pose.angularVelocity[2] = pose.AngularVelocity.z;
 
     result.flags |= VRDisplayCapabilityFlags::Cap_AngularAcceleration;
 
-    result.angularAcceleration[0] = pose.AngularAcceleration.x;
-    result.angularAcceleration[1] = pose.AngularAcceleration.y;
-    result.angularAcceleration[2] = pose.AngularAcceleration.z;
+    result.pose.angularAcceleration[0] = pose.AngularAcceleration.x;
+    result.pose.angularAcceleration[1] = pose.AngularAcceleration.y;
+    result.pose.angularAcceleration[2] = pose.AngularAcceleration.z;
   } else {
     // default to an identity quaternion
-    result.orientation[3] = 1.0f;
+    result.pose.orientation[3] = 1.0f;
   }
 
   if (state.StatusFlags & ovrStatus_PositionTracked) {
     result.flags |= VRDisplayCapabilityFlags::Cap_Position;
 
-    result.position[0] = pose.ThePose.Position.x;
-    result.position[1] = pose.ThePose.Position.y;
-    result.position[2] = pose.ThePose.Position.z;
+    result.pose.position[0] = pose.ThePose.Position.x;
+    result.pose.position[1] = pose.ThePose.Position.y;
+    result.pose.position[2] = pose.ThePose.Position.z;
 
-    result.linearVelocity[0] = pose.LinearVelocity.x;
-    result.linearVelocity[1] = pose.LinearVelocity.y;
-    result.linearVelocity[2] = pose.LinearVelocity.z;
+    result.pose.linearVelocity[0] = pose.LinearVelocity.x;
+    result.pose.linearVelocity[1] = pose.LinearVelocity.y;
+    result.pose.linearVelocity[2] = pose.LinearVelocity.z;
 
     result.flags |= VRDisplayCapabilityFlags::Cap_LinearAcceleration;
 
-    result.linearAcceleration[0] = pose.LinearAcceleration.x;
-    result.linearAcceleration[1] = pose.LinearAcceleration.y;
-    result.linearAcceleration[2] = pose.LinearAcceleration.z;
+    result.pose.linearAcceleration[0] = pose.LinearAcceleration.x;
+    result.pose.linearAcceleration[1] = pose.LinearAcceleration.y;
+    result.pose.linearAcceleration[2] = pose.LinearAcceleration.z;
   }
   result.flags |= VRDisplayCapabilityFlags::Cap_External;
   result.flags |= VRDisplayCapabilityFlags::Cap_MountDetection;
@@ -1330,17 +1334,17 @@ VRControllerOculus::VRControllerOculus(dom::GamepadHand aHand, uint32_t aDisplay
       break;
   }
 
-  strncpy(state.mControllerName, touchID, kVRControllerNameMaxLen);
+  strncpy(state.controllerName, touchID, kVRControllerNameMaxLen);
 
   MOZ_ASSERT(kNumOculusButton ==
              static_cast<uint32_t>(OculusLeftControllerButtonType::NumButtonType)
              && kNumOculusButton ==
              static_cast<uint32_t>(OculusRightControllerButtonType::NumButtonType));
 
-  state.mNumButtons = kNumOculusButton;
-  state.mNumAxes = static_cast<uint32_t>(
+  state.numButtons = kNumOculusButton;
+  state.numAxes = static_cast<uint32_t>(
                    OculusControllerAxisType::NumVRControllerAxisType);
-  state.mNumHaptics = kNumOculusHaptcs;
+  state.numHaptics = kNumOculusHaptcs;
 }
 
 float

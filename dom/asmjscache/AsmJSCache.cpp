@@ -446,6 +446,7 @@ public:
     mOpenMode(aOpenMode),
     mWriteParams(aWriteParams),
     mOperationMayProceed(true),
+    mModuleIndex(0),
     mState(eInitial),
     mResult(JS::AsmJSCache_InternalError),
     mActorDestroyed(false),
@@ -1937,6 +1938,9 @@ void
 Client::ShutdownWorkThreads()
 {
   AssertIsOnBackgroundThread();
+  MOZ_ASSERT(!mShutdownRequested);
+
+  mShutdownRequested = true;
 
   if (sLiveParentActors) {
     MOZ_ALWAYS_TRUE(SpinEventLoopUntil([&]() {

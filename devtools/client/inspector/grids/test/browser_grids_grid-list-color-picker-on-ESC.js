@@ -20,12 +20,12 @@ const TEST_URI = `
 
 add_task(async function() {
   await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-  const { inspector, gridInspector } = await openLayoutView();
+  const { inspector, gridInspector, layoutView } = await openLayoutView();
   const { document: doc } = gridInspector;
   const { store } = inspector;
-  const cPicker = gridInspector.getSwatchColorPickerTooltip();
+  const cPicker = layoutView.swatchColorPickerTooltip;
   const spectrum = cPicker.spectrum;
-  const swatch = doc.querySelector(".grid-color-swatch");
+  const swatch = doc.querySelector("#layout-grid-container .layout-color-swatch");
 
   info("Checking the initial state of the Grid Inspector.");
   is(swatch.style.backgroundColor, "rgb(148, 0, 255)",

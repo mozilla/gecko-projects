@@ -20,7 +20,7 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
 ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm", this);
 
 ChromeUtils.defineModuleGetter(this, "TelemetryHealthPing",
-  "resource://gre/modules/TelemetryHealthPing.jsm");
+  "resource://gre/modules/HealthPing.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(Services, "cookies", "@mozilla.org/cookieService;1", "nsICookieService");
 
@@ -639,9 +639,14 @@ add_task(async function test_pref_observer() {
             reject(Error("Crash report annotation without expected value."));
           }
 
-          if (!expectedValue && value != "") {
+          if (keys.size == 0) {
             MockRegistrar.unregister(gMockCrs);
-            reject(Error(`Crash report annotation ("${key}") with unexpected value: "${value}".`));
+            resolve();
+          }
+        },
+        removeCrashReportAnnotation(key) {
+          if (!keys.delete(key)) {
+            MockRegistrar.unregister(gMockCrs);
           }
 
           if (keys.size == 0) {

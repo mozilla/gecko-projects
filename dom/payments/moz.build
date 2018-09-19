@@ -14,7 +14,9 @@ EXPORTS += [
 ]
 
 EXPORTS.mozilla.dom += [
+    'MerchantValidationEvent.h',
     'PaymentAddress.h',
+    'PaymentMethodChangeEvent.h',
     'PaymentRequest.h',
     'PaymentRequestManager.h',
     'PaymentRequestUpdateEvent.h',
@@ -23,9 +25,10 @@ EXPORTS.mozilla.dom += [
 
 UNIFIED_SOURCES += [
     'BasicCardPayment.cpp',
-    'PaymentActionRequest.cpp',
+    'MerchantValidationEvent.cpp',
     'PaymentActionResponse.cpp',
     'PaymentAddress.cpp',
+    'PaymentMethodChangeEvent.cpp',
     'PaymentRequest.cpp',
     'PaymentRequestData.cpp',
     'PaymentRequestManager.cpp',
@@ -39,6 +42,9 @@ UNIFIED_SOURCES += [
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
+
+with Files("**"):
+    BUG_COMPONENT = ("Core", "DOM: Web Payments")
 
 BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
 MOCHITEST_MANIFESTS += ['test/mochitest.ini']

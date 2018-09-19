@@ -63,8 +63,6 @@ const {components, Cc, Ci} = require("chrome");
 loader.lazyImporter(this, "NetUtil", "resource://gre/modules/NetUtil.jsm");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const Services = require("Services");
-const { LocalizationHelper } = require("devtools/shared/l10n");
-const L10N = new LocalizationHelper("devtools/client/locales/netmonitor.properties");
 
 // The cache used in the `nsIURL` function.
 const gNSURLStore = new Map();
@@ -196,22 +194,6 @@ var NetworkHelper = {
 
         return this.readAndConvertFromStream(descriptor, charset);
       }
-    }
-    return null;
-  },
-
-  /**
-   * Gets the web appId that is associated with request.
-   *
-   * @param nsIHttpChannel request
-   * @returns number|null
-   *          The appId for the given request, if available.
-   */
-  getAppIdForRequest: function(request) {
-    try {
-      return this.getRequestLoadContext(request).appId;
-    } catch (ex) {
-      // request loadContent is not always available.
     }
     return null;
   },
@@ -602,12 +584,10 @@ var NetworkHelper = {
      */
 
     securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
-    securityInfo.QueryInterface(Ci.nsISSLStatusProvider);
 
     const wpl = Ci.nsIWebProgressListener;
     const NSSErrorsService = Cc["@mozilla.org/nss_errors_service;1"]
                                .getService(Ci.nsINSSErrorsService);
-    const SSLStatus = securityInfo.SSLStatus;
     if (!NSSErrorsService.isNSSErrorCode(securityInfo.errorCode)) {
       const state = securityInfo.securityState;
 
@@ -640,67 +620,23 @@ var NetworkHelper = {
       }
 
       // Cipher suite.
-      info.cipherSuite = SSLStatus.cipherName;
+      info.cipherSuite = securityInfo.cipherName;
 
       // Key exchange group name.
-      info.keaGroupName = SSLStatus.keaGroupName;
-      // Localise two special values.
-      if (info.keaGroupName == "none") {
-        info.keaGroupName = L10N.getStr("netmonitor.security.keaGroup.none");
-      }
-      if (info.keaGroupName == "custom") {
-        info.keaGroupName = L10N.getStr("netmonitor.security.keaGroup.custom");
-      }
-      if (info.keaGroupName == "unknown group") {
-        info.keaGroupName = L10N.getStr("netmonitor.security.keaGroup.unknown");
-      }
+      info.keaGroupName = securityInfo.keaGroupName;
 
       // Certificate signature scheme.
-      info.signatureSchemeName = SSLStatus.signatureSchemeName;
-      // Localise two special values.
-      if (info.signatureSchemeName == "none") {
-        info.signatureSchemeName =
-          L10N.getStr("netmonitor.security.signatureScheme.none");
-      }
-      if (info.signatureSchemeName == "unknown signature") {
-        info.signatureSchemeName =
-          L10N.getStr("netmonitor.security.signatureScheme.unknown");
-      }
+      info.signatureSchemeName = securityInfo.signatureSchemeName;
 
       // Protocol version.
       info.protocolVersion =
-        this.formatSecurityProtocol(SSLStatus.protocolVersion);
+        this.formatSecurityProtocol(securityInfo.protocolVersion);
 
       // Certificate.
-      info.cert = this.parseCertificateInfo(SSLStatus.serverCert);
+      info.cert = this.parseCertificateInfo(securityInfo.serverCert);
 
-      info.certificateTransparency = null;
-
-      switch (SSLStatus.certificateTransparencyStatus) {
-        case SSLStatus.CERTIFICATE_TRANSPARENCY_NOT_APPLICABLE:
-        default:
-          break;
-        case SSLStatus.CERTIFICATE_TRANSPARENCY_NONE:
-          info.certificateTransparency =
-            L10N.getStr("certmgr.certificateTransparency.status.none");
-          break;
-        case SSLStatus.CERTIFICATE_TRANSPARENCY_POLICY_COMPLIANT:
-          info.certificateTransparency =
-            L10N.getStr("certmgr.certificateTransparency.status.ok");
-          break;
-        case SSLStatus.CERTIFICATE_TRANSPARENCY_POLICY_NOT_ENOUGH_SCTS:
-          info.certificateTransparency =
-            L10N.getStr(
-              "certmgr.certificateTransparency.status.notEnoughSCTS"
-            );
-          break;
-        case SSLStatus.CERTIFICATE_TRANSPARENCY_POLICY_NOT_DIVERSE_SCTS:
-          info.certificateTransparency =
-            L10N.getStr(
-              "certmgr.certificateTransparency.status.notDiverseSCTS"
-            );
-          break;
-      }
+      // Certificate transparency status.
+      info.certificateTransparency = securityInfo.certificateTransparencyStatus;
 
       // HSTS and HPKP if available.
       if (httpActivity.hostname) {
@@ -783,24 +719,24 @@ var NetworkHelper = {
   },
 
   /**
-   * Takes protocolVersion of SSLStatus object and returns human readable
-   * description.
+   * Takes protocolVersion of TransportSecurityInfo object and returns
+   * human readable description.
    *
    * @param Number version
-   *        One of nsISSLStatus version constants.
+   *        One of nsITransportSecurityInfo version constants.
    * @return string
    *         One of TLSv1, TLSv1.1, TLSv1.2, TLSv1.3 if @param version
    *         is valid, Unknown otherwise.
    */
   formatSecurityProtocol: function(version) {
     switch (version) {
-      case Ci.nsISSLStatus.TLS_VERSION_1:
+      case Ci.nsITransportSecurityInfo.TLS_VERSION_1:
         return "TLSv1";
-      case Ci.nsISSLStatus.TLS_VERSION_1_1:
+      case Ci.nsITransportSecurityInfo.TLS_VERSION_1_1:
         return "TLSv1.1";
-      case Ci.nsISSLStatus.TLS_VERSION_1_2:
+      case Ci.nsITransportSecurityInfo.TLS_VERSION_1_2:
         return "TLSv1.2";
-      case Ci.nsISSLStatus.TLS_VERSION_1_3:
+      case Ci.nsITransportSecurityInfo.TLS_VERSION_1_3:
         return "TLSv1.3";
       default:
         DevToolsUtils.reportException("NetworkHelper.formatSecurityProtocol",

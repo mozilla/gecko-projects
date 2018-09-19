@@ -7,6 +7,7 @@
 #ifndef util_Text_h
 #define util_Text_h
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/TextUtils.h"
@@ -56,24 +57,9 @@ class StringBuffer;
 
 template <typename Char1, typename Char2>
 inline bool
-EqualChars(const Char1* s1, const Char2* s2, size_t len);
-
-template <typename Char1>
-inline bool
-EqualChars(const Char1* s1, const Char1* s2, size_t len)
-{
-    return mozilla::PodEqual(s1, s2, len);
-}
-
-template <typename Char1, typename Char2>
-inline bool
 EqualChars(const Char1* s1, const Char2* s2, size_t len)
 {
-    for (const Char1* s1end = s1 + len; s1 < s1end; s1++, s2++) {
-        if (*s1 != *s2)
-            return false;
-    }
-    return true;
+    return mozilla::ArrayEqual(s1, s2, len);
 }
 
 // Return less than, equal to, or greater than zero depending on whether
@@ -84,8 +70,9 @@ CompareChars(const Char1* s1, size_t len1, const Char2* s2, size_t len2)
 {
     size_t n = Min(len1, len2);
     for (size_t i = 0; i < n; i++) {
-        if (int32_t cmp = s1[i] - s2[i])
+        if (int32_t cmp = s1[i] - s2[i]) {
             return cmp;
+        }
     }
 
     return int32_t(len1 - len2);
@@ -98,8 +85,9 @@ SkipSpace(const CharT* s, const CharT* end)
 {
     MOZ_ASSERT(s <= end);
 
-    while (s < end && unicode::IsSpace(*s))
+    while (s < end && unicode::IsSpace(*s)) {
         s++;
+    }
 
     return s;
 }
@@ -141,27 +129,18 @@ InflateString(JSContext* cx, const char* bytes, size_t length);
 inline void
 CopyAndInflateChars(char16_t* dst, const char* src, size_t srclen)
 {
-    for (size_t i = 0; i < srclen; i++)
+    for (size_t i = 0; i < srclen; i++) {
         dst[i] = (unsigned char) src[i];
+    }
 }
 
 inline void
 CopyAndInflateChars(char16_t* dst, const JS::Latin1Char* src, size_t srclen)
 {
-    for (size_t i = 0; i < srclen; i++)
+    for (size_t i = 0; i < srclen; i++) {
         dst[i] = src[i];
+    }
 }
-
-/*
- * Deflate JS chars to bytes into a buffer. 'bytes' must be large enough for
- * 'length chars. The buffer is NOT null-terminated. The destination length
- * must to be initialized with the buffer size and will contain on return the
- * number of copied bytes.
- */
-template <typename CharT>
-extern bool
-DeflateStringToBuffer(JSContext* maybecx, const CharT* chars,
-                      size_t charsLength, char* bytes, size_t* length);
 
 /*
  * Convert one UCS-4 char and write it into a UTF-8 buffer, which must be at
@@ -244,8 +223,8 @@ FileEscapedString(FILE* fp, const char* chars, size_t length, uint32_t quote)
     return res;
 }
 
-bool
-EncodeURI(JSContext* cx, StringBuffer& sb, const char* chars, size_t length);
+JSString*
+EncodeURI(JSContext* cx, const char* chars, size_t length);
 
 } // namespace js
 

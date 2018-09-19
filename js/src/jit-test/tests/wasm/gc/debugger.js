@@ -5,7 +5,7 @@ if (!wasmGcEnabled() || !wasmDebuggingIsSupported()) {
 (function() {
     let g = newGlobal();
     let dbg = new Debugger(g);
-    g.eval(`o = new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary('(module (func (result anyref) (param anyref) get_local 0) (export "" 0))')));`);
+    g.eval(`o = new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary('(module (gc_feature_opt_in 1) (func (result anyref) (param anyref) get_local 0) (export "" 0))')));`);
 })();
 
 (function() {
@@ -14,6 +14,7 @@ if (!wasmGcEnabled() || !wasmDebuggingIsSupported()) {
 
     let src = `
       (module
+        (gc_feature_opt_in 1)
         (func (export "func") (result anyref) (param $ref anyref)
             get_local $ref
         )
@@ -22,14 +23,19 @@ if (!wasmGcEnabled() || !wasmDebuggingIsSupported()) {
 
     g.eval(`
         var obj = { somekey: 'somevalue' };
-
         Debugger(parent).onEnterFrame = function(frame) {
             let v = frame.environment.getVariable('var0');
-            assertEq(typeof v === 'object', true);
-            assertEq(typeof v.somekey === 'string', true);
-            assertEq(v.somekey === 'somevalue', true);
-        };
+            assertEq(typeof v, 'object');
 
-        new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary(\`${src}\`))).exports.func(obj);
+            let prop = v.unwrap().getOwnPropertyDescriptor('somekey');
+            assertEq(typeof prop, 'object');
+            assertEq(typeof prop.value, 'string');
+            assertEq(prop.value, 'somevalue');
+
+            // Disable onEnterFrame hook.
+            Debugger(parent).onEnterFrame = undefined;
+        };
     `);
+
+    new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary(`${src}`))).exports.func(g.obj);
 })();

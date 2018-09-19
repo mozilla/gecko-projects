@@ -639,7 +639,6 @@ with modules["DOM"]:
     errors["NS_ERROR_DOM_XPCONNECT_ACCESS_DENIED"] = FAILURE(1011)
     errors["NS_ERROR_DOM_BAD_URI"] = FAILURE(1012)
     errors["NS_ERROR_DOM_RETVAL_UNDEFINED"] = FAILURE(1013)
-    errors["NS_ERROR_DOM_QUOTA_REACHED"] = FAILURE(1014)
 
     # A way to represent uncatchable exceptions
     errors["NS_ERROR_UNCATCHABLE_EXCEPTION"] = FAILURE(1015)
@@ -825,6 +824,8 @@ with modules["URILOADER"]:
     errors["NS_ERROR_UNWANTED_URI"] = FAILURE(35)
     errors["NS_ERROR_BLOCKED_URI"] = FAILURE(37)
     errors["NS_ERROR_HARMFUL_URI"] = FAILURE(38)
+    errors["NS_ERROR_MAYBE_TRACKING_URI"] = FAILURE(39)
+    errors["NS_ERROR_TRACKING_ANNOTATION_URI"] = FAILURE(40)
     # Used when "Save Link As..." doesn't see the headers quickly enough to
     # choose a filename.  See nsContextMenu.js.
     errors["NS_ERROR_SAVE_LINK_AS_TIMEOUT"] = FAILURE(32)
@@ -974,6 +975,7 @@ with modules["DOM_INDEXEDDB"]:
     errors["NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR"] = FAILURE(11)
     errors["NS_ERROR_DOM_INDEXEDDB_VERSION_ERR"] = FAILURE(12)
     errors["NS_ERROR_DOM_INDEXEDDB_RECOVERABLE_ERR"] = FAILURE(1001)
+    errors["NS_ERROR_DOM_INDEXEDDB_KEY_ERR"] = FAILURE(1002)
 
 
 # =======================================================================

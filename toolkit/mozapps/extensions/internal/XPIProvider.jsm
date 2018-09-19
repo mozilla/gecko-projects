@@ -130,7 +130,7 @@ const BOOTSTRAP_REASONS = {
   ADDON_INSTALL: 5,
   ADDON_UNINSTALL: 6,
   ADDON_UPGRADE: 7,
-  ADDON_DOWNGRADE: 8
+  ADDON_DOWNGRADE: 8,
 };
 
 const ALL_EXTERNAL_TYPES = new Set([
@@ -541,6 +541,7 @@ class XPIState {
     this.dependencies = aDBAddon.dependencies;
     this.runInSafeMode = canRunInSafeMode(aDBAddon);
     this.signedState = aDBAddon.signedState;
+    this.file = aDBAddon._sourceBundle;
 
     if (aUpdated || mustGetMod) {
       this.getModTime(this.file);
@@ -1767,7 +1768,7 @@ class BootstrapScope {
 
   async _install(reason, callUpdate, startup, extraArgs) {
     if (callUpdate) {
-      this.callBootstrapMethod("update", reason, extraArgs);
+      await this.callBootstrapMethod("update", reason, extraArgs);
     } else {
       this.callBootstrapMethod("install", reason, extraArgs);
     }

@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "builtin/TestingFunctions.h"
+#include "js/CompilationAndEvaluation.h"
 #include "js/UbiNode.h"
 #include "js/UbiNodeDominatorTree.h"
 #include "js/UbiNodePostOrder.h"
@@ -92,7 +93,7 @@ BEGIN_TEST(test_ubiNodeZone)
     RootedString string1(cx, JS_NewStringCopyZ(cx, "Simpson's Individual Stringettes!"));
     CHECK(string1);
     RootedScript script1(cx);
-    CHECK(JS::Compile(cx, options, "", 0, &script1));
+    CHECK(JS::CompileUtf8(cx, options, "", 0, &script1));
 
     {
         // ... and then enter global2's zone and create a string and script
@@ -102,7 +103,7 @@ BEGIN_TEST(test_ubiNodeZone)
         RootedString string2(cx, JS_NewStringCopyZ(cx, "A million household uses!"));
         CHECK(string2);
         RootedScript script2(cx);
-        CHECK(JS::Compile(cx, options, "", 0, &script2));
+        CHECK(JS::CompileUtf8(cx, options, "", 0, &script2));
 
         CHECK(JS::ubi::Node(string1).zone() == global1->zone());
         CHECK(JS::ubi::Node(script1).zone() == global1->zone());
@@ -137,7 +138,7 @@ BEGIN_TEST(test_ubiNodeCompartment)
 
     // Create a script in the original realm...
     RootedScript script1(cx);
-    CHECK(JS::Compile(cx, options, "", 0, &script1));
+    CHECK(JS::CompileUtf8(cx, options, "", 0, &script1));
 
     {
         // ... and then enter global2's realm and create a script
@@ -145,7 +146,7 @@ BEGIN_TEST(test_ubiNodeCompartment)
         JSAutoRealm ar(cx, global2);
 
         RootedScript script2(cx);
-        CHECK(JS::Compile(cx, options, "", 0, &script2));
+        CHECK(JS::CompileUtf8(cx, options, "", 0, &script2));
 
         CHECK(JS::ubi::Node(script1).compartment() == global1->compartment());
         CHECK(JS::ubi::Node(script2).compartment() == global2->compartment());
@@ -311,7 +312,7 @@ struct ExpectedEdge
     { }
 };
 
-namespace js {
+namespace mozilla {
 
 template <>
 struct DefaultHasher<ExpectedEdge>
@@ -327,7 +328,7 @@ struct DefaultHasher<ExpectedEdge>
     }
 };
 
-} // namespace js
+} // namespace mozilla
 
 BEGIN_TEST(test_ubiPostOrder)
 {
@@ -368,7 +369,6 @@ BEGIN_TEST(test_ubiPostOrder)
     FakeNode g('g');
 
     js::HashSet<ExpectedEdge> expectedEdges(cx);
-    CHECK(expectedEdges.init());
 
     auto declareEdge = [&](FakeNode& from, FakeNode& to) {
         return from.addEdgeTo(to) && expectedEdges.putNew(ExpectedEdge(from, to));
@@ -395,7 +395,6 @@ BEGIN_TEST(test_ubiPostOrder)
 
         JS::AutoCheckCannotGC nogc(cx);
         JS::ubi::PostOrder traversal(cx, nogc);
-        CHECK(traversal.init());
         CHECK(traversal.addStart(&r));
 
         auto onNode = [&](const JS::ubi::Node& node) {
@@ -420,8 +419,9 @@ BEGIN_TEST(test_ubiPostOrder)
     }
 
     fprintf(stderr, "visited.length() = %lu\n", (unsigned long) visited.length());
-    for (size_t i = 0; i < visited.length(); i++)
+    for (size_t i = 0; i < visited.length(); i++) {
         fprintf(stderr, "visited[%lu] = '%c'\n", (unsigned long) i, visited[i]);
+    }
 
     CHECK(visited.length() == 8);
     CHECK(visited[0] == 'g');
@@ -590,7 +590,6 @@ BEGIN_TEST(test_JS_ubi_DominatorTree)
         fprintf(stderr, "Checking %c's dominated set:\n", node.name);
 
         js::HashSet<char> expectedDominatedSet(cx);
-        CHECK(expectedDominatedSet.init());
         for (auto& rel : domination) {
             if (&rel.dominator == &node) {
                 fprintf(stderr, "    Expecting %c\n", rel.dominated.name);
@@ -714,7 +713,6 @@ BEGIN_TEST(test_JS_ubi_ShortestPaths_no_path)
         JS::AutoCheckCannotGC noGC(cx);
 
         JS::ubi::NodeSet targets;
-        CHECK(targets.init());
         CHECK(targets.put(&b));
 
         maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 10, &a,
@@ -756,7 +754,6 @@ BEGIN_TEST(test_JS_ubi_ShortestPaths_one_path)
         JS::AutoCheckCannotGC noGC(cx);
 
         JS::ubi::NodeSet targets;
-        CHECK(targets.init());
         CHECK(targets.put(&b));
 
         maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 10, &a,
@@ -823,7 +820,6 @@ BEGIN_TEST(test_JS_ubi_ShortestPaths_multiple_paths)
         JS::AutoCheckCannotGC noGC(cx);
 
         JS::ubi::NodeSet targets;
-        CHECK(targets.init());
         CHECK(targets.put(&f));
 
         maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 10, &a,
@@ -915,7 +911,6 @@ BEGIN_TEST(test_JS_ubi_ShortestPaths_more_paths_than_max)
         JS::AutoCheckCannotGC noGC(cx);
 
         JS::ubi::NodeSet targets;
-        CHECK(targets.init());
         CHECK(targets.put(&f));
 
         maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 1, &a,
@@ -965,7 +960,6 @@ BEGIN_TEST(test_JS_ubi_ShortestPaths_multiple_edges_to_target)
         JS::AutoCheckCannotGC noGC(cx);
 
         JS::ubi::NodeSet targets;
-        CHECK(targets.init());
         CHECK(targets.put(&b));
 
         maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 10, &a,

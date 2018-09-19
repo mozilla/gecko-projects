@@ -18,10 +18,13 @@
                         oncopy="compareSynthetic(event, 'copy')"
                         onpaste="compareSynthetic(event, 'paste')">Spot</div>
 
+<div id="contenteditableContainer"></div>
+
 <pre id="test">
 <script class="testbody" type="text/javascript">
 var content = document.getElementById("content");
 var contentInput = document.getElementById("content-input");
+var contenteditableContainer = document.getElementById("contenteditableContainer");
 var clipboardInitialValue = "empty";
 
 var cachedCutData, cachedCopyData, cachedPasteData;
@@ -302,7 +305,7 @@ add_task(async function test_input_cut_dataTransfer() {
     ok(event instanceof ClipboardEvent, "cut event is a ClipboardEvent");
     ok(event.clipboardData instanceof DataTransfer, "cut event dataTransfer is a DataTransfer");
     is(event.target, contentInput, "cut event target");
-    is(event.clipboardData.mozItemCount, 0, "cut event mozItemCount");
+    is(SpecialPowers.wrap(event.clipboardData).mozItemCount, 0, "cut event mozItemCount");
     is(event.clipboardData.getData("text/plain"), "", "cut event getData");
     event.clipboardData.setData("text/plain", "This is some dataTransfer text");
     cachedCutData = event.clipboardData;
@@ -349,7 +352,7 @@ add_task(async function test_input_copy_dataTransfer() {
     ok(event instanceof ClipboardEvent, "copy event is a ClipboardEvent");
     ok(event.clipboardData instanceof DataTransfer, "copy event dataTransfer is a DataTransfer");
     is(event.target, contentInput, "copy event target");
-    is(event.clipboardData.mozItemCount, 0, "copy event mozItemCount");
+    is(SpecialPowers.wrap(event.clipboardData).mozItemCount, 0, "copy event mozItemCount");
     is(event.clipboardData.getData("text/plain"), "", "copy event getData");
     event.clipboardData.setData("text/plain", "Copied dataTransfer text");
     cachedCopyData = event.clipboardData;
@@ -394,7 +397,7 @@ add_task(async function test_input_paste_dataTransfer() {
     ok(event instanceof ClipboardEvent, "paste event is an ClipboardEvent");
     ok(event.clipboardData instanceof DataTransfer, "paste event dataTransfer is a DataTransfer");
     is(event.target, contentInput, "paste event target");
-    is(event.clipboardData.mozItemCount, 1, "paste event mozItemCount");
+    is(SpecialPowers.wrap(event.clipboardData).mozItemCount, 1, "paste event mozItemCount");
     is(event.clipboardData.getData("text/plain"), clipboardInitialValue, "paste event getData");
     cachedPasteData = event.clipboardData;
   };
@@ -440,21 +443,21 @@ add_task(async function test_input_copypaste_dataTransfer_multiple() {
     cd.setData("text/plain", "would be a phrase");
 
     var exh = false;
-    try { cd.mozSetDataAt("text/plain", "Text", 1); } catch (ex) { exh = true; }
+    try { SpecialPowers.wrap(cd).mozSetDataAt("text/plain", "Text", 1); } catch (ex) { exh = true; }
     ok(exh, "exception occured mozSetDataAt 1");
     exh = false;
-    try { cd.mozTypesAt(1); } catch (ex) { exh = true; }
+    try { SpecialPowers.wrap(cd).mozTypesAt(1); } catch (ex) { exh = true; }
     ok(exh, "exception occured mozTypesAt 1");
     exh = false;
-    try { cd.mozGetDataAt("text/plain", 1); } catch (ex) { exh = true; }
+    try { SpecialPowers.wrap(cd).mozGetDataAt("text/plain", 1); } catch (ex) { exh = true; }
     ok(exh, "exception occured mozGetDataAt 1");
     exh = false;
     try { cd.mozClearDataAt("text/plain", 1); } catch (ex) { exh = true; }
     ok(exh, "exception occured mozClearDataAt 1");
 
     cd.setData("text/x-moz-url", "http://www.mozilla.org");
-    cd.mozSetDataAt("text/x-custom", "Custom Text with \u0000 null", 0);
-    is(cd.mozItemCount, 1, "mozItemCount after set multiple types");
+    SpecialPowers.wrap(cd).mozSetDataAt("text/x-custom", "Custom Text with \u0000 null", 0);
+    is(SpecialPowers.wrap(cd).mozItemCount, 1, "mozItemCount after set multiple types");
     return false;
   };
 
@@ -473,7 +476,7 @@ add_task(async function test_input_copypaste_dataTransfer_multiple() {
 
   contentInput.onpaste = function(event) {
     var cd = event.clipboardData;
-    is(cd.mozItemCount, 1, "paste after copy multiple types mozItemCount");
+    is(SpecialPowers.wrap(cd).mozItemCount, 1, "paste after copy multiple types mozItemCount");
     is(cd.getData("text/plain"), "would be a phrase", "paste text/plain multiple types");
 
     // Firefox for Android's clipboard code doesn't handle x-moz-url. Therefore
@@ -640,10 +643,10 @@ function compareSynthetic(event, eventtype) {
 
   is(event.type, expectedData.type, "synthetic " + eventtype + " event type");
   if (expectedData.data === null) {
-    is(event.clipboardData.mozItemCount, 0, "synthetic " + eventtype + " empty data");
+    is(SpecialPowers.wrap(event.clipboardData).mozItemCount, 0, "synthetic " + eventtype + " empty data");
   }
   else {
-    is(event.clipboardData.mozItemCount, 1, "synthetic " + eventtype + " item count");
+    is(SpecialPowers.wrap(event.clipboardData).mozItemCount, 1, "synthetic " + eventtype + " item count");
     is(event.clipboardData.types.length, 1, "synthetic " + eventtype + " types length");
     is(event.clipboardData.getData(expectedData.dataType), expectedData.data,
        "synthetic " + eventtype + " data");
@@ -666,7 +669,7 @@ async function checkCachedDataTransfer(cd, eventtype) {
   ok(!oldtext, "clipboard get using " + testprefix);
 
   try {
-    cd.mozSetDataAt("text/plain", "Test Cache Data", 0);
+    SpecialPowers.wrap(cd).mozSetDataAt("text/plain", "Test Cache Data", 0);
   } catch (ex) {}
   ok(!cd.getData("text/plain"), "clipboard set using " + testprefix);
 
@@ -766,6 +769,44 @@ add_task(async function test_image_dataTransfer() {
   } finally {
     document.onpaste = null;
   }
+});
+
+add_task(async function test_event_target() {
+  await reset();
+
+  let copyTarget = null;
+  document.addEventListener("copy", (event) => { copyTarget = event.target; }, {once: true});
+
+  if (document.activeElement) {
+    document.activeElement.blur();
+  }
+
+  let selection = document.getSelection();
+  selection.setBaseAndExtent(content.firstChild, "CONTENT ".length,
+                             content.firstChild, "CONTENT TEXT".length);
+
+  await putOnClipboard("TEXT", () => {
+    synthesizeKey("c", {accelKey: 1});
+  }, "copy text from non-editable element");
+
+  is(copyTarget.getAttribute("id"), "content", "Copy event's target should be always an element");
+
+  // Create a contenteditable element to check complicated event target.
+  contenteditableContainer.innerHTML = '<div contenteditable><p id="p1">foo</p><p id="p2">bar</p></div>';
+  contenteditableContainer.firstChild.focus();
+
+  let p1 = document.getElementById("p1");
+  let p2 = document.getElementById("p2");
+  selection.setBaseAndExtent(p1.firstChild, 1, p2.firstChild, 1);
+
+  let pasteTarget = null;
+  document.addEventListener("paste", (event) => { pasteTarget = event.target; }, {once: true});
+
+  synthesizeKey("v", {accelKey: 1});
+  is(pasteTarget.getAttribute("id"), "p1",
+     "'paste' event's target should be always an element which includes start container of the first Selection range");
+
+  contenteditableContainer.innerHTML = "";
 });
 
 </script>

@@ -27,7 +27,7 @@
 #ifndef HB_OT_VAR_MVAR_TABLE_HH
 #define HB_OT_VAR_MVAR_TABLE_HH
 
-#include "hb-ot-layout-common-private.hh"
+#include "hb-ot-layout-common.hh"
 
 
 namespace OT {
@@ -51,9 +51,9 @@ struct VariationValueRecord
 
 
 /*
- * MVAR -- Metrics Variations Table
+ * MVAR -- Metrics Variations
+ * https://docs.microsoft.com/en-us/typography/opentype/spec/mvar
  */
-
 #define HB_OT_TAG_MVAR HB_TAG('M','V','A','R')
 
 struct MVAR

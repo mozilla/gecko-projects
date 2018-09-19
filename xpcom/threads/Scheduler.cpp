@@ -69,6 +69,12 @@ public:
 
   Mutex& MutexRef() { return mLock; }
 
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override
+  {
+    return SynchronizedEventQueue::SizeOfExcludingThis(aMallocSizeOf) +
+           mQueue->SizeOfIncludingThis(aMallocSizeOf);
+  }
+
 private:
   Mutex mLock;
   CondVar mNonCooperativeCondVar;
@@ -774,7 +780,7 @@ Scheduler::Shutdown()
   }
 }
 
-/* static */ nsCString
+/* static */ nsPrintfCString
 Scheduler::GetPrefs()
 {
   MOZ_ASSERT(XRE_IsParentProcess());

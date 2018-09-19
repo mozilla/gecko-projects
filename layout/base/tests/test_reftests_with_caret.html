@@ -61,11 +61,14 @@ const MAX_ITERATIONS = 1000;
 
 function createIframe(url,next) {
   var iframe = document.createElement("iframe");
-  iframe.src = url;
   iframe.remotePageLoaded = remotePageLoaded;
   var me = this;
   var currentIteration = 0;
   function iframeLoadCompleted() {
+    let loc = iframe.contentWindow.location;
+    if (loc && loc.href == "about:blank") {
+      return;
+    }
     var docEl = iframe.contentDocument.documentElement;
     if (docEl.className.includes("reftest-wait")) {
       if (currentIteration++ > MAX_ITERATIONS) {
@@ -84,6 +87,8 @@ function createIframe(url,next) {
   }
   iframe.addEventListener("load", iframeLoadCompleted);
   window.document.body.appendChild(iframe);
+  iframe.clientHeight; // flush layout.
+  iframe.src = url;
   iframe.focus();
 };
 
@@ -199,6 +204,8 @@ var tests = [
     // FIXME(bug 1434949): These two fail in some platforms.
     // [ 'bug1423331-3.html' , 'bug1423331-1-ref.html' ] ,
     // [ 'bug1423331-4.html' , 'bug1423331-2-ref.html' ] ,
+    [ 'bug1484094-1.html' , 'bug1484094-1-ref.html' ] ,
+    [ 'bug1484094-2.html' , 'bug1484094-2-ref.html' ] ,
     function() {SpecialPowers.pushPrefEnv({'clear': [['layout.accessiblecaret.enabled']]}, nextTest);} ,
 ];
 

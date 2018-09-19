@@ -20,6 +20,7 @@
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/PBackground.h"
 #include "mozilla/ipc/PBackgroundChild.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "mozIThirdPartyUtil.h"
 #include "nsAboutProtocolUtils.h"
@@ -263,8 +264,7 @@ IDBFactory::CreateForJSInternal(JSContext* aCx,
   MOZ_ASSERT(aPrincipalInfo);
   MOZ_ASSERT(aPrincipalInfo->type() != PrincipalInfo::T__None);
   MOZ_ASSERT(aFactory);
-  MOZ_ASSERT(JS_GetGlobalForObject(aCx, aOwningObject) == aOwningObject,
-             "Not a global object!");
+  MOZ_ASSERT(JS_IsGlobalObject(aOwningObject));
 
   if (aPrincipalInfo->type() != PrincipalInfo::TContentPrincipalInfo &&
       aPrincipalInfo->type() != PrincipalInfo::TSystemPrincipalInfo) {
@@ -718,7 +718,7 @@ IDBFactory::OpenInternal(JSContext* aCx,
   if (isInternal) {
     // Chrome privilege and internal origins always get persistent storage.
     persistenceType = PERSISTENCE_TYPE_PERSISTENT;
-  } else if (isAddon || DOMPrefs::IndexedDBStorageOptionsEnabled()) {
+  } else if (isAddon || StaticPrefs::dom_indexedDB_storageOption_enabled()) {
     persistenceType = PersistenceTypeFromStorage(aStorageType);
   } else {
     persistenceType = PERSISTENCE_TYPE_DEFAULT;
@@ -949,7 +949,7 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_END
 JSObject*
 IDBFactory::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return IDBFactoryBinding::Wrap(aCx, this, aGivenProto);
+  return IDBFactory_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

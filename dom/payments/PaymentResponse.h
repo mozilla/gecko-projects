@@ -10,6 +10,7 @@
 #include "mozilla/dom/PaymentResponseBinding.h" // PaymentComplete
 #include "nsPIDOMWindow.h"
 #include "nsWrapperCache.h"
+#include "nsITimer.h"
 
 namespace mozilla {
 namespace dom {
@@ -18,19 +19,21 @@ class PaymentAddress;
 class PaymentRequest;
 class Promise;
 
-class PaymentResponse final : public nsISupports,
+class PaymentResponse final : public nsITimerCallback,
                               public nsWrapperCache
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(PaymentResponse)
 
+  NS_IMETHOD Notify(nsITimer* aTimer) override;
+
   PaymentResponse(nsPIDOMWindowInner* aWindow,
                   PaymentRequest* aRequest,
                   const nsAString& aRequestId,
                   const nsAString& aMethodName,
                   const nsAString& aShippingOption,
-                  RefPtr<PaymentAddress> aShippingAddress,
+                  PaymentAddress* aShippingAddress,
                   const nsAString& aDetails,
                   const nsAString& aPayerName,
                   const nsAString& aPayerEmail,
@@ -66,8 +69,23 @@ public:
 
   void RespondComplete();
 
+  already_AddRefed<Promise> Retry(JSContext* aCx,
+                                  const PaymentValidationErrors& errorField,
+                                  ErrorResult& aRv);
+
+  void RespondRetry(const nsAString& aMethodName,
+                    const nsAString& aShippingOption,
+                    PaymentAddress* aShippingAddress,
+                    const nsAString& aDetails,
+                    const nsAString& aPayerName,
+                    const nsAString& aPayerEmail,
+                    const nsAString& aPayerPhone);
+  void RejectRetry(nsresult aRejectReason);
+
 protected:
   ~PaymentResponse();
+
+  nsresult ValidatePaymentValidationErrors(const PaymentValidationErrors& aErrors);
 
 private:
   nsCOMPtr<nsPIDOMWindowInner> mOwner;
@@ -83,6 +101,11 @@ private:
   RefPtr<PaymentAddress> mShippingAddress;
   // Promise for "PaymentResponse::Complete"
   RefPtr<Promise> mPromise;
+  // Timer for timing out if the page doesn't call
+  // complete()
+  nsCOMPtr<nsITimer> mTimer;
+  // Promise for "PaymentResponse::Retry"
+  RefPtr<Promise> mRetryPromise;
 };
 
 } // namespace dom

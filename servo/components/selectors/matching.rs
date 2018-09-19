@@ -261,11 +261,10 @@ where
     let iter = selector.iter_from(selector.len() - from_offset);
     debug_assert!(
         iter.clone().next().is_some() ||
-            (from_offset != selector.len() &&
-                matches!(
-                    selector.combinator_at_parse_order(from_offset),
-                    Combinator::SlotAssignment | Combinator::PseudoElement
-                )),
+            (from_offset != selector.len() && matches!(
+                selector.combinator_at_parse_order(from_offset),
+                Combinator::SlotAssignment | Combinator::PseudoElement
+            )),
         "Got the math wrong: {:?} | {:?} | {} {}",
         selector,
         selector.iter_raw_match_order().as_slice(),
@@ -418,10 +417,6 @@ where
     match combinator {
         Combinator::NextSibling | Combinator::LaterSibling => element.prev_sibling_element(),
         Combinator::Child | Combinator::Descendant => {
-            if element.blocks_ancestor_combinators() {
-                return None;
-            }
-
             match element.parent_element() {
                 Some(e) => return Some(e),
                 None => {},
@@ -576,7 +571,7 @@ where
             _ => {},
         }
 
-        if element.is_link() || combinator.is_sibling() {
+        if element.is_link() {
             visited_handling = VisitedHandlingMode::AllLinksUnvisited;
         }
 
@@ -667,8 +662,9 @@ where
         Component::Combinator(_) => unreachable!(),
         Component::Slotted(ref selector) => {
             // <slots> are never flattened tree slottables.
-            !element.is_html_slot_element() && element.assigned_slot().is_some() &&
-                context.shared.nest(|context| {
+            !element.is_html_slot_element() && element.assigned_slot().is_some() && context
+                .shared
+                .nest(|context| {
                     matches_complex_selector(selector.iter(), element, context, flags_setter)
                 })
         },
@@ -703,7 +699,6 @@ where
         },
         Component::AttributeInNoNamespace {
             ref local_name,
-            ref local_name_lower,
             ref value,
             operator,
             case_sensitivity,
@@ -715,7 +710,7 @@ where
             let is_html = element.is_html_element_in_html_document();
             element.attr_matches(
                 &NamespaceConstraint::Specific(&::parser::namespace_empty_string::<E::Impl>()),
-                select_name(is_html, local_name, local_name_lower),
+                local_name,
                 &AttrSelectorOperation::WithValue {
                     operator: operator,
                     case_sensitivity: case_sensitivity.to_unconditional(is_html),
@@ -728,8 +723,16 @@ where
                 return false;
             }
             let is_html = element.is_html_element_in_html_document();
+            let empty_string;
+            let namespace = match attr_sel.namespace() {
+                Some(ns) => ns,
+                None => {
+                    empty_string = ::parser::namespace_empty_string::<E::Impl>();
+                    NamespaceConstraint::Specific(&empty_string)
+                },
+            };
             element.attr_matches(
-                &attr_sel.namespace(),
+                &namespace,
                 select_name(is_html, &attr_sel.local_name, &attr_sel.local_name_lower),
                 &match attr_sel.operation {
                     ParsedAttrSelectorOperation::Exists => AttrSelectorOperation::Exists,
@@ -747,7 +750,8 @@ where
         },
         Component::NonTSPseudoClass(ref pc) => {
             if context.matches_hover_and_active_quirk == MatchesHoverAndActiveQuirk::Yes &&
-                !context.shared.is_nested() && pc.is_active_or_hover() &&
+                !context.shared.is_nested() &&
+                pc.is_active_or_hover() &&
                 !element.is_link()
             {
                 return false;

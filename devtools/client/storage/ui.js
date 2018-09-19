@@ -51,9 +51,9 @@ const COOKIE_KEY_MAP = {
   path: "Path",
   host: "Domain",
   expires: "Expires",
+  hostOnly: "HostOnly",
   isSecure: "Secure",
   isHttpOnly: "HttpOnly",
-  isDomain: "HostOnly",
   creationTime: "CreationTime",
   lastAccessed: "LastAccessed"
 };
@@ -755,8 +755,7 @@ class StorageUI {
           }
 
           const cookieProp = COOKIE_KEY_MAP[prop] || prop;
-          // The pseduo property of HostOnly refers to converse of isDomain property
-          rawObject[cookieProp] = (prop === "isDomain") ? !item[prop] : item[prop];
+          rawObject[cookieProp] = item[prop];
         }
         itemVar.populate(rawObject, {sorted: true});
         itemVar.twisty = true;
@@ -1038,11 +1037,11 @@ class StorageUI {
 
       switch (reason) {
         case REASON.POPULATE:
+        case REASON.NEXT_50_ITEMS:
           // Update without flashing the row.
           this.table.push(item, true);
           break;
         case REASON.NEW_ROW:
-        case REASON.NEXT_50_ITEMS:
           // Update and flash the row.
           this.table.push(item, false);
           break;

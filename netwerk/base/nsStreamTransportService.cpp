@@ -16,7 +16,7 @@
 #include "nsIPipe.h"
 #include "nsITransport.h"
 #include "nsIObserverService.h"
-#include "nsIThreadPool.h"
+#include "nsThreadPool.h"
 #include "mozilla/Services.h"
 
 namespace mozilla {
@@ -34,7 +34,9 @@ class nsInputStreamTransport : public nsITransport
                              , public nsIInputStream
 {
 public:
-    NS_DECL_THREADSAFE_ISUPPORTS
+    // Record refcount changes to ensure that stream transports are destroyed
+    // on consistent threads when recording/replaying.
+    NS_DECL_THREADSAFE_ISUPPORTS_WITH_RECORDING(recordreplay::Behavior::Preserve)
     NS_DECL_NSITRANSPORT
     NS_DECL_NSIINPUTSTREAM
 
@@ -116,7 +118,7 @@ nsInputStreamTransport::OpenOutputStream(uint32_t flags,
                                          nsIOutputStream **result)
 {
     // this transport only supports reading!
-    NS_NOTREACHED("nsInputStreamTransport::OpenOutputStream");
+    MOZ_ASSERT_UNREACHABLE("nsInputStreamTransport::OpenOutputStream");
     return NS_ERROR_UNEXPECTED;
 }
 
@@ -202,8 +204,7 @@ nsStreamTransportService::~nsStreamTransportService()
 nsresult
 nsStreamTransportService::Init()
 {
-    mPool = do_CreateInstance(NS_THREADPOOL_CONTRACTID);
-    NS_ENSURE_STATE(mPool);
+    mPool = new nsThreadPool();
 
     // Configure the pool
     mPool->SetName(NS_LITERAL_CSTRING("StreamTrans"));

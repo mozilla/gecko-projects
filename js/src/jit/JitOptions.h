@@ -30,12 +30,15 @@ enum IonRegisterAllocator {
 static inline mozilla::Maybe<IonRegisterAllocator>
 LookupRegisterAllocator(const char* name)
 {
-    if (!strcmp(name, "backtracking"))
+    if (!strcmp(name, "backtracking")) {
         return mozilla::Some(RegisterAllocator_Backtracking);
-    if (!strcmp(name, "testbed"))
+    }
+    if (!strcmp(name, "testbed")) {
         return mozilla::Some(RegisterAllocator_Testbed);
-    if (!strcmp(name, "stupid"))
+    }
+    if (!strcmp(name, "stupid")) {
         return mozilla::Some(RegisterAllocator_Stupid);
+    }
     return mozilla::Nothing();
 }
 
@@ -50,7 +53,6 @@ struct DefaultJitOptions
     bool disableInlineBacktracking;
     bool disableAma;
     bool disableEaa;
-    bool disableEagerSimdUnbox;
     bool disableEdgeCaseAnalysis;
     bool disableGvn;
     bool disableInlining;
@@ -63,7 +65,7 @@ struct DefaultJitOptions
     bool disableRecoverIns;
     bool disableScalarReplacement;
     bool disableCacheIR;
-    bool disableSharedStubs;
+    bool disableCacheIRBinaryArith;
     bool disableSincos;
     bool disableSink;
     bool eagerCompilation;
@@ -71,7 +73,6 @@ struct DefaultJitOptions
     bool fullDebugChecks;
     bool limitScriptSize;
     bool osr;
-    bool asmJSAtomicsEnable;
     bool wasmFoldOffsets;
     bool wasmDelayTier2;
     uint32_t baselineWarmUpThreshold;

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test for paste as quotation with middle button click</title>
+  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script type="application/javascript" src="/tests/SimpleTest/EventUtils.js"></script>
+  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
+</head>
+<body>
+<p id="display"></p>
+<div id="content" style="display: none;">
+
+</div>
+
+<div id="container"></div>
+
+<textarea id="toCopyPlaintext" style="display: none;"></textarea>
+<iframe id="toCopyHTMLContent" srcdoc="<body></body>" style="display: none;"></iframe>
+
+<pre id="test">
+
+<script class="testbody" type="application/javascript">
+SimpleTest.waitForExplicitFinish();
+
+// TODO: This file should test complicated cases too.
+//       E.g., pasting into existing content, e.g., pasting invalid child
+//       element for the parent elements at insertion point.
+
+async function copyPlaintext(aText) {
+  return new Promise(resolve => {
+    SimpleTest.waitForClipboard(aText,
+      () => {
+        let element = document.getElementById("toCopyPlaintext");
+        element.style.display = "block";
+        element.focus();
+        element.value = aText;
+        synthesizeKey("a", {accelKey: true});
+        synthesizeKey("c", {accelKey: true});
+      },
+      () => {
+        ok(true, `Succeeded to copy "${aText}" to clipboard`);
+        let element = document.getElementById("toCopyPlaintext");
+        element.style.display = "none";
+        resolve();
+      },
+      () => {
+        ok(false, `Failed to copy "${aText}" to clipboard`);
+        SimpleTest.finish();
+      });
+  });
+}
+
+async function copyHTMLContent(aInnerHTML) {
+  let iframe = document.getElementById("toCopyHTMLContent");
+  iframe.style.display = "block";
+  iframe.contentDocument.body.scrollTop;
+  iframe.contentDocument.body.innerHTML = aInnerHTML;
+  iframe.contentWindow.focus();
+  iframe.contentWindow.getSelection().selectAllChildren(iframe.contentDocument.body);
+  return new Promise(resolve => {
+    SimpleTest.waitForClipboard(
+      () => { return true; },
+      () => {
+        synthesizeKey("c", {accelKey: true}, iframe.contentWindow);
+      },
+      () => {
+        ok(true, `Succeeded to copy "${aInnerHTML}" to clipboard as HTML`);
+        iframe.style.display = "none";
+        resolve();
+      },
+      () => {
+        ok(false, `Failed to copy "${aInnerHTML}" to clipboard`);
+        SimpleTest.finish();
+      },
+      "text/html");
+  });
+}
+
+async function doTextareaTests(aTextarea) {
+  await copyPlaintext("abc\ndef\nghi");
+  aTextarea.focus();
+  synthesizeMouseAtCenter(aTextarea, {button: 1, ctrlKey: true});
+  is(aTextarea.value,
+     "> abc\n> def\n> ghi\n\n",
+     "Pasted each line should start with \"> \"");
+  aTextarea.value = "";
+
+  await copyPlaintext("> abc\n> def\n> ghi");
+  aTextarea.focus();
+  synthesizeMouseAtCenter(aTextarea, {button: 1, ctrlKey: true});
+  is(aTextarea.value,
+     ">> abc\n>> def\n>> ghi\n\n",
+     "Pasted each line should be start with \">> \" when already quoted one level");
+  aTextarea.value = "";
+
+  await copyPlaintext("> abc\n> def\n\nghi");
+  aTextarea.focus();
+  synthesizeMouseAtCenter(aTextarea, {button: 1, ctrlKey: true});
+  is(aTextarea.value,
+     ">> abc\n>> def\n> \n> ghi\n\n",
+     "Pasted each line should be start with \">> \" when already quoted one level");
+  aTextarea.value = "";
+
+  await copyPlaintext("abc\ndef\n\n");
+  aTextarea.focus();
+  synthesizeMouseAtCenter(aTextarea, {button: 1, ctrlKey: true});
+  is(aTextarea.value,
+     "> abc\n> def\n> \n",
+     "If pasted text ends with \"\\n\", only the last line should not started with \">\"");
+  aTextarea.value = "";
+}
+
+async function doContenteditableTests(aEditableDiv) {
+  await copyPlaintext("abc\ndef\nghi");
+  aEditableDiv.focus();
+  synthesizeMouseAtCenter(aEditableDiv, {button: 1, ctrlKey: true});
+  is(aEditableDiv.innerHTML,
+     "<blockquote type=\"cite\">abc<br>def<br>ghi</blockquote>",
+     "Pasted plaintext should be in <blockquote> element and each linebreaker should be <br> element");
+  aEditableDiv.innerHTML = "";
+
+  // Oddly, copyHTMLContent fails randomly only on Linux.  Let's skip this.
+  if (navigator.platform.startsWith("Linux")) {
+    return;
+  }
+
+  await copyHTMLContent("<p>abc</p><p>def</p><p>ghi</p>");
+  aEditableDiv.focus();
+  synthesizeMouseAtCenter(aEditableDiv, {button: 1, ctrlKey: true});
+  if (!navigator.appVersion.includes("Android")) {
+    is(aEditableDiv.innerHTML,
+       "<blockquote type=\"cite\"><p>abc</p><p>def</p><p>ghi</p></blockquote>",
+       "Pasted HTML content should be set to the <blockquote>");
+  } else {
+    // Oddly, on Android, we use <br> elements for pasting <p> elements.
+    is(aEditableDiv.innerHTML,
+       "<blockquote type=\"cite\">abc<br><br>def<br><br>ghi</blockquote>",
+       "Pasted HTML content should be set to the <blockquote>");
+  }
+  aEditableDiv.innerHTML = "";
+}
+
+async function doTests() {
+  await SpecialPowers.pushPrefEnv({"set": [["middlemouse.paste", true],
+                                           ["middlemouse.contentLoadURL", false]]});
+  let container = document.getElementById("container");
+  container.innerHTML = "<textarea id=\"editor\"></textarea>";
+  await doTextareaTests(document.getElementById("editor"));
+  container.innerHTML = "<div id=\"editor\" contenteditable style=\"min-height: 1em;\"></div>";
+  await doContenteditableTests(document.getElementById("editor"));
+  SimpleTest.finish();
+}
+
+SimpleTest.waitForFocus(doTests);
+</script>
+</pre>
+</body>
+</html>

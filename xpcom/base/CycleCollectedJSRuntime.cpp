@@ -91,7 +91,6 @@
 #endif
 
 #include "nsIException.h"
-#include "nsIPlatformInfo.h"
 #include "nsThread.h"
 #include "nsThreadUtils.h"
 #include "xpcpublic.h"
@@ -486,29 +485,6 @@ void JSObjectsTenuredCb(JSContext* aContext, void* aData)
   static_cast<CycleCollectedJSRuntime*>(aData)->JSObjectsTenured();
 }
 
-bool
-mozilla::GetBuildId(JS::BuildIdCharVector* aBuildID)
-{
-  nsCOMPtr<nsIPlatformInfo> info = do_GetService("@mozilla.org/xre/app-info;1");
-  if (!info) {
-    return false;
-  }
-
-  nsCString buildID;
-  nsresult rv = info->GetPlatformBuildID(buildID);
-  NS_ENSURE_SUCCESS(rv, false);
-
-  if (!aBuildID->resize(buildID.Length())) {
-    return false;
-  }
-
-  for (size_t i = 0; i < buildID.Length(); i++) {
-    (*aBuildID)[i] = buildID[i];
-  }
-
-  return true;
-}
-
 static void
 MozCrashWarningReporter(JSContext*, JSErrorReport*)
 {
@@ -555,7 +531,6 @@ CycleCollectedJSRuntime::CycleCollectedJSRuntime(JSContext* aCx)
   JS_SetObjectsTenuredCallback(aCx, JSObjectsTenuredCb, this);
   JS::SetOutOfMemoryCallback(aCx, OutOfMemoryCallback, this);
   JS_SetExternalStringSizeofCallback(aCx, SizeofExternalStringCallback);
-  JS::SetBuildIdOp(aCx, GetBuildId);
   JS::SetWarningReporter(aCx, MozCrashWarningReporter);
 
   js::AutoEnterOOMUnsafeRegion::setAnnotateOOMAllocationSizeCallback(
@@ -622,6 +597,10 @@ CycleCollectedJSRuntime::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 void
 CycleCollectedJSRuntime::UnmarkSkippableJSHolders()
 {
+  // Prevent nsWrapperCaches accessed under CanSkip from adding recorded events
+  // which might not replay in the same order.
+  recordreplay::AutoDisallowThreadEvents disallow;
+
   for (auto iter = mJSHolders.Iter(); !iter.Done(); iter.Next()) {
     void* holder = iter.Get().mHolder;
     nsScriptObjectTracer* tracer = iter.Get().mTracer;
@@ -1263,7 +1242,7 @@ CycleCollectedJSRuntime::JSObjectsTenured()
   for (auto iter = mNurseryObjects.Iter(); !iter.Done(); iter.Next()) {
     nsWrapperCache* cache = iter.Get();
     JSObject* wrapper = cache->GetWrapperMaybeDead();
-    MOZ_DIAGNOSTIC_ASSERT(wrapper);
+    MOZ_DIAGNOSTIC_ASSERT(wrapper || recordreplay::IsReplaying());
     if (!JS::ObjectIsTenured(wrapper)) {
       MOZ_ASSERT(!cache->PreservingWrapper());
       const JSClass* jsClass = js::GetObjectJSClass(wrapper);
@@ -1364,9 +1343,12 @@ IncrementalFinalizeRunnable::ReleaseNow(bool aLimited)
                "We should have at least ReleaseSliceNow to run");
     MOZ_ASSERT(mFinalizeFunctionToRun < mDeferredFinalizeFunctions.Length(),
                "No more finalizers to run?");
+    if (recordreplay::IsRecordingOrReplaying()) {
+      aLimited = false;
+    }
 
     TimeDuration sliceTime = TimeDuration::FromMilliseconds(SliceMillis);
-    TimeStamp started = TimeStamp::Now();
+    TimeStamp started = aLimited ? TimeStamp::Now() : TimeStamp();
     bool timeout = false;
     do {
       const DeferredFinalizeFunctionHolder& function =
@@ -1448,6 +1430,13 @@ CycleCollectedJSRuntime::FinalizeDeferredThings(CycleCollectedJSContext::Deferre
     }
   }
 
+  // When recording or replaying, execute triggers that were activated recently
+  // by mozilla::DeferredFinalize. This will populate the deferred finalizer
+  // table with a consistent set of entries between the recording and replay.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    recordreplay::ExecuteTriggers();
+  }
+
   if (mDeferredFinalizerTable.Count() == 0) {
     return;
   }
@@ -1466,19 +1455,35 @@ CycleCollectedJSRuntime::FinalizeDeferredThings(CycleCollectedJSContext::Deferre
   }
 }
 
+const char*
+CycleCollectedJSRuntime::OOMStateToString(const OOMState aOomState) const
+{
+  switch (aOomState) {
+    case OOMState::OK:
+      return "OK";
+    case OOMState::Reporting:
+      return "Reporting";
+    case OOMState::Reported:
+      return "Reported";
+    case OOMState::Recovered:
+      return "Recovered";
+    default:
+      MOZ_ASSERT_UNREACHABLE("OOMState holds an invalid value");
+      return "Unknown";
+  }
+}
+
 void
 CycleCollectedJSRuntime::AnnotateAndSetOutOfMemory(OOMState* aStatePtr,
                                                    OOMState aNewState)
 {
   *aStatePtr = aNewState;
-  CrashReporter::AnnotateCrashReport(aStatePtr == &mOutOfMemoryState
-                                     ? NS_LITERAL_CSTRING("JSOutOfMemory")
-                                     : NS_LITERAL_CSTRING("JSLargeAllocationFailure"),
-                                     aNewState == OOMState::Reporting
-                                     ? NS_LITERAL_CSTRING("Reporting")
-                                     : aNewState == OOMState::Reported
-                                     ? NS_LITERAL_CSTRING("Reported")
-                                     : NS_LITERAL_CSTRING("Recovered"));
+  CrashReporter::Annotation annotation = (aStatePtr == &mOutOfMemoryState)
+    ? CrashReporter::Annotation::JSOutOfMemory
+    : CrashReporter::Annotation::JSLargeAllocationFailure;
+
+  CrashReporter::AnnotateCrashReport(
+    annotation, nsDependentCString(OOMStateToString(aNewState)));
 }
 
 void
@@ -1549,15 +1554,16 @@ CycleCollectedJSRuntime::PrepareWaitingZonesForGC()
 }
 
 void
-CycleCollectedJSRuntime::EnvironmentPreparer::invoke(JS::HandleObject scope,
+CycleCollectedJSRuntime::EnvironmentPreparer::invoke(JS::HandleObject global,
                                                      js::ScriptEnvironmentPreparer::Closure& closure)
 {
-  nsIGlobalObject* global = xpc::NativeGlobal(scope);
+  MOZ_ASSERT(JS_IsGlobalObject(global));
+  nsIGlobalObject* nativeGlobal = xpc::NativeGlobal(global);
 
   // Not much we can do if we simply don't have a usable global here...
-  NS_ENSURE_TRUE_VOID(global && global->GetGlobalJSObject());
+  NS_ENSURE_TRUE_VOID(nativeGlobal && nativeGlobal->GetGlobalJSObject());
 
-  AutoEntryScript aes(global, "JS-engine-initiated execution");
+  AutoEntryScript aes(nativeGlobal, "JS-engine-initiated execution");
 
   MOZ_ASSERT(!JS_IsExceptionPending(aes.cx()));
 
@@ -1636,10 +1642,8 @@ CycleCollectedJSRuntime::ErrorInterceptor::interceptError(JSContext* cx, const J
   // so nothing such should happen.
   nsContentUtils::ExtractErrorValues(cx, value, details.mFilename, &details.mLine, &details.mColumn, details.mMessage);
 
-  nsAutoCString stack;
-  JS::UniqueChars buf = JS::FormatStackDump(cx, nullptr, /* showArgs = */ false, /* showLocals = */ false, /* showThisProps = */ false);
-  stack.Append(buf.get());
-  CopyUTF8toUTF16(buf.get(), details.mStack);
+  JS::UniqueChars buf = JS::FormatStackDump(cx, /* showArgs = */ false, /* showLocals = */ false, /* showThisProps = */ false);
+  CopyUTF8toUTF16(mozilla::MakeStringSpan(buf.get()), details.mStack);
 
   mThrownError.emplace(std::move(details));
 }

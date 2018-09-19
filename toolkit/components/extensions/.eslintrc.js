@@ -109,10 +109,6 @@ module.exports = {
     // since only let and const are used, see "no-var").
     "block-scoped-var": "error",
 
-    // Allow trailing commas for easy list extension.  Having them does not
-    // impair readability, but also not required either.
-    "comma-dangle": ["error", "always-multiline"],
-
     // Warn about cyclomatic complexity in functions.
     "complexity": "error",
 
@@ -162,10 +158,6 @@ module.exports = {
 
     // Allow use of bitwise operators.
     "no-bitwise": "off",
-
-    // Disallow the catch clause parameter name being the same as a variable in
-    // the outer scope, to avoid confusion.
-    "no-catch-shadow": "off",
 
     // Disallow using the console API.
     "no-console": "error",
@@ -220,9 +212,6 @@ module.exports = {
 
     // Disallow usage of __proto__ property.
     "no-proto": "error",
-
-    // Allow reserved words being used as object literal keys.
-    "no-reserved-keys": "off",
 
     // Don't restrict usage of specified node modules (not a node environment).
     "no-restricted-modules": "off",

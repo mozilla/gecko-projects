@@ -23,7 +23,6 @@
 #include "vm/Shape.h"
 #include "vm/ShapedObject.h"
 #include "vm/StringType.h"
-#include "vm/TypeInference.h"
 
 namespace js {
 
@@ -41,8 +40,9 @@ static MOZ_ALWAYS_INLINE void
 Debug_SetValueRangeToCrashOnTouch(Value* beg, Value* end)
 {
 #ifdef DEBUG
-    for (Value* v = beg; v != end; ++v)
+    for (Value* v = beg; v != end; ++v) {
         *v = js::PoisonedObjectValue(0x48);
+    }
 #endif
 }
 
@@ -92,6 +92,8 @@ ArraySetLength(JSContext* cx, Handle<ArrayObject*> obj, HandleId id,
                unsigned attrs, HandleValue value, ObjectOpResult& result);
 
 /*
+ * [SMDOC] NativeObject Elements layout
+ *
  * Elements header used for native objects. The elements component of such objects
  * offers an efficient representation for all or some of the indexed properties
  * of the object, using a flat array of Values rather than a shape hierarchy
@@ -158,6 +160,9 @@ ArraySetLength(JSContext* cx, Handle<ArrayObject*> obj, HandleId id,
  * Elements do not track property creation order, so enumerating the elements
  * of an object does not necessarily visit indexes in the order they were
  * created.
+ *
+ *
+ * [SMDOC] NativeObject shifted elements optimization
  *
  * Shifted elements
  * ----------------
@@ -362,7 +367,7 @@ class ObjectElements
         return int(offsetof(ObjectElements, length)) - int(sizeof(ObjectElements));
     }
 
-    static bool ConvertElementsToDoubles(JSContext* cx, uintptr_t elements);
+    static void ConvertElementsToDoubles(JSContext* cx, uintptr_t elements);
     static bool MakeElementsCopyOnWrite(JSContext* cx, NativeObject* obj);
 
     static MOZ_MUST_USE bool PreventExtensions(JSContext* cx, NativeObject* obj);
@@ -376,10 +381,12 @@ class ObjectElements
     }
 
     uint8_t elementAttributes() const {
-        if (isFrozen())
+        if (isFrozen()) {
             return JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY;
-        if (isSealed())
+        }
+        if (isSealed()) {
             return JSPROP_ENUMERATE | JSPROP_PERMANENT;
+        }
         return JSPROP_ENUMERATE;
     }
 
@@ -432,6 +439,8 @@ enum class ShouldUpdateTypes {
 };
 
 /*
+ * [SMDOC] NativeObject layout
+ *
  * NativeObject specifies the internal implementation of a native object.
  *
  * Native objects use ShapedObject::shape to record property information. Two
@@ -756,8 +765,9 @@ class NativeObject : public ShapedObject
     }
 
     uint32_t slotSpan() const {
-        if (inDictionaryMode())
+        if (inDictionaryMode()) {
             return lastProperty()->base()->slotSpan();
+        }
         return lastProperty()->slotSpan();
     }
 
@@ -858,8 +868,9 @@ class NativeObject : public ShapedObject
     }
 
     bool containsShapeOrElement(JSContext* cx, jsid id) {
-        if (JSID_IS_INT(id) && containsDenseElement(JSID_TO_INT(id)))
+        if (JSID_IS_INT(id) && containsDenseElement(JSID_TO_INT(id))) {
             return true;
+        }
         return contains(cx, id);
     }
 
@@ -959,7 +970,7 @@ class NativeObject : public ShapedObject
                                 const AutoKeepShapeTables& keep);
 
     static MOZ_MUST_USE bool fillInAfterSwap(JSContext* cx, HandleNativeObject obj,
-                                             const Vector<Value>& values, void* priv);
+                                             const AutoValueVector& values, void* priv);
 
   public:
     // Return true if this object has been converted from shared-immutable
@@ -972,22 +983,25 @@ class NativeObject : public ShapedObject
     const Value& getSlot(uint32_t slot) const {
         MOZ_ASSERT(slotInRange(slot));
         uint32_t fixed = numFixedSlots();
-        if (slot < fixed)
+        if (slot < fixed) {
             return fixedSlots()[slot];
+        }
         return slots_[slot - fixed];
     }
 
     const HeapSlot* getSlotAddressUnchecked(uint32_t slot) const {
         uint32_t fixed = numFixedSlots();
-        if (slot < fixed)
+        if (slot < fixed) {
             return fixedSlots() + slot;
+        }
         return slots_ + (slot - fixed);
     }
 
     HeapSlot* getSlotAddressUnchecked(uint32_t slot) {
         uint32_t fixed = numFixedSlots();
-        if (slot < fixed)
+        if (slot < fixed) {
             return fixedSlots() + slot;
+        }
         return slots_ + (slot - fixed);
     }
 
@@ -1055,8 +1069,9 @@ class NativeObject : public ShapedObject
     void prepareElementRangeForOverwrite(size_t start, size_t end) {
         MOZ_ASSERT(end <= getDenseInitializedLength());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
-        for (size_t i = start; i < end; i++)
+        for (size_t i = start; i < end; i++) {
             elements_[i].destroy();
+        }
     }
 
     /*
@@ -1064,8 +1079,9 @@ class NativeObject : public ShapedObject
      * reachable.
      */
     void prepareSlotRangeForOverwrite(size_t start, size_t end) {
-        for (size_t i = start; i < end; i++)
+        for (size_t i = start; i < end; i++) {
             getSlotAddressUnchecked(i)->destroy();
+        }
     }
 
     inline void shiftDenseElementsUnchecked(uint32_t count);
@@ -1180,8 +1196,9 @@ class NativeObject : public ShapedObject
     bool ensureElements(JSContext* cx, uint32_t capacity) {
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
         MOZ_ASSERT(isExtensible());
-        if (capacity > getDenseCapacity())
+        if (capacity > getDenseCapacity()) {
             return growElements(cx, capacity);
+        }
         return true;
     }
 
@@ -1211,8 +1228,9 @@ class NativeObject : public ShapedObject
     static bool CopyElementsForWrite(JSContext* cx, NativeObject* obj);
 
     bool maybeCopyElementsForWrite(JSContext* cx) {
-        if (denseElementsAreCopyOnWrite())
+        if (denseElementsAreCopyOnWrite()) {
             return CopyElementsForWrite(cx, this);
+        }
         return true;
     }
 
@@ -1232,8 +1250,9 @@ class NativeObject : public ShapedObject
     // non-writable length never exceed the length. This mechanism is also used
     // when an object becomes non-extensible.
     void shrinkCapacityToInitializedLength(JSContext* cx) {
-        if (getElementsHeader()->numShiftedElements() > 0)
+        if (getElementsHeader()->numShiftedElements() > 0) {
             moveShiftedElements();
+        }
 
         ObjectElements* header = getElementsHeader();
         uint32_t len = header->initializedLength;
@@ -1244,12 +1263,26 @@ class NativeObject : public ShapedObject
         }
     }
 
-    void setDenseInitializedLength(uint32_t length) {
+  private:
+    void setDenseInitializedLengthInternal(uint32_t length) {
         MOZ_ASSERT(length <= getDenseCapacity());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
         MOZ_ASSERT(!denseElementsAreFrozen());
         prepareElementRangeForOverwrite(length, getElementsHeader()->initializedLength);
         getElementsHeader()->initializedLength = length;
+    }
+
+  public:
+    void setDenseInitializedLength(uint32_t length) {
+        MOZ_ASSERT(isExtensible());
+        setDenseInitializedLengthInternal(length);
+    }
+
+    void setDenseInitializedLengthMaybeNonExtensible(JSContext* cx, uint32_t length) {
+        setDenseInitializedLengthInternal(length);
+        if (!isExtensible()) {
+            shrinkCapacityToInitializedLength(cx);
+        }
     }
 
     inline void ensureDenseInitializedLength(JSContext* cx,
@@ -1272,12 +1305,17 @@ class NativeObject : public ShapedObject
     }
 
     void setDenseElementMaybeConvertDouble(uint32_t index, const Value& val) {
-        if (val.isInt32() && shouldConvertDoubleElements())
+        if (val.isInt32() && shouldConvertDoubleElements()) {
             setDenseElement(index, DoubleValue(val.toInt32()));
-        else
+        } else {
             setDenseElement(index, val);
+        }
     }
 
+  private:
+    inline void addDenseElementType(JSContext* cx, uint32_t index, const Value& val);
+
+  public:
     inline void setDenseElementWithType(JSContext* cx, uint32_t index,
                                         const Value& val);
     inline void initDenseElementWithType(JSContext* cx, uint32_t index,
@@ -1406,8 +1444,9 @@ class NativeObject : public ShapedObject
         MOZ_ASSERT(cellp);
         MOZ_ASSERT(*cellp);
         gc::StoreBuffer* storeBuffer = (*cellp)->storeBuffer();
-        if (storeBuffer)
+        if (storeBuffer) {
             storeBuffer->putCell(cellp);
+        }
     }
 
     /* Private data accessors. */
@@ -1507,8 +1546,9 @@ inline void
 NativeObject::privateWriteBarrierPre(void** oldval)
 {
     JS::shadow::Zone* shadowZone = this->shadowZoneFromAnyThread();
-    if (shadowZone->needsIncrementalBarrier() && *oldval && getClass()->hasTrace())
+    if (shadowZone->needsIncrementalBarrier() && *oldval && getClass()->hasTrace()) {
         getClass()->doTrace(shadowZone->barrierTracer(), this);
+    }
 }
 
 
@@ -1660,51 +1700,5 @@ CopyDataPropertiesNative(JSContext* cx, HandlePlainObject target,
                          bool* optimized);
 
 } // namespace js
-
-
-/*** Inline functions declared in JSObject.h that use the native declarations above **************/
-
-inline bool
-js::HasProperty(JSContext* cx, HandleObject obj, HandleId id, bool* foundp)
-{
-    if (HasPropertyOp op = obj->getOpsHasProperty())
-        return op(cx, obj, id, foundp);
-    return NativeHasProperty(cx, obj.as<NativeObject>(), id, foundp);
-}
-
-inline bool
-js::GetProperty(JSContext* cx, HandleObject obj, HandleValue receiver, HandleId id,
-                MutableHandleValue vp)
-{
-    if (GetPropertyOp op = obj->getOpsGetProperty())
-        return op(cx, obj, receiver, id, vp);
-    return NativeGetProperty(cx, obj.as<NativeObject>(), receiver, id, vp);
-}
-
-inline bool
-js::GetPropertyNoGC(JSContext* cx, JSObject* obj, const Value& receiver, jsid id, Value* vp)
-{
-    if (obj->getOpsGetProperty())
-        return false;
-    return NativeGetPropertyNoGC(cx, &obj->as<NativeObject>(), receiver, id, vp);
-}
-
-inline bool
-js::SetProperty(JSContext* cx, HandleObject obj, HandleId id, HandleValue v,
-                HandleValue receiver, ObjectOpResult& result)
-{
-    if (obj->getOpsSetProperty())
-        return JSObject::nonNativeSetProperty(cx, obj, id, v, receiver, result);
-    return NativeSetProperty<Qualified>(cx, obj.as<NativeObject>(), id, v, receiver, result);
-}
-
-inline bool
-js::SetElement(JSContext* cx, HandleObject obj, uint32_t index, HandleValue v,
-               HandleValue receiver, ObjectOpResult& result)
-{
-    if (obj->getOpsSetProperty())
-        return JSObject::nonNativeSetElement(cx, obj, index, v, receiver, result);
-    return NativeSetElement(cx, obj.as<NativeObject>(), index, v, receiver, result);
-}
 
 #endif /* vm_NativeObject_h */

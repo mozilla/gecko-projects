@@ -133,7 +133,7 @@ class SearchBar extends _react.Component {
         selectedSource
       } = this.props;
 
-      if (!selectedSource || !selectedSource.get("text")) {
+      if (!selectedSource || !selectedSource.text) {
         return;
       }
 
@@ -335,7 +335,7 @@ class SearchBar extends _react.Component {
     }, _react2.default.createElement(_SearchInput2.default, {
       query: this.state.query,
       count: count,
-      placeholder: L10N.getStr("sourceSearch.search.placeholder"),
+      placeholder: L10N.getStr("sourceSearch.search.placeholder2"),
       summaryMsg: this.buildSummaryMsg(),
       onChange: this.onChange,
       onBlur: this.onBlur,
@@ -366,4 +366,12 @@ const mapStateToProps = state => ({
   searchResults: (0, _selectors.getFileSearchResults)(state)
 });
 
-exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(SearchBar);
+exports.default = (0, _reactRedux.connect)(mapStateToProps, {
+  toggleFileSearchModifier: _actions2.default.toggleFileSearchModifier,
+  setFileSearchQuery: _actions2.default.setFileSearchQuery,
+  setActiveSearch: _actions2.default.setActiveSearch,
+  closeFileSearch: _actions2.default.closeFileSearch,
+  doSearch: _actions2.default.doSearch,
+  traverseResults: _actions2.default.traverseResults,
+  updateSearchResults: _actions2.default.updateSearchResults
+})(SearchBar);

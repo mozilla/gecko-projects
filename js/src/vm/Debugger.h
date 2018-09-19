@@ -94,6 +94,9 @@ extern void
 CheckDebuggeeThing(JSScript* script, bool invisibleOk);
 
 extern void
+CheckDebuggeeThing(LazyScript* script, bool invisibleOk);
+
+extern void
 CheckDebuggeeThing(JSObject* obj, bool invisibleOk);
 #endif
 
@@ -122,8 +125,7 @@ CheckDebuggeeThing(JSObject* obj, bool invisibleOk);
  * transitions.
  */
 template <class UnbarrieredKey, bool InvisibleKeysOk=false>
-class DebuggerWeakMap : private WeakMap<HeapPtr<UnbarrieredKey>, HeapPtr<JSObject*>,
-                                        MovableCellHasher<HeapPtr<UnbarrieredKey>>>
+class DebuggerWeakMap : private WeakMap<HeapPtr<UnbarrieredKey>, HeapPtr<JSObject*>>
 {
   private:
     typedef HeapPtr<UnbarrieredKey> Key;
@@ -138,7 +140,7 @@ class DebuggerWeakMap : private WeakMap<HeapPtr<UnbarrieredKey>, HeapPtr<JSObjec
     JS::Compartment* compartment;
 
   public:
-    typedef WeakMap<Key, Value, MovableCellHasher<Key>> Base;
+    typedef WeakMap<Key, Value> Base;
 
     explicit DebuggerWeakMap(JSContext* cx)
         : Base(cx),
@@ -162,10 +164,6 @@ class DebuggerWeakMap : private WeakMap<HeapPtr<UnbarrieredKey>, HeapPtr<JSObjec
     using Base::all;
     using Base::trace;
 
-    MOZ_MUST_USE bool init(uint32_t len = 16) {
-        return Base::init(len) && zoneCounts.init();
-    }
-
     template<typename KeyInput, typename ValueInput>
     bool relookupOrAdd(AddPtr& p, const KeyInput& k, const ValueInput& v) {
         MOZ_ASSERT(v->compartment() == this->compartment);
@@ -173,11 +171,13 @@ class DebuggerWeakMap : private WeakMap<HeapPtr<UnbarrieredKey>, HeapPtr<JSObjec
         CheckDebuggeeThing(k, InvisibleKeysOk);
 #endif
         MOZ_ASSERT(!Base::has(k));
-        if (!incZoneCount(k->zone()))
+        if (!incZoneCount(k->zone())) {
             return false;
+        }
         bool ok = Base::relookupOrAdd(p, k, v);
-        if (!ok)
+        if (!ok) {
             decZoneCount(k->zone());
+        }
         return ok;
     }
 
@@ -194,8 +194,9 @@ class DebuggerWeakMap : private WeakMap<HeapPtr<UnbarrieredKey>, HeapPtr<JSObjec
             traceValueEdges(tracer, e.front().value());
             Key key = e.front().key();
             TraceEdge(tracer, &key, "Debugger WeakMap key");
-            if (key != e.front().key())
+            if (key != e.front().key()) {
                 e.rekeyFront(key);
+            }
             key.unsafeSet(nullptr);
         }
     }
@@ -216,13 +217,16 @@ class DebuggerWeakMap : private WeakMap<HeapPtr<UnbarrieredKey>, HeapPtr<JSObjec
                 e.removeFront();
             }
         }
+#ifdef DEBUG
         Base::assertEntriesNotAboutToBeFinalized();
+#endif
     }
 
     MOZ_MUST_USE bool incZoneCount(JS::Zone* zone) {
-        CountMap::Ptr p = zoneCounts.lookupWithDefault(zone, 0);
-        if (!p)
-            return false;
+        CountMap::AddPtr p = zoneCounts.lookupForAdd(zone);
+        if (!p && !zoneCounts.add(p, zone, 0)) {
+            return false;   // OOM'd while adding
+        }
         ++p->value();
         return true;
     }
@@ -232,8 +236,9 @@ class DebuggerWeakMap : private WeakMap<HeapPtr<UnbarrieredKey>, HeapPtr<JSObjec
         MOZ_ASSERT(p);
         MOZ_ASSERT(p->value() > 0);
         --p->value();
-        if (p->value() == 0)
+        if (p->value() == 0) {
             zoneCounts.remove(zone);
+        }
     }
 };
 
@@ -284,7 +289,7 @@ class MOZ_RAII EvalOptions {
  */
 typedef JSObject Env;
 
-// Either a real JSScript or synthesized.
+// One of a real JSScript, a real LazyScript, or synthesized.
 //
 // If synthesized, the referent is one of the following:
 //
@@ -292,7 +297,7 @@ typedef JSObject Env;
 //      script.
 //   2. A wasm JSFunction, denoting a synthesized wasm function script.
 //      NYI!
-typedef mozilla::Variant<JSScript*, WasmInstanceObject*> DebuggerScriptReferent;
+typedef mozilla::Variant<JSScript*, LazyScript*, WasmInstanceObject*> DebuggerScriptReferent;
 
 // Either a ScriptSourceObject, for ordinary JS, or a WasmInstanceObject,
 // denoting the synthesized source of a wasm module.
@@ -532,6 +537,11 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     typedef DebuggerWeakMap<JSScript*> ScriptWeakMap;
     ScriptWeakMap scripts;
 
+    using LazyScriptWeakMap = DebuggerWeakMap<LazyScript*>;
+    LazyScriptWeakMap lazyScripts;
+
+    using LazyScriptVector = JS::GCVector<LazyScript*>;
+
     /* The map from debuggee source script objects to their Debugger.Source instances. */
     typedef DebuggerWeakMap<JSObject*, true> SourceWeakMap;
     SourceWeakMap sources;
@@ -568,6 +578,28 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     void removeDebuggeeGlobal(FreeOp* fop, GlobalObject* global,
                               WeakGlobalObjectSet::Enum* debugEnum);
 
+    enum class CallUncaughtExceptionHook {
+        No,
+        Yes
+    };
+
+    /*
+     * Apply the resumption information in (resumeMode, vp) to `frame` in
+     * anticipation of returning to the debuggee.
+     *
+     * This is the usual path for returning from the debugger to the debuggee
+     * when we have a resumption value to apply. This does final checks on the
+     * result value and exits the debugger's realm by calling `ar.reset()`.
+     * Some hooks don't call this because they don't allow the debugger to
+     * control resumption; those just call `ar.reset()` and return.
+     */
+    ResumeMode leaveDebugger(mozilla::Maybe<AutoRealm>& ar,
+                             AbstractFramePtr frame,
+                             const mozilla::Maybe<HandleValue>& maybeThisv,
+                             CallUncaughtExceptionHook callHook,
+                             ResumeMode resumeMode,
+                             MutableHandleValue vp);
+
     /*
      * Report and clear the pending exception on ar.context, if any, and return
      * ResumeMode::Terminate.
@@ -584,9 +616,9 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
      * If there is no uncaughtExceptionHook, or if it fails, report and clear
      * the pending exception on ar.context and return ResumeMode::Terminate.
      *
-     * This always calls ar.leave(); ar is a parameter because this method must
-     * do some things in the debugger realm and some things in the debuggee
-     * realm.
+     * This always calls `ar.reset()`; ar is a parameter because this method
+     * must do some things in the debugger realm and some things in the
+     * debuggee realm.
      */
     ResumeMode handleUncaughtException(mozilla::Maybe<AutoRealm>& ar);
     ResumeMode handleUncaughtException(mozilla::Maybe<AutoRealm>& ar,
@@ -607,7 +639,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
      *
      * Precondition: ar is entered. We are in the debugger compartment.
      *
-     * Postcondition: This called ar.leave(). See handleUncaughtException.
+     * Postcondition: This called ar.reset(). See handleUncaughtException.
      *
      * If `success` is false, the hook failed. If an exception is pending in
      * ar.context(), return handleUncaughtException(ar, vp, callhook).
@@ -637,16 +669,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
                                           AbstractFramePtr frame, jsbytecode* pc,
                                           bool success, ResumeMode resumeMode,
                                           MutableHandleValue vp);
-
-    ResumeMode processParsedHandlerResultHelper(mozilla::Maybe<AutoRealm>& ar,
-                                                AbstractFramePtr frame,
-                                                const mozilla::Maybe<HandleValue>& maybeThisv,
-                                                bool success, ResumeMode resumeMode,
-                                                MutableHandleValue vp);
-
-    bool processResumptionValue(mozilla::Maybe<AutoRealm>& ar, AbstractFramePtr frame,
-                                const mozilla::Maybe<HandleValue>& maybeThis, HandleValue rval,
-                                ResumeMode& resumeMode, MutableHandleValue vp);
 
     GlobalObject* unwrapDebuggeeArgument(JSContext* cx, const Value& v);
 
@@ -709,6 +731,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static bool startTraceLogger(JSContext* cx, unsigned argc, Value* vp);
     static bool endTraceLogger(JSContext* cx, unsigned argc, Value* vp);
     static bool isCompilableUnit(JSContext* cx, unsigned argc, Value* vp);
+    static bool recordReplayProcessKind(JSContext* cx, unsigned argc, Value* vp);
 #ifdef NIGHTLY_BUILD
     static bool setupTraceLogger(JSContext* cx, unsigned argc, Value* vp);
     static bool drainTraceLogger(JSContext* cx, unsigned argc, Value* vp);
@@ -858,7 +881,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     Debugger(JSContext* cx, NativeObject* dbg);
     ~Debugger();
 
-    MOZ_MUST_USE bool init(JSContext* cx);
     inline const js::GCPtrNativeObject& toJSObject() const;
     inline js::GCPtrNativeObject& toJSObjectRef();
     static inline Debugger* fromJSObject(const JSObject* obj);
@@ -1082,7 +1104,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
      * if the operation in the debuggee realm succeeded, false on error or
      * exception.
      *
-     * Postcondition: we are in the debugger realm, having called ar.leave()
+     * Postcondition: we are in the debugger realm, having called `ar.reset()`
      * even if an error occurred.
      *
      * On success, a completion value is in vp and ar.context does not have a
@@ -1099,6 +1121,8 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
      * a script in a debuggee realm.
      */
     JSObject* wrapScript(JSContext* cx, HandleScript script);
+
+    JSObject* wrapLazyScript(JSContext* cx, Handle<LazyScript*> script);
 
     /*
      * Return the Debugger.Script object for |wasmInstance| (the toplevel
@@ -1420,8 +1444,6 @@ class DebuggerObject : public NativeObject
     // Properties
     static MOZ_MUST_USE bool getClassName(JSContext* cx, HandleDebuggerObject object,
                                           MutableHandleString result);
-    static MOZ_MUST_USE bool getGlobal(JSContext* cx, HandleDebuggerObject object,
-                                       MutableHandleDebuggerObject result);
     static MOZ_MUST_USE bool getParameterNames(JSContext* cx, HandleDebuggerObject object,
                                                MutableHandle<StringVector> result);
     static MOZ_MUST_USE bool getBoundTargetFunction(JSContext* cx, HandleDebuggerObject object,
@@ -1548,7 +1570,6 @@ class DebuggerObject : public NativeObject
     static MOZ_MUST_USE bool boundTargetFunctionGetter(JSContext* cx, unsigned argc, Value* vp);
     static MOZ_MUST_USE bool boundThisGetter(JSContext* cx, unsigned argc, Value* vp);
     static MOZ_MUST_USE bool boundArgumentsGetter(JSContext* cx, unsigned argc, Value* vp);
-    static MOZ_MUST_USE bool globalGetter(JSContext* cx, unsigned argc, Value* vp);
     static MOZ_MUST_USE bool allocationSiteGetter(JSContext* cx, unsigned argc, Value* vp);
     static MOZ_MUST_USE bool errorMessageNameGetter(JSContext* cx, unsigned argc, Value* vp);
     static MOZ_MUST_USE bool errorNotesGetter(JSContext* cx, unsigned argc, Value* vp);
@@ -1756,8 +1777,9 @@ Breakpoint::asWasm()
 Breakpoint*
 Debugger::firstBreakpoint() const
 {
-    if (breakpoints.isEmpty())
+    if (breakpoints.isEmpty()) {
         return nullptr;
+    }
     return &(*breakpoints.begin());
 }
 
@@ -1810,11 +1832,13 @@ Debugger::onNewScript(JSContext* cx, HandleScript script)
                   script->realm()->firedOnNewGlobalObject);
 
     // The script may not be ready to be interrogated by the debugger.
-    if (script->hideScriptFromDebugger())
+    if (script->hideScriptFromDebugger()) {
         return;
+    }
 
-    if (script->realm()->isDebuggee())
+    if (script->realm()->isDebuggee()) {
         slowPathOnNewScript(cx, script);
+    }
 }
 
 /* static */ void
@@ -1824,16 +1848,18 @@ Debugger::onNewGlobalObject(JSContext* cx, Handle<GlobalObject*> global)
 #ifdef DEBUG
     global->realm()->firedOnNewGlobalObject = true;
 #endif
-    if (!cx->runtime()->onNewGlobalObjectWatchers().isEmpty())
+    if (!cx->runtime()->onNewGlobalObjectWatchers().isEmpty()) {
         Debugger::slowPathOnNewGlobalObject(cx, global);
+    }
 }
 
 /* static */ bool
 Debugger::onLogAllocationSite(JSContext* cx, JSObject* obj, HandleSavedFrame frame, mozilla::TimeStamp when)
 {
     GlobalObject::DebuggerVector* dbgs = cx->global()->getDebuggers();
-    if (!dbgs || dbgs->empty())
+    if (!dbgs || dbgs->empty()) {
         return true;
+    }
     RootedObject hobj(cx, obj);
     return Debugger::slowPathOnLogAllocationSite(cx, hobj, frame, when, *dbgs);
 }

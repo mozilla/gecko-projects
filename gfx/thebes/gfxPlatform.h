@@ -26,6 +26,7 @@
 #include "GfxInfoCollector.h"
 
 #include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/layers/MemoryPressureObserver.h"
 
 class gfxASurface;
 class gfxFont;
@@ -155,7 +156,7 @@ struct BackendPrefsData
   mozilla::gfx::BackendType mContentDefault = mozilla::gfx::BackendType::NONE;
 };
 
-class gfxPlatform {
+class gfxPlatform: public mozilla::layers::MemoryPressureListener {
     friend class SRGBOverrideObserver;
 
 public:
@@ -358,7 +359,8 @@ public:
      * gfxPlatformFontList *and* to call its InitFontList() method.
      */
     virtual gfxPlatformFontList *CreatePlatformFontList() {
-        NS_NOTREACHED("oops, this platform doesn't have a gfxPlatformFontList implementation");
+        MOZ_ASSERT_UNREACHABLE("oops, this platform doesn't have a "
+                               "gfxPlatformFontList implementation");
         return nullptr;
     }
 
@@ -366,7 +368,7 @@ public:
      * Resolving a font name to family name. The result MUST be in the result of GetFontList().
      * If the name doesn't in the system, aFamilyName will be empty string, but not failed.
      */
-    virtual nsresult GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName);
+    void GetStandardFamilyName(const nsCString& aFontName, nsACString& aFamilyName);
 
     /**
      * Returns default font name (localized family name) for aLangGroup and
@@ -375,8 +377,8 @@ public:
      * available in the system, this may return second or later font in the
      * pref.  If there are no available fonts in the pref, returns empty string.
      */
-    nsString GetDefaultFontName(const nsACString& aLangGroup,
-                                const nsACString& aGenericFamily);
+    nsAutoCString GetDefaultFontName(const nsACString& aLangGroup,
+                                     const nsACString& aGenericFamily);
 
     /**
      * Create the appropriate platform font group
@@ -394,7 +396,7 @@ public:
      * Ownership of the returned gfxFontEntry is passed to the caller,
      * who must either AddRef() or delete.
      */
-    gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
+    gfxFontEntry* LookupLocalFont(const nsACString& aFontName,
                                   WeightRange aWeightForEntry,
                                   StretchRange aStretchForEntry,
                                   SlantStyleRange aStyleForEntry);
@@ -407,7 +409,7 @@ public:
      * Ownership of the returned gfxFontEntry is passed to the caller,
      * who must either AddRef() or delete.
      */
-    gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
+    gfxFontEntry* MakePlatformFont(const nsACString& aFontName,
                                    WeightRange aWeightForEntry,
                                    StretchRange aStretchForEntry,
                                    SlantStyleRange aStyleForEntry,
@@ -630,7 +632,7 @@ public:
      */
     virtual mozilla::gfx::VsyncSource* GetHardwareVsync() {
       MOZ_ASSERT(mVsyncSource != nullptr);
-      MOZ_ASSERT(XRE_IsParentProcess());
+      MOZ_ASSERT(XRE_IsParentProcess() || mozilla::recordreplay::IsRecordingOrReplaying());
       return mVsyncSource;
     }
 
@@ -746,6 +748,8 @@ public:
     // you probably want to use gfxVars::UseWebRender() instead of this
     static bool WebRenderEnvvarEnabled();
 
+    virtual void
+    OnMemoryPressure(mozilla::layers::MemoryPressureReason aWhy) override;
 protected:
     gfxPlatform();
     virtual ~gfxPlatform();
@@ -887,8 +891,7 @@ private:
 
     RefPtr<gfxASurface> mScreenReferenceSurface;
     nsCOMPtr<nsIObserver> mSRGBOverrideObserver;
-    nsCOMPtr<nsIObserver> mFontPrefsObserver;
-    nsCOMPtr<nsIObserver> mMemoryPressureObserver;
+    RefPtr<mozilla::layers::MemoryPressureObserver> mMemoryPressureObserver;
 
     // The preferred draw target backend to use for canvas
     mozilla::gfx::BackendType mPreferredCanvasBackend;

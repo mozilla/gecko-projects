@@ -16,6 +16,7 @@
 #include "mozilla/Services.h"
 #include "mozilla/BinarySearch.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/Unused.h"
 
 #include "nsCOMPtr.h"
 #include "nsIUUIDGenerator.h"
@@ -67,18 +68,18 @@ typedef struct {
 void
 gfxSparseBitSet::Dump(const char* aPrefix, eGfxLog aWhichLog) const
 {
-    NS_ASSERTION(mBlocks.DebugGetHeader(), "mHdr is null, this is bad");
-    uint32_t b, numBlocks = mBlocks.Length();
+    uint32_t numBlocks = mBlockIndex.Length();
 
-    for (b = 0; b < numBlocks; b++) {
-        Block *block = mBlocks[b].get();
-        if (!block) {
+    for (uint32_t b = 0; b < numBlocks; b++) {
+        if (mBlockIndex[b] == NO_BLOCK) {
             continue;
         }
+        const Block* block = &mBlocks[mBlockIndex[b]];
         const int BUFSIZE = 256;
         char outStr[BUFSIZE];
         int index = 0;
-        index += snprintf(&outStr[index], BUFSIZE - index, "%s u+%6.6x [", aPrefix, (b << BLOCK_INDEX_SHIFT));
+        index += snprintf(&outStr[index], BUFSIZE - index, "%s u+%6.6x [",
+                          aPrefix, (b * BLOCK_SIZE_BITS));
         for (int i = 0; i < 32; i += 4) {
             for (int j = i; j < i + 4; j++) {
                 uint8_t bits = block->mBits[j];
@@ -90,7 +91,7 @@ gfxSparseBitSet::Dump(const char* aPrefix, eGfxLog aWhichLog) const
             }
             if (i + 4 != 32) index += snprintf(&outStr[index], BUFSIZE - index, " ");
         }
-        index += snprintf(&outStr[index], BUFSIZE - index, "]");
+        Unused << snprintf(&outStr[index], BUFSIZE - index, "]");
         LOG(aWhichLog, ("%s", outStr));
     }
 }
@@ -188,7 +189,7 @@ gfxFontUtils::ReadCMAPTableFormat12or13(const uint8_t *aBuf, uint32_t aLength,
         const uint32_t endCharCode = group->endCharCode;
         NS_ENSURE_TRUE((prevEndCharCode < startCharCode || i == 0) &&
                        startCharCode <= endCharCode &&
-                       endCharCode <= CMAP_MAX_CODEPOINT, 
+                       endCharCode <= CMAP_MAX_CODEPOINT,
                        NS_ERROR_GFX_CMAP_MALFORMED);
         // don't include a character that maps to glyph ID 0 (.notdef)
         if (group->startGlyphId == 0) {
@@ -205,7 +206,7 @@ gfxFontUtils::ReadCMAPTableFormat12or13(const uint8_t *aBuf, uint32_t aLength,
     return NS_OK;
 }
 
-nsresult 
+nsresult
 gfxFontUtils::ReadCMAPTableFormat4(const uint8_t *aBuf, uint32_t aLength,
                                    gfxSparseBitSet& aCharacterMap)
 {
@@ -216,21 +217,21 @@ gfxFontUtils::ReadCMAPTableFormat4(const uint8_t *aBuf, uint32_t aLength,
         OffsetSegCountX2 = 6
     };
 
-    NS_ENSURE_TRUE(ReadShortAt(aBuf, OffsetFormat) == 4, 
+    NS_ENSURE_TRUE(ReadShortAt(aBuf, OffsetFormat) == 4,
                    NS_ERROR_GFX_CMAP_MALFORMED);
     uint16_t tablelen = ReadShortAt(aBuf, OffsetLength);
     NS_ENSURE_TRUE(tablelen <= aLength, NS_ERROR_GFX_CMAP_MALFORMED);
     NS_ENSURE_TRUE(tablelen > 16, NS_ERROR_GFX_CMAP_MALFORMED);
-    
+
     // This field should normally (except for Mac platform subtables) be zero according to
     // the OT spec, but some buggy fonts have lang = 1 (which would be English for MacOS).
     // E.g. Arial Narrow Bold, v. 1.1 (Tiger), Arial Unicode MS (see bug 530614).
     // So accept either zero or one here; the error should be harmless.
-    NS_ENSURE_TRUE((ReadShortAt(aBuf, OffsetLanguage) & 0xfffe) == 0, 
+    NS_ENSURE_TRUE((ReadShortAt(aBuf, OffsetLanguage) & 0xfffe) == 0,
                    NS_ERROR_GFX_CMAP_MALFORMED);
 
     uint16_t segCountX2 = ReadShortAt(aBuf, OffsetSegCountX2);
-    NS_ENSURE_TRUE(tablelen >= 16 + (segCountX2 * 4), 
+    NS_ENSURE_TRUE(tablelen >= 16 + (segCountX2 * 4),
                    NS_ERROR_GFX_CMAP_MALFORMED);
 
     const uint16_t segCount = segCountX2 / 2;
@@ -274,12 +275,12 @@ gfxFontUtils::ReadCMAPTableFormat4(const uint8_t *aBuf, uint32_t aLength,
                 if (c == 0xFFFF)
                     break;
 
-                const uint16_t *gdata = (idRangeOffset/2 
+                const uint16_t *gdata = (idRangeOffset/2
                                          + (c - startCount)
                                          + &idRangeOffsets[i]);
 
-                NS_ENSURE_TRUE((uint8_t*)gdata > aBuf && 
-                               (uint8_t*)gdata < aBuf + aLength, 
+                NS_ENSURE_TRUE((uint8_t*)gdata > aBuf &&
+                               (uint8_t*)gdata < aBuf + aLength,
                                NS_ERROR_GFX_CMAP_MALFORMED);
 
                 // make sure we have a glyph
@@ -325,7 +326,7 @@ gfxFontUtils::ReadCMAPTableFormat14(const uint8_t *aBuf, uint32_t aLength,
     NS_ENSURE_TRUE(aLength >= OffsetVarSelectorRecords,
                    NS_ERROR_GFX_CMAP_MALFORMED);
 
-    NS_ENSURE_TRUE(ReadShortAt(aBuf, OffsetFormat) == 14, 
+    NS_ENSURE_TRUE(ReadShortAt(aBuf, OffsetFormat) == 14,
                    NS_ERROR_GFX_CMAP_MALFORMED);
 
     uint32_t tablelen = ReadLongAt(aBuf, OffsetTableLength);
@@ -339,14 +340,14 @@ gfxFontUtils::ReadCMAPTableFormat14(const uint8_t *aBuf, uint32_t aLength,
                    NS_ERROR_GFX_CMAP_MALFORMED);
 
     const uint8_t *records = aBuf + OffsetVarSelectorRecords;
-    for (uint32_t i = 0; i < numVarSelectorRecords; 
+    for (uint32_t i = 0; i < numVarSelectorRecords;
          i++, records += SizeOfVarSelectorRecord) {
         const uint32_t varSelector = ReadUint24At(records, VSRecOffsetVarSelector);
         const uint32_t defUVSOffset = ReadLongAt(records, VSRecOffsetDefUVSOffset);
         const uint32_t nonDefUVSOffset = ReadLongAt(records, VSRecOffsetNonDefUVSOffset);
         NS_ENSURE_TRUE(varSelector <= CMAP_MAX_CODEPOINT &&
                        defUVSOffset <= tablelen - 4 &&
-                       nonDefUVSOffset <= tablelen - 4, 
+                       nonDefUVSOffset <= tablelen - 4,
                        NS_ERROR_GFX_CMAP_MALFORMED);
 
         if (defUVSOffset) {
@@ -360,7 +361,7 @@ gfxFontUtils::ReadCMAPTableFormat14(const uint8_t *aBuf, uint32_t aLength,
                 const uint32_t startUnicode = ReadUint24At(tables, DefUVSOffsetStartUnicodeValue);
                 const uint32_t endUnicode = startUnicode + tables[DefUVSOffsetAdditionalCount];
                 NS_ENSURE_TRUE((prevEndUnicode < startUnicode || j == 0) &&
-                               endUnicode <= CMAP_MAX_CODEPOINT, 
+                               endUnicode <= CMAP_MAX_CODEPOINT,
                                NS_ERROR_GFX_CMAP_MALFORMED);
                 prevEndUnicode = endUnicode;
             }
@@ -376,7 +377,7 @@ gfxFontUtils::ReadCMAPTableFormat14(const uint8_t *aBuf, uint32_t aLength,
             for (uint32_t j = 0; j < numUVSMappings; j++, tables += SizeOfNonDefUVSTable) {
                 const uint32_t unicodeValue = ReadUint24At(tables, NonDefUVSOffsetUnicodeValue);
                 NS_ENSURE_TRUE((prevUnicode < unicodeValue || j == 0) &&
-                               unicodeValue <= CMAP_MAX_CODEPOINT, 
+                               unicodeValue <= CMAP_MAX_CODEPOINT,
                                NS_ERROR_GFX_CMAP_MALFORMED);
                 prevUnicode = unicodeValue;
             }
@@ -823,26 +824,26 @@ gfxFontUtils::MapCharToGlyph(const uint8_t *aCmapBuf, uint32_t aBufLength,
     return gid;
 }
 
-void gfxFontUtils::ParseFontList(const nsAString& aFamilyList,
-                                 nsTArray<nsString>& aFontList)
+void gfxFontUtils::ParseFontList(const nsACString& aFamilyList,
+                                 nsTArray<nsCString>& aFontList)
 {
-    const char16_t kComma = char16_t(',');
-    
+    const char kComma = ',';
+
     // append each font name to the list
-    nsAutoString fontname;
-    const char16_t *p, *p_end;
+    nsAutoCString fontname;
+    const char *p, *p_end;
     aFamilyList.BeginReading(p);
     aFamilyList.EndReading(p_end);
 
      while (p < p_end) {
-        const char16_t *nameStart = p;
+        const char *nameStart = p;
         while (++p != p_end && *p != kComma)
         /* nothing */ ;
 
-        // pull out a single name and clean out leading/trailing whitespace        
+        // pull out a single name and clean out leading/trailing whitespace
         fontname = Substring(nameStart, p);
         fontname.CompressWhitespace(true, true);
-        
+
         // append it to the list if it's not empty
         if (!fontname.IsEmpty()) {
             aFontList.AppendElement(fontname);
@@ -852,11 +853,11 @@ void gfxFontUtils::ParseFontList(const nsAString& aFamilyList,
 }
 
 void gfxFontUtils::AppendPrefsFontList(const char *aPrefName,
-                                       nsTArray<nsString>& aFontList)
+                                       nsTArray<nsCString>& aFontList)
 {
     // get the list of single-face font families
-    nsAutoString fontlistValue;
-    nsresult rv = Preferences::GetString(aPrefName, fontlistValue);
+    nsAutoCString fontlistValue;
+    nsresult rv = Preferences::GetCString(aPrefName, fontlistValue);
     if (NS_FAILED(rv)) {
         return;
     }
@@ -865,14 +866,14 @@ void gfxFontUtils::AppendPrefsFontList(const char *aPrefName,
 }
 
 void gfxFontUtils::GetPrefsFontList(const char *aPrefName,
-                                    nsTArray<nsString>& aFontList)
+                                    nsTArray<nsCString>& aFontList)
 {
     aFontList.Clear();
     AppendPrefsFontList(aPrefName, aFontList);
 }
 
 // produce a unique font name that is (1) a valid Postscript name and (2) less
-// than 31 characters in length.  Using AddFontMemResourceEx on Windows fails 
+// than 31 characters in length.  Using AddFontMemResourceEx on Windows fails
 // for names longer than 30 characters in length.
 
 #define MAX_B64_LEN 32
@@ -934,21 +935,6 @@ IsValidSFNTVersion(uint32_t version)
            version == TRUETYPE_TAG('t','r','u','e');
 }
 
-// Copy and swap UTF-16 values, assume no surrogate pairs, can be in place.
-// aInBuf and aOutBuf are NOT necessarily 16-bit-aligned, so we should avoid
-// accessing them directly as uint16_t* values.
-// aLen is count of UTF-16 values, so the byte buffers are twice that.
-static void
-CopySwapUTF16(const char* aInBuf, char* aOutBuf, uint32_t aLen)
-{
-    const char* end = aInBuf + aLen * 2;
-    while (aInBuf < end) {
-        uint8_t b0 = *aInBuf++;
-        *aOutBuf++ = *aInBuf++;
-        *aOutBuf++ = b0;
-    }
-}
-
 gfxUserFontType
 gfxFontUtils::DetermineFontDataType(const uint8_t *aFontData, uint32_t aFontDataLength)
 {
@@ -961,10 +947,10 @@ gfxFontUtils::DetermineFontDataType(const uint8_t *aFontData, uint32_t aFontData
             return GFX_USERFONT_OPENTYPE;
         }
     }
-    
+
     // test for WOFF
     if (aFontDataLength >= sizeof(AutoSwap_PRUint32)) {
-        const AutoSwap_PRUint32 *version = 
+        const AutoSwap_PRUint32 *version =
             reinterpret_cast<const AutoSwap_PRUint32*>(aFontData);
         if (uint32_t(*version) == TRUETYPE_TAG('w','O','F','F')) {
             return GFX_USERFONT_WOFF;
@@ -974,9 +960,9 @@ gfxFontUtils::DetermineFontDataType(const uint8_t *aFontData, uint32_t aFontData
             return GFX_USERFONT_WOFF2;
         }
     }
-    
+
     // tests for other formats here
-    
+
     return GFX_USERFONT_UNKNOWN;
 }
 
@@ -1016,15 +1002,15 @@ gfxFontUtils::GetTableFromFontData(const void* aFontData, uint32_t aTableTag)
 }
 
 nsresult
-gfxFontUtils::RenameFont(const nsAString& aName, const uint8_t *aFontData, 
+gfxFontUtils::RenameFont(const nsAString& aName, const uint8_t *aFontData,
                          uint32_t aFontDataLength, FallibleTArray<uint8_t> *aNewFont)
 {
     NS_ASSERTION(aNewFont, "null font data array");
-    
+
     uint64_t dataLength(aFontDataLength);
 
     // new name table
-    static const uint32_t neededNameIDs[] = {NAME_ID_FAMILY, 
+    static const uint32_t neededNameIDs[] = {NAME_ID_FAMILY,
                                              NAME_ID_STYLE,
                                              NAME_ID_UNIQUE,
                                              NAME_ID_FULL,
@@ -1046,10 +1032,10 @@ gfxFontUtils::RenameFont(const nsAString& aName, const uint8_t *aFontData,
                               sizeof(NameRecord) * nameCount +
                               nameStrLength +
                               3) & ~3;
-                              
+
     if (dataLength + nameTableSize > UINT32_MAX)
         return NS_ERROR_FAILURE;
-        
+
     // bug 505386 - need to handle unpadded font length
     uint32_t paddedFontDataSize = (aFontDataLength + 3) & ~3;
     uint32_t adjFontDataSize = paddedFontDataSize + nameTableSize;
@@ -1060,28 +1046,28 @@ gfxFontUtils::RenameFont(const nsAString& aName, const uint8_t *aFontData,
 
     // copy the old font data
     uint8_t *newFontData = reinterpret_cast<uint8_t*>(aNewFont->Elements());
-    
+
     // null the last four bytes in case the font length is not a multiple of 4
     memset(newFontData + aFontDataLength, 0, paddedFontDataSize - aFontDataLength);
 
     // copy font data
     memcpy(newFontData, aFontData, aFontDataLength);
-    
+
     // null out the last 4 bytes for checksum calculations
     memset(newFontData + adjFontDataSize - 4, 0, 4);
-    
+
     NameHeader *nameHeader = reinterpret_cast<NameHeader*>(newFontData +
                                                             paddedFontDataSize);
-    
+
     // -- name header
     nameHeader->format = 0;
     nameHeader->count = nameCount;
     nameHeader->stringOffset = sizeof(NameHeader) + nameCount * sizeof(NameRecord);
-    
+
     // -- name records
     uint32_t i;
     NameRecord *nameRecord = reinterpret_cast<NameRecord*>(nameHeader + 1);
-    
+
     for (i = 0; i < nameCount; i++, nameRecord++) {
         nameRecord->platformID = PLATFORM_ID_MICROSOFT;
         nameRecord->encodingID = ENCODING_ID_MICROSOFT_UNICODEBMP;
@@ -1090,7 +1076,7 @@ gfxFontUtils::RenameFont(const nsAString& aName, const uint8_t *aFontData,
         nameRecord->offset = 0;
         nameRecord->length = nameStrLength;
     }
-    
+
     // -- string data, located after the name records, stored in big-endian form
     char16_t *strData = reinterpret_cast<char16_t*>(nameRecord);
 
@@ -1098,7 +1084,7 @@ gfxFontUtils::RenameFont(const nsAString& aName, const uint8_t *aFontData,
                                                   aName.BeginReading(),
                                                   aName.Length());
     strData[aName.Length()] = 0; // add null termination
-    
+
     // adjust name table header to point to the new name table
     SFNTHeader *sfntHeader = reinterpret_cast<SFNTHeader*>(newFontData);
 
@@ -1109,35 +1095,35 @@ gfxFontUtils::RenameFont(const nsAString& aName, const uint8_t *aFontData,
     MOZ_ASSERT(dirEntry, "attempt to rename font with no name table");
 
     uint32_t numTables = sfntHeader->numTables;
-    
+
     // note: dirEntry now points to 'name' table record
-    
+
     // recalculate name table checksum
     uint32_t checkSum = 0;
     AutoSwap_PRUint32 *nameData = reinterpret_cast<AutoSwap_PRUint32*> (nameHeader);
     AutoSwap_PRUint32 *nameDataEnd = nameData + (nameTableSize >> 2);
-    
+
     while (nameData < nameDataEnd)
         checkSum = checkSum + *nameData++;
-    
+
     // adjust name table entry to point to new name table
     dirEntry->offset = paddedFontDataSize;
     dirEntry->length = nameTableSize;
     dirEntry->checkSum = checkSum;
-    
+
     // fix up checksums
     uint32_t checksum = 0;
-    
+
     // checksum for font = (checksum of header) + (checksum of tables)
     uint32_t headerLen = sizeof(SFNTHeader) + sizeof(TableDirEntry) * numTables;
-    const AutoSwap_PRUint32 *headerData = 
+    const AutoSwap_PRUint32 *headerData =
         reinterpret_cast<const AutoSwap_PRUint32*>(newFontData);
 
     // header length is in bytes, checksum calculated in longwords
     for (i = 0; i < (headerLen >> 2); i++, headerData++) {
         checksum += *headerData;
     }
-    
+
     uint32_t headOffset = 0;
     dirEntry = reinterpret_cast<TableDirEntry*>(newFontData + sizeof(SFNTHeader));
 
@@ -1147,9 +1133,9 @@ gfxFontUtils::RenameFont(const nsAString& aName, const uint8_t *aFontData,
         }
         checksum += dirEntry->checkSum;
     }
-    
+
     NS_ASSERTION(headOffset != 0, "no head table for font");
-    
+
     HeadTable *headData = reinterpret_cast<HeadTable*>(newFontData + headOffset);
 
     headData->checkSumAdjustment = HeadTable::HEAD_CHECKSUM_CALC_CONST - checksum;
@@ -1163,13 +1149,13 @@ gfxFontUtils::RenameFont(const nsAString& aName, const uint8_t *aFontData,
 // other checks here are just for extra paranoia.
 nsresult
 gfxFontUtils::GetFullNameFromSFNT(const uint8_t* aFontData, uint32_t aLength,
-                                  nsAString& aFullName)
+                                  nsACString& aFullName)
 {
-    aFullName.AssignLiteral("(MISSING NAME)"); // should always get replaced
+    aFullName = "(MISSING NAME)"; // should always get replaced
 
     const TableDirEntry *dirEntry =
         FindTableDirEntry(aFontData, TRUETYPE_TAG('n','a','m','e'));
-    
+
     // should never fail, as we're only called after font validation succeeded
     NS_ENSURE_TRUE(dirEntry, NS_ERROR_NOT_AVAILABLE);
 
@@ -1188,9 +1174,9 @@ gfxFontUtils::GetFullNameFromSFNT(const uint8_t* aFontData, uint32_t aLength,
 
 nsresult
 gfxFontUtils::GetFullNameFromTable(hb_blob_t *aNameTable,
-                                   nsAString& aFullName)
+                                   nsACString& aFullName)
 {
-    nsAutoString name;
+    nsAutoCString name;
     nsresult rv =
         gfxFontUtils::ReadCanonicalName(aNameTable,
                                         gfxFontUtils::NAME_ID_FULL,
@@ -1203,7 +1189,7 @@ gfxFontUtils::GetFullNameFromTable(hb_blob_t *aNameTable,
                                          gfxFontUtils::NAME_ID_FAMILY,
                                          name);
     if (NS_SUCCEEDED(rv) && !name.IsEmpty()) {
-        nsAutoString styleName;
+        nsAutoCString styleName;
         rv = gfxFontUtils::ReadCanonicalName(aNameTable,
                                              gfxFontUtils::NAME_ID_STYLE,
                                              styleName);
@@ -1220,15 +1206,15 @@ gfxFontUtils::GetFullNameFromTable(hb_blob_t *aNameTable,
 
 nsresult
 gfxFontUtils::GetFamilyNameFromTable(hb_blob_t *aNameTable,
-                                     nsAString& aFullName)
+                                     nsACString& aFamilyName)
 {
-    nsAutoString name;
+    nsAutoCString name;
     nsresult rv =
         gfxFontUtils::ReadCanonicalName(aNameTable,
                                         gfxFontUtils::NAME_ID_FAMILY,
                                         name);
     if (NS_SUCCEEDED(rv) && !name.IsEmpty()) {
-        aFullName = name;
+        aFamilyName = name;
         return NS_OK;
     }
     return NS_ERROR_NOT_AVAILABLE;
@@ -1242,12 +1228,12 @@ enum {
     CANONICAL_LANG_ID = gfxFontUtils::LANG_ID_MICROSOFT_EN_US,
     PLATFORM_ID       = gfxFontUtils::PLATFORM_ID_MICROSOFT
 #endif
-};    
+};
 
 nsresult
 gfxFontUtils::ReadNames(const char *aNameData, uint32_t aDataLen,
                         uint32_t aNameID, int32_t aPlatformID,
-                        nsTArray<nsString>& aNames)
+                        nsTArray<nsCString>& aNames)
 {
     return ReadNames(aNameData, aDataLen, aNameID, LANG_ALL,
                      aPlatformID, aNames);
@@ -1255,7 +1241,7 @@ gfxFontUtils::ReadNames(const char *aNameData, uint32_t aDataLen,
 
 nsresult
 gfxFontUtils::ReadCanonicalName(hb_blob_t *aNameTable, uint32_t aNameID,
-                                nsString& aName)
+                                nsCString& aName)
 {
     uint32_t nameTableLen;
     const char *nameTable = hb_blob_get_data(aNameTable, &nameTableLen);
@@ -1264,31 +1250,31 @@ gfxFontUtils::ReadCanonicalName(hb_blob_t *aNameTable, uint32_t aNameID,
 
 nsresult
 gfxFontUtils::ReadCanonicalName(const char *aNameData, uint32_t aDataLen,
-                                uint32_t aNameID, nsString& aName)
+                                uint32_t aNameID, nsCString& aName)
 {
     nsresult rv;
-    
-    nsTArray<nsString> names;
-    
+
+    nsTArray<nsCString> names;
+
     // first, look for the English name (this will succeed 99% of the time)
-    rv = ReadNames(aNameData, aDataLen, aNameID, CANONICAL_LANG_ID, 
+    rv = ReadNames(aNameData, aDataLen, aNameID, CANONICAL_LANG_ID,
                    PLATFORM_ID, names);
     NS_ENSURE_SUCCESS(rv, rv);
-        
+
     // otherwise, grab names for all languages
     if (names.Length() == 0) {
         rv = ReadNames(aNameData, aDataLen, aNameID, LANG_ALL,
                        PLATFORM_ID, names);
         NS_ENSURE_SUCCESS(rv, rv);
     }
-    
+
 #if defined(XP_MACOSX)
     // may be dealing with font that only has Microsoft name entries
     if (names.Length() == 0) {
         rv = ReadNames(aNameData, aDataLen, aNameID, LANG_ID_MICROSOFT_EN_US,
                        PLATFORM_ID_MICROSOFT, names);
         NS_ENSURE_SUCCESS(rv, rv);
-        
+
         // getting really desperate now, take anything!
         if (names.Length() == 0) {
             rv = ReadNames(aNameData, aDataLen, aNameID, LANG_ALL,
@@ -1304,7 +1290,7 @@ gfxFontUtils::ReadCanonicalName(const char *aNameData, uint32_t aDataLen,
         aName.Assign(names[0]);
         return NS_OK;
     }
-        
+
     return NS_ERROR_FAILURE;
 }
 
@@ -1447,9 +1433,9 @@ StartsWith(const nsACString& string, const char (&prefix)[N])
 // convert a raw name from the name table to an nsString, if possible;
 // return value indicates whether conversion succeeded
 bool
-gfxFontUtils::DecodeFontName(const char *aNameData, int32_t aByteLen, 
+gfxFontUtils::DecodeFontName(const char *aNameData, int32_t aByteLen,
                              uint32_t aPlatformCode, uint32_t aScriptCode,
-                             uint32_t aLangCode, nsAString& aName)
+                             uint32_t aLangCode, nsACString& aName)
 {
     if (aByteLen <= 0) {
         NS_WARNING("empty font name");
@@ -1472,19 +1458,6 @@ gfxFontUtils::DecodeFontName(const char *aNameData, int32_t aByteLen,
         return false;
     }
 
-    if (encoding == UTF_16BE_ENCODING) {
-        // no need to instantiate a converter
-        uint32_t strLen = aByteLen / 2;
-        aName.SetLength(strLen);
-#ifdef IS_LITTLE_ENDIAN
-        CopySwapUTF16(aNameData, reinterpret_cast<char*>(aName.BeginWriting()),
-                      strLen);
-#else
-        memcpy(aName.BeginWriting(), aNameData, strLen * 2);
-#endif
-        return true;
-    }
-
     if (encoding == X_USER_DEFINED_ENCODING) {
 #ifdef XP_MACOSX
         // Special case for macOS only: support legacy Mac encodings
@@ -1496,10 +1469,12 @@ gfxFontUtils::DecodeFontName(const char *aNameData, int32_t aByteLen,
                                         aScriptCode, false);
             if (str) {
                 CFIndex length = CFStringGetLength(str);
-                aName.SetLength(length);
+                nsAutoString name16;
+                name16.SetLength(length);
                 CFStringGetCharacters(str, CFRangeMake(0, length),
-                                      (UniChar*)aName.BeginWriting());
+                                      (UniChar*)name16.BeginWriting());
                 CFRelease(str);
+                CopyUTF16toUTF8(name16, aName);
                 return true;
             }
         }
@@ -1509,7 +1484,7 @@ gfxFontUtils::DecodeFontName(const char *aNameData, int32_t aByteLen,
     }
 
     auto rv = encoding->DecodeWithoutBOMHandling(
-      AsBytes(MakeSpan(aNameData, aByteLen)), aName);
+        nsDependentCSubstring(aNameData, aByteLen), aName);
     return NS_SUCCEEDED(rv);
 }
 
@@ -1517,7 +1492,7 @@ nsresult
 gfxFontUtils::ReadNames(const char *aNameData, uint32_t aDataLen,
                         uint32_t aNameID,
                         int32_t aLangID, int32_t aPlatformID,
-                        nsTArray<nsString>& aNames)
+                        nsTArray<nsCString>& aNames)
 {
     NS_ASSERTION(aDataLen != 0, "null name table");
 
@@ -1576,7 +1551,7 @@ gfxFontUtils::ReadNames(const char *aNameData, uint32_t aDataLen,
         }
 
         // -- decode if necessary and make nsString
-        nsAutoString name;
+        nsAutoCString name;
 
         DecodeFontName(aNameData + nameStringsBase + nameoff, namelen,
                        platformID, uint32_t(nameRecord->encodingID),

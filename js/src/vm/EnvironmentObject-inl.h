@@ -17,8 +17,11 @@ namespace js {
 inline LexicalEnvironmentObject&
 NearestEnclosingExtensibleLexicalEnvironment(JSObject* env)
 {
-    while (!IsExtensibleLexicalEnvironment(env))
+    MOZ_ASSERT(env);
+    while (!IsExtensibleLexicalEnvironment(env)) {
         env = env->enclosingEnvironment();
+        MOZ_ASSERT(env);
+    }
     return env->as<LexicalEnvironmentObject>();
 }
 
@@ -59,8 +62,9 @@ CallObject::setAliasedFormalFromArguments(JSContext* cx, const Value& argsValue,
                                           const Value& v)
 {
     setSlot(ArgumentsObject::SlotFromMagicScopeSlotValue(argsValue), v);
-    if (isSingleton())
+    if (isSingleton()) {
         AddTypePropertyId(cx, this, id, v);
+    }
 }
 
 }  /* namespace js */
@@ -68,14 +72,17 @@ CallObject::setAliasedFormalFromArguments(JSContext* cx, const Value& argsValue,
 inline JSObject*
 JSObject::enclosingEnvironment() const
 {
-    if (is<js::EnvironmentObject>())
+    if (is<js::EnvironmentObject>()) {
         return &as<js::EnvironmentObject>().enclosingEnvironment();
+    }
 
-    if (is<js::DebugEnvironmentProxy>())
+    if (is<js::DebugEnvironmentProxy>()) {
         return &as<js::DebugEnvironmentProxy>().enclosingEnvironment();
+    }
 
-    if (is<js::GlobalObject>())
+    if (is<js::GlobalObject>()) {
         return nullptr;
+    }
 
     MOZ_ASSERT_IF(is<JSFunction>(), as<JSFunction>().isInterpreted());
     return &nonCCWGlobal();

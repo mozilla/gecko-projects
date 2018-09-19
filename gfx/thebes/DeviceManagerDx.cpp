@@ -154,6 +154,7 @@ static inline bool
 ProcessOwnsCompositor()
 {
   return XRE_GetProcessType() == GeckoProcessType_GPU ||
+         XRE_GetProcessType() == GeckoProcessType_VR ||
          (XRE_IsParentProcess() && !gfxConfig::IsEnabled(Feature::GPU_PROCESS));
 }
 
@@ -200,7 +201,15 @@ DeviceManagerDx::CreateCompositorDevices()
     return false;
   }
 
-  PreloadAttachmentsOnCompositorThread();
+  // When WR is used, do not preload attachments for D3D11 Non-WR compositor.
+  //
+  // Fallback from WR to D3D11 Non-WR compositor without re-creating gpu process
+  // could happen when WR causes error. In this case, the attachments are loaded
+  // synchronously.
+  if (!gfx::gfxVars::UseWebRender()) {
+    PreloadAttachmentsOnCompositorThread();
+  }
+
   return true;
 }
 
@@ -885,10 +894,8 @@ DeviceManagerDx::MaybeResetAndReacquireDevices()
     Telemetry::Accumulate(Telemetry::DEVICE_RESET_REASON, uint32_t(resetReason));
   }
 
-  nsPrintfCString reasonString("%d", int(resetReason));
   CrashReporter::AnnotateCrashReport(
-    NS_LITERAL_CSTRING("DeviceResetReason"),
-    reasonString);
+    CrashReporter::Annotation::DeviceResetReason, int(resetReason));
 
   bool createCompositorDevice = !!mCompositorDevice;
   bool createContentDevice = !!mContentDevice;

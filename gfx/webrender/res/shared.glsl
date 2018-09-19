@@ -40,7 +40,7 @@
     // https://github.com/servo/webrender/pull/623
     // https://github.com/servo/servo/issues/13953
     // Do the division with unsigned ints because that's more efficient with D3D
-    #define get_fetch_uv(i, vpi)  ivec2(int(uint(vpi) * (uint(i) % uint(WR_MAX_VERTEX_TEXTURE_WIDTH/vpi))), int(uint(i) / uint(WR_MAX_VERTEX_TEXTURE_WIDTH/vpi)))
+    #define get_fetch_uv(i, vpi)  ivec2(int(vpi * (uint(i) % (WR_MAX_VERTEX_TEXTURE_WIDTH/vpi))), int(uint(i) / (WR_MAX_VERTEX_TEXTURE_WIDTH/vpi)))
 #endif
 
 //======================================================================================
@@ -57,7 +57,10 @@
         out vec4 oFragColor;
     #endif
 
-    #define EPSILON     0.0001
+    #define EPSILON                     0.0001
+
+    // "Show Overdraw" color. Premultiplied.
+    #define WR_DEBUG_OVERDRAW_COLOR     vec4(0.110, 0.077, 0.027, 0.125)
 
     float distance_to_line(vec2 p0, vec2 perp_dir, vec2 p) {
         vec2 dir_to_p0 = p0 - p;

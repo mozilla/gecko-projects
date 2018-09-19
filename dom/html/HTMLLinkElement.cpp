@@ -127,14 +127,12 @@ HTMLLinkElement::HasDeferredDNSPrefetchRequest()
 nsresult
 HTMLLinkElement::BindToTree(nsIDocument* aDocument,
                             nsIContent* aParent,
-                            nsIContent* aBindingParent,
-                            bool aCompileEventHandlers)
+                            nsIContent* aBindingParent)
 {
   Link::ResetLinkState(false, Link::ElementHasHref());
 
   nsresult rv = nsGenericHTMLElement::BindToTree(aDocument, aParent,
-                                                 aBindingParent,
-                                                 aCompileEventHandlers);
+                                                 aBindingParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (nsIDocument* doc = GetComposedDoc()) {
@@ -145,6 +143,10 @@ HTMLLinkElement::BindToTree(nsIDocument* aDocument,
   void (HTMLLinkElement::*update)() = &HTMLLinkElement::UpdateStyleSheetInternal;
   nsContentUtils::AddScriptRunner(
     NewRunnableMethod("dom::HTMLLinkElement::BindToTree", this, update));
+
+  if (aDocument && this->AttrValueIs(kNameSpaceID_None, nsGkAtoms::rel, nsGkAtoms::localization, eIgnoreCase)) {
+    aDocument->LocalizationLinkAdded(this);
+  }
 
   CreateAndDispatchEvent(aDocument, NS_LITERAL_STRING("DOMLinkAdded"));
 
@@ -181,6 +183,10 @@ HTMLLinkElement::UnbindFromTree(bool aDeep, bool aNullParent)
   // from the parser.
   nsIDocument* oldDoc = GetUncomposedDoc();
   ShadowRoot* oldShadowRoot = GetContainingShadow();
+
+  if (oldDoc && this->AttrValueIs(kNameSpaceID_None, nsGkAtoms::rel, nsGkAtoms::localization, eIgnoreCase)) {
+    oldDoc->LocalizationLinkRemoved(this);
+  }
 
   CreateAndDispatchEvent(oldDoc, NS_LITERAL_STRING("DOMLinkRemoved"));
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
@@ -244,7 +250,10 @@ HTMLLinkElement::CreateAndDispatchEvent(nsIDocument* aDoc,
     return;
 
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
-    new AsyncEventDispatcher(this, aEventName, true, true);
+    new AsyncEventDispatcher(this,
+                             aEventName,
+                             CanBubble::eYes,
+                             ChromeOnlyDispatch::eYes);
   // Always run async in order to avoid running script when the content
   // sink isn't expecting it.
   asyncDispatcher->PostDOMEvent();
@@ -289,6 +298,36 @@ HTMLLinkElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
     mTriggeringPrincipal = nsContentUtils::GetAttrTriggeringPrincipal(
         this, aValue ? aValue->GetStringValue() : EmptyString(),
         aSubjectPrincipal);
+  }
+
+  // If a link's `rel` attribute was changed from or to `localization`,
+  // update the list of localization links.
+  if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::rel) {
+    nsIDocument* doc = GetComposedDoc();
+    if (doc) {
+      if ((aValue && aValue->Equals(nsGkAtoms::localization, eIgnoreCase)) &&
+          (!aOldValue || !aOldValue->Equals(nsGkAtoms::localization, eIgnoreCase))) {
+        doc->LocalizationLinkAdded(this);
+      } else if ((aOldValue && aOldValue->Equals(nsGkAtoms::localization, eIgnoreCase)) &&
+                 (!aValue || !aValue->Equals(nsGkAtoms::localization, eIgnoreCase))) {
+        doc->LocalizationLinkRemoved(this);
+      }
+    }
+  }
+
+  // If the link has `rel=localization` and its `href` attribute is changed,
+  // update the list of localization links.
+  if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::href && 
+      AttrValueIs(kNameSpaceID_None, nsGkAtoms::rel, nsGkAtoms::localization, eIgnoreCase)) {
+    nsIDocument* doc = GetComposedDoc();
+    if (doc) {
+      if (aOldValue) {
+        doc->LocalizationLinkRemoved(this);
+      }
+      if (aValue) {
+        doc->LocalizationLinkAdded(this);
+      }
+    }
   }
 
   if (aValue) {
@@ -476,7 +515,7 @@ HTMLLinkElement::AddSizeOfExcludingThis(nsWindowSizes& aSizes,
 JSObject*
 HTMLLinkElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLLinkElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLLinkElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void

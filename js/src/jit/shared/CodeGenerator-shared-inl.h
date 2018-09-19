@@ -19,15 +19,19 @@ static inline bool
 IsConstant(const LInt64Allocation& a)
 {
 #if JS_BITS_PER_WORD == 32
-    if (a.high().isConstantValue())
+    if (a.high().isConstantValue()) {
         return true;
-    if (a.high().isConstantIndex())
+    }
+    if (a.high().isConstantIndex()) {
         return true;
+    }
 #else
-    if (a.value().isConstantValue())
+    if (a.value().isConstantValue()) {
         return true;
-    if (a.value().isConstantIndex())
+    }
+    if (a.value().isConstantIndex()) {
         return true;
+    }
 #endif
     return false;
 }
@@ -35,20 +39,24 @@ IsConstant(const LInt64Allocation& a)
 static inline int32_t
 ToInt32(const LAllocation* a)
 {
-    if (a->isConstantValue())
+    if (a->isConstantValue()) {
         return a->toConstant()->toInt32();
-    if (a->isConstantIndex())
+    }
+    if (a->isConstantIndex()) {
         return a->toConstantIndex()->index();
+    }
     MOZ_CRASH("this is not a constant!");
 }
 
 static inline int64_t
 ToInt64(const LAllocation* a)
 {
-    if (a->isConstantValue())
+    if (a->isConstantValue()) {
         return a->toConstant()->toInt64();
-    if (a->isConstantIndex())
+    }
+    if (a->isConstantIndex()) {
         return a->toConstantIndex()->index();
+    }
     MOZ_CRASH("this is not a constant!");
 }
 
@@ -56,15 +64,19 @@ static inline int64_t
 ToInt64(const LInt64Allocation& a)
 {
 #if JS_BITS_PER_WORD == 32
-    if (a.high().isConstantValue())
+    if (a.high().isConstantValue()) {
         return a.high().toConstant()->toInt64();
-    if (a.high().isConstantIndex())
+    }
+    if (a.high().isConstantIndex()) {
         return a.high().toConstantIndex()->index();
+    }
 #else
-    if (a.value().isConstantValue())
+    if (a.value().isConstantValue()) {
         return a.value().toConstant()->toInt64();
-    if (a.value().isConstantIndex())
+    }
+    if (a.value().isConstantIndex()) {
         return a.value().toConstantIndex()->index();
+    }
 #endif
     MOZ_CRASH("this is not a constant!");
 }
@@ -119,8 +131,9 @@ ToRegister64(const LInt64Allocation& a)
 static inline Register
 ToTempRegisterOrInvalid(const LDefinition* def)
 {
-    if (def->isBogusTemp())
+    if (def->isBogusTemp()) {
         return InvalidReg;
+    }
     return ToRegister(def);
 }
 
@@ -158,8 +171,9 @@ ToFloatRegister(const LDefinition* def)
 static inline FloatRegister
 ToTempFloatRegisterOrInvalid(const LDefinition* def)
 {
-    if (def->isBogusTemp())
+    if (def->isBogusTemp()) {
         return InvalidFloatReg;
+    }
     return ToFloatRegister(def);
 }
 
@@ -167,8 +181,9 @@ static inline AnyRegister
 ToAnyRegister(const LAllocation& a)
 {
     MOZ_ASSERT(a.isGeneralReg() || a.isFloatReg());
-    if (a.isGeneralReg())
+    if (a.isGeneralReg()) {
         return AnyRegister(ToRegister(a));
+    }
     return AnyRegister(ToFloatRegister(a));
 }
 
@@ -222,7 +237,7 @@ int32_t
 CodeGeneratorShared::SlotToStackOffset(int32_t slot) const
 {
     MOZ_ASSERT(slot > 0 && slot <= int32_t(graph.localSlotCount()));
-    int32_t offset = masm.framePushed() - frameInitialAdjustment_ - slot;
+    int32_t offset = masm.framePushed() - slot;
     MOZ_ASSERT(offset >= 0);
     return offset;
 }
@@ -236,7 +251,7 @@ CodeGeneratorShared::StackOffsetToSlot(int32_t offset) const
     // offset = framePushed - frameInitialAdjustment - slot
     // offset + slot = framePushed - frameInitialAdjustment
     // slot = framePushed - frameInitialAdjustement - offset
-    return masm.framePushed() - frameInitialAdjustment_ - offset;
+    return masm.framePushed() - offset;
 }
 
 // For argument construction for calls. Argslots are Value-sized.
@@ -263,8 +278,9 @@ CodeGeneratorShared::StackOffsetOfPassedArg(int32_t slot) const
 int32_t
 CodeGeneratorShared::ToStackOffset(LAllocation a) const
 {
-    if (a.isArgument())
+    if (a.isArgument()) {
         return ArgToStackOffset(a.toArgument()->index());
+    }
     return SlotToStackOffset(a.toStackSlot()->slot());
 }
 
@@ -342,8 +358,9 @@ CodeGeneratorShared::verifyHeapAccessDisassembly(uint32_t begin, uint32_t end, b
     switch (type) {
       case Scalar::Int8:
       case Scalar::Int16:
-        if (kind == HeapAccess::Load)
+        if (kind == HeapAccess::Load) {
             kind = HeapAccess::LoadSext32;
+        }
         break;
       default:
         break;
@@ -378,10 +395,6 @@ CodeGeneratorShared::verifyHeapAccessDisassembly(uint32_t begin, uint32_t end, b
         break;
       case Scalar::Float32:
       case Scalar::Float64:
-      case Scalar::Float32x4:
-      case Scalar::Int8x16:
-      case Scalar::Int16x8:
-      case Scalar::Int32x4:
         op = OtherOperand(ToFloatRegister(alloc).encoding());
         break;
       case Scalar::Uint8Clamped:

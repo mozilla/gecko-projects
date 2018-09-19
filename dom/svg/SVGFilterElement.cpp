@@ -12,27 +12,29 @@
 #include "mozilla/dom/SVGFilterElementBinding.h"
 #include "mozilla/dom/SVGLengthBinding.h"
 #include "mozilla/dom/SVGUnitTypesBinding.h"
+#include "nsQueryObject.h"
 #include "nsSVGUtils.h"
+#include "SVGObserverUtils.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Filter)
 
 namespace mozilla {
 namespace dom {
 
-using namespace SVGUnitTypesBinding;
+using namespace SVGUnitTypes_Binding;
 
 JSObject*
 SVGFilterElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFilterElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFilterElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::LengthInfo SVGFilterElement::sLengthInfo[4] =
 {
-  { &nsGkAtoms::x, -10, SVGLengthBinding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::y, -10, SVGLengthBinding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
-  { &nsGkAtoms::width, 120, SVGLengthBinding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::height, 120, SVGLengthBinding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::x, -10, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::y, -10, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::width, 120, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::height, 120, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
 };
 
 nsSVGElement::EnumInfo SVGFilterElement::sEnumInfo[2] =
@@ -144,9 +146,10 @@ SVGFilterElement::Invalidate()
     nsAutoTObserverArray<nsIMutationObserver*, 1>::ForwardIterator iter(*observers);
     while (iter.HasMore()) {
       nsCOMPtr<nsIMutationObserver> obs(iter.GetNext());
-      nsCOMPtr<nsISVGFilterReference> filter = do_QueryInterface(obs);
-      if (filter)
+      RefPtr<SVGFilterObserver> filter = do_QueryObject(obs);
+      if (filter) {
         filter->Invalidate();
+      }
     }
   }
 }

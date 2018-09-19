@@ -1,3 +1,9 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 #ifndef frontend_ParseContext_inl_h
 #define frontend_ParseContext_inl_h
 
@@ -20,7 +26,6 @@ ParseContext::Statement::is<ParseContext::ClassStatement>() const
     return kind_ == StatementKind::Class;
 }
 
-
 inline JS::Result<Ok, ParseContext::BreakStatementError>
 ParseContext::checkBreakStatement(PropertyName* label)
 {
@@ -33,16 +38,18 @@ ParseContext::checkBreakStatement(PropertyName* label)
             return stmt->label() == label;
         };
 
-        if (!findInnermostStatement<ParseContext::LabelStatement>(hasSameLabel))
+        if (!findInnermostStatement<ParseContext::LabelStatement>(hasSameLabel)) {
             return mozilla::Err(ParseContext::BreakStatementError::LabelNotFound);
+        }
 
     } else {
         auto isBreakTarget = [](ParseContext::Statement* stmt) {
             return StatementKindIsUnlabeledBreakTarget(stmt->kind());
         };
 
-        if (!findInnermostStatement(isBreakTarget))
+        if (!findInnermostStatement(isBreakTarget)) {
             return mozilla::Err(ParseContext::BreakStatementError::ToughBreak);
+        }
     }
 
     return Ok();
@@ -62,8 +69,9 @@ ParseContext::checkContinueStatement(PropertyName* label)
     if (!label) {
         // Unlabeled statement: we target the innermost loop, so make sure that
         // there is an innermost loop.
-        if (!findInnermostStatement(isLoop))
+        if (!findInnermostStatement(isLoop)) {
             return mozilla::Err(ParseContext::ContinueStatementError::NotInALoop);
+        }
         return Ok();
     }
 
@@ -73,17 +81,19 @@ ParseContext::checkContinueStatement(PropertyName* label)
 
     for (;;) {
         stmt = ParseContext::Statement::findNearest(stmt, isLoop);
-        if (!stmt)
+        if (!stmt) {
             return foundLoop ? mozilla::Err(ParseContext::ContinueStatementError::LabelNotFound)
                              : mozilla::Err(ParseContext::ContinueStatementError::NotInALoop);
+        }
 
         foundLoop = true;
 
         // Is it labeled by our label?
         stmt = stmt->enclosing();
         while (stmt && stmt->is<ParseContext::LabelStatement>()) {
-            if (stmt->as<ParseContext::LabelStatement>().label() == label)
+            if (stmt->as<ParseContext::LabelStatement>().label() == label) {
                 return Ok();
+            }
 
             stmt = stmt->enclosing();
         }

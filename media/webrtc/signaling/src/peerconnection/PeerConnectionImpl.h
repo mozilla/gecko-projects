@@ -206,6 +206,7 @@ class RTCStatsQuery {
     std::string pcName;
     bool internalStats;
     nsTArray<RefPtr<mozilla::MediaPipeline>> pipelines;
+    std::string transportId;
     RefPtr<NrIceCtx> iceCtx;
     bool grabAllLevels;
     DOMHighResTimeStamp now;
@@ -295,8 +296,8 @@ public:
                               uint16_t defaultPort,
                               const std::string& defaultRtcpAddr,
                               uint16_t defaultRtcpPort,
-                              uint16_t level);
-  void EndOfLocalCandidates(uint16_t level);
+                              const std::string& transportId);
+  void EndOfLocalCandidates(const std::string& transportId);
   void IceStreamReady(NrIceMediaStream *aStream);
 
   static void ListenThread(void *aData);
@@ -431,28 +432,6 @@ public:
   {
     rv = ReplaceTrackNoRenegotiation(aTransceiver, aWithTrack);
   }
-
-  NS_IMETHODIMP_TO_ERRORRESULT(SetParameters, ErrorResult &rv,
-                               dom::MediaStreamTrack& aTrack,
-                               const dom::RTCRtpParameters& aParameters)
-  {
-    rv = SetParameters(aTrack, aParameters);
-  }
-
-  NS_IMETHODIMP_TO_ERRORRESULT(GetParameters, ErrorResult &rv,
-                               dom::MediaStreamTrack& aTrack,
-                               dom::RTCRtpParameters& aOutParameters)
-  {
-    rv = GetParameters(aTrack, aOutParameters);
-  }
-
-  nsresult
-  SetParameters(dom::MediaStreamTrack& aTrack,
-                const std::vector<JsepTrack::JsConstraints>& aConstraints);
-
-  nsresult
-  GetParameters(dom::MediaStreamTrack& aTrack,
-                std::vector<JsepTrack::JsConstraints>* aOutConstraints);
 
   // test-only: called from contributing sources mochitests.
   NS_IMETHODIMP_TO_ERRORRESULT(InsertAudioLevelForContributingSource,
@@ -688,7 +667,8 @@ private:
   // Shut down media - called on main thread only
   void ShutdownMedia();
 
-  void CandidateReady(const std::string& candidate, uint16_t level);
+  void CandidateReady(const std::string& candidate,
+                      const std::string& transportId);
   void SendLocalIceCandidateToContent(uint16_t level,
                                       const std::string& mid,
                                       const std::string& candidate);
@@ -699,7 +679,7 @@ private:
       uint16_t* remoteport,
       uint32_t* maxmessagesize,
       bool*     mmsset,
-      uint16_t* level) const;
+      std::string* transportId) const;
 
   nsresult AddRtpTransceiverToJsepSession(RefPtr<JsepTransceiver>& transceiver);
   already_AddRefed<TransceiverImpl> CreateTransceiverImpl(
@@ -721,7 +701,7 @@ private:
   static void DeliverStatsReportToPCObserver_m(
       const std::string& pcHandle,
       nsresult result,
-      nsAutoPtr<RTCStatsQuery> query);
+      const nsAutoPtr<RTCStatsQuery>& query);
 
   // When ICE completes, we record a bunch of statistics that outlive the
   // PeerConnection. This is just telemetry right now, but this can also

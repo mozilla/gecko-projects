@@ -6,37 +6,37 @@ add_task(async function() {
     {
       usage: 1024,
       origin: "https://account.xyz.com",
-      persisted: true
+      persisted: true,
     },
     {
       usage: 1024,
       origin: "https://shopping.xyz.com",
-      persisted: false
+      persisted: false,
     },
     {
       usage: 1024,
       origin: "http://cinema.bar.com",
-      persisted: true
+      persisted: true,
     },
     {
       usage: 1024,
       origin: "http://email.bar.com",
-      persisted: false
+      persisted: false,
     },
     {
       usage: 1024,
       origin: "https://s3-us-west-2.amazonaws.com",
-      persisted: true
+      persisted: true,
     },
     {
       usage: 1024,
       origin: "https://127.0.0.1",
-      persisted: false
+      persisted: false,
     },
     {
       usage: 1024,
       origin: "https://[0:0:0:0:0:0:0:1]",
-      persisted: true
+      persisted: true,
     },
   ]);
   let fakeHosts = mockSiteDataManager.fakeSites.map(site => site.principal.URI.host);
@@ -68,16 +68,27 @@ add_task(async function() {
   is(removeBtn.disabled, false, "Should enable the removeSelected button");
   removeBtn.doCommand();
   is(sitesList.selectedIndex, 0, "Should select next item");
+  assertSitesListed(doc, fakeHosts.slice(2));
+
+  // Select some other sites to remove with Delete.
+  fakeHosts.slice(2, 4).forEach(host => {
+    let site = sitesList.querySelector(`richlistitem[host="${host}"]`);
+    sitesList.addItemToSelection(site);
+  });
+
+  is(removeBtn.disabled, false, "Should enable the removeSelected button");
+  EventUtils.synthesizeKey("VK_DELETE");
+  is(sitesList.selectedIndex, 0, "Should select next item");
+  assertSitesListed(doc, fakeHosts.slice(4));
 
   let saveBtn = frameDoc.getElementById("save");
-  assertSitesListed(doc, fakeHosts.slice(2));
   saveBtn.doCommand();
 
   await removeDialogOpenPromise;
   await settingsDialogClosePromise;
   await openSiteDataSettingsDialog();
 
-  assertSitesListed(doc, fakeHosts.slice(2));
+  assertSitesListed(doc, fakeHosts.slice(4));
 
   await mockSiteDataManager.unregister();
   BrowserTestUtils.removeTab(gBrowser.selectedTab);

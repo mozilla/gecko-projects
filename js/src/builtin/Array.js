@@ -971,6 +971,7 @@ function ArraySpeciesCreate(originalArray, length) {
     assert(length >= 0, "length should be a non-negative number");
 
     // Step 2.
+    // eslint-disable-next-line no-compare-neg-zero
     if (length === -0)
         length = 0;
 
@@ -982,7 +983,7 @@ function ArraySpeciesCreate(originalArray, length) {
     var C = originalArray.constructor;
 
     // Step 5.b.
-    if (IsConstructor(C) && IsWrappedArrayConstructor(C))
+    if (IsConstructor(C) && IsCrossRealmArrayConstructor(C))
         return std_Array(length);
 
     // Step 5.c.

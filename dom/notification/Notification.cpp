@@ -13,13 +13,13 @@
 #include "mozilla/OwningNonNull.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
 
 #include "mozilla/dom/AppNotificationServiceOptionsBinding.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ContentChild.h"
-#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/NotificationEvent.h"
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/Promise.h"
@@ -910,11 +910,11 @@ Notification::PrefEnabled(JSContext* aCx, JSObject* aObj)
     }
 
     if (workerPrivate->IsServiceWorker()) {
-      return DOMPrefs::NotificationEnabledInServiceWorkers();
+      return StaticPrefs::dom_webnotifications_serviceworker_enabled();
     }
   }
 
-  return DOMPrefs::NotificationEnabled();
+  return StaticPrefs::dom_webnotifications_enabled();
 }
 
 // static
@@ -930,21 +930,14 @@ Notification::Notification(nsIGlobalObject* aGlobal, const nsAString& aID,
                            const nsAString& aTag, const nsAString& aIconUrl,
                            bool aRequireInteraction,
                            const NotificationBehavior& aBehavior)
-  : DOMEventTargetHelper(),
+  : DOMEventTargetHelper(aGlobal),
     mWorkerPrivate(nullptr), mObserver(nullptr),
     mID(aID), mTitle(aTitle), mBody(aBody), mDir(aDir), mLang(aLang),
     mTag(aTag), mIconUrl(aIconUrl), mRequireInteraction(aRequireInteraction),
     mBehavior(aBehavior), mData(JS::NullValue()),
     mIsClosed(false), mIsStored(false), mTaskCount(0)
 {
-  if (NS_IsMainThread()) {
-    // We can only call this on the main thread because
-    // Event::SetEventType() called down the call chain when dispatching events
-    // using DOMEventTargetHelper::DispatchTrustedEvent() will assume the event
-    // is a main thread event if it has a valid owner. It will then attempt to
-    // fetch the atom for the event name which asserts main thread only.
-    BindToOwner(aGlobal);
-  } else {
+  if (!NS_IsMainThread()) {
     mWorkerPrivate = GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(mWorkerPrivate);
   }
@@ -1725,7 +1718,7 @@ Notification::ShowInternal()
   bool inPrivateBrowsing = IsInPrivateBrowsing();
 
   bool requireInteraction = mRequireInteraction;
-  if (!DOMPrefs::NotificationRIEnabled()) {
+  if (!StaticPrefs::dom_webnotifications_requireinteraction_enabled()) {
     requireInteraction = false;
   }
 
@@ -1833,7 +1826,7 @@ Notification::GetPermission(nsIGlobalObject* aGlobal, ErrorResult& aRv)
     MOZ_ASSERT(worker);
     RefPtr<GetPermissionRunnable> r =
       new GetPermissionRunnable(worker);
-    r->Dispatch(Terminating, aRv);
+    r->Dispatch(Canceling, aRv);
     if (aRv.Failed()) {
       return NotificationPermission::Denied;
     }
@@ -2205,7 +2198,7 @@ Notification::WorkerGet(WorkerPrivate* aWorkerPrivate,
 JSObject*
 Notification::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return mozilla::dom::NotificationBinding::Wrap(aCx, this, aGivenProto);
+  return mozilla::dom::Notification_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -2589,7 +2582,7 @@ Notification::ShowPersistentNotification(JSContext* aCx,
     worker->AssertIsOnWorkerThread();
     RefPtr<CheckLoadRunnable> loadChecker =
       new CheckLoadRunnable(worker, NS_ConvertUTF16toUTF8(aScope));
-    loadChecker->Dispatch(Terminating, aRv);
+    loadChecker->Dispatch(Canceling, aRv);
     if (aRv.Failed()) {
       return nullptr;
     }

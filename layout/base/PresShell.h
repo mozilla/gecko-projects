@@ -173,7 +173,6 @@ public:
                                  nsIContent** aTargetContent = nullptr,
                                  nsIContent* aOverrideClickTarget = nullptr)
                                  override;
-  nsIFrame* GetEventTargetFrame() override;
   already_AddRefed<nsIContent>
     GetEventTargetContent(WidgetEvent* aEvent) override;
 
@@ -191,7 +190,7 @@ public:
 
   already_AddRefed<SourceSurface>
   RenderNode(nsINode* aNode,
-             nsIntRegion* aRegion,
+             const Maybe<CSSIntRegion>& aRegion,
              const LayoutDeviceIntPoint aPoint,
              LayoutDeviceIntRect* aScreenRect,
              uint32_t aFlags) override;
@@ -245,6 +244,9 @@ public:
   void ScheduleViewManagerFlush(PaintType aType = PAINT_DEFAULT) override;
   void ClearMouseCaptureOnView(nsView* aView) override;
   bool IsVisible() override;
+  void SuppressDisplayport(bool aEnabled) override;
+  void RespectDisplayportSuppression(bool aEnabled) override;
+  bool IsDisplayportSuppressed() override;
 
   already_AddRefed<AccessibleCaretEventHub> GetAccessibleCaretEventHub() const override;
 
@@ -540,7 +542,7 @@ private:
   already_AddRefed<SourceSurface>
   PaintRangePaintInfo(const nsTArray<UniquePtr<RangePaintInfo>>& aItems,
                       dom::Selection* aSelection,
-                      nsIntRegion* aRegion,
+                      const Maybe<CSSIntRegion>& aRegion,
                       nsRect aArea,
                       const LayoutDeviceIntPoint aPoint,
                       LayoutDeviceIntRect* aScreenRect,
@@ -654,7 +656,7 @@ private:
   bool InZombieDocument(nsIContent *aContent);
   already_AddRefed<nsIPresShell> GetParentPresShellForEventHandling();
   nsIContent* GetCurrentEventContent();
-  nsIFrame* GetCurrentEventFrame();
+  nsIFrame* GetCurrentEventFrame() override;
   MOZ_CAN_RUN_SCRIPT nsresult
   RetargetEventToParent(WidgetGUIEvent* aEvent, nsEventStatus* aEventStatus);
   void PushCurrentEventInfo(nsIFrame* aFrame, nsIContent* aContent);
@@ -716,7 +718,7 @@ private:
   void WindowSizeMoveDone() override;
   void SysColorChanged() override { mPresContext->SysColorChanged(); }
   void ThemeChanged() override { mPresContext->ThemeChanged(); }
-  void BackingScaleFactorChanged() override { mPresContext->UIResolutionChanged(); }
+  void BackingScaleFactorChanged() override { mPresContext->UIResolutionChangedSync(); }
   nsIDocument* GetPrimaryContentDocument() override;
 
   void PausePainting() override;
@@ -781,9 +783,6 @@ private:
   // we finish reflowing mCurrentReflowRoot.
   nsTHashtable<nsPtrHashKey<nsIFrame> > mFramesToDirty;
 
-  // Reflow roots that need to be reflowed.
-  nsTArray<nsIFrame*> mDirtyRoots;
-
   nsTArray<nsAutoPtr<DelayedEvent> > mDelayedEvents;
 private:
   nsIFrame* mCurrentEventFrame;
@@ -829,6 +828,8 @@ private:
   // Used in case we need re-dispatch event after sending pointer event,
   // when target of pointer event was deleted during executing user handlers.
   nsCOMPtr<nsIContent> mPointerEventTarget;
+
+  int32_t mActiveSuppressDisplayport;
 
   // The focus sequence number of the last processed input event
   uint64_t mAPZFocusSequenceNumber;

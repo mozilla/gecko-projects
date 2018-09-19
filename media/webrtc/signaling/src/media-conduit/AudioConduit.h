@@ -203,10 +203,14 @@ public:
    *   this list should contain only a single ssrc.
    */
   bool SetLocalSSRCs(const std::vector<unsigned int>& aSSRCs) override;
-  std::vector<unsigned int> GetLocalSSRCs() const override;
+  std::vector<unsigned int> GetLocalSSRCs() override;
   bool SetRemoteSSRC(unsigned int ssrc) override
   {
     return false;
+  }
+  bool UnsetRemoteSSRC(uint32_t ssrc) override
+  {
+    return true;
   }
   bool GetRemoteSSRC(unsigned int* ssrc) override;
   bool SetLocalCNAME(const char* cname) override;

@@ -48,8 +48,9 @@ MessageParameterCount(const char* format)
 {
     unsigned numfmtspecs = 0;
     for (const char* fmt = format; *fmt != '\0'; fmt++) {
-        if (*fmt == '{' && isdigit(fmt[1]))
+        if (*fmt == '{' && isdigit(fmt[1])) {
             ++numfmtspecs;
+        }
     }
     return numfmtspecs;
 }
@@ -88,6 +89,8 @@ JS::detail::InitWithFailureDiagnostic(bool isDebugBuild)
 
     PRMJ_NowInit();
 
+    js::SliceBudget::Init();
+
     // The first invocation of `ProcessCreation` creates a temporary thread
     // and crashes if that fails, i.e. because we're out of memory. To prevent
     // that from happening at some later time, get it out of the way during
@@ -103,6 +106,8 @@ JS::detail::InitWithFailureDiagnostic(bool isDebugBuild)
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
     RETURN_IF_FAIL(js::oom::InitThreadType());
 #endif
+
+    js::gDisablePoisoning = bool(getenv("JSGC_DISABLE_POISONING"));
 
     js::InitMallocAllocator();
 
@@ -125,8 +130,9 @@ JS::detail::InitWithFailureDiagnostic(bool isDebugBuild)
 #if EXPOSE_INTL_API
     UErrorCode err = U_ZERO_ERROR;
     u_init(&err);
-    if (U_FAILURE(err))
+    if (U_FAILURE(err)) {
         return "u_init() failed";
+    }
 #endif // EXPOSE_INTL_API
 
     RETURN_IF_FAIL(js::CreateHelperThreadsState());

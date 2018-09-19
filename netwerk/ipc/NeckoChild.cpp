@@ -33,6 +33,8 @@
 #include "nsINetworkPredictor.h"
 #include "nsINetworkPredictorVerifier.h"
 #include "nsINetworkLinkService.h"
+#include "nsIRedirectProcessChooser.h"
+#include "nsQueryObject.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "nsNetUtil.h"
 
@@ -76,7 +78,8 @@ NeckoChild::AllocPHttpChannelChild(const PBrowserOrId& browser,
 {
   // We don't allocate here: instead we always use IPDL constructor that takes
   // an existing HttpChildChannel
-  NS_NOTREACHED("AllocPHttpChannelChild should not be called on child");
+  MOZ_ASSERT_UNREACHABLE("AllocPHttpChannelChild should not be called on "
+                         "child");
   return nullptr;
 }
 
@@ -95,7 +98,8 @@ NeckoChild::AllocPStunAddrsRequestChild()
 {
   // We don't allocate here: instead we always use IPDL constructor that takes
   // an existing object
-  NS_NOTREACHED("AllocPStunAddrsRequestChild should not be called on child");
+  MOZ_ASSERT_UNREACHABLE("AllocPStunAddrsRequestChild should not be called "
+                         "on child");
   return nullptr;
 }
 
@@ -116,7 +120,7 @@ NeckoChild::AllocPAltDataOutputStreamChild(
         PHttpChannelChild* channel)
 {
   // We don't allocate here: see HttpChannelChild::OpenAlternativeOutputStream()
-  NS_NOTREACHED("AllocPAltDataOutputStreamChild should not be called");
+  MOZ_ASSERT_UNREACHABLE("AllocPAltDataOutputStreamChild should not be called");
   return nullptr;
 }
 
@@ -152,7 +156,7 @@ PCookieServiceChild*
 NeckoChild::AllocPCookieServiceChild()
 {
   // We don't allocate here: see nsCookieService::GetSingleton()
-  NS_NOTREACHED("AllocPCookieServiceChild should not be called");
+  MOZ_ASSERT_UNREACHABLE("AllocPCookieServiceChild should not be called");
   return nullptr;
 }
 
@@ -170,7 +174,7 @@ PWyciwygChannelChild*
 NeckoChild::AllocPWyciwygChannelChild()
 {
   // We don't allocate here: see nsWyciwygProtocolHandler::NewChannel2()
-  NS_NOTREACHED("AllocPWyciwygChannelChild should not be called");
+  MOZ_ASSERT_UNREACHABLE("AllocPWyciwygChannelChild should not be called");
   return nullptr;
 }
 
@@ -189,7 +193,7 @@ NeckoChild::AllocPWebSocketChild(const PBrowserOrId& browser,
                                  const SerializedLoadContext& aSerialized,
                                  const uint32_t& aSerial)
 {
-  NS_NOTREACHED("AllocPWebSocketChild should not be called");
+  MOZ_ASSERT_UNREACHABLE("AllocPWebSocketChild should not be called");
   return nullptr;
 }
 
@@ -292,7 +296,7 @@ NeckoChild::AllocPTCPServerSocketChild(const uint16_t& aLocalPort,
                                   const uint16_t& aBacklog,
                                   const bool& aUseArrayBuffers)
 {
-  NS_NOTREACHED("AllocPTCPServerSocket should not be called");
+  MOZ_ASSERT_UNREACHABLE("AllocPTCPServerSocket should not be called");
   return nullptr;
 }
 
@@ -308,7 +312,7 @@ PUDPSocketChild*
 NeckoChild::AllocPUDPSocketChild(const Principal& aPrincipal,
                                  const nsCString& aFilter)
 {
-  NS_NOTREACHED("AllocPUDPSocket should not be called");
+  MOZ_ASSERT_UNREACHABLE("AllocPUDPSocket should not be called");
   return nullptr;
 }
 
@@ -328,7 +332,7 @@ NeckoChild::AllocPDNSRequestChild(const nsCString& aHost,
 {
   // We don't allocate here: instead we always use IPDL constructor that takes
   // an existing object
-  NS_NOTREACHED("AllocPDNSRequestChild should not be called on child");
+  MOZ_ASSERT_UNREACHABLE("AllocPDNSRequestChild should not be called on child");
   return nullptr;
 }
 
@@ -367,6 +371,74 @@ bool
 NeckoChild::DeallocPTransportProviderChild(PTransportProviderChild* aActor)
 {
   return true;
+}
+
+mozilla::ipc::IPCResult
+NeckoChild::RecvCrossProcessRedirect(
+            const uint32_t& aRegistrarId,
+            nsIURI* aURI,
+            const uint32_t& aNewLoadFlags,
+            const OptionalLoadInfoArgs& aLoadInfo,
+            const uint64_t& aChannelId,
+            nsIURI* aOriginalURI,
+            const uint64_t& aIdentifier)
+{
+  nsCOMPtr<nsILoadInfo> loadInfo;
+  nsresult rv = ipc::LoadInfoArgsToLoadInfo(aLoadInfo, getter_AddRefs(loadInfo));
+  if (NS_FAILED(rv)) {
+    MOZ_DIAGNOSTIC_ASSERT(false, "LoadInfoArgsToLoadInfo failed");
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIChannel> newChannel;
+  rv = NS_NewChannelInternal(getter_AddRefs(newChannel),
+                             aURI,
+                             loadInfo,
+                             nullptr, // PerformanceStorage
+                             nullptr, // aLoadGroup
+                             nullptr, // aCallbacks
+                             aNewLoadFlags);
+
+  // We are sure this is a HttpChannelChild because the parent
+  // is always a HTTP channel.
+  RefPtr<HttpChannelChild> httpChild = do_QueryObject(newChannel);
+  if (NS_FAILED(rv) || !httpChild) {
+    MOZ_DIAGNOSTIC_ASSERT(false, "NS_NewChannelInternal failed");
+    return IPC_OK();
+  }
+
+  // This is used to report any errors back to the parent by calling
+  // CrossProcessRedirectFinished.
+  auto scopeExit = MakeScopeExit([&]() {
+    httpChild->CrossProcessRedirectFinished(rv);
+  });
+
+  rv = httpChild->SetChannelId(aChannelId);
+  if (NS_FAILED(rv)) {
+    return IPC_OK();
+  }
+
+  rv = httpChild->SetOriginalURI(aOriginalURI);
+  if (NS_FAILED(rv)) {
+    return IPC_OK();
+  }
+
+  // connect parent.
+  rv = httpChild->ConnectParent(aRegistrarId); // creates parent channel
+  if (NS_FAILED(rv)) {
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIChildProcessChannelListener> processListener =
+      do_GetClassObject("@mozilla.org/network/childProcessChannelListener");
+  // The listener will call completeRedirectSetup on the channel.
+  rv = processListener->OnChannelReady(httpChild, aIdentifier);
+  if (NS_FAILED(rv)) {
+    return IPC_OK();
+  }
+
+  // scopeExit will call CrossProcessRedirectFinished(rv) here
+  return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
@@ -464,4 +536,3 @@ NeckoChild::RecvNetworkChangeNotification(nsCString const& type)
 
 } // namespace net
 } // namespace mozilla
-

@@ -498,11 +498,13 @@ exports.CustomHighlighterActor = protocol.ActorClassWithSpec(customHighlighterSp
    * (FF41+)
    */
   show: function(node, options) {
-    if (!node || !this._highlighter) {
-      return false;
+    if (!this._highlighter) {
+      return null;
     }
 
-    return this._highlighter.show(node.rawNode, options);
+    const rawNode = node && node.rawNode;
+
+    return this._highlighter.show(rawNode, options);
   },
 
   /**
@@ -551,8 +553,7 @@ exports.CustomHighlighterActor = protocol.ActorClassWithSpec(customHighlighterSp
  * most frequent way of using it, since highlighters are usually initialized by
  * the HighlighterActor or CustomHighlighterActor, which have a targetActor
  * reference). It can also be initialized just with a window object (which is
- * useful for when a highlighter is used outside of the debugger server context,
- * for instance from a gcli command).
+ * useful for when a highlighter is used outside of the debugger server context.
  */
 function HighlighterEnvironment() {
   this.relayTargetActorWindowReady = this.relayTargetActorWindowReady.bind(this);
@@ -640,9 +641,7 @@ HighlighterEnvironment.prototype = {
 
   get docShell() {
     return this.window &&
-           this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIWebNavigation)
-                      .QueryInterface(Ci.nsIDocShell);
+           this.window.docShell;
   },
 
   get webProgress() {

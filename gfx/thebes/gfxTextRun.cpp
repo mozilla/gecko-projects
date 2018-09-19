@@ -6,6 +6,7 @@
 
 #include "gfxTextRun.h"
 #include "gfxGlyphExtents.h"
+#include "gfxHarfBuzzShaper.h"
 #include "gfxPlatformFontList.h"
 #include "gfxUserFontSet.h"
 #include "mozilla/gfx/2D.h"
@@ -1233,6 +1234,34 @@ gfxTextRun::GetAdvanceWidth(Range aRange, PropertyProvider *aProvider,
     return result + GetAdvanceForGlyphs(ligatureRange);
 }
 
+gfxFloat
+gfxTextRun::GetMinAdvanceWidth(Range aRange)
+{
+    MOZ_ASSERT(aRange.end <= GetLength(), "Substring out of range");
+
+    Range ligatureRange = aRange;
+    ShrinkToLigatureBoundaries(&ligatureRange);
+
+    gfxFloat result = std::max(
+        ComputePartialLigatureWidth(Range(aRange.start, ligatureRange.start),
+                                    nullptr),
+        ComputePartialLigatureWidth(Range(ligatureRange.end, aRange.end),
+                                    nullptr));
+
+    // XXX Do we need to take spacing into account? When each grapheme cluster
+    // takes its own line, we shouldn't be adding spacings around them.
+    gfxFloat clusterAdvance = 0;
+    for (uint32_t i = ligatureRange.start; i < ligatureRange.end; ++i) {
+        clusterAdvance += GetAdvanceForGlyph(i);
+        if (i + 1 == ligatureRange.end || IsClusterStart(i + 1)) {
+            result = std::max(result, clusterAdvance);
+            clusterAdvance = 0;
+        }
+    }
+
+    return result;
+}
+
 bool
 gfxTextRun::SetLineBreaks(Range aRange,
                           bool aLineBreakBefore, bool aLineBreakAfter,
@@ -1748,13 +1777,12 @@ gfxTextRun::Dump(FILE* aOutput) {
         }
         gfxFont* font = glyphRuns[i].mFont;
         const gfxFontStyle* style = font->GetStyle();
-        NS_ConvertUTF16toUTF8 fontName(font->GetName());
         nsAutoString styleString;
         nsStyleUtil::AppendFontSlantStyle(style->style, styleString);
         nsAutoCString lang;
         style->language->ToUTF8String(lang);
         fprintf(aOutput, "%d: %s %f/%g/%s/%s", glyphRuns[i].mCharacterOffset,
-                fontName.get(), style->size,
+                font->GetName().get(), style->size,
                 style->weight.ToFloat(),
                 NS_ConvertUTF16toUTF8(styleString).get(),
                 lang.get());
@@ -1802,7 +1830,7 @@ gfxFontGroup::BuildFontList()
     // lookup fonts in the fontlist
     for (const FontFamilyName& name : mFamilyList.GetFontlist()->mNames) {
         if (name.IsNamed()) {
-            AddPlatformFont(name.mName, fonts);
+            AddPlatformFont(nsAtomCString(name.mName), fonts);
         } else {
             pfl->AddGenericFonts(name.mType, mStyle.language, fonts);
             if (mTextPerf) {
@@ -1828,7 +1856,7 @@ gfxFontGroup::BuildFontList()
 }
 
 void
-gfxFontGroup::AddPlatformFont(const nsAString& aName,
+gfxFontGroup::AddPlatformFont(const nsACString& aName,
                               nsTArray<FamilyAndGeneric>& aFamilyList)
 {
     // First, look up in the user font set...
@@ -1908,7 +1936,7 @@ gfxFontGroup::GetFontAt(int32_t i, uint32_t aCh)
         if (fe->mIsUserFontContainer) {
             gfxUserFontEntry* ufe = static_cast<gfxUserFontEntry*>(fe);
             if (ufe->LoadState() == gfxUserFontEntry::STATUS_NOT_LOADED &&
-                ufe->CharacterInUnicodeRange(aCh) &&
+                ufe->CharacterInUnicodeRange(aCh) && !mSkipDrawing &&
                 !FontLoadingForFamily(ff.Family(), aCh)) {
                 ufe->Load();
                 ff.CheckState(mSkipDrawing);
@@ -2054,10 +2082,10 @@ gfxFontGroup::GetDefaultFont()
         gfxCriticalError() << fontInitInfo.get();
 
         char msg[256]; // CHECK buffer length if revising message below
-        nsAutoString familiesString;
+        nsAutoCString familiesString;
         mFamilyList.ToString(familiesString);
         SprintfLiteral(msg, "unable to find a usable font (%.220s)",
-                       NS_ConvertUTF16toUTF8(familiesString).get());
+                       familiesString.get());
         MOZ_CRASH_UNSAFE_OOL(msg);
     }
 
@@ -2091,7 +2119,8 @@ gfxFontGroup::GetFirstValidFont(uint32_t aCh, FontFamilyType* aGeneric)
                 static_cast<gfxUserFontEntry*>(mFonts[i].FontEntry());
             bool inRange = ufe->CharacterInUnicodeRange(aCh);
             if (ufe->LoadState() == gfxUserFontEntry::STATUS_NOT_LOADED &&
-                inRange && !FontLoadingForFamily(ff.Family(), aCh)) {
+                inRange && !mSkipDrawing &&
+                !FontLoadingForFamily(ff.Family(), aCh)) {
                 ufe->Load();
                 ff.CheckState(mSkipDrawing);
             }
@@ -2406,7 +2435,7 @@ gfxFontGroup::InitTextRun(DrawTarget* aDrawTarget,
             if (MOZ_UNLIKELY(MOZ_LOG_TEST(log, LogLevel::Warning))) {
                 nsAutoCString lang;
                 mStyle.language->ToUTF8String(lang);
-                nsAutoString families;
+                nsAutoCString families;
                 mFamilyList.ToString(families);
                 nsAutoCString str((const char*)aString, aLength);
                 nsAutoString styleString;
@@ -2416,7 +2445,7 @@ gfxFontGroup::InitTextRun(DrawTarget* aDrawTarget,
                         "len %d weight: %g stretch: %g%% style: %s size: %6.2f %zu-byte "
                         "TEXTRUN [%s] ENDTEXTRUN\n",
                         (mStyle.systemFont ? "textrunui" : "textrun"),
-                        NS_ConvertUTF16toUTF8(families).get(),
+                        families.get(),
                         (mFamilyList.GetDefaultFontType() == eFamily_serif ?
                          "serif" :
                          (mFamilyList.GetDefaultFontType() == eFamily_sans_serif ?
@@ -2455,7 +2484,7 @@ gfxFontGroup::InitTextRun(DrawTarget* aDrawTarget,
                 if (MOZ_UNLIKELY(MOZ_LOG_TEST(log, LogLevel::Warning))) {
                     nsAutoCString lang;
                     mStyle.language->ToUTF8String(lang);
-                    nsAutoString families;
+                    nsAutoCString families;
                     mFamilyList.ToString(families);
                     nsAutoString styleString;
                     nsStyleUtil::AppendFontSlantStyle(mStyle.style, styleString);
@@ -2465,7 +2494,7 @@ gfxFontGroup::InitTextRun(DrawTarget* aDrawTarget,
                             "len %d weight: %g stretch: %g%% style: %s size: %6.2f "
                             "%zu-byte TEXTRUN [%s] ENDTEXTRUN\n",
                             (mStyle.systemFont ? "textrunui" : "textrun"),
-                            NS_ConvertUTF16toUTF8(families).get(),
+                            families.get(),
                             (mFamilyList.GetDefaultFontType() == eFamily_serif ?
                              "serif" :
                              (mFamilyList.GetDefaultFontType() == eFamily_sans_serif ?
@@ -2988,7 +3017,7 @@ gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh,
             // load if not already loaded but only if no other font in similar
             // range within family is loading
             if (ufe->LoadState() == gfxUserFontEntry::STATUS_NOT_LOADED &&
-                !FontLoadingForFamily(ff.Family(), aCh)) {
+                !mSkipDrawing && !FontLoadingForFamily(ff.Family(), aCh)) {
                 ufe->Load();
                 ff.CheckState(mSkipDrawing);
             }
@@ -3249,7 +3278,7 @@ void gfxFontGroup::ComputeRanges(nsTArray<gfxTextRange>& aRanges,
     if (MOZ_UNLIKELY(MOZ_LOG_TEST(log, LogLevel::Debug))) {
         nsAutoCString lang;
         mStyle.language->ToUTF8String(lang);
-        nsAutoString families;
+        nsAutoCString families;
         mFamilyList.ToString(families);
 
         // collect the font matched for each range
@@ -3274,14 +3303,14 @@ void gfxFontGroup::ComputeRanges(nsTArray<gfxTextRange>& aRanges,
             }
             fontMatches.AppendPrintf(" [%u:%u] %.200s (%s)", r.start, r.end,
                 (r.font.get() ?
-                 NS_ConvertUTF16toUTF8(r.font->GetName()).get() : "<null>"),
+                 r.font->GetName().get() : "<null>"),
                 matchTypes.get());
         }
         MOZ_LOG(log, LogLevel::Debug,\
                ("(%s-fontmatching) fontgroup: [%s] default: %s lang: %s script: %d"
                 "%s\n",
                 (mStyle.systemFont ? "textrunui" : "textrun"),
-                NS_ConvertUTF16toUTF8(families).get(),
+                families.get(),
                 (mFamilyList.GetDefaultFontType() == eFamily_serif ?
                  "serif" :
                  (mFamilyList.GetDefaultFontType() == eFamily_sans_serif ?

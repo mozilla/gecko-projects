@@ -25,6 +25,7 @@ struct PcScriptCacheEntry
 
 struct PcScriptCache
 {
+  private:
     static const uint32_t Length = 73;
 
     // GC number at the time the cache was filled or created.
@@ -35,9 +36,15 @@ struct PcScriptCache
     // List of cache entries.
     mozilla::Array<PcScriptCacheEntry, Length> entries;
 
+  public:
+    explicit PcScriptCache(uint64_t gcNumber) {
+        clear(gcNumber);
+    }
+
     void clear(uint64_t gcNumber) {
-        for (uint32_t i = 0; i < Length; i++)
+        for (uint32_t i = 0; i < Length; i++) {
             entries[i].returnAddress = nullptr;
+        }
         this->gcNumber = gcNumber;
     }
 
@@ -51,12 +58,14 @@ struct PcScriptCache
             return false;
         }
 
-        if (entries[hash].returnAddress != addr)
+        if (entries[hash].returnAddress != addr) {
             return false;
+        }
 
         *scriptRes = entries[hash].script;
-        if (pcRes)
+        if (pcRes) {
             *pcRes = entries[hash].pc;
+        }
 
         return true;
     }

@@ -187,6 +187,9 @@ public:
           JS::MutableHandle<JSObject*> aBodyOut,
           ErrorResult& aRv);
 
+  const nsAString&
+  BodyLocalPath() const;
+
   // If the body contains a ReadableStream body object, this method produces a
   // tee() of it.
   void
@@ -249,8 +252,8 @@ public:
     mBodyUsed = true;
   }
 
-  virtual AbortSignal*
-  GetSignal() const = 0;
+  virtual AbortSignalImpl*
+  GetSignalImpl() const = 0;
 
   // AbortFollower
   void

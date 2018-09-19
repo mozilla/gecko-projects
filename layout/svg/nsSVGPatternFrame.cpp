@@ -15,7 +15,6 @@
 #include "gfxPattern.h"
 #include "gfxPlatform.h"
 #include "mozilla/gfx/2D.h"
-#include "nsContentUtils.h"
 #include "nsGkAtoms.h"
 #include "nsSVGDisplayableFrame.h"
 #include "mozilla/ComputedStyle.h"
@@ -29,7 +28,7 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using namespace mozilla::dom::SVGUnitTypesBinding;
+using namespace mozilla::dom::SVGUnitTypes_Binding;
 using namespace mozilla::gfx;
 using namespace mozilla::image;
 
@@ -605,9 +604,15 @@ nsSVGPatternFrame::GetReferencedPattern()
     nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI), href,
                                               mContent->GetUncomposedDoc(), base);
 
-    property =
-      SVGObserverUtils::GetPaintingProperty(targetURI, this,
-                          SVGObserverUtils::HrefAsPaintingProperty());
+    // There's no clear refererer policy spec about non-CSS SVG resource references
+    // Bug 1415044 to investigate which referrer we should use
+    RefPtr<URLAndReferrerInfo> target =
+      new URLAndReferrerInfo(targetURI,
+                             mContent->OwnerDoc()->GetDocumentURI(),
+                             mContent->OwnerDoc()->GetReferrerPolicy());
+
+    property = SVGObserverUtils::GetPaintingProperty(target, this,
+      SVGObserverUtils::HrefAsPaintingProperty());
     if (!property)
       return nullptr;
   }

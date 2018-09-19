@@ -3,6 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jsfriendapi.h"
+#include "js/CompilationAndEvaluation.h"
+#include "js/SourceBufferHolder.h"
 #include "jsapi-tests/tests.h"
 
 BEGIN_TEST(testMutedErrors)
@@ -38,8 +40,9 @@ eval(const char* asciiChars, bool mutedErrors, JS::MutableHandleValue rval)
 {
     size_t len = strlen(asciiChars);
     mozilla::UniquePtr<char16_t[]> chars(new char16_t[len+1]);
-    for (size_t i = 0; i < len; ++i)
+    for (size_t i = 0; i < len; ++i) {
         chars[i] = asciiChars[i];
+    }
     chars[len] = 0;
 
     JS::RealmOptions globalOptions;
@@ -54,7 +57,8 @@ eval(const char* asciiChars, bool mutedErrors, JS::MutableHandleValue rval)
     options.setMutedErrors(mutedErrors)
            .setFileAndLine("", 0);
 
-    return JS::Evaluate(cx, options, chars.get(), len, rval);
+    JS::SourceBufferHolder srcBuf(chars.get(), len, JS::SourceBufferHolder::NoOwnership);
+    return JS::Evaluate(cx, options, srcBuf, rval);
 }
 
 bool

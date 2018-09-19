@@ -33,6 +33,7 @@ import android.util.Log;
 public class DownloadsIntegration implements BundleEventListener
 {
     private static final String LOGTAG = "GeckoDownloadsIntegration";
+    private static final String URI_FILE_PREFIX = "file://";
 
     private static final List<String> UNKNOWN_MIME_TYPES;
     static {
@@ -72,7 +73,10 @@ public class DownloadsIntegration implements BundleEventListener
         }
 
         public static Download fromCursor(final Cursor c) {
-            final String path = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_FILENAME));
+            String path = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI));
+            if (path.contains(URI_FILE_PREFIX)) {
+                path = path.replace(URI_FILE_PREFIX, "");
+            }
             final long id = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID));
             return new Download(path, id);
         }
@@ -99,6 +103,27 @@ public class DownloadsIntegration implements BundleEventListener
 
     private static boolean useSystemDownloadManager() {
         if (!AppConstants.ANDROID_DOWNLOADS_INTEGRATION) {
+            return false;
+        }
+
+        if (Versions.feature23Plus) {
+            // Bug 1280184:
+            // Starting from Android M, the system download manager has started to delete downloaded
+            // files if the download is removed from the download manager again or if the down-
+            // loading app is subsequently uninstalled, even if the files have been downloaded to a
+            // public folder on the shared storage.
+            // In Android O, this was changed to only clean up files in app-private directories and
+            // leave files e.g. in the public Downloads folder alone, but that fix only applies to
+            // files actually downloaded via the download manager. Files that are registered with
+            // the download manager after having been downloaded independently, as in our case, are
+            // still deleted unconditionally when the registering app is uninstalled.
+            // Additionally, starting from Android O Google has also started replacing the former
+            // user-facing part of the download manager, the Downloads app, with a new general file
+            // explorer-type app, whose "Downloads" view simply shows all files stored in the
+            // corresponding folder.
+            // Since that removes the only raison d'être of the downloads integration and we also
+            // don't want to delete user's downloads just because they're uninstalling us, we dis-
+            // able downloads integration again on all Android versions exhibiting this behaviour.
             return false;
         }
 

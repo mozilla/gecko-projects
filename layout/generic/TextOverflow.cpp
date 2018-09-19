@@ -162,7 +162,7 @@ IsFrameDescendantOfAny(nsIFrame* aChild,
   return false;
 }
 
-class nsDisplayTextOverflowMarker : public nsDisplayItem
+class nsDisplayTextOverflowMarker final : public nsDisplayItem
 {
 public:
   nsDisplayTextOverflowMarker(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
@@ -304,7 +304,7 @@ nsDisplayTextOverflowMarker::CreateWebRenderCommands(mozilla::wr::DisplayListBui
   }
 
   // Run the rendering algorithm to capture the glyphs and shadows
-  RefPtr<TextDrawTarget> textDrawer = new TextDrawTarget(aBuilder, aSc, aManager, this, bounds);
+  RefPtr<TextDrawTarget> textDrawer = new TextDrawTarget(aBuilder, aResources, aSc, aManager, this, bounds);
   RefPtr<gfxContext> captureCtx = gfxContext::CreateOrNull(textDrawer);
   Paint(aDisplayListBuilder, captureCtx);
   textDrawer->TerminateShadows();
@@ -328,7 +328,7 @@ TextOverflow::TextOverflow(nsDisplayListBuilder* aBuilder,
 #ifdef MOZ_XUL
   if (!mScrollableFrame) {
     nsAtom* pseudoType = aBlockFrame->Style()->GetPseudo();
-    if (pseudoType == nsCSSAnonBoxes::mozXULAnonymousBlock) {
+    if (pseudoType == nsCSSAnonBoxes::mozXULAnonymousBlock()) {
       mScrollableFrame =
         nsLayoutUtils::GetScrollableFrameFor(aBlockFrame->GetParent());
       // nsXULScrollFrame::ClampAndSetBounds rounds to nearest pixels
@@ -342,8 +342,8 @@ TextOverflow::TextOverflow(nsDisplayListBuilder* aBuilder,
   mCanHaveInlineAxisScrollbar = false;
   if (mScrollableFrame) {
     auto scrollbarStyle = mBlockWM.IsVertical() ?
-      mScrollableFrame->GetScrollbarStyles().mVertical :
-      mScrollableFrame->GetScrollbarStyles().mHorizontal;
+      mScrollableFrame->GetScrollStyles().mVertical :
+      mScrollableFrame->GetScrollStyles().mHorizontal;
     mCanHaveInlineAxisScrollbar = scrollbarStyle != NS_STYLE_OVERFLOW_HIDDEN;
     if (!mAdjustForPixelSnapping) {
       // Scrolling to the end position can leave some text still overflowing due
@@ -370,7 +370,7 @@ TextOverflow::TextOverflow(nsDisplayListBuilder* aBuilder,
   // has overflow on that side.
 }
 
-/* static */ UniquePtr<TextOverflow>
+/* static */ Maybe<TextOverflow>
 TextOverflow::WillProcessLines(nsDisplayListBuilder*   aBuilder,
                                nsIFrame*               aBlockFrame)
 {
@@ -378,14 +378,14 @@ TextOverflow::WillProcessLines(nsDisplayListBuilder*   aBuilder,
   if (aBuilder->IsForEventDelivery() ||
       aBuilder->IsForFrameVisibility() ||
       !CanHaveTextOverflow(aBlockFrame)) {
-    return nullptr;
+    return Nothing();
   }
   nsIScrollableFrame* scrollableFrame = nsLayoutUtils::GetScrollableFrameFor(aBlockFrame);
   if (scrollableFrame && scrollableFrame->IsTransformingByAPZ()) {
     // If the APZ is actively scrolling this, don't bother with markers.
-    return nullptr;
+    return Nothing();
   }
-  return MakeUnique<TextOverflow>(aBuilder, aBlockFrame);
+  return Some(TextOverflow(aBuilder, aBlockFrame));
 }
 
 void

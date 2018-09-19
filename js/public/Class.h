@@ -202,6 +202,7 @@ class ObjectOpResult
     JS_PUBLIC_API(bool) failCantSetProto();
     JS_PUBLIC_API(bool) failNoNamedSetter();
     JS_PUBLIC_API(bool) failNoIndexedSetter();
+    JS_PUBLIC_API(bool) failNotDataDescriptor();
 
     uint32_t failureCode() const {
         MOZ_ASSERT(!ok());
@@ -223,8 +224,9 @@ class ObjectOpResult
      * -   Otherwise, do nothing and return true.
      */
     bool checkStrictErrorOrWarning(JSContext* cx, HandleObject obj, HandleId id, bool strict) {
-        if (ok())
+        if (ok()) {
             return true;
+        }
         return reportStrictErrorOrWarning(cx, obj, id, strict);
     }
 
@@ -686,8 +688,9 @@ struct MOZ_STATIC_CLASS ClassSpec
         static_assert(JSProto_Null == 0, "zeroed key must be null");
 
         // Default: Inherit from Object.
-        if (!(flags & ProtoKeyMask))
+        if (!(flags & ProtoKeyMask)) {
             return JSProto_Object;
+        }
 
         return JSProtoKey(flags & ProtoKeyMask);
     }

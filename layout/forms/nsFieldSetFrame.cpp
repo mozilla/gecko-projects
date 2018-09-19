@@ -60,7 +60,7 @@ nsFieldSetFrame::GetInner() const
 {
   nsIFrame* last = mFrames.LastChild();
   if (last &&
-      last->Style()->GetPseudo() == nsCSSAnonBoxes::fieldsetContent) {
+      last->Style()->GetPseudo() == nsCSSAnonBoxes::fieldsetContent()) {
     return last;
   }
   MOZ_ASSERT(mFrames.LastChild() == mFrames.FirstChild());
@@ -79,7 +79,8 @@ nsFieldSetFrame::GetLegend() const
   return mFrames.FirstChild();
 }
 
-class nsDisplayFieldSetBorder : public nsDisplayItem {
+class nsDisplayFieldSetBorder final : public nsDisplayItem
+{
 public:
   nsDisplayFieldSetBorder(nsDisplayListBuilder* aBuilder,
                           nsFieldSetFrame* aFrame)
@@ -176,14 +177,21 @@ nsDisplayFieldSetBorder::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder
     rect = nsRect(offset, frame->GetRect().Size());
   }
 
-  return nsCSSRendering::CreateWebRenderCommandsForBorder(this,
-                                                          mFrame,
-                                                          rect,
-                                                          aBuilder,
-                                                          aResources,
-                                                          aSc,
-                                                          aManager,
-                                                          aDisplayListBuilder);
+  ImgDrawResult drawResult =
+    nsCSSRendering::CreateWebRenderCommandsForBorder(this,
+                                                     mFrame,
+                                                     rect,
+                                                     aBuilder,
+                                                     aResources,
+                                                     aSc,
+                                                     aManager,
+                                                     aDisplayListBuilder);
+  if (drawResult == ImgDrawResult::NOT_SUPPORTED) {
+    return false;
+  }
+
+  nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, drawResult);
+  return true;
 };
 
 void
@@ -273,6 +281,13 @@ nsFieldSetFrame::PaintBorder(
     // border looks.
     nsRect legendRect = legend->GetNormalRect() + aPt;
 
+    // Make sure we clip all of the border in case the legend is smaller.
+    nscoord borderTopWidth = GetUsedBorder().top;
+    if (legendRect.height < borderTopWidth) {
+      legendRect.height = borderTopWidth;
+      legendRect.y = aPt.y;
+    }
+
     DrawTarget* drawTarget = aRenderingContext.GetDrawTarget();
     // We set up a clip path which has our rect clockwise and the legend rect
     // counterclockwise, with FILL_WINDING as the fill rule.  That will allow us
@@ -316,18 +331,22 @@ nsFieldSetFrame::GetIntrinsicISize(gfxContext* aRenderingContext,
 {
   nscoord legendWidth = 0;
   nscoord contentWidth = 0;
-  if (nsIFrame* legend = GetLegend()) {
-    legendWidth =
-      nsLayoutUtils::IntrinsicForContainer(aRenderingContext, legend, aType);
-  }
+  if (!StyleDisplay()->IsContainSize()) {
+    // Both inner and legend are children, and if the fieldset is
+    // size-contained they should not contribute to the intrinsic size.
+    if (nsIFrame* legend = GetLegend()) {
+      legendWidth =
+        nsLayoutUtils::IntrinsicForContainer(aRenderingContext, legend, aType);
+    }
 
-  if (nsIFrame* inner = GetInner()) {
-    // Ignore padding on the inner, since the padding will be applied to the
-    // outer instead, and the padding computed for the inner is wrong
-    // for percentage padding.
-    contentWidth =
-      nsLayoutUtils::IntrinsicForContainer(aRenderingContext, inner, aType,
-                                           nsLayoutUtils::IGNORE_PADDING);
+    if (nsIFrame* inner = GetInner()) {
+      // Ignore padding on the inner, since the padding will be applied to the
+      // outer instead, and the padding computed for the inner is wrong
+      // for percentage padding.
+      contentWidth =
+        nsLayoutUtils::IntrinsicForContainer(aRenderingContext, inner, aType,
+                                             nsLayoutUtils::IGNORE_PADDING);
+    }
   }
 
   return std::max(legendWidth, contentWidth);
@@ -338,7 +357,7 @@ nscoord
 nsFieldSetFrame::GetMinISize(gfxContext* aRenderingContext)
 {
   nscoord result = 0;
-  DISPLAY_MIN_WIDTH(this, result);
+  DISPLAY_MIN_INLINE_SIZE(this, result);
 
   result = GetIntrinsicISize(aRenderingContext, nsLayoutUtils::MIN_ISIZE);
   return result;
@@ -348,7 +367,7 @@ nscoord
 nsFieldSetFrame::GetPrefISize(gfxContext* aRenderingContext)
 {
   nscoord result = 0;
-  DISPLAY_PREF_WIDTH(this, result);
+  DISPLAY_PREF_INLINE_SIZE(this, result);
 
   result = GetIntrinsicISize(aRenderingContext, nsLayoutUtils::PREF_ISIZE);
   return result;
@@ -396,7 +415,7 @@ nsFieldSetFrame::Reflow(nsPresContext*           aPresContext,
   WritingMode innerWM = inner ? inner->GetWritingMode() : wm;
   WritingMode legendWM = legend ? legend->GetWritingMode() : wm;
   LogicalSize innerAvailSize = aReflowInput.ComputedSizeWithPadding(innerWM);
-  LogicalSize legendAvailSize = aReflowInput.ComputedSizeWithPadding(legendWM);
+  LogicalSize legendAvailSize = aReflowInput.ComputedSize(legendWM);
   innerAvailSize.BSize(innerWM) = legendAvailSize.BSize(legendWM) =
     NS_UNCONSTRAINEDSIZE;
 
@@ -588,6 +607,21 @@ nsFieldSetFrame::Reflow(nsPresContext*           aPresContext,
   LogicalSize finalSize(wm, contentRect.ISize(wm) + border.IStartEnd(wm),
                         mLegendSpace + border.BStartEnd(wm) +
                         (inner ? inner->BSize(wm) : 0));
+  if (aReflowInput.mStyleDisplay->IsContainSize()) {
+    // If we're size-contained, then we must set finalSize to be what
+    // it'd be if we had no children (i.e. if we had no legend and if
+    // 'inner' were empty).  Note: normally the fieldset's own padding
+    // (which we still must honor) would be accounted for as part of
+    // inner's size (see kidReflowInput.Init() call above).  So: since
+    // we're disregarding sizing information from 'inner', we need to
+    // account for that padding ourselves here.
+    nscoord contentBoxBSize =
+      aReflowInput.ComputedBSize() == NS_UNCONSTRAINEDSIZE
+      ? aReflowInput.ApplyMinMaxBSize(0)
+      : aReflowInput.ComputedBSize();
+    finalSize.BSize(wm) = contentBoxBSize +
+      aReflowInput.ComputedLogicalBorderPadding().BStartEnd(wm);
+  }
   aDesiredSize.SetSize(wm, finalSize);
   aDesiredSize.SetOverflowAreasToDesiredBounds();
 
@@ -669,6 +703,11 @@ bool
 nsFieldSetFrame::GetVerticalAlignBaseline(WritingMode aWM,
                                           nscoord* aBaseline) const
 {
+  if (StyleDisplay()->IsContainSize()) {
+    // If we are size-contained, our child 'inner' should not
+    // affect how we calculate our baseline.
+    return false;
+  }
   nsIFrame* inner = GetInner();
   MOZ_ASSERT(!inner->GetWritingMode().IsOrthogonalTo(aWM));
   if (!inner->GetVerticalAlignBaseline(aWM, aBaseline)) {
@@ -684,6 +723,11 @@ nsFieldSetFrame::GetNaturalBaselineBOffset(WritingMode          aWM,
                                            BaselineSharingGroup aBaselineGroup,
                                            nscoord*             aBaseline) const
 {
+  if (StyleDisplay()->IsContainSize()) {
+    // If we are size-contained, our child 'inner' should not
+    // affect how we calculate our baseline.
+    return false;
+  }
   nsIFrame* inner = GetInner();
   MOZ_ASSERT(!inner->GetWritingMode().IsOrthogonalTo(aWM));
   if (!inner->GetNaturalBaselineBOffset(aWM, aBaselineGroup, aBaseline)) {

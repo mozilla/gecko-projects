@@ -5,6 +5,7 @@
 "use strict";
 
 const { Ci } = require("chrome");
+const Services = require("Services");
 const { E10SUtils } = require("resource://gre/modules/E10SUtils.jsm");
 const { tunnelToInnerBrowser } = require("./tunnel");
 
@@ -58,7 +59,10 @@ function swapToInnerBrowser({ tab, containerURL, getInnerBrowser }) {
     browserWindow.addEventListener("TabOpen", event => {
       event.stopImmediatePropagation();
     }, { capture: true, once: true });
-    return gBrowser.addTab(uri, options);
+    options.triggeringPrincipal = Services.scriptSecurityManager.createNullPrincipal({
+      userContextId: options.userContextId,
+    });
+    return gBrowser.addWebTab(uri, options);
   };
 
   // A version of `gBrowser.swapBrowsersAndCloseOther` that absorbs the `TabClose` event.

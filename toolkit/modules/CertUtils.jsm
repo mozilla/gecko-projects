@@ -7,7 +7,6 @@ var EXPORTED_SYMBOLS = ["CertUtils"];
 const Ce = Components.Exception;
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-const { XPCOMUtils } = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", {});
 
 /**
  * Reads a set of expected certificate attributes from preferences. The returned
@@ -143,9 +142,8 @@ function checkCert(aChannel, aAllowNonBuiltInCerts, aCerts) {
     return;
   }
 
-  let sslStatus = aChannel.securityInfo.QueryInterface(Ci.nsISSLStatusProvider)
-                          .SSLStatus;
-  let cert = sslStatus.serverCert;
+  let secInfo = aChannel.securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
+  let cert = secInfo.serverCert;
 
   validateCert(cert, aCerts);
 
@@ -153,10 +151,8 @@ function checkCert(aChannel, aAllowNonBuiltInCerts, aCerts) {
     return;
   }
 
-  let certEnumerator = sslStatus.succeededCertChain.getEnumerator();
   let issuerCert = null;
-  for (issuerCert of XPCOMUtils.IterSimpleEnumerator(certEnumerator,
-                                                     Ci.nsIX509Cert));
+  for (issuerCert of secInfo.succeededCertChain.getEnumerator());
 
   const certNotBuiltInErr = "Certificate issuer is not built-in.";
   if (!issuerCert) {

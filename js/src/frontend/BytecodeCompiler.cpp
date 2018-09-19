@@ -16,8 +16,8 @@
 #include "frontend/BytecodeEmitter.h"
 #include "frontend/ErrorReporter.h"
 #include "frontend/FoldConstants.h"
-#include "frontend/NameFunctions.h"
 #include "frontend/Parser.h"
+#include "js/SourceBufferHolder.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSContext.h"
 #include "vm/JSScript.h"
@@ -25,13 +25,18 @@
 #include "wasm/AsmJS.h"
 
 #include "vm/EnvironmentObject-inl.h"
-#include "vm/JSObject-inl.h"
-#include "vm/JSScript-inl.h"
+#include "vm/GeckoProfiler-inl.h"
+#include "vm/JSContext-inl.h"
 
 using namespace js;
 using namespace js::frontend;
+
 using mozilla::Maybe;
 using mozilla::Nothing;
+
+using JS::CompileOptions;
+using JS::ReadOnlyCompileOptions;
+using JS::SourceBufferHolder;
 
 // The BytecodeCompiler class contains resources common to compiling scripts and
 // function bodies.
@@ -47,7 +52,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
 
     JSScript* compileGlobalScript(ScopeKind scopeKind);
     JSScript* compileEvalScript(HandleObject environment, HandleScope enclosingScope);
-    ModuleObject* compileModule();
+    JSScript* compileModule();
     bool compileStandaloneFunction(MutableHandleFunction fun, GeneratorKind generatorKind,
                                    FunctionAsyncKind asyncKind,
                                    const Maybe<uint32_t>& parameterListEnd);
@@ -174,9 +179,10 @@ BytecodeCompiler::checkLength()
     // JSScript as 32-bits. It could be lifted fairly easily, since the compiler
     // is using size_t internally already.
     if (sourceBuffer.length() > UINT32_MAX) {
-        if (!cx->helperThread())
+        if (!cx->helperThread()) {
             JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                                       JSMSG_SOURCE_TOO_LONG);
+        }
         return false;
     }
     return true;
@@ -185,12 +191,14 @@ BytecodeCompiler::checkLength()
 bool
 BytecodeCompiler::createScriptSource(const Maybe<uint32_t>& parameterListEnd)
 {
-    if (!checkLength())
+    if (!checkLength()) {
         return false;
+    }
 
     sourceObject = CreateScriptSourceObject(cx, options, parameterListEnd);
-    if (!sourceObject)
+    if (!sourceObject) {
         return false;
+    }
 
     scriptSource = sourceObject->source();
 
@@ -212,22 +220,25 @@ BytecodeCompiler::canLazilyParse()
            !cx->realm()->behaviors().disableLazyParsing() &&
            !cx->realm()->behaviors().discardSource() &&
            !options.sourceIsLazy &&
-           !cx->lcovEnabled();
+           !cx->lcovEnabled() &&
+           // Disabled during record/replay. The replay debugger requires
+           // scripts to be constructed in a consistent order, which might not
+           // happen with lazy parsing.
+           !mozilla::recordreplay::IsRecordingOrReplaying();
 }
 
 bool
 BytecodeCompiler::createParser(ParseGoal goal)
 {
     usedNames.emplace(cx);
-    if (!usedNames->init())
-        return false;
 
     if (canLazilyParse()) {
         syntaxParser.emplace(cx, alloc, options, sourceBuffer.get(), sourceBuffer.length(),
                              /* foldConstants = */ false, *usedNames, nullptr, nullptr,
                              sourceObject, goal);
-        if (!syntaxParser->checkOptions())
+        if (!syntaxParser->checkOptions()) {
             return false;
+        }
     }
 
     parser.emplace(cx, alloc, options, sourceBuffer.get(), sourceBuffer.length(),
@@ -300,11 +311,13 @@ BytecodeCompiler::deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObj
         if (env->is<CallObject>()) {
             RootedFunction fun(cx, &env->as<CallObject>().callee());
             RootedScript script(cx, JSFunction::getOrCreateScript(cx, fun));
-            if (!script)
+            if (!script) {
                 return false;
+            }
             if (script->argumentsHasVarBinding()) {
-                if (!JSScript::argumentsOptimizationFailed(cx, script))
+                if (!JSScript::argumentsOptimizationFailed(cx, script)) {
                     return false;
+                }
             }
         }
         env = env->enclosingEnvironment();
@@ -316,46 +329,54 @@ BytecodeCompiler::deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObj
 JSScript*
 BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
 {
-    if (!createSourceAndParser(ParseGoal::Script))
+    if (!createSourceAndParser(ParseGoal::Script)) {
         return nullptr;
+    }
 
     TokenStreamPosition startPosition(keepAtoms, parser->tokenStream);
 
-    if (!createScript())
+    if (!createScript()) {
         return nullptr;
+    }
 
     Maybe<BytecodeEmitter> emitter;
-    if (!emplaceEmitter(emitter, sc))
+    if (!emplaceEmitter(emitter, sc)) {
         return nullptr;
+    }
 
     for (;;) {
         ParseNode* pn;
-        if (sc->isEvalContext())
-            pn = parser->evalBody(sc->asEvalContext());
-        else
-            pn = parser->globalBody(sc->asGlobalContext());
+        {
+            AutoGeckoProfilerEntry pseudoFrame(cx, "script parsing");
+            if (sc->isEvalContext()) {
+                pn = parser->evalBody(sc->asEvalContext());
+            } else {
+                pn = parser->globalBody(sc->asGlobalContext());
+            }
+        }
 
         // Successfully parsed. Emit the script.
+        AutoGeckoProfilerEntry pseudoFrame(cx, "script emit");
         if (pn) {
             if (sc->isEvalContext() && sc->hasDebuggerStatement() && !cx->helperThread()) {
                 // If the eval'ed script contains any debugger statement, force construction
                 // of arguments objects for the caller script and any other scripts it is
                 // transitively nested inside. The debugger can access any variable on the
                 // scope chain.
-                if (!deoptimizeArgumentsInEnclosingScripts(cx, environment))
+                if (!deoptimizeArgumentsInEnclosingScripts(cx, environment)) {
                     return nullptr;
+                }
             }
-            if (!emitter->emitScript(pn))
+            if (!emitter->emitScript(pn)) {
                 return nullptr;
-            if (!NameFunctions(cx, pn))
-                return nullptr;
-
+            }
             break;
         }
 
         // Maybe we aborted a syntax parse. See if we can try again.
-        if (!handleParseFailure(directives, startPosition))
+        if (!handleParseFailure(directives, startPosition)) {
             return nullptr;
+        }
 
         // Reset UsedNameTracker state before trying again.
         usedNames->reset();
@@ -366,8 +387,9 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
     script->scriptSource()->recordParseEnded();
 
     // Enqueue an off-thread source compression task after finishing parsing.
-    if (!scriptSource->tryCompressOffThread(cx))
+    if (!scriptSource->tryCompressOffThread(cx)) {
         return nullptr;
+    }
 
     MOZ_ASSERT_IF(!cx->helperThread(), !cx->isExceptionPending());
 
@@ -389,54 +411,58 @@ BytecodeCompiler::compileEvalScript(HandleObject environment, HandleScope enclos
     return compileScript(environment, &evalsc);
 }
 
-ModuleObject*
+JSScript*
 BytecodeCompiler::compileModule()
 {
-    if (!createSourceAndParser(ParseGoal::Module))
+    if (!createSourceAndParser(ParseGoal::Module)) {
         return nullptr;
+    }
 
     Rooted<ModuleObject*> module(cx, ModuleObject::create(cx));
-    if (!module)
+    if (!module) {
         return nullptr;
+    }
 
-    if (!createScript())
+    if (!createScript()) {
         return nullptr;
+    }
 
     module->init(script);
 
     ModuleBuilder builder(cx, module, parser->anyChars);
-    if (!builder.init())
-        return nullptr;
 
     ModuleSharedContext modulesc(cx, module, enclosingScope, builder);
     ParseNode* pn = parser->moduleBody(&modulesc);
-    if (!pn)
+    if (!pn) {
         return nullptr;
+    }
 
     Maybe<BytecodeEmitter> emitter;
-    if (!emplaceEmitter(emitter, &modulesc))
+    if (!emplaceEmitter(emitter, &modulesc)) {
         return nullptr;
-    if (!emitter->emitScript(pn->pn_body))
+    }
+    if (!emitter->emitScript(pn->as<CodeNode>().body())) {
         return nullptr;
+    }
 
-    if (!NameFunctions(cx, pn))
+    if (!builder.initModule()) {
         return nullptr;
-
-    if (!builder.initModule())
-        return nullptr;
+    }
 
     RootedModuleEnvironmentObject env(cx, ModuleEnvironmentObject::create(cx, module));
-    if (!env)
+    if (!env) {
         return nullptr;
+    }
 
     module->setInitialEnvironment(env);
 
     // Enqueue an off-thread source compression task after finishing parsing.
-    if (!scriptSource->tryCompressOffThread(cx))
+    if (!scriptSource->tryCompressOffThread(cx)) {
         return nullptr;
+    }
 
     MOZ_ASSERT_IF(!cx->helperThread(), !cx->isExceptionPending());
-    return module;
+    return script;
 }
 
 // Compile a standalone JS function, which might appear as the value of an
@@ -451,8 +477,9 @@ BytecodeCompiler::compileStandaloneFunction(MutableHandleFunction fun,
     MOZ_ASSERT(fun);
     MOZ_ASSERT(fun->isTenured());
 
-    if (!createSourceAndParser(ParseGoal::Script, parameterListEnd))
+    if (!createSourceAndParser(ParseGoal::Script, parameterListEnd)) {
         return false;
+    }
 
     TokenStreamPosition startPosition(keepAtoms, parser->tokenStream);
 
@@ -466,32 +493,37 @@ BytecodeCompiler::compileStandaloneFunction(MutableHandleFunction fun,
         Directives newDirectives = directives;
         fn = parser->standaloneFunction(fun, enclosingScope, parameterListEnd, generatorKind,
                                         asyncKind, directives, &newDirectives);
-        if (!fn && !handleParseFailure(newDirectives, startPosition))
+        if (!fn && !handleParseFailure(newDirectives, startPosition)) {
             return false;
+        }
     } while (!fn);
 
-    if (fn->pn_funbox->function()->isInterpreted()) {
-        MOZ_ASSERT(fun == fn->pn_funbox->function());
+    FunctionBox* funbox = fn->as<CodeNode>().funbox();
+    if (funbox->function()->isInterpreted()) {
+        MOZ_ASSERT(fun == funbox->function());
 
-        if (!createScript(fn->pn_funbox->toStringStart, fn->pn_funbox->toStringEnd))
+        if (!createScript(funbox->toStringStart, funbox->toStringEnd)) {
             return false;
+        }
 
         Maybe<BytecodeEmitter> emitter;
-        if (!emplaceEmitter(emitter, fn->pn_funbox))
+        if (!emplaceEmitter(emitter, funbox)) {
             return false;
-        if (!emitter->emitFunctionScript(fn->pn_body))
+        }
+        if (!emitter->emitFunctionScript(&fn->as<CodeNode>(),
+                                         BytecodeEmitter::TopLevelFunction::Yes))
+        {
             return false;
+        }
     } else {
-        fun.set(fn->pn_funbox->function());
+        fun.set(funbox->function());
         MOZ_ASSERT(IsAsmJSModule(fun));
     }
 
-    if (!NameFunctions(cx, fn))
-        return false;
-
     // Enqueue an off-thread source compression task after finishing parsing.
-    if (!scriptSource->tryCompressOffThread(cx))
+    if (!scriptSource->tryCompressOffThread(cx)) {
         return false;
+    }
 
     return true;
 }
@@ -507,16 +539,19 @@ frontend::CreateScriptSourceObject(JSContext* cx, const ReadOnlyCompileOptions& 
                                    const Maybe<uint32_t>& parameterListEnd /* = Nothing() */)
 {
     ScriptSource* ss = cx->new_<ScriptSource>();
-    if (!ss)
+    if (!ss) {
         return nullptr;
+    }
     ScriptSourceHolder ssHolder(ss);
 
-    if (!ss->initFromOptions(cx, options, parameterListEnd))
+    if (!ss->initFromOptions(cx, options, parameterListEnd)) {
         return nullptr;
+    }
 
     RootedScriptSourceObject sso(cx, ScriptSourceObject::create(cx, ss));
-    if (!sso)
+    if (!sso) {
         return nullptr;
+    }
 
     // Off-thread compilations do all their GC heap allocation, including the
     // SSO, in a temporary compartment. Hence, for the SSO to refer to the
@@ -528,8 +563,9 @@ frontend::CreateScriptSourceObject(JSContext* cx, const ReadOnlyCompileOptions& 
     // Instead, we put off populating those SSO slots in off-thread compilations
     // until after we've merged compartments.
     if (!cx->helperThread()) {
-        if (!ScriptSourceObject::initFromOptions(cx, sso, options))
+        if (!ScriptSourceObject::initFromOptions(cx, sso, options)) {
             return nullptr;
+        }
     }
 
     return sso;
@@ -562,8 +598,9 @@ class MOZ_STACK_CLASS AutoInitializeSourceObject
     { }
 
     ~AutoInitializeSourceObject() {
-        if (sourceObjectOut_)
+        if (sourceObjectOut_) {
             *sourceObjectOut_ = compiler_.sourceObjectPtr();
+        }
     }
 };
 
@@ -584,8 +621,9 @@ class MOZ_RAII AutoAssertReportedException
         check_ = false;
     }
     ~AutoAssertReportedException() {
-        if (!check_)
+        if (!check_) {
             return;
+        }
 
         if (!cx_->helperThread()) {
             MOZ_ASSERT(cx_->isExceptionPending());
@@ -615,8 +653,9 @@ frontend::CompileGlobalScript(JSContext* cx, LifoAlloc& alloc, ScopeKind scopeKi
     BytecodeCompiler compiler(cx, alloc, options, srcBuf, /* enclosingScope = */ nullptr);
     AutoInitializeSourceObject autoSSO(compiler, sourceObjectOut);
     JSScript* script = compiler.compileGlobalScript(scopeKind);
-    if (!script)
+    if (!script) {
         return nullptr;
+    }
     assertException.reset();
     return script;
 }
@@ -630,42 +669,44 @@ frontend::CompileGlobalBinASTScript(JSContext* cx, LifoAlloc& alloc, const ReadO
     AutoAssertReportedException assertException(cx);
 
     frontend::UsedNameTracker usedNames(cx);
-    if (!usedNames.init())
-        return nullptr;
 
     RootedScriptSourceObject sourceObj(cx, CreateScriptSourceObject(cx, options));
 
-    if (!sourceObj)
+    if (!sourceObj) {
         return nullptr;
+    }
 
     RootedScript script(cx, JSScript::Create(cx, options, sourceObj, 0, len, 0, len));
 
-    if (!script)
+    if (!script) {
         return nullptr;
+    }
+
+    Directives directives(options.strictOption);
+    GlobalSharedContext globalsc(cx, ScopeKind::Global, directives, options.extraWarningsOption);
 
     frontend::BinASTParser<BinTokenReaderMultipart> parser(cx, alloc, usedNames, options);
 
-    auto parsed = parser.parse(src, len);
+    auto parsed = parser.parse(&globalsc, src, len);
 
-    if (parsed.isErr())
+    if (parsed.isErr()) {
         return nullptr;
+    }
 
-    Directives dir(false);
-    GlobalSharedContext sc(cx, ScopeKind::Global, dir, false);
-    BytecodeEmitter bce(nullptr, &parser, &sc, script, nullptr, 0);
+    BytecodeEmitter bce(nullptr, &parser, &globalsc, script, nullptr, 0);
 
-    if (!bce.init())
+    if (!bce.init()) {
         return nullptr;
+    }
 
     ParseNode *pn = parsed.unwrap();
-    if (!bce.emitScript(pn))
+    if (!bce.emitScript(pn)) {
         return nullptr;
+    }
 
-    if (!NameFunctions(cx, pn))
-        return nullptr;
-
-    if (sourceObjectOut)
+    if (sourceObjectOut) {
         *sourceObjectOut = sourceObj;
+    }
 
     assertException.reset();
     return script;
@@ -684,14 +725,15 @@ frontend::CompileEvalScript(JSContext* cx, LifoAlloc& alloc,
     BytecodeCompiler compiler(cx, alloc, options, srcBuf, enclosingScope);
     AutoInitializeSourceObject autoSSO(compiler, sourceObjectOut);
     JSScript* script = compiler.compileEvalScript(environment, enclosingScope);
-    if (!script)
+    if (!script) {
         return nullptr;
+    }
     assertException.reset();
     return script;
 
 }
 
-ModuleObject*
+JSScript*
 frontend::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& optionsInput,
                         SourceBufferHolder& srcBuf, LifoAlloc& alloc,
                         ScriptSourceObject** sourceObjectOut)
@@ -709,47 +751,99 @@ frontend::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& optionsInpu
     RootedScope emptyGlobalScope(cx, &cx->global()->emptyGlobalScope());
     BytecodeCompiler compiler(cx, alloc, options, srcBuf, emptyGlobalScope);
     AutoInitializeSourceObject autoSSO(compiler, sourceObjectOut);
-    ModuleObject* module = compiler.compileModule();
-    if (!module)
+    JSScript* script = compiler.compileModule();
+    if (!script) {
         return nullptr;
+    }
 
     assertException.reset();
-    return module;
+    return script;
 }
 
-ModuleObject*
-frontend::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
+JSScript*
+frontend::CompileModule(JSContext* cx, const JS::ReadOnlyCompileOptions& options,
                         SourceBufferHolder& srcBuf)
 {
     AutoAssertReportedException assertException(cx);
 
-    if (!GlobalObject::ensureModulePrototypesCreated(cx, cx->global()))
+    if (!GlobalObject::ensureModulePrototypesCreated(cx, cx->global())) {
         return nullptr;
+    }
 
     LifoAlloc& alloc = cx->tempLifoAlloc();
-    RootedModuleObject module(cx, CompileModule(cx, options, srcBuf, alloc));
-    if (!module)
+    RootedScript script(cx, CompileModule(cx, options, srcBuf, alloc));
+    if (!script) {
         return nullptr;
+    }
 
     // This happens in GlobalHelperThreadState::finishModuleParseTask() when a
     // module is compiled off thread.
-    if (!ModuleObject::Freeze(cx, module))
+    RootedModuleObject module(cx, script->module());
+    if (!ModuleObject::Freeze(cx, module)) {
         return nullptr;
+    }
 
     assertException.reset();
-    return module;
+    return script;
 }
+
+// When leaving this scope, the given function should either:
+//   * be linked to a fully compiled script
+//   * remain linking to a lazy script
+class MOZ_STACK_CLASS AutoAssertFunctionDelazificationCompletion
+{
+#ifdef DEBUG
+    RootedFunction fun_;
+#endif
+
+  public:
+    AutoAssertFunctionDelazificationCompletion(JSContext* cx, HandleFunction fun)
+#ifdef DEBUG
+      : fun_(cx, fun)
+#endif
+    {
+        MOZ_ASSERT(fun_->isInterpretedLazy());
+        MOZ_ASSERT(!fun_->lazyScript()->hasScript());
+    }
+
+    ~AutoAssertFunctionDelazificationCompletion() {
+#ifdef DEBUG
+        if (!fun_) {
+            return;
+        }
+#endif
+
+        // If fun_ is not nullptr, it means delazification doesn't complete.
+        // Assert that the function keeps linking to lazy script
+        MOZ_ASSERT(fun_->isInterpretedLazy());
+        MOZ_ASSERT(!fun_->lazyScript()->hasScript());
+    }
+
+    void complete() {
+        // Assert the completion of delazification and forget the function.
+        MOZ_ASSERT(fun_->hasScript());
+        MOZ_ASSERT(!fun_->hasUncompletedScript());
+
+#ifdef DEBUG
+        fun_ = nullptr;
+#endif
+    }
+};
 
 bool
 frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const char16_t* chars, size_t length)
 {
     MOZ_ASSERT(cx->compartment() == lazy->functionNonDelazifying()->compartment());
-    // We can't be running this script unless we've run its parent.
-    MOZ_ASSERT(!lazy->isEnclosingScriptLazy());
+    // We can only compile functions whose parents have previously been
+    // compiled, because compilation requires full information about the
+    // function's immediately enclosing scope.
+    MOZ_ASSERT(lazy->enclosingScriptHasEverBeenCompiled());
 
     AutoAssertReportedException assertException(cx);
+    Rooted<JSFunction*> fun(cx, lazy->functionNonDelazifying());
+    AutoAssertFunctionDelazificationCompletion delazificationCompletion(cx, fun);
 
-    CompileOptions options(cx);
+    JS::CompileOptions options(cx);
     options.setMutedErrors(lazy->mutedErrors())
            .setFileAndLine(lazy->filename(), lazy->lineno())
            .setColumn(lazy->column())
@@ -762,7 +856,7 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
     // syntax parsing and start of full parsing, so we do this now rather than
     // after parsing below.
     if (!lazy->scriptSource()->parseEnded().IsNull()) {
-        const mozilla::TimeDuration delta = mozilla::TimeStamp::Now() -
+        const mozilla::TimeDuration delta = ReallyNow() -
             lazy->scriptSource()->parseEnded();
 
         // Differentiate between web-facing and privileged code, to aid
@@ -776,52 +870,54 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
     }
 
     UsedNameTracker usedNames(cx);
-    if (!usedNames.init())
-        return false;
 
     RootedScriptSourceObject sourceObject(cx, &lazy->sourceObject());
     Parser<FullParseHandler, char16_t> parser(cx, cx->tempLifoAlloc(), options, chars, length,
                                               /* foldConstants = */ true, usedNames, nullptr,
                                               lazy, sourceObject, lazy->parseGoal());
-    if (!parser.checkOptions())
+    if (!parser.checkOptions()) {
         return false;
+    }
 
-    Rooted<JSFunction*> fun(cx, lazy->functionNonDelazifying());
     ParseNode* pn = parser.standaloneLazyFunction(fun, lazy->toStringStart(),
                                                   lazy->strict(), lazy->generatorKind(),
                                                   lazy->asyncKind());
-    if (!pn)
+    if (!pn) {
         return false;
+    }
 
     Rooted<JSScript*> script(cx, JSScript::Create(cx, options, sourceObject,
                                                   lazy->sourceStart(), lazy->sourceEnd(),
                                                   lazy->toStringStart(), lazy->toStringEnd()));
-    if (!script)
+    if (!script) {
         return false;
+    }
 
-    if (lazy->isLikelyConstructorWrapper())
+    if (lazy->isLikelyConstructorWrapper()) {
         script->setLikelyConstructorWrapper();
-    if (lazy->hasBeenCloned())
+    }
+    if (lazy->hasBeenCloned()) {
         script->setHasBeenCloned();
+    }
 
-    BytecodeEmitter bce(/* parent = */ nullptr, &parser, pn->pn_funbox, script, lazy,
+    BytecodeEmitter bce(/* parent = */ nullptr, &parser, pn->as<CodeNode>().funbox(), script, lazy,
                         pn->pn_pos, BytecodeEmitter::LazyFunction);
-    if (!bce.init())
+    if (!bce.init()) {
         return false;
+    }
 
-    if (!bce.emitFunctionScript(pn->pn_body))
+    if (!bce.emitFunctionScript(&pn->as<CodeNode>(), BytecodeEmitter::TopLevelFunction::Yes)) {
         return false;
+    }
 
-    if (!NameFunctions(cx, pn))
-        return false;
-
+    delazificationCompletion.complete();
     assertException.reset();
     return true;
 }
 
 bool
 frontend::CompileStandaloneFunction(JSContext* cx, MutableHandleFunction fun,
-                                    const ReadOnlyCompileOptions& options,
+                                    const JS::ReadOnlyCompileOptions& options,
                                     JS::SourceBufferHolder& srcBuf,
                                     const Maybe<uint32_t>& parameterListEnd,
                                     HandleScope enclosingScope /* = nullptr */)
@@ -829,8 +925,9 @@ frontend::CompileStandaloneFunction(JSContext* cx, MutableHandleFunction fun,
     AutoAssertReportedException assertException(cx);
 
     RootedScope scope(cx, enclosingScope);
-    if (!scope)
+    if (!scope) {
         scope = &cx->global()->emptyGlobalScope();
+    }
 
     BytecodeCompiler compiler(cx, cx->tempLifoAlloc(), options, srcBuf, scope);
     if (!compiler.compileStandaloneFunction(fun, GeneratorKind::NotGenerator,
@@ -846,7 +943,7 @@ frontend::CompileStandaloneFunction(JSContext* cx, MutableHandleFunction fun,
 
 bool
 frontend::CompileStandaloneGenerator(JSContext* cx, MutableHandleFunction fun,
-                                     const ReadOnlyCompileOptions& options,
+                                     const JS::ReadOnlyCompileOptions& options,
                                      JS::SourceBufferHolder& srcBuf,
                                      const Maybe<uint32_t>& parameterListEnd)
 {

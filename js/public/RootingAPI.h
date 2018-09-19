@@ -28,6 +28,8 @@
 #include "js/Utility.h"
 
 /*
+ * [SMDOC] Stack Rooting
+ *
  * Moving GC Stack Rooting
  *
  * A moving GC may change the physical location of GC allocated things, even
@@ -372,8 +374,9 @@ ObjectIsMarkedGray(const JS::Heap<JSObject*>& obj)
 inline bool
 CellIsNotGray(js::gc::Cell* maybeCell)
 {
-    if (!maybeCell)
+    if (!maybeCell) {
         return true;
+    }
 
     return js::gc::detail::CellIsNotGray(maybeCell);
 }
@@ -436,8 +439,9 @@ class TenuredHeap : public js::HeapBase<T, TenuredHeap<T>>
     void setPtr(T newPtr) {
         MOZ_ASSERT((reinterpret_cast<uintptr_t>(newPtr) & flagsMask) == 0);
         MOZ_ASSERT(js::gc::IsCellPointerValidOrNull(newPtr));
-        if (newPtr)
+        if (newPtr) {
             AssertGCThingMustBeTenured(newPtr);
+        }
         bits = (bits & flagsMask) | reinterpret_cast<uintptr_t>(newPtr);
     }
 
@@ -651,18 +655,21 @@ struct BarrierMethods<T*>
 {
     static T* initial() { return nullptr; }
     static gc::Cell* asGCThingOrNull(T* v) {
-        if (!v)
+        if (!v) {
             return nullptr;
+        }
         MOZ_ASSERT(uintptr_t(v) > 32);
         return reinterpret_cast<gc::Cell*>(v);
     }
     static void postBarrier(T** vp, T* prev, T* next) {
-        if (next)
+        if (next) {
             JS::AssertGCThingIsNotNurseryAllocable(reinterpret_cast<js::gc::Cell*>(next));
+        }
     }
     static void exposeToJS(T* t) {
-        if (t)
+        if (t) {
             js::gc::ExposeGCThingToActiveJS(JS::GCCellPtr(t));
+        }
     }
 };
 
@@ -671,8 +678,9 @@ struct BarrierMethods<JSObject*>
 {
     static JSObject* initial() { return nullptr; }
     static gc::Cell* asGCThingOrNull(JSObject* v) {
-        if (!v)
+        if (!v) {
             return nullptr;
+        }
         MOZ_ASSERT(uintptr_t(v) > 32);
         return reinterpret_cast<gc::Cell*>(v);
     }
@@ -680,8 +688,9 @@ struct BarrierMethods<JSObject*>
         JS::HeapObjectPostBarrier(vp, prev, next);
     }
     static void exposeToJS(JSObject* obj) {
-        if (obj)
+        if (obj) {
             JS::ExposeObjectToActiveJS(obj);
+        }
     }
 };
 
@@ -690,8 +699,9 @@ struct BarrierMethods<JSFunction*>
 {
     static JSFunction* initial() { return nullptr; }
     static gc::Cell* asGCThingOrNull(JSFunction* v) {
-        if (!v)
+        if (!v) {
             return nullptr;
+        }
         MOZ_ASSERT(uintptr_t(v) > 32);
         return reinterpret_cast<gc::Cell*>(v);
     }
@@ -701,8 +711,9 @@ struct BarrierMethods<JSFunction*>
                                   reinterpret_cast<JSObject*>(next));
     }
     static void exposeToJS(JSFunction* fun) {
-        if (fun)
+        if (fun) {
             JS::ExposeObjectToActiveJS(reinterpret_cast<JSObject*>(fun));
+        }
     }
 };
 
@@ -711,8 +722,9 @@ struct BarrierMethods<JSString*>
 {
     static JSString* initial() { return nullptr; }
     static gc::Cell* asGCThingOrNull(JSString* v) {
-        if (!v)
+        if (!v) {
             return nullptr;
+        }
         MOZ_ASSERT(uintptr_t(v) > 32);
         return reinterpret_cast<gc::Cell*>(v);
     }
@@ -720,8 +732,9 @@ struct BarrierMethods<JSString*>
         JS::HeapStringPostBarrier(vp, prev, next);
     }
     static void exposeToJS(JSString* v) {
-        if (v)
+        if (v) {
             js::gc::ExposeGCThingToActiveJS(JS::GCCellPtr(v));
+        }
     }
 };
 
@@ -764,18 +777,22 @@ struct JS_PUBLIC_API(MovableCellHasher<JS::Heap<T>>)
     static void rekey(Key& k, const Key& newKey) { k.unsafeSet(newKey); }
 };
 
+} // namespace js
+
+namespace mozilla {
+
 template <typename T>
-struct FallibleHashMethods<MovableCellHasher<T>>
+struct FallibleHashMethods<js::MovableCellHasher<T>>
 {
     template <typename Lookup> static bool hasHash(Lookup&& l) {
-        return MovableCellHasher<T>::hasHash(std::forward<Lookup>(l));
+        return js::MovableCellHasher<T>::hasHash(std::forward<Lookup>(l));
     }
     template <typename Lookup> static bool ensureHash(Lookup&& l) {
-        return MovableCellHasher<T>::ensureHash(std::forward<Lookup>(l));
+        return js::MovableCellHasher<T>::ensureHash(std::forward<Lookup>(l));
     }
 };
 
-} /* namespace js */
+} // namespace mozilla
 
 namespace js {
 
@@ -939,7 +956,7 @@ class JS_PUBLIC_API(AutoGCRooter)
     /* No copy or assignment semantics. */
     AutoGCRooter(AutoGCRooter& ida) = delete;
     void operator=(AutoGCRooter& ida) = delete;
-};
+} JS_HAZ_ROOTED_BASE;
 
 namespace detail {
 
@@ -1063,8 +1080,9 @@ GetContextRealm(const JSContext* cx)
 inline JS::Compartment*
 GetContextCompartment(const JSContext* cx)
 {
-    if (JS::Realm* realm = GetContextRealm(cx))
+    if (JS::Realm* realm = GetContextRealm(cx)) {
         return GetCompartmentForRealm(realm);
+    }
     return nullptr;
 }
 

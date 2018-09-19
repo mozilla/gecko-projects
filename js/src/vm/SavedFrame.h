@@ -103,8 +103,9 @@ class SavedFrame : public NativeObject {
 
     static bool isSavedFrameOrWrapperAndNotProto(JSObject& obj) {
         auto unwrapped = CheckedUnwrap(&obj);
-        if (!unwrapped)
+        if (!unwrapped) {
             return false;
+        }
         return isSavedFrameAndNotProto(*unwrapped);
     }
 
@@ -172,16 +173,24 @@ struct SavedFrame::HashPolicy
     static void rekey(Key& key, const Key& newKey);
 };
 
+} // namespace js
+
+namespace mozilla {
+
 template <>
-struct FallibleHashMethods<SavedFrame::HashPolicy>
+struct FallibleHashMethods<js::SavedFrame::HashPolicy>
 {
     template <typename Lookup> static bool hasHash(Lookup&& l) {
-        return SavedFrame::HashPolicy::hasHash(std::forward<Lookup>(l));
+        return js::SavedFrame::HashPolicy::hasHash(std::forward<Lookup>(l));
     }
     template <typename Lookup> static bool ensureHash(Lookup&& l) {
-        return SavedFrame::HashPolicy::ensureHash(std::forward<Lookup>(l));
+        return js::SavedFrame::HashPolicy::ensureHash(std::forward<Lookup>(l));
     }
 };
+
+} // namespace mozilla
+
+namespace js {
 
 // Assert that if the given object is not null, that it must be either a
 // SavedFrame object or wrapper (Xray or CCW) around a SavedFrame object.
@@ -263,8 +272,9 @@ class ConcreteStackFrame<SavedFrame> : public BaseStackFrame {
         JSObject* prev = &get();
         JSObject* next = prev;
         js::TraceRoot(trc, &next, "ConcreteStackFrame<SavedFrame>::ptr");
-        if (next != prev)
+        if (next != prev) {
             ptr = next;
+        }
     }
 
     bool isSelfHosted(JSContext* cx) const override {

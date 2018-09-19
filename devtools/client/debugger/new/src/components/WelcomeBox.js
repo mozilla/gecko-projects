@@ -49,8 +49,8 @@ class WelcomeBox extends _react.Component {
   render() {
     const searchSourcesShortcut = (0, _text.formatKeyShortcut)(L10N.getStr("sources.search.key2"));
     const searchProjectShortcut = (0, _text.formatKeyShortcut)(L10N.getStr("projectTextSearch.key"));
-    const searchSourcesLabel = L10N.getStr("welcome.search").substring(2);
-    const searchProjectLabel = L10N.getStr("welcome.findInFiles").substring(2);
+    const searchSourcesLabel = L10N.getStr("welcome.search2").substring(2);
+    const searchProjectLabel = L10N.getStr("welcome.findInFiles2").substring(2);
     const {
       setActiveSearch,
       openQuickOpen
@@ -90,4 +90,8 @@ const mapStateToProps = state => ({
   endPanelCollapsed: (0, _selectors.getPaneCollapse)(state, "end")
 });
 
-exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(WelcomeBox);
+exports.default = (0, _reactRedux.connect)(mapStateToProps, {
+  togglePaneCollapse: _actions2.default.togglePaneCollapse,
+  setActiveSearch: _actions2.default.setActiveSearch,
+  openQuickOpen: _actions2.default.openQuickOpen
+})(WelcomeBox);

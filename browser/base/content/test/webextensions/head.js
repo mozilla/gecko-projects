@@ -31,7 +31,7 @@ function promisePopupNotificationShown(name) {
       ok(PopupNotifications.isPanelOpen, "notification panel open");
 
       PopupNotifications.panel.removeEventListener("popupshown", popupshown);
-      resolve(PopupNotifications.panel.firstChild);
+      resolve(PopupNotifications.panel.firstElementChild);
     }
 
     PopupNotifications.panel.addEventListener("popupshown", popupshown);
@@ -123,7 +123,7 @@ async function waitForUpdate(addon) {
     Management.on("ready", listener);
   });
 
-  let [newAddon, ] = await Promise.all([installPromise, readyPromise]);
+  let [newAddon ] = await Promise.all([installPromise, readyPromise]);
   return newAddon;
 }
 

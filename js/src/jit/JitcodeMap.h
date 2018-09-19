@@ -11,7 +11,6 @@
 #include "jit/CompileInfo.h"
 #include "jit/ExecutableAllocator.h"
 #include "jit/OptimizationTracking.h"
-#include "jit/shared/CodeGenerator-shared.h"
 
 namespace js {
 namespace jit {
@@ -36,6 +35,12 @@ class JitcodeIonTable;
 class JitcodeRegionEntry;
 
 class JitcodeGlobalEntry;
+
+struct NativeToBytecode {
+    CodeOffset nativeOffset;
+    InlineScriptTree* tree;
+    jsbytecode* pc;
+};
 
 class JitcodeSkiplistTower
 {
@@ -92,8 +97,9 @@ class JitcodeSkiplistTower
     }
 
     static JitcodeSkiplistTower* PopFromFreeList(JitcodeSkiplistTower** freeList) {
-        if (!*freeList)
+        if (!*freeList) {
             return nullptr;
+        }
 
         JitcodeSkiplistTower* tower = *freeList;
         MOZ_ASSERT(tower->isFree_);
@@ -112,8 +118,9 @@ class JitcodeSkiplistTower
 
   private:
     void clearPtrs() {
-        for (unsigned i = 0; i < height_; i++)
+        for (unsigned i = 0; i < height_; i++) {
             ptrs_[0] = nullptr;
+        }
     }
 };
 
@@ -139,7 +146,6 @@ class JitcodeGlobalEntry
         BytecodeLocation(JSScript* script, jsbytecode* pc) : script(script), pc(pc) {}
     };
     typedef Vector<BytecodeLocation, 0, SystemAllocPolicy> BytecodeLocationVector;
-    typedef Vector<const char*, 0, SystemAllocPolicy> ProfileStringVector;
 
     struct BaseEntry
     {
@@ -183,8 +189,9 @@ class JitcodeGlobalEntry
             samplePositionInBuffer_ = kNoSampleInBuffer;
         }
         bool isSampled(uint64_t bufferRangeStart) {
-            if (samplePositionInBuffer_ == kNoSampleInBuffer)
+            if (samplePositionInBuffer_ == kNoSampleInBuffer) {
                 return false;
+            }
             return bufferRangeStart <= samplePositionInBuffer_;
         }
 
@@ -323,8 +330,9 @@ class JitcodeGlobalEntry
         int scriptIndex(JSScript* script) const {
             unsigned count = numScripts();
             for (unsigned i = 0; i < count; i++) {
-                if (getScript(i) == script)
+                if (getScript(i) == script) {
                     return i;
+                }
             }
             return -1;
         }
@@ -662,12 +670,14 @@ class JitcodeGlobalEntry
 
     bool overlapsWith(const JitcodeGlobalEntry& entry) const {
         // Catch full containment of |entry| within |this|, and partial overlaps.
-        if (containsPointer(entry.nativeStartAddr()) || containsPointer(entry.nativeEndAddr()))
+        if (containsPointer(entry.nativeStartAddr()) || containsPointer(entry.nativeEndAddr())) {
             return true;
+        }
 
         // Catch full containment of |this| within |entry|.
-        if (startsBelowPointer(entry.nativeEndAddr()) && endsAbovePointer(entry.nativeStartAddr()))
+        if (startsBelowPointer(entry.nativeEndAddr()) && endsAbovePointer(entry.nativeStartAddr())) {
             return true;
+        }
 
         return false;
     }
@@ -962,8 +972,9 @@ class JitcodeGlobalEntry
     }
 
     bool isMarkedFromAnyThread(JSRuntime* rt) {
-        if (!baseEntry().isJitcodeMarkedFromAnyThread(rt))
+        if (!baseEntry().isJitcodeMarkedFromAnyThread(rt)) {
             return false;
+        }
         switch (kind()) {
           case Ion:
             return ionEntry().isMarkedFromAnyThread(rt);
@@ -997,8 +1008,9 @@ class JitcodeGlobalEntry
     }
 
     static JitcodeGlobalEntry* PopFromFreeList(JitcodeGlobalEntry** freeList) {
-        if (!*freeList)
+        if (!*freeList) {
             return nullptr;
+        }
 
         JitcodeGlobalEntry* entry = *freeList;
         MOZ_ASSERT(!entry->isValid());
@@ -1031,10 +1043,12 @@ class JitcodeGlobalTable
       : alloc_(LIFO_CHUNK_SIZE), freeEntries_(nullptr), rand_(0), skiplistSize_(0),
         nurseryEntries_(nullptr)
     {
-        for (unsigned i = 0; i < JitcodeSkiplistTower::MAX_HEIGHT; i++)
+        for (unsigned i = 0; i < JitcodeSkiplistTower::MAX_HEIGHT; i++) {
             startTower_[i] = nullptr;
-        for (unsigned i = 0; i < JitcodeSkiplistTower::MAX_HEIGHT; i++)
+        }
+        for (unsigned i = 0; i < JitcodeSkiplistTower::MAX_HEIGHT; i++) {
             freeTowers_[i] = nullptr;
+        }
     }
     ~JitcodeGlobalTable() {}
 
@@ -1109,20 +1123,24 @@ class JitcodeGlobalTable
         MOZ_ASSERT(entry->nextNursery_ == nullptr);
 
         entry->nextNursery_ = nurseryEntries_;
-        if (nurseryEntries_)
+        if (nurseryEntries_) {
             nurseryEntries_->prevNursery_ = entry;
+        }
         nurseryEntries_ = entry;
     }
 
     void removeFromNurseryList(JitcodeGlobalEntry::IonEntry* entry) {
         // Splice out of list to be scanned on a minor GC.
-        if (entry->prevNursery_)
+        if (entry->prevNursery_) {
             entry->prevNursery_->nextNursery_ = entry->nextNursery_;
-        if (entry->nextNursery_)
+        }
+        if (entry->nextNursery_) {
             entry->nextNursery_->prevNursery_ = entry->prevNursery_;
+        }
 
-        if (nurseryEntries_ == entry)
+        if (nurseryEntries_ == entry) {
             nurseryEntries_ = entry->nextNursery_;
+        }
 
         entry->prevNursery_ = entry->nextNursery_ = nullptr;
     }
@@ -1262,13 +1280,13 @@ class JitcodeRegionEntry
     // Given a pointer into an array of NativeToBytecode (and a pointer to the end of the array),
     // compute the number of entries that would be consume by outputting a run starting
     // at this one.
-    static uint32_t ExpectedRunLength(const CodeGeneratorShared::NativeToBytecode* entry,
-                                      const CodeGeneratorShared::NativeToBytecode* end);
+    static uint32_t ExpectedRunLength(const NativeToBytecode* entry,
+                                      const NativeToBytecode* end);
 
     // Write a run, starting at the given NativeToBytecode entry, into the given buffer writer.
     static MOZ_MUST_USE bool WriteRun(CompactBufferWriter& writer, JSScript** scriptList,
                                       uint32_t scriptListSize, uint32_t runLength,
-                                      const CodeGeneratorShared::NativeToBytecode* entry);
+                                      const NativeToBytecode* entry);
 
     // Delta Run entry formats are encoded little-endian:
     //
@@ -1478,8 +1496,9 @@ class JitcodeIonTable
     explicit JitcodeIonTable(uint32_t numRegions)
       : numRegions_(numRegions)
     {
-        for (uint32_t i = 0; i < numRegions; i++)
+        for (uint32_t i = 0; i < numRegions; i++) {
             regionOffsets_[i] = 0;
+        }
     }
 
     MOZ_MUST_USE bool makeIonEntry(JSContext* cx, JitCode* code, uint32_t numScripts,
@@ -1497,8 +1516,9 @@ class JitcodeIonTable
     JitcodeRegionEntry regionEntry(uint32_t regionIndex) const {
         const uint8_t* regionStart = payloadEnd() - regionOffset(regionIndex);
         const uint8_t* regionEnd = payloadEnd();
-        if (regionIndex < numRegions_ - 1)
+        if (regionIndex < numRegions_ - 1) {
             regionEnd -= regionOffset(regionIndex + 1);
+        }
         return JitcodeRegionEntry(regionStart, regionEnd);
     }
 
@@ -1506,11 +1526,13 @@ class JitcodeIonTable
         MOZ_ASSERT(regionIndex < numRegions());
 
         JitcodeRegionEntry ent = regionEntry(regionIndex);
-        if (nativeOffset < ent.nativeOffset())
+        if (nativeOffset < ent.nativeOffset()) {
             return false;
+        }
 
-        if (regionIndex == numRegions_ - 1)
+        if (regionIndex == numRegions_ - 1) {
             return true;
+        }
 
         return nativeOffset < regionEntry(regionIndex + 1).nativeOffset();
     }
@@ -1524,8 +1546,8 @@ class JitcodeIonTable
 
     static MOZ_MUST_USE bool WriteIonTable(CompactBufferWriter& writer,
                                            JSScript** scriptList, uint32_t scriptListSize,
-                                           const CodeGeneratorShared::NativeToBytecode* start,
-                                           const CodeGeneratorShared::NativeToBytecode* end,
+                                           const NativeToBytecode* start,
+                                           const NativeToBytecode* end,
                                            uint32_t* tableOffsetOut, uint32_t* numRegionsOut);
 };
 

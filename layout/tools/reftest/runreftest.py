@@ -233,6 +233,7 @@ class RefTest(object):
     def __init__(self, suite):
         update_mozinfo()
         self.lastTestSeen = None
+        self.lastTest = None
         self.haveDumpedScreen = False
         self.resolver = self.resolver_cls()
         self.log = None
@@ -396,7 +397,7 @@ class RefTest(object):
 
         # Enable tracing output for detailed failures in case of
         # failing connection attempts, and hangs (bug 1397201)
-        prefs["marionette.log.level"] = "TRACE"
+        prefs["marionette.log.level"] = "Trace"
 
         # Third, set preferences passed in via the command line.
         for v in options.extraPrefs:
@@ -721,11 +722,18 @@ class RefTest(object):
 
         def record_last_test(message):
             """Records the last test seen by this harness for the benefit of crash logging."""
+            def testid(test):
+                if " " in test:
+                    return test.split(" ")[0]
+                return test
+
             if message['action'] == 'test_start':
-                if " " in message['test']:
-                    self.lastTestSeen = message['test'].split(" ")[0]
+                self.lastTestSeen = testid(message['test'])
+            elif message['action'] == 'test_end':
+                if self.lastTest and message['test'] == self.lastTest:
+                    self.lastTestSeen = "Last test finished"
                 else:
-                    self.lastTestSeen = message['test']
+                    self.lastTestSeen = '{} (finished)'.format(testid(message['test']))
 
         self.log.add_handler(record_last_test)
 
@@ -856,6 +864,11 @@ class RefTest(object):
                                                       options.debuggerInteractive)
 
         def run(**kwargs):
+            if kwargs.get('tests'):
+                self.lastTest = kwargs['tests'][-1]['identifier']
+                if not isinstance(self.lastTest, basestring):
+                    self.lastTest = ' '.join(self.lastTest)
+
             status = self.runApp(
                 options,
                 manifests=manifests,
@@ -933,7 +946,7 @@ def run_test_harness(parser, options):
 
     # We have to validate options.app here for the case when the mach
     # command is able to find it after argument parsing. This can happen
-    # when running from a tests.zip.
+    # when running from a tests archive.
     if not options.app:
         parser.error("could not find the application path, --appname must be specified")
 

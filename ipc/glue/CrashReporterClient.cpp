@@ -26,7 +26,8 @@ CrashReporterClient::~CrashReporterClient()
 }
 
 void
-CrashReporterClient::AnnotateCrashReport(const nsCString& aKey, const nsCString& aData)
+CrashReporterClient::AnnotateCrashReport(CrashReporter::Annotation aKey,
+                                         const nsCString& aData)
 {
   StaticMutexAutoLock lock(sLock);
   mMetadata->AnnotateCrashReport(aKey, aData);
@@ -42,10 +43,14 @@ CrashReporterClient::AppendAppNotes(const nsCString& aData)
 /* static */ void
 CrashReporterClient::InitSingletonWithShmem(const Shmem& aShmem)
 {
-  StaticMutexAutoLock lock(sLock);
+  {
+    StaticMutexAutoLock lock(sLock);
 
-  MOZ_ASSERT(!sClientSingleton);
-  sClientSingleton = new CrashReporterClient(aShmem);
+    MOZ_ASSERT(!sClientSingleton);
+    sClientSingleton = new CrashReporterClient(aShmem);
+  }
+
+  CrashReporter::NotifyCrashReporterClientCreated();
 }
 
 /* static */ void

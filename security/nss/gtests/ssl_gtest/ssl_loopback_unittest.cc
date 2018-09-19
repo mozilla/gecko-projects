@@ -65,7 +65,7 @@ class TlsAlertRecorder : public TlsRecordFilter {
     if (level_ != 255) {  // Already captured.
       return KEEP;
     }
-    if (header.content_type() != kTlsAlertType) {
+    if (header.content_type() != ssl_ct_alert) {
       return KEEP;
     }
 
@@ -426,13 +426,15 @@ class TlsPreCCSHeaderInjector : public TlsRecordFilter {
   virtual PacketFilter::Action FilterRecord(
       const TlsRecordHeader& record_header, const DataBuffer& input,
       size_t* offset, DataBuffer* output) override {
-    if (record_header.content_type() != kTlsChangeCipherSpecType) return KEEP;
+    if (record_header.content_type() != ssl_ct_change_cipher_spec) {
+      return KEEP;
+    }
 
     std::cerr << "Injecting Finished header before CCS\n";
     const uint8_t hhdr[] = {kTlsHandshakeFinished, 0x00, 0x00, 0x0c};
     DataBuffer hhdr_buf(hhdr, sizeof(hhdr));
     TlsRecordHeader nhdr(record_header.variant(), record_header.version(),
-                         kTlsHandshakeType, 0);
+                         ssl_ct_handshake, 0);
     *offset = nhdr.Write(output, *offset, hhdr_buf);
     *offset = record_header.Write(output, *offset, input);
     return CHANGE;
@@ -537,6 +539,47 @@ TEST_F(TlsConnectTest, OneNRecordSplitting) {
   EXPECT_EQ(ExpectedCbcLen(1), records->record(0).buffer.len());
   EXPECT_EQ(ExpectedCbcLen(16384), records->record(1).buffer.len());
   EXPECT_EQ(ExpectedCbcLen(20), records->record(2).buffer.len());
+}
+
+// We can't test for randomness easily here, but we can test that we don't
+// produce a zero value, or produce the same value twice.  There are 5 values
+// here: two ClientHello.random, two ServerHello.random, and one zero value.
+// Matrix them and fail if any are the same.
+TEST_P(TlsConnectGeneric, CheckRandoms) {
+  ConfigureSessionCache(RESUME_NONE, RESUME_NONE);
+
+  static const size_t random_len = 32;
+  uint8_t crandom1[random_len], srandom1[random_len];
+  uint8_t z[random_len] = {0};
+
+  auto ch = MakeTlsFilter<TlsHandshakeRecorder>(client_, ssl_hs_client_hello);
+  auto sh = MakeTlsFilter<TlsHandshakeRecorder>(server_, ssl_hs_server_hello);
+  Connect();
+  ASSERT_TRUE(ch->buffer().len() > (random_len + 2));
+  ASSERT_TRUE(sh->buffer().len() > (random_len + 2));
+  memcpy(crandom1, ch->buffer().data() + 2, random_len);
+  memcpy(srandom1, sh->buffer().data() + 2, random_len);
+  EXPECT_NE(0, memcmp(crandom1, srandom1, random_len));
+  EXPECT_NE(0, memcmp(crandom1, z, random_len));
+  EXPECT_NE(0, memcmp(srandom1, z, random_len));
+
+  Reset();
+  ch = MakeTlsFilter<TlsHandshakeRecorder>(client_, ssl_hs_client_hello);
+  sh = MakeTlsFilter<TlsHandshakeRecorder>(server_, ssl_hs_server_hello);
+  Connect();
+  ASSERT_TRUE(ch->buffer().len() > (random_len + 2));
+  ASSERT_TRUE(sh->buffer().len() > (random_len + 2));
+  const uint8_t* crandom2 = ch->buffer().data() + 2;
+  const uint8_t* srandom2 = sh->buffer().data() + 2;
+
+  EXPECT_NE(0, memcmp(crandom2, srandom2, random_len));
+  EXPECT_NE(0, memcmp(crandom2, z, random_len));
+  EXPECT_NE(0, memcmp(srandom2, z, random_len));
+
+  EXPECT_NE(0, memcmp(crandom1, crandom2, random_len));
+  EXPECT_NE(0, memcmp(crandom1, srandom2, random_len));
+  EXPECT_NE(0, memcmp(srandom1, crandom2, random_len));
+  EXPECT_NE(0, memcmp(srandom1, srandom2, random_len));
 }
 
 INSTANTIATE_TEST_CASE_P(

@@ -1,7 +1,7 @@
 use spec::*;
 use util::*;
 
-use std::collections::{ HashSet };
+use std::collections::{ HashMap, HashSet };
 
 use itertools::Itertools;
 
@@ -61,20 +61,37 @@ use itertools::Itertools;
 /// implementing the webidl specification.
 pub struct TypeDeanonymizer {
     builder: SpecBuilder,
+
+    /// When we encounter `typedef (A or B) C`
+    /// and `typedef (C or D) E`, we deanonymize into
+    /// `typedef (A or B or D) E`.
+    ///
+    /// This maintains the relationship that `E` (value)
+    /// contains `C` (key).
+    supersums_of: HashMap<NodeName, HashSet<NodeName>>,
 }
 impl TypeDeanonymizer {
     /// Create an empty TypeDeanonymizer.
     pub fn new(spec: &Spec) -> Self {
         let mut result = TypeDeanonymizer {
             builder: SpecBuilder::new(),
+            supersums_of: HashMap::new(),
         };
+        let mut skip_name_map: HashMap<&FieldName, FieldName> = HashMap::new();
+
         // Copy field names
         for (_, name) in spec.field_names() {
             result.builder.import_field_name(name)
         }
 
-        // We may need to introduce name `offset`, we'll se.
-        let mut field_offset = None;
+        for (_, interface) in spec.interfaces_by_name() {
+            for field in interface.contents().fields() {
+                if field.is_lazy() {
+                    let skip_name = result.builder.field_name(format!("{}_skip", field.name().to_str()).to_str());
+                    skip_name_map.insert(field.name(), skip_name);
+                }
+            }
+        }
 
         // Copy and deanonymize interfaces.
         for (name, interface) in spec.interfaces_by_name() {
@@ -83,16 +100,6 @@ impl TypeDeanonymizer {
             // and walk through their fields to deanonymize types.
 
             let mut fields = vec![];
-            // If the interface is skippable, introduce a first invisible field `_offset`.
-            if interface.is_skippable() {
-                let name = field_offset.get_or_insert_with(||
-                    result.builder.field_name("_offset")
-                );
-                fields.push(Field::new(
-                    name.clone(),
-                    Type::offset().required()
-                ))
-            }
 
             // Copy other fields.
             for field in interface.contents().fields() {
@@ -104,7 +111,15 @@ impl TypeDeanonymizer {
             let mut declaration = result.builder.add_interface(name)
                 .unwrap();
             for field in fields.drain(..) {
-                declaration.with_field(field.name(), field.type_().clone());
+                // Create *_skip field just before the lazy field.
+                // See also tagged_tuple in write.rs.
+                if field.is_lazy() {
+                    declaration.with_field(skip_name_map.get(field.name()).unwrap(),
+                                           Type::offset().required(),
+                                           Laziness::Eager);
+                }
+                declaration.with_field(field.name(), field.type_().clone(),
+                                       field.laziness());
             }
         }
         // Copy and deanonymize typedefs
@@ -131,6 +146,10 @@ impl TypeDeanonymizer {
         debug!(target: "export_utils", "Names: {:?}", result.builder.names().keys().format(", "));
 
         result
+    }
+
+    pub fn supersums(&self) -> &HashMap<NodeName, HashSet<NodeName>> {
+        &self.supersums_of
     }
 
     /// Convert into a new specification.
@@ -171,6 +190,7 @@ impl TypeDeanonymizer {
         match *type_spec {
             TypeSpec::Boolean |
             TypeSpec::Number |
+            TypeSpec::UnsignedLong |
             TypeSpec::String |
             TypeSpec::Offset |
             TypeSpec::Void    => {
@@ -219,6 +239,7 @@ impl TypeDeanonymizer {
                             Some(IsNullable { content: Primitive::Interface(_), .. }) => Type::named(&content).required(),
                             Some(IsNullable { content: Primitive::String, .. }) => Type::string().required(),
                             Some(IsNullable { content: Primitive::Number, .. }) => Type::number().required(),
+                            Some(IsNullable { content: Primitive::UnsignedLong, .. }) => Type::unsigned_long().required(),
                             Some(IsNullable { content: Primitive::Boolean, .. }) => Type::bool().required(),
                             Some(IsNullable { content: Primitive::Offset, .. }) => Type::offset().required(),
                             Some(IsNullable { content: Primitive::Void, .. }) => Type::void().required()
@@ -278,11 +299,16 @@ impl TypeDeanonymizer {
             TypeSpec::TypeSum(ref sum) => {
                 let mut full_sum = HashSet::new();
                 let mut names = vec![];
+                let mut subsums = vec![];
                 for sub_type in sum.types() {
                     let (mut sub_sum, name) = self.import_typespec(spec, sub_type, None);
                     let mut sub_sum = sub_sum.unwrap_or_else(
                         || panic!("While treating {:?}, attempting to create a sum containing {}, which isn't an interface or a sum of interfaces", type_spec, name)
                     );
+                    if sub_sum.len() > 1 {
+                        // The subtype is itself a sum.
+                        subsums.push(name.clone())
+                    }
                     names.push(name);
                     for item in sub_sum.drain() {
                         full_sum.insert(item);
@@ -291,9 +317,16 @@ impl TypeDeanonymizer {
                 let my_name =
                     match public_name {
                         None => self.builder.node_name(&format!("{}",
-                            names.drain(..).format("Or"))),
+                            names.drain(..)
+                                .format("Or"))),
                         Some(ref name) => name.clone()
                     };
+                for subsum_name in subsums {
+                    // So, `my_name` is a superset of `subsum_name`.
+                    let mut supersum_entry = self.supersums_of.entry(subsum_name.clone())
+                        .or_insert_with(|| HashSet::new());
+                    supersum_entry.insert(my_name.clone());
+                }
                 let sum : Vec<_> = full_sum.iter()
                     .map(Type::named)
                     .collect();
@@ -336,6 +369,8 @@ impl TypeName {
                 "_Bool".to_string(),
             TypeSpec::Number =>
                 "_Number".to_string(),
+            TypeSpec::UnsignedLong =>
+                "_UnsignedLong".to_string(),
             TypeSpec::String =>
                 "_String".to_string(),
             TypeSpec::Void =>
@@ -375,6 +410,8 @@ impl ToWebidl {
                 "string".to_string(),
             TypeSpec::Number =>
                 "number".to_string(),
+            TypeSpec::UnsignedLong =>
+                "unsigned long".to_string(),
             TypeSpec::NamedType(ref name) =>
                 name.to_str().to_string(),
             TypeSpec::TypeSum(ref sum) => {

@@ -94,7 +94,7 @@ const CATEGORY_PROVIDER_MODULE = "addon-provider-module";
 // A list of providers to load by default
 const DEFAULT_PROVIDERS = [
   "resource://gre/modules/addons/XPIProvider.jsm",
-  "resource://gre/modules/LightweightThemeManager.jsm"
+  "resource://gre/modules/LightweightThemeManager.jsm",
 ];
 
 ChromeUtils.import("resource://gre/modules/Log.jsm");
@@ -155,7 +155,7 @@ var PrefObserver = {
           parentLogger.level = Log.Level.Warn;
         }
       }
-    }
+    },
 };
 
 PrefObserver.init();
@@ -342,7 +342,7 @@ BrowserListener.prototype = {
 
   QueryInterface: ChromeUtils.generateQI([Ci.nsISupportsWeakReference,
                                           Ci.nsIWebProgressListener,
-                                          Ci.nsIObserver])
+                                          Ci.nsIObserver]),
 };
 
 /**
@@ -365,7 +365,7 @@ AddonAuthor.prototype = {
   // Returns the author's name, defaulting to the empty string
   toString() {
     return this.name || "";
-  }
+  },
 };
 
 /**
@@ -409,7 +409,7 @@ AddonScreenshot.prototype = {
   // Returns the screenshot URL, defaulting to the empty string
   toString() {
     return this.url || "";
-  }
+  },
 };
 
 
@@ -469,7 +469,7 @@ AddonCompatibilityOverride.prototype = {
   /**
    * Max version of the application to match.
    */
-  appMaxVersion: null
+  appMaxVersion: null,
 };
 
 
@@ -783,13 +783,7 @@ var AddonManagerInternal = {
       }
 
       // Load any providers registered in the category manager
-      let catman = Cc["@mozilla.org/categorymanager;1"].
-                   getService(Ci.nsICategoryManager);
-      let entries = catman.enumerateCategory(CATEGORY_PROVIDER_MODULE);
-      while (entries.hasMoreElements()) {
-        let entry = entries.getNext().QueryInterface(Ci.nsISupportsCString).data;
-        let url = catman.getCategoryEntry(CATEGORY_PROVIDER_MODULE, entry);
-
+      for (let {entry, value: url} of Services.catMan.enumerateCategory(CATEGORY_PROVIDER_MODULE)) {
         try {
           ChromeUtils.import(url, {});
           logger.debug(`Loaded provider scope for ${url}`);
@@ -821,7 +815,8 @@ var AddonManagerInternal = {
 
       // Support for remote about:plugins. Note that this module isn't loaded
       // at the top because Services.appinfo is defined late in tests.
-      let { RemotePages } = ChromeUtils.import("resource://gre/modules/RemotePageManager.jsm", {});
+      let { RemotePages } =
+        ChromeUtils.import("resource://gre/modules/remotepagemanager/RemotePageManagerParent.jsm", {});
 
       gPluginPageListener = new RemotePages("about:plugins");
       gPluginPageListener.addMessageListener("RequestPlugins", this.requestPlugins);
@@ -885,7 +880,7 @@ var AddonManagerInternal = {
 
           this.types[type.id] = {
             type,
-            providers: [aProvider]
+            providers: [aProvider],
           };
 
           let typeListeners = new Set(this.typeListeners);
@@ -1018,12 +1013,12 @@ var AddonManagerInternal = {
     if (gShutdownBarrier) {
       state.push({
         name: gShutdownBarrier.client.name,
-        state: gShutdownBarrier.state
+        state: gShutdownBarrier.state,
       });
     }
     state.push({
       name: "AddonRepository: async shutdown",
-      state: gRepoShutdownState
+      state: gRepoShutdownState,
     });
     return state;
   },
@@ -1241,7 +1236,7 @@ var AddonManagerInternal = {
       let subject = {wrappedJSObject: {
         addon: info.addon,
         permissions: difference,
-        resolve, reject
+        resolve, reject,
       }};
       Services.obs.notifyObservers(subject, "webextension-update-permissions");
     });
@@ -1307,7 +1302,7 @@ var AddonManagerInternal = {
                 }
               },
 
-              onUpdateFinished: aAddon => { logger.debug("onUpdateFinished for ${id}", aAddon); resolve(); }
+              onUpdateFinished: aAddon => { logger.debug("onUpdateFinished for ${id}", aAddon); resolve(); },
             }, AddonManager.UPDATE_WHEN_PERIODIC_UPDATE);
           }));
         }
@@ -1586,10 +1581,13 @@ var AddonManagerInternal = {
    *         An optional placeholder version while the add-on is being downloaded
    * @param  aBrowser
    *         An optional <browser> element for download permissions prompts.
+   * @param  aTelemetryInfo
+   *         An optional object which provides details about the installation source
+   *         included in the addon manager telemetry events.
    * @throws if the aUrl, aCallback or aMimetype arguments are not specified
    */
   getInstallForURL(aUrl, aMimetype, aHash, aName,
-                   aIcons, aVersion, aBrowser) {
+                   aIcons, aVersion, aBrowser, aTelemetryInfo) {
     if (!gStarted)
       throw Components.Exception("AddonManager is not initialized",
                                  Cr.NS_ERROR_NOT_INITIALIZED);
@@ -1632,7 +1630,7 @@ var AddonManagerInternal = {
       if (callProvider(provider, "supportsMimetype", false, aMimetype)) {
         return promiseCallProvider(
           provider, "getInstallForURL", aUrl, aHash, aName, aIcons,
-          aVersion, aBrowser);
+          aVersion, aBrowser, aTelemetryInfo);
       }
     }
 
@@ -1646,9 +1644,12 @@ var AddonManagerInternal = {
    *         The nsIFile where the add-on is located
    * @param  aMimetype
    *         An optional mimetype hint for the add-on
+   * @param  aTelemetryInfo
+   *         An optional object which provides details about the installation source
+   *         included in the addon manager telemetry events.
    * @throws if the aFile or aCallback arguments are not specified
    */
-  getInstallForFile(aFile, aMimetype) {
+  getInstallForFile(aFile, aMimetype, aTelemetryInfo) {
     if (!gStarted)
       throw Components.Exception("AddonManager is not initialized",
                                  Cr.NS_ERROR_NOT_INITIALIZED);
@@ -1664,7 +1665,7 @@ var AddonManagerInternal = {
     return (async () => {
       for (let provider of this.providers) {
         let install = await promiseCallProvider(
-          provider, "getInstallForFile", aFile);
+          provider, "getInstallForFile", aFile, aTelemetryInfo);
 
         if (install)
           return install;
@@ -1891,10 +1892,7 @@ var AddonManagerInternal = {
     // main tab's browser). Check this by seeing if the browser we've been
     // passed is in a content type docshell and if so get the outer-browser.
     let topBrowser = aBrowser;
-    let docShell = aBrowser.ownerGlobal
-                           .QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDocShell)
-                           .QueryInterface(Ci.nsIDocShellTreeItem);
+    let docShell = aBrowser.ownerGlobal.docShell;
     if (docShell.itemType == Ci.nsIDocShellTreeItem.typeContent)
       topBrowser = docShell.chromeEventHandler;
 
@@ -2419,7 +2417,7 @@ var AddonManagerInternal = {
           writable: false,
           // Claim configurability to maintain the proxy invariants.
           configurable: true,
-          enumerable: true
+          enumerable: true,
         };
       },
 
@@ -2436,7 +2434,7 @@ var AddonManagerInternal = {
       setPrototypeOf(target, prototype) {
         // Not allowed to change prototype
         return false;
-      }
+      },
     });
   },
 
@@ -2535,7 +2533,7 @@ var AddonManagerInternal = {
           wrappedJSObject: {
             target: browser,
             info: Object.assign({resolve, reject, source}, info),
-          }
+          },
         };
         subject.wrappedJSObject.info.permissions = info.addon.userPermissions;
         Services.obs.notifyObservers(subject, "webextension-permission-prompt");
@@ -2558,7 +2556,7 @@ var AddonManagerInternal = {
             }
             let result = target[property];
             return (typeof result == "function") ? result.bind(target) : result;
-          }
+          },
         });
 
         // Check for a custom installation prompt that may be provided by the
@@ -2589,10 +2587,7 @@ var AddonManagerInternal = {
           let parentWindow = null;
           if (browser) {
             // Find the outer browser
-            let docShell = browser.ownerGlobal
-                                  .QueryInterface(Ci.nsIInterfaceRequestor)
-                                  .getInterface(Ci.nsIDocShell)
-                                  .QueryInterface(Ci.nsIDocShellTreeItem);
+            let docShell = browser.ownerGlobal.docShell;
             if (docShell.itemType == Ci.nsIDocShellTreeItem.typeContent)
               browser = docShell.chromeEventHandler;
 
@@ -2715,7 +2710,13 @@ var AddonManagerInternal = {
         return Promise.reject({message: err.message});
       }
 
-      return AddonManagerInternal.getInstallForURL(options.url, "application/x-xpinstall", options.hash)
+      let installTelemetryInfo = {
+        source: AddonManager.getInstallSourceFromHost(options.sourceHost),
+        method: "amWebAPI",
+      };
+
+      return AddonManagerInternal.getInstallForURL(options.url, "application/x-xpinstall", options.hash,
+                                                   null, null, null, null, installTelemetryInfo)
                                  .then(install => {
         AddonManagerInternal.setupPromptHandler(target, null, install, false, "AMO");
 
@@ -2758,22 +2759,24 @@ var AddonManagerInternal = {
         await addon.disable();
     },
 
-    addonInstallDoInstall(target, id) {
+    async addonInstallDoInstall(target, id) {
       let state = this.installs.get(id);
       if (!state) {
-        return Promise.reject(`invalid id ${id}`);
+        throw new Error(`invalid id ${id}`);
       }
-      let result = state.install.install();
 
-      return state.installPromise.then(addon => new Promise(resolve => {
-        let callback = () => resolve(result);
-        if (Services.prefs.getBoolPref(PREF_WEBEXT_PERM_PROMPTS, false)) {
-          let subject = {wrappedJSObject: {target, addon, callback}};
+      let addon = await state.install.install();
+
+      if (addon.type == "theme" && !addon.appDisabled) {
+        await addon.enable();
+      }
+
+      if (Services.prefs.getBoolPref(PREF_WEBEXT_PERM_PROMPTS, false)) {
+        await new Promise(resolve => {
+          let subject = {wrappedJSObject: {target, addon, callback: resolve}};
           Services.obs.notifyObservers(subject, "webextension-install-notify");
-        } else {
-          callback();
-        }
-      }));
+        });
+      }
     },
 
     addonInstallCancel(target, id) {
@@ -2906,7 +2909,7 @@ var AddonManagerPrivate = {
   recordException(aModule, aContext, aException) {
     let report = {
       module: aModule,
-      context: aContext
+      context: aContext,
     };
 
     if (typeof aException == "number") {
@@ -2939,7 +2942,7 @@ var AddonManagerPrivate = {
   simpleTimer(aName) {
     let startTime = Cu.now();
     return {
-      done: () => this.recordSimpleMeasure(aName, Math.round(Cu.now() - startTime))
+      done: () => this.recordSimpleMeasure(aName, Math.round(Cu.now() - startTime)),
     };
   },
 
@@ -3011,6 +3014,14 @@ var AddonManagerPrivate = {
  * @class
  */
 var AddonManager = {
+  // Map used to convert the known install source hostnames into the value to set into the
+  // telemetry events.
+  _installHostSource: new Map([
+    ["addons.mozilla.org", "amo"],
+    ["discovery.addons.mozilla.org", "disco"],
+    ["testpilot.firefox.com", "testpilot"],
+  ]),
+
   // Constants for the AddonInstall.state property
   // These will show up as AddonManager.STATE_* (eg, STATE_AVAILABLE)
   _states: new Map([
@@ -3270,14 +3281,26 @@ var AddonManager = {
     return err ? this._errorToString.get(err) : null;
   },
 
-  getInstallForURL(aUrl, aMimetype, aHash, aName, aIcons,
-                   aVersion, aBrowser) {
-    return AddonManagerInternal.getInstallForURL(aUrl, aMimetype, aHash,
-                                                 aName, aIcons, aVersion, aBrowser);
+  getInstallSourceFromHost(host) {
+    if (this._installHostSource.has(host)) {
+      return this._installHostSource.get(host);
+    }
+
+    if (WEBAPI_TEST_INSTALL_HOSTS.includes(host)) {
+      return "test-host";
+    }
+
+    return "unknown";
   },
 
-  getInstallForFile(aFile, aMimetype) {
-      return AddonManagerInternal.getInstallForFile(aFile, aMimetype);
+  getInstallForURL(aUrl, aMimetype, aHash, aName, aIcons,
+                   aVersion, aBrowser, aTelemetryInfo) {
+    return AddonManagerInternal.getInstallForURL(
+      aUrl, aMimetype, aHash, aName, aIcons, aVersion, aBrowser, aTelemetryInfo);
+  },
+
+  getInstallForFile(aFile, aMimetype, aTelemetryInfo) {
+    return AddonManagerInternal.getInstallForFile(aFile, aMimetype, aTelemetryInfo);
   },
 
   /**

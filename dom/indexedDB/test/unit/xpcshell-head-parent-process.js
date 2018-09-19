@@ -61,9 +61,6 @@ function finishTest()
   if (SpecialPowers.isMainProcess()) {
     resetExperimental();
     resetTesting();
-
-    SpecialPowers.notifyObserversInParentProcess(null, "disk-space-watcher",
-                                                 "free");
   }
 
   SpecialPowers.removeFiles();
@@ -646,7 +643,3 @@ var SpecialPowers = {
     }
   },
 };
-
-// This can be removed soon when on by default.
-if (SpecialPowers.isMainProcess())
-  SpecialPowers.setBoolPref("javascript.options.wasm_baselinejit", true);

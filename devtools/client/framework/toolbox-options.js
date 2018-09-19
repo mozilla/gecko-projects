@@ -5,7 +5,6 @@
 "use strict";
 
 const Services = require("Services");
-const defer = require("devtools/shared/defer");
 const {gDevTools} = require("devtools/client/framework/devtools");
 
 const {LocalizationHelper} = require("devtools/shared/l10n");
@@ -369,11 +368,6 @@ OptionsPanel.prototype = {
     // Labels for these new buttons are nightly only and mostly intended for working on
     // devtools.
     const prefDefinitions = [{
-      pref: "devtools.debugger.new-debugger-frontend",
-      label: L10N.getStr("toolbox.options.enableNewDebugger.label"),
-      id: "devtools-new-debugger",
-      parentId: "debugger-options"
-    }, {
       pref: "devtools.performance.new-panel-enabled",
       label: "Enable new performance recorder (then re-open DevTools)",
       id: "devtools-new-performance",
@@ -457,7 +451,7 @@ OptionsPanel.prototype = {
       });
     }
 
-    if (this.target.activeTab) {
+    if (this.target.activeTab && !this.target.chrome) {
       const [ response ] = await this.target.client.attachTab(this.target.activeTab._actor);
       this._origJavascriptEnabled = !response.javascriptEnabled;
       this.disableJSNode.checked = this._origJavascriptEnabled;
@@ -514,26 +508,25 @@ OptionsPanel.prototype = {
       return this.destroyPromise;
     }
 
-    const deferred = defer();
-    this.destroyPromise = deferred.promise;
-
     this._removeListeners();
 
-    if (this.target.activeTab) {
-      this.disableJSNode.removeEventListener("click", this._disableJSClicked);
-      // FF41+ automatically cleans up state in actor on disconnect
-      if (!this.target.activeTab.traits.noTabReconfigureOnClose) {
-        const options = {
-          "javascriptEnabled": this._origJavascriptEnabled,
-          "performReload": false
-        };
-        this.target.activeTab.reconfigure(options, deferred.resolve);
+    this.destroyPromise = new Promise(resolve => {
+      if (this.target.activeTab) {
+        this.disableJSNode.removeEventListener("click", this._disableJSClicked);
+        // FF41+ automatically cleans up state in actor on disconnect
+        if (!this.target.activeTab.traits.noTabReconfigureOnClose) {
+          const options = {
+            "javascriptEnabled": this._origJavascriptEnabled,
+            "performReload": false
+          };
+          this.target.activeTab.reconfigure(options, resolve);
+        } else {
+          resolve();
+        }
       } else {
-        deferred.resolve();
+        resolve();
       }
-    } else {
-      deferred.resolve();
-    }
+    });
 
     this.panelWin = this.panelDoc = this.disableJSNode = this.toolbox = null;
 

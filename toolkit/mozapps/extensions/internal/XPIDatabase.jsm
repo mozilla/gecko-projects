@@ -94,7 +94,8 @@ const DEFAULT_THEME_ID = "default-theme@mozilla.org";
 const PENDING_INSTALL_METADATA =
     ["syncGUID", "targetApplications", "userDisabled", "softDisabled",
      "existingAddonID", "sourceURI", "releaseNotesURI", "installDate",
-     "updateDate", "applyBackgroundUpdates", "compatibilityOverrides"];
+     "updateDate", "applyBackgroundUpdates", "compatibilityOverrides",
+     "installTelemetryInfo"];
 
 const COMPATIBLE_BY_DEFAULT_TYPES = {
   extension: true,
@@ -116,7 +117,7 @@ const PROP_JSON_FIELDS = ["id", "syncGUID", "version", "type",
                           "seen", "dependencies", "hasEmbeddedWebExtension",
                           "userPermissions", "icons", "iconURL", "icon64URL",
                           "blocklistState", "blocklistURL", "startupData",
-                          "previewImage"];
+                          "previewImage", "hidden", "installTelemetryInfo"];
 
 const LEGACY_TYPES = new Set([
   "extension",
@@ -288,6 +289,8 @@ class AddonInternal {
     this.seen = true;
     this.skinnable = false;
     this.startupData = null;
+    this._hidden = false;
+    this.installTelemetryInfo = null;
 
     this.inDatabase = false;
 
@@ -416,7 +419,12 @@ class AddonInternal {
   }
 
   get hidden() {
-    return this.location.isSystem;
+    return this.location.isSystem ||
+           (this._hidden && this.signedState == AddonManager.SIGNEDSTATE_PRIVILEGED);
+  }
+
+  set hidden(val) {
+    this._hidden = val;
   }
 
   get disabled() {
@@ -486,8 +494,11 @@ class AddonInternal {
 
     // Only extensions and dictionaries can be compatible by default; themes
     // and language packs always use strict compatibility checking.
+    // Dictionaries are compatible by default unless requested by the dictinary.
     if (this.type in COMPATIBLE_BY_DEFAULT_TYPES &&
-        !AddonManager.strictCompatibility && !this.strictCompatibility) {
+        !this.strictCompatibility &&
+        (!AddonManager.strictCompatibility ||
+         this.type == "webextension-dictionary")) {
 
       // The repository can specify compatibility overrides.
       // Note: For now, only blacklisting is supported by overrides.
@@ -568,16 +579,16 @@ class AddonInternal {
     }
   }
 
-  async setUserDisabled(val) {
+  async setUserDisabled(val, allowSystemAddons = false) {
     if (val == (this.userDisabled || this.softDisabled)) {
       return;
     }
 
     if (this.inDatabase) {
-      // hidden and system add-ons should not be user disabled,
-      // as there is no UI to re-enable them.
-      if (this.hidden) {
-        throw new Error(`Cannot disable hidden add-on ${this.id}`);
+      // System add-ons should not be user disabled, as there is no UI to
+      // re-enable them.
+      if (this.location.isSystem && !allowSystemAddons) {
+        throw new Error(`Cannot disable system add-on ${this.id}`);
       }
       await XPIDatabase.updateAddonDisabledState(this, val);
     } else {
@@ -703,6 +714,21 @@ AddonWrapper = class {
   markAsSeen() {
     addonFor(this).seen = true;
     XPIDatabase.saveChanges();
+  }
+
+  get installTelemetryInfo() {
+    const addon = addonFor(this);
+    if (!addon.installTelemetryInfo && addon.location) {
+      if (addon.location.isSystem) {
+        return {source: "system-addon"};
+      }
+
+      if (addon.location.isTemporary) {
+        return {source: "temporary-addon"};
+      }
+    }
+
+    return addon.installTelemetryInfo;
   }
 
   get type() {
@@ -845,7 +871,7 @@ AddonWrapper = class {
       return val;
 
     XPIDatabase.setAddonProperties(addon, {
-      applyBackgroundUpdates: val
+      applyBackgroundUpdates: val,
     });
     AddonManagerPrivate.callAddonListeners("onPropertyChanged", this, ["applyBackgroundUpdates"]);
 
@@ -954,12 +980,14 @@ AddonWrapper = class {
     return addon.softDisabled || addon.userDisabled;
   }
 
-  enable() {
-    return addonFor(this).setUserDisabled(false);
+  enable(options = {}) {
+    const {allowSystemAddons = false} = options;
+    return addonFor(this).setUserDisabled(false, allowSystemAddons);
   }
 
-  disable() {
-    return addonFor(this).setUserDisabled(true);
+  disable(options = {}) {
+    const {allowSystemAddons = false} = options;
+    return addonFor(this).setUserDisabled(true, allowSystemAddons);
   }
 
   set softDisabled(val) {
@@ -1554,7 +1582,7 @@ this.XPIDatabase = {
 
       let changes = {
         enabled: [],
-        disabled: []
+        disabled: [],
       };
 
       for (let addon of addons) {
@@ -2181,7 +2209,7 @@ this.XPIDatabase = {
     this.setAddonProperties(aAddon, {
       userDisabled: aUserDisabled,
       appDisabled,
-      softDisabled: aSoftDisabled
+      softDisabled: aSoftDisabled,
     });
 
     let wrapper = aAddon.wrapper;
@@ -2422,6 +2450,12 @@ this.XPIDatabaseReconcile = {
     aNewAddon.appDisabled = !XPIDatabase.isUsableAddon(aNewAddon);
 
     if (isDetectedInstall && aNewAddon.foreignInstall) {
+      // Add the installation source info for the sideloaded extension.
+      aNewAddon.installTelemetryInfo = {
+        source: aLocation.name,
+        method: "sideload",
+      };
+
       // If the add-on is a foreign install and is in a scope where add-ons
       // that were dropped in should default to disabled then disable it
       let disablingScopes = Services.prefs.getIntPref(PREF_EM_AUTO_DISABLED_SCOPES, 0);

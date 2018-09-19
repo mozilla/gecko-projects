@@ -21,8 +21,8 @@ DevToolsModules(
     'pending-breakpoints.js',
     'project-text-search.js',
     'quick-open.js',
-    'replay.js',
     'source-tree.js',
     'sources.js',
+    'tabs.js',
     'ui.js',
 )

@@ -24,6 +24,13 @@
 namespace js {
 namespace wasm {
 
+// Return a uint32_t which captures the observed properties of the CPU that
+// affect compilation. If code compiled now is to be serialized and executed
+// later, the ObservedCPUFeatures() must be ensured to be the same.
+
+uint32_t
+ObservedCPUFeatures();
+
 // Describes the JS scripted caller of a request to compile a wasm module.
 
 struct ScriptedCaller
@@ -39,31 +46,26 @@ struct ScriptedCaller
 
 struct CompileArgs : ShareableBase<CompileArgs>
 {
-    Assumptions assumptions;
     ScriptedCaller scriptedCaller;
     UniqueChars sourceMapURL;
     bool baselineEnabled;
     bool debugEnabled;
     bool ionEnabled;
     bool sharedMemoryEnabled;
-    HasGcTypes gcTypesEnabled;
+    HasGcTypes gcTypesConfigured;
     bool testTiering;
 
-    CompileArgs(Assumptions&& assumptions, ScriptedCaller&& scriptedCaller)
-      : assumptions(std::move(assumptions)),
-        scriptedCaller(std::move(scriptedCaller)),
+    explicit CompileArgs(ScriptedCaller&& scriptedCaller)
+      : scriptedCaller(std::move(scriptedCaller)),
         baselineEnabled(false),
         debugEnabled(false),
         ionEnabled(false),
         sharedMemoryEnabled(false),
-        gcTypesEnabled(HasGcTypes::False),
+        gcTypesConfigured(HasGcTypes::False),
         testTiering(false)
     {}
 
-    // If CompileArgs is constructed without arguments, initFromContext() must
-    // be called to complete initialization.
-    CompileArgs() = default;
-    bool initFromContext(JSContext* cx, ScriptedCaller&& scriptedCaller);
+    CompileArgs(JSContext* cx, ScriptedCaller&& scriptedCaller);
 };
 
 typedef RefPtr<CompileArgs> MutableCompileArgs;
@@ -87,11 +89,11 @@ CompileBuffer(const CompileArgs& args,
               UniqueChars* error,
               UniqueCharsVector* warnings);
 
-// Attempt to compile the second tier of the given wasm::Module, returning whether
-// tier-2 compilation succeeded and Module::finishTier2 was called.
+// Attempt to compile the second tier of the given wasm::Module.
 
-bool
-CompileTier2(const CompileArgs& args, Module& module, Atomic<bool>* cancelled);
+void
+CompileTier2(const CompileArgs& args, const Bytes& bytecode, const Module& module,
+             Atomic<bool>* cancelled);
 
 // Compile the given WebAssembly module which has been broken into three
 // partitions:

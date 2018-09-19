@@ -42,14 +42,27 @@ amContentHandler.prototype = {
 
     aRequest.cancel(Cr.NS_BINDING_ABORTED);
 
+    const {triggeringPrincipal} = aRequest.loadInfo;
+
+    let sourceHost;
+
+    try {
+      sourceHost = triggeringPrincipal.URI.host;
+    } catch (err) {
+      // Ignore errors when retrieving the host for the principal (e.g. null principals raise
+      // an NS_ERROR_FAILURE when principal.URI.host is accessed).
+    }
+
     let install = {
       uri: uri.spec,
       hash: null,
       name: null,
       icon: null,
       mimetype: XPI_CONTENT_TYPE,
-      triggeringPrincipal: aRequest.loadInfo.triggeringPrincipal,
-      callbackID: -1
+      triggeringPrincipal,
+      callbackID: -1,
+      method: "link",
+      sourceHost,
     };
 
     if (Services.appinfo.processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT) {
@@ -66,17 +79,14 @@ amContentHandler.prototype = {
         listener.wrappedJSObject.receiveMessage({
           name: MSG_INSTALL_ADDON,
           target: element,
-          data: install
+          data: install,
         });
         return;
       }
     }
 
     // Fall back to sending through the message manager
-    let messageManager = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIDocShell)
-                               .QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIContentFrameMessageManager);
+    let messageManager = window.docShell.messageManager;
 
     messageManager.sendAsyncMessage(MSG_INSTALL_ADDON, install);
   },
@@ -88,7 +98,7 @@ amContentHandler.prototype = {
     let msg = "amContentHandler.js: " + (aMsg.join ? aMsg.join("") : aMsg);
     Services.console.logStringMessage(msg);
     dump(msg + "\n");
-  }
+  },
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([amContentHandler]);

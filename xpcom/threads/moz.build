@@ -32,6 +32,7 @@ EXPORTS += [
     'nsProxyRelease.h',
     'nsThread.h',
     'nsThreadManager.h',
+    'nsThreadPool.h',
     'nsThreadUtils.h',
 ]
 
@@ -119,3 +120,6 @@ LOCAL_INCLUDES += [
 FINAL_LIBRARY = 'xul'
 
 include('/ipc/chromium/chromium-config.mozbuild')
+
+if CONFIG['CC_TYPE'] == 'clang-cl':
+    AllowCompilerWarnings()  # workaround for bug 1090497

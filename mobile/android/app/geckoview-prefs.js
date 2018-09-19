@@ -16,6 +16,8 @@ pref("toolkit.telemetry.isGeckoViewMode", true);
 // Disable the Telemetry Event Ping
 pref("toolkit.telemetry.eventping.enabled", false);
 
+pref("geckoview.console.enabled", false);
+
 // Disable Web Push until we get it working
 pref("dom.push.enabled", false);
 

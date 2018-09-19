@@ -44,6 +44,11 @@ using namespace js;
 using namespace js::jit;
 
 #ifdef XP_WIN
+// TODO: implement the necessary support for AArch64.
+# if defined(HAVE_64BIT_BUILD) && defined(_M_X64)
+#  define NEED_JIT_UNWIND_HANDLING
+# endif
+
 static void*
 ComputeRandomAllocationAddress()
 {
@@ -72,7 +77,7 @@ ComputeRandomAllocationAddress()
     return (void*) (base | (rand & mask));
 }
 
-# ifdef HAVE_64BIT_BUILD
+# ifdef NEED_JIT_UNWIND_HANDLING
 static js::JitExceptionHandler sJitExceptionHandler;
 
 JS_FRIEND_API(void)
@@ -121,8 +126,9 @@ ExceptionHandler(PEXCEPTION_RECORD exceptionRecord, _EXCEPTION_REGISTRATION_RECO
 static bool
 RegisterExecutableMemory(void* p, size_t bytes, size_t pageSize)
 {
-    if (!VirtualAlloc(p, pageSize, MEM_COMMIT, PAGE_READWRITE))
+    if (!VirtualAlloc(p, pageSize, MEM_COMMIT, PAGE_READWRITE)) {
         MOZ_CRASH();
+    }
 
     ExceptionHandlerRecord* r = reinterpret_cast<ExceptionHandlerRecord*>(p);
 
@@ -157,8 +163,9 @@ RegisterExecutableMemory(void* p, size_t bytes, size_t pageSize)
     r->thunk[11] = 0xe0;
 
     DWORD oldProtect;
-    if (!VirtualProtect(p, pageSize, PAGE_EXECUTE_READ, &oldProtect))
+    if (!VirtualProtect(p, pageSize, PAGE_EXECUTE_READ, &oldProtect)) {
         MOZ_CRASH();
+    }
 
     // XXX NB: The profiler believes this function is only called from the main
     // thread. If that ever becomes untrue, the profiler must be updated
@@ -183,28 +190,31 @@ UnregisterExecutableMemory(void* p, size_t bytes, size_t pageSize)
 static void*
 ReserveProcessExecutableMemory(size_t bytes)
 {
-# ifdef HAVE_64BIT_BUILD
+# ifdef NEED_JIT_UNWIND_HANDLING
     size_t pageSize = gc::SystemPageSize();
-    if (sJitExceptionHandler)
+    if (sJitExceptionHandler) {
         bytes += pageSize;
+    }
 # endif
 
     void* p = nullptr;
     for (size_t i = 0; i < 10; i++) {
         void* randomAddr = ComputeRandomAllocationAddress();
         p = VirtualAlloc(randomAddr, bytes, MEM_RESERVE, PAGE_NOACCESS);
-        if (p)
+        if (p) {
             break;
+        }
     }
 
     if (!p) {
         // Try again without randomization.
         p = VirtualAlloc(nullptr, bytes, MEM_RESERVE, PAGE_NOACCESS);
-        if (!p)
+        if (!p) {
             return nullptr;
+        }
     }
 
-# ifdef HAVE_64BIT_BUILD
+# ifdef NEED_JIT_UNWIND_HANDLING
     if (sJitExceptionHandler) {
         if (!RegisterExecutableMemory(p, bytes, pageSize)) {
             VirtualFree(p, 0, MEM_RELEASE);
@@ -224,7 +234,7 @@ ReserveProcessExecutableMemory(size_t bytes)
 static void
 DeallocateProcessExecutableMemory(void* addr, size_t bytes)
 {
-# ifdef HAVE_64BIT_BUILD
+# ifdef NEED_JIT_UNWIND_HANDLING
     UnregisterJitCodeRegion((uint8_t*)addr, bytes);
 
     if (sJitExceptionHandler) {
@@ -252,8 +262,9 @@ static MOZ_MUST_USE bool
 CommitPages(void* addr, size_t bytes, ProtectionSetting protection)
 {
     void* p = VirtualAlloc(addr, bytes, MEM_COMMIT, ProtectionSettingToFlags(protection));
-    if (!p)
+    if (!p) {
         return false;
+    }
     MOZ_RELEASE_ASSERT(p == addr);
     return true;
 }
@@ -261,8 +272,9 @@ CommitPages(void* addr, size_t bytes, ProtectionSetting protection)
 static void
 DecommitPages(void* addr, size_t bytes)
 {
-    if (!VirtualFree(addr, bytes, MEM_DECOMMIT))
+    if (!VirtualFree(addr, bytes, MEM_DECOMMIT)) {
         MOZ_CRASH("DecommitPages failed");
+    }
 }
 #else // !XP_WIN
 static void*
@@ -297,8 +309,9 @@ ReserveProcessExecutableMemory(size_t bytes)
     void* randomAddr = ComputeRandomAllocationAddress();
     void* p = MozTaggedAnonymousMmap(randomAddr, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON,
                                      -1, 0, "js-executable-memory");
-    if (p == MAP_FAILED)
+    if (p == MAP_FAILED) {
         return nullptr;
+    }
     return p;
 }
 
@@ -342,8 +355,9 @@ CommitPages(void* addr, size_t bytes, ProtectionSetting protection)
     void* p = MozTaggedAnonymousMmap(addr, bytes, ProtectionSettingToFlags(protection),
                                      MAP_FIXED | MAP_PRIVATE | MAP_ANON,
                                      -1, 0, "js-executable-memory");
-    if (p == MAP_FAILED)
+    if (p == MAP_FAILED) {
         return false;
+    }
     MOZ_RELEASE_ASSERT(p == addr);
     return true;
 }
@@ -403,8 +417,9 @@ class PageBitSet
 #ifdef DEBUG
     bool empty() const {
         for (size_t i = 0; i < NumWords; i++) {
-            if (words_[i] != 0)
+            if (words_[i] != 0) {
                 return false;
+            }
         }
         return true;
     }
@@ -442,7 +457,8 @@ class ProcessExecutableMemory
 
     // pagesAllocated_ is an Atomic so that bytesAllocated does not have to
     // take the lock.
-    mozilla::Atomic<size_t, mozilla::ReleaseAcquire> pagesAllocated_;
+    mozilla::Atomic<size_t, mozilla::ReleaseAcquire,
+                    mozilla::recordreplay::Behavior::DontPreserve> pagesAllocated_;
 
     // Page where we should try to allocate next.
     size_t cursor_;
@@ -467,8 +483,9 @@ class ProcessExecutableMemory
         MOZ_RELEASE_ASSERT(gc::SystemPageSize() <= ExecutableCodePageSize);
 
         void* p = ReserveProcessExecutableMemory(MaxCodeBytesPerProcess);
-        if (!p)
+        if (!p) {
             return false;
+        }
 
         base_ = static_cast<uint8_t*>(p);
 
@@ -523,8 +540,9 @@ ProcessExecutableMemory::allocate(size_t bytes, ProtectionSetting protection,
         MOZ_ASSERT(pagesAllocated_ <= MaxCodePages);
 
         // Check if we have enough pages available.
-        if (pagesAllocated_ + numPages >= MaxCodePages)
+        if (pagesAllocated_ + numPages >= MaxCodePages) {
             return nullptr;
+        }
 
         MOZ_ASSERT(bytes <= MaxCodeBytesPerProcess);
 
@@ -533,8 +551,9 @@ ProcessExecutableMemory::allocate(size_t bytes, ProtectionSetting protection,
 
         for (size_t i = 0; i < MaxCodePages; i++) {
             // Make sure page + numPages - 1 is a valid index.
-            if (page + numPages > MaxCodePages)
+            if (page + numPages > MaxCodePages) {
                 page = 0;
+            }
 
             bool available = true;
             for (size_t j = 0; j < numPages; j++) {
@@ -549,8 +568,9 @@ ProcessExecutableMemory::allocate(size_t bytes, ProtectionSetting protection,
             }
 
             // Mark the pages as unavailable.
-            for (size_t j = 0; j < numPages; j++)
+            for (size_t j = 0; j < numPages; j++) {
                 pages_.insert(page + j);
+            }
 
             pagesAllocated_ += numPages;
             MOZ_ASSERT(pagesAllocated_ <= MaxCodePages);
@@ -558,14 +578,16 @@ ProcessExecutableMemory::allocate(size_t bytes, ProtectionSetting protection,
             // If we allocated a small number of pages, move cursor_ to the
             // next page. We don't do this for larger allocations to avoid
             // skipping a large number of small holes.
-            if (numPages <= 2)
+            if (numPages <= 2) {
                 cursor_ = page + numPages;
+            }
 
             p = base_ + page * ExecutableCodePageSize;
             break;
         }
-        if (!p)
+        if (!p) {
             return nullptr;
+        }
     }
 
     // Commit the pages after releasing the lock.
@@ -595,20 +617,23 @@ ProcessExecutableMemory::deallocate(void* addr, size_t bytes, bool decommit)
 
     // Decommit before taking the lock.
     MOZ_MAKE_MEM_NOACCESS(addr, bytes);
-    if (decommit)
+    if (decommit) {
         DecommitPages(addr, bytes);
+    }
 
     LockGuard<Mutex> guard(lock_);
     MOZ_ASSERT(numPages <= pagesAllocated_);
     pagesAllocated_ -= numPages;
 
-    for (size_t i = 0; i < numPages; i++)
+    for (size_t i = 0; i < numPages; i++) {
         pages_.remove(firstPage + i);
+    }
 
     // Move the cursor back so we can reuse pages instead of fragmenting the
     // whole region.
-    if (firstPage < cursor_)
+    if (firstPage < cursor_) {
         cursor_ = firstPage;
+    }
 }
 
 static ProcessExecutableMemory execMemory;
@@ -681,12 +706,14 @@ js::jit::ReprotectRegion(void* start, size_t size, ProtectionSetting protection)
 #ifdef XP_WIN
     DWORD oldProtect;
     DWORD flags = ProtectionSettingToFlags(protection);
-    if (!VirtualProtect(pageStart, size, flags, &oldProtect))
+    if (!VirtualProtect(pageStart, size, flags, &oldProtect)) {
         return false;
+    }
 #else
     unsigned flags = ProtectionSettingToFlags(protection);
-    if (mprotect(pageStart, size, flags))
+    if (mprotect(pageStart, size, flags)) {
         return false;
+    }
 #endif
 
     execMemory.assertValidAddress(pageStart, size);

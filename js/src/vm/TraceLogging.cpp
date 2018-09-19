@@ -29,7 +29,6 @@
 #include "jit/JitFrames-inl.h"
 
 using namespace js;
-using namespace js::jit;
 
 using mozilla::DebugOnly;
 
@@ -91,12 +90,14 @@ rdtsc(void)
 static bool
 EnsureTraceLoggerState()
 {
-    if (MOZ_LIKELY(traceLoggerState))
+    if (MOZ_LIKELY(traceLoggerState)) {
         return true;
+    }
 
     traceLoggerState = js_new<TraceLoggerThreadState>();
-    if (!traceLoggerState)
+    if (!traceLoggerState) {
         return false;
+    }
 
     if (!traceLoggerState->init()) {
         DestroyTraceLoggerThreadState();
@@ -132,22 +133,25 @@ js::CurrentThreadOwnsTraceLoggerThreadStateLock()
 void
 js::DestroyTraceLogger(TraceLoggerThread* logger)
 {
-    if (!EnsureTraceLoggerState())
+    if (!EnsureTraceLoggerState()) {
         return;
+    }
     traceLoggerState->destroyLogger(logger);
 }
 
 bool
 TraceLoggerThread::init()
 {
-    if (!events.init())
+    if (!events.init()) {
         return false;
+    }
 
     // Minimum amount of capacity needed for operation to allow flushing.
     // Flushing requires space for the actual event and two spaces to log the
     // start and stop of flushing.
-    if (!events.ensureSpaceBeforeAdd(3))
+    if (!events.ensureSpaceBeforeAdd(3)) {
         return false;
+    }
 
     return true;
 }
@@ -159,33 +163,38 @@ TraceLoggerThread::initGraph()
     // graph into the UniquePtr. So it gets deleted when TraceLoggerThread
     // is destructed.
     graph.reset(js_new<TraceLoggerGraph>());
-    if (!graph.get())
+    if (!graph.get()) {
         return;
+    }
 
     MOZ_ASSERT(traceLoggerState);
+    bool graphFile = traceLoggerState->IsGraphFileEnabled();
     uint64_t start = rdtsc() - traceLoggerState->startupTime;
-    if (!graph->init(start)) {
+    if (!graph->init(start, graphFile)) {
         graph = nullptr;
         return;
     }
 
-    // Report the textIds to the graph.
-    for (uint32_t i = 0; i < TraceLogger_LastTreeItem; i++) {
-        TraceLoggerTextId id = TraceLoggerTextId(i);
-        graph->addTextId(i, TLTextIdString(id));
-    }
-    graph->addTextId(TraceLogger_LastTreeItem, "TraceLogger internal");
-    for (uint32_t i = TraceLogger_LastTreeItem + 1; i < TraceLogger_Last; i++) {
-        TraceLoggerTextId id = TraceLoggerTextId(i);
-        graph->addTextId(i, TLTextIdString(id));
+    if (graphFile) {
+        // Report the textIds to the graph.
+        for (uint32_t i = 0; i < TraceLogger_TreeItemEnd; i++) {
+            TraceLoggerTextId id = TraceLoggerTextId(i);
+            graph->addTextId(i, TLTextIdString(id));
+        }
+        graph->addTextId(TraceLogger_TreeItemEnd, "TraceLogger internal");
+        for (uint32_t i = TraceLogger_TreeItemEnd + 1; i < TraceLogger_Last; i++) {
+            TraceLoggerTextId id = TraceLoggerTextId(i);
+            graph->addTextId(i, TLTextIdString(id));
+        }
     }
 }
 
 TraceLoggerThread::~TraceLoggerThread()
 {
     if (graph.get()) {
-        if (!failed)
+        if (!failed) {
             graph->log(events);
+        }
         graph = nullptr;
     }
 }
@@ -198,8 +207,9 @@ TraceLoggerThread::enable()
         return true;
     }
 
-    if (failed)
+    if (failed) {
         return false;
+    }
 
     enabled_ = 1;
     logTimestamp(TraceLogger_Enable);
@@ -233,8 +243,9 @@ TraceLoggerThread::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const
     size += graphStack.sizeOfExcludingThis(mallocSizeOf);
 #endif
     size += events.sizeOfExcludingThis(mallocSizeOf);
-    if (graph.get())
+    if (graph.get()) {
         size += graph->sizeOfIncludingThis(mallocSizeOf);
+    }
     return size;
 }
 
@@ -247,16 +258,20 @@ TraceLoggerThread::sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const
 bool
 TraceLoggerThread::enable(JSContext* cx)
 {
-    if (!enable())
+    using namespace js::jit;
+
+    if (!enable()) {
         return fail(cx, "internal error");
+    }
 
     if (enabled_ == 1) {
         // Get the top Activation to log the top script/pc (No inlined frames).
         ActivationIterator iter(cx);
         Activation* act = iter.activation();
 
-        if (!act)
+        if (!act) {
             return fail(cx, "internal error");
+        }
 
         JSScript* script = nullptr;
         int32_t engine = 0;
@@ -271,8 +286,9 @@ TraceLoggerThread::enable(JSContext* cx)
                                               "not yet supported in wasm code");
                     return false;
                 }
-                if (frame.asJSJit().isScripted())
+                if (frame.asJSJit().isScripted()) {
                     break;
+                }
                 ++frame;
             }
 
@@ -291,8 +307,9 @@ TraceLoggerThread::enable(JSContext* cx)
             script = fp->script();
             engine = TraceLogger_Interpreter;
         }
-        if (script->compartment() != cx->compartment())
+        if (script->compartment() != cx->compartment()) {
             return fail(cx, "compartment mismatch");
+        }
 
         TraceLoggerEvent event(TraceLogger_Scripts, script);
         startEvent(event);
@@ -310,16 +327,18 @@ TraceLoggerThread::disable(bool force, const char* error)
         return false;
     }
 
-    if (enabled_ == 0)
+    if (enabled_ == 0) {
         return true;
+    }
 
     if (enabled_ > 1 && !force) {
         enabled_--;
         return true;
     }
 
-    if (force)
+    if (force) {
         traceLoggerState->maybeSpewError(error);
+    }
 
     logTimestamp(TraceLogger_Disable);
     enabled_ = 0;
@@ -330,8 +349,9 @@ TraceLoggerThread::disable(bool force, const char* error)
 const char*
 TraceLoggerThread::maybeEventText(uint32_t id)
 {
-    if (id < TraceLogger_Last)
+    if (id < TraceLogger_Last) {
         return TLTextIdString(static_cast<TraceLoggerTextId>(id));
+    }
     return traceLoggerState->maybeEventText(id);
 }
 
@@ -341,8 +361,9 @@ TraceLoggerThreadState::maybeEventText(uint32_t id)
     LockGuard<Mutex> guard(lock);
 
     TextIdHashMap::Ptr p = textIdPayloads.lookup(id);
-    if (!p)
+    if (!p) {
         return nullptr;
+    }
 
     return p->value()->string();
 }
@@ -355,11 +376,10 @@ TraceLoggerThreadState::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
     // Do not count threadLoggers since they are counted by JSContext::traceLogger.
 
     size_t size = 0;
-    size += pointerMap.sizeOfExcludingThis(mallocSizeOf);
-    if (textIdPayloads.initialized()) {
-        size += textIdPayloads.sizeOfExcludingThis(mallocSizeOf);
-        for (TextIdHashMap::Range r = textIdPayloads.all(); !r.empty(); r.popFront())
-            r.front().value()->sizeOfIncludingThis(mallocSizeOf);
+    size += pointerMap.shallowSizeOfExcludingThis(mallocSizeOf);
+    size += textIdPayloads.shallowSizeOfExcludingThis(mallocSizeOf);
+    for (TextIdHashMap::Range r = textIdPayloads.all(); !r.empty(); r.popFront()) {
+        r.front().value()->sizeOfIncludingThis(mallocSizeOf);
     }
     return size;
 }
@@ -367,8 +387,9 @@ TraceLoggerThreadState::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
 bool
 TraceLoggerThread::textIdIsScriptEvent(uint32_t id)
 {
-    if (id < TraceLogger_Last)
+    if (id < TraceLogger_Last) {
         return false;
+    }
 
     // Currently this works by checking if text begins with "script".
     const char* str = eventText(id);
@@ -422,14 +443,16 @@ TraceLoggerThreadState::getOrCreateEventPayload(const char* text)
     }
 
     UniqueChars str = DuplicateString(text);
-    if (!str)
+    if (!str) {
         return nullptr;
+    }
 
     uint32_t textId = nextTextId;
 
     auto* payload = js_new<TraceLoggerEventPayload>(textId, std::move(str));
-    if (!payload)
+    if (!payload) {
         return nullptr;
+    }
 
     if (!textIdPayloads.putNew(textId, payload)) {
         js_delete(payload);
@@ -441,8 +464,9 @@ TraceLoggerThreadState::getOrCreateEventPayload(const char* text)
 
     nextTextId++;
 
-    if (!pointerMap.add(p, text, payload))
+    if (!pointerMap.add(p, text, payload)) {
         return nullptr;
+    }
 
     payload->incPointerCount();
 
@@ -453,8 +477,9 @@ TraceLoggerEventPayload*
 TraceLoggerThreadState::getOrCreateEventPayload(const char* filename,
                                                 uint32_t lineno, uint32_t colno, const void* ptr)
 {
-    if (!filename)
+    if (!filename) {
         filename = "<unknown>";
+    }
 
     LockGuard<Mutex> guard(lock);
 
@@ -469,13 +494,15 @@ TraceLoggerThreadState::getOrCreateEventPayload(const char* filename,
     }
 
     UniqueChars str = JS_smprintf("script %s:%u:%u", filename, lineno, colno);
-    if (!str)
+    if (!str) {
         return nullptr;
+    }
 
     uint32_t textId = nextTextId;
     auto* payload = js_new<TraceLoggerEventPayload>(textId, std::move(str));
-    if (!payload)
+    if (!payload) {
         return nullptr;
+    }
 
     if (!textIdPayloads.putNew(textId, payload)) {
         js_delete(payload);
@@ -488,8 +515,9 @@ TraceLoggerThreadState::getOrCreateEventPayload(const char* filename,
     nextTextId++;
 
     if (ptr) {
-        if (!pointerMap.add(p, ptr, payload))
+        if (!pointerMap.add(p, ptr, payload)) {
             return nullptr;
+        }
 
         payload->incPointerCount();
     }
@@ -537,8 +565,9 @@ TraceLoggerThread::startEvent(TraceLoggerTextId id) {
 void
 TraceLoggerThread::startEvent(const TraceLoggerEvent& event) {
     if (!event.hasTextId()) {
-        if (!enabled())
+        if (!enabled()) {
             return;
+        }
         startEvent(TraceLogger_Error);
         disable(/* force = */ true, "TraceLogger encountered an empty event. "
                                     "Potentially due to OOM during creation of "
@@ -553,20 +582,23 @@ TraceLoggerThread::startEvent(uint32_t id)
 {
     MOZ_ASSERT(TLTextIdIsTreeEvent(id) || id == TraceLogger_Error);
     MOZ_ASSERT(traceLoggerState);
-    if (!traceLoggerState->isTextIdEnabled(id))
+    if (!traceLoggerState->isTextIdEnabled(id)) {
        return;
+    }
 
 #ifdef DEBUG
     if (enabled_ > 0) {
         AutoEnterOOMUnsafeRegion oomUnsafe;
-        if (!graphStack.append(id))
+        if (!graphStack.append(id)) {
             oomUnsafe.crash("Could not add item to debug stack.");
+        }
     }
 #endif
 
-    if (graph.get()) {
-        for (uint32_t otherId = graph->nextTextId(); otherId <= id; otherId++)
+    if (graph.get() && traceLoggerState->IsGraphFileEnabled()) {
+        for (uint32_t otherId = graph->nextTextId(); otherId <= id; otherId++) {
             graph->addTextId(otherId, maybeEventText(id));
+        }
     }
 
     log(id);
@@ -591,8 +623,9 @@ TraceLoggerThread::stopEvent(uint32_t id)
 {
     MOZ_ASSERT(TLTextIdIsTreeEvent(id) || id == TraceLogger_Error);
     MOZ_ASSERT(traceLoggerState);
-    if (!traceLoggerState->isTextIdEnabled(id))
+    if (!traceLoggerState->isTextIdEnabled(id)) {
         return;
+    }
 
 #ifdef DEBUG
     if (enabled_ > 0 && !graphStack.empty()) {
@@ -629,19 +662,21 @@ TraceLoggerThread::logTimestamp(TraceLoggerTextId id)
 void
 TraceLoggerThread::logTimestamp(uint32_t id)
 {
-    MOZ_ASSERT(id > TraceLogger_LastTreeItem && id < TraceLogger_Last);
+    MOZ_ASSERT(id > TraceLogger_TreeItemEnd && id < TraceLogger_Last);
     log(id);
 }
 
 void
 TraceLoggerThread::log(uint32_t id)
 {
-    if (enabled_ == 0)
+    if (enabled_ == 0) {
         return;
+    }
 
 #ifdef DEBUG
-    if (id == TraceLogger_Disable)
+    if (id == TraceLogger_Disable) {
         graphStack.clear();
+    }
 #endif
 
     MOZ_ASSERT(traceLoggerState);
@@ -653,8 +688,16 @@ TraceLoggerThread::log(uint32_t id)
         uint64_t start = rdtsc() - traceLoggerState->startupTime;
 
         if (!events.ensureSpaceBeforeAdd(3)) {
-            if (graph.get())
+            if (graph.get()) {
                 graph->log(events);
+            }
+
+            // The data structures are full, and the graph file is not enabled
+            // so we cannot flush to disk.  Trace logging should stop here.
+            if (!traceLoggerState->IsGraphFileEnabled()) {
+                enabled_ = 0;
+                return;
+            }
 
             iteration_++;
             events.clear();
@@ -687,14 +730,14 @@ TraceLoggerThread::log(uint32_t id)
 
 TraceLoggerThreadState::~TraceLoggerThreadState()
 {
-    while (TraceLoggerThread* logger = threadLoggers.popFirst())
+    while (TraceLoggerThread* logger = threadLoggers.popFirst()) {
         js_delete(logger);
+    }
 
     threadLoggers.clear();
 
-    if (textIdPayloads.initialized()) {
-        for (TextIdHashMap::Range r = textIdPayloads.all(); !r.empty(); r.popFront())
-            js_delete(r.front().value());
+    for (TextIdHashMap::Range r = textIdPayloads.all(); !r.empty(); r.popFront()) {
+        js_delete(r.front().value());
     }
 
 #ifdef DEBUG
@@ -708,8 +751,9 @@ ContainsFlag(const char* str, const char* flag)
     size_t flaglen = strlen(flag);
     const char* index = strstr(str, flag);
     while (index) {
-        if ((index == str || index[-1] == ',') && (index[flaglen] == 0 || index[flaglen] == ','))
+        if ((index == str || index[-1] == ',') && (index[flaglen] == 0 || index[flaglen] == ',')) {
             return true;
+        }
         index = strstr(index + flaglen, flag);
     }
     return false;
@@ -719,8 +763,9 @@ bool
 TraceLoggerThreadState::init()
 {
     const char* env = getenv("TLLOG");
-    if (!env)
+    if (!env) {
         env = "";
+    }
 
     if (strstr(env, "help")) {
         fflush(nullptr);
@@ -756,8 +801,9 @@ TraceLoggerThreadState::init()
         );
         for (uint32_t i = 1; i < TraceLogger_Last; i++) {
             TraceLoggerTextId id = TraceLoggerTextId(i);
-            if (!TLTextIdIsTogglable(id))
+            if (!TLTextIdIsTogglable(id)) {
                 continue;
+            }
             printf("  %s\n", TLTextIdString(id));
         }
         printf("\n");
@@ -767,10 +813,11 @@ TraceLoggerThreadState::init()
 
     for (uint32_t i = 1; i < TraceLogger_Last; i++) {
         TraceLoggerTextId id = TraceLoggerTextId(i);
-        if (TLTextIdIsTogglable(id))
+        if (TLTextIdIsTogglable(id)) {
             enabledTextIds[i] = ContainsFlag(env, TLTextIdString(id));
-        else
+        } else {
             enabledTextIds[i] = true;
+        }
     }
 
     if (ContainsFlag(env, "Default")) {
@@ -857,7 +904,8 @@ TraceLoggerThreadState::init()
                 "\n"
                 "  EnableMainThread        Start logging main threads immediately.\n"
                 "  EnableOffThread         Start logging helper threads immediately.\n"
-                "  EnableGraph             Enable spewing the tracelogging graph to a file.\n"
+                "  EnableGraph             Enable the tracelogging graph.\n"
+                "  EnableGraphFile         Enable flushing tracelogger data to a file.\n"
                 "  Errors                  Report errors during tracing to stderr.\n"
             );
             printf("\n");
@@ -865,20 +913,22 @@ TraceLoggerThreadState::init()
             /*NOTREACHED*/
         }
 
-        if (strstr(options, "EnableMainThread"))
+        if (strstr(options, "EnableMainThread")) {
             mainThreadEnabled = true;
-        if (strstr(options, "EnableOffThread"))
+        }
+        if (strstr(options, "EnableOffThread")) {
             helperThreadEnabled = true;
-        if (strstr(options, "EnableGraph"))
-            graphSpewingEnabled = true;
-        if (strstr(options, "Errors"))
+        }
+        if (strstr(options, "EnableGraphFile")) {
+            graphFileEnabled = true;
+        }
+        if (strstr(options, "EnableGraph")) {
+            graphEnabled = true;
+        }
+        if (strstr(options, "Errors")) {
             spewErrors = true;
+        }
     }
-
-    if (!pointerMap.init())
-        return false;
-    if (!textIdPayloads.init())
-        return false;
 
     startupTime = rdtsc();
 
@@ -894,8 +944,9 @@ TraceLoggerThreadState::enableTextId(JSContext* cx, uint32_t textId)
 {
     MOZ_ASSERT(TLTextIdIsTogglable(textId));
 
-    if (enabledTextIds[textId])
+    if (enabledTextIds[textId]) {
         return;
+    }
 
     ReleaseAllJITCode(cx->runtime()->defaultFreeOp());
 
@@ -906,10 +957,12 @@ TraceLoggerThreadState::enableTextId(JSContext* cx, uint32_t textId)
         enabledTextIds[TraceLogger_Interpreter] = true;
     }
 
-    if (textId == TraceLogger_Scripts)
+    if (textId == TraceLogger_Scripts) {
         jit::ToggleBaselineTraceLoggerScripts(cx->runtime(), true);
-    if (textId == TraceLogger_Engine)
+    }
+    if (textId == TraceLogger_Engine) {
         jit::ToggleBaselineTraceLoggerEngine(cx->runtime(), true);
+    }
 
 }
 void
@@ -917,8 +970,9 @@ TraceLoggerThreadState::disableTextId(JSContext* cx, uint32_t textId)
 {
     MOZ_ASSERT(TLTextIdIsTogglable(textId));
 
-    if (!enabledTextIds[textId])
+    if (!enabledTextIds[textId]) {
         return;
+    }
 
     ReleaseAllJITCode(cx->runtime()->defaultFreeOp());
 
@@ -929,17 +983,20 @@ TraceLoggerThreadState::disableTextId(JSContext* cx, uint32_t textId)
         enabledTextIds[TraceLogger_Interpreter] = false;
     }
 
-    if (textId == TraceLogger_Scripts)
+    if (textId == TraceLogger_Scripts) {
         jit::ToggleBaselineTraceLoggerScripts(cx->runtime(), false);
-    if (textId == TraceLogger_Engine)
+    }
+    if (textId == TraceLogger_Engine) {
         jit::ToggleBaselineTraceLoggerEngine(cx->runtime(), false);
+    }
 }
 
 TraceLoggerThread*
 js::TraceLoggerForCurrentThread(JSContext* maybecx)
 {
-    if (!EnsureTraceLoggerState())
+    if (!EnsureTraceLoggerState()) {
         return nullptr;
+    }
     return traceLoggerState->forCurrentThread(maybecx);
 }
 
@@ -950,15 +1007,17 @@ TraceLoggerThreadState::forCurrentThread(JSContext* maybecx)
     MOZ_ASSERT_IF(maybecx, maybecx == TlsContext.get());
 
     JSContext* cx = maybecx ? maybecx : TlsContext.get();
-    if (!cx)
+    if (!cx) {
         return nullptr;
+    }
 
     if (!cx->traceLogger) {
         LockGuard<Mutex> guard(lock);
 
         TraceLoggerThread* logger = js_new<TraceLoggerThread>();
-        if (!logger)
+        if (!logger) {
             return nullptr;
+        }
 
         if (!logger->init()) {
             js_delete(logger);
@@ -968,11 +1027,13 @@ TraceLoggerThreadState::forCurrentThread(JSContext* maybecx)
         threadLoggers.insertFront(logger);
         cx->traceLogger = logger;
 
-        if (graphSpewingEnabled)
+        if (graphEnabled) {
             logger->initGraph();
+        }
 
-        if (CurrentHelperThread() ? helperThreadEnabled : mainThreadEnabled)
+        if (CurrentHelperThread() ? helperThreadEnabled : mainThreadEnabled) {
             logger->enable();
+        }
     }
 
     return cx->traceLogger;
@@ -992,23 +1053,26 @@ TraceLoggerThreadState::destroyLogger(TraceLoggerThread* logger)
 bool
 js::TraceLogTextIdEnabled(uint32_t textId)
 {
-    if (!EnsureTraceLoggerState())
+    if (!EnsureTraceLoggerState()) {
         return false;
+    }
     return traceLoggerState->isTextIdEnabled(textId);
 }
 
 void
 js::TraceLogEnableTextId(JSContext* cx, uint32_t textId)
 {
-    if (!EnsureTraceLoggerState())
+    if (!EnsureTraceLoggerState()) {
         return;
+    }
     traceLoggerState->enableTextId(cx, textId);
 }
 void
 js::TraceLogDisableTextId(JSContext* cx, uint32_t textId)
 {
-    if (!EnsureTraceLoggerState())
+    if (!EnsureTraceLoggerState()) {
         return;
+    }
     traceLoggerState->disableTextId(cx, textId);
 }
 
@@ -1023,8 +1087,9 @@ TraceLoggerEvent::TraceLoggerEvent(TraceLoggerTextId type, const char* filename,
     MOZ_ASSERT(type == TraceLogger_Scripts || type == TraceLogger_AnnotateScripts ||
                type == TraceLogger_InlinedScripts || type == TraceLogger_Frontend);
 
-    if (!traceLoggerState)
+    if (!traceLoggerState) {
         return;
+    }
 
     // Only log scripts when enabled, otherwise use the more generic type
     // (which will get filtered out).
@@ -1040,32 +1105,37 @@ TraceLoggerEvent::TraceLoggerEvent(TraceLoggerTextId type, const char* filename,
 TraceLoggerEvent::TraceLoggerEvent(const char* text)
   : payload_()
 {
-    if (traceLoggerState)
+    if (traceLoggerState) {
         payload_.setEventPayload(traceLoggerState->getOrCreateEventPayload(text));
+    }
 }
 
 TraceLoggerEvent::~TraceLoggerEvent()
 {
-    if (hasExtPayload())
+    if (hasExtPayload()) {
         extPayload()->release();
+    }
 }
 
 uint32_t
 TraceLoggerEvent::textId() const
 {
     MOZ_ASSERT(hasTextId());
-    if (hasExtPayload())
+    if (hasExtPayload()) {
         return extPayload()->textId();
+    }
     return payload_.textId();
 }
 
 TraceLoggerEvent&
 TraceLoggerEvent::operator=(const TraceLoggerEvent& other)
 {
-    if (other.hasExtPayload())
+    if (other.hasExtPayload()) {
         other.extPayload()->use();
-    if (hasExtPayload())
+    }
+    if (hasExtPayload()) {
         extPayload()->release();
+    }
 
     payload_ = other.payload_;
 
@@ -1075,6 +1145,7 @@ TraceLoggerEvent::operator=(const TraceLoggerEvent& other)
 TraceLoggerEvent::TraceLoggerEvent(const TraceLoggerEvent& other)
   : payload_(other.payload_)
 {
-    if (hasExtPayload())
+    if (hasExtPayload()) {
         extPayload()->use();
+    }
 }

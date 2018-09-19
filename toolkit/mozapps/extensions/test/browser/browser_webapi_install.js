@@ -15,7 +15,7 @@ function waitForClear() {
           Services.mm.removeMessageListener(MSG, listener);
           resolve();
         }
-      }
+      },
     };
 
     Services.mm.addMessageListener(MSG, listener, true);
@@ -213,6 +213,10 @@ function makeRegularTest(options, what) {
     let addons = await promiseAddonsByIDs([ID]);
     isnot(addons[0], null, "Found the addon");
 
+    // Check that the expected installTelemetryInfo has been stored in the addon details.
+    Assert.deepEqual(addons[0].installTelemetryInfo, {source: "test-host", method: "amWebAPI"},
+                     "Got the expected addon.installTelemetryInfo");
+
     await addons[0].uninstall();
 
     addons = await promiseAddonsByIDs([ID]);
@@ -234,7 +238,7 @@ add_task(makeInstallTest(async function(browser) {
         state: "STATE_CANCELLED",
         error: null,
       },
-    }
+    },
   ];
 
   await testInstall(browser, {url: XPI_URL}, steps, "canceling an install works");
@@ -259,7 +263,7 @@ add_task(makeInstallTest(async function(browser) {
         state: "STATE_DOWNLOAD_FAILED",
         error: "ERROR_NETWORK_FAILURE",
       },
-    }
+    },
   ];
 
   await testInstall(browser, {url: XPI_URL + "bogus"}, steps, "install of a bad url fails");
@@ -284,7 +288,7 @@ add_task(makeInstallTest(async function(browser) {
         state: "STATE_DOWNLOAD_FAILED",
         error: "ERROR_INCORRECT_HASH",
       },
-    }
+    },
   ];
 
   await testInstall(browser, {url: XPI_URL, hash: "sha256:bogus"}, steps, "install with bad hash fails");

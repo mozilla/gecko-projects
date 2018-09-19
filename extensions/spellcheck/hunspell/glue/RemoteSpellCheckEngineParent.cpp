@@ -5,14 +5,14 @@
 
 #include "RemoteSpellCheckEngineParent.h"
 #include "mozilla/Unused.h"
-#include "nsISpellChecker.h"
+#include "mozilla/mozSpellChecker.h"
 #include "nsServiceManagerUtils.h"
 
 namespace mozilla {
 
 RemoteSpellcheckEngineParent::RemoteSpellcheckEngineParent()
 {
-  mSpellChecker = do_CreateInstance(NS_SPELLCHECKER_CONTRACTID);
+  mSpellChecker = mozSpellChecker::Create();
 }
 
 RemoteSpellcheckEngineParent::~RemoteSpellcheckEngineParent()
@@ -32,17 +32,16 @@ RemoteSpellcheckEngineParent::RecvSetDictionary(
 mozilla::ipc::IPCResult
 RemoteSpellcheckEngineParent::RecvSetDictionaryFromList(
                                 nsTArray<nsString>&& aList,
-                                const intptr_t& aPromiseId)
+                                SetDictionaryFromListResolver&& aResolve)
 {
   for (auto& dictionary : aList) {
-    MOZ_ASSERT(!dictionary.IsEmpty());
     nsresult rv = mSpellChecker->SetCurrentDictionary(dictionary);
     if (NS_SUCCEEDED(rv)) {
-      Unused << SendNotifyOfCurrentDictionary(dictionary, aPromiseId);
+      aResolve(Tuple<const bool&, const nsString&>(true, dictionary));
       return IPC_OK();
     }
   }
-  Unused << SendNotifyOfCurrentDictionary(EmptyString(), aPromiseId);
+  aResolve(Tuple<const bool&, const nsString&>(false, EmptyString()));
   return IPC_OK();
 }
 

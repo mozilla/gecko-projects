@@ -14,16 +14,12 @@ service('ToolkitChromeRegistryService', 'nsIToolkitChromeRegistry',
         "@mozilla.org/chrome/chrome-registry;1")
 service('XULChromeRegistryService', 'nsIXULChromeRegistry',
         "@mozilla.org/chrome/chrome-registry;1")
-service('XULOverlayProviderService', 'nsIXULOverlayProvider',
-        "@mozilla.org/chrome/chrome-registry;1")
 service('IOService', 'nsIIOService',
         "@mozilla.org/network/io-service;1")
 service('ObserverService', 'nsIObserverService',
         "@mozilla.org/observer-service;1")
 service('StringBundleService', 'nsIStringBundleService',
         "@mozilla.org/intl/stringbundle;1")
-service('XPConnect', 'nsIXPConnect',
-        "@mozilla.org/js/xpc/XPConnect;1")
 service('PermissionManager', 'nsIPermissionManager',
         "@mozilla.org/permissionmanager;1")
 service('ServiceWorkerManager', 'nsIServiceWorkerManager',
@@ -66,7 +62,6 @@ CPP_INCLUDES = """
 #include "nsIChromeRegistry.h"
 #include "nsIStringBundle.h"
 #include "nsIToolkitChromeRegistry.h"
-#include "nsIXULOverlayProvider.h"
 #include "IHistory.h"
 #include "nsIXPConnect.h"
 #include "nsIPermissionManager.h"

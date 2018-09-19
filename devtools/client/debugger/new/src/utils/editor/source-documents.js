@@ -76,7 +76,7 @@ function updateDocument(editor, source) {
     return;
   }
 
-  const sourceId = source.get("id");
+  const sourceId = source.id;
   const doc = getDocument(sourceId) || editor.createDocument();
   editor.replaceDocument(doc);
   updateLineNumberFormat(editor, sourceId);
@@ -142,6 +142,15 @@ function setEditorText(editor, source) {
     editor.setText(text);
   }
 }
+
+function setMode(editor, source, symbols) {
+  const mode = (0, _source.getMode)(source, symbols);
+  const currentMode = editor.codeMirror.getOption("mode");
+
+  if (!currentMode || currentMode.name != mode.name) {
+    editor.setMode(mode);
+  }
+}
 /**
  * Handle getting the source document or creating a new
  * document with the correct mode and text.
@@ -157,18 +166,13 @@ function showSourceText(editor, source, symbols) {
     const doc = getDocument(source.id);
 
     if (editor.codeMirror.doc === doc) {
-      const mode = (0, _source.getMode)(source, symbols);
-
-      if (doc.mode.name !== mode.name) {
-        editor.setMode(mode);
-      }
-
+      setMode(editor, source, symbols);
       return;
     }
 
     editor.replaceDocument(doc);
     updateLineNumberFormat(editor, source.id);
-    editor.setMode((0, _source.getMode)(source, symbols));
+    setMode(editor, source, symbols);
     return doc;
   }
 
@@ -176,6 +180,6 @@ function showSourceText(editor, source, symbols) {
   setDocument(source.id, doc);
   editor.replaceDocument(doc);
   setEditorText(editor, source);
-  editor.setMode((0, _source.getMode)(source, symbols));
+  setMode(editor, source, symbols);
   updateLineNumberFormat(editor, source.id);
 }

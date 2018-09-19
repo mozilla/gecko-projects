@@ -28,6 +28,9 @@
 # define getpid _getpid
 #endif
 
+#include "js/CharacterEncoding.h"
+#include "js/Utility.h"
+#include "util/Text.h"
 #include "vm/Probes.h"
 
 #include "vm/JSContext-inl.h"
@@ -69,10 +72,11 @@ StartOSXProfiling(const char* profileName, pid_t pid)
     profiler = "Instruments";
 #endif
     if (!ok) {
-        if (profileName)
+        if (profileName) {
             UnsafeError("Failed to start %s for %s", profiler, profileName);
-        else
+        } else {
             UnsafeError("Failed to start %s", profiler);
+        }
         return false;
     }
     return true;
@@ -87,8 +91,9 @@ JS_StartProfiling(const char* profileName, pid_t pid)
     ok = StartOSXProfiling(profileName, pid);
 #endif
 #ifdef __linux__
-    if (!js_StartPerf())
+    if (!js_StartPerf()) {
         ok = false;
+    }
 #endif
     return ok;
 }
@@ -103,8 +108,9 @@ JS_StopProfiling(const char* profileName)
 #endif
 #endif
 #ifdef __linux__
-    if (!js_StopPerf())
+    if (!js_StopPerf()) {
         ok = false;
+    }
 #endif
     return ok;
 }
@@ -188,27 +194,21 @@ JS_DumpProfile(const char* outfile, const char* profileName)
 
 #ifdef MOZ_PROFILING
 
-struct RequiredStringArg {
-    JSContext* mCx;
-    char* mBytes;
-    RequiredStringArg(JSContext* cx, const CallArgs& args, size_t argi, const char* caller)
-        : mCx(cx), mBytes(nullptr)
-    {
-        if (args.length() <= argi) {
-            JS_ReportErrorASCII(cx, "%s: not enough arguments", caller);
-        } else if (!args[argi].isString()) {
-            JS_ReportErrorASCII(cx, "%s: invalid arguments (string expected)", caller);
-        } else {
-            mBytes = JS_EncodeString(cx, args[argi].toString());
-        }
+static UniqueChars
+RequiredStringArg(JSContext* cx, const CallArgs& args, size_t argi, const char* caller)
+{
+    if (args.length() <= argi) {
+        JS_ReportErrorASCII(cx, "%s: not enough arguments", caller);
+        return nullptr;
     }
-    operator void*() {
-        return (void*) mBytes;
+
+    if (!args[argi].isString()) {
+        JS_ReportErrorASCII(cx, "%s: invalid arguments (string expected)", caller);
+        return nullptr;
     }
-    ~RequiredStringArg() {
-        js_free(mBytes);
-    }
-};
+
+    return JS_EncodeStringToLatin1(cx, args[argi].toString());
+}
 
 static bool
 StartProfiling(JSContext* cx, unsigned argc, Value* vp)
@@ -219,12 +219,13 @@ StartProfiling(JSContext* cx, unsigned argc, Value* vp)
         return true;
     }
 
-    RequiredStringArg profileName(cx, args, 0, "startProfiling");
-    if (!profileName)
+    UniqueChars profileName = RequiredStringArg(cx, args, 0, "startProfiling");
+    if (!profileName) {
         return false;
+    }
 
     if (args.length() == 1) {
-        args.rval().setBoolean(JS_StartProfiling(profileName.mBytes, getpid()));
+        args.rval().setBoolean(JS_StartProfiling(profileName.get(), getpid()));
         return true;
     }
 
@@ -233,7 +234,7 @@ StartProfiling(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
     pid_t pid = static_cast<pid_t>(args[1].toInt32());
-    args.rval().setBoolean(JS_StartProfiling(profileName.mBytes, pid));
+    args.rval().setBoolean(JS_StartProfiling(profileName.get(), pid));
     return true;
 }
 
@@ -246,10 +247,11 @@ StopProfiling(JSContext* cx, unsigned argc, Value* vp)
         return true;
     }
 
-    RequiredStringArg profileName(cx, args, 0, "stopProfiling");
-    if (!profileName)
+    UniqueChars profileName = RequiredStringArg(cx, args, 0, "stopProfiling");
+    if (!profileName) {
         return false;
-    args.rval().setBoolean(JS_StopProfiling(profileName.mBytes));
+    }
+    args.rval().setBoolean(JS_StopProfiling(profileName.get()));
     return true;
 }
 
@@ -262,10 +264,11 @@ PauseProfilers(JSContext* cx, unsigned argc, Value* vp)
         return true;
     }
 
-    RequiredStringArg profileName(cx, args, 0, "pauseProfiling");
-    if (!profileName)
+    UniqueChars profileName = RequiredStringArg(cx, args, 0, "pauseProfiling");
+    if (!profileName) {
         return false;
-    args.rval().setBoolean(JS_PauseProfilers(profileName.mBytes));
+    }
+    args.rval().setBoolean(JS_PauseProfilers(profileName.get()));
     return true;
 }
 
@@ -278,10 +281,11 @@ ResumeProfilers(JSContext* cx, unsigned argc, Value* vp)
         return true;
     }
 
-    RequiredStringArg profileName(cx, args, 0, "resumeProfiling");
-    if (!profileName)
+    UniqueChars profileName = RequiredStringArg(cx, args, 0, "resumeProfiling");
+    if (!profileName) {
         return false;
-    args.rval().setBoolean(JS_ResumeProfilers(profileName.mBytes));
+    }
+    args.rval().setBoolean(JS_ResumeProfilers(profileName.get()));
     return true;
 }
 
@@ -294,18 +298,20 @@ DumpProfile(JSContext* cx, unsigned argc, Value* vp)
     if (args.length() == 0) {
         ret = JS_DumpProfile(nullptr, nullptr);
     } else {
-        RequiredStringArg filename(cx, args, 0, "dumpProfile");
-        if (!filename)
+        UniqueChars filename = RequiredStringArg(cx, args, 0, "dumpProfile");
+        if (!filename) {
             return false;
+        }
 
         if (args.length() == 1) {
-            ret = JS_DumpProfile(filename.mBytes, nullptr);
+            ret = JS_DumpProfile(filename.get(), nullptr);
         } else {
-            RequiredStringArg profileName(cx, args, 1, "dumpProfile");
-            if (!profileName)
+            UniqueChars profileName = RequiredStringArg(cx, args, 1, "dumpProfile");
+            if (!profileName) {
                 return false;
+            }
 
-            ret = JS_DumpProfile(filename.mBytes, profileName.mBytes);
+            ret = JS_DumpProfile(filename.get(), profileName.get());
         }
     }
 
@@ -367,11 +373,12 @@ DumpCallgrind(JSContext* cx, unsigned argc, Value* vp)
         return true;
     }
 
-    RequiredStringArg outFile(cx, args, 0, "dumpCallgrind");
-    if (!outFile)
+    UniqueChars outFile = RequiredStringArg(cx, args, 0, "dumpCallgrind");
+    if (!outFile) {
         return false;
+    }
 
-    args.rval().setBoolean(js_DumpCallgrind(outFile.mBytes));
+    args.rval().setBoolean(js_DumpCallgrind(outFile.get()));
     return true;
 }
 #endif
@@ -404,7 +411,7 @@ static const JSFunctionSpec profiling_functions[] = {
 JS_PUBLIC_API(bool)
 JS_DefineProfilingFunctions(JSContext* cx, HandleObject obj)
 {
-    assertSameCompartment(cx, obj);
+    cx->check(obj);
 #ifdef MOZ_PROFILING
     return JS_DefineFunctions(cx, obj, profiling_functions);
 #else
@@ -539,30 +546,33 @@ bool js_StartPerf()
         const char* defaultArgs[] = {"perf", "record", "--pid", mainPidStr, "--output", outfile};
 
         Vector<const char*, 0, SystemAllocPolicy> args;
-        if (!args.append(defaultArgs, ArrayLength(defaultArgs)))
+        if (!args.append(defaultArgs, ArrayLength(defaultArgs))) {
             return false;
+        }
 
         const char* flags = getenv("MOZ_PROFILE_PERF_FLAGS");
         if (!flags) {
             flags = "--call-graph";
         }
 
-        UniqueChars flags2((char*)js_malloc(strlen(flags) + 1));
-        if (!flags2)
+        UniqueChars flags2 = DuplicateString(flags);
+        if (!flags2) {
             return false;
-        strcpy(flags2.get(), flags);
+        }
 
         // Split |flags2| on spaces.
         char* toksave;
         char* tok = strtok_r(flags2.get(), " ", &toksave);
         while (tok) {
-            if (!args.append(tok))
+            if (!args.append(tok)) {
                 return false;
+            }
             tok = strtok_r(nullptr, " ", &toksave);
         }
 
-        if (!args.append((char*) nullptr))
+        if (!args.append((char*) nullptr)) {
             return false;
+        }
 
         execvp("perf", const_cast<char**>(args.begin()));
 

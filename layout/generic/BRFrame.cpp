@@ -158,7 +158,7 @@ BRFrame::Reflow(nsPresContext* aPresContext,
     }
 
     // Return our reflow status
-    StyleClear breakType = aReflowInput.mStyleDisplay->PhysicalBreakType(wm);
+    StyleClear breakType = aReflowInput.mStyleDisplay->mBreakType;
     if (StyleClear::None == breakType) {
       breakType = StyleClear::Line;
     }
@@ -199,7 +199,7 @@ BRFrame::AddInlinePrefISize(gfxContext *aRenderingContext,
 BRFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   nscoord result = 0;
-  DISPLAY_MIN_WIDTH(this, result);
+  DISPLAY_MIN_INLINE_SIZE(this, result);
   return result;
 }
 
@@ -207,7 +207,7 @@ BRFrame::GetMinISize(gfxContext *aRenderingContext)
 BRFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   nscoord result = 0;
-  DISPLAY_PREF_WIDTH(this, result);
+  DISPLAY_PREF_INLINE_SIZE(this, result);
   return result;
 }
 

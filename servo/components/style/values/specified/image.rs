@@ -55,19 +55,19 @@ impl SpecifiedValueInfo for Gradient {
     fn collect_completion_keywords(f: KeywordsCollectFn) {
         // This list here should keep sync with that in Gradient::parse.
         f(&[
-          "linear-gradient",
-          "-webkit-linear-gradient",
-          "-moz-linear-gradient",
-          "repeating-linear-gradient",
-          "-webkit-repeating-linear-gradient",
-          "-moz-repeating-linear-gradient",
-          "radial-gradient",
-          "-webkit-radial-gradient",
-          "-moz-radial-gradient",
-          "repeating-radial-gradient",
-          "-webkit-repeating-radial-gradient",
-          "-moz-repeating-radial-gradient",
-          "-webkit-gradient",
+            "linear-gradient",
+            "-webkit-linear-gradient",
+            "-moz-linear-gradient",
+            "repeating-linear-gradient",
+            "-webkit-repeating-linear-gradient",
+            "-moz-repeating-linear-gradient",
+            "radial-gradient",
+            "-webkit-radial-gradient",
+            "-moz-radial-gradient",
+            "repeating-radial-gradient",
+            "-webkit-repeating-radial-gradient",
+            "-moz-repeating-radial-gradient",
+            "-webkit-gradient",
         ]);
     }
 }
@@ -166,6 +166,21 @@ impl Image {
             ref t => Err(location.new_unexpected_token_error(t.clone())),
         })
     }
+
+    /// Provides an alternate method for parsing that associates the URL with
+    /// anonymous CORS headers.
+    ///
+    /// FIXME(emilio): It'd be nicer for this to pass a `CorsMode` parameter to
+    /// a shared function instead.
+    pub fn parse_with_cors_anonymous<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<Image, ParseError<'i>> {
+        if let Ok(url) = input.try(|input| SpecifiedImageUrl::parse_with_cors_anonymous(context, input)) {
+            return Ok(generic::Image::Url(url));
+        }
+        Self::parse(context, input)
+    }
 }
 
 impl Parse for Gradient {
@@ -239,9 +254,9 @@ impl Parse for Gradient {
         #[cfg(feature = "gecko")]
         {
             use gecko_bindings::structs;
-            if compat_mode == CompatMode::Moz && !unsafe {
-                structs::StaticPrefs_sVarCache_layout_css_prefixes_gradients
-            } {
+            if compat_mode == CompatMode::Moz &&
+                !unsafe { structs::StaticPrefs_sVarCache_layout_css_prefixes_gradients }
+            {
                 return Err(input.new_custom_error(StyleParseErrorKind::UnexpectedFunction(func)));
             }
         }
@@ -760,9 +775,9 @@ impl LineDirection {
                 // There is no `to` keyword in webkit prefixed syntax. If it's consumed,
                 // parsing should throw an error.
                 CompatMode::WebKit if to_ident.is_ok() => {
-                    return Err(i.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(
-                        "to".into(),
-                    )))
+                    return Err(
+                        i.new_custom_error(SelectorParseErrorKind::UnexpectedIdent("to".into()))
+                    )
                 },
                 _ => {},
             }
@@ -969,8 +984,7 @@ impl Parse for PaintWorklet {
                 .try(|input| {
                     input.expect_comma()?;
                     input.parse_comma_separated(|input| SpecifiedValue::parse(input))
-                })
-                .unwrap_or(vec![]);
+                }).unwrap_or(vec![]);
             Ok(PaintWorklet { name, arguments })
         })
     }

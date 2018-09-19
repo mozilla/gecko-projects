@@ -511,7 +511,6 @@ get_quoted_path(const NS_tchar *path)
   NS_tstrcat(c, kQuote);
   c += lenQuote;
   *c = NS_T('\0');
-  c++;
   return s;
 }
 
@@ -900,7 +899,7 @@ static int remove_recursive_on_reboot(const NS_tchar *path, const NS_tchar *dele
 
   if (!S_ISDIR(sInfo.st_mode)) {
     NS_tchar tmpDeleteFile[MAXPATHLEN];
-    GetTempFileNameW(deleteDir, L"rep", 0, tmpDeleteFile);
+    GetUUIDTempFilePath(deleteDir, L"rep", tmpDeleteFile);
     NS_tremove(tmpDeleteFile);
     rv = rename_file(path, tmpDeleteFile, false);
     if (MoveFileEx(rv ? path : tmpDeleteFile, nullptr, MOVEFILE_DELAY_UNTIL_REBOOT)) {
@@ -1005,7 +1004,7 @@ static int backup_discard(const NS_tchar *path, const NS_tchar *relPath)
   if (rv && !sStagedUpdate && !sReplaceRequest) {
     LOG(("backup_discard: unable to remove: " LOG_S, relBackup));
     NS_tchar path[MAXPATHLEN];
-    GetTempFileNameW(gDeleteDirPath, L"moz", 0, path);
+    GetUUIDTempFilePath(gDeleteDirPath, L"moz", path);
     if (rename_file(backup, path)) {
       LOG(("backup_discard: failed to rename file:" LOG_S ", dst:" LOG_S,
            relBackup, relPath));
@@ -2085,7 +2084,6 @@ LaunchCallbackApp(const NS_tchar *workingDir,
                   NS_tchar **argv,
                   bool usingService)
 {
-  putenv(const_cast<char*>("NO_EM_RESTART="));
   putenv(const_cast<char*>("MOZ_LAUNCHED_CHILD=1"));
 
   // Run from the specified working directory (see bug 312360).
@@ -2122,7 +2120,7 @@ WriteStatusFile(const char* aStatus)
 #if defined(XP_WIN)
   // The temp file is not removed on failure since there is client code that
   // will remove it.
-  if (GetTempFileNameW(gPatchDirPath, L"sta", 0, filename) == 0) {
+  if (!GetUUIDTempFilePath(gPatchDirPath, L"sta", filename)) {
     return false;
   }
 #else

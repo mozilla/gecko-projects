@@ -39,7 +39,7 @@
 #include "nsLayoutUtils.h"
 #include "nsDisplayList.h"
 #include "nsITheme.h"
-#include "nsThemeConstants.h"
+#include "nsStyleConsts.h"
 #include "mozilla/Likely.h"
 #include <algorithm>
 #include "nsTextNode.h"
@@ -89,7 +89,7 @@ nsComboboxControlFrame::RedisplayTextEvent::Run()
  * combo box is toggled to open or close. this is used by Accessibility which presses
  * that button Programmatically.
  */
-class nsComboButtonListener : public nsIDOMEventListener
+class nsComboButtonListener final : public nsIDOMEventListener
 {
 private:
   virtual ~nsComboButtonListener() {}
@@ -761,7 +761,7 @@ bool
 nsComboboxControlFrame::HasDropDownButton() const
 {
   const nsStyleDisplay* disp = StyleDisplay();
-  return disp->mAppearance == NS_THEME_MENULIST &&
+  return disp->mAppearance == StyleAppearance::Menulist &&
     (!IsThemed(disp) ||
      PresContext()->GetTheme()->ThemeNeedsComboboxDropmarker());
 }
@@ -823,7 +823,7 @@ nscoord
 nsComboboxControlFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   nscoord minISize;
-  DISPLAY_MIN_WIDTH(this, minISize);
+  DISPLAY_MIN_INLINE_SIZE(this, minISize);
   minISize = GetIntrinsicISize(aRenderingContext, nsLayoutUtils::MIN_ISIZE);
   return minISize;
 }
@@ -832,7 +832,7 @@ nscoord
 nsComboboxControlFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   nscoord prefISize;
-  DISPLAY_PREF_WIDTH(this, prefISize);
+  DISPLAY_PREF_INLINE_SIZE(this, prefISize);
   prefISize = GetIntrinsicISize(aRenderingContext, nsLayoutUtils::PREF_ISIZE);
   return prefISize;
 }
@@ -1304,7 +1304,8 @@ nsComboboxControlFrame::GetDisplayNode() const
 
 // XXXbz this is a for-now hack.  Now that display:inline-block works,
 // need to revisit this.
-class nsComboboxDisplayFrame : public nsBlockFrame {
+class nsComboboxDisplayFrame final : public nsBlockFrame
+{
 public:
   NS_DECL_FRAMEARENA_HELPERS(nsComboboxDisplayFrame)
 
@@ -1394,7 +1395,7 @@ nsComboboxControlFrame::CreateFrameForDisplayNode()
   // create the ComputedStyle for the anonymous block frame and text frame
   RefPtr<ComputedStyle> computedStyle;
   computedStyle = styleSet->
-    ResolveInheritingAnonymousBoxStyle(nsCSSAnonBoxes::mozDisplayComboboxControlFrame,
+    ResolveInheritingAnonymousBoxStyle(nsCSSAnonBoxes::mozDisplayComboboxControlFrame(),
                                        mComputedStyle);
 
   RefPtr<ComputedStyle> textComputedStyle;
@@ -1554,7 +1555,8 @@ nsComboboxControlFrame::UpdateRecentIndex(int32_t aIndex)
   return index;
 }
 
-class nsDisplayComboboxFocus : public nsDisplayItem {
+class nsDisplayComboboxFocus : public nsDisplayItem
+{
 public:
   nsDisplayComboboxFocus(nsDisplayListBuilder* aBuilder,
                          nsComboboxControlFrame* aFrame)
@@ -1678,8 +1680,8 @@ void nsComboboxControlFrame::FireValueChangeEvent()
 {
   // Fire ValueChange event to indicate data value of combo box has changed
   nsContentUtils::AddScriptRunner(
-    new AsyncEventDispatcher(mContent, NS_LITERAL_STRING("ValueChange"), true,
-                             false));
+    new AsyncEventDispatcher(mContent, NS_LITERAL_STRING("ValueChange"),
+                             CanBubble::eYes, ChromeOnlyDispatch::eNo));
 }
 
 void

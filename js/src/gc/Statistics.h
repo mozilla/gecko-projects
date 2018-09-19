@@ -159,8 +159,9 @@ struct Statistics
 
     void reset(gc::AbortReason reason) {
         MOZ_ASSERT(reason != gc::AbortReason::None);
-        if (!aborted)
+        if (!aborted) {
             slices_.back().resetReason = reason;
+        }
     }
 
     void nonincremental(gc::AbortReason reason) {
@@ -190,6 +191,27 @@ struct Statistics
         triggerAmount = amount;
         triggerThreshold = threshold;
         thresholdTriggered = true;
+    }
+
+    void noteNurseryAlloc() {
+        allocsSinceMinorGC.nursery++;
+    }
+
+    // tenured allocs don't include nursery evictions.
+    void setAllocsSinceMinorGCTenured(uint32_t allocs) {
+        allocsSinceMinorGC.tenured = allocs;
+    }
+
+    uint32_t allocsSinceMinorGCNursery() {
+        return allocsSinceMinorGC.nursery;
+    }
+
+    uint32_t allocsSinceMinorGCTenured() {
+        return allocsSinceMinorGC.tenured;
+    }
+
+    uint32_t* addressOfAllocsSinceMinorGCNursery() {
+        return &allocsSinceMinorGC.nursery;
     }
 
     void beginNurseryCollection(JS::gcreason::Reason reason);
@@ -312,7 +334,17 @@ struct Statistics
     /* Number of events of this type for this GC. */
     EnumeratedArray<Stat,
                     STAT_LIMIT,
-                    mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire>> counts;
+                    mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire,
+                                    mozilla::recordreplay::Behavior::DontPreserve>> counts;
+
+    /*
+     * These events cannot be kept in the above array, we need to take their
+     * address.
+     */
+    struct {
+        uint32_t nursery;
+        uint32_t tenured;
+    } allocsSinceMinorGC;
 
     /* Allocated space before the GC started. */
     size_t preBytes;
@@ -431,13 +463,15 @@ struct MOZ_RAII AutoPhase
     AutoPhase(Statistics& stats, bool condition, PhaseKind phaseKind)
       : stats(stats), phaseKind(phaseKind), enabled(condition)
     {
-        if (enabled)
+        if (enabled) {
             stats.beginPhase(phaseKind);
+        }
     }
 
     ~AutoPhase() {
-        if (enabled)
+        if (enabled) {
             stats.endPhase(phaseKind);
+        }
     }
 
     Statistics& stats;

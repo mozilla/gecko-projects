@@ -19,8 +19,9 @@ NS_IMPL_ISUPPORTS(xpcJSWeakReference, xpcIJSWeakReference)
 
 nsresult xpcJSWeakReference::Init(JSContext* cx, const JS::Value& object)
 {
-    if (!object.isObject())
+    if (!object.isObject()) {
         return NS_OK;
+    }
 
     JS::RootedObject obj(cx, &object.toObject());
 
@@ -41,7 +42,7 @@ nsresult xpcJSWeakReference::Init(JSContext* cx, const JS::Value& object)
 
     // See if object is a wrapped JSObject.
     RefPtr<nsXPCWrappedJS> wrapped;
-    nsresult rv = nsXPCWrappedJS::GetNewOrUsed(obj,
+    nsresult rv = nsXPCWrappedJS::GetNewOrUsed(cx, obj,
                                                NS_GET_IID(nsISupports),
                                                getter_AddRefs(wrapped));
     if (!wrapped) {

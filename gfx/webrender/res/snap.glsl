@@ -8,7 +8,7 @@ vec4 compute_snap_positions(mat4 transform, RectWithSize snap_rect) {
     // Ensure that the snap rect is at *least* one device pixel in size.
     // TODO(gw): It's not clear to me that this is "correct". Specifically,
     //           how should it interact with sub-pixel snap rects when there
-    //           is a scroll_node transform with scale present? But it does fix
+    //           is a transform with scale present? But it does fix
     //           the test cases we have in Servo that are failing without it
     //           and seem better than not having this at all.
     snap_rect.size = max(snap_rect.size, vec2(1.0 / uDevicePixelRatio));
@@ -27,11 +27,10 @@ vec2 compute_snap_offset_impl(
     mat4 transform,
     RectWithSize snap_rect,
     RectWithSize reference_rect,
-    vec4 snap_positions,
-    vec2 snap_bias) {
+    vec4 snap_positions) {
 
     /// World offsets applied to the corners of the snap rectangle.
-    vec4 snap_offsets = floor(snap_positions + snap_bias.xyxy) - snap_positions;
+    vec4 snap_offsets = floor(snap_positions + 0.5) - snap_positions;
 
     /// Compute the position of this vertex inside the snap rectangle.
     vec2 normalized_snap_pos = (reference_pos - reference_rect.p0) / reference_rect.size;
@@ -41,11 +40,10 @@ vec2 compute_snap_offset_impl(
 }
 
 // Compute a snapping offset in world space (adjusted to pixel ratio),
-// given local position on the scroll_node and a snap rectangle.
+// given local position on the transform and a snap rectangle.
 vec2 compute_snap_offset(vec2 local_pos,
                          mat4 transform,
-                         RectWithSize snap_rect,
-                         vec2 snap_bias) {
+                         RectWithSize snap_rect) {
     vec4 snap_positions = compute_snap_positions(
         transform,
         snap_rect
@@ -56,8 +54,7 @@ vec2 compute_snap_offset(vec2 local_pos,
         transform,
         snap_rect,
         snap_rect,
-        snap_positions,
-        snap_bias
+        snap_positions
     );
 
     return snap_offsets;

@@ -4,10 +4,13 @@
 
 "use strict";
 
-let {FormAutofillParent} = ChromeUtils.import("resource://formautofill/FormAutofillParent.jsm", {});
-ChromeUtils.import("resource://formautofill/MasterPassword.jsm");
-ChromeUtils.import("resource://formautofill/FormAutofillStorage.jsm");
 ChromeUtils.import("resource://gre/modules/CreditCard.jsm");
+
+let FormAutofillParent;
+add_task(async function setup() {
+  ({FormAutofillParent} = ChromeUtils.import("resource://formautofill/FormAutofillParent.jsm", {}));
+  ChromeUtils.import("resource://formautofill/MasterPassword.jsm");
+});
 
 const TEST_ADDRESS_1 = {
   "given-name": "Timothy",
@@ -33,6 +36,7 @@ let TEST_CREDIT_CARD_1 = {
   "cc-number": "4111111111111111",
   "cc-exp-month": 4,
   "cc-exp-year": 2017,
+  "cc-type": "visa",
 };
 
 let TEST_CREDIT_CARD_2 = {
@@ -40,6 +44,7 @@ let TEST_CREDIT_CARD_2 = {
   "cc-number": "4929001587121045",
   "cc-exp-month": 2,
   "cc-exp-year": 2017,
+  "cc-type": "visa",
 };
 
 let target = {
@@ -74,7 +79,7 @@ add_task(async function test_getRecords() {
 
     if (collection) {
       sinon.stub(collection, "getAll");
-      collection.getAll.returns(expectedResult);
+      collection.getAll.returns(Promise.resolve(expectedResult));
     }
     await formAutofillParent._getRecords({collectionName}, target);
     mock.verify();
@@ -93,7 +98,7 @@ add_task(async function test_getRecords_addresses() {
   let mockAddresses = [TEST_ADDRESS_1, TEST_ADDRESS_2];
   let collection = formAutofillParent.formAutofillStorage.addresses;
   sinon.stub(collection, "getAll");
-  collection.getAll.returns(mockAddresses);
+  collection.getAll.returns(Promise.resolve(mockAddresses));
 
   let testCases = [
     {
@@ -168,13 +173,14 @@ add_task(async function test_getRecords_creditCards() {
   await formAutofillParent.init();
   await formAutofillParent.formAutofillStorage.initialize();
   let collection = formAutofillParent.formAutofillStorage.creditCards;
-  let encryptedCCRecords = [TEST_CREDIT_CARD_1, TEST_CREDIT_CARD_2].map(record => {
+  let encryptedCCRecords = await Promise.all([TEST_CREDIT_CARD_1, TEST_CREDIT_CARD_2].map(async record => {
     let clonedRecord = Object.assign({}, record);
     clonedRecord["cc-number"] = CreditCard.getLongMaskedNumber(record["cc-number"]);
-    clonedRecord["cc-number-encrypted"] = MasterPassword.encryptSync(record["cc-number"]);
+    clonedRecord["cc-number-encrypted"] = await MasterPassword.encrypt(record["cc-number"]);
     return clonedRecord;
-  });
-  sinon.stub(collection, "getAll", () => [Object.assign({}, encryptedCCRecords[0]), Object.assign({}, encryptedCCRecords[1])]);
+  }));
+  sinon.stub(collection, "getAll", () =>
+    Promise.resolve([Object.assign({}, encryptedCCRecords[0]), Object.assign({}, encryptedCCRecords[1])]));
   let CreditCardsWithDecryptedNumber = [
     Object.assign({}, encryptedCCRecords[0], {"cc-number-decrypted": TEST_CREDIT_CARD_1["cc-number"]}),
     Object.assign({}, encryptedCCRecords[1], {"cc-number-decrypted": TEST_CREDIT_CARD_2["cc-number"]}),

@@ -7,12 +7,16 @@
 #ifndef mozilla_dom_shadowroot_h__
 #define mozilla_dom_shadowroot_h__
 
+#include "mozilla/dom/DocumentBinding.h"
 #include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/DocumentOrShadowRoot.h"
 #include "mozilla/dom/NameSpaceConstants.h"
+#include "mozilla/dom/ShadowRootBinding.h"
+#include "mozilla/ServoBindings.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIdentifierMapEntry.h"
+#include "nsStubMutationObserver.h"
 #include "nsTHashtable.h"
 
 class nsAtom;
@@ -51,6 +55,8 @@ public:
   ShadowRoot(Element* aElement, ShadowRootMode aMode,
              already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
 
+  void AddSizeOfExcludingThis(nsWindowSizes&, size_t* aNodeSize) const final;
+
   // Shadow DOM v1
   Element* Host() const
   {
@@ -84,6 +90,14 @@ public:
    */
   void CloneInternalDataFrom(ShadowRoot* aOther);
   void InsertSheetAt(size_t aIndex, StyleSheet&);
+
+  // Calls UnbindFromTree for each of our kids, and also flags us as no longer
+  // being connected.
+  void Unbind();
+
+  // Calls BindToTree on each of our kids, and also maybe flags us as being
+  // connected.
+  nsresult Bind();
 
 private:
   void InsertSheetIntoAuthorData(size_t aIndex, StyleSheet&);
@@ -144,12 +158,12 @@ public:
   void RemoveSlot(HTMLSlotElement* aSlot);
   bool HasSlots() const { return !mSlotMap.IsEmpty(); };
 
-  const RawServoAuthorStyles* ServoStyles() const
+  const RawServoAuthorStyles* GetServoStyles() const
   {
     return mServoStyles.get();
   }
 
-  RawServoAuthorStyles* ServoStyles()
+  RawServoAuthorStyles* GetServoStyles()
   {
     return mServoStyles.get();
   }
@@ -168,12 +182,28 @@ public:
   void GetInnerHTML(nsAString& aInnerHTML);
   void SetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError);
 
-  bool IsComposedDocParticipant() const
+  /**
+   * These methods allow UA Widget to insert DOM elements into the Shadow ROM
+   * without putting their DOM reflectors to content scope first.
+   * The inserted DOM will have their reflectors in the UA Widget scope.
+   */
+  nsINode* ImportNodeAndAppendChildAt(nsINode& aParentNode,
+                                      nsINode& aNode,
+                                      bool aDeep, mozilla::ErrorResult& rv);
+
+  nsINode* CreateElementAndAppendChildAt(nsINode& aParentNode,
+                                         const nsAString& aTagName,
+                                         mozilla::ErrorResult& rv);
+
+  bool IsUAWidget() const
   {
-    return mIsComposedDocParticipant;
+    return mIsUAWidget;
   }
 
-  void SetIsComposedDocParticipant(bool aIsComposedDocParticipant);
+  void SetIsUAWidget()
+  {
+    mIsUAWidget = true;
+  }
 
   void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
 
@@ -195,14 +225,9 @@ protected:
   // are in the shadow tree and should be kept alive by its parent.
   nsClassHashtable<nsStringHashKey, SlotArray> mSlotMap;
 
-  // Flag to indicate whether the descendants of this shadow root are part of the
-  // composed document. Ideally, we would use a node flag on nodes to
-  // mark whether it is in the composed document, but we have run out of flags
-  // so instead we track it here.
-  bool mIsComposedDocParticipant;
+  bool mIsUAWidget;
 
-  nsresult Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult,
-                 bool aPreallocateChildren) const override;
+  nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 };
 
 } // namespace dom

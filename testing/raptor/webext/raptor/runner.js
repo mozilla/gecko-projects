@@ -1,3 +1,4 @@
+
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -35,11 +36,13 @@ var testTabID = 0;
 var getHero = false;
 var getFNBPaint = false;
 var getFCP = false;
+var getDCF = false;
 var isHeroPending = false;
 var pendingHeroes = [];
 var settings = {};
 var isFNBPaintPending = false;
 var isFCPPending = false;
+var isDCFPending = false;
 var isBenchmarkPending = false;
 var pageTimeout = 10000; // default pageload timeout
 
@@ -77,7 +80,9 @@ function getTestSettings() {
         results.type = testType;
         results.name = testName;
         results.unit = settings.unit;
-        results.lower_is_better = settings.lower_is_better;
+        results.subtest_unit = settings.subtest_unit;
+        results.lower_is_better = settings.lower_is_better === true;
+        results.subtest_lower_is_better = settings.subtest_lower_is_better === true;
         results.alert_threshold = settings.alert_threshold;
 
         if (settings.page_timeout !== undefined) {
@@ -89,6 +94,9 @@ function getTestSettings() {
           if (settings.measure !== undefined) {
             if (settings.measure.fnbpaint !== undefined) {
               getFNBPaint = settings.measure.fnbpaint;
+            }
+            if (settings.measure.dcf !== undefined) {
+              getDCF = settings.measure.dcf;
             }
             if (settings.measure.fcp !== undefined) {
               getFCP = settings.measure.fcp;
@@ -105,7 +113,7 @@ function getTestSettings() {
         }
 
         // write options to storage that our content script needs to know
-        if (browserName === "firefox") {
+        if (["firefox", "geckoview"].includes(browserName)) {
           ext.storage.local.clear().then(function() {
             ext.storage.local.set({settings}).then(function() {
               console.log("wrote settings to ext local storage");
@@ -127,7 +135,7 @@ function getTestSettings() {
 
 function getBrowserInfo() {
   return new Promise(resolve => {
-    if (browserName === "firefox") {
+    if (["firefox", "geckoview"].includes(browserName)) {
       ext = browser;
       var gettingInfo = browser.runtime.getBrowserInfo();
       gettingInfo.then(function(bi) {
@@ -157,7 +165,7 @@ function testTabCreated(tab) {
 }
 
 async function testTabUpdated(tab) {
-  console.log("tab " + tab.id + " reloaded");
+  console.log("test tab updated");
   // wait for pageload test result from content
   await waitForResult();
   // move on to next cycle (or test complete)
@@ -169,7 +177,7 @@ function waitForResult() {
   return new Promise(resolve => {
     function checkForResult() {
       if (testType == "pageload") {
-        if (!isHeroPending && !isFNBPaintPending && !isFCPPending) {
+        if (!isHeroPending && !isFNBPaintPending && !isFCPPending && !isDCFPending) {
           cancelTimeoutAlarm("raptor-page-timeout");
           resolve();
         } else {
@@ -212,10 +220,12 @@ function nextCycle() {
           isFNBPaintPending = true;
         if (getFCP)
           isFCPPending = true;
+        if (getDCF)
+          isDCFPending = true;
       } else if (testType == "benchmark") {
         isBenchmarkPending = true;
       }
-      // (re)load the test page
+      // update the test page - browse to our test URL
       ext.tabs.update(testTabID, {url: testURL}, testTabUpdated);
     }, pageCycleDelay);
   } else {
@@ -223,10 +233,9 @@ function nextCycle() {
   }
 }
 
-function timeoutAlarmListener(alarm) {
-  var text = alarm.name;
-  console.error(text);
-  postToControlServer("status", text);
+function timeoutAlarmListener() {
+  console.error("raptor-page-timeout on %s" % testURL);
+  postToControlServer("raptor-page-timeout", [testName, testURL]);
   // call clean-up to shutdown gracefully
   cleanUp();
 }
@@ -241,7 +250,7 @@ function setTimeoutAlarm(timeoutName, timeoutMS) {
 }
 
 function cancelTimeoutAlarm(timeoutName) {
-  if (browserName === "firefox") {
+  if (browserName === "firefox" || browserName === "geckoview") {
     var clearAlarm = ext.alarms.clear(timeoutName);
     clearAlarm.then(function(onCleared) {
       if (onCleared) {
@@ -286,6 +295,9 @@ function resultListener(request, sender, sendResponse) {
       } else if (request.type == "fnbpaint") {
         results.measurements.fnbpaint.push(request.value);
         isFNBPaintPending = false;
+      } else if (request.type == "dcf") {
+        results.measurements.dcf.push(request.value);
+        isDCFPending = false;
       } else if (request.type == "fcp") {
         results.measurements.fcp.push(request.value);
         isFCPPending = false;
@@ -359,6 +371,7 @@ function cleanUp() {
 }
 
 function runner() {
+  console.log("Welcome to Jurassic Park!");
   let config = getTestConfig();
   console.log("test name is: " + config.test_name);
   console.log("test settings url is: " + config.test_settings_url);
@@ -388,7 +401,13 @@ function runner() {
       // wait some time for the browser to settle before beginning
       var text = "* pausing " + postStartupDelay / 1000 + " seconds to let browser settle... *";
       postToControlServer("status", text);
-      setTimeout(function() { ext.tabs.create({url: "about:blank"}); }, postStartupDelay);
+
+      // on geckoview you can't create a new tab; only using existing tab - set it blank first
+      if (config.browser == "geckoview") {
+        setTimeout(function() { nextCycle(); }, postStartupDelay);
+      } else {
+        setTimeout(function() { ext.tabs.create({url: "about:blank"}); }, postStartupDelay);
+      }
     });
   });
 }

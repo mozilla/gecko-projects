@@ -20,11 +20,11 @@ const TEST_URI = `
 
 add_task(async function() {
   await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-  const { inspector, gridInspector, toolbox } = await openLayoutView();
+  const { inspector, gridInspector, layoutView, toolbox } = await openLayoutView();
   const { document: doc } = gridInspector;
   const { store } = inspector;
-  const cPicker = gridInspector.getSwatchColorPickerTooltip();
-  const swatch = doc.querySelector(".grid-color-swatch");
+  const cPicker = layoutView.swatchColorPickerTooltip;
+  const swatch = doc.querySelector("#layout-grid-container .layout-color-swatch");
 
   info("Scrolling into view of the #grid color swatch.");
   swatch.scrollIntoView();

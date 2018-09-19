@@ -11,6 +11,7 @@
 #include "mozilla/Move.h"
 #include "mozilla/TypeTraits.h"
 
+#include "jit/JitcodeMap.h"
 #include "jit/JitFrames.h"
 #include "jit/LIR.h"
 #include "jit/MacroAssembler.h"
@@ -37,17 +38,6 @@ class OutOfLineTruncateSlow;
 struct ReciprocalMulConstants {
     int64_t multiplier;
     int32_t shiftAmount;
-};
-
-// This should be nested in CodeGeneratorShared, but it is used in
-// optimization tracking implementation and nested classes cannot be
-// forward-declared.
-struct NativeToTrackedOptimizations
-{
-    // [startOffset, endOffset]
-    CodeOffset startOffset;
-    CodeOffset endOffset;
-    const TrackedOptimizations* optimizations;
 };
 
 class CodeGeneratorShared : public LElementVisitor
@@ -77,8 +67,6 @@ class CodeGeneratorShared : public LElementVisitor
 
     // Label for the common return path.
     NonAssertingLabel returnLabel_;
-
-    FallbackICStubSpace stubSpace_;
 
     js::Vector<SafepointIndex, 0, SystemAllocPolicy> safepointIndices_;
     js::Vector<OsiIndex, 0, SystemAllocPolicy> osiIndices_;
@@ -110,13 +98,6 @@ class CodeGeneratorShared : public LElementVisitor
     js::Vector<PatchableTLEvent, 0, SystemAllocPolicy> patchableTLEvents_;
     js::Vector<CodeOffset, 0, SystemAllocPolicy> patchableTLScripts_;
 #endif
-
-  public:
-    struct NativeToBytecode {
-        CodeOffset nativeOffset;
-        InlineScriptTree* tree;
-        jsbytecode* pc;
-    };
 
   protected:
     js::Vector<NativeToBytecode, 0, SystemAllocPolicy> nativeToBytecodeList_;
@@ -190,11 +171,6 @@ class CodeGeneratorShared : public LElementVisitor
     // constant header present for every Ion frame, used for pre-determined
     // spills.
     int32_t frameDepth_;
-
-    // In some cases, we force stack alignment to platform boundaries, see
-    // also CodeGeneratorShared constructor. This value records the adjustment
-    // we've done.
-    int32_t frameInitialAdjustment_;
 
     // Frame class this frame's size falls into (see IonFrame.h).
     FrameSizeClass frameClass_;
@@ -278,8 +254,9 @@ class CodeGeneratorShared : public LElementVisitor
         masm.propagateOOM(allocateData(sizeof(mozilla::AlignedStorage2<T>), &index));
         masm.propagateOOM(icList_.append(index));
         masm.propagateOOM(icInfo_.append(CompileTimeICInfo()));
-        if (masm.oom())
+        if (masm.oom()) {
             return SIZE_MAX;
+        }
         // Use the copy constructor on the allocated space.
         MOZ_ASSERT(index == icList_.back());
         new (&runtimeData_[index]) T(cache);
@@ -334,7 +311,7 @@ class CodeGeneratorShared : public LElementVisitor
     void emitTruncateDouble(FloatRegister src, Register dest, MTruncateToInt32* mir);
     void emitTruncateFloat32(FloatRegister src, Register dest, MTruncateToInt32* mir);
 
-    void emitPreBarrier(Register base, const LAllocation* index, int32_t offsetAdjustment);
+    void emitPreBarrier(Register elements, const LAllocation* index, int32_t offsetAdjustment);
     void emitPreBarrier(Address address);
 
     // We don't emit code for trivial blocks, so if we want to branch to the
@@ -354,12 +331,14 @@ class CodeGeneratorShared : public LElementVisitor
     inline bool isNextBlock(LBlock* block) {
         uint32_t target = skipTrivialBlocks(block->mir())->id();
         uint32_t i = current->mir()->id() + 1;
-        if (target < i)
+        if (target < i) {
             return false;
+        }
         // Trivial blocks can be crossed via fallthrough.
         for (; i != target; ++i) {
-            if (!graph.getBlock(i)->isTrivial())
+            if (!graph.getBlock(i)->isTrivial()) {
                 return false;
+            }
         }
         return true;
     }

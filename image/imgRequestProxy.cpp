@@ -103,7 +103,6 @@ NS_INTERFACE_MAP_BEGIN(imgRequestProxy)
   NS_INTERFACE_MAP_ENTRY(imgIRequest)
   NS_INTERFACE_MAP_ENTRY(nsIRequest)
   NS_INTERFACE_MAP_ENTRY(nsISupportsPriority)
-  NS_INTERFACE_MAP_ENTRY(nsISecurityInfoProvider)
   NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsITimedChannel,
                                      TimedChannel() != nullptr)
 NS_INTERFACE_MAP_END
@@ -150,11 +149,7 @@ imgRequestProxy::~imgRequestProxy()
                                    mHadDispatch);
   }
 
-  // Unlock the image the proper number of times if we're holding locks on
-  // it. Note that UnlockImage() decrements mLockCount each time it's called.
-  while (mLockCount) {
-    UnlockImage();
-  }
+  MOZ_RELEASE_ASSERT(!mLockCount, "Someone forgot to unlock on time?");
 
   ClearAnimationConsumers();
 
@@ -807,7 +802,7 @@ imgRequestProxy::GetMimeType(char** aMimeType)
     return NS_ERROR_FAILURE;
   }
 
-  *aMimeType = NS_strdup(type);
+  *aMimeType = NS_xstrdup(type);
 
   return NS_OK;
 }
@@ -999,31 +994,6 @@ imgRequestProxy::AdjustPriority(int32_t priority)
   return NS_OK;
 }
 
-/** nsISecurityInfoProvider methods **/
-
-NS_IMETHODIMP
-imgRequestProxy::GetSecurityInfo(nsISupports** _retval)
-{
-  if (GetOwner()) {
-    return GetOwner()->GetSecurityInfo(_retval);
-  }
-
-  *_retval = nullptr;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-imgRequestProxy::GetHasTransferredData(bool* hasData)
-{
-  if (GetOwner()) {
-    *hasData = GetOwner()->HasTransferredData();
-  } else {
-    // The safe thing to do is to claim we have data
-    *hasData = true;
-  }
-  return NS_OK;
-}
-
 static const char*
 NotificationTypeToString(int32_t aType)
 {
@@ -1039,7 +1009,7 @@ NotificationTypeToString(int32_t aType)
     case imgINotificationObserver::IS_ANIMATED: return "IS_ANIMATED";
     case imgINotificationObserver::HAS_TRANSPARENCY: return "HAS_TRANSPARENCY";
     default:
-      NS_NOTREACHED("Notification list should be exhaustive");
+      MOZ_ASSERT_UNREACHABLE("Notification list should be exhaustive");
       return "(unknown notification)";
   }
 }

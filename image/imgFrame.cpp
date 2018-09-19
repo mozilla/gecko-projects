@@ -108,22 +108,21 @@ ShouldUseHeap(const IntSize& aSize,
 static already_AddRefed<DataSourceSurface>
 AllocateBufferForImage(const IntSize& size,
                        SurfaceFormat format,
-                       bool aIsAnimated = false)
+                       bool aIsAnimated = false,
+                       bool aIsFullFrame = true)
 {
   int32_t stride = VolatileSurfaceStride(size, format);
 
-  if (ShouldUseHeap(size, stride, aIsAnimated)) {
+  if (gfxVars::GetUseWebRenderOrDefault() &&
+      gfxPrefs::ImageMemShared() && aIsFullFrame) {
+    RefPtr<SourceSurfaceSharedData> newSurf = new SourceSurfaceSharedData();
+    if (newSurf->Init(size, stride, format)) {
+      return newSurf.forget();
+    }
+  } else if (ShouldUseHeap(size, stride, aIsAnimated)) {
     RefPtr<SourceSurfaceAlignedRawData> newSurf =
       new SourceSurfaceAlignedRawData();
     if (newSurf->Init(size, format, false, 0, stride)) {
-      return newSurf.forget();
-    }
-  }
-
-  if (!aIsAnimated && gfxVars::GetUseWebRenderOrDefault()
-                   && gfxPrefs::ImageMemShared()) {
-    RefPtr<SourceSurfaceSharedData> newSurf = new SourceSurfaceSharedData();
-    if (newSurf->Init(size, stride, format)) {
       return newSurf.forget();
     }
   } else {
@@ -213,6 +212,7 @@ imgFrame::imgFrame()
   , mPalettedImageData(nullptr)
   , mPaletteDepth(0)
   , mNonPremult(false)
+  , mIsFullFrame(false)
   , mCompositingFailed(false)
 {
 }
@@ -235,7 +235,8 @@ imgFrame::InitForDecoder(const nsIntSize& aImageSize,
                          SurfaceFormat aFormat,
                          uint8_t aPaletteDepth /* = 0 */,
                          bool aNonPremult /* = false */,
-                         const Maybe<AnimationParams>& aAnimParams /* = Nothing() */)
+                         const Maybe<AnimationParams>& aAnimParams /* = Nothing() */,
+                         bool aIsFullFrame /* = false */)
 {
   // Assert for properties that should be verified by decoders,
   // warn for properties related to bad content.
@@ -248,13 +249,20 @@ imgFrame::InitForDecoder(const nsIntSize& aImageSize,
   mImageSize = aImageSize;
   mFrameRect = aRect;
 
+  // May be updated shortly after InitForDecoder by BlendAnimationFilter
+  // because it needs to take into consideration the previous frames to
+  // properly calculate. We start with the whole frame as dirty.
+  mDirtyRect = aRect;
+
   if (aAnimParams) {
     mBlendRect = aAnimParams->mBlendRect;
     mTimeout = aAnimParams->mTimeout;
     mBlendMethod = aAnimParams->mBlendMethod;
     mDisposalMethod = aAnimParams->mDisposalMethod;
+    mIsFullFrame = aAnimParams->mFrameNum == 0 || aIsFullFrame;
   } else {
     mBlendRect = aRect;
+    mIsFullFrame = true;
   }
 
   // We only allow a non-trivial frame rect (i.e., a frame rect that doesn't
@@ -295,7 +303,8 @@ imgFrame::InitForDecoder(const nsIntSize& aImageSize,
     MOZ_ASSERT(!mLockedSurface, "Called imgFrame::InitForDecoder() twice?");
 
     bool postFirstFrame = aAnimParams && aAnimParams->mFrameNum > 0;
-    mRawSurface = AllocateBufferForImage(mFrameRect.Size(), mFormat, postFirstFrame);
+    mRawSurface = AllocateBufferForImage(mFrameRect.Size(), mFormat,
+                                         postFirstFrame, mIsFullFrame);
     if (!mRawSurface) {
       mAborted = true;
       return NS_ERROR_OUT_OF_MEMORY;
@@ -619,19 +628,27 @@ imgFrame::ImageUpdatedInternal(const nsIntRect& aUpdateRect)
 {
   mMonitor.AssertCurrentThreadOwns();
 
-  mDecoded.UnionRect(mDecoded, aUpdateRect);
-
   // Clamp to the frame rect to ensure that decoder bugs don't result in a
   // decoded rect that extends outside the bounds of the frame rect.
-  mDecoded.IntersectRect(mDecoded, mFrameRect);
+  IntRect updateRect = mFrameRect.Intersect(aUpdateRect);
+  if (updateRect.IsEmpty()) {
+    return NS_OK;
+  }
+
+  mDecoded.UnionRect(mDecoded, updateRect);
+
+  // Paletted images cannot invalidate.
+  if (mPalettedImageData) {
+    return NS_OK;
+  }
 
   // Update our invalidation counters for any consumers watching for changes
   // in the surface.
   if (mRawSurface) {
-    mRawSurface->Invalidate();
+    mRawSurface->Invalidate(updateRect);
   }
   if (mLockedSurface && mRawSurface != mLockedSurface) {
-    mLockedSurface->Invalidate();
+    mLockedSurface->Invalidate(updateRect);
   }
   return NS_OK;
 }
@@ -643,7 +660,27 @@ imgFrame::Finish(Opacity aFrameOpacity /* = Opacity::SOME_TRANSPARENCY */,
   MonitorAutoLock lock(mMonitor);
   MOZ_ASSERT(mLockCount > 0, "Image data should be locked");
 
-  ImageUpdatedInternal(GetRect());
+  if (mPalettedImageData) {
+    ImageUpdatedInternal(mFrameRect);
+  } else if (!mDecoded.IsEqualEdges(mFrameRect)) {
+    // The decoder should have produced rows starting from either the bottom or
+    // the top of the image. We need to calculate the region for which we have
+    // not yet invalidated.
+    IntRect delta(0, 0, mFrameRect.width, 0);
+    if (mDecoded.y == 0) {
+      delta.y = mDecoded.height;
+      delta.height = mFrameRect.height - mDecoded.height;
+    } else if (mDecoded.y + mDecoded.height == mFrameRect.height) {
+      delta.height = mFrameRect.height - mDecoded.y;
+    } else {
+      MOZ_ASSERT_UNREACHABLE("Decoder only updated middle of image!");
+      delta = mFrameRect;
+    }
+
+    ImageUpdatedInternal(delta);
+  }
+
+  MOZ_ASSERT(mDecoded.IsEqualEdges(mFrameRect));
 
   if (aFinalize) {
     FinalizeSurfaceInternal();

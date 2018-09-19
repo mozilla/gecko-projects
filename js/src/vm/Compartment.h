@@ -17,13 +17,14 @@
 
 #include "gc/Barrier.h"
 #include "gc/NurseryAwareHashMap.h"
-#include "gc/Zone.h"
 #include "js/UniquePtr.h"
+#include "vm/JSObject.h"
+#include "vm/JSScript.h"
 
 namespace js {
 
 namespace gc {
-template <typename Node, typename Derived> class ComponentFinder;
+struct ZoneComponentFinder;
 } // namespace gc
 
 class CrossCompartmentKey
@@ -33,10 +34,12 @@ class CrossCompartmentKey
                                         DebuggerWasmScript, DebuggerWasmSource };
     using DebuggerAndObject = mozilla::Tuple<NativeObject*, JSObject*, DebuggerObjectKind>;
     using DebuggerAndScript = mozilla::Tuple<NativeObject*, JSScript*>;
+    using DebuggerAndLazyScript = mozilla::Tuple<NativeObject*, LazyScript*>;
     using WrappedType = mozilla::Variant<
         JSObject*,
         JSString*,
         DebuggerAndScript,
+        DebuggerAndLazyScript,
         DebuggerAndObject>;
 
     explicit CrossCompartmentKey(JSObject* obj) : wrapped(obj) { MOZ_RELEASE_ASSERT(obj); }
@@ -56,6 +59,12 @@ class CrossCompartmentKey
         MOZ_RELEASE_ASSERT(debugger);
         MOZ_RELEASE_ASSERT(script);
     }
+    explicit CrossCompartmentKey(NativeObject* debugger, LazyScript* lazyScript)
+      : wrapped(DebuggerAndLazyScript(debugger, lazyScript))
+    {
+        MOZ_RELEASE_ASSERT(debugger);
+        MOZ_RELEASE_ASSERT(lazyScript);
+    }
 
     bool operator==(const CrossCompartmentKey& other) const { return wrapped == other.wrapped; }
     bool operator!=(const CrossCompartmentKey& other) const { return wrapped != other.wrapped; }
@@ -72,6 +81,7 @@ class CrossCompartmentKey
             ReturnType match(JSObject*& obj) { return f_(&obj); }
             ReturnType match(JSString*& str) { return f_(&str); }
             ReturnType match(DebuggerAndScript& tpl) { return f_(&mozilla::Get<1>(tpl)); }
+            ReturnType match(DebuggerAndLazyScript& tpl) { return f_(&mozilla::Get<1>(tpl)); }
             ReturnType match(DebuggerAndObject& tpl) { return f_(&mozilla::Get<1>(tpl)); }
         } matcher(f);
         return wrapped.match(matcher);
@@ -86,6 +96,7 @@ class CrossCompartmentKey
             ReturnType match(JSObject*& obj) { return ReturnType(); }
             ReturnType match(JSString*& str) { return ReturnType(); }
             ReturnType match(DebuggerAndScript& tpl) { return f_(&mozilla::Get<0>(tpl)); }
+            ReturnType match(DebuggerAndLazyScript& tpl) { return f_(&mozilla::Get<0>(tpl)); }
             ReturnType match(DebuggerAndObject& tpl) { return f_(&mozilla::Get<0>(tpl)); }
         } matcher(f);
         return wrapped.match(matcher);
@@ -95,6 +106,7 @@ class CrossCompartmentKey
         struct GetCompartmentFunctor {
             JS::Compartment* operator()(JSObject** tp) const { return (*tp)->compartment(); }
             JS::Compartment* operator()(JSScript** tp) const { return (*tp)->compartment(); }
+            JS::Compartment* operator()(LazyScript** tp) const { return (*tp)->compartment(); }
             JS::Compartment* operator()(JSString** tp) const { return nullptr; }
         };
         return applyToWrapped(GetCompartmentFunctor());
@@ -108,6 +120,10 @@ class CrossCompartmentKey
             HashNumber match(const DebuggerAndScript& tpl) {
                 return DefaultHasher<NativeObject*>::hash(mozilla::Get<0>(tpl)) ^
                        DefaultHasher<JSScript*>::hash(mozilla::Get<1>(tpl));
+            }
+            HashNumber match(const DebuggerAndLazyScript& tpl) {
+                return DefaultHasher<NativeObject*>::hash(mozilla::Get<0>(tpl)) ^
+                       DefaultHasher<LazyScript*>::hash(mozilla::Get<1>(tpl));
             }
             HashNumber match(const DebuggerAndObject& tpl) {
                 return DefaultHasher<NativeObject*>::hash(mozilla::Get<0>(tpl)) ^
@@ -129,6 +145,7 @@ class CrossCompartmentKey
             using ReturnType = bool;
             ReturnType operator()(JSObject** tp) { return !IsInsideNursery(*tp); }
             ReturnType operator()(JSScript** tp) { return true; }
+            ReturnType operator()(LazyScript** tp) { return true; }
             ReturnType operator()(JSString** tp) { return !IsInsideNursery(*tp); }
         };
         return const_cast<CrossCompartmentKey*>(this)->applyToWrapped(IsTenuredFunctor());
@@ -174,20 +191,24 @@ class WrapperMap
         void operator=(const Enum&) = delete;
 
         void goToNext() {
-            if (outer.isNothing())
+            if (outer.isNothing()) {
                 return;
+            }
             for (; !outer->empty(); outer->popFront()) {
                 JS::Compartment* c = outer->front().key();
                 // Need to skip string at first, because the filter may not be
                 // happy with a nullptr.
-                if (!c && skipStrings)
+                if (!c && skipStrings) {
                     continue;
-                if (filter && !filter->match(c))
+                }
+                if (filter && !filter->match(c)) {
                     continue;
+                }
                 InnerMap& m = outer->front().value();
                 if (!m.empty()) {
-                    if (inner.isSome())
+                    if (inner.isSome()) {
                         inner.reset();
+                    }
                     inner.emplace(m);
                     outer->popFront();
                     return;
@@ -217,8 +238,9 @@ class WrapperMap
             // Leave the outer map as nothing and only iterate the inner map we
             // find here.
             auto p = m.map.lookup(target);
-            if (p)
+            if (p) {
                 inner.emplace(p->value());
+            }
         }
 
         bool empty() const {
@@ -235,8 +257,9 @@ class WrapperMap
             MOZ_ASSERT(!empty());
             if (!inner->empty()) {
                 inner->popFront();
-                if (!inner->empty())
+                if (!inner->empty()) {
                     return;
+                }
             }
             goToNext();
         }
@@ -257,14 +280,17 @@ class WrapperMap
         Ptr(const InnerMap::Ptr& p, InnerMap& m) : InnerMap::Ptr(p), map(&m) {}
     };
 
-    MOZ_MUST_USE bool init(uint32_t len) { return map.init(len); }
+    WrapperMap() {}
+    explicit WrapperMap(size_t aLen) : map(aLen) {}
 
     bool empty() {
-        if (map.empty())
+        if (map.empty()) {
             return true;
+        }
         for (OuterMap::Enum e(map); !e.empty(); e.popFront()) {
-            if (!e.front().value().empty())
+            if (!e.front().value().empty()) {
                 return false;
+            }
         }
         return true;
     }
@@ -273,15 +299,17 @@ class WrapperMap
         auto op = map.lookup(const_cast<CrossCompartmentKey&>(k).compartment());
         if (op) {
             auto ip = op->value().lookup(k);
-            if (ip)
+            if (ip) {
                 return Ptr(ip, op->value());
+            }
         }
         return Ptr();
     }
 
     void remove(Ptr p) {
-        if (p)
+        if (p) {
             p.map->remove(p);
+        }
     }
 
     MOZ_MUST_USE bool put(const CrossCompartmentKey& k, const JS::Value& v) {
@@ -289,34 +317,39 @@ class WrapperMap
         MOZ_ASSERT(k.is<JSString*>() == !c);
         auto p = map.lookupForAdd(c);
         if (!p) {
-            InnerMap m;
-            if (!m.init(InitialInnerMapSize) || !map.add(p, c, std::move(m)))
+            InnerMap m(InitialInnerMapSize);
+            if (!map.add(p, c, std::move(m))) {
                 return false;
+            }
         }
         return p->value().put(k, v);
     }
 
     size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) {
-        size_t size = map.sizeOfExcludingThis(mallocSizeOf);
-        for (OuterMap::Enum e(map); !e.empty(); e.popFront())
+        size_t size = map.shallowSizeOfExcludingThis(mallocSizeOf);
+        for (OuterMap::Enum e(map); !e.empty(); e.popFront()) {
             size += e.front().value().sizeOfExcludingThis(mallocSizeOf);
+        }
         return size;
     }
     size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) {
-        size_t size = map.sizeOfIncludingThis(mallocSizeOf);
-        for (OuterMap::Enum e(map); !e.empty(); e.popFront())
+        size_t size = map.shallowSizeOfIncludingThis(mallocSizeOf);
+        for (OuterMap::Enum e(map); !e.empty(); e.popFront()) {
             size += e.front().value().sizeOfIncludingThis(mallocSizeOf);
+        }
         return size;
     }
 
     bool hasNurseryAllocatedWrapperEntries(const CompartmentFilter& f) {
         for (OuterMap::Enum e(map); !e.empty(); e.popFront()) {
             JS::Compartment* c = e.front().key();
-            if (c && !f.match(c))
+            if (c && !f.match(c)) {
                 continue;
+            }
             InnerMap& m = e.front().value();
-            if (m.hasNurseryEntries())
+            if (m.hasNurseryEntries()) {
                 return true;
+            }
         }
         return false;
     }
@@ -325,8 +358,9 @@ class WrapperMap
         for (OuterMap::Enum e(map); !e.empty(); e.popFront()) {
             InnerMap& m = e.front().value();
             m.sweepAfterMinorGC(trc);
-            if (m.empty())
+            if (m.empty()) {
                 e.removeFront();
+            }
         }
     }
 
@@ -334,8 +368,9 @@ class WrapperMap
         for (OuterMap::Enum e(map); !e.empty(); e.popFront()) {
             InnerMap& m = e.front().value();
             m.sweep();
-            if (m.empty())
+            if (m.empty()) {
                 e.removeFront();
+            }
         }
     }
 };
@@ -420,7 +455,6 @@ class JS::Compartment
   public:
     explicit Compartment(JS::Zone* zone);
 
-    MOZ_MUST_USE bool init(JSContext* cx);
     void destroy(js::FreeOp* fop);
 
     MOZ_MUST_USE inline bool wrap(JSContext* cx, JS::MutableHandleValue vp);
@@ -430,7 +464,7 @@ class JS::Compartment
     MOZ_MUST_USE bool wrap(JSContext* cx, js::MutableHandle<JS::BigInt*> bi);
 #endif
     MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandleObject obj);
-    MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandle<js::PropertyDescriptor> desc);
+    MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandle<JS::PropertyDescriptor> desc);
     MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandle<JS::GCVector<JS::Value>> vec);
     MOZ_MUST_USE bool rewrap(JSContext* cx, JS::MutableHandleObject obj, JS::HandleObject existing);
 

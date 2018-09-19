@@ -421,46 +421,34 @@ impl NoCalcLength {
         value: CSSFloat,
         unit: &str,
     ) -> Result<Self, ()> {
-        match_ignore_ascii_case! { unit,
-            "px" => Ok(NoCalcLength::Absolute(AbsoluteLength::Px(value))),
-            "in" => Ok(NoCalcLength::Absolute(AbsoluteLength::In(value))),
-            "cm" => Ok(NoCalcLength::Absolute(AbsoluteLength::Cm(value))),
-            "mm" => Ok(NoCalcLength::Absolute(AbsoluteLength::Mm(value))),
-            "q" => Ok(NoCalcLength::Absolute(AbsoluteLength::Q(value))),
-            "pt" => Ok(NoCalcLength::Absolute(AbsoluteLength::Pt(value))),
-            "pc" => Ok(NoCalcLength::Absolute(AbsoluteLength::Pc(value))),
+        Ok(match_ignore_ascii_case! { unit,
+            "px" => NoCalcLength::Absolute(AbsoluteLength::Px(value)),
+            "in" => NoCalcLength::Absolute(AbsoluteLength::In(value)),
+            "cm" => NoCalcLength::Absolute(AbsoluteLength::Cm(value)),
+            "mm" => NoCalcLength::Absolute(AbsoluteLength::Mm(value)),
+            "q" => NoCalcLength::Absolute(AbsoluteLength::Q(value)),
+            "pt" => NoCalcLength::Absolute(AbsoluteLength::Pt(value)),
+            "pc" => NoCalcLength::Absolute(AbsoluteLength::Pc(value)),
             // font-relative
-            "em" => Ok(NoCalcLength::FontRelative(FontRelativeLength::Em(value))),
-            "ex" => Ok(NoCalcLength::FontRelative(FontRelativeLength::Ex(value))),
-            "ch" => Ok(NoCalcLength::FontRelative(FontRelativeLength::Ch(value))),
-            "rem" => Ok(NoCalcLength::FontRelative(FontRelativeLength::Rem(value))),
+            "em" => NoCalcLength::FontRelative(FontRelativeLength::Em(value)),
+            "ex" => NoCalcLength::FontRelative(FontRelativeLength::Ex(value)),
+            "ch" => NoCalcLength::FontRelative(FontRelativeLength::Ch(value)),
+            "rem" => NoCalcLength::FontRelative(FontRelativeLength::Rem(value)),
             // viewport percentages
-            "vw" => {
-                if context.in_page_rule() {
-                    return Err(())
-                }
-                Ok(NoCalcLength::ViewportPercentage(ViewportPercentageLength::Vw(value)))
-            },
-            "vh" => {
-                if context.in_page_rule() {
-                    return Err(())
-                }
-                Ok(NoCalcLength::ViewportPercentage(ViewportPercentageLength::Vh(value)))
-            },
-            "vmin" => {
-                if context.in_page_rule() {
-                    return Err(())
-                }
-                Ok(NoCalcLength::ViewportPercentage(ViewportPercentageLength::Vmin(value)))
-            },
-            "vmax" => {
-                if context.in_page_rule() {
-                    return Err(())
-                }
-                Ok(NoCalcLength::ViewportPercentage(ViewportPercentageLength::Vmax(value)))
-            },
-            _ => Err(())
-        }
+            "vw" if !context.in_page_rule() => {
+                NoCalcLength::ViewportPercentage(ViewportPercentageLength::Vw(value))
+            }
+            "vh" if !context.in_page_rule() => {
+                NoCalcLength::ViewportPercentage(ViewportPercentageLength::Vh(value))
+            }
+            "vmin" if !context.in_page_rule() => {
+                NoCalcLength::ViewportPercentage(ViewportPercentageLength::Vmin(value))
+            }
+            "vmax" if !context.in_page_rule() => {
+                NoCalcLength::ViewportPercentage(ViewportPercentageLength::Vmax(value))
+            }
+            _ => return Err(())
+        })
     }
 
     #[inline]
@@ -578,14 +566,16 @@ impl Length {
             match *token {
                 Token::Dimension {
                     value, ref unit, ..
-                } if num_context.is_ok(context.parsing_mode, value) =>
+                }
+                    if num_context.is_ok(context.parsing_mode, value) =>
                 {
                     return NoCalcLength::parse_dimension(context, value, unit)
                         .map(Length::NoCalc)
                         .map_err(|()| location.new_unexpected_token_error(token.clone()))
                 },
                 Token::Number { value, .. } if num_context.is_ok(context.parsing_mode, value) => {
-                    if value != 0. && !context.parsing_mode.allows_unitless_lengths() &&
+                    if value != 0. &&
+                        !context.parsing_mode.allows_unitless_lengths() &&
                         !allow_quirks.allowed(context.quirks_mode)
                     {
                         return Err(location.new_custom_error(StyleParseErrorKind::UnspecifiedError));
@@ -765,7 +755,8 @@ impl LengthOrPercentage {
             match *token {
                 Token::Dimension {
                     value, ref unit, ..
-                } if num_context.is_ok(context.parsing_mode, value) =>
+                }
+                    if num_context.is_ok(context.parsing_mode, value) =>
                 {
                     return NoCalcLength::parse_dimension(context, value, unit)
                         .map(LengthOrPercentage::Length)
@@ -779,7 +770,8 @@ impl LengthOrPercentage {
                     )))
                 },
                 Token::Number { value, .. } if num_context.is_ok(context.parsing_mode, value) => {
-                    if value != 0. && !context.parsing_mode.allows_unitless_lengths() &&
+                    if value != 0. &&
+                        !context.parsing_mode.allows_unitless_lengths() &&
                         !allow_quirks.allowed(context.quirks_mode)
                     {
                         return Err(location.new_unexpected_token_error(token.clone()));
@@ -792,8 +784,9 @@ impl LengthOrPercentage {
             }
         }
 
-        let calc = input
-            .parse_nested_block(|i| CalcNode::parse_length_or_percentage(context, i, num_context))?;
+        let calc = input.parse_nested_block(|i| {
+            CalcNode::parse_length_or_percentage(context, i, num_context)
+        })?;
         Ok(LengthOrPercentage::Calc(Box::new(calc)))
     }
 
@@ -883,7 +876,8 @@ impl LengthOrPercentageOrAuto {
             match *token {
                 Token::Dimension {
                     value, ref unit, ..
-                } if num_context.is_ok(context.parsing_mode, value) =>
+                }
+                    if num_context.is_ok(context.parsing_mode, value) =>
                 {
                     return NoCalcLength::parse_dimension(context, value, unit)
                         .map(LengthOrPercentageOrAuto::Length)
@@ -897,7 +891,8 @@ impl LengthOrPercentageOrAuto {
                     )))
                 },
                 Token::Number { value, .. } if num_context.is_ok(context.parsing_mode, value) => {
-                    if value != 0. && !context.parsing_mode.allows_unitless_lengths() &&
+                    if value != 0. &&
+                        !context.parsing_mode.allows_unitless_lengths() &&
                         !allow_quirks.allowed(context.quirks_mode)
                     {
                         return Err(location.new_custom_error(StyleParseErrorKind::UnspecifiedError));
@@ -914,8 +909,9 @@ impl LengthOrPercentageOrAuto {
             }
         }
 
-        let calc = input
-            .parse_nested_block(|i| CalcNode::parse_length_or_percentage(context, i, num_context))?;
+        let calc = input.parse_nested_block(|i| {
+            CalcNode::parse_length_or_percentage(context, i, num_context)
+        })?;
         Ok(LengthOrPercentageOrAuto::Calc(Box::new(calc)))
     }
 
@@ -1010,8 +1006,7 @@ impl Parse for NonNegativeLengthOrPercentageOrAuto {
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
         Ok(NonNegative(LengthOrPercentageOrAuto::parse_non_negative(
-            context,
-            input,
+            context, input,
         )?))
     }
 }
@@ -1040,7 +1035,8 @@ impl LengthOrPercentageOrNone {
             match *token {
                 Token::Dimension {
                     value, ref unit, ..
-                } if num_context.is_ok(context.parsing_mode, value) =>
+                }
+                    if num_context.is_ok(context.parsing_mode, value) =>
                 {
                     return NoCalcLength::parse_dimension(context, value, unit)
                         .map(LengthOrPercentageOrNone::Length)
@@ -1054,7 +1050,8 @@ impl LengthOrPercentageOrNone {
                     )))
                 },
                 Token::Number { value, .. } if num_context.is_ok(context.parsing_mode, value) => {
-                    if value != 0. && !context.parsing_mode.allows_unitless_lengths() &&
+                    if value != 0. &&
+                        !context.parsing_mode.allows_unitless_lengths() &&
                         !allow_quirks.allowed(context.quirks_mode)
                     {
                         return Err(location.new_custom_error(StyleParseErrorKind::UnspecifiedError));
@@ -1071,8 +1068,9 @@ impl LengthOrPercentageOrNone {
             }
         }
 
-        let calc = input
-            .parse_nested_block(|i| CalcNode::parse_length_or_percentage(context, i, num_context))?;
+        let calc = input.parse_nested_block(|i| {
+            CalcNode::parse_length_or_percentage(context, i, num_context)
+        })?;
         Ok(LengthOrPercentageOrNone::Calc(Box::new(calc)))
     }
 

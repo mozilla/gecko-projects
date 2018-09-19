@@ -42,9 +42,10 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
   ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
-  ExtensionCommon: "resource://gre/modules/ExtensionCommon.jsm",
   ExtensionPermissions: "resource://gre/modules/ExtensionPermissions.jsm",
   ExtensionStorage: "resource://gre/modules/ExtensionStorage.jsm",
+  ExtensionStorageIDB: "resource://gre/modules/ExtensionStorageIDB.jsm",
+  ExtensionTelemetry: "resource://gre/modules/ExtensionTelemetry.jsm",
   ExtensionTestCommon: "resource://testing-common/ExtensionTestCommon.jsm",
   FileSource: "resource://gre/modules/L10nRegistry.jsm",
   L10nRegistry: "resource://gre/modules/L10nRegistry.jsm",
@@ -54,7 +55,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   OS: "resource://gre/modules/osfile.jsm",
   PluralForm: "resource://gre/modules/PluralForm.jsm",
   Schemas: "resource://gre/modules/Schemas.jsm",
-  TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
   XPIProvider: "resource://gre/modules/addons/XPIProvider.jsm",
 });
 
@@ -77,6 +77,7 @@ XPCOMUtils.defineLazyGetter(
   () => Services.io.getProtocolHandler("resource")
           .QueryInterface(Ci.nsIResProtocolHandler));
 
+ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
 ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
 ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
@@ -87,8 +88,6 @@ XPCOMUtils.defineLazyServiceGetters(this, {
 });
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "processCount", "dom.ipc.processCount.extension");
-XPCOMUtils.defineLazyPreferenceGetter(this, "isStorageIDBEnabled",
-                                      "extensions.webextensions.ExtensionStorageIDB.enabled");
 
 var {
   GlobalManager,
@@ -98,14 +97,19 @@ var {
 } = ExtensionParent;
 
 const {
-  EventEmitter,
   getUniqueId,
   promiseTimeout,
 } = ExtensionUtils;
 
-XPCOMUtils.defineLazyGetter(this, "console", ExtensionUtils.getConsole);
+const {
+  EventEmitter,
+} = ExtensionCommon;
+
+XPCOMUtils.defineLazyGetter(this, "console", ExtensionCommon.getConsole);
 
 XPCOMUtils.defineLazyGetter(this, "LocaleData", () => ExtensionCommon.LocaleData);
+
+const {sharedData} = Services.ppmm;
 
 // The userContextID reserved for the extension storage (its purpose is ensuring that the IndexedDB
 // storage used by the browser.storage.local API is not directly accessible from the extension code).
@@ -247,6 +251,8 @@ var UninstallObserver = {
         userContextId: WEBEXT_STORAGE_USER_CONTEXT_ID,
       });
       Services.qms.clearStoragesForPrincipal(storagePrincipal);
+
+      ExtensionStorageIDB.clearMigratedExtensionPref(addon.id);
 
       // Clear localStorage created by the extension
       let storage = Services.domStorageManager.getStorage(null, principal);
@@ -674,6 +680,24 @@ class ExtensionData {
         return manager.initModuleJSON([modules]);
       };
 
+      result.contentScripts = [];
+      for (let options of manifest.content_scripts || []) {
+        result.contentScripts.push({
+          allFrames: options.all_frames,
+          matchAboutBlank: options.match_about_blank,
+          frameID: options.frame_id,
+          runAt: options.run_at,
+
+          matches: options.matches,
+          excludeMatches: options.exclude_matches || [],
+          includeGlobs: options.include_globs,
+          excludeGlobs: options.exclude_globs,
+
+          jsPaths: options.js || [],
+          cssPaths: options.css || [],
+        });
+      }
+
       if (this.canUseExperiment(manifest)) {
         let parentModules = {};
         let childModules = {};
@@ -814,6 +838,7 @@ class ExtensionData {
 
     this.manifest = manifestData.manifest;
     this.apiNames = manifestData.apiNames;
+    this.contentScripts = manifestData.contentScripts;
     this.dependencies = manifestData.dependencies;
     this.permissions = manifestData.permissions;
     this.schemaURLs = manifestData.schemaURLs;
@@ -1181,7 +1206,7 @@ class BootstrapScope {
   }
 
   update(data, reason) {
-    Management.emit("update", {id: data.id, resourceURI: data.resourceURI});
+    return Management.emit("update", {id: data.id, resourceURI: data.resourceURI});
   }
 
   startup(data, reason) {
@@ -1244,6 +1269,8 @@ class LangpackBootstrapScope {
   }
 }
 
+let activeExtensionIDs = new Set();
+
 /**
  * This class is the main representation of an active WebExtension
  * in the main process.
@@ -1252,6 +1279,8 @@ class LangpackBootstrapScope {
 class Extension extends ExtensionData {
   constructor(addonData, startupReason) {
     super(addonData.resourceURI);
+
+    this.sharedDataKeys = new Set();
 
     this.uuid = UUIDMap.get(addonData.id);
     this.instanceId = getUniqueId();
@@ -1295,7 +1324,6 @@ class Extension extends ExtensionData {
     this.views = new Set();
     this._backgroundPageFrameLoader = null;
 
-    this.storageIDBBackend = null;
     this.onStartup = null;
 
     this.hasShutdown = false;
@@ -1306,6 +1334,8 @@ class Extension extends ExtensionData {
     this.whiteListedHosts = null;
     this._optionalOrigins = null;
     this.webAccessibleResources = null;
+
+    this.registeredContentScripts = new Map();
 
     this.emitter = new EventEmitter();
 
@@ -1433,7 +1463,7 @@ class Extension extends ExtensionData {
       return true;
     }
 
-    return ExtensionUtils.checkLoadURL(url, this.principal, options);
+    return ExtensionCommon.checkLoadURL(url, this.principal, options);
   }
 
   async promiseLocales(locale) {
@@ -1513,6 +1543,19 @@ class Extension extends ExtensionData {
     return manifest;
   }
 
+  get contentSecurityPolicy() {
+    return this.manifest.content_security_policy;
+  }
+
+  get backgroundScripts() {
+    return (this.manifest.background &&
+            this.manifest.background.scripts);
+  }
+
+  get optionalPermissions() {
+    return this.manifest.optional_permissions;
+  }
+
   // Representation of the extension to send to content
   // processes. This should include anything the content process might
   // need.
@@ -1521,27 +1564,26 @@ class Extension extends ExtensionData {
       id: this.id,
       uuid: this.uuid,
       name: this.name,
+      contentSecurityPolicy: this.contentSecurityPolicy,
       instanceId: this.instanceId,
-      manifest: this.manifest,
       resourceURL: this.resourceURL,
-      baseURL: this.baseURI.spec,
       contentScripts: this.contentScripts,
-      registeredContentScripts: new Map(),
       webAccessibleResources: this.webAccessibleResources.map(res => res.glob),
       whiteListedHosts: this.whiteListedHosts.patterns.map(pat => pat.pattern),
-      localeData: this.localeData.serialize(),
-      childModules: this.modules && this.modules.child,
-      dependencies: this.dependencies,
       permissions: this.permissions,
-      principal: this.principal,
-      optionalPermissions: this.manifest.optional_permissions,
-      schemaURLs: this.schemaURLs,
-      storageIDBBackend: this.storageIDBBackend,
+      optionalPermissions: this.optionalPermissions,
     };
   }
 
-  get contentScripts() {
-    return this.manifest.content_scripts || [];
+  // Extended serialized data which is only needed in the extensions process,
+  // and is never deserialized in web content processes.
+  serializeExtended() {
+    return {
+      backgroundScripts: this.backgroundScripts,
+      childModules: this.modules && this.modules.child,
+      dependencies: this.dependencies,
+      schemaURLs: this.schemaURLs,
+    };
   }
 
   broadcast(msg, data) {
@@ -1578,6 +1620,30 @@ class Extension extends ExtensionData {
     });
   }
 
+  setSharedData(key, value) {
+    key = `extension/${this.id}/${key}`;
+    this.sharedDataKeys.add(key);
+
+    sharedData.set(key, value);
+  }
+
+  getSharedData(key, value) {
+    key = `extension/${this.id}/${key}`;
+    return sharedData.get(key);
+  }
+
+  initSharedData() {
+    this.setSharedData("", this.serialize());
+    this.setSharedData("extendedData", this.serializeExtended());
+    this.setSharedData("locales", this.localeData.serialize());
+    this.setSharedData("manifest", this.manifest);
+    this.updateContentScripts();
+  }
+
+  updateContentScripts() {
+    this.setSharedData("contentScripts", this.registeredContentScripts);
+  }
+
   runManifest(manifest) {
     let promises = [];
     for (let directive in manifest) {
@@ -1588,22 +1654,11 @@ class Extension extends ExtensionData {
       }
     }
 
-    let data = Services.ppmm.initialProcessData;
-    if (!data["Extension:Extensions"]) {
-      data["Extension:Extensions"] = [];
-    }
+    activeExtensionIDs.add(this.id);
+    sharedData.set("extensions/activeIDs", activeExtensionIDs);
 
-    let serial = this.serialize();
-
-    // Map of the programmatically registered content script definitions
-    // (by string scriptId), used in ext-contentScripts.js to propagate
-    // the registered content scripts to the child content processes
-    // (e.g. when a new content process starts after a content process crash).
-    this.registeredContentScripts = serial.registeredContentScripts;
-
-    data["Extension:Extensions"].push(serial);
-
-    this.broadcast("Extension:Startup", serial);
+    Services.ppmm.sharedData.flush();
+    this.broadcast("Extension:Startup", this.id);
 
     return Promise.all(promises);
   }
@@ -1710,7 +1765,7 @@ class Extension extends ExtensionData {
 
     this.policy.extension = this;
 
-    TelemetryStopwatch.start("WEBEXT_EXTENSION_STARTUP_MS", this);
+    ExtensionTelemetry.extensionStartup.stopwatchStart(this);
     try {
       await this.loadManifest();
 
@@ -1728,14 +1783,32 @@ class Extension extends ExtensionData {
 
       GlobalManager.init(this);
 
+      this.initSharedData();
+
       this.policy.active = false;
       this.policy = processScript.initExtension(this);
       this.policy.extension = this;
 
       this.updatePermissions(this.startupReason);
 
-      if (this.hasPermission("storage") && !isStorageIDBEnabled) {
-        this.storageIDBBackend = false;
+      // Select the storage.local backend if it is already known,
+      // and start the data migration if needed.
+      if (this.hasPermission("storage")) {
+        if (!ExtensionStorageIDB.isBackendEnabled) {
+          this.setSharedData("storageIDBBackend", false);
+        } else if (ExtensionStorageIDB.isMigratedExtension(this)) {
+          this.setSharedData("storageIDBBackend", true);
+          this.setSharedData("storageIDBPrincipal", ExtensionStorageIDB.getStoragePrincipal(this));
+        } else {
+          // If the extension has to migrate backend, ensure that the data migration
+          // starts once Firefox is idle after the extension has been started.
+          this.once("ready", () => ChromeUtils.idleDispatch(() => {
+            if (this.hasShutdown) {
+              return;
+            }
+            ExtensionStorageIDB.selectBackend({extension: this});
+          }));
+        }
       }
 
       // The "startup" Management event sent on the extension instance itself
@@ -1743,13 +1816,15 @@ class Extension extends ExtensionData {
       // and it is used to run code that needs to be executed before
       // any of the "startup" listeners.
       this.emit("startup", this);
-      Management.emit("startup", this);
 
-      await this.runManifest(this.manifest);
+      await Promise.all([
+        Management.emit("startup", this),
+        this.runManifest(this.manifest),
+      ]);
 
       Management.emit("ready", this);
       this.emit("ready");
-      TelemetryStopwatch.finish("WEBEXT_EXTENSION_STARTUP_MS", this);
+      ExtensionTelemetry.extensionStartup.stopwatchFinish(this);
     } catch (errors) {
       for (let e of [].concat(errors)) {
         dump(`Extension error: ${e.message || e} ${e.filename || e.fileName}:${e.lineNumber} :: ${e.stack || new Error().stack}\n`);
@@ -1793,6 +1868,17 @@ class Extension extends ExtensionData {
       return;
     }
 
+    if (this.hasPermission("storage") && ExtensionStorageIDB.selectedBackendPromises.has(this)) {
+      // Wait the data migration to complete.
+      try {
+        await ExtensionStorageIDB.selectedBackendPromises.get(this);
+      } catch (err) {
+        Cu.reportError(
+          `Error while waiting for extension data migration on shutdown: ${this.policy.debugName} - ` +
+          `${err.message}::${err.stack}`);
+      }
+    }
+
     if (this.rootURI instanceof Ci.nsIJARURI) {
       let file = this.rootURI.JARFile.QueryInterface(Ci.nsIFileURL).file;
       Services.ppmm.broadcastAsyncMessage("Extension:FlushJarCache", {path: file.path});
@@ -1803,8 +1889,12 @@ class Extension extends ExtensionData {
       StartupCache.clearAddonData(this.id);
     }
 
-    let data = Services.ppmm.initialProcessData;
-    data["Extension:Extensions"] = data["Extension:Extensions"].filter(e => e.id !== this.id);
+    activeExtensionIDs.delete(this.id);
+    sharedData.set("extensions/activeIDs", activeExtensionIDs);
+
+    for (let key of this.sharedDataKeys) {
+      sharedData.delete(key);
+    }
 
     Services.ppmm.removeMessageListener(this.MESSAGE_EMIT_EVENT, this);
 
@@ -1942,6 +2032,11 @@ class Langpack extends ExtensionData {
   }
 
   async shutdown(reason) {
+    if (reason === "APP_SHUTDOWN") {
+      // If we're shutting down, let's not bother updating the state of each
+      // system.
+      return;
+    }
     for (const sourceName of Object.keys(this.startupData.l10nRegistrySources)) {
       L10nRegistry.removeSource(`${sourceName}-${this.startupData.langpackId}`);
     }

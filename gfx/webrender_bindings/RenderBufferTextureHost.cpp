@@ -16,6 +16,10 @@ RenderBufferTextureHost::RenderBufferTextureHost(uint8_t* aBuffer,
                                                  const layers::BufferDescriptor& aDescriptor)
   : mBuffer(aBuffer)
   , mDescriptor(aDescriptor)
+  , mMap()
+  , mYMap()
+  , mCbMap()
+  , mCrMap()
   , mLocked(false)
 {
   MOZ_COUNT_CTOR_INHERITED(RenderBufferTextureHost, RenderTextureHost);
@@ -45,7 +49,9 @@ RenderBufferTextureHost::~RenderBufferTextureHost()
 }
 
 wr::WrExternalImage
-RenderBufferTextureHost::Lock(uint8_t aChannelIndex, gl::GLContext* aGL)
+RenderBufferTextureHost::Lock(uint8_t aChannelIndex,
+                              gl::GLContext* aGL,
+                              wr::ImageRendering aRendering)
 {
   if (!mLocked) {
     if (!GetBuffer()) {

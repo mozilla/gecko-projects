@@ -12,7 +12,6 @@
 #include "nsFontFaceLoader.h"
 
 #include "nsError.h"
-#include "nsContentUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
@@ -174,7 +173,7 @@ nsFontFaceLoader::LoadTimerCallback(nsITimer* aTimer, void* aClosure)
       break;
 
     default:
-      NS_NOTREACHED("strange font-display value");
+      MOZ_ASSERT_UNREACHABLE("strange font-display value");
       break;
   }
 
@@ -325,8 +324,7 @@ nsFontFaceLoader::OnStopRequest(nsIRequest* aRequest,
 void
 nsFontFaceLoader::Cancel()
 {
-  mUserFontEntry->mFontDataLoadingState = gfxUserFontEntry::NOT_LOADING;
-  mUserFontEntry->mLoader = nullptr;
+  mUserFontEntry->LoadCanceled();
   mFontFaceSet = nullptr;
   if (mLoadTimer) {
     mLoadTimer->Cancel();

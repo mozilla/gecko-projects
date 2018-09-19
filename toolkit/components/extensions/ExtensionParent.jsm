@@ -25,8 +25,10 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   E10SUtils: "resource://gre/modules/E10SUtils.jsm",
   ExtensionData: "resource://gre/modules/Extension.jsm",
   MessageChannel: "resource://gre/modules/MessageChannel.jsm",
-  OS: "resource://gre/modules/osfile.jsm",
+  MessageManagerProxy: "resource://gre/modules/MessageManagerProxy.jsm",
   NativeApp: "resource://gre/modules/NativeMessaging.jsm",
+  OS: "resource://gre/modules/osfile.jsm",
+  PerformanceCounters: "resource://gre/modules/PerformanceCounters.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
   Schemas: "resource://gre/modules/Schemas.jsm",
 });
@@ -35,6 +37,10 @@ XPCOMUtils.defineLazyServiceGetters(this, {
   aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
 });
 
+// We're using the pref to avoid loading PerformanceCounters.jsm for nothing.
+XPCOMUtils.defineLazyPreferenceGetter(this, "gTimingEnabled",
+                                      "extensions.webextensions.enablePerformanceCounters",
+                                      false);
 ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
 ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
@@ -43,14 +49,13 @@ var {
   CanOfAPIs,
   SchemaAPIManager,
   SpreadArgs,
+  defineLazyGetter,
 } = ExtensionCommon;
 
 var {
   DefaultMap,
   DefaultWeakMap,
   ExtensionError,
-  MessageManagerProxy,
-  defineLazyGetter,
   promiseDocumentLoaded,
   promiseEvent,
   promiseObserved,
@@ -109,8 +114,8 @@ let apiManager = new class extends SchemaAPIManager {
   }
 
   getModuleJSONURLs() {
-    return Array.from(XPCOMUtils.enumerateCategoryEntries(CATEGORY_EXTENSION_MODULES),
-                      ([name, url]) => url);
+    return Array.from(Services.catMan.enumerateCategory(CATEGORY_EXTENSION_MODULES),
+                      ({value}) => value);
   }
 
   // Loads all the ext-*.js scripts currently registered.
@@ -124,7 +129,7 @@ let apiManager = new class extends SchemaAPIManager {
       () => this.loadModuleJSON(this.getModuleJSONURLs()));
 
     let scriptURLs = [];
-    for (let [/* name */, value] of XPCOMUtils.enumerateCategoryEntries(CATEGORY_EXTENSION_SCRIPTS)) {
+    for (let {value} of Services.catMan.enumerateCategory(CATEGORY_EXTENSION_SCRIPTS)) {
       scriptURLs.push(value);
     }
 
@@ -140,10 +145,10 @@ let apiManager = new class extends SchemaAPIManager {
 
       // Load order matters here. The base manifest defines types which are
       // extended by other schemas, so needs to be loaded first.
-      return Schemas.load(BASE_SCHEMA, AppConstants.DEBUG).then(() => {
+      return Schemas.load(BASE_SCHEMA).then(() => {
         let promises = [];
-        for (let [/* name */, url] of XPCOMUtils.enumerateCategoryEntries(CATEGORY_EXTENSION_SCHEMAS)) {
-          promises.push(Schemas.load(url));
+        for (let {value} of Services.catMan.enumerateCategory(CATEGORY_EXTENSION_SCHEMAS)) {
+          promises.push(Schemas.load(value));
         }
         for (let [url, {content}] of this.schemaURLs) {
           promises.push(Schemas.load(url, content));
@@ -151,7 +156,9 @@ let apiManager = new class extends SchemaAPIManager {
         for (let url of schemaURLs) {
           promises.push(Schemas.load(url));
         }
-        return Promise.all(promises);
+        return Promise.all(promises).then(() => {
+          Schemas.updateSharedSchemas();
+        });
       });
     })();
 
@@ -468,7 +475,7 @@ ProxyMessenger = {
       // connected to the tab's top-level message manager. To deal with
       // this, we find the options <browser> for the tab, and use that
       // directly, insteead.
-      if (browser.currentURI.cloneIgnoringRef().spec === "about:addons") {
+      if (browser.currentURI.specIgnoringRef === "about:addons") {
         let optionsBrowser = browser.contentDocument.querySelector(".inline-options-browser");
         if (optionsBrowser) {
           browser = optionsBrowser;
@@ -476,6 +483,15 @@ ProxyMessenger = {
       }
 
       return {messageManager: browser.messageManager, xulBrowser: browser};
+    }
+
+    // port.postMessage / port.disconnect to non-tab contexts.
+    if (recipient.envType === "content_child") {
+      let childId = `${recipient.extensionId}.${recipient.contextId}`;
+      let context = ParentAPIManager.proxyContexts.get(childId);
+      if (context) {
+        return {messageManager: context.parentMessageManager, xulBrowser: context.xulBrowser};
+      }
     }
 
     // runtime.sendMessage / runtime.connect
@@ -501,8 +517,8 @@ GlobalManager = {
       ProxyMessenger.init();
       apiManager.on("extension-browser-inserted", this._onExtensionBrowser);
       this.initialized = true;
+      Services.ppmm.addMessageListener("Extension:SendPerformanceCounter", this);
     }
-
     this.extensionMap.set(extension.id, extension);
   },
 
@@ -512,6 +528,15 @@ GlobalManager = {
     if (this.extensionMap.size == 0 && this.initialized) {
       apiManager.off("extension-browser-inserted", this._onExtensionBrowser);
       this.initialized = false;
+      Services.ppmm.removeMessageListener("Extension:SendPerformanceCounter", this);
+    }
+  },
+
+  async receiveMessage({name, data}) {
+    switch (name) {
+      case "Extension:SendPerformanceCounter":
+        PerformanceCounters.merge(data.counters);
+        break;
     }
   },
 
@@ -520,7 +545,7 @@ GlobalManager = {
       Components.utils.import("resource://gre/modules/Services.jsm");
 
       Services.obs.notifyObservers(this, "tab-content-frameloader-created", "");
-    `, false);
+    `, false, true);
 
     let viewType = browser.getAttribute("webextension-view-type");
     if (viewType) {
@@ -658,8 +683,7 @@ class ExtensionPageContextParent extends ProxyContextParent {
   // The window that contains this context. This may change due to moving tabs.
   get xulWindow() {
     let win = this.xulBrowser.ownerGlobal;
-    return win.document.docShell.rootTreeItem
-              .QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
+    return win.docShell.rootTreeItem.domWindow;
   }
 
   get currentWindow() {
@@ -749,19 +773,14 @@ class DevToolsExtensionPageContextParent extends ExtensionPageContextParent {
 ParentAPIManager = {
   proxyContexts: new Map(),
 
-  parentMessageManagers: new Set(),
-
   init() {
     Services.obs.addObserver(this, "message-manager-close");
-    Services.obs.addObserver(this, "ipc:content-created");
 
     Services.mm.addMessageListener("API:CreateProxyContext", this);
     Services.mm.addMessageListener("API:CloseProxyContext", this, true);
     Services.mm.addMessageListener("API:Call", this);
     Services.mm.addMessageListener("API:AddListener", this);
     Services.mm.addMessageListener("API:RemoveListener", this);
-
-    this.schemaHook = this.schemaHook.bind(this);
   },
 
   attachMessageManager(extension, processMessageManager) {
@@ -783,23 +802,6 @@ ParentAPIManager = {
           extension.parentMessageManager = null;
         }
       }
-
-      this.parentMessageManagers.delete(mm);
-    } else if (topic === "ipc:content-created") {
-      let mm = subject.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIMessageSender);
-      if (mm.remoteType === E10SUtils.EXTENSION_REMOTE_TYPE) {
-        this.parentMessageManagers.add(mm);
-        mm.sendAsyncMessage("Schema:Add", Schemas.schemaJSON);
-
-        Schemas.schemaHook = this.schemaHook;
-      }
-    }
-  },
-
-  schemaHook(schemas) {
-    for (let mm of this.parentMessageManagers) {
-      mm.sendAsyncMessage("Schema:Add", schemas);
     }
   },
 
@@ -896,6 +898,26 @@ ParentAPIManager = {
     }
   },
 
+  async retrievePerformanceCounters() {
+    // getting the parent counters
+    return PerformanceCounters.getData();
+  },
+
+  async withTiming(data, callable) {
+    if (!gTimingEnabled) {
+      return callable();
+    }
+    let childId = data.childId;
+    let webExtId = childId.slice(0, childId.lastIndexOf("."));
+    let start = Cu.now() * 1000;
+    try {
+      return callable();
+    } finally {
+      let end = Cu.now() * 1000;
+      PerformanceCounters.storeExecutionTime(webExtId, data.path, end - start);
+    }
+  },
+
   async call(data, target) {
     let context = this.getContextById(data.childId);
     if (context.parentMessageManager !== target.messageManager) {
@@ -921,8 +943,11 @@ ParentAPIManager = {
       let args = data.args;
       let pendingBrowser = context.pendingEventBrowser;
       let fun = await context.apiCan.asyncFindAPIPath(data.path);
-      let result = context.withPendingBrowser(pendingBrowser,
-                                              () => fun(...args));
+      let result = this.withTiming(data, () => {
+        return context.withPendingBrowser(pendingBrowser,
+                                          () => fun(...args));
+      });
+
       if (data.callId) {
         result = result || Promise.resolve();
 
@@ -1070,14 +1095,12 @@ class HiddenXULWindow {
     // The windowless browser is a thin wrapper around a docShell that keeps
     // its related resources alive. It implements nsIWebNavigation and
     // forwards its methods to the underlying docShell, but cannot act as a
-    // docShell itself. Calling `getInterface(nsIDocShell)` gives us the
+    // docShell itself.  Getting .docShell gives us the
     // underlying docShell, and `QueryInterface(nsIWebNavigation)` gives us
     // access to the webNav methods that are already available on the
     // windowless browser, but contrary to appearances, they are not the same
     // object.
-    this.chromeShell = this._windowlessBrowser
-                           .QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDocShell)
+    this.chromeShell = this._windowlessBrowser.docShell
                            .QueryInterface(Ci.nsIWebNavigation);
 
     if (PrivateBrowsingUtils.permanentPrivateBrowsing) {
@@ -1118,7 +1141,7 @@ class HiddenXULWindow {
 
     const chromeDoc = this.chromeDocument;
 
-    const browser = chromeDoc.createElement("browser");
+    const browser = chromeDoc.createXULElement("browser");
     browser.setAttribute("type", "content");
     browser.setAttribute("disableglobalhistory", "true");
     browser.sameProcessAsFrameLoader = groupFrameLoader;
@@ -1537,7 +1560,7 @@ let IconDetails = {
     return {size, icon: DEFAULT};
   },
 
-  convertImageURLToDataURL(imageURL, contentWindow, browserWindow, size = 18) {
+  convertImageURLToDataURL(imageURL, contentWindow, browserWindow, size = 16) {
     return new Promise((resolve, reject) => {
       let image = new contentWindow.Image();
       image.onload = function() {

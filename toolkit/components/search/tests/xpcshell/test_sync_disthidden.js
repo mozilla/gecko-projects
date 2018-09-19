@@ -8,7 +8,7 @@
 function run_test() {
   let defaultBranch = Services.prefs.getDefaultBranch(BROWSER_SEARCH_PREF);
   defaultBranch.setCharPref("ignoredJAREngines", "engine");
-  Services.prefs.setCharPref("distribution.id", "partner-1");
+  Services.prefs.getDefaultBranch("").setCharPref("distribution.id", "partner-1");
 
   // The test engines used in this test need to be recognized as 'default'
   // engines or the resource URL won't be used
@@ -20,9 +20,9 @@ function run_test() {
   Assert.ok(!Services.search.isInitialized);
 
   let engines = Services.search.getEngines();
-  // From data/list.json - only 5 out of 6
+  // From data/list.json - only 6 out of 7
   // since one is hidden
-  Assert.equal(engines.length, 5);
+  Assert.equal(engines.length, 6);
 
   Assert.ok(Services.search.isInitialized);
 

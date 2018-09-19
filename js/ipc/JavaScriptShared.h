@@ -29,8 +29,9 @@ class ObjectId {
     explicit ObjectId(uint64_t serialNumber, bool hasXrayWaiver)
       : serialNumber_(serialNumber), hasXrayWaiver_(hasXrayWaiver)
     {
-        if (isInvalidSerialNumber(serialNumber))
+        if (isInvalidSerialNumber(serialNumber)) {
             MOZ_CRASH("Bad CPOW Id");
+        }
     }
 
     bool operator==(const ObjectId& other) const {
@@ -98,7 +99,6 @@ class IdToObjectMap
   public:
     IdToObjectMap();
 
-    bool init();
     void trace(JSTracer* trc, uint64_t minimumId = 0);
     void sweep();
 
@@ -125,7 +125,8 @@ class ObjectToIdMap
     using Table = JS::GCHashMap<JS::Heap<JSObject*>, ObjectId, Hasher, js::SystemAllocPolicy>;
 
   public:
-    bool init();
+    ObjectToIdMap();
+
     void trace(JSTracer* trc);
     void sweep();
 
@@ -145,8 +146,6 @@ class JavaScriptShared : public CPOWManager
   public:
     JavaScriptShared();
     virtual ~JavaScriptShared();
-
-    bool init();
 
     void decref();
     void incref();

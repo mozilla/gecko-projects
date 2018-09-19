@@ -10,7 +10,7 @@
 #include "xpcpublic.h"
 
 #include "mozilla/BasePrincipal.h"
-#include "SystemPrincipal.h"
+#include "mozilla/SystemPrincipal.h"
 
 #include "NSSErrorsService.h"
 #include "nsITransportSecurityInfo.h"
@@ -102,20 +102,20 @@ ChannelWrapper::SetChannel(nsIChannel* aChannel)
 {
   detail::ChannelHolder::SetChannel(aChannel);
   ClearCachedAttributes();
-  ChannelWrapperBinding::ClearCachedFinalURIValue(this);
-  ChannelWrapperBinding::ClearCachedFinalURLValue(this);
+  ChannelWrapper_Binding::ClearCachedFinalURIValue(this);
+  ChannelWrapper_Binding::ClearCachedFinalURLValue(this);
   mFinalURLInfo.reset();
-  ChannelWrapperBinding::ClearCachedProxyInfoValue(this);
+  ChannelWrapper_Binding::ClearCachedProxyInfoValue(this);
 }
 
 void
 ChannelWrapper::ClearCachedAttributes()
 {
-  ChannelWrapperBinding::ClearCachedRemoteAddressValue(this);
-  ChannelWrapperBinding::ClearCachedStatusCodeValue(this);
-  ChannelWrapperBinding::ClearCachedStatusLineValue(this);
+  ChannelWrapper_Binding::ClearCachedRemoteAddressValue(this);
+  ChannelWrapper_Binding::ClearCachedStatusCodeValue(this);
+  ChannelWrapper_Binding::ClearCachedStatusLineValue(this);
   if (!mFiredErrorEvent) {
-    ChannelWrapperBinding::ClearCachedErrorStringValue(this);
+    ChannelWrapper_Binding::ClearCachedErrorStringValue(this);
   }
 }
 
@@ -521,13 +521,14 @@ ChannelWrapper::Matches(const dom::MozRequestFilter& aFilter,
   }
 
   if (aExtension) {
-    if (!aExtension->CanAccessURI(urlInfo)) {
+    bool isProxy = aOptions.mIsProxy && aExtension->HasPermission(nsGkAtoms::proxy);
+    // Proxies are allowed access to all urls, including restricted urls.
+    if (!aExtension->CanAccessURI(urlInfo, false, !isProxy)) {
       return false;
     }
 
     // If this isn't the proxy phase of the request, check that the extension
     // has origin permissions for origin that originated the request.
-    bool isProxy = aOptions.mIsProxy && aExtension->HasPermission(nsGkAtoms::proxy);
     if (!isProxy) {
       if (IsSystemLoad()) {
         return false;
@@ -881,7 +882,8 @@ ChannelWrapper::GetErrorString(nsString& aRetVal) const
     nsCOMPtr<nsISupports> securityInfo;
     Unused << chan->GetSecurityInfo(getter_AddRefs(securityInfo));
     if (nsCOMPtr<nsITransportSecurityInfo> tsi = do_QueryInterface(securityInfo)) {
-      auto errorCode = tsi->GetErrorCode();
+      int32_t errorCode = 0;
+      tsi->GetErrorCode(&errorCode);
       if (psm::IsNSSErrorCode(errorCode)) {
         nsCOMPtr<nsINSSErrorsService> nsserr =
           do_GetService(NS_NSS_ERRORS_SERVICE_CONTRACTID);
@@ -915,7 +917,7 @@ ChannelWrapper::ErrorCheck()
     if (error.Length()) {
       mChannelEntry = nullptr;
       mFiredErrorEvent = true;
-      ChannelWrapperBinding::ClearCachedErrorStringValue(this);
+      ChannelWrapper_Binding::ClearCachedErrorStringValue(this);
       FireEvent(NS_LITERAL_STRING("error"));
     }
   }
@@ -1042,7 +1044,7 @@ ChannelWrapper::EventListenerRemoved(nsAtom* aType)
 JSObject*
 ChannelWrapper::WrapObject(JSContext* aCx, HandleObject aGivenProto)
 {
-  return ChannelWrapperBinding::Wrap(aCx, this, aGivenProto);
+  return ChannelWrapper_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(ChannelWrapper)

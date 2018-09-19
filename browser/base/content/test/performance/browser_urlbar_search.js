@@ -15,37 +15,26 @@ requestLongerTimeout(5);
  */
 
 /* These reflows happen only the first time the awesomebar panel opens. */
-const EXPECTED_REFLOWS_FIRST_OPEN = [
-  {
+const EXPECTED_REFLOWS_FIRST_OPEN = [];
+if (AppConstants.DEBUG ||
+    AppConstants.platform == "linux" ||
+    AppConstants.platform == "macosx" ||
+    AppConstants.isPlatformAndVersionAtLeast("win", "10")) {
+  EXPECTED_REFLOWS_FIRST_OPEN.push({
     stack: [
       "_rebuild@chrome://browser/content/search/search.xml",
       "set_popup@chrome://browser/content/search/search.xml",
-      "enableOneOffSearches@chrome://browser/content/urlbarBindings.xml",
+      "set_oneOffSearchesEnabled@chrome://browser/content/urlbarBindings.xml",
       "_enableOrDisableOneOffSearches@chrome://browser/content/urlbarBindings.xml",
-      "urlbar_XBL_Constructor/<@chrome://browser/content/urlbarBindings.xml",
+      "@chrome://browser/content/urlbarBindings.xml",
       "_openAutocompletePopup@chrome://browser/content/urlbarBindings.xml",
       "openAutocompletePopup@chrome://browser/content/urlbarBindings.xml",
       "openPopup@chrome://global/content/bindings/autocomplete.xml",
-      "set_popupOpen@chrome://global/content/bindings/autocomplete.xml"
+      "set_popupOpen@chrome://global/content/bindings/autocomplete.xml",
     ],
-  },
-
-  {
-    stack: [
-      "adjustHeight@chrome://global/content/bindings/autocomplete.xml",
-      "onxblpopupshown@chrome://global/content/bindings/autocomplete.xml"
-    ],
-    maxCount: 5, // This number should only ever go down - never up.
-  },
-
-  {
-    stack: [
-      "adjustHeight@chrome://global/content/bindings/autocomplete.xml",
-      "_invalidate/this._adjustHeightTimeout<@chrome://global/content/bindings/autocomplete.xml",
-    ],
-    maxCount: 6, // This number should only ever go down - never up.
-  },
-
+  });
+}
+EXPECTED_REFLOWS_FIRST_OPEN.push(
   {
     stack: [
       "_handleOverflow@chrome://global/content/bindings/autocomplete.xml",
@@ -53,7 +42,7 @@ const EXPECTED_REFLOWS_FIRST_OPEN = [
       "_reuseAcItem@chrome://global/content/bindings/autocomplete.xml",
       "_appendCurrentResult@chrome://global/content/bindings/autocomplete.xml",
       "_invalidate@chrome://global/content/bindings/autocomplete.xml",
-      "invalidate@chrome://global/content/bindings/autocomplete.xml"
+      "invalidate@chrome://global/content/bindings/autocomplete.xml",
     ],
     maxCount: 36, // This number should only ever go down - never up.
   },
@@ -78,27 +67,11 @@ const EXPECTED_REFLOWS_FIRST_OPEN = [
       "openPopup@chrome://global/content/bindings/autocomplete.xml",
       "set_popupOpen@chrome://global/content/bindings/autocomplete.xml",
     ],
-  },
-];
+  }
+);
 
 /* These reflows happen everytime the awesomebar panel opens. */
 const EXPECTED_REFLOWS_SECOND_OPEN = [
-  {
-    stack: [
-      "adjustHeight@chrome://global/content/bindings/autocomplete.xml",
-      "onxblpopupshown@chrome://global/content/bindings/autocomplete.xml"
-    ],
-    maxCount: 3, // This number should only ever go down - never up.
-  },
-
-  {
-    stack: [
-      "adjustHeight@chrome://global/content/bindings/autocomplete.xml",
-      "_invalidate/this._adjustHeightTimeout<@chrome://global/content/bindings/autocomplete.xml",
-    ],
-    maxCount: 6, // This number should only ever go down - never up.
-  },
-
   {
     stack: [
       "_handleOverflow@chrome://global/content/bindings/autocomplete.xml",
@@ -106,7 +79,7 @@ const EXPECTED_REFLOWS_SECOND_OPEN = [
       "_reuseAcItem@chrome://global/content/bindings/autocomplete.xml",
       "_appendCurrentResult@chrome://global/content/bindings/autocomplete.xml",
       "_invalidate@chrome://global/content/bindings/autocomplete.xml",
-      "invalidate@chrome://global/content/bindings/autocomplete.xml"
+      "invalidate@chrome://global/content/bindings/autocomplete.xml",
     ],
     maxCount: 24, // This number should only ever go down - never up.
   },
@@ -175,7 +148,7 @@ add_task(async function() {
     });
     let matchCount = URLBar.popup.matchCount;
     await BrowserTestUtils.waitForCondition(() => {
-      return URLBar.popup.richlistbox.childNodes.length == matchCount;
+      return URLBar.popup.richlistbox.children.length == matchCount;
     });
 
     URLBar.controller.stopSearch();
@@ -195,7 +168,7 @@ add_task(async function() {
   let dropmarkerRect = document.getAnonymousElementByAttribute(gURLBar,
     "anonid", "historydropmarker").getBoundingClientRect();
   let textBoxRect = document.getAnonymousElementByAttribute(gURLBar,
-    "anonid", "textbox-input-box").getBoundingClientRect();
+    "anonid", "moz-input-box").getBoundingClientRect();
   let expectedRects = {
     filter: rects => rects.filter(r => !(
       // We put text into the urlbar so expect its textbox to change.
@@ -207,7 +180,7 @@ add_task(async function() {
        r.y1 >= dropmarkerRect.top && r.y2 <= dropmarkerRect.bottom)
       // XXX For some reason the awesomebar panel isn't in our screenshots,
       // but that's where we actually expect many changes.
-    ))
+    )),
   };
 
   info("First opening");

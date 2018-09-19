@@ -57,6 +57,7 @@ extern bool gIsGtest;
  * @note XPCOMInit has not happened yet.
  */
 nsresult NS_CreateNativeAppSupport(nsINativeAppSupport* *aResult);
+already_AddRefed<nsINativeAppSupport> NS_GetNativeAppSupport();
 
 nsresult
 NS_NewToolkitProfileService(nsIToolkitProfileService* *aResult);
@@ -110,8 +111,6 @@ WinLaunchChild(const wchar_t *exePath, int argc,
 #define PREF_WIN_REGISTER_APPLICATION_RESTART "toolkit.winRegisterApplicationRestart"
 #endif
 
-#define NS_NATIVEAPPSUPPORT_CONTRACTID "@mozilla.org/toolkit/native-app-support;1"
-
 namespace mozilla {
 namespace startup {
 Result<nsCOMPtr<nsIFile>, nsresult> GetIncompleteStartupFile(nsIFile* aProfLD);
@@ -128,5 +127,15 @@ const char* PlatformBuildID();
  * and the JIT debugger on Windows, and install unix signal handlers.
  */
 void SetupErrorHandling(const char* progname);
+
+
+#ifdef MOZ_ASAN_REPORTER
+extern "C" {
+  void MOZ_EXPORT __sanitizer_set_report_path(const char *path);
+}
+void setASanReporterPath(nsIFile* aDir);
+
+already_AddRefed<nsIFile> GetFileFromEnv(const char *name);
+#endif
 
 #endif // nsAppRunner_h__

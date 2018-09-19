@@ -17,7 +17,10 @@ structures.
 
 from __future__ import absolute_import, unicode_literals
 
-from mozbuild.frontend.context import ObjDirPath
+from mozbuild.frontend.context import (
+    ObjDirPath,
+    SourcePath,
+)
 from mozbuild.util import StrictOrderingOnAppendList
 from mozpack.chrome.manifest import ManifestEntry
 
@@ -189,21 +192,20 @@ class ComputedFlags(ContextDerived):
                     flags[dest_var].extend(value)
         return flags.items()
 
-class XPIDLFile(ContextDerived):
-    """Describes an XPIDL file to be compiled."""
+class XPIDLModule(ContextDerived):
+    """Describes an XPIDL module to be compiled."""
 
     __slots__ = (
-        'source_path',
-        'basename',
-        'module',
+        'name',
+        'idl_files',
     )
 
-    def __init__(self, context, source, module):
+    def __init__(self, context, name, idl_files):
         ContextDerived.__init__(self, context)
 
-        self.source_path = source
-        self.basename = mozpath.basename(source)
-        self.module = module
+        assert all(isinstance(idl, SourcePath) for idl in idl_files)
+        self.name = name
+        self.idl_files = idl_files
 
 class BaseDefines(ContextDerived):
     """Context derived container object for DEFINES/HOST_DEFINES,
@@ -387,6 +389,7 @@ class Linkable(ContextDerived):
         'linked_libraries',
         'linked_system_libs',
         'no_pgo_sources',
+        'pgo_gen_only_sources',
         'no_pgo',
         'sources',
     )
@@ -399,6 +402,7 @@ class Linkable(ContextDerived):
         self.lib_defines = Defines(context, {})
         self.sources = defaultdict(list)
         self.no_pgo_sources = []
+        self.pgo_gen_only_sources = set()
         self.no_pgo = False
 
     def link_library(self, obj):
@@ -410,8 +414,8 @@ class Linkable(ContextDerived):
         # errors from duplicate symbols.
         if isinstance(obj, RustLibrary) and any(isinstance(l, RustLibrary)
                                                 for l in self.linked_libraries):
-            raise LinkageMultipleRustLibrariesError("Cannot link multiple Rust libraries into %s",
-                                                    self)
+            raise LinkageMultipleRustLibrariesError("Cannot link multiple Rust libraries into %s"
+                                                    % self)
         self.linked_libraries.append(obj)
         if obj.cxx_link and not isinstance(obj, SharedLibrary):
             self.cxx_link = True
@@ -421,7 +425,9 @@ class Linkable(ContextDerived):
         # The '$' check is here as a special temporary rule, allowing the
         # inherited use of make variables, most notably in TK_LIBS.
         if not lib.startswith('$') and not lib.startswith('-'):
-            if self.config.substs.get('GNU_CC'):
+            type_var = 'HOST_CC_TYPE' if self.KIND == 'host' else 'CC_TYPE'
+            compiler_type = self.config.substs.get(type_var)
+            if compiler_type in ('gcc', 'clang'):
                 lib = '-l%s' % lib
             else:
                 lib = '%s%s%s' % (
@@ -456,6 +462,10 @@ class Linkable(ContextDerived):
     @property
     def objs(self):
         return self._get_objs(self.source_files())
+
+    @property
+    def pgo_gen_only_objs(self):
+        return self._get_objs(self.pgo_gen_only_sources)
 
 
 class BaseProgram(Linkable):
@@ -665,6 +675,7 @@ class RustLibrary(StaticLibrary):
         'deps_path',
         'features',
         'target_dir',
+        'output_category',
     )
     TARGET_SUBST_VAR = 'RUST_TARGET'
     FEATURES_VAR = 'RUST_LIBRARY_FEATURES'
@@ -686,6 +697,7 @@ class RustLibrary(StaticLibrary):
         self.dependencies = dependencies
         self.features = features
         self.target_dir = target_dir
+        self.output_category = context.get('RUST_LIBRARY_OUTPUT_CATEGORY')
         # Skip setting properties below which depend on cargo
         # when we don't have a compile environment. The required
         # config keys won't be available, but the instance variables
@@ -705,6 +717,7 @@ class SharedLibrary(Library):
         'soname',
         'variant',
         'symbols_file',
+        'output_category',
     )
 
     DICT_ATTRS = {
@@ -725,6 +738,7 @@ class SharedLibrary(Library):
         Library.__init__(self, context, basename, real_name)
         self.variant = variant
         self.lib_name = real_name or basename
+        self.output_category = context.get('SHARED_LIBRARY_OUTPUT_CATEGORY')
         assert self.lib_name
 
         if variant == self.FRAMEWORK:
@@ -762,6 +776,22 @@ class SharedLibrary(Library):
             # Explicitly provided name.
             self.symbols_file = symbols_file
 
+
+class HostSharedLibrary(HostMixin, Library):
+    """Context derived container object for a host shared library.
+
+    This class supports less things than SharedLibrary does for target shared
+    libraries. Currently has enough build system support to build the clang
+    plugin."""
+    KIND = 'host'
+
+    def __init__(self, context, basename):
+        Library.__init__(self, context, basename)
+        self.lib_name = '%s%s%s' % (
+            context.config.host_dll_prefix,
+            self.basename,
+            context.config.host_dll_suffix,
+        )
 
 
 class ExternalLibrary(object):
@@ -935,6 +965,15 @@ class Sources(BaseSources):
         BaseSources.__init__(self, context, files, canonical_suffix)
 
 
+class PgoGenerateOnlySources(BaseSources):
+    """Represents files to be compiled during the build.
+
+    These files are only used during the PGO generation phase."""
+
+    def __init__(self, context, files):
+        BaseSources.__init__(self, context, files, '.cpp')
+
+
 class GeneratedSources(BaseSources):
     """Represents generated files to be compiled during the build."""
 
@@ -944,6 +983,13 @@ class GeneratedSources(BaseSources):
 
 class HostSources(HostMixin, BaseSources):
     """Represents files to be compiled for the host during the build."""
+
+    def __init__(self, context, files, canonical_suffix):
+        BaseSources.__init__(self, context, files, canonical_suffix)
+
+
+class HostGeneratedSources(HostMixin, BaseSources):
+    """Represents generated files to be compiled for the host during the build."""
 
     def __init__(self, context, files, canonical_suffix):
         BaseSources.__init__(self, context, files, canonical_suffix)
@@ -1124,9 +1170,8 @@ class GeneratedFile(ContextDerived):
             '.inc',
             '.py',
             '.rs',
-            'new', # 'new' is an output from make-stl-wrappers.py
         )
-        self.required_for_compile = any(f.endswith(suffixes) for f in self.outputs)
+        self.required_for_compile = [f for f in self.outputs if f.endswith(suffixes) or 'stl_wrappers/' in f]
 
 
 class ChromeManifestEntry(ContextDerived):

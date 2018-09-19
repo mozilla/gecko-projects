@@ -29,11 +29,11 @@
 #include "nsPKCS11Slot.h"
 #include "nsRandomGenerator.h"
 #include "nsSSLSocketProvider.h"
-#include "nsSSLStatus.h"
 #include "nsSecureBrowserUIImpl.h"
 #include "nsSiteSecurityService.h"
 #include "nsTLSSocketProvider.h"
 #include "nsXULAppAPI.h"
+#include "OSKeyStore.h"
 
 #ifdef MOZ_XUL
 #include "nsCertTree.h"
@@ -153,13 +153,13 @@ NS_DEFINE_NAMED_CID(NS_KEYMODULEOBJECTFACTORY_CID);
 NS_DEFINE_NAMED_CID(NS_CONTENTSIGNATUREVERIFIER_CID);
 NS_DEFINE_NAMED_CID(NS_CERTOVERRIDE_CID);
 NS_DEFINE_NAMED_CID(NS_RANDOMGENERATOR_CID);
-NS_DEFINE_NAMED_CID(NS_SSLSTATUS_CID);
 NS_DEFINE_NAMED_CID(TRANSPORTSECURITYINFO_CID);
 NS_DEFINE_NAMED_CID(NS_NSSERRORSSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_NSSVERSION_CID);
 NS_DEFINE_NAMED_CID(NS_SECURE_BROWSER_UI_CID);
 NS_DEFINE_NAMED_CID(NS_SITE_SECURITY_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_CERT_BLOCKLIST_CID);
+NS_DEFINE_NAMED_CID(NS_OSKEYSTORE_CID);
 
 // Components that require main thread initialization could cause a deadlock
 // in necko code (bug 1418752). To prevent it we initialize all such components
@@ -203,8 +203,6 @@ static const mozilla::Module::CIDEntry kNSSCIDs[] = {
                 ThreadRestriction::MainThreadOnly> },
   { &kNS_RANDOMGENERATOR_CID, false, nullptr,
     Constructor<nsRandomGenerator, nullptr, ProcessRestriction::AnyProcess> },
-  { &kNS_SSLSTATUS_CID, false, nullptr,
-    Constructor<nsSSLStatus, nullptr, ProcessRestriction::AnyProcess> },
   { &kTRANSPORTSECURITYINFO_CID, false, nullptr,
     Constructor<TransportSecurityInfo, nullptr,
                 ProcessRestriction::AnyProcess> },
@@ -217,6 +215,10 @@ static const mozilla::Module::CIDEntry kNSSCIDs[] = {
                 ThreadRestriction::MainThreadOnly> },
   { &kNS_CERT_BLOCKLIST_CID, false, nullptr,
     Constructor<CertBlocklist, &CertBlocklist::Init,
+                ProcessRestriction::ParentProcessOnly,
+                ThreadRestriction::MainThreadOnly> },
+  { &kNS_OSKEYSTORE_CID, false, nullptr, Constructor<OSKeyStore,
+                nullptr,
                 ProcessRestriction::ParentProcessOnly,
                 ThreadRestriction::MainThreadOnly> },
   { nullptr }
@@ -250,6 +252,7 @@ static const mozilla::Module::ContractIDEntry kNSSContracts[] = {
   { NS_SECURE_BROWSER_UI_CONTRACTID, &kNS_SECURE_BROWSER_UI_CID },
   { NS_SSSERVICE_CONTRACTID, &kNS_SITE_SECURITY_SERVICE_CID },
   { NS_CERTBLOCKLIST_CONTRACTID, &kNS_CERT_BLOCKLIST_CID },
+  { NS_OSKEYSTORE_CONTRACTID, &kNS_OSKEYSTORE_CID},
   { nullptr }
 };
 

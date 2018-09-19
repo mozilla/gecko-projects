@@ -50,7 +50,7 @@ add_task(async function test_reader_button() {
   info("Opening tab and waiting for reader mode button to show up");
 
   await promiseTabLoadEvent(tab, url);
-  await promiseWaitForCondition(() => !readerButton.hidden);
+  await TestUtils.waitForCondition(() => !readerButton.hidden);
 
   is_element_visible(readerButton, "Reader mode button is present on a reader-able page");
 
@@ -63,7 +63,7 @@ add_task(async function test_reader_button() {
   ok(readerUrl.startsWith("about:reader"), "about:reader loaded after clicking reader mode button");
   is_element_visible(readerButton, "Reader mode button is present on about:reader");
   let iconEl = document.getAnonymousElementByAttribute(tab, "anonid", "tab-icon-image");
-  await promiseWaitForCondition(() => iconEl.getBoundingClientRect().width != 0);
+  await TestUtils.waitForCondition(() => iconEl.getBoundingClientRect().width != 0);
   is_element_visible(iconEl, "Favicon should be visible");
   is(iconEl.src, favicon, "Correct favicon should be loaded");
 
@@ -95,12 +95,12 @@ add_task(async function test_reader_button() {
   // Load a new tab that is NOT reader-able.
   let newTab = gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
   await promiseTabLoadEvent(newTab, nonReadableUrl);
-  await promiseWaitForCondition(() => readerButton.hidden);
+  await TestUtils.waitForCondition(() => readerButton.hidden);
   is_element_hidden(readerButton, "Reader mode button is not present on a non-reader-able page");
 
   // Switch back to the original tab to make sure reader mode button is still visible.
   gBrowser.removeCurrentTab();
-  await promiseWaitForCondition(() => !readerButton.hidden);
+  await TestUtils.waitForCondition(() => !readerButton.hidden);
   is_element_visible(readerButton, "Reader mode button is present on a reader-able page");
 
   // Load a new tab in reader mode that is NOT reader-able in the reader mode.
@@ -108,7 +108,7 @@ add_task(async function test_reader_button() {
   let promiseAboutReaderError = BrowserTestUtils.waitForContentEvent(newTab.linkedBrowser, "AboutReaderContentError");
   await promiseTabLoadEvent(newTab, "about:reader?url=" + nonReadableUrl);
   await promiseAboutReaderError;
-  await promiseWaitForCondition(() => !readerButton.hidden);
+  await TestUtils.waitForCondition(() => !readerButton.hidden);
   is_element_visible(readerButton, "Reader mode button is present on about:reader even in error state");
 
   // Switch page back out of reader mode.
@@ -117,7 +117,7 @@ add_task(async function test_reader_button() {
   await promisePageShow;
   is(gBrowser.selectedBrowser.currentURI.spec, nonReadableUrl,
     "Back to the original non-reader-able page after clicking active reader mode button");
-  await promiseWaitForCondition(() => readerButton.hidden);
+  await TestUtils.waitForCondition(() => readerButton.hidden);
   is_element_hidden(readerButton, "Reader mode button is not present on a non-reader-able page");
 });
 
@@ -156,52 +156,52 @@ add_task(async function test_reader_view_element_attribute_transform() {
       observer.observe(element, {
         attributes: true,
         attributeOldValue: true,
-        attributeFilter: [attribute]
+        attributeFilter: [attribute],
       });
 
       triggerFn();
     });
   }
 
-  let command = document.getElementById("View:ReaderView");
+  let menuitem = document.getElementById("menu_readerModeItem");
   let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser);
-  is(command.hidden, true, "Command element should have the hidden attribute");
+  is(menuitem.hidden, true, "menuitem element should have the hidden attribute");
 
   info("Navigate a reader-able page");
   let waitForPageshow = BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, "pageshow");
-  await observeAttribute(command, "hidden",
+  await observeAttribute(menuitem, "hidden",
     () => {
       let url = TEST_PATH + "readerModeArticle.html";
       tab.linkedBrowser.loadURI(url);
     },
     () => {
-      is(command.hidden, false, "Command's hidden attribute should be false on a reader-able page");
+      is(menuitem.hidden, false, "menuitem's hidden attribute should be false on a reader-able page");
     }
   );
   await waitForPageshow;
 
   info("Navigate a non-reader-able page");
   waitForPageshow = BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, "pageshow");
-  await observeAttribute(command, "hidden",
+  await observeAttribute(menuitem, "hidden",
     () => {
       let url = TEST_PATH + "readerModeArticleHiddenNodes.html";
       tab.linkedBrowser.loadURI(url);
     },
     () => {
-      is(command.hidden, true, "Command's hidden attribute should be true on a non-reader-able page");
+      is(menuitem.hidden, true, "menuitem's hidden attribute should be true on a non-reader-able page");
     }
   );
   await waitForPageshow;
 
   info("Navigate a reader-able page");
   waitForPageshow = BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, "pageshow");
-  await observeAttribute(command, "hidden",
+  await observeAttribute(menuitem, "hidden",
     () => {
       let url = TEST_PATH + "readerModeArticle.html";
       tab.linkedBrowser.loadURI(url);
     },
     () => {
-      is(command.hidden, false, "Command's hidden attribute should be false on a reader-able page");
+      is(menuitem.hidden, false, "menuitem's hidden attribute should be false on a reader-able page");
     }
   );
   await waitForPageshow;
@@ -232,13 +232,13 @@ add_task(async function test_reader_view_element_attribute_transform() {
 
   info("Navigate a non-reader-able page");
   waitForPageshow = BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, "pageshow");
-  await observeAttribute(command, "hidden",
+  await observeAttribute(menuitem, "hidden",
     () => {
       let url = TEST_PATH + "readerModeArticleHiddenNodes.html";
       tab.linkedBrowser.loadURI(url);
     },
     () => {
-      is(command.hidden, true, "Command's hidden attribute should be true on a non-reader-able page");
+      is(menuitem.hidden, true, "menuitem's hidden attribute should be true on a non-reader-able page");
     }
   );
   await waitForPageshow;

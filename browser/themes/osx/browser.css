@@ -2,12 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-@import url("chrome://global/skin/");
-
 %include shared.inc
 %define toolbarButtonPressed :hover:active:not([disabled="true"]):not([cui-areatype="menu-panel"])
 
-@namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 @namespace html url("http://www.w3.org/1999/xhtml");
 
 %include ../shared/browser.inc.css
@@ -49,7 +46,23 @@
 }
 
 #navigator-toolbox {
+  -moz-appearance: none;
   --tabs-border-color: rgba(0,0,0,.3);
+}
+
+/*
+  This is a workaround for Bug 1482157
+  -moz-appearance: toolbox; makes the macOS sheets attached to the element's
+  bottom border. We cannot put this property on the toolbox itself as it
+  cancels all backgrounds that are there, so we set it on the toolbox bottom
+  border.
+*/
+#navigator-toolbox::after {
+  -moz-appearance: toolbox;
+  height: 1px;
+  /* use inset box-shadow instead of border because -moz-appearance hides the border */
+  border: none;
+  box-shadow: inset 0 -1px var(--toolbox-border-bottom-color);
 }
 
 #tabbrowser-tabs {
@@ -128,7 +141,7 @@
   border-top: 1px solid rgba(0,0,0,0.65);
 }
 
-#navigator-toolbox > toolbar:not(#TabsToolbar) {
+.browser-toolbar:not(#TabsToolbar) {
   -moz-appearance: none;
   background: var(--toolbar-bgcolor);
   color: var(--toolbar-color, inherit);
@@ -217,10 +230,9 @@
 
 /* Override OSX-specific toolkit findbar button styles */
 .findbar-button {
-  background: none;
-  box-shadow: none;
+  background: none !important;
+  box-shadow: none !important;
   border: none;
-  color: inherit;
 }
 
 /* On Mac, native buttons keep their full opacity when they become disabled
@@ -473,15 +485,9 @@ html|input.urlbar-input {
 #editBMPanel_folderMenuList > .menulist-dropmarker {
   -moz-appearance: none;
   display: -moz-box;
-  background-color: transparent;
-  border: 0;
-  margin: 0;
-  padding: 0;
+  -moz-box-align: center;
   padding-inline-end: 4px;
   width: 7px;
-}
-
-#editBMPanel_folderMenuList > .menulist-dropmarker > .dropmarker-icon {
   list-style-image: url("chrome://global/skin/icons/panel-dropmarker.png");
 }
 
@@ -569,7 +575,7 @@ html|input.urlbar-input {
   }
 }
 
-#editBMPanel_tagsField > .textbox-input-box > html|*.textbox-input::placeholder {
+#editBMPanel_tagsField > moz-input-box > html|*.textbox-input::placeholder {
   opacity: 1.0;
   color: #bbb;
 }
@@ -578,20 +584,18 @@ html|input.urlbar-input {
 
 %include ../shared/sidebar.inc.css
 
+#browser {
+  --sidebar-border-color: hsla(240, 5%, 5%, .1);
+}
+
 #sidebar-box {
-  -moz-appearance: -moz-mac-source-list;
-  -moz-font-smoothing-background-color: -moz-mac-source-list;
   /* Default font size is 11px on mac, so this is 12px */
   font-size: 1.0909rem;
 }
 
-#sidebar-header {
-  border-bottom: 1px solid hsla(240, 5%, 5%, .1);
-  background-color: transparent;
-}
-
-.sidebar-splitter {
-  border-color: hsla(240, 5%, 5%, .1);
+#sidebar-box:not([lwt-sidebar]) {
+  -moz-appearance: -moz-mac-source-list;
+  -moz-font-smoothing-background-color: -moz-mac-source-list;
 }
 
 /* ----- CONTENT ----- */
@@ -961,7 +965,6 @@ html|*.addon-webext-perm-list {
 
 %include ../shared/fullscreen/warning.inc.css
 %include ../shared/ctrlTab.inc.css
-%include ../shared/plugin-doorhanger.inc.css
 
 /* On mac, the popup notification contents are indented by default and so
   the default closebutton margins from notification.css require adjustment */

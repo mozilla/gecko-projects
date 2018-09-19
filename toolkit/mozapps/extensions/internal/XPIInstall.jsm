@@ -261,7 +261,7 @@ class Package {
     if (!shouldVerifySignedState(addon)) {
       return {
         signedState: AddonManager.SIGNEDSTATE_NOT_REQUIRED,
-        cert: null
+        cert: null,
       };
     }
 
@@ -361,9 +361,9 @@ XPIPackage = class XPIPackage extends Package {
             aZipReader.close();
           resolve({
             signedState: getSignedStatus(aRv, aCert, addon.id),
-            cert: aCert
+            cert: aCert,
           });
-        }
+        },
       };
       // This allows the certificate DB to get the raw JS callback object so the
       // test code can pass through objects that XPConnect would reject.
@@ -466,6 +466,7 @@ async function loadManifestFromWebManifest(aUri, aPackage) {
   addon.aboutURL = null;
   addon.dependencies = Object.freeze(Array.from(extension.dependencies));
   addon.startupData = extension.startupData;
+  addon.hidden = manifest.hidden;
 
   if (isTheme(addon.type) && await aPackage.hasResource("preview.png")) {
     addon.previewImage = "preview.png";
@@ -649,7 +650,7 @@ async function loadManifestFromRDF(aUri, aData, aPackage) {
     addon.hasEmbeddedWebExtension = manifest.hasEmbeddedWebExtension == "true";
 
     if (addon.optionsType &&
-        addon.optionsType != AddonManager.OPTIONS_INLINE_BROWSER &&
+        addon.optionsType != AddonManager.OPTIONS_TYPE_INLINE_BROWSER &&
         addon.optionsType != AddonManager.OPTIONS_TYPE_TAB) {
       throw new Error("Install manifest specifies unknown optionsType: " + addon.optionsType);
     }
@@ -726,7 +727,7 @@ async function loadManifestFromRDF(aUri, aData, aPackage) {
   for (let targetPlatform of manifest.targetPlatforms || []) {
     let platform = {
       os: null,
-      abi: null
+      abi: null,
     };
 
     let pos = targetPlatform.indexOf("_");
@@ -812,6 +813,9 @@ var loadManifest = async function(aPackage, aLocation, aOldAddon) {
 
   let {signedState, cert} = await aPackage.verifySignedState(addon);
   addon.signedState = signedState;
+  if (signedState != AddonManager.SIGNEDSTATE_PRIVILEGED) {
+    addon.hidden = false;
+  }
 
   if (isWebExtension && !addon.id) {
     if (cert) {
@@ -1271,7 +1275,7 @@ SafeInstallOperation.prototype = {
 
     while (this._createdDirs.length > 0)
       recursiveRemove(this._createdDirs.pop());
-  }
+  },
 };
 
 function getHashStringForCrypto(aCrypto) {
@@ -1311,6 +1315,9 @@ class AddonInstall {
    *        Optional icons for the add-on
    * @param {string} [options.version]
    *        An optional version for the add-on
+   * @param {Object?} [options.installTelemetryInfo]
+   *        An optional object which provides details about the installation source
+   *        included in the addon manager telemetry events.
    * @param {function(string) : Promise<void>} [options.promptHandler]
    *        A callback to prompt the user before installing.
    */
@@ -1323,7 +1330,7 @@ class AddonInstall {
       let hashSplit = options.hash.toLowerCase().split(":");
       this.originalHash = {
         algorithm: hashSplit[0],
-        data: hashSplit[1]
+        data: hashSplit[1],
       };
     }
     this.hash = this.originalHash;
@@ -1353,6 +1360,15 @@ class AddonInstall {
     this.name = options.name || null;
     this.type = options.type || null;
     this.version = options.version || null;
+    this.installTelemetryInfo = null;
+
+    if (options.installTelemetryInfo) {
+      this.installTelemetryInfo = options.installTelemetryInfo;
+    } else if (this.existingAddon) {
+      // Inherits the installTelemetryInfo on updates (so that the source of the original
+      // installation telemetry data is being preserved across the extension updates).
+      this.installTelemetryInfo = this.existingAddon.installTelemetryInfo;
+    }
 
     this.file = null;
     this.ownsTempFile = null;
@@ -1509,13 +1525,18 @@ class AddonInstall {
   }
 
   /**
-   * Updates the sourceURI and releaseNotesURI values on the Addon being
-   * installed by this AddonInstall instance.
+   * Updates the addon metadata that has to be propagated across restarts.
    */
-  updateAddonURIs() {
+  updatePersistedMetadata() {
     this.addon.sourceURI = this.sourceURI.spec;
-    if (this.releaseNotesURI)
+
+    if (this.releaseNotesURI) {
       this.addon.releaseNotesURI = this.releaseNotesURI.spec;
+    }
+
+    if (this.installTelemetryInfo) {
+      this.addon.installTelemetryInfo = this.installTelemetryInfo;
+    }
   }
 
   /**
@@ -1578,7 +1599,7 @@ class AddonInstall {
       pkg.close();
     }
 
-    this.updateAddonURIs();
+    this.updatePersistedMetadata();
 
     this.addon._install = this;
     this.name = this.addon.selectedLocale.name;
@@ -1733,7 +1754,7 @@ class AddonInstall {
         let file = await this.location.installer.installAddon({
           id: this.addon.id,
           source: stagedAddon,
-          existingAddonID
+          existingAddonID,
         });
 
         // Update the metadata in the database
@@ -1776,6 +1797,10 @@ class AddonInstall {
         if (this.existingAddon) {
           await XPIInternal.BootstrapScope.get(this.existingAddon).update(
             this.addon, !this.addon.disabled, install);
+
+          if (this.addon.disabled) {
+            flushJarCache(this.file);
+          }
         } else {
           await install();
           await XPIInternal.BootstrapScope.get(this.addon).install(undefined, true);
@@ -1986,7 +2011,7 @@ var LocalAddonInstall = class extends AddonInstall {
             this.state = AddonManager.STATE_DOWNLOADED;
             this._callInstallListeners("onNewInstall");
             resolve();
-          }
+          },
         }, AddonManager.UPDATE_WHEN_ADDON_INSTALLED);
       });
     } else {
@@ -2145,7 +2170,7 @@ var DownloadAddonInstall = class extends AddonInstall {
 
       this.channel = NetUtil.newChannel({
         uri: this.sourceURI,
-        loadUsingSystemPrincipal: true
+        loadUsingSystemPrincipal: true,
       });
       this.channel.notificationCallbacks = this;
       if (this.channel instanceof Ci.nsIHttpChannel) {
@@ -2192,7 +2217,7 @@ var DownloadAddonInstall = class extends AddonInstall {
         let hashSplit = hashStr.toLowerCase().split(":");
         this.hash = {
           algorithm: hashSplit[0],
-          data: hashSplit[1]
+          data: hashSplit[1],
         };
       } catch (e) {
       }
@@ -2421,6 +2446,7 @@ function createUpdate(aCallback, aAddon, aUpdate) {
       icons: aAddon.icons,
       version: aUpdate.version,
     };
+
     let install;
     if (url instanceof Ci.nsIFileURL) {
       install = new LocalAddonInstall(aAddon.location, url, opts);
@@ -2482,6 +2508,10 @@ AddonInstallWrapper.prototype = {
 
   set promptHandler(handler) {
     installFor(this).promptHandler = handler;
+  },
+
+  get installTelemetryInfo() {
+    return installFor(this).installTelemetryInfo;
   },
 
   install() {
@@ -2598,9 +2628,9 @@ UpdateChecker.prototype = {
     XPIInstall.done(this.addon._updateCheck);
     this.addon._updateCheck = null;
     let AUC = AddonUpdateChecker;
-
     let ignoreMaxVersion = false;
-    let ignoreStrictCompat = false;
+    // Ignore strict compatibility for dictionaries by default.
+    let ignoreStrictCompat = (this.addon.type == "webextension-dictionary");
     if (!AddonManager.checkCompatibility) {
       ignoreMaxVersion = true;
       ignoreStrictCompat = true;
@@ -2709,7 +2739,7 @@ UpdateChecker.prototype = {
       // This will call back to onUpdateCheckError with a CANCELLED error
       parser.cancel();
     }
-  }
+  },
 };
 
 /**
@@ -2719,17 +2749,22 @@ UpdateChecker.prototype = {
  *        The file to install
  * @param {XPIStateLocation} location
  *        The location to install to
+ * @param {Object?} [telemetryInfo]
+ *        An optional object which provides details about the installation source
+ *        included in the addon manager telemetry events.
  * @returns {Promise<AddonInstall>}
  *        A Promise that resolves with the new install object.
  */
-function createLocalInstall(file, location) {
+function createLocalInstall(file, location, telemetryInfo) {
   if (!location) {
     location = XPIStates.getLocation(KEY_APP_PROFILE);
   }
   let url = Services.io.newFileURI(file);
 
   try {
-    let install = new LocalAddonInstall(location, url);
+    let install = new LocalAddonInstall(location, url, {
+      installTelemetryInfo: telemetryInfo,
+    });
     return install.init().then(() => install);
   } catch (e) {
     logger.error("Error creating install", e);
@@ -3250,7 +3285,7 @@ class SystemAddonInstaller extends DirectoryInstaller {
       state = { schema: 1, directory: newDir.leafName, addons: {} };
       for (let addon of aAddons) {
         state.addons[addon.id] = {
-          version: addon.version
+          version: addon.version,
         };
       }
 
@@ -3428,6 +3463,7 @@ var XPIInstall = {
    */
   async installDistributionAddon(id, file, location) {
     let addon = await loadManifestFromFile(file, location);
+    addon.installTelemetryInfo = {source: "distribution"};
 
     if (addon.id != id) {
       throw new Error(`File file ${file.path} contains an add-on with an incorrect ID`);
@@ -3743,9 +3779,12 @@ var XPIInstall = {
    *        A version for the install
    * @param {XULElement?} [aBrowser]
    *        The browser performing the install
+   * @param {Object?} [aInstallTelemetryInfo]
+   *        An optional object which provides details about the installation source
+   *        included in the addon manager telemetry events.
    * @returns {AddonInstall}
    */
-  async getInstallForURL(aUrl, aHash, aName, aIcons, aVersion, aBrowser) {
+  async getInstallForURL(aUrl, aHash, aName, aIcons, aVersion, aBrowser, aInstallTelemetryInfo) {
     let location = XPIStates.getLocation(KEY_APP_PROFILE);
     let url = Services.io.newURI(aUrl);
 
@@ -3755,6 +3794,7 @@ var XPIInstall = {
       name: aName,
       icons: aIcons,
       version: aVersion,
+      installTelemetryInfo: aInstallTelemetryInfo,
     };
 
     if (url instanceof Ci.nsIFileURL) {
@@ -3772,10 +3812,13 @@ var XPIInstall = {
    *
    * @param {nsIFile} aFile
    *        The file to be installed
+   * @param {Object?} [aInstallTelemetryInfo]
+   *        An optional object which provides details about the installation source
+   *        included in the addon manager telemetry events.
    * @returns {AddonInstall?}
    */
-  async getInstallForFile(aFile) {
-    let install = await createLocalInstall(aFile);
+  async getInstallForFile(aFile, aInstallTelemetryInfo) {
+    let install = await createLocalInstall(aFile, null, aInstallTelemetryInfo);
     return install ? install.wrapper : null;
   },
 
@@ -3935,7 +3978,7 @@ var XPIInstall = {
       }
 
       XPIDatabase.setAddonProperties(aAddon, {
-        pendingUninstall: true
+        pendingUninstall: true,
       });
       Services.prefs.setBoolPref(PREF_PENDING_OPERATIONS, true);
       let xpiState = aAddon.location.get(aAddon.id);
@@ -4023,7 +4066,7 @@ var XPIInstall = {
       aAddon.location.installer.cleanStagingDir([aAddon.id]);
 
     XPIDatabase.setAddonProperties(aAddon, {
-      pendingUninstall: false
+      pendingUninstall: false,
     });
 
     if (!aAddon.visible)

@@ -52,9 +52,7 @@ def build_dict(config, env=os.environ):
         d["appname"] = substs["MOZ_APP_NAME"]
 
     # Build app name
-    if 'MOZ_MULET' in substs and substs.get('MOZ_MULET') == "1":
-        d["buildapp"] = "mulet"
-    elif 'MOZ_BUILD_APP' in substs:
+    if 'MOZ_BUILD_APP' in substs:
         d["buildapp"] = substs["MOZ_BUILD_APP"]
 
     # processor
@@ -67,7 +65,7 @@ def build_dict(config, env=os.environ):
         p = "x86"
     d["processor"] = p
     # hardcoded list of 64-bit CPUs
-    if p in ["x86_64", "ppc64"]:
+    if p in ["x86_64", "ppc64", "aarch64"]:
         d["bits"] = 64
     # hardcoded list of known 32-bit CPUs
     elif p in ["x86", "arm", "ppc"]:
@@ -100,7 +98,7 @@ def build_dict(config, env=os.environ):
     d['cc_type'] = substs.get('CC_TYPE')
 
     def guess_platform():
-        if d['buildapp'] in ('browser', 'mulet'):
+        if d['buildapp'] == 'browser':
             p = d['os']
             if p == 'mac':
                 p = 'macosx64'
@@ -108,9 +106,6 @@ def build_dict(config, env=os.environ):
                 p = '{}64'.format(p)
             elif p in ('win',):
                 p = '{}32'.format(p)
-
-            if d['buildapp'] == 'mulet':
-                p = '{}-mulet'.format(p)
 
             if d['asan']:
                 p = '{}-asan'.format(p)

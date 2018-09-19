@@ -10,6 +10,7 @@
 #include "jit/JitFrames.h"
 #include "jit/MoveResolver.h"
 #include "jit/x86-shared/MacroAssembler-x86-shared.h"
+#include "js/HeapAPI.h"
 #include "vm/Realm.h"
 
 namespace js {
@@ -48,8 +49,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     Operand payloadOfAfterStackPush(const Address& address) {
         // If we are basing off %esp, the address will be invalid after the
         // first push.
-        if (address.base == StackPointer)
+        if (address.base == StackPointer) {
             return Operand(address.base, address.offset + 4);
+        }
         return payloadOf(address);
     }
     Operand payloadOf(const Address& address) {
@@ -149,6 +151,20 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
     template <typename T>
     void storeValue(JSValueType type, Register reg, const T& dest) {
+#ifdef NIGHTLY_BUILD
+        // Bug 1485209 - Diagnostic assert for constructing Values with
+        // nullptr or misaligned (eg poisoned) JSObject/JSString pointers.
+        if (type == JSVAL_TYPE_OBJECT || type == JSVAL_TYPE_STRING) {
+            Label crash, ok;
+            testPtr(reg, Imm32(js::gc::CellAlignMask));
+            j(Assembler::NonZero, &crash);
+            testPtr(reg, reg);
+            j(Assembler::NonZero, &ok);
+            bind(&crash);
+            breakpoint();
+            bind(&ok);
+        }
+#endif
         storeTypeTag(ImmTag(JSVAL_TYPE_TO_TAG(type)), Operand(dest));
         storePayload(reg, Operand(dest));
     }
@@ -211,8 +227,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
     void tagValue(JSValueType type, Register payload, ValueOperand dest) {
         MOZ_ASSERT(dest.typeReg() != dest.payloadReg());
-        if (payload != dest.payloadReg())
+        if (payload != dest.payloadReg()) {
             movl(payload, dest.payloadReg());
+        }
         movl(ImmType(type), dest.typeReg());
     }
     void pushValue(ValueOperand val) {
@@ -225,10 +242,11 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
     void pushValue(const Value& val) {
         push(Imm32(val.toNunboxTag()));
-        if (val.isGCThing())
+        if (val.isGCThing()) {
             push(ImmGCPtr(val.toGCThing()));
-        else
+        } else {
             push(Imm32(val.toNunboxPayload()));
+        }
     }
     void pushValue(JSValueType type, Register reg) {
         push(ImmTag(JSVAL_TYPE_TO_TAG(type)));
@@ -247,10 +265,11 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         pop(dest.high);
     }
     void storePayload(const Value& val, Operand dest) {
-        if (val.isGCThing())
+        if (val.isGCThing()) {
             movl(ImmGCPtr(val.toGCThing()), ToPayload(dest));
-        else
+        } else {
             movl(Imm32(val.toNunboxPayload()), ToPayload(dest));
+        }
     }
     void storePayload(Register src, Operand dest) {
         movl(src, ToPayload(dest));
@@ -674,15 +693,17 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
             vpextrd(1, src, dest.typeReg());
         } else {
             vmovd(src, dest.payloadReg());
-            if (src != temp)
+            if (src != temp) {
                 moveDouble(src, temp);
+            }
             vpsrldq(Imm32(4), temp, temp);
             vmovd(temp, dest.typeReg());
         }
     }
     void boxNonDouble(JSValueType type, Register src, const ValueOperand& dest) {
-        if (src != dest.payloadReg())
+        if (src != dest.payloadReg()) {
             movl(src, dest.payloadReg());
+        }
         movl(ImmType(type), dest.typeReg());
     }
 
@@ -691,8 +712,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
     void unboxNonDouble(const Operand& tag, const Operand& payload, Register dest, JSValueType type, Register scratch = InvalidReg) {
         auto movPayloadToDest = [&]() {
-            if (payload.kind() != Operand::REG || !payload.containsReg(dest))
+            if (payload.kind() != Operand::REG || !payload.containsReg(dest)) {
                 movl(payload, dest);
+            }
         };
         if (!JitOptions.spectreValueMasking) {
             movPayloadToDest();
@@ -813,8 +835,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
     inline void unboxValue(const ValueOperand& src, AnyRegister dest, JSValueType type);
     void unboxPrivate(const ValueOperand& src, Register dest) {
-        if (src.payloadReg() != dest)
+        if (src.payloadReg() != dest) {
             movl(src.payloadReg(), dest);
+        }
     }
 
     // See comment in MacroAssembler-x64.h.

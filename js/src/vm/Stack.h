@@ -23,6 +23,7 @@
 #include "jit/JSJitFrameIter.h"
 #include "js/RootingAPI.h"
 #include "js/TypeDecls.h"
+#include "js/UniquePtr.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/JSFunction.h"
 #include "vm/JSScript.h"
@@ -69,7 +70,7 @@ class DebugFrame;
 class Instance;
 }
 
-// VM stack layout
+// [SMDOC] VM stack layout
 //
 // A JSRuntime's stack consists of a linked list of activations. Every activation
 // contains a number of scripted frames that are either running in the interpreter
@@ -102,7 +103,16 @@ class Instance;
 enum MaybeCheckAliasing { CHECK_ALIASING = true, DONT_CHECK_ALIASING = false };
 enum MaybeCheckTDZ { CheckTDZ = true, DontCheckTDZ = false };
 
+} // namespace js
+
+namespace mozilla {
+template <>
+struct IsPod<js::MaybeCheckTDZ> : TrueType {};
+} // namespace mozilla
+
 /*****************************************************************************/
+
+namespace js {
 
 namespace jit {
     class BaselineFrame;
@@ -636,13 +646,15 @@ class InterpreterFrame
      * frame.
      */
     Value newTarget() const {
-        if (isEvalFrame())
+        if (isEvalFrame()) {
             return ((Value*)this)[-1];
+        }
 
         MOZ_ASSERT(isFunctionFrame());
 
-        if (callee().isArrow())
+        if (callee().isArrow()) {
             return callee().getExtendedSlot(FunctionExtended::ARROW_NEWTARGET_SLOT);
+        }
 
         if (isConstructing()) {
             unsigned pushedArgs = Max(numFormalArgs(), numActualArgs());
@@ -672,8 +684,9 @@ class InterpreterFrame
     }
 
     MutableHandleValue returnValue() {
-        if (!hasReturnValue())
+        if (!hasReturnValue()) {
             rval_.setUndefined();
+        }
         return MutableHandleValue::fromMarkedLocation(&rval_);
     }
 
@@ -958,13 +971,15 @@ class GenericArgsBase
         // callee, this, arguments[, new.target iff constructing]
         size_t len = 2 + argc + uint32_t(Construct);
         MOZ_ASSERT(len > argc);  // no overflow
-        if (!v_.resize(len))
+        if (!v_.resize(len)) {
             return false;
+        }
 
         *static_cast<JS::CallArgs*>(this) = CallArgsFromVp(argc, v_.begin());
         this->constructing_ = Construct;
-        if (Construct)
+        if (Construct) {
             this->CallArgs::setThis(MagicValue(JS_IS_CONSTRUCTING));
+        }
         return true;
     }
 };
@@ -982,8 +997,9 @@ class FixedArgsBase
     explicit FixedArgsBase(JSContext* cx) : v_(cx) {
         *static_cast<JS::CallArgs*>(this) = CallArgsFromVp(N, v_.begin());
         this->constructing_ = Construct;
-        if (Construct)
+        if (Construct) {
             this->CallArgs::setThis(MagicValue(JS_IS_CONSTRUCTING));
+        }
     }
 };
 
@@ -1043,27 +1059,37 @@ inline bool
 FillArgumentsFromArraylike(JSContext* cx, Args& args, const Arraylike& arraylike)
 {
     uint32_t len = arraylike.length();
-    if (!args.init(cx, len))
+    if (!args.init(cx, len)) {
         return false;
+    }
 
-    for (uint32_t i = 0; i < len; i++)
+    for (uint32_t i = 0; i < len; i++) {
         args[i].set(arraylike[i]);
+    }
 
     return true;
 }
 
+} // namespace js
+
+namespace mozilla {
+
 template <>
-struct DefaultHasher<AbstractFramePtr> {
-    typedef AbstractFramePtr Lookup;
+struct DefaultHasher<js::AbstractFramePtr> {
+    typedef js::AbstractFramePtr Lookup;
 
     static js::HashNumber hash(const Lookup& key) {
         return mozilla::HashGeneric(key.raw());
     }
 
-    static bool match(const AbstractFramePtr& k, const Lookup& l) {
+    static bool match(const js::AbstractFramePtr& k, const Lookup& l) {
         return k == l;
     }
 };
+
+} // namespace mozilla
+
+namespace js {
 
 /*****************************************************************************/
 
@@ -1573,8 +1599,9 @@ class InterpreterActivation : public Activation
 
     // If this js::Interpret frame is running |script|, enable interrupts.
     void enableInterruptsIfRunning(JSScript* script) {
-        if (regs_.fp()->script() == script)
+        if (regs_.fp()->script() == script) {
             enableInterruptsUnconditionally();
+        }
     }
     void enableInterruptsUnconditionally() {
         opMask_ = EnableInterruptsPseudoOpcode;
@@ -1613,13 +1640,10 @@ class BailoutFrameInfo;
 // A JitActivation is used for frames running in Baseline or Ion.
 class JitActivation : public Activation
 {
-  public:
-    static const uintptr_t ExitFpWasmBit = 0x1;
-
-  private:
     // If Baseline, Ion or Wasm code is on the stack, and has called into C++,
     // this will be aligned to an ExitFrame. The last bit indicates if it's a
-    // wasm frame (bit set to ExitFpWasmBit) or not (bit set to !ExitFpWasmBit).
+    // wasm frame (bit set to wasm::ExitOrJitEntryFPTag) or not
+    // (bit set to ~wasm::ExitOrJitEntryFPTag).
     uint8_t* packedExitFP_;
 
     // When hasWasmExitFP(), encodedWasmExitReason_ holds ExitReason.
@@ -1634,7 +1658,7 @@ class JitActivation : public Activation
     // This table is lazily initialized by calling getRematerializedFrame.
     typedef GCVector<RematerializedFrame*> RematerializedFrameVector;
     typedef HashMap<uint8_t*, RematerializedFrameVector> RematerializedFrameTable;
-    RematerializedFrameTable* rematerializedFrames_;
+    js::UniquePtr<RematerializedFrameTable> rematerializedFrames_;
 
     // This vector is used to remember the outcome of the evaluation of recover
     // instructions.
@@ -1695,14 +1719,14 @@ class JitActivation : public Activation
         return !!packedExitFP_;
     }
     uint8_t* jsOrWasmExitFP() const {
-        return (uint8_t*)(uintptr_t(packedExitFP_) & ~ExitFpWasmBit);
+        return (uint8_t*)(uintptr_t(packedExitFP_) & ~wasm::ExitOrJitEntryFPTag);
     }
     static size_t offsetOfPackedExitFP() {
         return offsetof(JitActivation, packedExitFP_);
     }
 
     bool hasJSExitFP() const {
-        return !(uintptr_t(packedExitFP_) & ExitFpWasmBit);
+        return !(uintptr_t(packedExitFP_) & wasm::ExitOrJitEntryFPTag);
     }
     uint8_t* jsExitFP() const {
         MOZ_ASSERT(hasJSExitFP());
@@ -1793,16 +1817,16 @@ class JitActivation : public Activation
 
     // WebAssembly specific attributes.
     bool hasWasmExitFP() const {
-        return uintptr_t(packedExitFP_) & ExitFpWasmBit;
+        return uintptr_t(packedExitFP_) & wasm::ExitOrJitEntryFPTag;
     }
     wasm::Frame* wasmExitFP() const {
         MOZ_ASSERT(hasWasmExitFP());
-        return (wasm::Frame*)(uintptr_t(packedExitFP_) & ~ExitFpWasmBit);
+        return (wasm::Frame*)(uintptr_t(packedExitFP_) & ~wasm::ExitOrJitEntryFPTag);
     }
     void setWasmExitFP(const wasm::Frame* fp) {
         if (fp) {
-            MOZ_ASSERT(!(uintptr_t(fp) & ExitFpWasmBit));
-            packedExitFP_ = (uint8_t*)(uintptr_t(fp) | ExitFpWasmBit);
+            MOZ_ASSERT(!(uintptr_t(fp) & wasm::ExitOrJitEntryFPTag));
+            packedExitFP_ = (uint8_t*)(uintptr_t(fp) | wasm::ExitOrJitEntryFPTag);
             MOZ_ASSERT(hasWasmExitFP());
         } else {
             packedExitFP_ = nullptr;
@@ -1826,8 +1850,9 @@ class JitActivation : public Activation
 class JitActivationIterator : public ActivationIterator
 {
     void settle() {
-        while (!done() && !activation_->isJit())
+        while (!done() && !activation_->isJit()) {
             ActivationIterator::operator++();
+        }
     }
 
   public:
@@ -1915,9 +1940,8 @@ class InterpreterFrameIterator
 // asJSJit() and asWasm(), but the user has to be careful not to have those be
 // used after JitFrameIter leaves the scope or the operator++ is called.
 //
-// TODO(bug 1360211) In particular, this can handle the transition from wasm to
-// ion and from ion to wasm, since these will be interleaved in the same
-// JitActivation.
+// In particular, this can handle the transition from wasm to jit and from jit
+// to wasm, since these can be interleaved in the same JitActivation.
 class JitFrameIter
 {
   protected:
@@ -1966,8 +1990,9 @@ class JitFrameIter
 class OnlyJSJitFrameIter : public JitFrameIter
 {
     void settle() {
-        while (!done() && !isJSJit())
+        while (!done() && !isJSJit()) {
             JitFrameIter::operator++();
+        }
     }
 
   public:
@@ -2151,7 +2176,7 @@ class FrameIter
     bool ensureHasRematerializedFrame(JSContext* cx);
 
     // True when isInterp() or isBaseline(). True when isIon() if it
-    // has a rematerialized frame. False otherwise false otherwise.
+    // has a rematerialized frame. False otherwise.
     bool hasUsableAbstractFramePtr() const;
 
     // -----------------------------------------------------------
@@ -2196,8 +2221,9 @@ class FrameIter
 class ScriptFrameIter : public FrameIter
 {
     void settle() {
-        while (!done() && !hasScript())
+        while (!done() && !hasScript()) {
             FrameIter::operator++();
+        }
     }
 
   public:
@@ -2339,10 +2365,12 @@ FrameIter::script() const
 {
     MOZ_ASSERT(!done());
     MOZ_ASSERT(hasScript());
-    if (data_.state_ == INTERP)
+    if (data_.state_ == INTERP) {
         return interpFrame()->script();
-    if (jsJitFrame().isIonJS())
+    }
+    if (jsJitFrame().isIonJS()) {
         return ionInlineFrames_.script();
+    }
     return jsJitFrame().script();
 }
 
@@ -2400,13 +2428,15 @@ FrameIter::interpFrame() const
 inline bool
 FrameIter::isPhysicalJitFrame() const
 {
-    if (!isJSJit())
+    if (!isJSJit()) {
         return false;
+    }
 
     auto& jitFrame = jsJitFrame();
 
-    if (jitFrame.isBaselineJS())
+    if (jitFrame.isBaselineJS()) {
         return true;
+    }
 
     if (jitFrame.isIonScripted()) {
         // Only the bottom of a group of inlined Ion frames is a physical frame.
@@ -2424,4 +2454,5 @@ FrameIter::physicalJitFrame() const
 }
 
 }  /* namespace js */
+
 #endif /* vm_Stack_h */

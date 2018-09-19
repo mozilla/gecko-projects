@@ -22,8 +22,8 @@
       },
       async function() {
         let webNav = SpecialPowers.wrap(window)
-                       .QueryInterface(SpecialPowers.Ci.nsIInterfaceRequestor)
-                       .getInterface(SpecialPowers.Ci.nsIWebNavigation);
+                       .docShell
+                       .QueryInterface(SpecialPowers.Ci.nsIWebNavigation);
         let shistory = webNav.sessionHistory;
         opener.is(webNav.canGoForward, true, 'canGoForward');
         opener.is(shistory.index, 4, 'shistory.index');
@@ -44,14 +44,13 @@
         window.location = 'goback.html';
       },
       async function() {
-        let windowWrap = SpecialPowers.wrap(window)
-                         .QueryInterface(SpecialPowers.Ci.nsIInterfaceRequestor);
-        let docShell = windowWrap.getInterface(SpecialPowers.Ci.nsIDocShell);
-        let shistory = windowWrap.getInterface(SpecialPowers.Ci.nsIWebNavigation)
-                                 .sessionHistory;
+        let windowWrap = SpecialPowers.wrap(window);
+        let docShell = windowWrap.docShell;
+        let shistory = docShell.QueryInterface(SpecialPowers.Ci.nsIWebNavigation)
+                               .sessionHistory;
         // Now staticFrame has frame0 -> frame1 -> frame2.
-        opener.is(docShell.previousTransIndex, 3, 'docShell.previousTransIndex');
-        opener.is(docShell.loadedTransIndex, 2, 'docShell.loadedTransIndex');
+        opener.is(docShell.previousEntryIndex, 3, 'docShell.previousEntryIndex');
+        opener.is(docShell.loadedEntryIndex, 2, 'docShell.loadedEntryIndex');
         opener.is(shistory.index, 2, 'shistory.index');
         opener.is(history.length, 4, 'history.length');
         opener.is(document.getElementById('staticFrame').contentWindow.location.href, BASE_URL + 'frame2.html', 'staticFrame location');
@@ -104,15 +103,14 @@
         window.location = 'file_bug1326251_evict_cache.html';
       },
       async function() {
-        let windowWrap = SpecialPowers.wrap(window)
-                         .QueryInterface(SpecialPowers.Ci.nsIInterfaceRequestor);
-        let docShell = windowWrap.getInterface(SpecialPowers.Ci.nsIDocShell);
-        let shistory = windowWrap.getInterface(SpecialPowers.Ci.nsIWebNavigation)
-                                 .sessionHistory;
+        let windowWrap = SpecialPowers.wrap(window);
+        let docShell = windowWrap.docShell;
+        let shistory = docShell.QueryInterface(SpecialPowers.Ci.nsIWebNavigation)
+                               .sessionHistory;
         // staticFrame:       frame0 -> frame1 -> frame2 -> iframe_static
         // innerStaticFrame:                                frame0        -> frame1
-        opener.is(docShell.previousTransIndex, 5, 'docShell.previousTransIndex');
-        opener.is(docShell.loadedTransIndex, 4, 'docShell.loadedTransIndex');
+        opener.is(docShell.previousEntryIndex, 5, 'docShell.previousEntryIndex');
+        opener.is(docShell.loadedEntryIndex, 4, 'docShell.loadedEntryIndex');
         opener.is(shistory.index, 4, 'shistory.index');
         opener.is(history.length, 6, 'history.length');
         let staticFrame = document.getElementById('staticFrame');

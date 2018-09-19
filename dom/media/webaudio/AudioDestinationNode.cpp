@@ -334,6 +334,7 @@ AudioDestinationNode::AudioDestinationNode(AudioContext* aContext,
   , mAudioChannelSuspended(false)
   , mCaptured(false)
   , mAudible(AudioChannelService::AudibleState::eAudible)
+  , mCreatedTime(TimeStamp::Now())
 {
   nsPIDOMWindowInner* window = aContext->GetParentObject();
   MediaStreamGraph* graph =
@@ -493,7 +494,7 @@ AudioDestinationNode::OfflineShutdown()
 JSObject*
 AudioDestinationNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return AudioDestinationNodeBinding::Wrap(aCx, this, aGivenProto);
+  return AudioDestinationNode_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -596,20 +597,12 @@ AudioDestinationNode::WindowAudioCaptureChanged(bool aCapture)
 nsresult
 AudioDestinationNode::CreateAudioChannelAgent()
 {
-  if (mIsOffline) {
+  if (mIsOffline || mAudioChannelAgent) {
     return NS_OK;
   }
 
-  nsresult rv = NS_OK;
-  if (mAudioChannelAgent) {
-    rv = mAudioChannelAgent->NotifyStoppedPlaying();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-  }
-
   mAudioChannelAgent = new AudioChannelAgent();
-  rv = mAudioChannelAgent->InitWithWeakCallback(GetOwner(), this);
+  nsresult rv = mAudioChannelAgent->InitWithWeakCallback(GetOwner(), this);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -634,6 +627,13 @@ AudioDestinationNode::InputMuted(bool aMuted)
     // Reset the state, and it would always be regard as audible.
     mAudible = AudioChannelService::AudibleState::eAudible;
     return;
+  }
+
+  if (mDurationBeforeFirstTimeAudible.IsZero()) {
+    MOZ_ASSERT(!aMuted);
+    mDurationBeforeFirstTimeAudible = TimeStamp::Now() - mCreatedTime;
+    Telemetry::Accumulate(Telemetry::WEB_AUDIO_BECOMES_AUDIBLE_TIME,
+                          mDurationBeforeFirstTimeAudible.ToSeconds());
   }
 
   AudioPlaybackConfig config;

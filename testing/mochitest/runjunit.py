@@ -15,7 +15,7 @@ import mozcrash
 import mozinfo
 import mozlog
 import moznetwork
-from mozdevice import ADBAndroid
+from mozdevice import ADBAndroid, ADBError
 from mozprofile import Profile, DEFAULT_PORTS
 from mozprofile.permissions import ServerLocations
 from runtests import MochitestDesktop, update_mozinfo
@@ -51,6 +51,15 @@ class JUnitTestRunner(MochitestDesktop):
         self.log.debug("options=%s" % vars(options))
         update_mozinfo()
         self.remote_profile = posixpath.join(self.device.test_root, 'junit-profile')
+
+        if self.options.coverage and not self.options.coverage_output_dir:
+            raise Exception("--coverage-output-dir is required when using --enable-coverage")
+        if self.options.coverage:
+            self.remote_coverage_output_file = posixpath.join(self.device.test_root,
+                                                              'junit-coverage.ec')
+            self.coverage_output_file = os.path.join(self.options.coverage_output_dir,
+                                                     'junit-coverage.ec')
+
         self.server_init()
 
         self.cleanup()
@@ -145,6 +154,10 @@ class JUnitTestRunner(MochitestDesktop):
         for f in test_filters:
             # filter can be class-name or 'class-name#method-name' (single test)
             cmd = cmd + " -e class %s" % f
+        # enable code coverage reports
+        if self.options.coverage:
+            cmd = cmd + " -e coverage true"
+            cmd = cmd + " -e coverageFile %s" % self.remote_coverage_output_file
         # environment
         env = {}
         env["MOZ_CRASHREPORTER"] = "1"
@@ -249,7 +262,10 @@ class JUnitTestRunner(MochitestDesktop):
         try:
             cmd = self.build_command_line(test_filters)
             self.log.info("launching %s" % cmd)
-            self.device.shell(cmd, timeout=self.options.max_time, stdout_callback=callback)
+            p = self.device.shell(cmd, timeout=self.options.max_time, stdout_callback=callback)
+            if p.timedout:
+                self.log.error("TEST-UNEXPECTED-TIMEOUT | runjunit.py | "
+                               "Timed out after %d seconds" % self.options.max_time)
             self.log.info("Passed: %d" % self.pass_count)
             self.log.info("Failed: %d" % self.fail_count)
             self.log.info("Todo: %d" % self.todo_count)
@@ -258,6 +274,16 @@ class JUnitTestRunner(MochitestDesktop):
 
         if self.check_for_crashes():
             self.fail_count = 1
+
+        if self.options.coverage:
+            try:
+                self.device.pull(self.remote_coverage_output_file,
+                                 self.coverage_output_file)
+            except ADBError:
+                # Avoid a task retry in case the code coverage file is not found.
+                self.log.error("No code coverage file (%s) found on remote device" %
+                               self.remote_coverage_output_file)
+                return -1
 
         return 1 if self.fail_count else 0
 
@@ -326,7 +352,7 @@ class JunitArgumentParser(argparse.ArgumentParser):
                           help="Disable multiprocess mode in test app.")
         self.add_argument("--max-time",
                           action="store",
-                          type=str,
+                          type=int,
                           dest="max_time",
                           default="2400",
                           help="Max time in seconds to wait for tests (default 2400s).")
@@ -361,6 +387,17 @@ class JunitArgumentParser(argparse.ArgumentParser):
                           dest="thisChunk",
                           default=None,
                           help="If running tests by chunks, the chunk number to run.")
+        self.add_argument("--enable-coverage",
+                          action="store_true",
+                          dest="coverage",
+                          default=False,
+                          help="Enable code coverage collection.")
+        self.add_argument("--coverage-output-dir",
+                          action="store",
+                          type=str,
+                          dest="coverage_output_dir",
+                          default=None,
+                          help="If collecting code coverage, save the report file in this dir.")
         # Additional options for server.
         self.add_argument("--certificate-path",
                           action="store",

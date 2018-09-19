@@ -81,8 +81,9 @@ struct AllocationIntegrityState
         BlockInfo() {}
         BlockInfo(const BlockInfo& o) {
             AutoEnterOOMUnsafeRegion oomUnsafe;
-            if (!phis.appendAll(o.phis))
+            if (!phis.appendAll(o.phis)) {
                 oomUnsafe.crash("BlockInfo::BlockInfo");
+            }
         }
     };
     Vector<BlockInfo, 0, SystemAllocPolicy> blocks;
@@ -234,8 +235,9 @@ class InstructionDataMap
     { }
 
     MOZ_MUST_USE bool init(MIRGenerator* gen, uint32_t numInstructions) {
-        if (!insData_.init(gen->alloc(), numInstructions))
+        if (!insData_.init(gen->alloc(), numInstructions)) {
             return false;
+        }
         memset(&insData_[0], 0, sizeof(LNode*) * numInstructions);
         return true;
     }
@@ -253,6 +255,16 @@ class InstructionDataMap
         return insData_[ins];
     }
 };
+
+inline void
+TakeJitRegisters(bool isProfiling, AllocatableRegisterSet* set)
+{
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64)
+    if (isProfiling) {
+        set->take(AnyRegister(FramePointer));
+    }
+#endif
+}
 
 // Common superclass for register allocators.
 class RegisterAllocator
@@ -283,10 +295,7 @@ class RegisterAllocator
         if (mir->compilingWasm()) {
             takeWasmRegisters(allRegisters_);
         } else {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64)
-            if (mir->instrumentedProfiling())
-                allRegisters_.take(AnyRegister(FramePointer));
-#endif
+            TakeJitRegisters(mir->instrumentedProfiling(), &allRegisters_);
         }
     }
 
@@ -343,8 +352,9 @@ class RegisterAllocator
         // safepoint information for the instruction may be incorrect.
         while (true) {
             LNode* next = insData[ins->id() + 1];
-            if (!next->isOsiPoint())
+            if (!next->isOsiPoint()) {
                 break;
+            }
             ins = next;
         }
 

@@ -43,7 +43,7 @@ function amManager() {
   ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
   /* globals AddonManagerPrivate*/
 
-  Services.mm.loadFrameScript(CHILD_SCRIPT, true);
+  Services.mm.loadFrameScript(CHILD_SCRIPT, true, true);
   Services.mm.addMessageListener(MSG_INSTALL_ENABLED, this);
   Services.mm.addMessageListener(MSG_INSTALL_ADDON, this);
   Services.mm.addMessageListener(MSG_PROMISE_REQUEST, this);
@@ -73,16 +73,34 @@ amManager.prototype = {
     }
   },
 
-  installAddonFromWebpage(aMimetype, aBrowser, aInstallingPrincipal,
-                          aUri, aHash, aName, aIcon, aCallback) {
+  installAddonFromWebpage(aPayload, aBrowser, aCallback) {
     let retval = true;
-    if (!AddonManager.isInstallAllowed(aMimetype, aInstallingPrincipal)) {
+
+    const {
+      mimetype,
+      triggeringPrincipal,
+      hash,
+      icon,
+      name,
+      uri,
+    } = aPayload;
+
+    if (!AddonManager.isInstallAllowed(mimetype, triggeringPrincipal)) {
       aCallback = null;
       retval = false;
     }
 
-    AddonManager.getInstallForURL(aUri, aMimetype, aHash, aName, aIcon, null, aBrowser).then(aInstall => {
-      function callCallback(uri, status) {
+    let installTelemetryInfo = {
+      source: AddonManager.getInstallSourceFromHost(aPayload.sourceHost),
+    };
+
+    if ("method" in aPayload) {
+      installTelemetryInfo.method = aPayload.method;
+    }
+
+    AddonManager.getInstallForURL(uri, mimetype, hash, name, icon, null, aBrowser,
+                                  installTelemetryInfo).then(aInstall => {
+      function callCallback(status) {
         try {
           aCallback.onInstallEnded(uri, status);
         } catch (e) {
@@ -91,34 +109,34 @@ amManager.prototype = {
       }
 
       if (!aInstall) {
-        aCallback.onInstallEnded(aUri, UNSUPPORTED_TYPE);
+        aCallback.onInstallEnded(uri, UNSUPPORTED_TYPE);
         return;
       }
 
       if (aCallback) {
         aInstall.addListener({
           onDownloadCancelled(aInstall) {
-            callCallback(aUri, USER_CANCELLED);
+            callCallback(USER_CANCELLED);
           },
 
           onDownloadFailed(aInstall) {
             if (aInstall.error == AddonManager.ERROR_CORRUPT_FILE)
-              callCallback(aUri, CANT_READ_ARCHIVE);
+              callCallback(CANT_READ_ARCHIVE);
             else
-              callCallback(aUri, DOWNLOAD_ERROR);
+              callCallback(DOWNLOAD_ERROR);
           },
 
           onInstallFailed(aInstall) {
-            callCallback(aUri, EXECUTION_ERROR);
+            callCallback(EXECUTION_ERROR);
           },
 
           onInstallEnded(aInstall, aStatus) {
-            callCallback(aUri, SUCCESS);
-          }
+            callCallback(SUCCESS);
+          },
         });
       }
 
-      AddonManager.installAddonFromWebpage(aMimetype, aBrowser, aInstallingPrincipal, aInstall);
+      AddonManager.installAddonFromWebpage(mimetype, aBrowser, triggeringPrincipal, aInstall);
     });
 
     return retval;
@@ -182,15 +200,13 @@ amManager.prototype = {
               mm.sendAsyncMessage(MSG_INSTALL_CALLBACK, {
                 callbackID: payload.callbackID,
                 url,
-                status
+                status,
               });
             },
           };
         }
 
-        return this.installAddonFromWebpage(payload.mimetype,
-          aMessage.target, payload.triggeringPrincipal, payload.uri,
-          payload.hash, payload.name, payload.icon, callback);
+        return this.installAddonFromWebpage(payload, aMessage.target, callback);
       }
 
       case MSG_PROMISE_REQUEST: {
@@ -198,13 +214,13 @@ amManager.prototype = {
         let resolve = (value) => {
           mm.sendAsyncMessage(MSG_PROMISE_RESULT, {
             callbackID: payload.callbackID,
-            resolve: value
+            resolve: value,
           });
         };
         let reject = (value) => {
           mm.sendAsyncMessage(MSG_PROMISE_RESULT, {
             callbackID: payload.callbackID,
-            reject: value
+            reject: value,
           });
         };
 
@@ -253,11 +269,11 @@ amManager.prototype = {
       if (!gSingleton)
         gSingleton = new amManager();
       return gSingleton.QueryInterface(aIid);
-    }
+    },
   },
   QueryInterface: ChromeUtils.generateQI([Ci.amIAddonManager,
                                           Ci.nsITimerCallback,
-                                          Ci.nsIObserver])
+                                          Ci.nsIObserver]),
 };
 
 const BLOCKLIST_JSM = "resource://gre/modules/Blocklist.jsm";

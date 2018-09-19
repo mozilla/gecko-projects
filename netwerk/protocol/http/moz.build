@@ -20,12 +20,14 @@ XPIDL_SOURCES += [
     'nsIHttpHeaderVisitor.idl',
     'nsIHttpProtocolHandler.idl',
     'nsIRaceCacheWithNetwork.idl',
+    'nsIRedirectProcessChooser.idl',
     'nsIWellKnownOpportunisticUtils.idl',
 ]
 
 XPIDL_MODULE = 'necko_http'
 
 EXPORTS += [
+    'DocumentAnalyticsTrackerFastBlocked.h',
     'nsCORSListenerProxy.h',
     'nsHttp.h',
     'nsHttpAtomList.h',
@@ -143,3 +145,6 @@ if CONFIG['OS_TARGET'] == 'Darwin':
         DEFINES.update(
             HAS_CONNECTX=True,
         )
+
+if CONFIG['CC_TYPE'] == 'clang-cl':
+    AllowCompilerWarnings()  # workaround for bug 1090497

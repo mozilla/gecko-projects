@@ -958,13 +958,13 @@ private:
   CanvasRenderingContext2D* mContext;
 };
 
-class CanvasFilterChainObserver : public nsSVGFilterChainObserver
+class SVGFilterObserverListForCanvas final : public SVGFilterObserverList
 {
 public:
-  CanvasFilterChainObserver(nsTArray<nsStyleFilter>& aFilters,
-                            Element* aCanvasElement,
-                            CanvasRenderingContext2D* aContext)
-    : nsSVGFilterChainObserver(aFilters, aCanvasElement)
+  SVGFilterObserverListForCanvas(nsTArray<nsStyleFilter>& aFilters,
+                                 Element* aCanvasElement,
+                                 CanvasRenderingContext2D* aContext)
+    : SVGFilterObserverList(aFilters, aCanvasElement)
     , mContext(aContext)
   {
   }
@@ -1004,12 +1004,12 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(CanvasRenderingContext2D)
     ImplCycleCollectionUnlink(tmp->mStyleStack[i].patternStyles[Style::FILL]);
     ImplCycleCollectionUnlink(tmp->mStyleStack[i].gradientStyles[Style::STROKE]);
     ImplCycleCollectionUnlink(tmp->mStyleStack[i].gradientStyles[Style::FILL]);
-    auto filterChainObserver =
-      static_cast<CanvasFilterChainObserver*>(tmp->mStyleStack[i].filterChainObserver.get());
-    if (filterChainObserver) {
-      filterChainObserver->DetachFromContext();
+    auto filterObserverList =
+      static_cast<SVGFilterObserverListForCanvas*>(tmp->mStyleStack[i].filterObserverList.get());
+    if (filterObserverList) {
+      filterObserverList->DetachFromContext();
     }
-    ImplCycleCollectionUnlink(tmp->mStyleStack[i].filterChainObserver);
+    ImplCycleCollectionUnlink(tmp->mStyleStack[i].filterObserverList);
   }
   for (size_t x = 0 ; x < tmp->mHitRegionsOptions.Length(); x++) {
     RegionInfo& info = tmp->mHitRegionsOptions[x];
@@ -1028,7 +1028,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(CanvasRenderingContext2D)
     ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].patternStyles[Style::FILL], "Fill CanvasPattern");
     ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].gradientStyles[Style::STROKE], "Stroke CanvasGradient");
     ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].gradientStyles[Style::FILL], "Fill CanvasGradient");
-    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].filterChainObserver, "Filter Chain Observer");
+    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].filterObserverList, "Filter Observer List");
   }
   for (size_t x = 0 ; x < tmp->mHitRegionsOptions.Length(); x++) {
     RegionInfo& info = tmp->mHitRegionsOptions[x];
@@ -1138,7 +1138,7 @@ CanvasRenderingContext2D::~CanvasRenderingContext2D()
 JSObject*
 CanvasRenderingContext2D::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return CanvasRenderingContext2DBinding::Wrap(aCx, this, aGivenProto);
+  return CanvasRenderingContext2D_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 bool
@@ -2639,7 +2639,8 @@ CreateDeclarationForServo(nsCSSPropertyID aProperty,
   RefPtr<URLExtraData> data =
     new URLExtraData(aDocument->GetDocBaseURI(),
                      aDocument->GetDocumentURI(),
-                     aDocument->NodePrincipal());
+                     aDocument->NodePrincipal(),
+                     aDocument->GetReferrerPolicy());
 
   ServoCSSParser::ParsingEnvironment env(data,
                                          aDocument->GetCompatibilityMode(),
@@ -2825,9 +2826,9 @@ CanvasRenderingContext2D::SetFilter(const nsAString& aFilter, ErrorResult& aErro
     CurrentState().filterString = aFilter;
     filterChain.SwapElements(CurrentState().filterChain);
     if (mCanvasElement) {
-      CurrentState().filterChainObserver =
-        new CanvasFilterChainObserver(CurrentState().filterChain,
-                                      mCanvasElement, this);
+      CurrentState().filterObserverList =
+        new SVGFilterObserverListForCanvas(CurrentState().filterChain,
+                                           mCanvasElement, this);
       UpdateFilter();
     }
   }
@@ -2850,7 +2851,7 @@ public:
   virtual float GetEmLength() const override
   {
     return NSAppUnitsToFloatPixels(mFont.size,
-                                   nsPresContext::AppUnitsPerCSSPixel());
+                                   AppUnitsPerCSSPixel());
   }
 
   virtual float GetExLength() const override
@@ -2862,7 +2863,7 @@ public:
     params.textPerf = mPresContext->GetTextPerfMetrics();
     RefPtr<nsFontMetrics> fontMetrics = dc->GetMetricsFor(mFont, params);
     return NSAppUnitsToFloatPixels(fontMetrics->XHeight(),
-                                   nsPresContext::AppUnitsPerCSSPixel());
+                                   AppUnitsPerCSSPixel());
   }
 
   virtual gfx::Size GetSize() const override
@@ -3741,7 +3742,7 @@ CanvasRenderingContext2D::SetFontInternal(const nsAString& aFont,
   // pixels to CSS pixels, to adjust for the difference in expectations from
   // other nsFontMetrics clients.
   resizedFont.size =
-    (fontStyle->mSize * c->AppUnitsPerDevPixel()) / nsPresContext::AppUnitsPerCSSPixel();
+    (fontStyle->mSize * c->AppUnitsPerDevPixel()) / AppUnitsPerCSSPixel();
 
   nsFontMetrics::Params params;
   params.language = fontStyle->mLanguage;
@@ -3997,6 +3998,12 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcess
 
   CanvasBidiProcessor()
     : nsBidiPresUtils::BidiProcessor()
+    , mCtx(nullptr)
+    , mFontgrp(nullptr)
+    , mAppUnitsPerDevPixel(0)
+    , mOp(CanvasRenderingContext2D::TextDrawOperation::FILL)
+    , mTextRunFlags()
+    , mDoMeasureBoundingBox(false)
   {
     if (Preferences::GetBool(GFX_MISSING_FONTS_NOTIFY_PREF)) {
       mMissingFonts = new gfxMissingFontRecorder();
@@ -4100,7 +4107,7 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcess
   already_AddRefed<gfxPattern> GetPatternFor(Style aStyle)
   {
     const CanvasPattern* pat = mCtx->CurrentState().patternStyles[aStyle];
-    RefPtr<gfxPattern> pattern = new gfxPattern(pat->mSurface, Matrix());
+    RefPtr<gfxPattern> pattern = new gfxPattern(pat->mSurface, pat->mTransform);
     pattern->SetExtend(CvtCanvasRepeatToGfxRepeat(pat->mRepeat));
     return pattern.forget();
   }
@@ -5275,7 +5282,7 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindowInner& aWindow, double aX,
   }
 
   // Flush layout updates
-  if (!(aFlags & CanvasRenderingContext2DBinding::DRAWWINDOW_DO_NOT_FLUSH)) {
+  if (!(aFlags & CanvasRenderingContext2D_Binding::DRAWWINDOW_DO_NOT_FLUSH)) {
     nsContentUtils::FlushLayoutForTree(aWindow.AsInner()->GetOuterWindow());
   }
 
@@ -5310,20 +5317,20 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindowInner& aWindow, double aX,
            nsPresContext::CSSPixelsToAppUnits((float)aH));
   uint32_t renderDocFlags = (nsIPresShell::RENDER_IGNORE_VIEWPORT_SCROLLING |
                              nsIPresShell::RENDER_DOCUMENT_RELATIVE);
-  if (aFlags & CanvasRenderingContext2DBinding::DRAWWINDOW_DRAW_CARET) {
+  if (aFlags & CanvasRenderingContext2D_Binding::DRAWWINDOW_DRAW_CARET) {
     renderDocFlags |= nsIPresShell::RENDER_CARET;
   }
-  if (aFlags & CanvasRenderingContext2DBinding::DRAWWINDOW_DRAW_VIEW) {
+  if (aFlags & CanvasRenderingContext2D_Binding::DRAWWINDOW_DRAW_VIEW) {
     renderDocFlags &= ~(nsIPresShell::RENDER_IGNORE_VIEWPORT_SCROLLING |
                         nsIPresShell::RENDER_DOCUMENT_RELATIVE);
   }
-  if (aFlags & CanvasRenderingContext2DBinding::DRAWWINDOW_USE_WIDGET_LAYERS) {
+  if (aFlags & CanvasRenderingContext2D_Binding::DRAWWINDOW_USE_WIDGET_LAYERS) {
     renderDocFlags |= nsIPresShell::RENDER_USE_WIDGET_LAYERS;
   }
-  if (aFlags & CanvasRenderingContext2DBinding::DRAWWINDOW_ASYNC_DECODE_IMAGES) {
+  if (aFlags & CanvasRenderingContext2D_Binding::DRAWWINDOW_ASYNC_DECODE_IMAGES) {
     renderDocFlags |= nsIPresShell::RENDER_ASYNC_DECODE_IMAGES;
   }
-  if (aFlags & CanvasRenderingContext2DBinding::DRAWWINDOW_DO_NOT_FLUSH) {
+  if (aFlags & CanvasRenderingContext2D_Binding::DRAWWINDOW_DO_NOT_FLUSH) {
     renderDocFlags |= nsIPresShell::RENDER_DRAWWINDOW_NOT_FLUSHING;
   }
 
@@ -6131,7 +6138,7 @@ CanvasPath::CanvasPath(nsISupports* aParent, already_AddRefed<PathBuilder> aPath
 JSObject*
 CanvasPath::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return Path2DBinding::Wrap(aCx, this, aGivenProto);
+  return Path2D_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<CanvasPath>

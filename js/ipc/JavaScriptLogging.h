@@ -105,15 +105,12 @@ class Logging
         if (local == incoming) {
             JS::RootedObject obj(cx);
             obj = shared->objects_.find(id);
-            if (obj) {
-                JSAutoRealm ar(cx, obj);
-                objDesc = js::ObjectClassName(cx, obj);
-            } else {
-                objDesc = "<dead object>";
-            }
+            obj = js::UncheckedUnwrap(obj, true);
 
+            JSAutoRealm ar(cx, obj);
+            objDesc = js::ObjectClassName(cx, obj);
             side = shared->isParent() ? "parent" : "child";
-            ptr = js::UncheckedUnwrap(obj, true);
+            ptr = obj;
         } else {
             objDesc = "<cpow>";
             side = shared->isParent() ? "child" : "parent";
@@ -131,8 +128,9 @@ class Logging
         nsAutoCString tmp;
         out.Truncate();
         for (size_t i = 0; i < values.Length(); i++) {
-            if (i)
+            if (i) {
                 out.AppendLiteral(", ");
+            }
             if (values[i].type() == JSParam::Tvoid_t) {
                 out.AppendLiteral("<void>");
             } else {

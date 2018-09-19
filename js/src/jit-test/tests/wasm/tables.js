@@ -7,7 +7,7 @@ const RuntimeError = WebAssembly.RuntimeError;
 
 var callee = i => `(func $f${i} (result i32) (i32.const ${i}))`;
 
-wasmFailValidateText(`(module (elem (i32.const 0) $f0) ${callee(0)})`, /table index out of range/);
+wasmFailValidateText(`(module (elem (i32.const 0) $f0) ${callee(0)})`, /elem segment requires a table section/);
 wasmFailValidateText(`(module (table 10 anyfunc) (elem (i32.const 0) 0))`, /table element out of range/);
 wasmFailValidateText(`(module (table 10 anyfunc) (func) (elem (i32.const 0) 0 1))`, /table element out of range/);
 wasmFailValidateText(`(module (table 10 anyfunc) (func) (elem (f32.const 0) 0) ${callee(0)})`, /type mismatch/);
@@ -201,3 +201,32 @@ var tbl = wasmEvalText(`(module (table (export "tbl") anyfunc (elem $f)) (func $
 tbl.get(0).foo = 42;
 gc();
 assertEq(tbl.get(0).foo, 42);
+
+(function testCrossRealmCall() {
+    var g = newGlobal({sameCompartmentAs: this});
+
+    // The current_memory builtin asserts cx->realm matches instance->realm so
+    // we call it here.
+    var src = `
+        (module
+            (import "a" "t" (table 3 anyfunc))
+            (import "a" "m" (memory 1))
+            (func $f (result i32) (i32.add (i32.const 3) (current_memory)))
+            (elem (i32.const 0) $f))
+    `;
+    g.mem = new Memory({initial:4});
+    g.tbl = new Table({initial:3, element:"anyfunc"});
+    var i1 = g.evaluate("new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary(`" + src + "`)), {a:{t:tbl,m:mem}})");
+
+    var call = new Instance(new Module(wasmTextToBinary(`
+        (module
+            (import "a" "t" (table 3 anyfunc))
+            (import "a" "m" (memory 1))
+            (type $v2i (func (result i32)))
+            (func $call (param $i i32) (result i32) (i32.add (call_indirect $v2i (get_local $i)) (current_memory)))
+            (export "call" $call))
+    `)), {a:{t:g.tbl,m:g.mem}}).exports.call;
+
+    for (var i = 0; i < 10; i++)
+        assertEq(call(0), 11);
+})();

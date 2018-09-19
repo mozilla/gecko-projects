@@ -78,8 +78,9 @@ class UsedNameTracker
         { }
 
         bool noteUsedInScope(uint32_t scriptId, uint32_t scopeId) {
-            if (uses_.empty() || uses_.back().scopeId < scopeId)
+            if (uses_.empty() || uses_.back().scopeId < scopeId) {
                 return uses_.append(Use { scriptId, scopeId });
+            }
             return true;
         }
 
@@ -87,10 +88,12 @@ class UsedNameTracker
             *closedOver = false;
             while (!uses_.empty()) {
                 Use& innermost = uses_.back();
-                if (innermost.scopeId < scopeId)
+                if (innermost.scopeId < scopeId) {
                     break;
-                if (innermost.scriptId > scriptId)
+                }
+                if (innermost.scriptId > scriptId) {
                     *closedOver = true;
+                }
                 uses_.popBack();
             }
         }
@@ -120,10 +123,6 @@ class UsedNameTracker
         scriptCounter_(0),
         scopeCounter_(0)
     { }
-
-    MOZ_MUST_USE bool init() {
-        return map_.init();
-    }
 
     uint32_t nextScriptId() {
         MOZ_ASSERT(scriptCounter_ != UINT32_MAX,
@@ -264,8 +263,9 @@ class ParseContext : public Nestable<ParseContext>
         uint32_t id_;
 
         bool maybeReportOOM(ParseContext* pc, bool result) {
-            if (!result)
+            if (!result) {
                 ReportOutOfMemory(pc->sc()->context);
+            }
             return result;
         }
 
@@ -350,14 +350,16 @@ class ParseContext : public Nestable<ParseContext>
             void settle() {
                 // Both var and lexically declared names are binding in a var
                 // scope.
-                if (isVarScope_)
+                if (isVarScope_) {
                     return;
+                }
 
                 // Otherwise, pop only lexically declared names are
                 // binding. Pop the range until we find such a name.
                 while (!declaredRange_.empty()) {
-                    if (BindingKindIsLexical(kind()))
+                    if (BindingKindIsLexical(kind())) {
                         break;
+                    }
                     declaredRange_.popFront();
                 }
             }
@@ -490,35 +492,9 @@ class ParseContext : public Nestable<ParseContext>
     bool superScopeNeedsHomeObject_;
 
   public:
-    inline ParseContext(JSContext* cx, ParseContext*& parent, SharedContext* sc, ErrorReporter& errorReporter,
-        class UsedNameTracker& usedNames, Directives* newDirectives, bool isFull)
-      : Nestable<ParseContext>(&parent),
-        traceLog_(sc->context,
-                  isFull
-                  ? TraceLogger_ParsingFull
-                  : TraceLogger_ParsingSyntax,
-                  errorReporter),
-        sc_(sc),
-        errorReporter_(errorReporter),
-        innermostStatement_(nullptr),
-        innermostScope_(nullptr),
-        varScope_(nullptr),
-        positionalFormalParameterNames_(cx->frontendCollectionPool()),
-        closedOverBindingsForLazy_(cx->frontendCollectionPool()),
-        innerFunctionsForLazy(cx, GCVector<JSFunction*, 8>(cx)),
-        newDirectives(newDirectives),
-        lastYieldOffset(NoYieldOffset),
-        lastAwaitOffset(NoAwaitOffset),
-        scriptId_(usedNames.nextScriptId()),
-        isStandaloneFunctionBody_(false),
-        superScopeNeedsHomeObject_(false)
-    {
-        if (isFunctionBox()) {
-            if (functionBox()->function()->isNamedLambda())
-                namedLambdaScope_.emplace(cx, parent, usedNames);
-            functionScope_.emplace(cx, parent, usedNames);
-        }
-    }
+    ParseContext(JSContext* cx, ParseContext*& parent, SharedContext* sc,
+                 ErrorReporter& errorReporter, UsedNameTracker& usedNames,
+                 Directives* newDirectives, bool isFull);
 
     MOZ_MUST_USE bool init();
 

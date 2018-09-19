@@ -10,6 +10,7 @@
 #include "AsyncPanZoomController.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/layers/APZThreadUtils.h"
+#include "mozilla/layers/APZUtils.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/LayerMetricsWrapper.h"
 #include "mozilla/layers/SynchronousTask.h"
@@ -178,6 +179,16 @@ APZSampler::GetCurrentAsyncTransform(const LayerMetricsWrapper& aLayer)
 
   MOZ_ASSERT(aLayer.GetApzc());
   return aLayer.GetApzc()->GetCurrentAsyncTransform(AsyncPanZoomController::eForCompositing);
+}
+
+AsyncTransform
+APZSampler::GetCurrentAsyncTransformForFixedAdjustment(const LayerMetricsWrapper& aLayer)
+{
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+  AssertOnSamplerThread();
+
+  MOZ_ASSERT(aLayer.GetApzc());
+  return aLayer.GetApzc()->GetCurrentAsyncTransformForFixedAdjustment(AsyncPanZoomController::eForCompositing);
 }
 
 AsyncTransformComponentMatrix

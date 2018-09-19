@@ -14,12 +14,6 @@ let panelWin = null;
 
 const URL = "data:text/html;charset=utf8,test split console key delegation";
 
-// Force the old debugger UI since it's directly used (see Bug 1301705)
-Services.prefs.setBoolPref("devtools.debugger.new-debugger-frontend", false);
-registerCleanupFunction(function() {
-  Services.prefs.clearUserPref("devtools.debugger.new-debugger-frontend");
-});
-
 add_task(async function() {
   const tab = await addTab(URL);
   const target = TargetFactory.forTab(tab);
@@ -52,8 +46,7 @@ function testUseKeyWithSplitConsole() {
   }, "jsdebugger");
 
   info("synthesizeKey with the console focused");
-  const consoleInput = gToolbox.getPanel("webconsole").hud.jsterm.inputNode;
-  consoleInput.focus();
+  focusConsoleInput();
   synthesizeKeyShortcut("F3", panelWin);
 
   ok(commandCalled, "Shortcut key should trigger the command");
@@ -69,8 +62,7 @@ function testUseKeyWithSplitConsoleWrongTool() {
   }, "inspector");
 
   info("synthesizeKey with the console focused");
-  const consoleInput = gToolbox.getPanel("webconsole").hud.jsterm.inputNode;
-  consoleInput.focus();
+  focusConsoleInput();
   synthesizeKeyShortcut("F4", panelWin);
 
   ok(!commandCalled, "Shortcut key shouldn't trigger the command");
@@ -80,4 +72,8 @@ async function cleanup() {
   await gToolbox.destroy();
   gBrowser.removeCurrentTab();
   gToolbox = panelWin = null;
+}
+
+function focusConsoleInput() {
+  gToolbox.getPanel("webconsole").hud.jsterm.focus();
 }

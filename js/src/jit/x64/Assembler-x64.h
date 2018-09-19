@@ -181,6 +181,7 @@ class ABIArgGenerator
 static constexpr Register ABINonArgReg0 = rax;
 static constexpr Register ABINonArgReg1 = rbx;
 static constexpr Register ABINonArgReg2 = r10;
+static constexpr Register ABINonArgReg3 = r12;
 
 // This register may be volatile or nonvolatile. Avoid xmm15 which is the
 // ScratchDoubleReg.
@@ -204,9 +205,10 @@ static constexpr Register WasmTlsReg = r14;
 
 // Registers used for asm.js/wasm table calls. These registers must be disjoint
 // from the ABI argument registers, WasmTlsReg and each other.
-static constexpr Register WasmTableCallScratchReg = ABINonArgReg0;
-static constexpr Register WasmTableCallSigReg = ABINonArgReg1;
-static constexpr Register WasmTableCallIndexReg = ABINonArgReg2;
+static constexpr Register WasmTableCallScratchReg0 = ABINonArgReg0;
+static constexpr Register WasmTableCallScratchReg1 = ABINonArgReg1;
+static constexpr Register WasmTableCallSigReg = ABINonArgReg2;
+static constexpr Register WasmTableCallIndexReg = ABINonArgReg3;
 
 static constexpr Register OsrFrameReg = IntArgReg3;
 
@@ -224,7 +226,7 @@ static_assert(JitStackAlignment % sizeof(Value) == 0 && JitStackValueAlignment >
 // this architecture or not. Rather than a method in the LIRGenerator, it is
 // here such that it is accessible from the entire codebase. Once full support
 // for SIMD is reached on all tier-1 platforms, this constant can be deleted.
-static constexpr bool SupportsSimd = true;
+static constexpr bool SupportsSimd = false;
 static constexpr uint32_t SimdMemoryAlignment = 16;
 
 static_assert(CodeAlignment % SimdMemoryAlignment == 0,
@@ -286,11 +288,11 @@ class Assembler : public AssemblerX86Shared
     static JitCode* CodeFromJump(JitCode* code, uint8_t* jump);
 
   private:
-    void writeRelocation(JmpSrc src, Relocation::Kind reloc);
-    void addPendingJump(JmpSrc src, ImmPtr target, Relocation::Kind reloc);
+    void writeRelocation(JmpSrc src, RelocationKind reloc);
+    void addPendingJump(JmpSrc src, ImmPtr target, RelocationKind reloc);
 
   protected:
-    size_t addPatchableJump(JmpSrc src, Relocation::Kind reloc);
+    size_t addPatchableJump(JmpSrc src, RelocationKind reloc);
 
   public:
     using AssemblerX86Shared::j;
@@ -901,10 +903,11 @@ class Assembler : public AssemblerX86Shared
         // though. Use xorl instead of xorq since they are functionally
         // equivalent (32-bit instructions zero-extend their results to 64 bits)
         // and xorl has a smaller encoding.
-        if (word.value == 0)
+        if (word.value == 0) {
             xorl(dest, dest);
-        else
+        } else {
             movq(word, dest);
+        }
     }
     void mov(ImmPtr imm, Register dest) {
         movq(imm, dest);
@@ -1058,32 +1061,31 @@ class Assembler : public AssemblerX86Shared
         }
     }
 
-    void jmp(ImmPtr target, Relocation::Kind reloc = Relocation::HARDCODED) {
+    void jmp(ImmPtr target, RelocationKind reloc = RelocationKind::HARDCODED) {
         JmpSrc src = masm.jmp();
         addPendingJump(src, target, reloc);
     }
-    void j(Condition cond, ImmPtr target,
-           Relocation::Kind reloc = Relocation::HARDCODED) {
+    void j(Condition cond, ImmPtr target, RelocationKind reloc = RelocationKind::HARDCODED) {
         JmpSrc src = masm.jCC(static_cast<X86Encoding::Condition>(cond));
         addPendingJump(src, target, reloc);
     }
 
     void jmp(JitCode* target) {
-        jmp(ImmPtr(target->raw()), Relocation::JITCODE);
+        jmp(ImmPtr(target->raw()), RelocationKind::JITCODE);
     }
     void j(Condition cond, JitCode* target) {
-        j(cond, ImmPtr(target->raw()), Relocation::JITCODE);
+        j(cond, ImmPtr(target->raw()), RelocationKind::JITCODE);
     }
     void call(JitCode* target) {
         JmpSrc src = masm.call();
-        addPendingJump(src, ImmPtr(target->raw()), Relocation::JITCODE);
+        addPendingJump(src, ImmPtr(target->raw()), RelocationKind::JITCODE);
     }
     void call(ImmWord target) {
         call(ImmPtr((void*)target.value));
     }
     void call(ImmPtr target) {
         JmpSrc src = masm.call();
-        addPendingJump(src, target, Relocation::HARDCODED);
+        addPendingJump(src, target, RelocationKind::HARDCODED);
     }
 
     // Emit a CALL or CMP (nop) instruction. ToggleCall can be used to patch
@@ -1091,7 +1093,7 @@ class Assembler : public AssemblerX86Shared
     CodeOffset toggledCall(JitCode* target, bool enabled) {
         CodeOffset offset(size());
         JmpSrc src = enabled ? masm.call() : masm.cmp_eax();
-        addPendingJump(src, ImmPtr(target->raw()), Relocation::JITCODE);
+        addPendingJump(src, ImmPtr(target->raw()), RelocationKind::JITCODE);
         MOZ_ASSERT_IF(!oom(), size() - offset.offset() == ToggledCallSize(nullptr));
         return offset;
     }
@@ -1137,8 +1139,9 @@ GetIntArgReg(uint32_t intArg, uint32_t floatArg, Register* out)
 #else
     uint32_t arg = intArg;
 #endif
-    if (arg >= NumIntArgRegs)
+    if (arg >= NumIntArgRegs) {
         return false;
+    }
     *out = IntArgRegs[arg];
     return true;
 }
@@ -1151,8 +1154,9 @@ GetIntArgReg(uint32_t intArg, uint32_t floatArg, Register* out)
 static inline bool
 GetTempRegForIntArg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register* out)
 {
-    if (GetIntArgReg(usedIntArgs, usedFloatArgs, out))
+    if (GetIntArgReg(usedIntArgs, usedFloatArgs, out)) {
         return true;
+    }
     // Unfortunately, we have to assume things about the point at which
     // GetIntArgReg returns false, because we need to know how many registers it
     // can allocate.
@@ -1162,8 +1166,9 @@ GetTempRegForIntArg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register* out)
     uint32_t arg = usedIntArgs;
 #endif
     arg -= NumIntArgRegs;
-    if (arg >= NumCallTempNonArgRegs)
+    if (arg >= NumCallTempNonArgRegs) {
         return false;
+    }
     *out = CallTempNonArgRegs[arg];
     return true;
 }
@@ -1176,8 +1181,9 @@ GetFloatArgReg(uint32_t intArg, uint32_t floatArg, FloatRegister* out)
 #else
     uint32_t arg = floatArg;
 #endif
-    if (floatArg >= NumFloatArgRegs)
+    if (floatArg >= NumFloatArgRegs) {
         return false;
+    }
     *out = FloatArgRegs[arg];
     return true;
 }

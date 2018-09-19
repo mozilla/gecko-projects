@@ -3,54 +3,69 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
-    "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"
-[
-  <!ENTITY % globalDTD SYSTEM "chrome://global/locale/global.dtd">
-  <!ENTITY % crashesDTD SYSTEM "chrome://global/locale/crashes.dtd">
-  %globalDTD;
-  %crashesDTD;
-]>
-
+<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
-<head>
-<link rel="stylesheet" type="text/css" href="chrome://global/content/crashes.css"/>
-<link rel="stylesheet" media="screen, projection" type="text/css"
-      href="chrome://global/skin/in-content/common.css"/>
-<script type="application/javascript" src="chrome://global/content/crashes.js"/>
+  <head>
+    <link rel="localization" href="crashreporter/aboutcrashes.ftl"/>
+    <link rel="stylesheet" type="text/css" href="chrome://global/content/crashes.css"/>
+    <link rel="stylesheet" media="screen, projection" type="text/css"
+          href="chrome://global/skin/in-content/common.css"/>
+    <script type="application/javascript" src="chrome://global/content/crashes.js"/>
+    <title data-l10n-id="crash-reports-title"></title>
+  </head>
 
-<title>&crashReports.title;</title>
-</head><body dir="&locale.dir;">
-<button chromedir="&locale.dir;" id="clear-reports">&clearAllReports.label;</button>
-<div id="reportList">
-  <div id="reportListUnsubmitted">
-    <h1>&crashesUnsubmitted.label;</h1>
-    <table>
-      <thead>
-        <tr>
-          <th chromedir="&locale.dir;">&id.heading;</th>
-          <th chromedir="&locale.dir;" colspan="2">&dateCrashed.heading;</th>
-        </tr>
-      </thead>
-      <tbody id="unsubmitted">
-      </tbody>
-    </table>
-  </div>
-  <div id="reportListSubmitted">
-    <h1>&crashesSubmitted.label;</h1>
-    <table>
-      <thead>
-        <tr>
-          <th chromedir="&locale.dir;">&id.heading;</th>
-          <th chromedir="&locale.dir;" colspan="2">&dateSubmitted.heading;</th>
-        </tr>
-      </thead>
-      <tbody id="submitted">
-      </tbody>
-    </table>
-  </div>
-</div>
-<p id="noReports" style="display: none">&noReports.label;</p>
-<p id="noConfig" style="display: none">&noConfig.label;</p>
-</body>
+  <body>
+    <p id="noConfig" class="hidden" data-l10n-id="no-config-label"></p>
+    <p id="noSubmittedReports" class="hidden" data-l10n-id="no-reports-label"></p>
+
+    <div id="reportListSubmitted" class="hidden">
+      <div class="table-title-container">
+        <h2 class="lighter-font-weight" data-l10n-id="crashes-submitted-label"></h2>
+        <button id="clearSubmittedReports" class="wide-button" data-l10n-id="delete-button-label"></button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th data-l10n-id="id-heading"></th>
+            <th data-l10n-id="date-submitted-heading"></th>
+          </tr>
+        </thead>
+        <tbody id="submitted"></tbody>
+      </table>
+    </div>
+
+    <div id="reportListUnsubmitted" class="hidden">
+      <div class="table-title-container">
+        <h2 class="lighter-font-weight" data-l10n-id="crashes-unsubmitted-label"></h2>
+        <button id="clearUnsubmittedReports" class="wide-button" data-l10n-id="delete-button-label"></button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th data-l10n-id="id-heading"></th>
+            <th data-l10n-id="date-crashed-heading"></th>
+          </tr>
+        </thead>
+        <tbody id="unsubmitted"></tbody>
+      </table>
+    </div>
+  </body>
+
+  <template id="crashReportRow">
+    <tr>
+      <td class="crash-id"></td>
+      <td></td>
+      <td class="float-right"></td>
+    </tr>
+  </template>
+
+  <template id="crashSubmitButton">
+    <button class="submit-button wide-button">
+      <span class="submit-crash-button-label" data-l10n-id="submit-crash-button-label"></span>
+    </button>
+  </template>
+
+  <template id="viewCrashLink">
+    <a class="crash-link button-as-link wide-button" data-l10n-id="view-crash-button-label"></a>
+  </template>
 </html>

@@ -3,8 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef ContentPrincipal_h
-#define ContentPrincipal_h
+#ifndef mozilla_ContentPrincipal_h
+#define mozilla_ContentPrincipal_h
 
 #include "nsCOMPtr.h"
 #include "nsJSPrincipals.h"
@@ -16,7 +16,9 @@
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/extensions/WebExtensionPolicy.h"
 
-class ContentPrincipal final : public mozilla::BasePrincipal
+namespace mozilla {
+
+class ContentPrincipal final : public BasePrincipal
 {
 public:
   NS_DECL_NSISERIALIZABLE
@@ -27,6 +29,7 @@ public:
   NS_IMETHOD SetDomain(nsIURI* aDomain) override;
   NS_IMETHOD GetBaseDomain(nsACString& aBaseDomain) override;
   NS_IMETHOD GetAddonId(nsAString& aAddonId) override;
+  NS_IMETHOD GetSiteOrigin(nsACString& aSiteOrigin) override;
   bool IsCodebasePrincipal() const override { return true; }
 
   ContentPrincipal();
@@ -35,15 +38,17 @@ public:
 
   // Init() must be called before the principal is in a usable state.
   nsresult Init(nsIURI* aCodebase,
-                const mozilla::OriginAttributes& aOriginAttributes,
+                const OriginAttributes& aOriginAttributes,
                 const nsACString& aOriginNoSuffix);
 
   virtual nsresult GetScriptLocation(nsACString& aStr) override;
 
+  nsresult GetSiteIdentifier(SiteIdentifier& aSite) override;
+
   static nsresult
   GenerateOriginNoSuffixFromURI(nsIURI* aURI, nsACString& aOrigin);
 
-  mozilla::extensions::WebExtensionPolicy* AddonPolicy();
+  extensions::WebExtensionPolicy* AddonPolicy();
 
   nsCOMPtr<nsIURI> mDomain;
   nsCOMPtr<nsIURI> mCodebase;
@@ -56,12 +61,14 @@ protected:
   bool MayLoadInternal(nsIURI* aURI) override;
 
 private:
-  mozilla::Maybe<mozilla::WeakPtr<mozilla::extensions::WebExtensionPolicy>> mAddon;
+  Maybe<WeakPtr<extensions::WebExtensionPolicy>> mAddon;
 };
+
+} // mozilla namespace
 
 #define NS_PRINCIPAL_CONTRACTID "@mozilla.org/principal;1"
 #define NS_PRINCIPAL_CID \
 { 0x653e0e4d, 0x3ee4, 0x45fa, \
   { 0xb2, 0x72, 0x97, 0xc2, 0x0b, 0xc0, 0x1e, 0xb8 } }
 
-#endif // ContentPrincipal_h
+#endif // mozilla_ContentPrincipal_h

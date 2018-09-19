@@ -87,6 +87,10 @@ module.exports = [
     path: "webconsole/bulklog.js",
     description: "Measure time for a bunch of sync console.log statements to appear"
   }, {
+    name: "console.autocomplete",
+    path: "webconsole/autocomplete.js",
+    description: "Measure time for autocomplete popup to appear"
+  }, {
     name: "console.streamlog",
     path: "webconsole/streamlog.js",
     description: "Measure rAF on page during a stream of console.log statements"
@@ -98,6 +102,10 @@ module.exports = [
     name: "console.openwithcache",
     path: "webconsole/openwithcache.js",
     description: "Measure time to render last logged messages in console for a page with 100 logged messages"
+  }, {
+    name: "console.typing",
+    path: "webconsole/typing.js",
+    description: "Measure time it takes to type something in the console input"
   }, {
     name: "inspector.mutations",
     path: "inspector/mutations.js",

@@ -34,6 +34,8 @@
 #include "vm/SymbolType.h"
 
 /*
+ * [SMDOC] Shapes
+ *
  * In isolation, a Shape represents a property that exists in one or more
  * objects; it has an id, flags, etc. (But it doesn't represent the property's
  * value.)  However, Shapes are always stored in linked linear sequence of
@@ -495,11 +497,6 @@ class BaseShape : public gc::TenuredCell
     /* For owned BaseShapes, the shape's shape table. */
     ShapeTable*      table_;
 
-#if JS_BITS_PER_WORD == 32
-    // Ensure sizeof(BaseShape) is a multiple of gc::CellAlignBytes.
-    uint32_t padding_;
-#endif
-
     BaseShape(const BaseShape& base) = delete;
     BaseShape& operator=(const BaseShape& other) = delete;
 
@@ -659,24 +656,34 @@ HashId(jsid id)
 {
     // HashGeneric alone would work, but bits of atom and symbol addresses
     // could then be recovered from the hash code. See bug 1330769.
-    if (MOZ_LIKELY(JSID_IS_ATOM(id)))
+    if (MOZ_LIKELY(JSID_IS_ATOM(id))) {
         return JSID_TO_ATOM(id)->hash();
-    if (JSID_IS_SYMBOL(id))
+    }
+    if (JSID_IS_SYMBOL(id)) {
         return JSID_TO_SYMBOL(id)->hash();
+    }
     return mozilla::HashGeneric(JSID_BITS(id));
 }
+
+} // namespace js
+
+namespace mozilla {
 
 template <>
 struct DefaultHasher<jsid>
 {
     typedef jsid Lookup;
     static HashNumber hash(jsid id) {
-        return HashId(id);
+        return js::HashId(id);
     }
     static bool match(jsid id1, jsid id2) {
         return id1 == id2;
     }
 };
+
+} // namespace mozilla
+
+namespace js {
 
 using BaseShapeSet = JS::WeakCache<JS::GCHashSet<ReadBarriered<UnownedBaseShape*>,
                                                  StackBaseShape,
@@ -794,8 +801,9 @@ class Shape : public gc::TenuredCell
     }
 
     bool ensureOwnBaseShape(JSContext* cx) {
-        if (base()->isOwned())
+        if (base()->isOwned()) {
             return true;
+        }
         return makeOwnBaseShape(cx);
     }
 
@@ -819,10 +827,12 @@ class Shape : public gc::TenuredCell
     template <typename T>
     MOZ_MUST_USE ShapeTable* ensureTableForDictionary(JSContext* cx, const T& nogc) {
         MOZ_ASSERT(inDictionary());
-        if (ShapeTable* table = maybeTable(nogc))
+        if (ShapeTable* table = maybeTable(nogc)) {
             return table;
-        if (!hashify(cx, this))
+        }
+        if (!hashify(cx, this)) {
             return nullptr;
+        }
         ShapeTable* table = maybeTable(nogc);
         MOZ_ASSERT(table);
         return table;
@@ -833,14 +843,17 @@ class Shape : public gc::TenuredCell
     {
         JS::AutoCheckCannotGC nogc;
         if (ShapeTable* table = maybeTable(nogc)) {
-            if (inDictionary())
+            if (inDictionary()) {
                 info->shapesMallocHeapDictTables += table->sizeOfIncludingThis(mallocSizeOf);
-            else
+            } else {
                 info->shapesMallocHeapTreeTables += table->sizeOfIncludingThis(mallocSizeOf);
+            }
         }
 
-        if (!inDictionary() && kids.isHash())
-            info->shapesMallocHeapTreeKids += kids.toHash()->sizeOfIncludingThis(mallocSizeOf);
+        if (!inDictionary() && kids.isHash()) {
+            info->shapesMallocHeapTreeKids +=
+                kids.toHash()->shallowSizeOfIncludingThis(mallocSizeOf);
+        }
     }
 
     bool isAccessorShape() const {
@@ -936,8 +949,9 @@ class Shape : public gc::TenuredCell
     // Per ES5, decode null getterObj as the undefined value, which encodes as null.
     Value getterValue() const {
         MOZ_ASSERT(hasGetterValue());
-        if (JSObject* getterObj = getterObject())
+        if (JSObject* getterObj = getterObject()) {
             return ObjectValue(*getterObj);
+        }
         return UndefinedValue();
     }
 
@@ -954,8 +968,9 @@ class Shape : public gc::TenuredCell
     // Per ES5, decode null setterObj as the undefined value, which encodes as null.
     Value setterValue() const {
         MOZ_ASSERT(hasSetterValue());
-        if (JSObject* setterObj = setterObject())
+        if (JSObject* setterObj = setterObject()) {
             return ObjectValue(*setterObj);
+        }
         return UndefinedValue();
     }
 
@@ -1075,11 +1090,13 @@ class Shape : public gc::TenuredCell
 
     uint32_t entryCount() {
         JS::AutoCheckCannotGC nogc;
-        if (ShapeTable* table = maybeTable(nogc))
+        if (ShapeTable* table = maybeTable(nogc)) {
             return table->entryCount();
+        }
         uint32_t count = 0;
-        for (Shape::Range<NoGC> r(this); !r.empty(); r.popFront())
+        for (Shape::Range<NoGC> r(this); !r.empty(); r.popFront()) {
             ++count;
+        }
         return count;
     }
 
@@ -1088,8 +1105,9 @@ class Shape : public gc::TenuredCell
         uint32_t count = 0;
         for (Shape::Range<NoGC> r(this); !r.empty(); r.popFront()) {
             ++count;
-            if (count >= ShapeTable::MIN_ENTRIES)
+            if (count >= ShapeTable::MIN_ENTRIES) {
                 return true;
+            }
         }
         return false;
     }
@@ -1113,8 +1131,9 @@ class Shape : public gc::TenuredCell
         MOZ_ASSERT(!(mutableFlags & CACHED_BIG_ENOUGH_FOR_SHAPE_TABLE));
 
         bool res = isBigEnoughForAShapeTableSlow();
-        if (res)
+        if (res) {
             mutableFlags |= CACHED_BIG_ENOUGH_FOR_SHAPE_TABLE;
+        }
         mutableFlags |= HAS_CACHED_BIG_ENOUGH_FOR_SHAPE_TABLE;
         return res;
     }
@@ -1446,10 +1465,11 @@ struct StackShape
     {}
 
     void updateGetterSetter(GetterOp rawGetter, SetterOp rawSetter) {
-        if (rawGetter || rawSetter || (attrs & (JSPROP_GETTER|JSPROP_SETTER)))
+        if (rawGetter || rawSetter || (attrs & (JSPROP_GETTER|JSPROP_SETTER))) {
             immutableFlags |= Shape::ACCESSOR_SHAPE;
-        else
+        } else {
             immutableFlags &= ~Shape::ACCESSOR_SHAPE;
+        }
 
         this->rawGetter = rawGetter;
         this->rawSetter = rawSetter;
@@ -1596,8 +1616,9 @@ inline Shape*
 Shape::searchLinear(jsid id)
 {
     for (Shape* shape = this; shape; ) {
-        if (shape->propidRef() == id)
+        if (shape->propidRef() == id) {
             return shape;
+        }
         shape = shape->parent;
     }
 

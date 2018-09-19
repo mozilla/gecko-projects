@@ -31,12 +31,14 @@ IdIsIndex(jsid id, uint32_t* indexp)
         return true;
     }
 
-    if (MOZ_UNLIKELY(!JSID_IS_STRING(id)))
+    if (MOZ_UNLIKELY(!JSID_IS_STRING(id))) {
         return false;
+    }
 
     JSAtom* atom = JSID_TO_ATOM(id);
-    if (atom->length() == 0 || !mozilla::IsAsciiDigit(atom->latin1OrTwoByteChar(0)))
+    if (atom->length() == 0 || !mozilla::IsAsciiDigit(atom->latin1OrTwoByteChar(0))) {
         return false;
+    }
 
     return js::StringIsArrayIndex(atom, indexp);
 }
@@ -112,14 +114,6 @@ NewCopiedArrayTryUseGroup(JSContext* cx, HandleObjectGroup group,
 extern ArrayObject*
 NewCopiedArrayForCallingAllocationSite(JSContext* cx, const Value* vp, size_t length,
                                        HandleObject proto = nullptr);
-
-/*
- * Determines whether a write to the given element on |obj| should fail because
- * |obj| is an Array with a non-writable length, and writing that element would
- * increase the length of the array.
- */
-extern bool
-WouldDefinePastNonwritableLength(HandleNativeObject obj, uint32_t index);
 
 extern bool
 GetLengthProperty(JSContext* cx, HandleObject obj, uint32_t* lengthp);
@@ -200,7 +194,7 @@ extern bool
 array_construct(JSContext* cx, unsigned argc, Value* vp);
 
 extern bool
-IsWrappedArrayConstructor(JSContext* cx, const Value& v, bool* result);
+IsCrossRealmArrayConstructor(JSContext* cx, const Value& v, bool* result);
 
 class MOZ_NON_TEMPORARY_CLASS ArraySpeciesLookup final
 {
@@ -281,8 +275,9 @@ class MOZ_NON_TEMPORARY_CLASS ArraySpeciesLookup final
 
     // Purge the cache and all info associated with it.
     void purge() {
-        if (state_ == State::Initialized)
+        if (state_ == State::Initialized) {
             reset();
+        }
     }
 };
 

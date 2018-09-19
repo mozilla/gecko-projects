@@ -7,17 +7,6 @@
 #ifndef nsDocShellCID_h__
 #define nsDocShellCID_h__
 
-#define NS_GLOBALHISTORY2_CONTRACTID "@mozilla.org/browser/global-history;2"
-
-/**
- * A contract for a service that will track download history.  This can be
- * overridden by embedders if they would like to track additional information
- * about downloads.
- *
- * @implements nsIDownloadHistory
- */
-#define NS_DOWNLOADHISTORY_CONTRACTID "@mozilla.org/browser/download-history;1"
-
 /**
  * A contract that can be used to get a service that provides
  * meta-information about nsIWebNavigation objects' capabilities.
@@ -86,17 +75,5 @@
  * to be anything in particular.
  */
 #define NS_CHROME_WEBNAVIGATION_DESTROY "chrome-webnavigation-destroy"
-
-/**
- * A way to create nsILoadContexts from script
- */
-#define NS_LOADCONTEXT_CONTRACTID "@mozilla.org/loadcontext;1"
-#define NS_LOADCONTEXT_CID \
-    { 0xd0181d36, 0x19a2, 0x4347, \
-      { 0x8f, 0x00, 0x04, 0x13, 0xa0, 0x70, 0xaa, 0xdc } }
-#define NS_PRIVATELOADCONTEXT_CONTRACTID "@mozilla.org/privateloadcontext;1"
-#define NS_PRIVATELOADCONTEXT_CID \
-    { 0x01629810, 0xd8ae, 0x4455, \
-      { 0x86, 0xe8, 0x69, 0x68, 0x87, 0xd1, 0xf7, 0x8d } }
 
 #endif // nsDocShellCID_h__

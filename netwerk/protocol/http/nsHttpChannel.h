@@ -32,12 +32,13 @@
 #include "nsIRaceCacheWithNetwork.h"
 #include "mozilla/extensions/PStreamFilterParent.h"
 #include "mozilla/Mutex.h"
+#include "nsITabParent.h"
 
 class nsDNSPrefetch;
 class nsICancelable;
 class nsIHttpChannelAuthProvider;
 class nsInputStreamPump;
-class nsISSLStatus;
+class nsITransportSecurityInfo;
 
 namespace mozilla { namespace net {
 
@@ -161,6 +162,9 @@ public:
     // nsIHttpChannelInternal
     NS_IMETHOD SetupFallbackChannel(const char *aFallbackKey) override;
     NS_IMETHOD SetChannelIsForDownload(bool aChannelIsForDownload) override;
+    NS_IMETHOD GetNavigationStartTimeStamp(TimeStamp* aTimeStamp) override;
+    NS_IMETHOD SetNavigationStartTimeStamp(TimeStamp aTimeStamp) override;
+    NS_IMETHOD CancelForTrackingProtection() override;
     // nsISupportsPriority
     NS_IMETHOD SetPriority(int32_t value) override;
     // nsIClassOfService
@@ -275,6 +279,10 @@ public:
     void SetTransactionObserver(TransactionObserver *arg) { mTransactionObserver = arg; }
     TransactionObserver *GetTransactionObserver() { return mTransactionObserver; }
 
+    typedef MozPromise<nsCOMPtr<nsITabParent>, nsresult, false> TabPromise;
+    already_AddRefed<TabPromise> TakeRedirectTabPromise() { return mRedirectTabPromise.forget(); }
+    uint64_t CrossProcessRedirectIdentifier() { return mCrossProcessRedirectIdentifier; }
+
 protected:
     virtual ~nsHttpChannel();
 
@@ -282,6 +290,9 @@ private:
     typedef nsresult (nsHttpChannel::*nsContinueRedirectionFunc)(nsresult result);
 
     bool     RequestIsConditional();
+    void HandleContinueCancelledByTrackingProtection();
+    nsresult CancelInternal(nsresult status);
+    void ContinueCancelledByTrackingProtection();
 
     // Connections will only be established in this function.
     // (including DNS prefetch and speculative connection.)
@@ -293,10 +304,10 @@ private:
     // is required, this funciton will just return NS_OK and BeginConnectActual()
     // will be called when callback. See Bug 1325054 for more information.
     nsresult BeginConnect();
-    void     HandleBeginConnectContinue();
-    MOZ_MUST_USE nsresult BeginConnectContinue();
     MOZ_MUST_USE nsresult ContinueBeginConnectWithResult();
     void     ContinueBeginConnect();
+    MOZ_MUST_USE nsresult PrepareToConnect();
+    void HandleOnBeforeConnect();
     MOZ_MUST_USE nsresult OnBeforeConnect();
     void     OnBeforeConnectContinue();
     MOZ_MUST_USE nsresult Connect();
@@ -341,6 +352,7 @@ private:
     virtual MOZ_MUST_USE nsresult
     SetupReplacementChannel(nsIURI *, nsIChannel *, bool preserveMethod,
                             uint32_t redirectFlags) override;
+    nsresult StartCrossProcessRedirect();
 
     // proxy specific methods
     MOZ_MUST_USE nsresult ProxyFailover();
@@ -427,8 +439,8 @@ private:
      * from ProcessSecurityHeaders.
      */
     MOZ_MUST_USE nsresult ProcessSingleSecurityHeader(uint32_t aType,
-                                                      nsISSLStatus *aSSLStatus,
-                                                      uint32_t aFlags);
+      nsITransportSecurityInfo* aSecInfo,
+      uint32_t aFlags);
 
     void InvalidateCacheEntryForLocation(const char *location);
     void AssembleCacheKey(const char *spec, uint32_t postID, nsACString &key);
@@ -500,6 +512,12 @@ private:
     nsCOMPtr<nsIURI> mRedirectURI;
     nsCOMPtr<nsIChannel> mRedirectChannel;
     nsCOMPtr<nsIChannel> mPreflightChannel;
+
+    // The associated childChannel is getting relocated to another process.
+    // This promise will be resolved when that process is set up.
+    RefPtr<TabPromise> mRedirectTabPromise;
+    // This identifier is passed to the childChannel in order to identify it.
+    uint64_t mCrossProcessRedirectIdentifier = 0;
 
     // nsChannelClassifier checks this channel's URI against
     // the URI classifier service.
@@ -622,6 +640,11 @@ private:
     // the next authentication request can be sent on a whole new connection
     uint32_t                          mAuthConnectionRestartable : 1;
 
+    // True if the channel classifier has marked the channel to be cancelled
+    // due to the tracking protection rules, but the asynchronous cancellation
+    // process hasn't finished yet.
+    uint32_t                          mTrackingProtectionCancellationPending : 1;
+
     nsTArray<nsContinueRedirectionFunc> mRedirectFuncStack;
 
     // Needed for accurate DNS timing
@@ -654,6 +677,9 @@ private:
     nsresult AsyncOpenOnTailUnblock();
     // Called on untail when tailed because of being a tracking resource.
     nsresult ConnectOnTailUnblock();
+
+    // Check if current channel should be canceled by FastBlock rules.
+    bool CheckFastBlocked();
 
     nsCString mUsername;
 
@@ -703,6 +729,8 @@ private:
     // Lock preventing OnCacheEntryCheck and SetupTransaction being called at
     // the same time.
     mozilla::Mutex mRCWNLock;
+
+    TimeStamp mNavigationStartTimeStamp;
 
 protected:
     virtual void DoNotifyListenerCleanup() override;

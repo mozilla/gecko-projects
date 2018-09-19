@@ -48,6 +48,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/ProcessHangMonitor.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/SystemPrincipal.h"
 #include "mozilla/ThreadLocal.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/Unused.h"
@@ -60,7 +61,6 @@
 #include "nsIXULRuntime.h"
 #include "nsJSPrincipals.h"
 #include "ExpandedPrincipal.h"
-#include "SystemPrincipal.h"
 
 #if defined(XP_LINUX) && !defined(ANDROID)
 // For getrlimit and min/max.
@@ -78,6 +78,10 @@ using namespace mozilla;
 using namespace xpc;
 using namespace JS;
 using mozilla::dom::AutoEntryScript;
+
+// The watchdog thread loop is pretty trivial, and should not require much stack
+// space to do its job. So only give it 32KiB.
+static constexpr size_t kWatchdogStackSize = 32 * 1024;
 
 static void WatchdogMain(void* arg);
 class Watchdog;
@@ -128,12 +132,14 @@ class Watchdog
     {
         MOZ_ASSERT(NS_IsMainThread());
         mLock = PR_NewLock();
-        if (!mLock)
+        if (!mLock) {
             MOZ_CRASH("PR_NewLock failed.");
+        }
 
         mWakeup = PR_NewCondVar(mLock);
-        if (!mWakeup)
+        if (!mWakeup) {
             MOZ_CRASH("PR_NewCondVar failed.");
+        }
 
         {
             AutoLockWatchdog lock(this);
@@ -143,9 +149,10 @@ class Watchdog
             // join it on shutdown.
             mThread = PR_CreateThread(PR_USER_THREAD, WatchdogMain, this,
                                       PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD,
-                                      PR_JOINABLE_THREAD, 0);
-            if (!mThread)
+                                      PR_JOINABLE_THREAD, kWatchdogStackSize);
+            if (!mThread) {
                 MOZ_CRASH("PR_CreateThread failed!");
+            }
 
             // WatchdogMain acquires the lock and then asserts mInitialized. So
             // make sure to set mInitialized before releasing the lock here so
@@ -234,24 +241,25 @@ class Watchdog
 #define PREF_MAX_SCRIPT_RUN_TIME_CHROME "dom.max_chrome_script_run_time"
 #define PREF_MAX_SCRIPT_RUN_TIME_EXT_CONTENT "dom.max_ext_content_script_run_time"
 
-class WatchdogManager : public nsIObserver
+static const char* gCallbackPrefs[] = {
+    "dom.use_watchdog",
+    PREF_MAX_SCRIPT_RUN_TIME_CONTENT,
+    PREF_MAX_SCRIPT_RUN_TIME_CHROME,
+    PREF_MAX_SCRIPT_RUN_TIME_EXT_CONTENT,
+    nullptr,
+};
+
+class WatchdogManager
 {
   public:
-
-    NS_DECL_ISUPPORTS
     explicit WatchdogManager()
     {
         // All the timestamps start at zero.
         PodArrayZero(mTimestamps);
 
         // Register ourselves as an observer to get updates on the pref.
-        mozilla::Preferences::AddStrongObserver(this, "dom.use_watchdog");
-        mozilla::Preferences::AddStrongObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CONTENT);
-        mozilla::Preferences::AddStrongObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CHROME);
-        mozilla::Preferences::AddStrongObserver(this, PREF_MAX_SCRIPT_RUN_TIME_EXT_CONTENT);
+        Preferences::RegisterCallbacks(PrefsChanged, gCallbackPrefs, this);
     }
-
-  protected:
 
     virtual ~WatchdogManager()
     {
@@ -261,21 +269,18 @@ class WatchdogManager : public nsIObserver
         MOZ_ASSERT(!mWatchdog);
     }
 
+  private:
+
+    static void PrefsChanged(const char* aPref, WatchdogManager* aSelf)
+    {
+        aSelf->RefreshWatchdog();
+    }
+
   public:
 
     void Shutdown()
     {
-        mozilla::Preferences::RemoveObserver(this, "dom.use_watchdog");
-        mozilla::Preferences::RemoveObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CONTENT);
-        mozilla::Preferences::RemoveObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CHROME);
-        mozilla::Preferences::RemoveObserver(this, PREF_MAX_SCRIPT_RUN_TIME_EXT_CONTENT);
-    }
-
-    NS_IMETHOD Observe(nsISupports* aSubject, const char* aTopic,
-                       const char16_t* aData) override
-    {
-        RefreshWatchdog();
-        return NS_OK;
+        Preferences::UnregisterCallbacks(PrefsChanged, gCallbackPrefs, this);
     }
 
     void
@@ -329,8 +334,9 @@ class WatchdogManager : public nsIObserver
 
         // The watchdog may be hibernating, waiting for the context to go
         // active. Wake it up if necessary.
-        if (active && mWatchdog && mWatchdog->Hibernating())
+        if (active && mWatchdog && mWatchdog->Hibernating()) {
             mWatchdog->WakeUp();
+        }
     }
 
     bool IsAnyContextActive()
@@ -381,22 +387,26 @@ class WatchdogManager : public nsIObserver
     {
         bool wantWatchdog = Preferences::GetBool("dom.use_watchdog", true);
         if (wantWatchdog != !!mWatchdog) {
-            if (wantWatchdog)
+            if (wantWatchdog) {
                 StartWatchdog();
-            else
+            } else {
                 StopWatchdog();
+            }
         }
 
         if (mWatchdog) {
             int32_t contentTime = Preferences::GetInt(PREF_MAX_SCRIPT_RUN_TIME_CONTENT, 10);
-            if (contentTime <= 0)
+            if (contentTime <= 0) {
                 contentTime = INT32_MAX;
+            }
             int32_t chromeTime = Preferences::GetInt(PREF_MAX_SCRIPT_RUN_TIME_CHROME, 20);
-            if (chromeTime <= 0)
+            if (chromeTime <= 0) {
                 chromeTime = INT32_MAX;
+            }
             int32_t extTime = Preferences::GetInt(PREF_MAX_SCRIPT_RUN_TIME_EXT_CONTENT, 5);
-            if (extTime <= 0)
+            if (extTime <= 0) {
                 extTime = INT32_MAX;
+            }
             mWatchdog->SetMinScriptRunTimeSeconds(std::min({contentTime, chromeTime, extTime}));
         }
     }
@@ -454,8 +464,6 @@ class WatchdogManager : public nsIObserver
     PRTime mTimestamps[kWatchdogTimestampCategoryCount - 1];
 };
 
-NS_IMPL_ISUPPORTS(WatchdogManager, nsIObserver)
-
 AutoLockWatchdog::AutoLockWatchdog(Watchdog* aWatchdog MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
   : mWatchdog(aWatchdog)
 {
@@ -476,6 +484,8 @@ static void
 WatchdogMain(void* arg)
 {
     AUTO_PROFILER_REGISTER_THREAD("JS Watchdog");
+    // Create an nsThread wrapper for the thread and register it with the thread manager.
+    Unused << NS_GetCurrentThread();
     NS_SetCurrentThreadName("JS Watchdog");
 
     Watchdog* self = static_cast<Watchdog*>(arg);
@@ -517,8 +527,9 @@ WatchdogMain(void* arg)
         if (!self->ShuttingDown() && manager->IsAnyContextActive()) {
             bool debuggerAttached = false;
             nsCOMPtr<nsIDebug2> dbg = do_GetService("@mozilla.org/xpcom/debug;1");
-            if (dbg)
+            if (dbg) {
                 dbg->GetIsDebuggerAttached(&debuggerAttached);
+            }
             if (debuggerAttached) {
                 // We won't be interrupting these scripts anyway.
                 continue;
@@ -549,28 +560,61 @@ XPCJSContext::GetWatchdogTimestamp(WatchdogTimestampCategory aCategory)
         mWatchdogManager->GetTimestamp(aCategory, lock);
 }
 
-void
-xpc::SimulateActivityCallback(bool aActive)
-{
-    XPCJSContext::ActivityCallback(XPCJSContext::Get(), aActive);
-}
-
 // static
-void
-XPCJSContext::ActivityCallback(void* arg, bool active)
+bool
+XPCJSContext::RecordScriptActivity(bool aActive)
 {
-    if (!active) {
-        ProcessHangMonitor::ClearHang();
+    MOZ_ASSERT(NS_IsMainThread());
+
+    XPCJSContext* xpccx = XPCJSContext::Get();
+    if (!xpccx) {
+        // mozilla::SpinEventLoopUntil may use AutoScriptActivity(false) after
+        // we destroyed the XPCJSContext.
+        MOZ_ASSERT(!aActive);
+        return false;
     }
 
-    XPCJSContext* self = static_cast<XPCJSContext*>(arg);
-    self->mWatchdogManager->RecordContextActivity(self, active);
+    bool oldValue = xpccx->SetHasScriptActivity(aActive);
+    if (aActive == oldValue) {
+        // Nothing to do.
+        return oldValue;
+    }
+
+    // Since the slow script dialog never activates if we are recording or
+    // replaying, don't record/replay JS activity notifications.
+    if (recordreplay::IsRecordingOrReplaying()) {
+        return oldValue;
+    }
+
+    if (!aActive) {
+        ProcessHangMonitor::ClearHang();
+    }
+    xpccx->mWatchdogManager->RecordContextActivity(xpccx, aActive);
+
+    return oldValue;
+}
+
+AutoScriptActivity::AutoScriptActivity(bool aActive)
+  : mActive(aActive)
+  , mOldValue(XPCJSContext::RecordScriptActivity(aActive))
+{
+}
+
+AutoScriptActivity::~AutoScriptActivity()
+{
+    MOZ_ALWAYS_TRUE(mActive == XPCJSContext::RecordScriptActivity(mOldValue));
 }
 
 // static
 bool
 XPCJSContext::InterruptCallback(JSContext* cx)
 {
+    // The slow script dialog never activates if we are recording or replaying,
+    // since the precise timing of the dialog cannot be replayed.
+    if (recordreplay::IsRecordingOrReplaying()) {
+        return true;
+    }
+
     XPCJSContext* self = XPCJSContext::Get();
 
     // Now is a good time to turn on profiling if it's pending.
@@ -589,8 +633,9 @@ XPCJSContext::InterruptCallback(JSContext* cx)
 
     // Sometimes we get called back during XPConnect initialization, before Gecko
     // has finished bootstrapping. Avoid crashing in nsContentUtils below.
-    if (!nsContentUtils::IsInitialized())
+    if (!nsContentUtils::IsInitialized()) {
         return true;
+    }
 
     // This is at least the second interrupt callback we've received since
     // returning to the event loop. See how long it's been, and what the limit
@@ -616,8 +661,9 @@ XPCJSContext::InterruptCallback(JSContext* cx)
     }
 
     // If there's no limit, or we're within the limit, let it go.
-    if (limit == 0 || duration.ToSeconds() < limit / 2.0)
+    if (limit == 0 || duration.ToSeconds() < limit / 2.0) {
         return true;
+    }
 
     self->mSlowScriptActualWait += duration;
 
@@ -643,8 +689,9 @@ XPCJSContext::InterruptCallback(JSContext* cx)
         // sandboxPrototype, use that DOMWindow. This supports GreaseMonkey
         // and JetPack content scripts.
         JS::Rooted<JSObject*> proto(cx);
-        if (!JS_GetPrototype(cx, global, &proto))
+        if (!JS_GetPrototype(cx, global, &proto)) {
             return false;
+        }
         if (proto && xpc::IsSandboxPrototypeProxy(proto) &&
             (proto = js::CheckedUnwrap(proto, /* stopAtWindowProxy = */ false)))
         {
@@ -675,15 +722,17 @@ XPCJSContext::InterruptCallback(JSContext* cx)
     // Show the prompt to the user, and kill if requested.
     nsGlobalWindowInner::SlowScriptResponse response = win->ShowSlowScriptDialog(addonId);
     if (response == nsGlobalWindowInner::KillSlowScript) {
-        if (Preferences::GetBool("dom.global_stop_script", true))
+        if (Preferences::GetBool("dom.global_stop_script", true)) {
             xpc::Scriptability::Get(global).Block();
+        }
         return false;
     }
     if (response == nsGlobalWindowInner::KillScriptGlobal) {
         nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
 
-        if (!IsSandbox(global) || !obs)
+        if (!IsSandbox(global) || !obs) {
             return false;
+        }
 
         // Notify the extensions framework that the sandbox should be killed.
         nsIXPConnect* xpc = nsContentUtils::XPConnect();
@@ -704,11 +753,13 @@ XPCJSContext::InterruptCallback(JSContext* cx)
 
     // The user chose to continue the script. Reset the timer, and disable this
     // machinery with a pref of the user opted out of future slow-script dialogs.
-    if (response != nsGlobalWindowInner::ContinueSlowScriptAndKeepNotifying)
+    if (response != nsGlobalWindowInner::ContinueSlowScriptAndKeepNotifying) {
         self->mSlowScriptCheckpoint = TimeStamp::NowLoRes();
+    }
 
-    if (response == nsGlobalWindowInner::AlwaysContinueSlowScript)
+    if (response == nsGlobalWindowInner::AlwaysContinueSlowScript) {
         Preferences::SetInt(prefName, 0);
+    }
 
     return true;
 }
@@ -733,9 +784,8 @@ bool
 xpc::SharedMemoryEnabled() { return sSharedMemoryEnabled; }
 
 static void
-ReloadPrefsCallback(const char* pref, void* data)
+ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx)
 {
-    XPCJSContext* xpccx = static_cast<XPCJSContext*>(data);
     JSContext* cx = xpccx->Context();
 
     bool useBaseline = Preferences::GetBool(JS_OPTIONS_DOT_STR "baselinejit");
@@ -877,8 +927,6 @@ XPCJSContext::~XPCJSContext()
     Preferences::UnregisterCallback(ReloadPrefsCallback, "fuzzing.enabled", this);
 #endif
 
-    js::SetActivityCallback(Context(), nullptr, nullptr);
-
     // Clear any pending exception.  It might be an XPCWrappedJS, and if we try
     // to destroy it later we will crash.
     SetPendingException(nullptr);
@@ -897,8 +945,9 @@ XPCJSContext::~XPCJSContext()
         mWatchdogManager->UnregisterContext(this);
     }
 
-    if (mCallContext)
+    if (mCallContext) {
         mCallContext->SystemIsBeingShutDown();
+    }
 
     PROFILER_CLEAR_JS_CONTEXT();
 
@@ -913,6 +962,7 @@ XPCJSContext::XPCJSContext()
    mWatchdogManager(GetWatchdogManager()),
    mSlowScriptSecondHalf(false),
    mTimeoutAccumulated(false),
+   mHasScriptActivity(false),
    mPendingResult(NS_OK),
    mActive(CONTEXT_INACTIVE),
    mLastStateChange(PR_Now())
@@ -950,8 +1000,9 @@ GetWindowsStackSize()
     // because that's the size of the committed area and we're also interested
     // in the reserved pages below that.
     MEMORY_BASIC_INFORMATION mbi;
-    if (!VirtualQuery(&mbi, &mbi, sizeof(mbi)))
+    if (!VirtualQuery(&mbi, &mbi, sizeof(mbi))) {
         MOZ_CRASH("VirtualQuery failed");
+    }
 
     const uint8_t* stackBottom = reinterpret_cast<const uint8_t*>(mbi.AllocationBase);
 
@@ -1074,6 +1125,18 @@ XPCJSContext::Initialize(XPCJSContext* aPrimaryContext)
 #  else
     const size_t kTrustedScriptBuffer = 180 * 1024;
 #  endif
+#elif defined(XP_WIN)
+    // 1MB is the default stack size on Windows. We use the -STACK linker flag
+    // (see WIN32_EXE_LDFLAGS in config/config.mk) to request a larger stack,
+    // so we determine the stack size at runtime.
+    const size_t kStackQuota = GetWindowsStackSize();
+#  if defined(MOZ_ASAN)
+    // See the standalone MOZ_ASAN branch below for the ASan case.
+    const size_t kTrustedScriptBuffer = 450 * 1024;
+#  else
+    const size_t kTrustedScriptBuffer = (sizeof(size_t) == 8) ? 180 * 1024   //win64
+                                                              : 120 * 1024;  //win32
+#  endif
 #elif defined(MOZ_ASAN)
     // ASan requires more stack space due to red-zones, so give it double the
     // default (1MB on 32-bit, 2MB on 64-bit). ASAN stack frame measurements
@@ -1086,13 +1149,6 @@ XPCJSContext::Initialize(XPCJSContext* aPrimaryContext)
     // (See bug 1415195)
     const size_t kStackQuota =  2 * kDefaultStackQuota;
     const size_t kTrustedScriptBuffer = 450 * 1024;
-#elif defined(XP_WIN)
-    // 1MB is the default stack size on Windows. We use the -STACK linker flag
-    // (see WIN32_EXE_LDFLAGS in config/config.mk) to request a larger stack,
-    // so we determine the stack size at runtime.
-    const size_t kStackQuota = GetWindowsStackSize();
-    const size_t kTrustedScriptBuffer = (sizeof(size_t) == 8) ? 180 * 1024   //win64
-                                                              : 120 * 1024;  //win32
 #elif defined(ANDROID)
     // Android appears to have 1MB stacks. Allow the use of 3/4 of that size
     // (768KB on 32-bit), since otherwise we can crash with a stack overflow
@@ -1122,7 +1178,6 @@ XPCJSContext::Initialize(XPCJSContext* aPrimaryContext)
 
     PROFILER_SET_JS_CONTEXT(cx);
 
-    js::SetActivityCallback(cx, ActivityCallback, this);
     JS_AddInterruptCallback(cx, InterruptCallback);
 
     if (!aPrimaryContext) {
@@ -1147,7 +1202,7 @@ uint32_t
 XPCJSContext::sInstanceCount;
 
 // static
-StaticRefPtr<WatchdogManager>
+StaticAutoPtr<WatchdogManager>
 XPCJSContext::sWatchdogInstance;
 
 // static
@@ -1180,8 +1235,9 @@ XPCJSContext::NewXPCJSContext(XPCJSContext* aPrimaryContext)
         MOZ_CRASH("new XPCJSContext failed to initialize.");
     }
 
-    if (self->Context())
+    if (self->Context()) {
         return self;
+    }
 
     MOZ_CRASH("new XPCJSContext failed to initialize.");
 }

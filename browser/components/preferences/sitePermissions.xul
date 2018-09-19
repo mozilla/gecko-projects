@@ -18,8 +18,9 @@
         persist="screenX screenY width height"
         onkeypress="gSitePermissionsManager.onWindowKeyPress(event);">
 
-  <link rel="localization" href="browser/preferences/permissions.ftl"/>
-  <script type="application/javascript" src="chrome://global/content/l10n.js"></script>
+  <linkset>
+    <link rel="localization" href="browser/preferences/permissions.ftl"/>
+  </linkset>
 
   <script src="chrome://browser/content/preferences/sitePermissions.js"/>
 
@@ -35,16 +36,14 @@
                type="search" oncommand="gSitePermissionsManager.buildPermissionsList();"/>
     </hbox>
     <separator class="thin"/>
-    <richlistbox id="permissionsBox" selected="false"
-                 hidecolumnpicker="true" flex="1"
+    <richlistbox id="permissionsBox" flex="1" selected="false"
                  onkeypress="gSitePermissionsManager.onPermissionKeyPress(event);"
                  onselect="gSitePermissionsManager.onPermissionSelect();">
       <listheader>
-        <treecol id="siteCol" data-l10n-id="permissions-site-name" flex="3"
-                 persist="width" width="50"
+        <treecol id="siteCol" data-l10n-id="permissions-site-name" flex="3" width="50"
                  onclick="gSitePermissionsManager.buildPermissionsList(event.target)"/>
-        <treecol id="statusCol" data-l10n-id="permissions-status" flex="1"
-                 persist="width" width="50" data-isCurrentSortCol="true"
+        <treecol id="statusCol" data-l10n-id="permissions-status" flex="1" width="50"
+                 data-isCurrentSortCol="true"
                  onclick="gSitePermissionsManager.buildPermissionsList(event.target);"/>
       </listheader>
     </richlistbox>

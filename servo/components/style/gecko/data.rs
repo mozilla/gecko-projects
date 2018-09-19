@@ -8,7 +8,7 @@ use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use context::QuirksMode;
 use dom::TElement;
 use gecko_bindings::bindings::{self, RawServoStyleSet};
-use gecko_bindings::structs::{self, RawGeckoPresContextOwned, ServoStyleSetSizes, StyleSheet as DomStyleSheet};
+use gecko_bindings::structs::{RawGeckoPresContextOwned, ServoStyleSetSizes, StyleSheet as DomStyleSheet};
 use gecko_bindings::structs::{StyleSheetInfo, nsIDocument};
 use gecko_bindings::sugar::ownership::{HasArcFFI, HasBoxFFI, HasFFI, HasSimpleFFI};
 use invalidation::media_queries::{MediaListKey, ToMediaListKey};
@@ -29,7 +29,8 @@ pub struct GeckoStyleSheet(*const DomStyleSheet);
 impl fmt::Debug for GeckoStyleSheet {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         let contents = self.contents();
-        formatter.debug_struct("GeckoStyleSheet")
+        formatter
+            .debug_struct("GeckoStyleSheet")
             .field("origin", &contents.origin)
             .field("url_data", &*contents.url_data.read())
             .finish()
@@ -66,9 +67,7 @@ impl GeckoStyleSheet {
     }
 
     fn inner(&self) -> &StyleSheetInfo {
-        unsafe {
-            &*(self.raw().mInner as *const StyleSheetInfo)
-        }
+        unsafe { &*(self.raw().mInner as *const StyleSheetInfo) }
     }
 
     /// Gets the StylesheetContents for this stylesheet.
@@ -185,52 +184,21 @@ impl PerDocumentStyleDataImpl {
             .flush(&StylesheetGuards::same(guard), document_element, snapshots)
     }
 
-    /// Returns whether private browsing is enabled.
-    fn is_private_browsing_enabled(&self) -> bool {
-        let doc = self.stylist
-            .device()
-            .pres_context()
-            .mDocument
-            .raw::<nsIDocument>();
-        unsafe { bindings::Gecko_IsPrivateBrowsingEnabled(doc) }
-    }
-
-    /// Returns whether the document is being used as an image.
-    fn is_being_used_as_an_image(&self) -> bool {
-        let doc = self.stylist
-            .device()
-            .pres_context()
-            .mDocument
-            .raw::<nsIDocument>();
-
-        unsafe { (*doc).mIsBeingUsedAsImage() }
-    }
-
     /// Get the default computed values for this document.
     pub fn default_computed_values(&self) -> &Arc<ComputedValues> {
         self.stylist.device().default_computed_values_arc()
     }
 
-    /// Returns whether visited links are enabled.
-    fn visited_links_enabled(&self) -> bool {
-        unsafe { structs::StaticPrefs_sVarCache_layout_css_visited_links_enabled }
-    }
-
     /// Returns whether visited styles are enabled.
+    #[inline]
     pub fn visited_styles_enabled(&self) -> bool {
-        if !self.visited_links_enabled() {
-            return false;
-        }
-
-        if self.is_private_browsing_enabled() {
-            return false;
-        }
-
-        if self.is_being_used_as_an_image() {
-            return false;
-        }
-
-        true
+        let doc = self
+            .stylist
+            .device()
+            .pres_context()
+            .mDocument
+            .raw::<nsIDocument>();
+        unsafe { bindings::Gecko_VisitedStylesEnabled(doc) }
     }
 
     /// Measure heap usage.

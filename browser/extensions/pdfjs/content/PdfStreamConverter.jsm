@@ -99,9 +99,7 @@ function getLocalizedStrings(path) {
     Services.strings.createBundle("chrome://pdf.js/locale/" + path);
 
   var map = {};
-  var enumerator = stringBundle.getSimpleEnumeration();
-  while (enumerator.hasMoreElements()) {
-    var string = enumerator.getNext().QueryInterface(Ci.nsIPropertyElement);
+  for (let string of stringBundle.getSimpleEnumeration()) {
     var key = string.key, property = "textContent";
     var i = key.lastIndexOf(".");
     if (i >= 0) {
@@ -121,6 +119,18 @@ function getLocalizedString(strings, id, property) {
     return strings[id][property];
   }
   return id;
+}
+
+function isValidMatchesCount(data) {
+  if (typeof data !== "object" || data === null) {
+    return false;
+  }
+  const {current, total} = data;
+  if ((typeof total !== "number" || total < 0) ||
+      (typeof current !== "number" || current < 0 || current > total)) {
+    return false;
+  }
+  return true;
 }
 
 // PDF data storage
@@ -268,9 +278,7 @@ class ChromeActions {
       var listener = {
         extListener: null,
         onStartRequest(aRequest, aContext) {
-          var loadContext = self.domWindow
-                                .QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIWebNavigation)
+          var loadContext = self.domWindow.docShell
                                 .QueryInterface(Ci.nsILoadContext);
           this.extListener = extHelperAppSvc.doContent(
             (data.isAttachment ? "application/octet-stream" :
@@ -414,10 +422,7 @@ class ChromeActions {
       getLocalizedString(strings, "open_with_different_viewer"),
       getLocalizedString(strings, "open_with_different_viewer", "accessKey"));
 
-    let winmm = domWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIDocShell)
-                         .QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIContentFrameMessageManager);
+    let winmm = domWindow.docShell.messageManager;
 
     winmm.addMessageListener("PDFJS:Child:fallbackDownload",
       function fallbackDownload(msg) {
@@ -441,13 +446,30 @@ class ChromeActions {
         (findPreviousType !== "undefined" && findPreviousType !== "boolean")) {
       return;
     }
+    // Allow the `matchesCount` property to be optional, and ensure that
+    // it's valid before including it in the data sent to the findbar.
+    let matchesCount = null;
+    if (isValidMatchesCount(data.matchesCount)) {
+      matchesCount = data.matchesCount;
+    }
 
-    var winmm = this.domWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                              .getInterface(Ci.nsIDocShell)
-                              .QueryInterface(Ci.nsIInterfaceRequestor)
-                              .getInterface(Ci.nsIContentFrameMessageManager);
+    var winmm = this.domWindow.docShell.messageManager;
+    winmm.sendAsyncMessage("PDFJS:Parent:updateControlState", {
+      result, findPrevious, matchesCount,
+    });
+  }
 
-    winmm.sendAsyncMessage("PDFJS:Parent:updateControlState", data);
+  updateFindMatchesCount(data) {
+    if (!this.supportsIntegratedFind()) {
+      return;
+    }
+    // Verify what we're sending to the findbar.
+    if (!isValidMatchesCount(data)) {
+      return;
+    }
+
+    const winmm = this.domWindow.docShell.messageManager;
+    winmm.sendAsyncMessage("PDFJS:Parent:updateMatchesCount", data);
   }
 
   setPreferences(prefs, sendResponse) {
@@ -736,7 +758,7 @@ class RequestListener {
         response = function sendResponse(aResponse) {
           try {
             var listener = doc.createEvent("CustomEvent");
-            let detail = Cu.cloneInto({ response: aResponse, },
+            let detail = Cu.cloneInto({ response: aResponse },
                                       doc.defaultView);
             listener.initCustomEvent("pdf.js.response", true, false, detail);
             return message.dispatchEvent(listener);
@@ -759,10 +781,7 @@ class RequestListener {
 class FindEventManager {
   constructor(contentWindow) {
     this.contentWindow = contentWindow;
-    this.winmm = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                              .getInterface(Ci.nsIDocShell)
-                              .QueryInterface(Ci.nsIInterfaceRequestor)
-                              .getInterface(Ci.nsIContentFrameMessageManager);
+    this.winmm = contentWindow.docShell.messageManager;
   }
 
   bind() {

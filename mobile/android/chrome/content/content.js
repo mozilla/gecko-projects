@@ -8,6 +8,7 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AboutReader", "resource://gre/modules/AboutReader.jsm");
 ChromeUtils.defineModuleGetter(this, "ReaderMode", "resource://gre/modules/ReaderMode.jsm");
+ChromeUtils.defineModuleGetter(this, "Readerable", "resource://gre/modules/Readerable.jsm");
 ChromeUtils.defineModuleGetter(this, "LoginManagerContent", "resource://gre/modules/LoginManagerContent.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "gPipNSSBundle", function() {
@@ -91,6 +92,7 @@ const SEC_ERROR_REUSED_ISSUER_AND_SERIAL           = SEC_ERROR_BASE + 138;
 const SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED  = SEC_ERROR_BASE + 176;
 const MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 5;
 const MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 6;
+const MOZILLA_PKIX_ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED = MOZILLA_PKIX_ERROR_BASE + 13;
 
 
 const SSL_ERROR_BASE = Ci.nsINSSErrorsService.NSS_SSL_ERROR_BASE;
@@ -179,12 +181,12 @@ var AboutCertErrorListener = {
     return content.document.documentURI.startsWith("about:certerror");
   },
 
-  _setTechDetailsMsgPart1(hostString, sslStatus, technicalInfo, doc) {
+  _setTechDetailsMsgPart1(hostString, securityInfo, technicalInfo, doc) {
     let msg = gPipNSSBundle.formatStringFromName("certErrorIntro",
                                                  [hostString], 1);
     msg += "\n\n";
 
-    if (sslStatus.isUntrusted && !sslStatus.serverCert.isSelfSigned) {
+    if (securityInfo.isUntrusted && !securityInfo.serverCert.isSelfSigned) {
       switch (securityInfo.errorCode) {
         case SEC_ERROR_UNKNOWN_ISSUER:
           msg += gPipNSSBundle.GetStringFromName("certErrorTrust_UnknownIssuer") + "\n";
@@ -203,23 +205,28 @@ var AboutCertErrorListener = {
         case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
           msg += gPipNSSBundle.GetStringFromName("certErrorTrust_ExpiredIssuer") + "\n";
           break;
+        // This error code currently only exists for the Symantec distrust, we may need to adjust
+        // it to fit other distrusts later.
+        case MOZILLA_PKIX_ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED:
+          msg += gPipNSSBundle.formatStringFromName("certErrorTrust_Symantec", [hostString], 1) + "\n";
+          break;
         case SEC_ERROR_UNTRUSTED_CERT:
         default:
           msg += gPipNSSBundle.GetStringFromName("certErrorTrust_Untrusted") + "\n";
       }
     }
-    if (sslStatus.isUntrusted && sslStatus.serverCert.isSelfSigned) {
+    if (securityInfo.isUntrusted && securityInfo.serverCert.isSelfSigned) {
       msg += gPipNSSBundle.GetStringFromName("certErrorTrust_SelfSigned") + "\n";
     }
 
     technicalInfo.appendChild(doc.createTextNode(msg));
   },
 
-  _setTechDetails(sslStatus, securityInfo, location) {
-    if (!securityInfo || !sslStatus || !location) {
+  _setTechDetails(securityInfo, location) {
+    if (!securityInfo || !location) {
       return;
     }
-    let validity = sslStatus.serverCert.validity;
+    let validity = securityInfo.serverCert.validity;
 
     let doc = content.document;
     // CSS class and error code are set from nsDocShell.
@@ -234,10 +241,27 @@ var AboutCertErrorListener = {
       hostString += ":" + uri.port;
     }
 
-    this._setTechDetailsMsgPart1(hostString, sslStatus, technicalInfo, doc);
+    // This error code currently only exists for the Symantec distrust
+    // in Firefox 63, so we add copy explaining that to the user.
+    // In case of future distrusts of that scale we might need to add
+    // additional parameters that allow us to identify the affected party
+    // without replicating the complex logic from certverifier code.
+    if (securityInfo.errorCode == MOZILLA_PKIX_ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED) {
+      let introContent = doc.getElementById("introContent");
+      let description = doc.createElement("p");
+      description.textContent = gPipNSSBundle.formatStringFromName(
+        "certErrorSymantecDistrustDescription", [hostString], 1);
+      introContent.append(description);
 
-    if (sslStatus.isDomainMismatch) {
-      let subjectAltNamesList = sslStatus.serverCert.subjectAltNames;
+      // The regular "what should I do" message does not make sense in this case.
+      doc.getElementById("whatShouldIDoContentText").textContent =
+        gPipNSSBundle.GetStringFromName("certErrorSymantecDistrustAdministrator");
+    }
+
+    this._setTechDetailsMsgPart1(hostString, securityInfo, technicalInfo, doc);
+
+    if (securityInfo.isDomainMismatch) {
+      let subjectAltNamesList = securityInfo.serverCert.subjectAltNames;
       let subjectAltNames = subjectAltNamesList.split(",");
       let numSubjectAltNames = subjectAltNames.length;
       let msgPrefix = "";
@@ -319,7 +343,7 @@ var AboutCertErrorListener = {
       }
     }
 
-    if (sslStatus.isNotValidAtThisTime) {
+    if (securityInfo.isNotValidAtThisTime) {
       let nowTime = new Date().getTime() * 1000;
       let dateOptions = { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "numeric" };
       let now = new Services.intl.DateTimeFormat(undefined, dateOptions).format(new Date());
@@ -360,9 +384,7 @@ var AboutCertErrorListener = {
     let securityInfo = docShell.failedChannel && docShell.failedChannel.securityInfo;
     securityInfo.QueryInterface(Ci.nsITransportSecurityInfo)
                 .QueryInterface(Ci.nsISerializable);
-    let sslStatus = securityInfo.QueryInterface(Ci.nsISSLStatusProvider)
-                                                .SSLStatus;
-    this._setTechDetails(sslStatus, securityInfo, ownerDoc.location.href);
+    this._setTechDetails(securityInfo, ownerDoc.location.href);
   },
 };
 AboutCertErrorListener.init();
@@ -464,7 +486,7 @@ var AboutReaderListener = {
     // Do not show Reader View icon on error pages (bug 1320900)
     if (this.isErrorPage) {
         sendAsyncMessage("Reader:UpdateReaderButton", { isArticle: false });
-    } else if (!ReaderMode.isEnabledForParseOnLoad || this.isAboutReader ||
+    } else if (!Readerable.isEnabledForParseOnLoad || this.isAboutReader ||
         !(content.document instanceof content.HTMLDocument) ||
         content.document.mozSyntheticDocument) {
 
@@ -500,11 +522,12 @@ var AboutReaderListener = {
       return;
     }
 
+    Services.console.logStringMessage(`ON PAINT WHEN WAITED FOR\n`);
     this.cancelPotentialPendingReadabilityCheck();
 
     // Only send updates when there are articles; there's no point updating with
     // |false| all the time.
-    if (ReaderMode.isProbablyReaderable(content.document)) {
+    if (Readerable.isProbablyReaderable(content.document)) {
       sendAsyncMessage("Reader:UpdateReaderButton", { isArticle: true });
     } else if (forceNonArticle) {
       sendAsyncMessage("Reader:UpdateReaderButton", { isArticle: false });

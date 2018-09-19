@@ -30,14 +30,10 @@ const nsIFile = Ci.nsIFile;
 
 var EXPORTED_SYMBOLS = [ "DownloadLastDir" ];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-let nonPrivateLoadContext = Cc["@mozilla.org/loadcontext;1"].
-                              createInstance(Ci.nsILoadContext);
-let privateLoadContext = Cc["@mozilla.org/privateloadcontext;1"].
-                              createInstance(Ci.nsILoadContext);
+let nonPrivateLoadContext = Cu.createLoadContext();
+let privateLoadContext = Cu.createPrivateLoadContext();
 
 var observer = {
   QueryInterface: ChromeUtils.generateQI(["nsIObserver",
@@ -61,7 +57,7 @@ var observer = {
         cps2.removeByName(LAST_DIR_PREF, privateLoadContext);
         break;
     }
-  }
+  },
 };
 
 Services.obs.addObserver(observer, "last-pb-context-exited", true);
@@ -86,8 +82,7 @@ function isContentPrefEnabled() {
 var gDownloadLastDirFile = readLastDirPref();
 
 function DownloadLastDir(aWindow) {
-  let loadContext = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIWebNavigation)
+  let loadContext = aWindow.docShell
                            .QueryInterface(Ci.nsILoadContext);
   // Need this in case the real thing has gone away by the time we need it.
   // We only care about the private browsing state. All the rest of the
@@ -146,7 +141,7 @@ DownloadLastDir.prototype = {
           }
         }
         aCallback(file);
-      }
+      },
     });
   },
 
@@ -170,5 +165,5 @@ DownloadLastDir.prototype = {
     } else if (Services.prefs.prefHasUserValue(LAST_DIR_PREF)) {
       Services.prefs.clearUserPref(LAST_DIR_PREF);
     }
-  }
+  },
 };

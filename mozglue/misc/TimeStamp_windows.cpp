@@ -168,7 +168,9 @@ PerformanceCounter()
   LARGE_INTEGER pc;
   ::QueryPerformanceCounter(&pc);
 
-  if (!sHasStableTSC) {
+  // As an experiment, we want to have a monotonicity sentinel
+  // even if the TSC is reported as stable.
+  if (true || !sHasStableTSC) {
     // This is a simple go-backward protection for faulty hardware
     AutoCriticalSection lock(&sTimeStampLock);
 
@@ -428,6 +430,12 @@ BaseTimeDurationPlatformUtils::ResolutionInTicks()
 static bool
 HasStableTSC()
 {
+#if defined(_M_ARM64)
+  // AArch64 defines that its system counter run at a constant rate
+  // regardless of the current clock frequency of the system.  See "The
+  // Generic Timer", section D7, in the ARMARM for ARMv8.
+  return true;
+#else
   union
   {
     int regs[4];
@@ -463,6 +471,7 @@ HasStableTSC()
   // if bit 8 is set than TSC will run at a constant rate
   // in all ACPI P-states, C-states and T-states
   return regs[3] & (1 << 8);
+#endif
 }
 
 static bool gInitialized = false;

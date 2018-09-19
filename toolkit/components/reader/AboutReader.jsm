@@ -9,7 +9,6 @@ var EXPORTED_SYMBOLS = [ "AboutReader" ];
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/ReaderMode.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AsyncPrefs", "resource://gre/modules/AsyncPrefs.jsm");
 ChromeUtils.defineModuleGetter(this, "NarrateControls", "resource://gre/modules/narrate/NarrateControls.jsm");
@@ -41,8 +40,7 @@ var AboutReader = function(mm, win, articlePromise) {
 
   this._docRef = Cu.getWeakReference(doc);
   this._winRef = Cu.getWeakReference(win);
-  this._innerWindowId = win.QueryInterface(Ci.nsIInterfaceRequestor)
-    .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+  this._innerWindowId = win.windowUtils.currentInnerWindowID;
 
   this._article = null;
   this._languagePromise = new Promise(resolve => {
@@ -88,7 +86,7 @@ var AboutReader = function(mm, win, articlePromise) {
     return {
       name: gStrings.GetStringFromName("aboutReader.colorScheme." + value),
       value,
-      itemClass: value + "-button"
+      itemClass: value + "-button",
     };
   });
 
@@ -101,7 +99,7 @@ var AboutReader = function(mm, win, articlePromise) {
     { name: fontTypeSample,
       description: gStrings.GetStringFromName("aboutReader.fontType.sans-serif"),
       value: "sans-serif",
-      itemClass: "sans-serif-button"
+      itemClass: "sans-serif-button",
     },
     { name: fontTypeSample,
       description: gStrings.GetStringFromName("aboutReader.fontType.serif"),
@@ -214,6 +212,8 @@ AboutReader.prototype = {
             btn.title = message.data.title;
           if (message.data.text)
             btn.textContent = message.data.text;
+          if (message.data.width && message.data.height)
+            btn.style.backgroundSize = `${message.data.width}px ${message.data.height}px`;
           let tb = this._toolbarElement;
           tb.appendChild(btn);
           this._setupButton(message.data.id, button => {
@@ -704,7 +704,7 @@ AboutReader.prototype = {
     this._mm.addMessageListener("Reader:FaviconReturn", handleFaviconReturn);
     this._mm.sendAsyncMessage("Reader:FaviconRequest", {
       url: this._article.url,
-      preferredWidth: 16 * this._win.devicePixelRatio
+      preferredWidth: 16 * this._win.devicePixelRatio,
     });
   },
 
@@ -782,8 +782,8 @@ AboutReader.prototype = {
   },
 
   _showError() {
-    this._headerElement.style.display = "none";
-    this._contentElement.style.display = "none";
+    this._headerElement.classList.remove("reader-show-element");
+    this._contentElement.classList.remove("reader-show-element");
 
     let errorMessage = gStrings.GetStringFromName("aboutReader.loadError");
     this._messageElement.textContent = errorMessage;
@@ -817,7 +817,7 @@ AboutReader.prototype = {
   },
 
   _showContent(article) {
-    this._messageElement.style.display = "none";
+    this._messageElement.classList.remove("reader-show-element");
 
     this._article = article;
 
@@ -830,7 +830,7 @@ AboutReader.prototype = {
     this._readTimeElement.textContent = this._formatReadTime(article.readingTimeMinsSlow, article.readingTimeMinsFast);
     this._doc.title = article.title;
 
-    this._headerElement.style.display = "block";
+    this._headerElement.classList.add("reader-show-element");
 
     let parserUtils = Cc["@mozilla.org/parserutils;1"].getService(Ci.nsIParserUtils);
     let contentFragment = parserUtils.parseFragment(article.content,
@@ -841,7 +841,7 @@ AboutReader.prototype = {
     this._maybeSetTextDirection(article);
     this._foundLanguage(article.language);
 
-    this._contentElement.style.display = "block";
+    this._contentElement.classList.add("reader-show-element");
     this._updateImageMargins();
 
     this._requestFavicon();
@@ -856,8 +856,8 @@ AboutReader.prototype = {
   },
 
   _hideContent() {
-    this._headerElement.style.display = "none";
-    this._contentElement.style.display = "none";
+    this._headerElement.classList.remove("reader-show-element");
+    this._contentElement.classList.remove("reader-show-element");
   },
 
   _showProgressDelayed() {
@@ -869,11 +869,11 @@ AboutReader.prototype = {
         return;
       }
 
-      this._headerElement.style.display = "none";
-      this._contentElement.style.display = "none";
+      this._headerElement.classList.remove("reader-show-element");
+      this._contentElement.classList.remove("reader-show-element");
 
       this._messageElement.textContent = gStrings.GetStringFromName("aboutReader.loading2");
-      this._messageElement.style.display = "block";
+      this._messageElement.classList.add("reader-show-element");
     }, 300);
   },
 
@@ -1044,5 +1044,5 @@ AboutReader.prototype = {
     if (ref) {
       this._win.location.hash = ref;
     }
-  }
+  },
 };

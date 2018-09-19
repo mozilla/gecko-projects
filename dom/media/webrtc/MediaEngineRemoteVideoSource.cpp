@@ -12,6 +12,7 @@
 #include "mozilla/ErrorNames.h"
 #include "mozilla/RefPtr.h"
 #include "nsIPrefService.h"
+#include "Tracing.h"
 #include "VideoFrameUtils.h"
 #include "VideoUtils.h"
 #include "webrtc/common_video/include/video_frame_buffer.h"
@@ -486,6 +487,8 @@ MediaEngineRemoteVideoSource::Pull(const RefPtr<const AllocationHandle>& aHandle
                                    StreamTime aDesiredTime,
                                    const PrincipalHandle& aPrincipalHandle)
 {
+  TRACE_AUDIO_CALLBACK_COMMENT("SourceMediaStream %p track %i",
+                               aStream.get(), aTrackID);
   MutexAutoLock lock(mMutex);
   if (mState == kReleased) {
     // We end the track before deallocating, so this is safe.
@@ -547,8 +550,10 @@ MediaEngineRemoteVideoSource::DeliverFrame(uint8_t* aBuffer,
     std::swap(req_ideal_width, req_ideal_height);
   }
 
-  int32_t dst_max_width = std::min(req_max_width, aProps.width());
-  int32_t dst_max_height = std::min(req_max_height, aProps.height());
+  int32_t dst_max_width = req_max_width == 0 ? aProps.width() :
+    std::min(req_max_width, aProps.width());
+  int32_t dst_max_height = req_max_height == 0 ? aProps.height() :
+    std::min(req_max_height, aProps.height());
   // This logic works for both camera and screen sharing case.
   // for camera case, req_ideal_width and req_ideal_height is 0.
   // The following snippet will set dst_width to dst_max_width and dst_height to dst_max_height
@@ -896,9 +901,11 @@ MediaEngineRemoteVideoSource::ChooseCapability(
       // algorithm there.
       // TODO: This can be removed in bug 1453269.
       aCapability.width =
-        (c.mWidth.mIdeal.valueOr(0) & 0xffff) << 16 | (c.mWidth.mMax & 0xffff);
+        (std::min(0xffff, c.mWidth.mIdeal.valueOr(0)) & 0xffff) << 16 |
+        (std::min(0xffff, c.mWidth.mMax) & 0xffff);
       aCapability.height =
-        (c.mHeight.mIdeal.valueOr(0) & 0xffff) << 16 | (c.mHeight.mMax & 0xffff);
+        (std::min(0xffff, c.mHeight.mIdeal.valueOr(0)) & 0xffff) << 16 |
+        (std::min(0xffff, c.mHeight.mMax) & 0xffff);
       aCapability.maxFPS =
         c.mFrameRate.Clamp(c.mFrameRate.mIdeal.valueOr(aPrefs.mFPS));
       return true;

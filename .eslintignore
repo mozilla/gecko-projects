@@ -6,6 +6,7 @@
 **/crashtests/**
 # Also ignore reftest - specially crafted to produce expected output.
 **/reftest/**
+**/reftests/**
 
 # Exclude expected objdirs.
 obj*/**
@@ -14,7 +15,6 @@ obj*/**
 # If you are enabling a directory, please add directory specific exclusions
 # below.
 docshell/**
-editor/**
 extensions/cookie/**
 extensions/spellcheck/**
 extensions/universalchardet/**
@@ -22,7 +22,6 @@ gfx/layers/**
 gfx/tests/browser/**
 gfx/tests/chrome/**
 gfx/tests/mochitest/**
-gfx/tests/unit/**
 image/**
 layout/**
 memory/replace/dmd/test/**
@@ -38,7 +37,6 @@ netwerk/test/mochitests/**
 netwerk/test/unit*/**
 netwerk/wifi/**
 parser/**
-rdf/**
 tools/update-packaging/**
 uriloader/exthandler/**
 uriloader/exthandler/tests/mochitest/**
@@ -57,7 +55,6 @@ mfbt/**
 mozglue/**
 nsprpub/**
 other-licenses/**
-probes/**
 startupcache/**
 xpfe/**
 
@@ -80,9 +77,8 @@ browser/components/sessionstore/test/unit/data/sessionstore_invalid.js
 browser/components/enterprisepolicies/schemas/schema.jsm
 # generated & special files in cld2
 browser/components/translation/cld2/**
-# Screenshots and Follow-on search are imported as a system add-on and have
+# Screenshots is imported as a system add-on and has
 # their own lint rules currently.
-browser/extensions/followonsearch/**
 browser/extensions/screenshots/**
 browser/extensions/pdfjs/content/build**
 browser/extensions/pdfjs/content/web**
@@ -90,7 +86,7 @@ browser/extensions/pdfjs/content/web**
 browser/extensions/pocket/content/panels/js/tmpl.js
 browser/extensions/pocket/content/panels/js/vendor/**
 # Activity Stream has incompatible eslintrc. `npm run lint` from its directory
-browser/extensions/activity-stream/**
+browser/components/newtab/**
 # The only file in browser/locales/ is pre-processed.
 browser/locales/**
 # imported from chromium
@@ -101,13 +97,10 @@ browser/extensions/formautofill/phonenumberutils/PhoneNumberMetaData.jsm
 # devtools/ exclusions
 devtools/client/inspector/markup/test/doc_markup_events_*.html
 devtools/client/inspector/rules/test/doc_media_queries.html
-devtools/client/memory/test/chrome/*.html
 devtools/client/performance/components/test/test_jit_optimizations_01.html
 devtools/client/responsive.html/test/browser/touch.html
 devtools/client/shared/components/test/mochitest/*.html
 !devtools/client/shared/components/test/mochitest/test_stack-trace.html
-devtools/client/shared/shim/test/test_*.html
-devtools/client/shared/test/browser_toolbar_webconsole_errors_count.html
 devtools/client/storage/test/*.html
 !devtools/client/storage/test/storage-cookies.html
 !devtools/client/storage/test/storage-overflow.html
@@ -122,15 +115,9 @@ devtools/shared/qrcode/tests/mochitest/test_decode.html
 devtools/shared/tests/mochitest/*.html
 devtools/shared/webconsole/test/test_*.html
 
-# Soon to be removed
-devtools/client/commandline/**
 # Soon to be removed, the new/ directory is explicitly excluded below due to
 # also being an imported repository.
 devtools/client/debugger/**
-# Soon to be removed
-devtools/client/webconsole/old/net/**
-devtools/client/webconsole/old/test/**
-devtools/client/webconsole/old/webconsole.js
 
 # Ignore devtools imported repositories
 devtools/client/debugger/new/**
@@ -142,10 +129,12 @@ devtools/client/webide/preferences/**
 devtools/shared/preferences/**
 devtools/startup/preferences/devtools-startup.js
 
+# Ignore devtools generated code
+devtools/shared/css/generated/properties-db.js
+
 # Ignore devtools third-party libs
 devtools/shared/jsbeautify/*
 devtools/shared/acorn/*
-devtools/shared/gcli/source/*
 devtools/shared/node-properties/*
 devtools/shared/pretty-fast/*
 devtools/shared/sourcemap/*
@@ -181,7 +170,6 @@ devtools/server/tests/unit/xpcshell_debugging_script.js
 # dom/ exclusions
 dom/abort/**
 dom/animation/**
-dom/archivereader/**
 dom/asmjscache/**
 dom/audiochannel/**
 dom/base/**
@@ -195,7 +183,6 @@ dom/canvas/**
 dom/commandhandler/**
 dom/console/**
 dom/crypto/**
-dom/devicestorage/**
 dom/encoding/**
 dom/events/**
 dom/fetch/**
@@ -203,7 +190,6 @@ dom/file/**
 dom/filehandle/**
 dom/filesystem/**
 dom/flex/**
-dom/flyweb/**
 dom/gamepad/**
 dom/geolocation/**
 dom/grid/**
@@ -211,7 +197,6 @@ dom/html/**
 dom/imptests/**
 dom/interfaces/**
 dom/ipc/**
-dom/json/**
 dom/jsurl/**
 dom/locales/**
 dom/manifest/**
@@ -234,20 +219,13 @@ dom/permission/**
 dom/plugins/test/mochitest/**
 dom/plugins/test/unit/**
 dom/power/**
-dom/presentation/Presentation*.js
-dom/presentation/provider/**
-dom/presentation/tests/mochitest/**
-dom/presentation/tests/xpcshell/**
 dom/promise/**
 dom/push/**
 dom/quota/**
 dom/res/**
-dom/secureelement/**
-dom/security/test/contentverifier/**
 dom/security/test/cors/**
 dom/security/test/csp/**
 dom/security/test/general/**
-dom/security/test/hsts/**
 dom/security/test/mixedcontentblocker/**
 dom/security/test/sri/**
 dom/security/test/unit/**
@@ -261,12 +239,12 @@ dom/tests/html/**
 dom/tests/js/**
 dom/tests/mochitest/**
 dom/tests/unit/**
-dom/time/**
 dom/u2f/**
 dom/url/**
 dom/vr/**
 dom/webauthn/**
 dom/webbrowserpersist/**
+dom/webgpu/**
 dom/webidl/**
 dom/websocket/**
 dom/workers/**
@@ -279,6 +257,9 @@ dom/xul/**
 
 # Third-party
 dom/media/webvtt/**
+
+# Third-party
+editor/libeditor/tests/browserscope/**
 
 # Third-party
 gfx/ots/**
@@ -322,7 +303,6 @@ mobile/android/locales/
 
 # Non-standard `(catch ex if ...)`
 mobile/android/chrome/content/browser.js
-mobile/android/components/Snippets.js
 
 # Only contains non-standard test files.
 python/**
@@ -362,7 +342,6 @@ testing/mozbase/mozprofile/tests/files/prefs_with_comments.js
 testing/talos/talos/scripts/jszip.min.js
 testing/talos/talos/startup_test/sessionrestore/profile/sessionstore.js
 testing/talos/talos/startup_test/sessionrestore/profile-manywindows/sessionstore.js
-testing/talos/talos/tests/canvasmark/**
 testing/talos/talos/tests/devtools/addon/content/pages/**
 testing/talos/talos/tests/dromaeo/**
 testing/talos/talos/tests/v8_7/**
@@ -380,9 +359,6 @@ services/common/kinto-offline-client.js
 
 # toolkit/ exclusions
 
-# Not part of the default build
-toolkit/components/help/**
-
 # Intentionally invalid JS
 toolkit/components/workerloader/tests/moduleF-syntax-error.js
 
@@ -397,6 +373,7 @@ toolkit/components/reader/Readability.js
 toolkit/components/reader/JSDOMParser.js
 
 # Uses preprocessing
+toolkit/components/reader/Readerable.jsm
 toolkit/content/widgets/wizard.xml
 toolkit/modules/AppConstants.jsm
 toolkit/mozapps/update/tests/data/xpcshellConstantsPP.js

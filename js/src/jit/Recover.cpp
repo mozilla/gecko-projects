@@ -10,7 +10,6 @@
 #include "jsmath.h"
 
 #include "builtin/RegExp.h"
-#include "builtin/SIMD.h"
 #include "builtin/String.h"
 #include "builtin/TypedObject.h"
 #include "gc/Heap.h"
@@ -78,8 +77,9 @@ MResumePoint::writeRecoverData(CompactBufferWriter& writer) const
         bool reachablePC;
         jsbytecode* bailPC = pc();
 
-        if (mode() == MResumePoint::ResumeAfter)
+        if (mode() == MResumePoint::ResumeAfter) {
             bailPC = GetNextPc(pc());
+        }
 
         if (!ReconstructStackDepth(GetJitContext()->cx, script,
                                    bailPC, &stackDepth, &reachablePC))
@@ -163,13 +163,13 @@ bool
 RBitNot::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue operand(cx, iter.read());
+    RootedValue result(cx);
 
-    int32_t result;
-    if (!js::BitNot(cx, operand, &result))
+    if (!js::BitNot(cx, &operand, &result)) {
         return false;
+    }
 
-    RootedValue rootedResult(cx, js::Int32Value(result));
-    iter.storeInstructionResult(rootedResult);
+    iter.storeInstructionResult(result);
     return true;
 }
 
@@ -189,14 +189,14 @@ RBitAnd::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue lhs(cx, iter.read());
     RootedValue rhs(cx, iter.read());
-    int32_t result;
+    RootedValue result(cx);
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
 
-    if (!js::BitAnd(cx, lhs, rhs, &result))
+    if (!js::BitAnd(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
-    RootedValue rootedResult(cx, js::Int32Value(result));
-    iter.storeInstructionResult(rootedResult);
+    iter.storeInstructionResult(result);
     return true;
 }
 
@@ -216,14 +216,14 @@ RBitOr::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue lhs(cx, iter.read());
     RootedValue rhs(cx, iter.read());
-    int32_t result;
+    RootedValue result(cx);
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
 
-    if (!js::BitOr(cx, lhs, rhs, &result))
+    if (!js::BitOr(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
-    RootedValue asValue(cx, js::Int32Value(result));
-    iter.storeInstructionResult(asValue);
+    iter.storeInstructionResult(result);
     return true;
 }
 
@@ -243,13 +243,13 @@ RBitXor::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue lhs(cx, iter.read());
     RootedValue rhs(cx, iter.read());
+    RootedValue result(cx);
 
-    int32_t result;
-    if (!js::BitXor(cx, lhs, rhs, &result))
+    if (!js::BitXor(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
-    RootedValue rootedResult(cx, js::Int32Value(result));
-    iter.storeInstructionResult(rootedResult);
+    iter.storeInstructionResult(result);
     return true;
 }
 
@@ -269,14 +269,14 @@ RLsh::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue lhs(cx, iter.read());
     RootedValue rhs(cx, iter.read());
-    int32_t result;
+    RootedValue result(cx);
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
 
-    if (!js::BitLsh(cx, lhs, rhs, &result))
+    if (!js::BitLsh(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
-    RootedValue asValue(cx, js::Int32Value(result));
-    iter.storeInstructionResult(asValue);
+    iter.storeInstructionResult(result);
     return true;
 }
 
@@ -296,14 +296,14 @@ RRsh::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     RootedValue lhs(cx, iter.read());
     RootedValue rhs(cx, iter.read());
+    RootedValue result(cx);
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
 
-    int32_t result;
-    if (!js::BitRsh(cx, lhs, rhs, &result))
+    if (!js::BitRsh(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
-    RootedValue rootedResult(cx, js::Int32Value(result));
-    iter.storeInstructionResult(rootedResult);
+    iter.storeInstructionResult(result);
     return true;
 }
 
@@ -326,8 +326,9 @@ RUrsh::recover(JSContext* cx, SnapshotIterator& iter) const
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
 
     RootedValue result(cx);
-    if (!js::UrshOperation(cx, lhs, rhs, &result))
+    if (!js::UrshOperation(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -356,12 +357,14 @@ RSignExtendInt32::recover(JSContext* cx, SnapshotIterator& iter) const
     int32_t result;
     switch (MSignExtendInt32::Mode(mode_)) {
       case MSignExtendInt32::Byte:
-        if (!js::SignExtendOperation<int8_t>(cx, operand, &result))
+        if (!js::SignExtendOperation<int8_t>(cx, operand, &result)) {
             return false;
+        }
         break;
       case MSignExtendInt32::Half:
-        if (!js::SignExtendOperation<int16_t>(cx, operand, &result))
+        if (!js::SignExtendOperation<int16_t>(cx, operand, &result)) {
             return false;
+        }
         break;
     }
 
@@ -392,13 +395,15 @@ RAdd::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
-    if (!js::AddValues(cx, &lhs, &rhs, &result))
+    if (!js::AddValues(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
     // MIRType::Float32 is a specialization embedding the fact that the result is
     // rounded to a Float32.
-    if (isFloatOperation_ && !RoundFloat32(cx, result, &result))
+    if (isFloatOperation_ && !RoundFloat32(cx, result, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -426,13 +431,15 @@ RSub::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
-    if (!js::SubValues(cx, &lhs, &rhs, &result))
+    if (!js::SubValues(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
     // MIRType::Float32 is a specialization embedding the fact that the result is
     // rounded to a Float32.
-    if (isFloatOperation_ && !RoundFloat32(cx, result, &result))
+    if (isFloatOperation_ && !RoundFloat32(cx, result, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -463,17 +470,20 @@ RMul::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     if (MMul::Mode(mode_) == MMul::Normal) {
-        if (!js::MulValues(cx, &lhs, &rhs, &result))
+        if (!js::MulValues(cx, &lhs, &rhs, &result)) {
             return false;
+        }
 
         // MIRType::Float32 is a specialization embedding the fact that the
         // result is rounded to a Float32.
-        if (isFloatOperation_ && !RoundFloat32(cx, result, &result))
+        if (isFloatOperation_ && !RoundFloat32(cx, result, &result)) {
             return false;
+        }
     } else {
         MOZ_ASSERT(MMul::Mode(mode_) == MMul::Integer);
-        if (!js::math_imul_handle(cx, lhs, rhs, &result))
+        if (!js::math_imul_handle(cx, lhs, rhs, &result)) {
             return false;
+        }
     }
 
     iter.storeInstructionResult(result);
@@ -501,13 +511,15 @@ RDiv::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue rhs(cx, iter.read());
     RootedValue result(cx);
 
-    if (!js::DivValues(cx, &lhs, &rhs, &result))
+    if (!js::DivValues(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
     // MIRType::Float32 is a specialization embedding the fact that the result is
     // rounded to a Float32.
-    if (isFloatOperation_ && !RoundFloat32(cx, result, &result))
+    if (isFloatOperation_ && !RoundFloat32(cx, result, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -532,8 +544,9 @@ RMod::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
-    if (!js::ModValues(cx, &lhs, &rhs, &result))
+    if (!js::ModValues(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -581,8 +594,9 @@ RConcat::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     MOZ_ASSERT(!lhs.isObject() && !rhs.isObject());
-    if (!js::AddValues(cx, &lhs, &rhs, &result))
+    if (!js::AddValues(cx, &lhs, &rhs, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -598,8 +612,9 @@ RStringLength::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     MOZ_ASSERT(!operand.isObject());
-    if (!js::GetLengthProperty(operand, &result))
+    if (!js::GetLengthProperty(operand, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -651,8 +666,9 @@ bool RFloor::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue v(cx, iter.read());
     RootedValue result(cx);
 
-    if (!js::math_floor_handle(cx, v, &result))
+    if (!js::math_floor_handle(cx, v, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -676,8 +692,9 @@ RCeil::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue v(cx, iter.read());
     RootedValue result(cx);
 
-    if (!js::math_ceil_handle(cx, v, &result))
+    if (!js::math_ceil_handle(cx, v, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -751,8 +768,9 @@ RCharCodeAt::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue rhs(cx, iter.read());
     RootedValue result(cx);
 
-    if (!js::str_charCodeAt_impl(cx, lhs, rhs, &result))
+    if (!js::str_charCodeAt_impl(cx, lhs, rhs, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -776,8 +794,9 @@ RFromCharCode::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     MOZ_ASSERT(!operand.isObject());
-    if (!js::str_fromCharCode_one_arg(cx, operand, &result))
+    if (!js::str_fromCharCode_one_arg(cx, operand, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -802,8 +821,9 @@ RPow::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     MOZ_ASSERT(base.isNumber() && power.isNumber());
-    if (!js::math_pow_handle(cx, base, power, &result))
+    if (!js::PowValues(cx, &base, &power, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -829,8 +849,9 @@ RPowHalf::recover(JSContext* cx, SnapshotIterator& iter) const
     power.setNumber(0.5);
 
     MOZ_ASSERT(base.isNumber());
-    if (!js::math_pow_handle(cx, base, power, &result))
+    if (!js::PowValues(cx, &base, &power, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -857,8 +878,9 @@ RMinMax::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue b(cx, iter.read());
     RootedValue result(cx);
 
-    if (!js::minmax_impl(cx, isMax_, a, b, &result))
+    if (!js::minmax_impl(cx, isMax_, a, b, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -881,8 +903,9 @@ RAbs::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue v(cx, iter.read());
     RootedValue result(cx);
 
-    if (!js::math_abs_handle(cx, v, &result))
+    if (!js::math_abs_handle(cx, v, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -909,13 +932,15 @@ RSqrt::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     MOZ_ASSERT(num.isNumber());
-    if (!math_sqrt_handle(cx, num, &result))
+    if (!math_sqrt_handle(cx, num, &result)) {
         return false;
+    }
 
     // MIRType::Float32 is a specialization embedding the fact that the result is
     // rounded to a Float32.
-    if (isFloatOperation_ && !RoundFloat32(cx, result, &result))
+    if (isFloatOperation_ && !RoundFloat32(cx, result, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -964,11 +989,13 @@ RHypot::recover(JSContext* cx, SnapshotIterator& iter) const
 {
     JS::AutoValueVector vec(cx);
 
-    if (!vec.reserve(numOperands_))
+    if (!vec.reserve(numOperands_)) {
         return false;
+    }
 
-    for (uint32_t i = 0 ; i < numOperands_ ; ++i)
+    for (uint32_t i = 0 ; i < numOperands_ ; ++i) {
        vec.infallibleAppend(iter.read());
+    }
 
     RootedValue result(cx);
 
@@ -1074,8 +1101,9 @@ RMathFunction::recover(JSContext* cx, SnapshotIterator& iter) const
         RootedValue arg(cx, iter.read());
         RootedValue result(cx);
 
-        if (!js::math_sin_handle(cx, arg, &result))
+        if (!js::math_sin_handle(cx, arg, &result)) {
             return false;
+        }
 
         iter.storeInstructionResult(result);
         return true;
@@ -1084,8 +1112,9 @@ RMathFunction::recover(JSContext* cx, SnapshotIterator& iter) const
         RootedValue arg(cx, iter.read());
         RootedValue result(cx);
 
-        if (!js::math_log_handle(cx, arg, &result))
+        if (!js::math_log_handle(cx, arg, &result)) {
             return false;
+        }
 
         iter.storeInstructionResult(result);
         return true;
@@ -1136,8 +1165,9 @@ RStringSplit::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     JSObject* res = str_split_string(cx, group, str, sep, INT32_MAX);
-    if (!res)
+    if (!res) {
         return false;
+    }
 
     result.setObject(*res);
     iter.storeInstructionResult(result);
@@ -1164,10 +1194,11 @@ RNaNToZero::recover(JSContext* cx, SnapshotIterator& iter) const
     MOZ_ASSERT(v.isDouble() || v.isInt32());
 
     // x ? x : 0.0
-    if (ToBoolean(v))
+    if (ToBoolean(v)) {
         result = v;
-    else
+    } else {
         result.setDouble(0.0);
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -1192,8 +1223,9 @@ RRegExpMatcher::recover(JSContext* cx, SnapshotIterator& iter) const
     int32_t lastIndex = iter.read().toInt32();
 
     RootedValue result(cx);
-    if (!RegExpMatcherRaw(cx, regexp, input, lastIndex, nullptr, &result))
+    if (!RegExpMatcherRaw(cx, regexp, input, lastIndex, nullptr, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -1218,8 +1250,9 @@ RRegExpSearcher::recover(JSContext* cx, SnapshotIterator& iter) const
     int32_t lastIndex = iter.read().toInt32();
 
     int32_t result;
-    if (!RegExpSearcherRaw(cx, regexp, input, lastIndex, nullptr, &result))
+    if (!RegExpSearcherRaw(cx, regexp, input, lastIndex, nullptr, &result)) {
         return false;
+    }
 
     RootedValue resultVal(cx);
     resultVal.setInt32(result);
@@ -1246,8 +1279,9 @@ RRegExpTester::recover(JSContext* cx, SnapshotIterator& iter) const
     int32_t lastIndex = iter.read().toInt32();
     int32_t endIndex;
 
-    if (!js::RegExpTesterRaw(cx, regexp, string, lastIndex, &endIndex))
+    if (!js::RegExpTesterRaw(cx, regexp, string, lastIndex, &endIndex)) {
         return false;
+    }
 
     RootedValue result(cx);
     result.setInt32(endIndex);
@@ -1297,8 +1331,9 @@ RToDouble::recover(JSContext* cx, SnapshotIterator& iter) const
     MOZ_ASSERT(!v.isSymbol());
 
     double dbl;
-    if (!ToNumber(cx, v, &dbl))
+    if (!ToNumber(cx, v, &dbl)) {
         return false;
+    }
 
     result.setDouble(dbl);
     iter.storeInstructionResult(result);
@@ -1323,8 +1358,9 @@ RToFloat32::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     MOZ_ASSERT(!v.isObject());
-    if (!RoundFloat32(cx, v, &result))
+    if (!RoundFloat32(cx, v, &result)) {
         return false;
+    }
 
     iter.storeInstructionResult(result);
     return true;
@@ -1348,8 +1384,9 @@ RTruncateToInt32::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     int32_t trunc;
-    if (!JS::ToInt32(cx, value, &trunc))
+    if (!JS::ToInt32(cx, value, &trunc)) {
         return false;
+    }
 
     result.setInt32(trunc);
     iter.storeInstructionResult(result);
@@ -1388,8 +1425,9 @@ RNewObject::recover(JSContext* cx, SnapshotIterator& iter) const
         break;
     }
 
-    if (!resultObject)
+    if (!resultObject) {
         return false;
+    }
 
     result.setObject(*resultObject);
     iter.storeInstructionResult(result);
@@ -1416,8 +1454,9 @@ RNewTypedArray::recover(JSContext* cx, SnapshotIterator& iter) const
 
     uint32_t length = templateObject.as<TypedArrayObject>()->length();
     JSObject* resultObject = TypedArrayCreateWithTemplate(cx, templateObject, length);
-    if (!resultObject)
+    if (!resultObject) {
         return false;
+    }
 
     result.setObject(*resultObject);
     iter.storeInstructionResult(result);
@@ -1446,8 +1485,9 @@ RNewArray::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedObjectGroup group(cx, templateObject->group());
 
     ArrayObject* resultObject = NewFullyAllocatedArrayTryUseGroup(cx, group, count_);
-    if (!resultObject)
+    if (!resultObject) {
         return false;
+    }
 
     result.setObject(*resultObject);
     iter.storeInstructionResult(result);
@@ -1475,8 +1515,9 @@ RNewArrayCopyOnWrite::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedValue result(cx);
 
     ArrayObject* resultObject = NewDenseCopyOnWriteArray(cx, templateObject, initialHeap_);
-    if (!resultObject)
+    if (!resultObject) {
         return false;
+    }
 
     result.setObject(*resultObject);
     iter.storeInstructionResult(result);
@@ -1513,8 +1554,9 @@ RNewIterator::recover(JSContext* cx, SnapshotIterator& iter) const
         break;
     }
 
-    if (!resultObject)
+    if (!resultObject) {
         return false;
+    }
 
     result.setObject(*resultObject);
     iter.storeInstructionResult(result);
@@ -1540,8 +1582,9 @@ RNewDerivedTypedObject::recover(JSContext* cx, SnapshotIterator& iter) const
     int32_t offset = iter.read().toInt32();
 
     JSObject* obj = OutlineTypedObject::createDerived(cx, descr, owner, offset);
-    if (!obj)
+    if (!obj) {
         return false;
+    }
 
     RootedValue result(cx, ObjectValue(*obj));
     iter.storeInstructionResult(result);
@@ -1567,8 +1610,9 @@ RCreateThisWithTemplate::recover(JSContext* cx, SnapshotIterator& iter) const
 
     // See CodeGenerator::visitCreateThisWithTemplate
     JSObject* resultObject = NewObjectOperationWithTemplate(cx, templateObject);
-    if (!resultObject)
+    if (!resultObject) {
         return false;
+    }
 
     RootedValue result(cx);
     result.setObject(*resultObject);
@@ -1595,8 +1639,9 @@ RLambda::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedFunction fun(cx, &iter.read().toObject().as<JSFunction>());
 
     JSObject* resultObject = js::Lambda(cx, fun, scopeChain);
-    if (!resultObject)
+    if (!resultObject) {
         return false;
+    }
 
     RootedValue result(cx);
     result.setObject(*resultObject);
@@ -1624,8 +1669,9 @@ RLambdaArrow::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedFunction fun(cx, &iter.read().toObject().as<JSFunction>());
 
     JSObject* resultObject = js::LambdaArrow(cx, fun, scopeChain, newTarget);
-    if (!resultObject)
+    if (!resultObject) {
         return false;
+    }
 
     RootedValue result(cx);
     result.setObject(*resultObject);
@@ -1653,81 +1699,9 @@ RNewCallObject::recover(JSContext* cx, SnapshotIterator& iter) const
     RootedShape shape(cx, templateObj->lastProperty());
     RootedObjectGroup group(cx, templateObj->group());
     JSObject* resultObject = NewCallObject(cx, shape, group);
-    if (!resultObject)
+    if (!resultObject) {
         return false;
-
-    RootedValue result(cx);
-    result.setObject(*resultObject);
-    iter.storeInstructionResult(result);
-    return true;
-}
-
-bool
-MSimdBox::writeRecoverData(CompactBufferWriter& writer) const
-{
-    MOZ_ASSERT(canRecoverOnBailout());
-    writer.writeUnsigned(uint32_t(RInstruction::Recover_SimdBox));
-    static_assert(unsigned(SimdType::Count) < 0x100, "assuming SimdType fits in 8 bits");
-    writer.writeByte(uint8_t(simdType()));
-    return true;
-}
-
-RSimdBox::RSimdBox(CompactBufferReader& reader)
-{
-    type_ = reader.readByte();
-}
-
-bool
-RSimdBox::recover(JSContext* cx, SnapshotIterator& iter) const
-{
-    JSObject* resultObject = nullptr;
-    RValueAllocation a = iter.readAllocation();
-    MOZ_ASSERT(iter.allocationReadable(a));
-    MOZ_ASSERT_IF(a.mode() == RValueAllocation::ANY_FLOAT_REG, a.fpuReg().isSimd128());
-    const FloatRegisters::RegisterContent* raw = iter.floatAllocationPointer(a);
-    switch (SimdType(type_)) {
-      case SimdType::Bool8x16:
-        resultObject = js::CreateSimd<Bool8x16>(cx, (const Bool8x16::Elem*) raw);
-        break;
-      case SimdType::Int8x16:
-        resultObject = js::CreateSimd<Int8x16>(cx, (const Int8x16::Elem*) raw);
-        break;
-      case SimdType::Uint8x16:
-        resultObject = js::CreateSimd<Uint8x16>(cx, (const Uint8x16::Elem*) raw);
-        break;
-      case SimdType::Bool16x8:
-        resultObject = js::CreateSimd<Bool16x8>(cx, (const Bool16x8::Elem*) raw);
-        break;
-      case SimdType::Int16x8:
-        resultObject = js::CreateSimd<Int16x8>(cx, (const Int16x8::Elem*) raw);
-        break;
-      case SimdType::Uint16x8:
-        resultObject = js::CreateSimd<Uint16x8>(cx, (const Uint16x8::Elem*) raw);
-        break;
-      case SimdType::Bool32x4:
-        resultObject = js::CreateSimd<Bool32x4>(cx, (const Bool32x4::Elem*) raw);
-        break;
-      case SimdType::Int32x4:
-        resultObject = js::CreateSimd<Int32x4>(cx, (const Int32x4::Elem*) raw);
-        break;
-      case SimdType::Uint32x4:
-        resultObject = js::CreateSimd<Uint32x4>(cx, (const Uint32x4::Elem*) raw);
-        break;
-      case SimdType::Float32x4:
-        resultObject = js::CreateSimd<Float32x4>(cx, (const Float32x4::Elem*) raw);
-        break;
-      case SimdType::Float64x2:
-        MOZ_CRASH("NYI, RSimdBox of Float64x2");
-        break;
-      case SimdType::Bool64x2:
-        MOZ_CRASH("NYI, RSimdBox of Bool64x2");
-        break;
-      case SimdType::Count:
-        MOZ_CRASH("RSimdBox of Count is unreachable");
     }
-
-    if (!resultObject)
-        return false;
 
     RootedValue result(cx);
     result.setObject(*resultObject);
@@ -1766,17 +1740,20 @@ RObjectState::recover(JSContext* cx, SnapshotIterator& iter) const
 
             // This is the default placeholder value of MObjectState, when no
             // properties are defined yet.
-            if (val.isUndefined())
+            if (val.isUndefined()) {
                 continue;
+            }
 
             id = NameToId(properties[i].name);
             ObjectOpResult result;
 
             // SetProperty can only fail due to OOM.
-            if (!SetProperty(cx, object, id, val, receiver, result))
+            if (!SetProperty(cx, object, id, val, receiver, result)) {
                 return false;
-            if (!result)
+            }
+            if (!result) {
                 return result.reportError(cx, object, id);
+            }
         }
     } else {
         RootedNativeObject nativeObject(cx, &object->as<NativeObject>());
@@ -1835,10 +1812,12 @@ RArrayState::recover(JSContext* cx, SnapshotIterator& iter) const
 
         for (size_t index = 0; index < numElements(); index++) {
             Value val = iter.read();
-            if (object->getDenseElement(index) == val)
+            if (object->getDenseElement(index) == val) {
                 continue;
-            if (!object->maybeCopyElementsForWrite(cx))
+            }
+            if (!object->maybeCopyElementsForWrite(cx)) {
                 return false;
+            }
             object->setDenseElement(index, val);
         }
     }
@@ -1872,8 +1851,9 @@ RSetArrayLength::recover(JSContext* cx, SnapshotIterator& iter) const
 
     RootedId id(cx, NameToId(cx->names().length));
     ObjectOpResult error;
-    if (!ArraySetLength(cx, obj, id, JSPROP_PERMANENT, len, error))
+    if (!ArraySetLength(cx, obj, id, JSPROP_PERMANENT, len, error)) {
         return false;
+    }
 
     result.setObject(*obj);
     iter.storeInstructionResult(result);
@@ -1925,8 +1905,9 @@ bool RStringReplace::recover(JSContext* cx, SnapshotIterator& iter) const
     JSString* result = isFlatReplacement_ ? js::str_flat_replace_string(cx, string, pattern, replace) :
                                             js::str_replace_string_raw(cx, string, pattern, replace);
 
-    if (!result)
+    if (!result) {
         return false;
+    }
 
     iter.storeInstructionResult(StringValue(result));
     return true;
@@ -1950,8 +1931,9 @@ RAtomicIsLockFree::recover(JSContext* cx, SnapshotIterator& iter) const
     MOZ_ASSERT(operand.isInt32());
 
     int32_t result;
-    if (!js::AtomicIsLockFree(cx, operand, &result))
+    if (!js::AtomicIsLockFree(cx, operand, &result)) {
         return false;
+    }
 
     RootedValue rootedResult(cx, js::Int32Value(result));
     iter.storeInstructionResult(rootedResult);

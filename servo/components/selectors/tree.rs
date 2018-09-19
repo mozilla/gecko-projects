@@ -8,18 +8,22 @@
 use attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstraint};
 use matching::{ElementSelectorFlags, MatchingContext};
 use parser::SelectorImpl;
-use servo_arc::NonZeroPtrMut;
 use std::fmt::Debug;
+use std::ptr::NonNull;
 
 /// Opaque representation of an Element, for identity comparisons. We use
 /// NonZeroPtrMut to get the NonZero optimization.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct OpaqueElement(NonZeroPtrMut<()>);
+pub struct OpaqueElement(NonNull<()>);
+
+unsafe impl Send for OpaqueElement {}
 
 impl OpaqueElement {
     /// Creates a new OpaqueElement from an arbitrarily-typed pointer.
-    pub fn new<T>(ptr: *const T) -> Self {
-        OpaqueElement(NonZeroPtrMut::new(ptr as *const () as *mut ()))
+    pub fn new<T>(ptr: &T) -> Self {
+        unsafe {
+            OpaqueElement(NonNull::new_unchecked(ptr as *const T as *const () as *mut ()))
+        }
     }
 }
 
@@ -44,12 +48,6 @@ pub trait Element: Sized + Clone + Debug {
     fn pseudo_element_originating_element(&self) -> Option<Self> {
         self.parent_element()
     }
-
-    /// Skips non-element nodes
-    fn first_child_element(&self) -> Option<Self>;
-
-    /// Skips non-element nodes
-    fn last_child_element(&self) -> Option<Self>;
 
     /// Skips non-element nodes
     fn prev_sibling_element(&self) -> Option<Self>;
@@ -127,13 +125,6 @@ pub trait Element: Sized + Clone + Debug {
     /// Returns whether this element should ignore matching nth child
     /// selector.
     fn ignores_nth_child_selectors(&self) -> bool {
-        false
-    }
-
-    /// Return true if we want to stop lookup ancestor of the current
-    /// element while matching complex selectors with descendant/child
-    /// combinator.
-    fn blocks_ancestor_combinators(&self) -> bool {
         false
     }
 }

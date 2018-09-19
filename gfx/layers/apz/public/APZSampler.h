@@ -11,6 +11,7 @@
 
 #include "base/platform_thread.h" // for PlatformThreadId
 #include "mozilla/layers/AsyncCompositionManager.h" // for AsyncTransform
+#include "mozilla/layers/APZUtils.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPtr.h"
 #include "nsTArray.h"
@@ -84,6 +85,7 @@ public:
   CSSRect GetCurrentAsyncLayoutViewport(const LayerMetricsWrapper& aLayer);
   ParentLayerPoint GetCurrentAsyncScrollOffset(const LayerMetricsWrapper& aLayer);
   AsyncTransform GetCurrentAsyncTransform(const LayerMetricsWrapper& aLayer);
+  AsyncTransform GetCurrentAsyncTransformForFixedAdjustment(const LayerMetricsWrapper& aLayer);
   AsyncTransformComponentMatrix GetOverscrollTransform(const LayerMetricsWrapper& aLayer);
   AsyncTransformComponentMatrix GetCurrentAsyncTransformWithOverscroll(const LayerMetricsWrapper& aLayer);
 

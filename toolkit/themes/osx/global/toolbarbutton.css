@@ -30,10 +30,7 @@ toolbarbutton[disabled="true"][open="true"] {
 
 .toolbarbutton-menu-dropmarker {
   -moz-appearance: none !important;
-  border: none !important;
-  background-color: transparent !important;
   list-style-image: url("chrome://global/skin/arrow/arrow-dn.png");
-  padding: 0;
   padding-inline-start: 2px;
   width: auto;
 }
@@ -63,12 +60,6 @@ toolbarbutton[disabled="true"][open="true"] {
   line-height: 10px;
   text-align: center;
   -moz-stack-sizing: ignore;
-}
-
-.toolbarbutton-badge:-moz-window-inactive {
-  background-color: rgb(230,230,230);
-  box-shadow: none;
-  color: rgb(192,192,192);
 }
 
 toolbar[mode="icons"] > *|* > .toolbarbutton-badge {

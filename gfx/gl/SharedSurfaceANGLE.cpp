@@ -73,11 +73,23 @@ SharedSurface_ANGLEShareHandle::Create(GLContext* gl, EGLConfig config,
                                    LOCAL_EGL_DXGI_KEYED_MUTEX_ANGLE,
                                    &opaqueKeyedMutex);
     RefPtr<IDXGIKeyedMutex> keyedMutex = static_cast<IDXGIKeyedMutex*>(opaqueKeyedMutex);
+#ifdef DEBUG
+    if (!keyedMutex) {
+        std::string envStr("1");
+        static auto env = PR_GetEnv("MOZ_REQUIRE_KEYED_MUTEX");
+        if (env) {
+            envStr = env;
+        }
+        if (envStr != "0") {
+            MOZ_ASSERT(keyedMutex, "set MOZ_REQUIRE_KEYED_MUTEX=0 to allow");
+        }
+    }
+#endif
 
     typedef SharedSurface_ANGLEShareHandle ptrT;
     UniquePtr<ptrT> ret( new ptrT(gl, egl, size, hasAlpha, pbuffer, shareHandle,
                                   keyedMutex) );
-    return std::move(ret);
+    return ret;
 }
 
 EGLDisplay
@@ -337,7 +349,7 @@ SurfaceFactory_ANGLEShareHandle::Create(GLContext* gl, const SurfaceCaps& caps,
 
     typedef SurfaceFactory_ANGLEShareHandle ptrT;
     UniquePtr<ptrT> ret( new ptrT(gl, caps, allocator, flags, egl, config) );
-    return std::move(ret);
+    return ret;
 }
 
 SurfaceFactory_ANGLEShareHandle::SurfaceFactory_ANGLEShareHandle(GLContext* gl,

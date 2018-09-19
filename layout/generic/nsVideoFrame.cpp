@@ -12,6 +12,7 @@
 #include "nsGkAtoms.h"
 
 #include "mozilla/dom/HTMLVideoElement.h"
+#include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "nsDisplayList.h"
 #include "nsGenericHTMLElement.h"
@@ -19,6 +20,7 @@
 #include "nsContentCreatorFunctions.h"
 #include "nsBoxLayoutState.h"
 #include "nsBoxFrame.h"
+#include "nsIContentInlines.h"
 #include "nsImageFrame.h"
 #include "nsIImageLoadingContent.h"
 #include "nsContentUtils.h"
@@ -146,9 +148,11 @@ nsVideoFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
                                           nsINode::ELEMENT_NODE);
   NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
 
-  NS_TrustedNewXULElement(getter_AddRefs(mVideoControls), nodeInfo.forget());
-  if (!aElements.AppendElement(mVideoControls))
-    return NS_ERROR_OUT_OF_MEMORY;
+  if (!nsContentUtils::IsUAWidgetEnabled()) {
+    NS_TrustedNewXULElement(getter_AddRefs(mVideoControls), nodeInfo.forget());
+    if (!aElements.AppendElement(mVideoControls))
+      return NS_ERROR_OUT_OF_MEMORY;
+  }
 
   return NS_OK;
 }
@@ -168,6 +172,23 @@ nsVideoFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
   if (mCaptionDiv) {
     aElements.AppendElement(mCaptionDiv);
   }
+}
+
+nsIContent*
+nsVideoFrame::GetVideoControls()
+{
+  if (mVideoControls) {
+    return mVideoControls;
+  }
+  if (mContent->GetShadowRoot()) {
+    // The video controls <div> is the only child of the UA Widget Shadow Root
+    // if it is present. It is only lazily inserted into the DOM when
+    // the controls attribute is set.
+    MOZ_ASSERT(mContent->GetShadowRoot()->IsUAWidget());
+    MOZ_ASSERT(1 >= mContent->GetShadowRoot()->GetChildCount());
+    return mContent->GetShadowRoot()->GetFirstChild();
+  }
+  return nullptr;
 }
 
 void
@@ -269,7 +290,7 @@ public:
   NS_IMETHOD Run() override {
     nsContentUtils::DispatchTrustedEvent(mContent->OwnerDoc(), mContent,
                                          NS_LITERAL_STRING("resizevideocontrols"),
-                                         false, false);
+                                         CanBubble::eNo, Cancelable::eNo);
     return NS_OK;
   }
   nsCOMPtr<nsIContent> mContent;
@@ -305,6 +326,8 @@ nsVideoFrame::Reflow(nsPresContext* aPresContext,
   }
 
   nsMargin borderPadding = aReflowInput.ComputedPhysicalBorderPadding();
+
+  nsIContent* videoControlsDiv = GetVideoControls();
 
   // Reflow the child frames. We may have up to three: an image
   // frame (for the poster image), a container frame for the controls,
@@ -349,7 +372,7 @@ nsVideoFrame::Reflow(nsPresContext* aPresContext,
                         posterRenderRect.x, posterRenderRect.y, 0);
 
     } else if (child->GetContent() == mCaptionDiv ||
-               child->GetContent() == mVideoControls) {
+               child->GetContent() == videoControlsDiv) {
       // Reflow the caption and control bar frames.
       WritingMode wm = child->GetWritingMode();
       LogicalSize availableSize = aReflowInput.ComputedSize(wm);
@@ -366,7 +389,7 @@ nsVideoFrame::Reflow(nsPresContext* aPresContext,
                  "We gave our child unconstrained available block-size, "
                  "so it should be complete!");
 
-      if (child->GetContent() == mVideoControls && isBSizeShrinkWrapping) {
+      if (child->GetContent() == videoControlsDiv && isBSizeShrinkWrapping) {
         // Resolve our own BSize based on the controls' size in the same axis.
         contentBoxBSize = myWM.IsOrthogonalTo(wm) ?
           kidDesiredSize.ISize(wm) : kidDesiredSize.BSize(wm);
@@ -375,11 +398,14 @@ nsVideoFrame::Reflow(nsPresContext* aPresContext,
       FinishReflowChild(child, aPresContext,
                         kidDesiredSize, &kidReflowInput,
                         borderPadding.left, borderPadding.top, 0);
-    }
 
-    if (child->GetContent() == mVideoControls && child->GetSize() != oldChildSize) {
-      RefPtr<Runnable> event = new DispatchResizeToControls(child->GetContent());
-      nsContentUtils::AddScriptRunner(event);
+      if (child->GetContent() == videoControlsDiv && child->GetSize() != oldChildSize) {
+        RefPtr<Runnable> event = new DispatchResizeToControls(child->GetContent());
+        nsContentUtils::AddScriptRunner(event);
+      }
+    } else {
+      MOZ_ASSERT_UNREACHABLE("Extra child frame found in nsVideoFrame. "
+                             "Possibly from stray whitespace around the videocontrols container element.");
     }
   }
 
@@ -409,6 +435,23 @@ nsVideoFrame::Reflow(nsPresContext* aPresContext,
 
   MOZ_ASSERT(aStatus.IsEmpty(), "This type of frame can't be split.");
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aMetrics);
+}
+
+/**
+ * nsVideoFrame should be a non-leaf frame when UA Widget is enabled,
+ * so the videocontrols container element inserted under the Shadow Root can be
+ * picked up. No frames will be generated from elements from the web content,
+ * given that they have been replaced by the Shadow Root without and <slots>
+ * element in the DOM tree.
+ *
+ * When the UA Widget is disabled, i.e. the videocontrols is bound as anonymous
+ * content with XBL, nsVideoFrame has to be a leaf so no frames from web content
+ * element will be generated.
+ */
+bool
+nsVideoFrame::IsLeafDynamic() const
+{
+  return !nsContentUtils::IsUAWidgetEnabled();
 }
 
 class nsDisplayVideo : public nsDisplayItem {
@@ -644,7 +687,7 @@ nsVideoFrame::ComputeSize(gfxContext *aRenderingContext,
 nscoord nsVideoFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   nscoord result;
-  DISPLAY_MIN_WIDTH(this, result);
+  DISPLAY_MIN_INLINE_SIZE(this, result);
 
   if (HasVideoElement()) {
     nsSize size = GetVideoIntrinsicSize(aRenderingContext);
@@ -668,7 +711,7 @@ nscoord nsVideoFrame::GetMinISize(gfxContext *aRenderingContext)
 nscoord nsVideoFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   nscoord result;
-  DISPLAY_PREF_WIDTH(this, result);
+  DISPLAY_PREF_INLINE_SIZE(this, result);
 
   if (HasVideoElement()) {
     nsSize size = GetVideoIntrinsicSize(aRenderingContext);

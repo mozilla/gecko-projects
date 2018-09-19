@@ -27,16 +27,16 @@
 #ifndef HB_OT_NAME_TABLE_HH
 #define HB_OT_NAME_TABLE_HH
 
-#include "hb-open-type-private.hh"
+#include "hb-open-type.hh"
 
 
 namespace OT {
 
 
 /*
- * name -- The Naming Table
+ * name -- Naming
+ * https://docs.microsoft.com/en-us/typography/opentype/spec/name
  */
-
 #define HB_OT_TAG_name HB_TAG('n','a','m','e')
 
 

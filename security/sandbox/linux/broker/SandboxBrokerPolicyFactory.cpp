@@ -8,6 +8,7 @@
 #include "SandboxInfo.h"
 #include "SandboxLogging.h"
 
+#include "base/shared_memory.h"
 #include "mozilla/Array.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Preferences.h"
@@ -62,6 +63,9 @@ AddMesaSysfsPaths(SandboxBroker::Policy* aPolicy)
   // Bug 1384178: Mesa driver loader
   aPolicy->AddPrefix(rdonly, "/sys/dev/char/226:");
 
+  // Bug 1480755: Mesa tries to probe /sys paths in turn
+  aPolicy->AddAncestors("/sys/dev/char/");
+
   // Bug 1401666: Mesa driver loader part 2: Mesa <= 12 using libudev
   if (auto dir = opendir("/dev/dri")) {
     while (auto entry = readdir(dir)) {
@@ -83,10 +87,22 @@ AddMesaSysfsPaths(SandboxBroker::Policy* aPolicy)
             // broker.  To match this, allow the canonical paths.
             UniqueFreePtr<char[]> realSysPath(realpath(sysPath.get(), nullptr));
             if (realSysPath) {
-              nsPrintfCString ueventPath("%s/uevent", realSysPath.get());
-              nsPrintfCString configPath("%s/config", realSysPath.get());
-              aPolicy->AddPath(rdonly, ueventPath.get());
-              aPolicy->AddPath(rdonly, configPath.get());
+              static const Array<const char*, 7> kMesaAttrSuffixes = {
+                "revision",
+                "vendor",
+                "device",
+                "subsystem_vendor",
+                "subsystem_device",
+                "uevent",
+                "config"
+              };
+              for (const auto attrSuffix : kMesaAttrSuffixes) {
+                nsPrintfCString attrPath("%s/%s", realSysPath.get(), attrSuffix);
+                aPolicy->AddPath(rdonly, attrPath.get());
+              }
+              // Allowing stat-ing the parent dirs
+              nsPrintfCString basePath("%s/", realSysPath.get());
+              aPolicy->AddAncestors(basePath.get());
             }
           }
         }
@@ -125,6 +141,9 @@ AddPathsFromFile(SandboxBroker::Policy* aPolicy, nsACString& aPath)
   bool more = true;
   do {
     rv = lineStream->ReadLine(line, &more);
+    if (NS_FAILED(rv)) {
+      break;
+    }
     // Cut off any comments at the end of the line, also catches lines
     // that are entirely a comment
     int32_t hash = line.FindChar('#');
@@ -187,7 +206,6 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory()
   // are cached over the lifetime of the factory.
 #if defined(MOZ_CONTENT_SANDBOX)
   SandboxBroker::Policy* policy = new SandboxBroker::Policy;
-  policy->AddDir(rdwrcr, "/dev/shm");
   // Write permssions
   //
   // Bug 1308851: NVIDIA proprietary driver when using WebGL
@@ -504,6 +522,15 @@ SandboxBrokerPolicyFactory::GetContentPolicy(int aPid, bool aFileProcess)
   if (allowAlsa) {
     // Bug 1309098: ALSA support
     policy->AddDir(rdwr, "/dev/snd");
+  }
+
+  if (allowPulse) {
+    policy->AddDir(rdwrcr, "/dev/shm");
+  } else {
+    std::string shmPath("/dev/shm");
+    if (base::SharedMemory::AppendPosixShmPrefix(&shmPath, aPid)) {
+      policy->AddPrefix(rdwrcr, shmPath.c_str());
+    }
   }
 
 #ifdef MOZ_WIDGET_GTK

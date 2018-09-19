@@ -15,7 +15,6 @@ ChromeUtils.defineModuleGetter(this, "FileUtils",
   "resource://gre/modules/FileUtils.jsm");
 
 const ORIGIN_TOP_RIGHT = 1;
-const ORIGIN_BOTTOM_LEFT = 2;
 
 var LightweightThemeImageOptimizer = {
   optimize(aThemeData, aScreen) {
@@ -27,11 +26,6 @@ var LightweightThemeImageOptimizer = {
     data.headerURL = ImageCropper.getCroppedImageURL(
       data.headerURL, aScreen, ORIGIN_TOP_RIGHT);
 
-    if (data.footerURL) {
-      data.footerURL = ImageCropper.getCroppedImageURL(
-        data.footerURL, aScreen, ORIGIN_BOTTOM_LEFT);
-    }
-
     return data;
   },
 
@@ -41,7 +35,7 @@ var LightweightThemeImageOptimizer = {
     try {
       dir.remove(true);
     } catch (e) {}
-  }
+  },
 };
 
 Object.freeze(LightweightThemeImageOptimizer);
@@ -109,7 +103,7 @@ var ImageCropper = {
 
       resetInProgress();
     });
-  }
+  },
 };
 
 var ImageFile = {
@@ -117,7 +111,7 @@ var ImageFile = {
     this._netUtil.asyncFetch({
       uri: aURI,
       loadUsingSystemPrincipal: true,
-      contentPolicyType: Ci.nsIContentPolicy.TYPE_INTERNAL_IMAGE
+      contentPolicyType: Ci.nsIContentPolicy.TYPE_INTERNAL_IMAGE,
     }, function(aInputStream, aStatus, aRequest) {
         if (Components.isSuccessCode(aStatus) && aRequest instanceof Ci.nsIChannel) {
           let channel = aRequest.QueryInterface(Ci.nsIChannel);
@@ -142,7 +136,7 @@ var ImageFile = {
 
       aCallback();
     });
-  }
+  },
 };
 
 XPCOMUtils.defineLazyModuleGetter(ImageFile, "_netUtil",
@@ -153,7 +147,7 @@ var ImageTools = {
     let callback = {
       onImageReady(aImage, aStatus) {
         aCallback(aImage);
-      }
+      },
     };
 
     try {
@@ -177,7 +171,7 @@ var ImageTools = {
     } catch (e) {}
 
     return stream;
-  }
+  },
 };
 
 XPCOMUtils.defineLazyServiceGetter(ImageTools, "_imgTools",

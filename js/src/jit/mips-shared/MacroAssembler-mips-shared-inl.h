@@ -231,20 +231,22 @@ MacroAssembler::mulDoublePtr(ImmPtr imm, Register temp, FloatRegister dest)
 void
 MacroAssembler::quotient32(Register rhs, Register srcDest, bool isUnsigned)
 {
-    if (isUnsigned)
+    if (isUnsigned) {
         as_divu(srcDest, rhs);
-    else
+    } else {
         as_div(srcDest, rhs);
+    }
     as_mflo(srcDest);
 }
 
 void
 MacroAssembler::remainder32(Register rhs, Register srcDest, bool isUnsigned)
 {
-    if (isUnsigned)
+    if (isUnsigned) {
         as_divu(srcDest, rhs);
-    else
+    } else {
         as_div(srcDest, rhs);
+    }
     as_mfhi(srcDest);
 }
 
@@ -336,6 +338,12 @@ MacroAssembler::lshift32(Register src, Register dest)
 }
 
 void
+MacroAssembler::flexibleLshift32(Register src, Register dest)
+{
+    lshift32(src,dest);
+}
+
+void
 MacroAssembler::lshift32(Imm32 imm, Register dest)
 {
     ma_sll(dest, dest, imm);
@@ -345,6 +353,12 @@ void
 MacroAssembler::rshift32(Register src, Register dest)
 {
     ma_srl(dest, dest, src);
+}
+
+void
+MacroAssembler::flexibleRshift32(Register src, Register dest)
+{
+    rshift32(src,dest);
 }
 
 void
@@ -360,6 +374,12 @@ MacroAssembler::rshift32Arithmetic(Register src, Register dest)
 }
 
 void
+MacroAssembler::flexibleRshift32Arithmetic(Register src, Register dest)
+{
+    rshift32Arithmetic(src,dest);
+}
+
+void
 MacroAssembler::rshift32Arithmetic(Imm32 imm, Register dest)
 {
     ma_sra(dest, dest, imm);
@@ -370,10 +390,11 @@ MacroAssembler::rshift32Arithmetic(Imm32 imm, Register dest)
 void
 MacroAssembler::rotateLeft(Imm32 count, Register input, Register dest)
 {
-    if (count.value)
+    if (count.value) {
         ma_rol(dest, input, count);
-    else
+    } else {
         ma_move(dest, input);
+    }
 }
 void
 MacroAssembler::rotateLeft(Register count, Register input, Register dest)
@@ -383,10 +404,11 @@ MacroAssembler::rotateLeft(Register count, Register input, Register dest)
 void
 MacroAssembler::rotateRight(Imm32 count, Register input, Register dest)
 {
-    if (count.value)
+    if (count.value) {
         ma_ror(dest, input, count);
-    else
+    } else {
         ma_move(dest, input);
+    }
 }
 void
 MacroAssembler::rotateRight(Register count, Register input, Register dest)
@@ -638,6 +660,15 @@ MacroAssembler::branchSub32(Condition cond, T src, Register dest, Label* overflo
         MOZ_CRASH("NYI");
     }
 }
+
+template <typename T>
+void
+MacroAssembler::branchMul32(Condition cond, T src, Register dest, Label* overflow)
+{
+    MOZ_ASSERT(cond == Assembler::Overflow);
+    ma_mul_branch_overflow(dest, dest, src, overflow);
+}
+
 
 void
 MacroAssembler::decBranchPtr(Condition cond, Register lhs, Imm32 rhs, Label* label)
@@ -1057,7 +1088,9 @@ MacroAssembler::storeUncanonicalizedFloat32(FloatRegister src, const BaseIndex& 
 void
 MacroAssembler::memoryBarrier(MemoryBarrierBits barrier)
 {
-    as_sync();
+    if (barrier) {
+        as_sync();
+    }
 }
 
 // ===============================================================

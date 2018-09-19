@@ -9,13 +9,15 @@ use channel::{self, MsgSender, Payload, PayloadSender, PayloadSenderHelperMethod
 use std::cell::Cell;
 use std::fmt;
 use std::marker::PhantomData;
+use std::os::raw::c_void;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::u32;
 use {BuiltDisplayList, BuiltDisplayListDescriptor, ColorF, DeviceIntPoint, DeviceUintRect};
 use {DeviceUintSize, ExternalScrollId, FontInstanceKey, FontInstanceOptions};
 use {FontInstancePlatformOptions, FontKey, FontVariation, GlyphDimensions, GlyphIndex, ImageData};
 use {ImageDescriptor, ImageKey, ItemTag, LayoutPoint, LayoutSize, LayoutTransform, LayoutVector2D};
-use {NativeFontHandle, WorldPoint};
+use {NativeFontHandle, WorldPoint, NormalizedRect};
 
 pub type TileSize = u16;
 /// Documents are rendered in the ascending order of their associated layer values.
@@ -26,6 +28,7 @@ pub enum ResourceUpdate {
     AddImage(AddImage),
     UpdateImage(UpdateImage),
     DeleteImage(ImageKey),
+    SetImageVisibleArea(ImageKey, NormalizedRect),
     AddFont(AddFont),
     DeleteFont(FontKey),
     AddFontInstance(AddFontInstance),
@@ -47,6 +50,8 @@ pub struct Transaction {
     // Additional display list data.
     payloads: Vec<Payload>,
 
+    notifications: Vec<NotificationRequest>,
+
     // Resource updates are applied after scene building.
     pub resource_updates: Vec<ResourceUpdate>,
 
@@ -55,6 +60,8 @@ pub struct Transaction {
     use_scene_builder_thread: bool,
 
     generate_frame: bool,
+
+    low_priority: bool,
 }
 
 impl Transaction {
@@ -64,8 +71,10 @@ impl Transaction {
             frame_ops: Vec::new(),
             resource_updates: Vec::new(),
             payloads: Vec::new(),
-            use_scene_builder_thread: false, // TODO: make this true by default.
+            notifications: Vec::new(),
+            use_scene_builder_thread: true,
             generate_frame: false,
+            low_priority: false,
         }
     }
 
@@ -84,7 +93,8 @@ impl Transaction {
         !self.generate_frame &&
             self.scene_ops.is_empty() &&
             self.frame_ops.is_empty() &&
-            self.resource_updates.is_empty()
+            self.resource_updates.is_empty() &&
+            self.notifications.is_empty()
     }
 
     pub fn update_epoch(&mut self, pipeline_id: PipelineId, epoch: Epoch) {
@@ -167,6 +177,21 @@ impl Transaction {
         self.merge(resources);
     }
 
+    // Note: Gecko uses this to get notified when a transaction that contains
+    // potentially long blob rasterization or scene build is ready to be rendered.
+    // so that the tab-switching integration can react adequately when tab
+    // switching takes too long. For this use case when matters is that the
+    // notification doesn't fire before scene building and blob rasterization.
+
+    /// Trigger a notification at a certain stage of the rendering pipeline.
+    ///
+    /// Not that notification requests are skipped during serialization, so is is
+    /// best to use them for synchronization purposes and not for things that could
+    /// affect the WebRender's state.
+    pub fn notify(&mut self, event: NotificationRequest) {
+        self.notifications.push(event);
+    }
+
     pub fn set_window_parameters(
         &mut self,
         window_size: DeviceUintSize,
@@ -215,7 +240,7 @@ impl Transaction {
     /// in `webrender::Renderer`, [new_frame_ready()][notifier] gets called.
     /// Note that the notifier is called even if the frame generation was a
     /// no-op; the arguments passed to `new_frame_ready` will provide information
-    /// as to what happened.
+    /// as to when happened.
     ///
     /// [notifier]: trait.RenderNotifier.html#tymethod.new_frame_ready
     pub fn generate_frame(&mut self) {
@@ -253,8 +278,10 @@ impl Transaction {
                 scene_ops: self.scene_ops,
                 frame_ops: self.frame_ops,
                 resource_updates: self.resource_updates,
+                notifications: self.notifications,
                 use_scene_builder_thread: self.use_scene_builder_thread,
                 generate_frame: self.generate_frame,
+                low_priority: self.low_priority,
             },
             self.payloads,
         )
@@ -292,6 +319,10 @@ impl Transaction {
 
     pub fn delete_image(&mut self, key: ImageKey) {
         self.resource_updates.push(ResourceUpdate::DeleteImage(key));
+    }
+
+    pub fn set_image_visible_area(&mut self, key: ImageKey, area: NormalizedRect) {
+        self.resource_updates.push(ResourceUpdate::SetImageVisibleArea(key, area))
     }
 
     pub fn add_raw_font(&mut self, key: FontKey, bytes: Vec<u8>, index: u32) {
@@ -332,6 +363,18 @@ impl Transaction {
         self.resource_updates.push(ResourceUpdate::DeleteFontInstance(key));
     }
 
+    // A hint that this transaction can be processed at a lower priority. High-
+    // priority transactions can jump ahead of regular-priority transactions,
+    // but both high- and regular-priority transactions are processed in order
+    // relative to other transactions of the same priority.
+    pub fn set_low_priority(&mut self, low_priority: bool) {
+        self.low_priority = low_priority;
+    }
+
+    pub fn is_low_priority(&self) -> bool {
+        self.low_priority
+    }
+
     pub fn merge(&mut self, mut other: Vec<ResourceUpdate>) {
         self.resource_updates.append(&mut other);
     }
@@ -349,6 +392,10 @@ pub struct TransactionMsg {
     pub resource_updates: Vec<ResourceUpdate>,
     pub generate_frame: bool,
     pub use_scene_builder_thread: bool,
+    pub low_priority: bool,
+
+    #[serde(skip)]
+    pub notifications: Vec<NotificationRequest>,
 }
 
 impl TransactionMsg {
@@ -356,27 +403,32 @@ impl TransactionMsg {
         !self.generate_frame &&
             self.scene_ops.is_empty() &&
             self.frame_ops.is_empty() &&
-            self.resource_updates.is_empty()
+            self.resource_updates.is_empty() &&
+            self.notifications.is_empty()
     }
 
     // TODO: We only need this for a few RenderApi methods which we should remove.
-    fn frame_message(msg: FrameMsg) -> Self {
+    pub fn frame_message(msg: FrameMsg) -> Self {
         TransactionMsg {
             scene_ops: Vec::new(),
             frame_ops: vec![msg],
             resource_updates: Vec::new(),
+            notifications: Vec::new(),
             generate_frame: false,
             use_scene_builder_thread: false,
+            low_priority: false,
         }
     }
 
-    fn scene_message(msg: SceneMsg) -> Self {
+    pub fn scene_message(msg: SceneMsg) -> Self {
         TransactionMsg {
             scene_ops: vec![msg],
             frame_ops: Vec::new(),
             resource_updates: Vec::new(),
+            notifications: Vec::new(),
             generate_frame: false,
             use_scene_builder_thread: false,
+            low_priority: false,
         }
     }
 }
@@ -530,11 +582,12 @@ bitflags!{
     /// Mask for clearing caches in debug commands.
     #[derive(Deserialize, Serialize)]
     pub struct ClearCache: u8 {
-        const IMAGES = 0x1;
-        const GLYPHS = 0x2;
-        const GLYPH_DIMENSIONS = 0x4;
-        const RENDER_TASKS = 0x8;
-        const TEXTURE_CACHE = 0x16;
+        const IMAGES = 0b1;
+        const GLYPHS = 0b01;
+        const GLYPH_DIMENSIONS = 0b001;
+        const RENDER_TASKS = 0b0001;
+        const TEXTURE_CACHE = 0b00001;
+        const RASTERIZED_BLOBS = 0b000001;
     }
 }
 
@@ -555,6 +608,8 @@ pub enum DebugCommand {
     EnableTextureCacheDebug(bool),
     /// Display intermediate render targets on screen.
     EnableRenderTargetDebug(bool),
+    /// Display the contents of GPU cache.
+    EnableGpuCacheDebug(bool),
     /// Display GPU timing results.
     EnableGpuTimeQueries(bool),
     /// Display GPU overdraw results
@@ -565,6 +620,8 @@ pub enum DebugCommand {
     EnableNewFrameIndicator(bool),
     /// Show an indicator that moves every time a scene is built.
     EnableNewSceneIndicator(bool),
+    /// Show an overlay displaying overdraw amount.
+    EnableShowOverdraw(bool),
     /// Fetch current documents and display lists.
     FetchDocuments,
     /// Fetch current passes and batches.
@@ -583,6 +640,12 @@ pub enum DebugCommand {
     ClearCaches(ClearCache),
     /// Invalidate GPU cache, forcing the update from the CPU mirror.
     InvalidateGpuCache,
+    /// Causes the scene builder to pause for a given amount of miliseconds each time it
+    /// processes a transaction.
+    SimulateLongSceneBuild(u32),
+    /// Causes the low priority scene builder to pause for a given amount of miliseconds
+    /// each time it processes a transaction.
+    SimulateLongLowPrioritySceneBuild(u32),
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -613,6 +676,8 @@ pub enum ApiMsg {
     ClearNamespace(IdNamespace),
     /// Flush from the caches anything that isn't necessary, to free some memory.
     MemoryPressure,
+    /// Collects a memory report.
+    ReportMemory(MsgSender<MemoryReport>),
     /// Change debugging options.
     DebugCommand(DebugCommand),
     /// Wakes the render backend's event loop up. Needed when an event is communicated
@@ -636,6 +701,7 @@ impl fmt::Debug for ApiMsg {
             ApiMsg::ExternalEvent(..) => "ApiMsg::ExternalEvent",
             ApiMsg::ClearNamespace(..) => "ApiMsg::ClearNamespace",
             ApiMsg::MemoryPressure => "ApiMsg::MemoryPressure",
+            ApiMsg::ReportMemory(..) => "ApiMsg::ReportMemory",
             ApiMsg::DebugCommand(..) => "ApiMsg::DebugCommand",
             ApiMsg::ShutDown => "ApiMsg::ShutDown",
             ApiMsg::WakeUp => "ApiMsg::WakeUp",
@@ -681,6 +747,34 @@ impl PipelineId {
     }
 }
 
+/// Collection of heap sizes, in bytes.
+#[repr(C)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct MemoryReport {
+    pub primitive_stores: usize,
+    pub clip_stores: usize,
+    pub gpu_cache_metadata: usize,
+    pub gpu_cache_cpu_mirror: usize,
+    pub render_tasks: usize,
+    pub hit_testers: usize,
+}
+
+impl ::std::ops::AddAssign for MemoryReport {
+    fn add_assign(&mut self, other: MemoryReport) {
+        self.primitive_stores += other.primitive_stores;
+        self.clip_stores += other.clip_stores;
+        self.gpu_cache_metadata += other.gpu_cache_metadata;
+        self.gpu_cache_cpu_mirror += other.gpu_cache_cpu_mirror;
+        self.render_tasks += other.render_tasks;
+        self.hit_testers += other.hit_testers;
+    }
+}
+
+/// A C function that takes a pointer to a heap allocation and returns its size.
+///
+/// This is borrowed from the malloc_size_of crate, upon which we want to avoid
+/// a dependency from WebRender.
+pub type VoidPtrToSizeFn = unsafe extern "C" fn(ptr: *const c_void) -> usize;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -843,6 +937,12 @@ impl RenderApi {
         self.api_sender.send(ApiMsg::MemoryPressure).unwrap();
     }
 
+    pub fn report_memory(&self) -> MemoryReport {
+        let (tx, rx) = channel::msg_channel().unwrap();
+        self.api_sender.send(ApiMsg::ReportMemory(tx)).unwrap();
+        rx.recv().unwrap()
+    }
+
     pub fn shut_down(&self) {
         self.api_sender.send(ApiMsg::ShutDown).unwrap();
     }
@@ -970,6 +1070,10 @@ impl RenderApi {
 
     /// Load a capture of the current frame state for debugging.
     pub fn load_capture(&self, path: PathBuf) -> Vec<CapturedDocument> {
+        // First flush the scene builder otherwise async scenes might clobber
+        // the capture we are about to load.
+        self.flush_scene_builder();
+
         let (tx, rx) = channel::msg_channel().unwrap();
         let msg = ApiMsg::DebugCommand(DebugCommand::LoadCapture(path, tx));
         self.send_message(msg);
@@ -1085,7 +1189,7 @@ impl<T> From<T> for PropertyBinding<T> {
 
 /// The current value of an animated property. This is
 /// supplied by the calling code.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 pub struct PropertyValue<T> {
     pub key: PropertyBindingKey<T>,
     pub value: T,
@@ -1094,7 +1198,7 @@ pub struct PropertyValue<T> {
 /// When using `generate_frame()`, a list of `PropertyValue` structures
 /// can optionally be supplied to provide the current value of any
 /// animated properties.
-#[derive(Clone, Deserialize, Serialize, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Default)]
 pub struct DynamicProperties {
     pub transforms: Vec<PropertyValue<LayoutTransform>>,
     pub floats: Vec<PropertyValue<f32>>,
@@ -1103,9 +1207,54 @@ pub struct DynamicProperties {
 pub trait RenderNotifier: Send {
     fn clone(&self) -> Box<RenderNotifier>;
     fn wake_up(&self);
-    fn new_frame_ready(&self, DocumentId, scrolled: bool, composite_needed: bool);
+    fn new_frame_ready(&self, DocumentId, scrolled: bool, composite_needed: bool, render_time_ns: Option<u64>);
     fn external_event(&self, _evt: ExternalEvent) {
         unimplemented!()
     }
     fn shut_down(&self) {}
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Checkpoint {
+    SceneBuilt,
+    FrameBuilt,
+    /// NotificationRequests get notified with this if they get dropped without having been
+    /// notified. This provides the guarantee that if a request is created it will get notified.
+    TransactionDropped,
+}
+
+pub trait NotificationHandler : Send + Sync {
+    fn notify(&self, when: Checkpoint);
+}
+
+#[derive(Clone)]
+pub struct NotificationRequest {
+    handler: Arc<NotificationHandler>,
+    when: Checkpoint,
+    done: bool,
+}
+
+impl NotificationRequest {
+    pub fn new(when: Checkpoint, handler: Arc<NotificationHandler>) -> Self {
+        NotificationRequest {
+            handler,
+            when,
+            done: false,
+        }
+    }
+
+    pub fn when(&self) -> Checkpoint { self.when }
+
+    pub fn notify(mut self) {
+        self.handler.notify(self.when);
+        self.done = true;
+    }
+}
+
+impl Drop for NotificationRequest {
+    fn drop(&mut self) {
+        if !self.done {
+            self.handler.notify(Checkpoint::TransactionDropped);
+        }
+    }
 }

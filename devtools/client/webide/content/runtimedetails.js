@@ -6,7 +6,7 @@ const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {}
 const Services = require("Services");
 const {AppManager} = require("devtools/client/webide/modules/app-manager");
 const {Connection} = require("devtools/shared/client/connection-manager");
-const {RuntimeTypes} = require("devtools/client/webide/modules/runtimes");
+const {RuntimeTypes} = require("devtools/client/webide/modules/runtime-types");
 const Strings = Services.strings.createBundle("chrome://devtools/locale/webide.properties");
 
 const UNRESTRICTED_HELP_URL = "https://developer.mozilla.org/docs/Tools/WebIDE/Running_and_debugging_apps#Unrestricted_app_debugging_%28including_certified_apps_main_process_etc.%29";
@@ -77,15 +77,14 @@ function CheckLockState() {
 
   const sYes = Strings.GetStringFromName("runtimedetails_checkyes");
   const sNo = Strings.GetStringFromName("runtimedetails_checkno");
-  const sUnknown = Strings.GetStringFromName("runtimedetails_checkunknown");
   const sNotUSB = Strings.GetStringFromName("runtimedetails_notUSBDevice");
 
   flipCertPerfButton.setAttribute("disabled", "true");
   flipCertPerfAction.setAttribute("hidden", "true");
   adbRootAction.setAttribute("hidden", "true");
 
-  adbCheckResult.textContent = sUnknown;
-  devtoolsCheckResult.textContent = sUnknown;
+  adbCheckResult.textContent = "";
+  devtoolsCheckResult.textContent = "";
 
   if (AppManager.connection &&
       AppManager.connection.status == Connection.Status.CONNECTED) {
@@ -102,8 +101,6 @@ function CheckLockState() {
             adbRootAction.removeAttribute("hidden");
           }
         }, console.error);
-      } else {
-        adbCheckResult.textContent = sUnknown;
       }
     } else {
       adbCheckResult.textContent = sNotUSB;

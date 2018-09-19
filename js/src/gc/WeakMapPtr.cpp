@@ -6,7 +6,7 @@
 
 #include "js/WeakMapPtr.h"
 
-#include "gc/WeakMap.h"
+#include "gc/WeakMap-inl.h"
 
 //
 // Machinery for the externally-linkable JS::WeakMapPtr, which wraps js::WeakMap
@@ -41,9 +41,8 @@ template <typename K, typename V>
 struct Utils
 {
     typedef typename DataType<K>::BarrieredType KeyType;
-    typedef typename DataType<K>::HasherType HasherType;
     typedef typename DataType<V>::BarrieredType ValueType;
-    typedef WeakMap<KeyType, ValueType, HasherType> Type;
+    typedef WeakMap<KeyType, ValueType> Type;
     typedef Type* PtrType;
     static PtrType cast(void* ptr) { return static_cast<PtrType>(ptr); }
 };
@@ -65,9 +64,10 @@ JS::WeakMapPtr<K, V>::init(JSContext* cx)
 {
     MOZ_ASSERT(!initialized());
     typename WeakMapDetails::Utils<K, V>::PtrType map =
-        cx->zone()->new_<typename WeakMapDetails::Utils<K,V>::Type>(cx);
-    if (!map || !map->init())
+        cx->new_<typename WeakMapDetails::Utils<K,V>::Type>(cx);
+    if (!map) {
         return false;
+    }
     ptr = map;
     return true;
 }
@@ -87,8 +87,9 @@ JS::WeakMapPtr<K, V>::lookup(const K& key)
     MOZ_ASSERT(initialized());
     typename WeakMapDetails::Utils<K, V>::Type::Ptr result =
         WeakMapDetails::Utils<K, V>::cast(ptr)->lookup(key);
-    if (!result)
+    if (!result) {
         return WeakMapDetails::DataType<V>::NullValue();
+    }
     return result->value();
 }
 

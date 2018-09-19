@@ -4,6 +4,7 @@
 "use strict";
 
 const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 const { FileUtils } = require("resource://gre/modules/FileUtils.jsm");
 const { gDevTools } = require("devtools/client/framework/devtools");
 const Services = require("Services");
@@ -12,7 +13,7 @@ const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { DebuggerServer } = require("devtools/server/main");
 
 var TEST_BASE;
-if (window.location === "chrome://browser/content/browser.xul") {
+if (window.location === AppConstants.BROWSER_CHROME_URL) {
   TEST_BASE = "chrome://mochitests/content/browser/devtools/client/webide/test/";
 } else {
   TEST_BASE = "chrome://mochitests/content/chrome/devtools/client/webide/test/";
@@ -21,7 +22,7 @@ if (window.location === "chrome://browser/content/browser.xul") {
 Services.prefs.setBoolPref("devtools.webide.enabled", true);
 Services.prefs.setBoolPref("devtools.webide.enableLocalRuntime", true);
 
-Services.prefs.setCharPref("devtools.webide.adbAddonURL", TEST_BASE + "addons/adbhelper-#OS#.xpi");
+Services.prefs.setCharPref("devtools.webide.adbExtensionURL", TEST_BASE + "addons/adb-extension-#OS#.xpi");
 Services.prefs.setCharPref("devtools.webide.templatesURL", TEST_BASE + "templates.json");
 Services.prefs.setCharPref("devtools.devices.url", TEST_BASE + "browser_devices.json");
 
@@ -30,7 +31,7 @@ var registerCleanupFunction = registerCleanupFunction ||
 registerCleanupFunction(() => {
   Services.prefs.clearUserPref("devtools.webide.enabled");
   Services.prefs.clearUserPref("devtools.webide.enableLocalRuntime");
-  Services.prefs.clearUserPref("devtools.webide.autoinstallADBHelper");
+  Services.prefs.clearUserPref("devtools.webide.autoinstallADBExtension");
   Services.prefs.clearUserPref("devtools.webide.busyTimeout");
   Services.prefs.clearUserPref("devtools.webide.lastSelectedProject");
   Services.prefs.clearUserPref("devtools.webide.lastConnectedRuntime");
@@ -39,7 +40,7 @@ registerCleanupFunction(() => {
 var openWebIDE = async function(autoInstallAddons) {
   info("opening WebIDE");
 
-  Services.prefs.setBoolPref("devtools.webide.autoinstallADBHelper", !!autoInstallAddons);
+  Services.prefs.setBoolPref("devtools.webide.autoinstallADBExtension", !!autoInstallAddons);
 
   const win = Services.ww.openWindow(null, "chrome://webide/content/", "webide",
                                    "chrome,centerscreen,resizable", null);
@@ -179,6 +180,10 @@ function getRuntimeWindow(win) {
 
 function getProjectWindow(win) {
   return win.document.querySelector("#project-listing-panel-details").contentWindow;
+}
+
+function getAddonsDocument(win) {
+  return win.document.querySelector("#deck-panel-addons").contentDocument;
 }
 
 function connectToLocalRuntime(win) {

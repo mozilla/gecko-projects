@@ -7,6 +7,8 @@
 #include "mozilla/ModuleUtils.h"
 #include "nsDocShellCID.h"
 
+#include "mozilla/dom/BrowsingContext.h"
+
 #include "nsDocShell.h"
 #include "nsDefaultURIFixup.h"
 #include "nsWebNavigationInfo.h"
@@ -17,6 +19,7 @@
 #include "nsURILoader.h"
 #include "nsDocLoader.h"
 #include "nsOSHelperAppService.h"
+#include "nsOSPermissionRequest.h"
 #include "nsExternalProtocolHandler.h"
 #include "nsPrefetchService.h"
 #include "nsOfflineCacheUpdate.h"
@@ -26,7 +29,6 @@
 #include "nsDBusHandlerApp.h"
 #endif
 #if defined(MOZ_WIDGET_ANDROID)
-#include "nsExternalSharingAppService.h"
 #include "nsExternalURLHandlerService.h"
 #endif
 
@@ -34,16 +36,6 @@
 #include "nsSHEntry.h"
 #include "nsSHEntryShared.h"
 #include "nsSHistory.h"
-#include "nsSHTransaction.h"
-
-#ifndef MOZ_PLACES
-// download history
-#include "nsDownloadHistory.h"
-#endif
-
-
-// LoadContexts (used for testing)
-#include "LoadContext.h"
 
 using mozilla::dom::ContentHandlerService;
 
@@ -59,6 +51,7 @@ Initialize()
   }
   gInitialized = true;
 
+  mozilla::dom::BrowsingContext::Init();
   nsresult rv = nsSHistory::Startup();
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -86,25 +79,20 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsExternalProtocolHandler)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrefetchService, Init)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsOfflineCacheUpdateService,
                                          nsOfflineCacheUpdateService::GetInstance)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsOfflineCacheUpdate)
 NS_GENERIC_FACTORY_CONSTRUCTOR(PlatformLocalHandlerApp_t)
 #ifdef MOZ_ENABLE_DBUS
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsDBusHandlerApp)
 #endif
 #if defined(MOZ_WIDGET_ANDROID)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsExternalSharingAppService)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsExternalURLHandlerService)
 #endif
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(ContentHandlerService, Init)
 
+// OS access permissions
+NS_GENERIC_FACTORY_CONSTRUCTOR(nsOSPermissionRequest)
+
 // session history
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsSHEntry)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsSHTransaction)
-
-#ifndef MOZ_PLACES
-// download history
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsDownloadHistory)
-#endif
 
 NS_DEFINE_NAMED_CID(NS_DOCSHELL_CID);
 NS_DEFINE_NAMED_CID(NS_DEFAULTURIFIXUP_CID);
@@ -116,23 +104,16 @@ NS_DEFINE_NAMED_CID(NS_EXTERNALHELPERAPPSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_EXTERNALPROTOCOLHANDLER_CID);
 NS_DEFINE_NAMED_CID(NS_PREFETCHSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_OFFLINECACHEUPDATESERVICE_CID);
-NS_DEFINE_NAMED_CID(NS_OFFLINECACHEUPDATE_CID);
 NS_DEFINE_NAMED_CID(NS_LOCALHANDLERAPP_CID);
+NS_DEFINE_NAMED_CID(NS_OSPERMISSIONREQUEST_CID);
 #ifdef MOZ_ENABLE_DBUS
 NS_DEFINE_NAMED_CID(NS_DBUSHANDLERAPP_CID);
 #endif
 #if defined(MOZ_WIDGET_ANDROID)
-NS_DEFINE_NAMED_CID(NS_EXTERNALSHARINGAPPSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_EXTERNALURLHANDLERSERVICE_CID);
 #endif
 NS_DEFINE_NAMED_CID(NS_SHENTRY_CID);
-NS_DEFINE_NAMED_CID(NS_SHTRANSACTION_CID);
-#ifndef MOZ_PLACES
-NS_DEFINE_NAMED_CID(NS_DOWNLOADHISTORY_CID);
-#endif
 NS_DEFINE_NAMED_CID(NS_CONTENTHANDLERSERVICE_CID);
-NS_DEFINE_NAMED_CID(NS_LOADCONTEXT_CID);
-NS_DEFINE_NAMED_CID(NS_PRIVATELOADCONTEXT_CID);
 
 const mozilla::Module::CIDEntry kDocShellCIDs[] = {
   { &kNS_DOCSHELL_CID, false, nullptr, nsDocShellConstructor },
@@ -142,27 +123,20 @@ const mozilla::Module::CIDEntry kDocShellCIDs[] = {
   { &kNS_URI_LOADER_CID, false, nullptr, nsURILoaderConstructor },
   { &kNS_DOCUMENTLOADER_SERVICE_CID, false, nullptr, nsDocLoaderConstructor },
   { &kNS_EXTERNALHELPERAPPSERVICE_CID, false, nullptr, nsOSHelperAppServiceConstructor },
+  { &kNS_OSPERMISSIONREQUEST_CID, false, nullptr, nsOSPermissionRequestConstructor },
   { &kNS_CONTENTHANDLERSERVICE_CID, false, nullptr, ContentHandlerServiceConstructor,
     mozilla::Module::CONTENT_PROCESS_ONLY },
   { &kNS_EXTERNALPROTOCOLHANDLER_CID, false, nullptr, nsExternalProtocolHandlerConstructor },
   { &kNS_PREFETCHSERVICE_CID, false, nullptr, nsPrefetchServiceConstructor },
   { &kNS_OFFLINECACHEUPDATESERVICE_CID, false, nullptr, nsOfflineCacheUpdateServiceConstructor },
-  { &kNS_OFFLINECACHEUPDATE_CID, false, nullptr, nsOfflineCacheUpdateConstructor },
   { &kNS_LOCALHANDLERAPP_CID, false, nullptr, PlatformLocalHandlerApp_tConstructor },
 #ifdef MOZ_ENABLE_DBUS
   { &kNS_DBUSHANDLERAPP_CID, false, nullptr, nsDBusHandlerAppConstructor },
 #endif
 #if defined(MOZ_WIDGET_ANDROID)
-  { &kNS_EXTERNALSHARINGAPPSERVICE_CID, false, nullptr, nsExternalSharingAppServiceConstructor },
   { &kNS_EXTERNALURLHANDLERSERVICE_CID, false, nullptr, nsExternalURLHandlerServiceConstructor },
 #endif
   { &kNS_SHENTRY_CID, false, nullptr, nsSHEntryConstructor },
-  { &kNS_SHTRANSACTION_CID, false, nullptr, nsSHTransactionConstructor },
-#ifndef MOZ_PLACES
-  { &kNS_DOWNLOADHISTORY_CID, false, nullptr, nsDownloadHistoryConstructor },
-#endif
-  { &kNS_LOADCONTEXT_CID, false, nullptr, mozilla::CreateTestLoadContext },
-  { &kNS_PRIVATELOADCONTEXT_CID, false, nullptr, mozilla::CreatePrivateTestLoadContext },
   { nullptr }
 };
 
@@ -208,22 +182,15 @@ const mozilla::Module::ContractIDEntry kDocShellContracts[] = {
   { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX"default", &kNS_EXTERNALPROTOCOLHANDLER_CID },
   { NS_PREFETCHSERVICE_CONTRACTID, &kNS_PREFETCHSERVICE_CID },
   { NS_OFFLINECACHEUPDATESERVICE_CONTRACTID, &kNS_OFFLINECACHEUPDATESERVICE_CID },
-  { NS_OFFLINECACHEUPDATE_CONTRACTID, &kNS_OFFLINECACHEUPDATE_CID },
   { NS_LOCALHANDLERAPP_CONTRACTID, &kNS_LOCALHANDLERAPP_CID },
 #ifdef MOZ_ENABLE_DBUS
   { NS_DBUSHANDLERAPP_CONTRACTID, &kNS_DBUSHANDLERAPP_CID },
 #endif
 #if defined(MOZ_WIDGET_ANDROID)
-  { NS_EXTERNALSHARINGAPPSERVICE_CONTRACTID, &kNS_EXTERNALSHARINGAPPSERVICE_CID },
   { NS_EXTERNALURLHANDLERSERVICE_CONTRACTID, &kNS_EXTERNALURLHANDLERSERVICE_CID },
 #endif
   { NS_SHENTRY_CONTRACTID, &kNS_SHENTRY_CID },
-  { NS_SHTRANSACTION_CONTRACTID, &kNS_SHTRANSACTION_CID },
-#ifndef MOZ_PLACES
-  { NS_DOWNLOADHISTORY_CONTRACTID, &kNS_DOWNLOADHISTORY_CID },
-#endif
-  { NS_LOADCONTEXT_CONTRACTID, &kNS_LOADCONTEXT_CID },
-  { NS_PRIVATELOADCONTEXT_CONTRACTID, &kNS_PRIVATELOADCONTEXT_CID },
+  { NS_OSPERMISSIONREQUEST_CONTRACTID, &kNS_OSPERMISSIONREQUEST_CID, mozilla::Module::MAIN_PROCESS_ONLY },
   { nullptr }
 };
 

@@ -26,6 +26,7 @@
 #include "webrtc/logging/rtc_event_log/rtc_event_log.h"
 
 #include <vector>
+#include <set>
 
 namespace webrtc {
 class VideoFrame;
@@ -39,64 +40,6 @@ enum class MediaSessionConduitLocalDirection : int {
 };
 
 using RtpExtList = std::vector<webrtc::RtpExtension>;
-
-// Wrap the webrtc.org Call class adding mozilla add/ref support.
-class WebRtcCallWrapper : public RefCounted<WebRtcCallWrapper>
-{
-public:
-  typedef webrtc::Call::Config Config;
-
-  static RefPtr<WebRtcCallWrapper> Create()
-  {
-    return new WebRtcCallWrapper();
-  }
-
-  static RefPtr<WebRtcCallWrapper> Create(UniquePtr<webrtc::Call>&& aCall)
-  {
-    return new WebRtcCallWrapper(std::move(aCall));
-  }
-
-  webrtc::Call* Call() const
-  {
-    return mCall.get();
-  }
-
-  virtual ~WebRtcCallWrapper()
-  {
-    if (mCall->voice_engine()) {
-      webrtc::VoiceEngine* voice_engine = mCall->voice_engine();
-      mCall.reset(nullptr); // Force it to release the voice engine reference
-      // Delete() must be after all refs are released
-      webrtc::VoiceEngine::Delete(voice_engine);
-    } else {
-      // Must ensure it's destroyed *before* the EventLog!
-      mCall.reset(nullptr);
-    }
-  }
-
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(WebRtcCallWrapper)
-
-private:
-  WebRtcCallWrapper()
-  {
-    webrtc::Call::Config config(&mEventLog);
-    mCall.reset(webrtc::Call::Create(config));
-  }
-
-  explicit WebRtcCallWrapper(UniquePtr<webrtc::Call>&& aCall)
-  {
-    MOZ_ASSERT(aCall);
-    mCall = std::move(aCall);
-  }
-
-  // Don't allow copying/assigning.
-  WebRtcCallWrapper(const WebRtcCallWrapper&) = delete;
-  void operator=(const WebRtcCallWrapper&) = delete;
-
-  UniquePtr<webrtc::Call> mCall;
-  webrtc::RtcEventLogNullImpl mEventLog;
-};
-
 
 /**
  * Abstract Interface for transporting RTP packets - audio/vidoeo
@@ -145,11 +88,9 @@ public:
    * Callback Function reportng any change in the video-frame dimensions
    * @param width:  current width of the video @ decoder
    * @param height: current height of the video @ decoder
-   * @param number_of_streams: number of participating video streams
    */
   virtual void FrameSizeChange(unsigned int width,
-                               unsigned int height,
-                               unsigned int number_of_streams) = 0;
+                               unsigned int height) = 0;
 
   /**
    * Callback Function reporting decoded frame for processing.
@@ -251,7 +192,7 @@ public:
    * Note: this is an ordered list and {a,b,c} != {b,a,c}
    */
   virtual bool SetLocalSSRCs(const std::vector<unsigned int>& aSSRCs) = 0;
-  virtual std::vector<unsigned int> GetLocalSSRCs() const = 0;
+  virtual std::vector<unsigned int> GetLocalSSRCs() = 0;
 
   /**
   * Adds negotiated RTP header extensions to the the conduit. Unknown extensions
@@ -268,6 +209,7 @@ public:
 
   virtual bool GetRemoteSSRC(unsigned int* ssrc) = 0;
   virtual bool SetRemoteSSRC(unsigned int ssrc) = 0;
+  virtual bool UnsetRemoteSSRC(uint32_t ssrc) = 0;
   virtual bool SetLocalCNAME(const char* cname) = 0;
 
   virtual bool SetLocalMID(const std::string& mid) = 0;
@@ -319,6 +261,87 @@ public:
 
 };
 
+// Wrap the webrtc.org Call class adding mozilla add/ref support.
+class WebRtcCallWrapper : public RefCounted<WebRtcCallWrapper>
+{
+public:
+  typedef webrtc::Call::Config Config;
+
+  static RefPtr<WebRtcCallWrapper> Create()
+  {
+    return new WebRtcCallWrapper();
+  }
+
+  static RefPtr<WebRtcCallWrapper> Create(UniquePtr<webrtc::Call>&& aCall)
+  {
+    return new WebRtcCallWrapper(std::move(aCall));
+  }
+
+  // Don't allow copying/assigning.
+  WebRtcCallWrapper(const WebRtcCallWrapper&) = delete;
+  void operator=(const WebRtcCallWrapper&) = delete;
+
+  webrtc::Call* Call() const
+  {
+    return mCall.get();
+  }
+
+  virtual ~WebRtcCallWrapper()
+  {
+    if (mCall->voice_engine()) {
+      webrtc::VoiceEngine* voice_engine = mCall->voice_engine();
+      mCall.reset(nullptr); // Force it to release the voice engine reference
+      // Delete() must be after all refs are released
+      webrtc::VoiceEngine::Delete(voice_engine);
+    } else {
+      // Must ensure it's destroyed *before* the EventLog!
+      mCall.reset(nullptr);
+    }
+  }
+
+  bool UnsetRemoteSSRC(uint32_t ssrc)
+  {
+    for (auto conduit : mConduits) {
+      if (!conduit->UnsetRemoteSSRC(ssrc)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  void RegisterConduit(MediaSessionConduit* conduit)
+  {
+    mConduits.insert(conduit);
+  }
+
+  void UnregisterConduit(MediaSessionConduit* conduit)
+  {
+    mConduits.erase(conduit);
+  }
+
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(WebRtcCallWrapper)
+
+private:
+  WebRtcCallWrapper()
+  {
+    webrtc::Call::Config config(&mEventLog);
+    mCall.reset(webrtc::Call::Create(config));
+  }
+
+  explicit WebRtcCallWrapper(UniquePtr<webrtc::Call>&& aCall)
+  {
+    MOZ_ASSERT(aCall);
+    mCall = std::move(aCall);
+  }
+
+  UniquePtr<webrtc::Call> mCall;
+  webrtc::RtcEventLogNullImpl mEventLog;
+  // Allows conduits to know about one another, to avoid remote SSRC
+  // collisions.
+  std::set<MediaSessionConduit*> mConduits;
+};
+
 // Abstract base classes for external encoder/decoder.
 class CodecPluginID
 {
@@ -355,7 +378,8 @@ public:
    * @result Concrete VideoSessionConduitObject or nullptr in the case
    *         of failure
    */
-  static RefPtr<VideoSessionConduit> Create(RefPtr<WebRtcCallWrapper> aCall);
+  static RefPtr<VideoSessionConduit> Create(
+    RefPtr<WebRtcCallWrapper> aCall, nsCOMPtr<nsIEventTarget> aStsThread);
 
   enum FrameRequestType
   {
@@ -389,6 +413,7 @@ public:
   virtual void DisableSsrcChanges() = 0;
 
   bool SetRemoteSSRC(unsigned int ssrc) override = 0;
+  bool UnsetRemoteSSRC(uint32_t ssrc) override = 0;
 
   /**
    * Function to deliver a capture video frame for encoding and transport.
@@ -402,6 +427,7 @@ public:
     const webrtc::VideoFrame& frame) = 0;
 
   virtual MediaConduitErrorCode ConfigureCodecMode(webrtc::VideoCodecMode) = 0;
+
   /**
    * Function to configure send codec for the video session
    * @param sendSessionConfig: CodecConfiguration
@@ -422,10 +448,6 @@ public:
    */
   virtual MediaConduitErrorCode ConfigureRecvMediaCodecs(
       const std::vector<VideoCodecConfig* >& recvCodecConfigList) = 0;
-
-  virtual unsigned int SendingMaxFs() = 0;
-
-  virtual unsigned int SendingMaxFr() = 0;
 
   /**
     * These methods allow unit tests to double-check that the
@@ -530,11 +552,10 @@ public:
   virtual bool IsSamplingFreqSupported(int freq) const = 0;
 
    /**
-    * Function to configure send codec for the audio session
-    * @param sendSessionConfig: CodecConfiguration
-    * NOTE: See VideoConduit for more information
-    */
-
+   * Function to configure send codec for the audio session
+   * @param sendSessionConfig: CodecConfiguration
+   * NOTE: See VideoConduit for more information
+   */
   virtual MediaConduitErrorCode ConfigureSendMediaCodec(const AudioCodecConfig* sendCodecConfig) = 0;
 
    /**

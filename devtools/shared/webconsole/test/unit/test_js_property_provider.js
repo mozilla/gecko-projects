@@ -117,11 +117,23 @@ function runChecks(dbgObject, dbgEnv, sandbox) {
   test_has_result(results, "charAt");
   results = JSPropertyProvider(dbgObject, dbgEnv, "`foo`.");
   test_has_result(results, "charAt");
+  results = JSPropertyProvider(dbgObject, dbgEnv, "`foo doc`.");
+  test_has_result(results, "charAt");
+  results = JSPropertyProvider(dbgObject, dbgEnv, "`foo \" doc`.");
+  test_has_result(results, "charAt");
+  results = JSPropertyProvider(dbgObject, dbgEnv, "`foo \' doc`.");
+  test_has_result(results, "charAt");
   results = JSPropertyProvider(dbgObject, dbgEnv, "'[1,2,3]'.");
   test_has_result(results, "charAt");
 
   info("Test that suggestions are not given for syntax errors.");
   results = JSPropertyProvider(dbgObject, dbgEnv, "'foo\"");
+  Assert.equal(null, results);
+  results = JSPropertyProvider(dbgObject, dbgEnv, "'foo d");
+  Assert.equal(null, results);
+  results = JSPropertyProvider(dbgObject, dbgEnv, `"foo d`);
+  Assert.equal(null, results);
+  results = JSPropertyProvider(dbgObject, dbgEnv, "`foo d");
   Assert.equal(null, results);
   results = JSPropertyProvider(dbgObject, dbgEnv, "[1,',2]");
   Assert.equal(null, results);
@@ -132,6 +144,8 @@ function runChecks(dbgObject, dbgEnv, sandbox) {
 
   info("Test that suggestions are not given without a dot.");
   results = JSPropertyProvider(dbgObject, dbgEnv, "'foo'");
+  test_has_no_results(results);
+  results = JSPropertyProvider(dbgObject, dbgEnv, "`foo`");
   test_has_no_results(results);
   results = JSPropertyProvider(dbgObject, dbgEnv, "[1,2,3]");
   test_has_no_results(results);
@@ -187,7 +201,7 @@ function runChecks(dbgObject, dbgEnv, sandbox) {
  */
 function test_has_no_results(results) {
   Assert.notEqual(results, null);
-  Assert.equal(results.matches.length, 0);
+  Assert.equal(results.matches.size, 0);
 }
 /**
  * A helper that ensures (required) results were found.
@@ -198,6 +212,6 @@ function test_has_no_results(results) {
  */
 function test_has_result(results, requiredSuggestion) {
   Assert.notEqual(results, null);
-  Assert.ok(results.matches.length > 0);
-  Assert.ok(results.matches.includes(requiredSuggestion));
+  Assert.ok(results.matches.size > 0);
+  Assert.ok(results.matches.has(requiredSuggestion));
 }

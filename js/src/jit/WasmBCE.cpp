@@ -31,8 +31,6 @@ jit::EliminateBoundsChecks(MIRGenerator* mir, MIRGraph& graph)
 {
     // Map for dominating block where a given definition was checked
     LastSeenMap lastSeen;
-    if (!lastSeen.init())
-        return false;
 
     for (ReversePostorderIterator bIter(graph.rpoBegin()); bIter != graph.rpoEnd(); bIter++) {
         MBasicBlock* block = *bIter;
@@ -59,26 +57,27 @@ jit::EliminateBoundsChecks(MIRGenerator* mir, MIRGraph& graph)
                     uint32_t(addr->toConstant()->toInt32()) < mir->minWasmHeapLength())
                 {
                     bc->setRedundant();
-                    if (JitOptions.spectreIndexMasking)
+                    if (JitOptions.spectreIndexMasking) {
                         bc->replaceAllUsesWith(addr);
-                    else
+                    } else {
                         MOZ_ASSERT(!bc->hasUses());
-                }
-                else
-                {
+                    }
+                } else {
                     LastSeenMap::AddPtr ptr = lastSeen.lookupForAdd(addr->id());
                     if (ptr) {
                         MDefinition* prevCheckOrPhi = ptr->value();
                         if (prevCheckOrPhi->block()->dominates(block)) {
                             bc->setRedundant();
-                            if (JitOptions.spectreIndexMasking)
+                            if (JitOptions.spectreIndexMasking) {
                                 bc->replaceAllUsesWith(prevCheckOrPhi);
-                            else
+                            } else {
                                 MOZ_ASSERT(!bc->hasUses());
+                            }
                         }
                     } else {
-                        if (!lastSeen.add(ptr, addr->id(), def))
+                        if (!lastSeen.add(ptr, addr->id(), def)) {
                             return false;
+                        }
                     }
                 }
                 break;
@@ -100,8 +99,9 @@ jit::EliminateBoundsChecks(MIRGenerator* mir, MIRGraph& graph)
                     MDefinition* src = phi->getOperand(i);
 
                     if (JitOptions.spectreIndexMasking) {
-                        if (src->isWasmBoundsCheck())
+                        if (src->isWasmBoundsCheck()) {
                             src = src->toWasmBoundsCheck()->index();
+                        }
                     } else {
                         MOZ_ASSERT(!src->isWasmBoundsCheck());
                     }
@@ -114,8 +114,9 @@ jit::EliminateBoundsChecks(MIRGenerator* mir, MIRGraph& graph)
                 }
 
                 if (phiChecked) {
-                    if (!lastSeen.put(def->id(), def))
+                    if (!lastSeen.put(def->id(), def)) {
                         return false;
+                    }
                 }
 
                 break;

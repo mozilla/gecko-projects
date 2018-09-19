@@ -131,6 +131,7 @@ public:
   virtual void            Move(double aX, double aY) override;
   virtual void            Resize(double aWidth, double aHeight, bool aRepaint) override;
   virtual void            Resize(double aX, double aY, double aWidth, double aHeight, bool aRepaint) override;
+  virtual mozilla::Maybe<bool> IsResizingNativeWidget() override;
   virtual MOZ_MUST_USE nsresult
                           BeginResizeDrag(mozilla::WidgetGUIEvent* aEvent,
                                           int32_t aHorizontal,
@@ -236,7 +237,7 @@ public:
                             int16_t aButton =
                               mozilla::WidgetMouseEvent::eLeftButton,
                             uint16_t aInputSource =
-                              mozilla::dom::MouseEventBinding::MOZ_SOURCE_MOUSE,
+                              mozilla::dom::MouseEvent_Binding::MOZ_SOURCE_MOUSE,
                             WinPointerInfo* aPointerInfo = nullptr);
   virtual bool            DispatchWindowEvent(mozilla::WidgetGUIEvent* aEvent,
                                               nsEventStatus& aStatus);
@@ -537,6 +538,7 @@ protected:
   WNDPROC               mPrevWndProc;
   HBRUSH                mBrush;
   IMEContext            mDefaultIMC;
+  HDEVNOTIFY            mDeviceNotifyHandle;
   bool                  mIsTopWidgetWindow;
   bool                  mInDtor;
   bool                  mIsVisible;
@@ -655,7 +657,7 @@ protected:
   // Whether we're in the process of sending a WM_SETTEXT ourselves
   bool                  mSendingSetText;
 
-  // Whether we we're created as a NS_CHILD_CID window (aka ChildWindow) or not.
+  // Whether we we're created as a child window (aka ChildWindow) or not.
   bool                  mIsChildWindow : 1;
 
   // The point in time at which the last paint completed. We use this to avoid

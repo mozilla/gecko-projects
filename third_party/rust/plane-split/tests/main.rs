@@ -3,7 +3,7 @@ extern crate plane_split;
 
 use euclid::{Angle, TypedRect, TypedSize2D, TypedTransform3D, point2, point3, vec3};
 use euclid::approxeq::ApproxEq;
-use plane_split::{Intersection, Line, LineProjection, Plane, Polygon};
+use plane_split::{Intersection, Line, LineProjection, NegativeHemisphereError, Plane, Polygon};
 
 
 #[test]
@@ -59,13 +59,27 @@ fn valid() {
 }
 
 #[test]
+fn empty() {
+    let poly = Polygon::<f32, ()>::from_points(
+        [
+            point3(0.0, 0.0, 1.0),
+            point3(0.0, 0.0, 1.0),
+            point3(0.0, 0.00001, 1.0),
+            point3(1.0, 0.0, 0.0),
+        ],
+        1,
+    );
+    assert_eq!(None, poly);
+}
+
+#[test]
 fn from_transformed_rect() {
     let rect: TypedRect<f32, ()> = TypedRect::new(point2(10.0, 10.0), TypedSize2D::new(20.0, 30.0));
     let transform: TypedTransform3D<f32, (), ()> =
         TypedTransform3D::create_rotation(0.5f32.sqrt(), 0.0, 0.5f32.sqrt(), Angle::radians(5.0))
         .pre_translate(vec3(0.0, 0.0, 10.0));
     let poly = Polygon::from_transformed_rect(rect, transform, 0);
-    assert!(poly.is_valid());
+    assert!(poly.is_some() && poly.unwrap().is_valid());
 }
 
 #[test]
@@ -244,4 +258,21 @@ fn split() {
         origin: point3(0.5, 1.0, 0.0),
         dir: vec3(-0.5f32.sqrt(), 0.0, 0.5f32.sqrt()),
     });
+}
+
+#[test]
+fn plane_unnormalized() {
+    let zero_vec = vec3(0.0000001, 0.0, 0.0);
+    let mut plane: Result<Option<Plane<f32, ()>>, _> = Plane::from_unnormalized(zero_vec, 1.0);
+    assert_eq!(plane, Ok(None));
+    plane = Plane::from_unnormalized(zero_vec, 0.0);
+    assert_eq!(plane, Err(NegativeHemisphereError));
+    plane = Plane::from_unnormalized(zero_vec, -0.5);
+    assert_eq!(plane, Err(NegativeHemisphereError));
+
+    plane = Plane::from_unnormalized(vec3(-3.0, 4.0, 0.0), 2.0);
+    assert_eq!(plane, Ok(Some(Plane {
+        normal: vec3(-3.0/5.0, 4.0/5.0, 0.0),
+        offset: 2.0/5.0,
+    })));
 }

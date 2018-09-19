@@ -11,6 +11,7 @@
 
 #include "WrapperFactory.h"
 
+#include "jsapi.h"
 #include "js/Proxy.h"
 #include "js/Wrapper.h"
 
@@ -56,8 +57,9 @@ public:
 
     static JSObject* getTargetObject(JSObject* wrapper) {
         JSObject* target = js::UncheckedUnwrap(wrapper, /* stopAtWindowProxy = */ false);
-        if (target)
+        if (target) {
             JS::ExposeObjectToActiveJS(target);
+        }
         return target;
     }
 
@@ -126,9 +128,11 @@ private:
                                   JS::MutableHandleObject expandoObject);
 
     // |cx| is in the target's compartment, and |exclusiveWrapper| is any xray
-    // that has exclusive use of the expando.
+    // that has exclusive use of the expando. |exclusiveWrapperGlobal| is the
+    // caller's global and must be same-compartment with |exclusiveWrapper|.
     JSObject* attachExpandoObject(JSContext* cx, JS::HandleObject target,
                                   JS::HandleObject exclusiveWrapper,
+                                  JS::HandleObject exclusiveWrapperGlobal,
                                   nsIPrincipal* origin);
 
     XrayTraits(XrayTraits&) = delete;
@@ -198,8 +202,9 @@ public:
     {
         JSXrayTraits& self = JSXrayTraits::singleton;
         JS::RootedObject holder(cx, self.ensureHolder(cx, wrapper));
-        if (xpc::JSXrayTraits::getProtoKey(holder) == JSProto_Function)
+        if (xpc::JSXrayTraits::getProtoKey(holder) == JSProto_Function) {
             return baseInstance.call(cx, wrapper, args);
+        }
 
         JS::RootedValue v(cx, JS::ObjectValue(*wrapper));
         js::ReportIsNotFunction(cx, v);
@@ -226,8 +231,9 @@ public:
 
         {
             JSAutoRealm ar(cx, target);
-            if (!JS_GetClassPrototype(cx, key, protop))
+            if (!JS_GetClassPrototype(cx, key, protop)) {
                 return false;
+            }
         }
         return JS_WrapObject(cx, protop);
     }
@@ -267,10 +273,12 @@ public:
                                                 JS::HandleId id,
                                                 JS::MutableHandle<JS::PropertyDescriptor> desc);
 
-    // Like the above, but operates in the target compartment.
+    // Like the above, but operates in the target compartment. wrapperGlobal is
+    // the caller's global (must be in the wrapper compartment).
     static bool getOwnPropertyFromTargetIfSafe(JSContext* cx,
                                                JS::HandleObject target,
                                                JS::HandleObject wrapper,
+                                               JS::HandleObject wrapperGlobal,
                                                JS::HandleId id,
                                                JS::MutableHandle<JS::PropertyDescriptor> desc);
 
@@ -330,8 +338,9 @@ public:
         // lets things like |toString| and |__proto__| work.
         {
             JSAutoRealm ar(cx, target);
-            if (!JS_GetClassPrototype(cx, JSProto_Object, protop))
+            if (!JS_GetClassPrototype(cx, JSProto_Object, protop)) {
                 return false;
+            }
         }
         return JS_WrapObject(cx, protop);
     }

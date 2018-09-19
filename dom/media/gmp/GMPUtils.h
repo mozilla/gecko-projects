@@ -14,11 +14,12 @@
 #include "nsCOMPtr.h"
 #include "nsClassHashtable.h"
 
-#define CHROMIUM_CDM_API_BACKWARD_COMPAT "chromium-cdm8-host4"
-#define CHROMIUM_CDM_API "chromium-cdm9-host4"
+#define CHROMIUM_CDM_API_BACKWARD_COMPAT "chromium-cdm9-host4"
+// TODO: The following should be used as we switch to cdm10
+#define CHROMIUM_CDM_API "chromium-cdm10-host4"
 
 class nsIFile;
-class nsISimpleEnumerator;
+class nsIDirectoryEnumerator;
 
 namespace mozilla {
 
@@ -62,7 +63,7 @@ public:
 
 private:
   Mode mMode;
-  nsCOMPtr<nsISimpleEnumerator> mIter;
+  nsCOMPtr<nsIDirectoryEnumerator> mIter;
 };
 
 class GMPInfoFileParser {

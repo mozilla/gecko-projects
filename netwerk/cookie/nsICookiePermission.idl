@@ -52,7 +52,7 @@ interface nsICookiePermission : nsISupports
   /**
    * canAccess
    *
-   * this method is called to test whether or not the given URI/channel may
+   * this method is called to test whether or not the given principal may
    * access the cookie database, either to set or get cookies.
    *
    * @param aPrincipal
@@ -98,10 +98,3 @@ interface nsICookiePermission : nsISupports
                        inout int64_t aExpiry);
 };
 
-%{ C++
-/**
- * The nsICookiePermission implementation is an XPCOM service registered
- * under the ContractID:
- */
-#define NS_COOKIEPERMISSION_CONTRACTID "@mozilla.org/cookie/permission;1"
-%}

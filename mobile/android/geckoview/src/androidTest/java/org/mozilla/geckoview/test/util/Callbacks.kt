@@ -59,7 +59,12 @@ class Callbacks private constructor() {
         }
 
         override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
-            return null;
+            return null
+        }
+
+        override fun onLoadError(session: GeckoSession, uri: String?,
+                                 category: Int, error: Int): GeckoResult<String>? {
+            return null
         }
     }
 
@@ -160,6 +165,9 @@ class Callbacks private constructor() {
         }
 
         override fun updateCursorAnchorInfo(session: GeckoSession, info: CursorAnchorInfo) {
+        }
+
+        override fun notifyAutoFill(session: GeckoSession, notification: Int, virtualId: Int) {
         }
     }
 }

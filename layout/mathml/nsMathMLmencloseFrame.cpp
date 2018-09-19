@@ -747,7 +747,7 @@ nsMathMLmencloseFrame::SetAdditionalComputedStyle(int32_t          aIndex,
     mMathMLChar[aIndex].SetComputedStyle(aComputedStyle);
 }
 
-class nsDisplayNotation : public nsDisplayItem
+class nsDisplayNotation final : public nsDisplayItem
 {
 public:
   nsDisplayNotation(nsDisplayListBuilder* aBuilder,
@@ -858,7 +858,8 @@ void nsDisplayNotation::Paint(nsDisplayListBuilder* aBuilder,
       return;
     }
     default:
-      NS_NOTREACHED("This notation can not be drawn using nsDisplayNotation");
+      MOZ_ASSERT_UNREACHABLE("This notation can not be drawn using "
+                             "nsDisplayNotation");
   }
 }
 

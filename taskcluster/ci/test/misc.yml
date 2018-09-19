@@ -31,9 +31,19 @@ geckoview-junit:
     e10s: true
     target: geckoview-androidTest.apk
     max-run-time: 3600
+    tier:
+        by-test-platform:
+            android-em-7.0-x86/opt: 3
+            default: default
+    run-on-projects:
+        by-test-platform:
+            android-em-7.0-x86/opt: ['mozilla-central']
+            default: built-projects
     chunks:
         by-test-platform:
-            android-em-4.3-arm7-api-16/debug: 3
+            android-em-4.3-arm7-api-16-ccov/debug: 4
+            android-em-4.3-arm7-api-16/debug: 4
+            android-em-4.3-arm7-api-16/opt: 2
             default: 1
     mozharness:
         script: android_emulator_unittest.py
@@ -59,6 +69,7 @@ robocop:
     chunks:
         by-test-platform:
             # android-em-4.3-arm7-api-16/debug -- not run
+            android-em-4.3-arm7-api-16-ccov/debug: 8
             android-em-4.3-arm7-api-16/opt: 4
     loopback-video: true
     e10s: false
@@ -73,7 +84,7 @@ robocop:
 telemetry-tests-client:
     description: "Telemetry tests client run"
     suite: telemetry-tests-client
-    treeherder-symbol: tt-c()
+    treeherder-symbol: tt(c)
     max-run-time: 5400
     checkout: true
     tier: 3
@@ -103,6 +114,7 @@ test-verify:
             .*-jsdcov/.*: []
             .*-asan/.*: []
             # do not run on beta or release: usually just confirms earlier results
+            .*-msvc/.*: ['mozilla-central', 'try']
             default: ['trunk', 'try']
     tier: 2
     mozharness:
@@ -112,12 +124,12 @@ test-verify:
                 default: desktop_unittest.py
         config:
             by-test-platform:
-                android-em.*:
-                    - android/android_common.py
-                    - android/androidarm_4_3.py
                 android-em-7.0-x86/opt:
                     - android/android_common.py
                     - android/androidx86_7_0.py
+                android-em.*:
+                    - android/android_common.py
+                    - android/androidarm_4_3.py
                 linux.*:
                     - unittests/linux_unittest.py
                     - remove_executables.py
@@ -147,6 +159,7 @@ test-verify-gpu:
             .*-jsdcov/.*: []
             .*-asan/.*: []
             # do not run on beta or release: usually just confirms earlier results
+            .*-msvc/.*: ['mozilla-central', 'try']
             default: ['trunk', 'try']
     tier: 2
     mozharness:
@@ -156,12 +169,12 @@ test-verify-gpu:
                 default: desktop_unittest.py
         config:
             by-test-platform:
-                android-em.*:
-                    - android/android_common.py
-                    - android/androidarm_4_3.py
                 android-em-7.0-x86/opt:
                     - android/android_common.py
                     - android/androidx86_7_0.py
+                android-em.*:
+                    - android/android_common.py
+                    - android/androidarm_4_3.py
                 linux.*:
                     - unittests/linux_unittest.py
                     - remove_executables.py
@@ -193,6 +206,9 @@ test-coverage:
                 default: desktop_unittest.py
         config:
             by-test-platform:
+                android-em-7.0-x86/opt:
+                    - android/android_common.py
+                    - android/androidx86_7_0.py
                 android-em.*:
                     - android/android_common.py
                     - android/androidarm_4_3.py
@@ -231,6 +247,9 @@ test-coverage-gpu:
                 default: desktop_unittest.py
         config:
             by-test-platform:
+                android-em-7.0-x86/opt:
+                    - android/android_common.py
+                    - android/androidx86_7_0.py
                 android-em.*:
                     - android/android_common.py
                     - android/androidarm_4_3.py

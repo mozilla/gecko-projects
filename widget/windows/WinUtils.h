@@ -105,6 +105,7 @@ typedef DPI_AWARENESS_CONTEXT(WINAPI * SetThreadDpiAwarenessContextProc)(DPI_AWA
 typedef BOOL(WINAPI * EnableNonClientDpiScalingProc)(HWND);
 
 namespace mozilla {
+enum class PointerCapabilities : uint8_t;
 #if defined(ACCESSIBILITY)
 namespace a11y {
 class Accessible;
@@ -394,7 +395,7 @@ public:
 
   /**
    * GetMouseInputSource() returns a pointing device information.  The value is
-   * one of MouseEventBinding::MOZ_SOURCE_*.  This method MUST be called during
+   * one of MouseEvent_Binding::MOZ_SOURCE_*.  This method MUST be called during
    * mouse message handling.
    */
   static uint16_t GetMouseInputSource();
@@ -453,7 +454,8 @@ public:
    * nsIWidget::SynthethizeNative*Event().
    */
   static void SetupKeyModifiersSequence(nsTArray<KeyPair>* aArray,
-                                        uint32_t aModifiers);
+                                        uint32_t aModifiers,
+                                        UINT aMessage);
 
   /**
   * Does device have touch support
@@ -467,6 +469,16 @@ public:
   * each individual digitizer.
   */
   static uint32_t GetMaxTouchPoints();
+
+  /**
+   * Returns the windows power platform role, which is useful for detecting tablets.
+   */
+  static POWER_PLATFORM_ROLE GetPowerPlatformRole();
+
+  // For pointer and hover media queries features.
+  static PointerCapabilities GetPrimaryPointerCapabilities();
+  // For any-pointer and any-hover media queries features.
+  static PointerCapabilities GetAllPointerCapabilities();
 
   /**
    * Fully resolves a path to its final path name. So if path contains
@@ -554,21 +566,6 @@ private:
   uint32_t mStride;
   uint32_t mWidth;
   uint32_t mHeight;
-};
-
-
-class AsyncDeleteIconFromDisk : public nsIRunnable
-{
-public:
-  NS_DECL_THREADSAFE_ISUPPORTS
-  NS_DECL_NSIRUNNABLE
-
-  explicit AsyncDeleteIconFromDisk(const nsAString &aIconPath);
-
-private:
-  virtual ~AsyncDeleteIconFromDisk();
-
-  nsAutoString mIconPath;
 };
 
 class AsyncDeleteAllFaviconsFromDisk : public nsIRunnable

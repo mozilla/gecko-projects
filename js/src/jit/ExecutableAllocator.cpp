@@ -35,8 +35,9 @@ using namespace js::jit;
 ExecutablePool::~ExecutablePool()
 {
 #ifdef DEBUG
-    for (size_t bytes : m_codeBytes)
+    for (size_t bytes : m_codeBytes) {
         MOZ_ASSERT(bytes == 0);
+    }
 #endif
 
     MOZ_ASSERT(!isMarked());
@@ -49,8 +50,9 @@ ExecutablePool::release(bool willDestroy)
 {
     MOZ_ASSERT(m_refCount != 0);
     MOZ_ASSERT_IF(willDestroy, m_refCount == 1);
-    if (--m_refCount == 0)
+    if (--m_refCount == 0) {
         js_delete(this);
+    }
 }
 
 void
@@ -95,12 +97,12 @@ ExecutablePool::available() const
 
 ExecutableAllocator::~ExecutableAllocator()
 {
-    for (size_t i = 0; i < m_smallPools.length(); i++)
+    for (size_t i = 0; i < m_smallPools.length(); i++) {
         m_smallPools[i]->release(/* willDestroy = */true);
+    }
 
     // If this asserts we have a pool leak.
-    MOZ_ASSERT_IF((m_pools.initialized() &&
-                   TlsContext.get()->runtime()->gc.shutdownCollectedEverything()),
+    MOZ_ASSERT_IF(TlsContext.get()->runtime()->gc.shutdownCollectedEverything(),
                   m_pools.empty());
 }
 
@@ -115,8 +117,9 @@ ExecutableAllocator::poolForSize(size_t n)
     ExecutablePool* minPool = nullptr;
     for (size_t i = 0; i < m_smallPools.length(); i++) {
         ExecutablePool* pool = m_smallPools[i];
-        if (n <= pool->available() && (!minPool || pool->available() < minPool->available()))
+        if (n <= pool->available() && (!minPool || pool->available() < minPool->available())) {
             minPool = pool;
+        }
     }
     if (minPool) {
         minPool->addRef();
@@ -124,26 +127,30 @@ ExecutableAllocator::poolForSize(size_t n)
     }
 
     // If the request is large, we just provide a unshared allocator
-    if (n > ExecutableCodePageSize)
+    if (n > ExecutableCodePageSize) {
         return createPool(n);
+    }
 
     // Create a new allocator
     ExecutablePool* pool = createPool(ExecutableCodePageSize);
-    if (!pool)
+    if (!pool) {
         return nullptr;
+    }
     // At this point, local |pool| is the owner.
 
     if (m_smallPools.length() < maxSmallPools) {
         // We haven't hit the maximum number of live pools; add the new pool.
         // If append() OOMs, we just return an unshared allocator.
-        if (m_smallPools.append(pool))
+        if (m_smallPools.append(pool)) {
             pool->addRef();
+        }
     } else {
         // Find the pool with the least space.
         int iMin = 0;
         for (size_t i = 1; i < m_smallPools.length(); i++) {
-            if (m_smallPools[i]->available() < m_smallPools[iMin]->available())
+            if (m_smallPools[i]->available() < m_smallPools[iMin]->available()) {
                 iMin = i;
+            }
         }
 
         // If the new allocator will result in more free space than the small
@@ -163,8 +170,9 @@ ExecutableAllocator::poolForSize(size_t n)
 /* static */ size_t
 ExecutableAllocator::roundUpAllocationSize(size_t request, size_t granularity)
 {
-    if ((std::numeric_limits<size_t>::max() - granularity) <= request)
+    if ((std::numeric_limits<size_t>::max() - granularity) <= request) {
         return OVERSIZE_ALLOCATION;
+    }
 
     // Round up to next page boundary
     size_t size = request + (granularity - 1);
@@ -177,15 +185,14 @@ ExecutablePool*
 ExecutableAllocator::createPool(size_t n)
 {
     size_t allocSize = roundUpAllocationSize(n, ExecutableCodePageSize);
-    if (allocSize == OVERSIZE_ALLOCATION)
+    if (allocSize == OVERSIZE_ALLOCATION) {
         return nullptr;
-
-    if (!m_pools.initialized() && !m_pools.init())
-        return nullptr;
+    }
 
     ExecutablePool::Allocation a = systemAlloc(allocSize);
-    if (!a.pages)
+    if (!a.pages) {
         return nullptr;
+    }
 
     ExecutablePool* pool = js_new<ExecutablePool>(this, a);
     if (!pool) {
@@ -216,8 +223,9 @@ ExecutableAllocator::alloc(JSContext* cx, size_t n, ExecutablePool** poolp, Code
     }
 
     *poolp = poolForSize(n);
-    if (!*poolp)
+    if (!*poolp) {
         return nullptr;
+    }
 
     // This alloc is infallible because poolForSize() just obtained
     // (found, or created if necessary) a pool that had enough space.
@@ -235,11 +243,10 @@ ExecutableAllocator::releasePoolPages(ExecutablePool* pool)
     MOZ_ASSERT(pool->m_allocation.pages);
     systemRelease(pool->m_allocation);
 
-    MOZ_ASSERT(m_pools.initialized());
-
     // Pool may not be present in m_pools if we hit OOM during creation.
-    if (auto ptr = m_pools.lookup(pool))
+    if (auto ptr = m_pools.lookup(pool)) {
         m_pools.remove(ptr);
+    }
 }
 
 void
@@ -263,15 +270,13 @@ ExecutableAllocator::purge()
 void
 ExecutableAllocator::addSizeOfCode(JS::CodeSizes* sizes) const
 {
-    if (m_pools.initialized()) {
-        for (ExecPoolHashSet::Range r = m_pools.all(); !r.empty(); r.popFront()) {
-            ExecutablePool* pool = r.front();
-            sizes->ion      += pool->m_codeBytes[CodeKind::Ion];
-            sizes->baseline += pool->m_codeBytes[CodeKind::Baseline];
-            sizes->regexp   += pool->m_codeBytes[CodeKind::RegExp];
-            sizes->other    += pool->m_codeBytes[CodeKind::Other];
-            sizes->unused   += pool->m_allocation.size - pool->usedCodeBytes();
-        }
+    for (ExecPoolHashSet::Range r = m_pools.all(); !r.empty(); r.popFront()) {
+        ExecutablePool* pool = r.front();
+        sizes->ion      += pool->m_codeBytes[CodeKind::Ion];
+        sizes->baseline += pool->m_codeBytes[CodeKind::Baseline];
+        sizes->regexp   += pool->m_codeBytes[CodeKind::RegExp];
+        sizes->other    += pool->m_codeBytes[CodeKind::Other];
+        sizes->unused   += pool->m_allocation.size - pool->usedCodeBytes();
     }
 }
 
@@ -279,8 +284,9 @@ ExecutableAllocator::addSizeOfCode(JS::CodeSizes* sizes) const
 ExecutableAllocator::reprotectPool(JSRuntime* rt, ExecutablePool* pool, ProtectionSetting protection)
 {
     char* start = pool->m_allocation.pages;
-    if (!ReprotectRegion(start, pool->m_freePtr - start, protection))
+    if (!ReprotectRegion(start, pool->m_freePtr - start, protection)) {
         MOZ_CRASH();
+    }
 }
 
 /* static */ void
@@ -290,8 +296,9 @@ ExecutableAllocator::poisonCode(JSRuntime* rt, JitPoisonRangeVector& ranges)
 
 #ifdef DEBUG
     // Make sure no pools have the mark bit set.
-    for (size_t i = 0; i < ranges.length(); i++)
+    for (size_t i = 0; i < ranges.length(); i++) {
         MOZ_ASSERT(!ranges[i].pool->isMarked());
+    }
 #endif
 
     for (size_t i = 0; i < ranges.length(); i++) {

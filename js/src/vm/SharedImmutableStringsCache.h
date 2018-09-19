@@ -16,6 +16,7 @@
 #include "builtin/String.h"
 
 #include "js/HashTable.h"
+#include "js/UniquePtr.h"
 #include "js/Utility.h"
 
 #include "threading/ExclusiveData.h"
@@ -138,17 +139,16 @@ class SharedImmutableStringsCache
         size_t n = mallocSizeOf(inner_);
 
         auto locked = inner_->lock();
-        if (!locked->set.initialized())
-            return n;
 
         // Size of the table.
-        n += locked->set.sizeOfExcludingThis(mallocSizeOf);
+        n += locked->set.shallowSizeOfExcludingThis(mallocSizeOf);
 
         // Sizes of the strings and their boxes.
         for (auto r = locked->set.all(); !r.empty(); r.popFront()) {
             n += mallocSizeOf(r.front().get());
-            if (const char* chars = r.front()->chars())
+            if (const char* chars = r.front()->chars()) {
                 n += mallocSizeOf(chars);
+            }
         }
 
         return n;
@@ -160,8 +160,9 @@ class SharedImmutableStringsCache
      */
     static mozilla::Maybe<SharedImmutableStringsCache> Create() {
         auto inner = js_new<ExclusiveData<Inner>>(mutexid::SharedImmutableStringsCache);
-        if (!inner)
+        if (!inner) {
             return mozilla::Nothing();
+        }
 
         auto locked = inner->lock();
         return mozilla::Some(SharedImmutableStringsCache(locked));
@@ -189,8 +190,9 @@ class SharedImmutableStringsCache
     }
 
     ~SharedImmutableStringsCache() {
-        if (!inner_)
+        if (!inner_) {
             return;
+        }
 
         bool shouldDestroy = false;
         {
@@ -199,11 +201,13 @@ class SharedImmutableStringsCache
             auto locked = inner_->lock();
             MOZ_ASSERT(locked->refcount > 0);
             locked->refcount--;
-            if (locked->refcount == 0)
+            if (locked->refcount == 0) {
                 shouldDestroy = true;
+            }
         }
-        if (shouldDestroy)
+        if (shouldDestroy) {
             js_delete(inner_);
+        }
     }
 
     /**
@@ -212,9 +216,6 @@ class SharedImmutableStringsCache
     void purge() {
         auto locked = inner_->lock();
         MOZ_ASSERT(locked->refcount > 0);
-
-        if (!locked->set.initialized())
-            return;
 
         for (Inner::Set::Enum e(locked->set); !e.empty(); e.popFront()) {
             if (e.front()->refcount == 0) {
@@ -239,7 +240,7 @@ class SharedImmutableStringsCache
       public:
         mutable size_t refcount;
 
-        using Ptr = mozilla::UniquePtr<StringBox, JS::DeletePolicy<StringBox>>;
+        using Ptr = js::UniquePtr<StringBox>;
 
         StringBox(OwnedChars&& chars, size_t length)
           : chars_(std::move(chars))
@@ -250,7 +251,7 @@ class SharedImmutableStringsCache
         }
 
         static Ptr Create(OwnedChars&& chars, size_t length) {
-            return Ptr(js_new<StringBox>(std::move(chars), length));
+            return js::MakeUnique<StringBox>(std::move(chars), length);
         }
 
         StringBox(const StringBox&) = delete;
@@ -319,11 +320,13 @@ class SharedImmutableStringsCache
         static bool match(const StringBox::Ptr& key, const Lookup& lookup) {
             MOZ_ASSERT(lookup.chars_);
 
-            if (!key->chars() || key->length() != lookup.length_)
+            if (!key->chars() || key->length() != lookup.length_) {
                 return false;
+            }
 
-            if (key->chars() == lookup.chars_)
+            if (key->chars() == lookup.chars_) {
                 return true;
+            }
 
             return memcmp(key->chars(), lookup.chars_, key->length()) == 0;
         }

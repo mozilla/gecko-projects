@@ -30,21 +30,60 @@ function getHistoryValue(state, direction) {
 }
 
 function getNextHistoryValue(state) {
-  if (state.history.placeHolder < (state.history.entries.length - 1)) {
-    return state.history.entries[state.history.placeHolder + 1];
+  if (state.history.position < (state.history.entries.length - 1)) {
+    return state.history.entries[state.history.position + 1];
+  }
+
+  // The user didn't pick up anything from the history and returned
+  // back to the previous value (if any) that was in the input box.
+  return state.history.originalUserValue;
+}
+
+function getPreviousHistoryValue(state) {
+  if (state.history.position > 0) {
+    return state.history.entries[state.history.position - 1];
   }
   return null;
 }
 
-function getPreviousHistoryValue(state) {
-  if (state.history.placeHolder > 0) {
-    return state.history.entries[state.history.placeHolder - 1];
+function getReverseSearchResult(state) {
+  const { history } = state;
+  const { currentReverseSearchResults, currentReverseSearchResultsPosition } = history;
+
+  if (!Array.isArray(currentReverseSearchResults)
+    || currentReverseSearchResults.length === 0
+    || !Number.isInteger(currentReverseSearchResultsPosition)
+  ) {
+    return null;
   }
-  return null;
+  return currentReverseSearchResults[currentReverseSearchResultsPosition];
+}
+
+function getReverseSearchResultPosition(state) {
+  const { history } = state;
+  const { currentReverseSearchResultsPosition } = history;
+  if (!Number.isInteger(currentReverseSearchResultsPosition)) {
+    return currentReverseSearchResultsPosition;
+  }
+
+  return currentReverseSearchResultsPosition + 1;
+}
+
+function getReverseSearchTotalResults(state) {
+  const { history } = state;
+  const { currentReverseSearchResults } = history;
+  if (!currentReverseSearchResults) {
+    return null;
+  }
+
+  return currentReverseSearchResults.length;
 }
 
 module.exports = {
   getHistory,
   getHistoryEntries,
   getHistoryValue,
+  getReverseSearchResult,
+  getReverseSearchResultPosition,
+  getReverseSearchTotalResults,
 };

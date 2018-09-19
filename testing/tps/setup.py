@@ -11,10 +11,10 @@ version = '0.6'
 deps = ['httplib2 == 0.9.2',
         'mozfile == 1.2',
         'mozhttpd == 0.7',
-        'mozinfo == 0.10',
+        'mozinfo >= 0.10',
         'mozinstall == 1.16',
         'mozprocess == 0.26',
-        'mozprofile == 1.1.0',
+        'mozprofile == 2.0.0',
         'mozrunner == 7.0.1',
         'mozversion == 1.5',
        ]

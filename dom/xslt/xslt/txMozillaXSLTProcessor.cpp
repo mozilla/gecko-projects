@@ -38,8 +38,6 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-static NS_DEFINE_CID(kXMLDocumentCID, NS_XMLDOCUMENT_CID);
-
 /**
  * Output Handler Factories
  */
@@ -1108,9 +1106,10 @@ txMozillaXSLTProcessor::reportError(nsresult aResult,
 void
 txMozillaXSLTProcessor::notifyError()
 {
-    nsCOMPtr<nsIDocument> document = do_CreateInstance(kXMLDocumentCID);
-    if (!document) {
-        return;
+    nsCOMPtr<nsIDocument> document;
+    {
+      nsresult rv = NS_NewXMLDocument(getter_AddRefs(document));
+      NS_ENSURE_SUCCESS_VOID(rv);
     }
 
     URIUtils::ResetWithSource(document, mSource);
@@ -1246,7 +1245,7 @@ txMozillaXSLTProcessor::ContentRemoved(nsIContent* aChild,
 /* virtual */ JSObject*
 txMozillaXSLTProcessor::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-    return XSLTProcessorBinding::Wrap(aCx, this, aGivenProto);
+    return XSLTProcessor_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 DocGroup*
@@ -1474,11 +1473,6 @@ txVariable::Convert(nsIVariant *aValue, txAExprResult** aResult)
             nsISupports** values = static_cast<nsISupports**>(array);
 
             RefPtr<txNodeSet> nodeSet = new txNodeSet(nullptr);
-            if (!nodeSet) {
-                NS_FREE_XPCOM_ISUPPORTS_POINTER_ARRAY(count, values);
-
-                return NS_ERROR_OUT_OF_MEMORY;
-            }
 
             uint32_t i;
             for (i = 0; i < count; ++i) {

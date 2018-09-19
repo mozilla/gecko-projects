@@ -16,15 +16,16 @@
 #include "nspr.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/NullPrincipal.h"
 #include "nsContentUtils.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsJSPrincipals.h"
 #include "nsIScriptError.h"
 #include "js/Wrapper.h"
-#include "NullPrincipal.h"
 
 extern mozilla::LazyLogModule MCD;
 using mozilla::AutoSafeJSContext;
+using mozilla::NullPrincipal;
 using mozilla::dom::AutoJSAPI;
 
 //*****************************************************************************
@@ -35,19 +36,14 @@ static bool sandboxEnabled;
 
 nsresult CentralizedAdminPrefManagerInit(bool aSandboxEnabled)
 {
-    nsresult rv;
-
     // If the sandbox is already created, no need to create it again.
     if (autoconfigSb.initialized())
         return NS_OK;
 
-    sandboxEnabled = aSandboxEnabled || !strcmp(NS_STRINGIFY(MOZ_UPDATE_CHANNEL), "release");
+    sandboxEnabled = aSandboxEnabled;
 
     // Grab XPConnect.
-    nsCOMPtr<nsIXPConnect> xpc = do_GetService(nsIXPConnect::GetCID(), &rv);
-    if (NS_FAILED(rv)) {
-        return rv;
-    }
+    nsCOMPtr<nsIXPConnect> xpc = nsIXPConnect::XPConnect();
 
     // Grab the system principal.
     nsCOMPtr<nsIPrincipal> principal;
@@ -57,7 +53,7 @@ nsresult CentralizedAdminPrefManagerInit(bool aSandboxEnabled)
     // Create a sandbox.
     AutoSafeJSContext cx;
     JS::Rooted<JSObject*> sandbox(cx);
-    rv = xpc->CreateSandbox(cx, principal, sandbox.address());
+    nsresult rv = xpc->CreateSandbox(cx, principal, sandbox.address());
     NS_ENSURE_SUCCESS(rv, rv);
 
     // Unwrap, store and root the sandbox.
@@ -74,7 +70,7 @@ nsresult CentralizedAdminPrefManagerInit(bool aSandboxEnabled)
 
 
     // Define gSandbox on system sandbox.
-    JSAutoRealm ac(cx, autoconfigSystemSb);
+    JSAutoRealm ar(cx, autoconfigSystemSb);
 
     JS::Rooted<JS::Value> value(cx, JS::ObjectValue(*sandbox));
 
@@ -116,8 +112,6 @@ nsresult EvaluateAdminConfigScript(JS::HandleObject sandbox,
                                    const char *filename, bool globalContext,
                                    bool callbacks, bool skipFirstLine)
 {
-    nsresult rv = NS_OK;
-
     if (skipFirstLine) {
         /* In order to protect the privacy of the JavaScript preferences file
          * from loading by the browser, we make the first line unparseable
@@ -141,10 +135,7 @@ nsresult EvaluateAdminConfigScript(JS::HandleObject sandbox,
     }
 
     // Grab XPConnect.
-    nsCOMPtr<nsIXPConnect> xpc = do_GetService(nsIXPConnect::GetCID(), &rv);
-    if (NS_FAILED(rv)) {
-        return rv;
-    }
+    nsCOMPtr<nsIXPConnect> xpc = nsIXPConnect::XPConnect();
 
     AutoJSAPI jsapi;
     if (!jsapi.Init(sandbox)) {
@@ -169,14 +160,14 @@ nsresult EvaluateAdminConfigScript(JS::HandleObject sandbox,
         convertedScript = NS_ConvertASCIItoUTF16(script);
     }
     {
-        JSAutoRealm ac(cx, autoconfigSystemSb);
+        JSAutoRealm ar(cx, autoconfigSystemSb);
         JS::Rooted<JS::Value> value(cx, JS::BooleanValue(isUTF8));
         if (!JS_DefineProperty(cx, autoconfigSystemSb, "gIsUTF8", value, JSPROP_ENUMERATE)) {
             return NS_ERROR_UNEXPECTED;
         }
     }
-    rv = xpc->EvalInSandboxObject(convertedScript, filename, cx,
-                                  sandbox, &v);
+    nsresult rv = xpc->EvalInSandboxObject(convertedScript, filename, cx,
+                                           sandbox, &v);
     NS_ENSURE_SUCCESS(rv, rv);
 
     return NS_OK;

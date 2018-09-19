@@ -177,6 +177,8 @@ public:
 
   void RefreshStandardFontLoadPrincipal();
 
+  void CopyNonRuleFacesTo(FontFaceSet* aFontFaceSet) const;
+
   nsIDocument* Document() const { return mDocument; }
 
   // -- Web IDL --------------------------------------------------------------
@@ -268,7 +270,7 @@ private:
   };
 
   static already_AddRefed<gfxUserFontEntry> FindOrCreateUserFontEntryFromFontFace(
-                                                   const nsAString& aFamilyName,
+                                                   const nsACString& aFamilyName,
                                                    FontFace* aFontFace,
                                                    SheetType aSheetType);
 

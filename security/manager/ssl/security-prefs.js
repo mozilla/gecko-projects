@@ -7,6 +7,11 @@ pref("security.tls.version.max", 4);
 pref("security.tls.version.fallback-limit", 4);
 pref("security.tls.insecure_fallback_hosts", "");
 pref("security.tls.enable_0rtt_data", false);
+#ifdef RELEASE_OR_BETA
+pref("security.tls.hello_downgrade_check", false);
+#else
+pref("security.tls.hello_downgrade_check", true);
+#endif
 
 pref("security.ssl.treat_unsafe_negotiation_as_broken", false);
 pref("security.ssl.require_safe_negotiation",  false);
@@ -128,9 +133,14 @@ pref("security.cert_pinning.max_max_age_seconds", 5184000);
 // security.pki.distrust_ca_policy controls what root program distrust policies
 // are enforced at this time:
 // 0: No distrust policies enforced
-// 1: Symantec root distrust policy enforced
+// 1: Symantec roots distrusted for certificates issued after cutoff
+// 2: Symantec roots distrusted regardless of date
 // See https://wiki.mozilla.org/CA/Upcoming_Distrust_Actions for more details.
+#ifdef NIGHTLY_BUILD
+pref("security.pki.distrust_ca_policy", 2);
+#else
 pref("security.pki.distrust_ca_policy", 1);
+#endif
 
 // Issuer we use to detect MitM proxies. Set to the issuer of the cert of the
 // Firefox update service. The string format is whatever NSS uses to print a DN.
@@ -138,3 +148,11 @@ pref("security.pki.distrust_ca_policy", 1);
 pref("security.pki.mitm_canary_issuer", "");
 // Pref to disable the MitM proxy checks.
 pref("security.pki.mitm_canary_issuer.enabled", true);
+
+// It is set to true when a non-built-in root certificate is detected on a
+// Firefox update service's connection.
+// This value is set automatically.
+// The difference between security.pki.mitm_canary_issuer and this pref is that
+// here the root is trusted but not a built-in, whereas for
+// security.pki.mitm_canary_issuer.enabled, the root is not trusted.
+pref("security.pki.mitm_detected", false);

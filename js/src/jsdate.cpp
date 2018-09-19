@@ -36,8 +36,10 @@
 #include "builtin/String.h"
 #include "js/Conversions.h"
 #include "js/Date.h"
+#include "js/LocaleSensitive.h"
 #include "js/Wrapper.h"
 #include "util/StringBuffer.h"
+#include "util/Text.h"
 #include "vm/DateTime.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
@@ -121,6 +123,48 @@ static Atomic<JS::ReduceMicrosecondTimePrecisionCallback, Relaxed> sReduceMicros
  *     hashCode
  */
 
+namespace
+{
+
+class DateTimeHelper
+{
+  private:
+#if ENABLE_INTL_API && !MOZ_SYSTEM_ICU
+    static double localTZA(double t, DateTimeInfo::TimeZoneOffset offset);
+#else
+    static int equivalentYearForDST(int year);
+    static bool isRepresentableAsTime32(double t);
+    static double daylightSavingTA(double t);
+    static double adjustTime(double date);
+    static PRMJTime toPRMJTime(double localTime, double utcTime);
+#endif
+
+  public:
+    static double localTime(double t);
+    static double UTC(double t);
+    static JSString* timeZoneComment(JSContext* cx, double utcTime, double localTime);
+#if !ENABLE_INTL_API || MOZ_SYSTEM_ICU
+    static size_t formatTime(char* buf, size_t buflen, const char* fmt, double utcTime, double localTime);
+#endif
+};
+
+}
+
+// ES2019 draft rev 0ceb728a1adbffe42b26972a6541fd7f398b1557
+// 5.2.5 Mathematical Operations
+static inline double
+PositiveModulo(double dividend, double divisor)
+{
+    MOZ_ASSERT(divisor > 0);
+    MOZ_ASSERT(IsFinite(divisor));
+
+    double result = fmod(dividend, divisor);
+    if (result < 0) {
+        result += divisor;
+    }
+    return result + (+0.0);
+}
+
 static inline double
 Day(double t)
 {
@@ -130,10 +174,7 @@ Day(double t)
 static double
 TimeWithinDay(double t)
 {
-    double result = fmod(t, msPerDay);
-    if (result < 0)
-        result += msPerDay;
-    return result;
+    return PositiveModulo(t, msPerDay);
 }
 
 /* ES5 15.9.1.3. */
@@ -147,8 +188,9 @@ IsLeapYear(double year)
 static inline double
 DaysInYear(double year)
 {
-    if (!IsFinite(year))
+    if (!IsFinite(year)) {
         return GenericNaN();
+    }
     return IsLeapYear(year) ? 366 : 365;
 }
 
@@ -170,8 +212,9 @@ TimeFromYear(double y)
 static double
 YearFromTime(double t)
 {
-    if (!IsFinite(t))
+    if (!IsFinite(t)) {
         return GenericNaN();
+    }
 
     MOZ_ASSERT(ToInteger(t) == t);
 
@@ -186,8 +229,9 @@ YearFromTime(double t)
     if (t2 > t) {
         y--;
     } else {
-        if (t2 + msPerDay * DaysInYear(y) <= t)
+        if (t2 + msPerDay * DaysInYear(y) <= t) {
             y++;
+        }
     }
     return y;
 }
@@ -209,35 +253,47 @@ DayWithinYear(double t, double year)
 static double
 MonthFromTime(double t)
 {
-    if (!IsFinite(t))
+    if (!IsFinite(t)) {
         return GenericNaN();
+    }
 
     double year = YearFromTime(t);
     double d = DayWithinYear(t, year);
 
     int step;
-    if (d < (step = 31))
+    if (d < (step = 31)) {
         return 0;
-    if (d < (step += DaysInFebruary(year)))
+    }
+    if (d < (step += DaysInFebruary(year))) {
         return 1;
-    if (d < (step += 31))
+    }
+    if (d < (step += 31)) {
         return 2;
-    if (d < (step += 30))
+    }
+    if (d < (step += 30)) {
         return 3;
-    if (d < (step += 31))
+    }
+    if (d < (step += 31)) {
         return 4;
-    if (d < (step += 30))
+    }
+    if (d < (step += 30)) {
         return 5;
-    if (d < (step += 31))
+    }
+    if (d < (step += 31)) {
         return 6;
-    if (d < (step += 31))
+    }
+    if (d < (step += 31)) {
         return 7;
-    if (d < (step += 30))
+    }
+    if (d < (step += 30)) {
         return 8;
-    if (d < (step += 31))
+    }
+    if (d < (step += 31)) {
         return 9;
-    if (d < (step += 30))
+    }
+    if (d < (step += 30)) {
         return 10;
+    }
     return 11;
 }
 
@@ -245,45 +301,57 @@ MonthFromTime(double t)
 static double
 DateFromTime(double t)
 {
-    if (!IsFinite(t))
+    if (!IsFinite(t)) {
         return GenericNaN();
+    }
 
     double year = YearFromTime(t);
     double d = DayWithinYear(t, year);
 
     int next;
-    if (d <= (next = 30))
+    if (d <= (next = 30)) {
         return d + 1;
+    }
     int step = next;
-    if (d <= (next += DaysInFebruary(year)))
+    if (d <= (next += DaysInFebruary(year))) {
         return d - step;
+    }
     step = next;
-    if (d <= (next += 31))
+    if (d <= (next += 31)) {
         return d - step;
+    }
     step = next;
-    if (d <= (next += 30))
+    if (d <= (next += 30)) {
         return d - step;
+    }
     step = next;
-    if (d <= (next += 31))
+    if (d <= (next += 31)) {
         return d - step;
+    }
     step = next;
-    if (d <= (next += 30))
+    if (d <= (next += 30)) {
         return d - step;
+    }
     step = next;
-    if (d <= (next += 31))
+    if (d <= (next += 31)) {
         return d - step;
+    }
     step = next;
-    if (d <= (next += 31))
+    if (d <= (next += 31)) {
         return d - step;
+    }
     step = next;
-    if (d <= (next += 30))
+    if (d <= (next += 30)) {
         return d - step;
+    }
     step = next;
-    if (d <= (next += 31))
+    if (d <= (next += 31)) {
         return d - step;
+    }
     step = next;
-    if (d <= (next += 30))
+    if (d <= (next += 30)) {
         return d - step;
+    }
     step = next;
     return d - step;
 }
@@ -298,8 +366,9 @@ WeekDay(double t)
      */
     MOZ_ASSERT(ToInteger(t) == t);
     int result = (int(Day(t)) + 4) % 7;
-    if (result < 0)
+    if (result < 0) {
         result += 7;
+    }
     return result;
 }
 
@@ -328,8 +397,9 @@ static double
 MakeDay(double year, double month, double date)
 {
     /* Step 1. */
-    if (!IsFinite(year) || !IsFinite(month) || !IsFinite(date))
+    if (!IsFinite(year) || !IsFinite(month) || !IsFinite(date)) {
         return GenericNaN();
+    }
 
     /* Steps 2-4. */
     double y = ToInteger(year);
@@ -340,9 +410,7 @@ MakeDay(double year, double month, double date)
     double ym = y + floor(m / 12);
 
     /* Step 6. */
-    int mn = int(fmod(m, 12.0));
-    if (mn < 0)
-        mn += 12;
+    int mn = int(PositiveModulo(m, 12));
 
     /* Steps 7-8. */
     bool leap = IsLeapYear(ym);
@@ -358,8 +426,9 @@ static inline double
 MakeDate(double day, double time)
 {
     /* Step 1. */
-    if (!IsFinite(day) || !IsFinite(time))
+    if (!IsFinite(day) || !IsFinite(time)) {
         return GenericNaN();
+    }
 
     /* Step 2. */
     return day * msPerDay + time;
@@ -426,6 +495,48 @@ JS::SetTimeResolutionUsec(uint32_t resolution, bool jitter)
     sJitter = jitter;
 }
 
+#if ENABLE_INTL_API && !MOZ_SYSTEM_ICU
+// ES2019 draft rev 0ceb728a1adbffe42b26972a6541fd7f398b1557
+// 20.3.1.7 LocalTZA ( t, isUTC )
+double
+DateTimeHelper::localTZA(double t, DateTimeInfo::TimeZoneOffset offset)
+{
+    MOZ_ASSERT(IsFinite(t));
+
+    int64_t milliseconds = static_cast<int64_t>(t);
+    int32_t offsetMilliseconds = DateTimeInfo::getOffsetMilliseconds(milliseconds, offset);
+    return static_cast<double>(offsetMilliseconds);
+}
+
+// ES2019 draft rev 0ceb728a1adbffe42b26972a6541fd7f398b1557
+// 20.3.1.8 LocalTime ( t )
+double
+DateTimeHelper::localTime(double t)
+{
+    if (!IsFinite(t)) {
+        return GenericNaN();
+    }
+
+    MOZ_ASSERT(StartOfTime <= t && t <= EndOfTime);
+    return t + localTZA(t, DateTimeInfo::TimeZoneOffset::UTC);
+}
+
+// ES2019 draft rev 0ceb728a1adbffe42b26972a6541fd7f398b1557
+// 20.3.1.9 UTC ( t )
+double
+DateTimeHelper::UTC(double t)
+{
+    if (!IsFinite(t)) {
+        return GenericNaN();
+    }
+
+    if (t < (StartOfTime - msPerDay) || t > (EndOfTime + msPerDay)) {
+        return GenericNaN();
+    }
+
+    return t - localTZA(t, DateTimeInfo::TimeZoneOffset::Local);
+}
+#else
 /*
  * Find a year for which any given date will fall on the same weekday.
  *
@@ -433,8 +544,8 @@ JS::SetTimeResolutionUsec(uint32_t resolution, bool jitter)
  * for determining DST; it hasn't been proven not to produce an
  * incorrect year for times near year boundaries.
  */
-static int
-EquivalentYearForDST(int year)
+int
+DateTimeHelper::equivalentYearForDST(int year)
 {
     /*
      * Years and leap years on which Jan 1 is a Sunday, Monday, etc.
@@ -458,8 +569,9 @@ EquivalentYearForDST(int year)
     };
 
     int day = int(DayFromYear(year) + 4) % 7;
-    if (day < 0)
+    if (day < 0) {
         day += 7;
+    }
 
     const auto& yearStartingWith = year < 1970 ? pastYearStartingWith : futureYearStartingWith;
     return yearStartingWith[IsLeapYear(year)][day];
@@ -467,52 +579,53 @@ EquivalentYearForDST(int year)
 
 // Return true if |t| is representable as a 32-bit time_t variable, that means
 // the year is in [1970, 2038).
-static bool
-IsRepresentableAsTime32(double t)
+bool
+DateTimeHelper::isRepresentableAsTime32(double t)
 {
     return 0.0 <= t && t < 2145916800000.0;
 }
 
 /* ES5 15.9.1.8. */
-static double
-DaylightSavingTA(double t)
+double
+DateTimeHelper::daylightSavingTA(double t)
 {
-    if (!IsFinite(t))
+    if (!IsFinite(t)) {
         return GenericNaN();
+    }
 
     /*
      * If earlier than 1970 or after 2038, potentially beyond the ken of
      * many OSes, map it to an equivalent year before asking.
      */
-    if (!IsRepresentableAsTime32(t)) {
-        int year = EquivalentYearForDST(int(YearFromTime(t)));
+    if (!isRepresentableAsTime32(t)) {
+        int year = equivalentYearForDST(int(YearFromTime(t)));
         double day = MakeDay(year, MonthFromTime(t), DateFromTime(t));
         t = MakeDate(day, TimeWithinDay(t));
     }
 
     int64_t utcMilliseconds = static_cast<int64_t>(t);
-    int64_t offsetMilliseconds = DateTimeInfo::getDSTOffsetMilliseconds(utcMilliseconds);
+    int32_t offsetMilliseconds = DateTimeInfo::getDSTOffsetMilliseconds(utcMilliseconds);
     return static_cast<double>(offsetMilliseconds);
 }
 
-static double
-AdjustTime(double date)
+double
+DateTimeHelper::adjustTime(double date)
 {
     double localTZA = DateTimeInfo::localTZA();
-    double t = DaylightSavingTA(date) + localTZA;
+    double t = daylightSavingTA(date) + localTZA;
     t = (localTZA >= 0) ? fmod(t, msPerDay) : -fmod(msPerDay - t, msPerDay);
     return t;
 }
 
 /* ES5 15.9.1.9. */
-static double
-LocalTime(double t)
+double
+DateTimeHelper::localTime(double t)
 {
-    return t + AdjustTime(t);
+    return t + adjustTime(t);
 }
 
-static double
-UTC(double t)
+double
+DateTimeHelper::UTC(double t)
 {
     // Following the ES2017 specification creates undesirable results at DST
     // transitions. For example when transitioning from PST to PDT,
@@ -521,44 +634,45 @@ UTC(double t)
     // V8 and subtract one hour before computing the offset.
     // Spec bug: https://bugs.ecmascript.org/show_bug.cgi?id=4007
 
-    return t - AdjustTime(t - DateTimeInfo::localTZA() - msPerHour);
+    return t - adjustTime(t - DateTimeInfo::localTZA() - msPerHour);
+}
+#endif /* ENABLE_INTL_API && !MOZ_SYSTEM_ICU */
+
+static double
+LocalTime(double t)
+{
+    return DateTimeHelper::localTime(t);
+}
+
+static double
+UTC(double t)
+{
+    return DateTimeHelper::UTC(t);
 }
 
 /* ES5 15.9.1.10. */
 static double
 HourFromTime(double t)
 {
-    double result = fmod(floor(t/msPerHour), HoursPerDay);
-    if (result < 0)
-        result += HoursPerDay;
-    return result;
+    return PositiveModulo(floor(t/msPerHour), HoursPerDay);
 }
 
 static double
 MinFromTime(double t)
 {
-    double result = fmod(floor(t / msPerMinute), MinutesPerHour);
-    if (result < 0)
-        result += MinutesPerHour;
-    return result;
+    return PositiveModulo(floor(t / msPerMinute), MinutesPerHour);
 }
 
 static double
 SecFromTime(double t)
 {
-    double result = fmod(floor(t / msPerSecond), SecondsPerMinute);
-    if (result < 0)
-        result += SecondsPerMinute;
-    return result;
+    return PositiveModulo(floor(t / msPerSecond), SecondsPerMinute);
 }
 
 static double
 msFromTime(double t)
 {
-    double result = fmod(t, msPerSecond);
-    if (result < 0)
-        result += msPerSecond;
-    return result;
+    return PositiveModulo(t, msPerSecond);
 }
 
 /* ES5 15.9.1.11. */
@@ -625,8 +739,9 @@ static bool
 RegionMatches(const char* s1, int s1off, const CharT* s2, int s2off, int count)
 {
     while (count > 0 && s1[s1off] && s2[s2off]) {
-        if (unicode::ToLowerCase(s1[s1off]) != unicode::ToLowerCase(s2[s2off]))
+        if (unicode::ToLowerCase(s1[s1off]) != unicode::ToLowerCase(s2[s2off])) {
             break;
+        }
 
         s1off++;
         s2off++;
@@ -646,14 +761,16 @@ date_UTC(JSContext* cx, unsigned argc, Value* vp)
 
     // Step 1.
     double y;
-    if (!ToNumber(cx, args.get(0), &y))
+    if (!ToNumber(cx, args.get(0), &y)) {
         return false;
+    }
 
     // Step 2.
     double m;
     if (args.length() >= 2) {
-        if (!ToNumber(cx, args[1], &m))
+        if (!ToNumber(cx, args[1], &m)) {
             return false;
+        }
     } else {
         m = 0;
     }
@@ -661,8 +778,9 @@ date_UTC(JSContext* cx, unsigned argc, Value* vp)
     // Step 3.
     double dt;
     if (args.length() >= 3) {
-        if (!ToNumber(cx, args[2], &dt))
+        if (!ToNumber(cx, args[2], &dt)) {
             return false;
+        }
     } else {
         dt = 1;
     }
@@ -670,8 +788,9 @@ date_UTC(JSContext* cx, unsigned argc, Value* vp)
     // Step 4.
     double h;
     if (args.length() >= 4) {
-        if (!ToNumber(cx, args[3], &h))
+        if (!ToNumber(cx, args[3], &h)) {
             return false;
+        }
     } else {
         h = 0;
     }
@@ -679,8 +798,9 @@ date_UTC(JSContext* cx, unsigned argc, Value* vp)
     // Step 5.
     double min;
     if (args.length() >= 5) {
-        if (!ToNumber(cx, args[4], &min))
+        if (!ToNumber(cx, args[4], &min)) {
             return false;
+        }
     } else {
         min = 0;
     }
@@ -688,8 +808,9 @@ date_UTC(JSContext* cx, unsigned argc, Value* vp)
     // Step 6.
     double s;
     if (args.length() >= 6) {
-        if (!ToNumber(cx, args[5], &s))
+        if (!ToNumber(cx, args[5], &s)) {
             return false;
+        }
     } else {
         s = 0;
     }
@@ -697,8 +818,9 @@ date_UTC(JSContext* cx, unsigned argc, Value* vp)
     // Step 7.
     double milli;
     if (args.length() >= 7) {
-        if (!ToNumber(cx, args[6], &milli))
+        if (!ToNumber(cx, args[6], &milli)) {
             return false;
+        }
     } else {
         milli = 0;
     }
@@ -707,8 +829,9 @@ date_UTC(JSContext* cx, unsigned argc, Value* vp)
     double yr = y;
     if (!IsNaN(y)) {
         double yint = ToInteger(y);
-        if (0 <= yint && yint <= 99)
+        if (0 <= yint && yint <= 99) {
             yr = 1900 + yint;
+        }
     }
 
     // Step 9.
@@ -774,8 +897,9 @@ ParseDigitsN(size_t n, size_t* result, const CharT* s, size_t* i, size_t limit)
 {
     size_t init = *i;
 
-    if (ParseDigits(result, s, i, Min(limit, init + n)))
+    if (ParseDigits(result, s, i, Min(limit, init + n))) {
         return (*i - init) == n;
+    }
 
     *i = init;
     return false;
@@ -794,8 +918,9 @@ ParseDigitsNOrLess(size_t n, size_t* result, const CharT* s, size_t* i, size_t l
 {
     size_t init = *i;
 
-    if (ParseDigits(result, s, i, Min(limit, init + n)))
+    if (ParseDigits(result, s, i, Min(limit, init + n))) {
         return ((*i - init) > 0) && ((*i - init) <= n);
+    }
 
     *i = init;
     return false;
@@ -912,8 +1037,9 @@ ParseISOStyleDate(const CharT* s, size_t length, ClippedTime* result)
     if (!ParseDigitsNOrLess(n, &field, s, &i, length)) { return false; }
 
     if (PEEK('+') || PEEK('-')) {
-        if (PEEK('-'))
+        if (PEEK('-')) {
             dateMul = -1;
+        }
         ++i;
         NEED_NDIGITS(6, year);
     } else if (!PEEK('T')) {
@@ -925,10 +1051,11 @@ ParseISOStyleDate(const CharT* s, size_t length, ClippedTime* result)
     NEED_NDIGITS_OR_LESS(2, day);
 
  done_date:
-    if (PEEK('T') || PEEK(' '))
+    if (PEEK('T') || PEEK(' ')) {
         i++;
-    else
+    } else {
         goto done;
+    }
 
     NEED_NDIGITS_OR_LESS(2, hour);
     NEED(':');
@@ -939,24 +1066,27 @@ ParseISOStyleDate(const CharT* s, size_t length, ClippedTime* result)
         NEED_NDIGITS_OR_LESS(2, sec);
         if (PEEK('.')) {
             ++i;
-            if (!ParseFractional(&frac, s, &i, length))
+            if (!ParseFractional(&frac, s, &i, length)) {
                 return false;
+            }
         }
     }
 
     if (PEEK('Z')) {
         ++i;
     } else if (PEEK('+') || PEEK('-')) {
-        if (PEEK('-'))
+        if (PEEK('-')) {
             tzMul = -1;
+        }
         ++i;
         NEED_NDIGITS(2, tzHour);
         /*
          * Non-standard extension to the ISO date format (permitted by ES5):
          * allow "-0700" as a time zone offset, not just "-07:00".
          */
-        if (PEEK(':'))
+        if (PEEK(':')) {
             ++i;
+        }
         NEED_NDIGITS(2, tzMin);
     } else {
         isLocalTime = true;
@@ -976,18 +1106,20 @@ ParseISOStyleDate(const CharT* s, size_t length, ClippedTime* result)
         return false;
     }
 
-    if (i != length)
+    if (i != length) {
         return false;
+    }
 
     month -= 1; /* convert month to 0-based */
 
     double msec = MakeDate(MakeDay(dateMul * double(year), month, day),
                            MakeTime(hour, min, sec, frac * 1000.0));
 
-    if (isLocalTime)
+    if (isLocalTime) {
         msec = UTC(msec);
-    else
+    } else {
         msec -= tzMul * (tzHour * msPerHour + tzMin * msPerMinute);
+    }
 
     *result = TimeClip(msec);
     return NumbersAreIdentical(msec, result->toDouble());
@@ -1002,11 +1134,13 @@ template <typename CharT>
 static bool
 ParseDate(const CharT* s, size_t length, ClippedTime* result)
 {
-    if (ParseISOStyleDate(s, length, result))
+    if (ParseISOStyleDate(s, length, result)) {
         return true;
+    }
 
-    if (length == 0)
+    if (length == 0) {
         return false;
+    }
 
     int year = -1;
     int mon = -1;
@@ -1026,8 +1160,9 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
         int c = s[i];
         i++;
         if (c <= ' ' || c == ',' || c == '-') {
-            if (c == '-' && '0' <= s[i] && s[i] <= '9')
+            if (c == '-' && '0' <= s[i] && s[i] <= '9') {
                 prevc = c;
+            }
             continue;
         }
         if (c == '(') { /* comments) */
@@ -1038,8 +1173,9 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
                 if (c == '(') {
                     depth++;
                 } else if (c == ')') {
-                    if (--depth <= 0)
+                    if (--depth <= 0) {
                         break;
+                    }
                 }
             }
             continue;
@@ -1064,48 +1200,54 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
                 seenPlusMinus = true;
 
                 /* offset */
-                if (n < 24)
+                if (n < 24) {
                     n = n * 60; /* EG. "GMT-3" */
-                else
+                } else {
                     n = n % 100 + n / 100 * 60; /* eg "GMT-0430" */
+                }
 
                 if (prevc == '+')       /* plus means east of GMT */
                     n = -n;
 
-                if (tzOffset != 0 && tzOffset != -1)
+                if (tzOffset != 0 && tzOffset != -1) {
                     return false;
+                }
 
                 tzOffset = n;
             } else if (prevc == '/' && mon >= 0 && mday >= 0 && year < 0) {
-                if (c <= ' ' || c == ',' || c == '/' || i >= length)
+                if (c <= ' ' || c == ',' || c == '/' || i >= length) {
                     year = n;
-                else
+                } else {
                     return false;
+                }
             } else if (c == ':') {
-                if (hour < 0)
+                if (hour < 0) {
                     hour = /*byte*/ n;
-                else if (min < 0)
+                } else if (min < 0) {
                     min = /*byte*/ n;
-                else
+                } else {
                     return false;
+                }
             } else if (c == '/') {
                 /*
                  * Until it is determined that mon is the actual month, keep
                  * it as 1-based rather than 0-based.
                  */
-                if (mon < 0)
+                if (mon < 0) {
                     mon = /*byte*/ n;
-                else if (mday < 0)
+                } else if (mday < 0) {
                     mday = /*byte*/ n;
-                else
+                } else {
                     return false;
+                }
             } else if (i < length && c != ',' && c > ' ' && c != '-' && c != '(') {
                 return false;
             } else if (seenPlusMinus && n < 60) {  /* handle GMT-3:30 */
-                if (tzOffset < 0)
+                if (tzOffset < 0) {
                     tzOffset -= n;
-                else
+                } else {
                     tzOffset += n;
+                }
             } else if (hour >= 0 && min < 0) {
                 min = /*byte*/ n;
             } else if (prevc == ':' && min >= 0 && sec < 0) {
@@ -1126,13 +1268,15 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
             size_t st = i - 1;
             while (i < length) {
                 c = s[i];
-                if (!IsAsciiAlpha(c))
+                if (!IsAsciiAlpha(c)) {
                     break;
+                }
                 i++;
             }
 
-            if (i <= st + 1)
+            if (i <= st + 1) {
                 return false;
+            }
 
             int k;
             for (k = ArrayLength(wtb); --k >= 0;) {
@@ -1145,8 +1289,9 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
                              * 12:30, instead of blindly adding 12 if PM.
                              */
                             MOZ_ASSERT(action == -1 || action == -2);
-                            if (hour > 12 || hour < 0)
+                            if (hour > 12 || hour < 0) {
                                 return false;
+                            }
 
                             if (action == -1 && hour == 12) /* am */
                                 hour = 0;
@@ -1157,8 +1302,9 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
                              * Adjust mon to be 1-based until the final values
                              * for mon, mday and year are adjusted below.
                              */
-                            if (seenMonthName)
+                            if (seenMonthName) {
                                 return false;
+                            }
 
                             seenMonthName = true;
                             int temp = /*byte*/ (action - 2) + 1;
@@ -1182,15 +1328,17 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
                 }
             }
 
-            if (k < 0)
+            if (k < 0) {
                 return false;
+            }
 
             prevc = 0;
         }
     }
 
-    if (year < 0 || mon < 0 || mday < 0)
+    if (year < 0 || mon < 0 || mday < 0) {
         return false;
+    }
 
     /*
      * Case 1. The input string contains an English month name.
@@ -1222,8 +1370,9 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
      *           iii. If year >= 100, it is the number of years after 0.
      */
     if (seenMonthName) {
-        if (mday >= 100 && mon >= 100)
+        if (mday >= 100 && mon >= 100) {
             return false;
+        }
 
         if (year > 0 && (mday == 0 || mday > year)) {
             int temp = year;
@@ -1231,8 +1380,9 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
             mday = temp;
         }
 
-        if (mday <= 0 || mday > 31)
+        if (mday <= 0 || mday > 31) {
             return false;
+        }
 
     } else if (0 < mon && mon <= 12 && 0 < mday && mday <= 31) {
         /* (a) month/day/year */
@@ -1248,25 +1398,30 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
         }
     }
 
-    if (year < 50)
+    if (year < 50) {
         year += 2000;
-    else if (year >= 50 && year < 100)
+    } else if (year >= 50 && year < 100) {
         year += 1900;
+    }
 
     mon -= 1; /* convert month to 0-based */
-    if (sec < 0)
+    if (sec < 0) {
         sec = 0;
-    if (min < 0)
+    }
+    if (min < 0) {
         min = 0;
-    if (hour < 0)
+    }
+    if (hour < 0) {
         hour = 0;
+    }
 
     double msec = MakeDate(MakeDay(year, mon, mday), MakeTime(hour, min, sec, 0));
 
-    if (tzOffset == -1) /* no time zone specified, have to use local */
+    if (tzOffset == -1) { /* no time zone specified, have to use local */
         msec = UTC(msec);
-    else
+    } else {
         msec += tzOffset * msPerMinute;
+    }
 
     *result = TimeClip(msec);
     return true;
@@ -1291,12 +1446,14 @@ date_parse(JSContext* cx, unsigned argc, Value* vp)
     }
 
     JSString* str = ToString<CanGC>(cx, args[0]);
-    if (!str)
+    if (!str) {
         return false;
+    }
 
     JSLinearString* linearStr = str->ensureLinear(cx);
-    if (!linearStr)
+    if (!linearStr) {
         return false;
+    }
 
     ClippedTime result;
     if (!ParseDate(linearStr, &result)) {
@@ -1313,8 +1470,9 @@ NowAsMillis(JSContext* cx)
 {
     double now = PRMJ_Now();
     bool clampAndJitter = cx->realm()->creationOptions().clampAndJitterTime();
-    if (clampAndJitter && sReduceMicrosecondTimePrecisionCallback)
+    if (clampAndJitter && sReduceMicrosecondTimePrecisionCallback) {
         now = sReduceMicrosecondTimePrecisionCallback(now);
+    }
     else if (clampAndJitter && sResolutionUsec) {
         double clamped = floor(now / sResolutionUsec) * sResolutionUsec;
 
@@ -1361,8 +1519,9 @@ js::date_now(JSContext* cx, unsigned argc, Value* vp)
 void
 DateObject::setUTCTime(ClippedTime t)
 {
-    for (size_t ind = COMPONENTS_START_SLOT; ind < RESERVED_SLOTS; ind++)
+    for (size_t ind = COMPONENTS_START_SLOT; ind < RESERVED_SLOTS; ind++) {
         setReservedSlot(ind, UndefinedValue());
+    }
 
     setFixedSlot(UTC_TIME_SLOT, TimeValue(t));
 }
@@ -1377,21 +1536,24 @@ DateObject::setUTCTime(ClippedTime t, MutableHandleValue vp)
 void
 DateObject::fillLocalTimeSlots()
 {
+    const int32_t localTZA = DateTimeInfo::localTZA();
+
     /* Check if the cache is already populated. */
     if (!getReservedSlot(LOCAL_TIME_SLOT).isUndefined() &&
-        getReservedSlot(TZA_SLOT).toDouble() == DateTimeInfo::localTZA())
+        getReservedSlot(TZA_SLOT).toInt32() == localTZA)
     {
         return;
     }
 
     /* Remember time zone used to generate the local cache. */
-    setReservedSlot(TZA_SLOT, DoubleValue(DateTimeInfo::localTZA()));
+    setReservedSlot(TZA_SLOT, Int32Value(localTZA));
 
     double utcTime = UTCTime().toNumber();
 
     if (!IsFinite(utcTime)) {
-        for (size_t ind = COMPONENTS_START_SLOT; ind < RESERVED_SLOTS; ind++)
+        for (size_t ind = COMPONENTS_START_SLOT; ind < RESERVED_SLOTS; ind++) {
             setReservedSlot(ind, DoubleValue(utcTime));
+        }
         return;
     }
 
@@ -1573,8 +1735,9 @@ date_getFullYear(JSContext* cx, unsigned argc, Value* vp)
 DateObject::getUTCFullYear_impl(JSContext* cx, const CallArgs& args)
 {
     double result = args.thisv().toObject().as<DateObject>().UTCTime().toNumber();
-    if (IsFinite(result))
+    if (IsFinite(result)) {
         result = YearFromTime(result);
+    }
 
     args.rval().setNumber(result);
     return true;
@@ -1640,8 +1803,9 @@ date_getDate(JSContext* cx, unsigned argc, Value* vp)
 DateObject::getUTCDate_impl(JSContext* cx, const CallArgs& args)
 {
     double result = args.thisv().toObject().as<DateObject>().UTCTime().toNumber();
-    if (IsFinite(result))
+    if (IsFinite(result)) {
         result = DateFromTime(result);
+    }
 
     args.rval().setNumber(result);
     return true;
@@ -1675,8 +1839,9 @@ date_getDay(JSContext* cx, unsigned argc, Value* vp)
 DateObject::getUTCDay_impl(JSContext* cx, const CallArgs& args)
 {
     double result = args.thisv().toObject().as<DateObject>().UTCTime().toNumber();
-    if (IsFinite(result))
+    if (IsFinite(result)) {
         result = WeekDay(result);
+    }
 
     args.rval().setNumber(result);
     return true;
@@ -1718,8 +1883,9 @@ date_getHours(JSContext* cx, unsigned argc, Value* vp)
 DateObject::getUTCHours_impl(JSContext* cx, const CallArgs& args)
 {
     double result = args.thisv().toObject().as<DateObject>().UTCTime().toNumber();
-    if (IsFinite(result))
+    if (IsFinite(result)) {
         result = HourFromTime(result);
+    }
 
     args.rval().setNumber(result);
     return true;
@@ -1761,8 +1927,9 @@ date_getMinutes(JSContext* cx, unsigned argc, Value* vp)
 DateObject::getUTCMinutes_impl(JSContext* cx, const CallArgs& args)
 {
     double result = args.thisv().toObject().as<DateObject>().UTCTime().toNumber();
-    if (IsFinite(result))
+    if (IsFinite(result)) {
         result = MinFromTime(result);
+    }
 
     args.rval().setNumber(result);
     return true;
@@ -1775,20 +1942,8 @@ date_getUTCMinutes(JSContext* cx, unsigned argc, Value* vp)
     return CallNonGenericMethod<IsDate, DateObject::getUTCMinutes_impl>(cx, args);
 }
 
-/*
- * Date.getSeconds is mapped to getUTCSeconds. As long as no supported time
- * zone has a fractional-minute component, the differences in their
- * specifications aren't observable.
- *
- * We'll have to split the implementations if a new time zone with a
- * fractional-minute component is introduced or once we implement ES6's
- * 20.3.1.7 Local Time Zone Adjustment: time zones with adjustments like that
- * did historically exist, e.g.
- * https://en.wikipedia.org/wiki/UTC%E2%88%9200:25:21
- */
-
 /* static */ MOZ_ALWAYS_INLINE bool
-DateObject::getUTCSeconds_impl(JSContext* cx, const CallArgs& args)
+DateObject::getSeconds_impl(JSContext* cx, const CallArgs& args)
 {
     DateObject* dateObj = &args.thisv().toObject().as<DateObject>();
     dateObj->fillLocalTimeSlots();
@@ -1806,25 +1961,49 @@ DateObject::getUTCSeconds_impl(JSContext* cx, const CallArgs& args)
 }
 
 static bool
+date_getSeconds(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    return CallNonGenericMethod<IsDate, DateObject::getSeconds_impl>(cx, args);
+}
+
+/* static */ MOZ_ALWAYS_INLINE bool
+DateObject::getUTCSeconds_impl(JSContext* cx, const CallArgs& args)
+{
+    double result = args.thisv().toObject().as<DateObject>().UTCTime().toNumber();
+    if (IsFinite(result)) {
+        result = SecFromTime(result);
+    }
+
+    args.rval().setNumber(result);
+    return true;
+}
+
+static bool
 date_getUTCSeconds(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     return CallNonGenericMethod<IsDate, DateObject::getUTCSeconds_impl>(cx, args);
 }
+
 /*
- * Date.getMilliseconds is mapped to getUTCMilliseconds for the same reasons
- * that getSeconds is mapped to getUTCSeconds (see above).  No known LocalTZA
- * has *ever* included a fractional-second component, however, so we can keep
- * this simplification even if we stop implementing ES5 local-time computation
- * semantics.
+ * Date.getMilliseconds is mapped to getUTCMilliseconds. As long as no
+ * supported time zone has a fractional-second component, the differences in
+ * their specifications aren't observable.
+ *
+ * The 'tz' database explicitly does not support fractional-second time zones.
+ * For example the Netherlands observed Amsterdam Mean Time, estimated to be
+ * UT +00:19:32.13, from 1909 to 1937, but in tzdata AMT is defined as exactly
+ * UT +00:19:32.
  */
 
 /* static */ MOZ_ALWAYS_INLINE bool
 DateObject::getUTCMilliseconds_impl(JSContext* cx, const CallArgs& args)
 {
     double result = args.thisv().toObject().as<DateObject>().UTCTime().toNumber();
-    if (IsFinite(result))
+    if (IsFinite(result)) {
         result = msFromTime(result);
+    }
 
     args.rval().setNumber(result);
     return true;
@@ -1871,8 +2050,9 @@ date_setTime_impl(JSContext* cx, const CallArgs& args)
     }
 
     double result;
-    if (!ToNumber(cx, args[0], &result))
+    if (!ToNumber(cx, args[0], &result)) {
         return false;
+    }
 
     dateObj->setUTCTime(TimeClip(result), args.rval());
     return true;
@@ -1926,8 +2106,9 @@ date_setMilliseconds_impl(JSContext* cx, const CallArgs& args)
 
     // Steps 3-4.
     double ms;
-    if (!ToNumber(cx, args.get(0), &ms))
+    if (!ToNumber(cx, args.get(0), &ms)) {
         return false;
+    }
 
     // Step 5.
     double time = MakeTime(HourFromTime(t), MinFromTime(t), SecFromTime(t), ms);
@@ -1958,8 +2139,9 @@ date_setUTCMilliseconds_impl(JSContext* cx, const CallArgs& args)
 
     /* Step 2. */
     double milli;
-    if (!ToNumber(cx, args.get(0), &milli))
+    if (!ToNumber(cx, args.get(0), &milli)) {
         return false;
+    }
     double time = MakeTime(HourFromTime(t), MinFromTime(t), SecFromTime(t), milli);
 
     /* Step 3. */
@@ -1988,13 +2170,15 @@ date_setSeconds_impl(JSContext* cx, const CallArgs& args)
 
     // Steps 3-4.
     double s;
-    if (!ToNumber(cx, args.get(0), &s))
+    if (!ToNumber(cx, args.get(0), &s)) {
         return false;
+    }
 
     // Steps 5-6.
     double milli;
-    if (!GetMsecsOrDefault(cx, args, 1, t, &milli))
+    if (!GetMsecsOrDefault(cx, args, 1, t, &milli)) {
         return false;
+    }
 
     // Step 7.
     double date = MakeDate(Day(t), MakeTime(HourFromTime(t), MinFromTime(t), s, milli));
@@ -2025,13 +2209,15 @@ date_setUTCSeconds_impl(JSContext* cx, const CallArgs& args)
 
     /* Step 2. */
     double s;
-    if (!ToNumber(cx, args.get(0), &s))
+    if (!ToNumber(cx, args.get(0), &s)) {
         return false;
+    }
 
     /* Step 3. */
     double milli;
-    if (!GetMsecsOrDefault(cx, args, 1, t, &milli))
+    if (!GetMsecsOrDefault(cx, args, 1, t, &milli)) {
         return false;
+    }
 
     /* Step 4. */
     double date = MakeDate(Day(t), MakeTime(HourFromTime(t), MinFromTime(t), s, milli));
@@ -2062,18 +2248,21 @@ date_setMinutes_impl(JSContext* cx, const CallArgs& args)
 
     // Steps 3-4.
     double m;
-    if (!ToNumber(cx, args.get(0), &m))
+    if (!ToNumber(cx, args.get(0), &m)) {
         return false;
+    }
 
     // Steps 5-6.
     double s;
-    if (!GetSecsOrDefault(cx, args, 1, t, &s))
+    if (!GetSecsOrDefault(cx, args, 1, t, &s)) {
         return false;
+    }
 
     // Steps 7-8.
     double milli;
-    if (!GetMsecsOrDefault(cx, args, 2, t, &milli))
+    if (!GetMsecsOrDefault(cx, args, 2, t, &milli)) {
         return false;
+    }
 
     // Step 9.
     double date = MakeDate(Day(t), MakeTime(HourFromTime(t), m, s, milli));
@@ -2105,18 +2294,21 @@ date_setUTCMinutes_impl(JSContext* cx, const CallArgs& args)
 
     /* Step 2. */
     double m;
-    if (!ToNumber(cx, args.get(0), &m))
+    if (!ToNumber(cx, args.get(0), &m)) {
         return false;
+    }
 
     /* Step 3. */
     double s;
-    if (!GetSecsOrDefault(cx, args, 1, t, &s))
+    if (!GetSecsOrDefault(cx, args, 1, t, &s)) {
         return false;
+    }
 
     /* Step 4. */
     double milli;
-    if (!GetMsecsOrDefault(cx, args, 2, t, &milli))
+    if (!GetMsecsOrDefault(cx, args, 2, t, &milli)) {
         return false;
+    }
 
     /* Step 5. */
     double date = MakeDate(Day(t), MakeTime(HourFromTime(t), m, s, milli));
@@ -2147,23 +2339,27 @@ date_setHours_impl(JSContext* cx, const CallArgs& args)
 
     // Steps 3-4.
     double h;
-    if (!ToNumber(cx, args.get(0), &h))
+    if (!ToNumber(cx, args.get(0), &h)) {
         return false;
+    }
 
     // Steps 5-6.
     double m;
-    if (!GetMinsOrDefault(cx, args, 1, t, &m))
+    if (!GetMinsOrDefault(cx, args, 1, t, &m)) {
         return false;
+    }
 
     // Steps 7-8.
     double s;
-    if (!GetSecsOrDefault(cx, args, 2, t, &s))
+    if (!GetSecsOrDefault(cx, args, 2, t, &s)) {
         return false;
+    }
 
     // Steps 9-10.
     double milli;
-    if (!GetMsecsOrDefault(cx, args, 3, t, &milli))
+    if (!GetMsecsOrDefault(cx, args, 3, t, &milli)) {
         return false;
+    }
 
     // Step 11.
     double date = MakeDate(Day(t), MakeTime(h, m, s, milli));
@@ -2194,23 +2390,27 @@ date_setUTCHours_impl(JSContext* cx, const CallArgs& args)
 
     /* Step 2. */
     double h;
-    if (!ToNumber(cx, args.get(0), &h))
+    if (!ToNumber(cx, args.get(0), &h)) {
         return false;
+    }
 
     /* Step 3. */
     double m;
-    if (!GetMinsOrDefault(cx, args, 1, t, &m))
+    if (!GetMinsOrDefault(cx, args, 1, t, &m)) {
         return false;
+    }
 
     /* Step 4. */
     double s;
-    if (!GetSecsOrDefault(cx, args, 2, t, &s))
+    if (!GetSecsOrDefault(cx, args, 2, t, &s)) {
         return false;
+    }
 
     /* Step 5. */
     double milli;
-    if (!GetMsecsOrDefault(cx, args, 3, t, &milli))
+    if (!GetMsecsOrDefault(cx, args, 3, t, &milli)) {
         return false;
+    }
 
     /* Step 6. */
     double newDate = MakeDate(Day(t), MakeTime(h, m, s, milli));
@@ -2241,8 +2441,9 @@ date_setDate_impl(JSContext* cx, const CallArgs& args)
 
     /* Step 2. */
     double date;
-    if (!ToNumber(cx, args.get(0), &date))
+    if (!ToNumber(cx, args.get(0), &date)) {
         return false;
+    }
 
     /* Step 3. */
     double newDate = MakeDate(MakeDay(YearFromTime(t), MonthFromTime(t), date), TimeWithinDay(t));
@@ -2273,8 +2474,9 @@ date_setUTCDate_impl(JSContext* cx, const CallArgs& args)
 
     /* Step 2. */
     double date;
-    if (!ToNumber(cx, args.get(0), &date))
+    if (!ToNumber(cx, args.get(0), &date)) {
         return false;
+    }
 
     /* Step 3. */
     double newDate = MakeDate(MakeDay(YearFromTime(t), MonthFromTime(t), date), TimeWithinDay(t));
@@ -2325,13 +2527,15 @@ date_setMonth_impl(JSContext* cx, const CallArgs& args)
 
     /* Step 2. */
     double m;
-    if (!ToNumber(cx, args.get(0), &m))
+    if (!ToNumber(cx, args.get(0), &m)) {
         return false;
+    }
 
     /* Step 3. */
     double date;
-    if (!GetDateOrDefault(cx, args, 1, t, &date))
+    if (!GetDateOrDefault(cx, args, 1, t, &date)) {
         return false;
+    }
 
     /* Step 4. */
     double newDate = MakeDate(MakeDay(YearFromTime(t), m, date), TimeWithinDay(t));
@@ -2362,13 +2566,15 @@ date_setUTCMonth_impl(JSContext* cx, const CallArgs& args)
 
     /* Step 2. */
     double m;
-    if (!ToNumber(cx, args.get(0), &m))
+    if (!ToNumber(cx, args.get(0), &m)) {
         return false;
+    }
 
     /* Step 3. */
     double date;
-    if (!GetDateOrDefault(cx, args, 1, t, &date))
+    if (!GetDateOrDefault(cx, args, 1, t, &date)) {
         return false;
+    }
 
     /* Step 4. */
     double newDate = MakeDate(MakeDay(YearFromTime(t), m, date), TimeWithinDay(t));
@@ -2392,8 +2598,9 @@ static double
 ThisLocalTimeOrZero(Handle<DateObject*> dateObj)
 {
     double t = dateObj->UTCTime().toNumber();
-    if (IsNaN(t))
+    if (IsNaN(t)) {
         return +0;
+    }
     return LocalTime(t);
 }
 
@@ -2415,18 +2622,21 @@ date_setFullYear_impl(JSContext* cx, const CallArgs& args)
 
     /* Step 2. */
     double y;
-    if (!ToNumber(cx, args.get(0), &y))
+    if (!ToNumber(cx, args.get(0), &y)) {
         return false;
+    }
 
     /* Step 3. */
     double m;
-    if (!GetMonthOrDefault(cx, args, 1, t, &m))
+    if (!GetMonthOrDefault(cx, args, 1, t, &m)) {
         return false;
+    }
 
     /* Step 4. */
     double date;
-    if (!GetDateOrDefault(cx, args, 2, t, &date))
+    if (!GetDateOrDefault(cx, args, 2, t, &date)) {
         return false;
+    }
 
     /* Step 5. */
     double newDate = MakeDate(MakeDay(y, m, date), TimeWithinDay(t));
@@ -2457,18 +2667,21 @@ date_setUTCFullYear_impl(JSContext* cx, const CallArgs& args)
 
     /* Step 2. */
     double y;
-    if (!ToNumber(cx, args.get(0), &y))
+    if (!ToNumber(cx, args.get(0), &y)) {
         return false;
+    }
 
     /* Step 3. */
     double m;
-    if (!GetMonthOrDefault(cx, args, 1, t, &m))
+    if (!GetMonthOrDefault(cx, args, 1, t, &m)) {
         return false;
+    }
 
     /* Step 4. */
     double date;
-    if (!GetDateOrDefault(cx, args, 2, t, &date))
+    if (!GetDateOrDefault(cx, args, 2, t, &date)) {
         return false;
+    }
 
     /* Step 5. */
     double newDate = MakeDate(MakeDay(y, m, date), TimeWithinDay(t));
@@ -2499,8 +2712,9 @@ date_setYear_impl(JSContext* cx, const CallArgs& args)
 
     /* Step 2. */
     double y;
-    if (!ToNumber(cx, args.get(0), &y))
+    if (!ToNumber(cx, args.get(0), &y)) {
         return false;
+    }
 
     /* Step 3. */
     if (IsNaN(y)) {
@@ -2510,8 +2724,9 @@ date_setYear_impl(JSContext* cx, const CallArgs& args)
 
     /* Step 4. */
     double yint = ToInteger(y);
-    if (0 <= yint && yint <= 99)
+    if (0 <= yint && yint <= 99) {
         yint += 1900;
+    }
 
     /* Step 5. */
     double day = MakeDay(yint, MonthFromTime(t), DateFromTime(t));
@@ -2532,7 +2747,6 @@ date_setYear(JSContext* cx, unsigned argc, Value* vp)
 }
 
 /* constants for toString, toUTCString */
-static const char js_NaN_date_str[] = "Invalid Date";
 static const char * const days[] =
 {
    "Sun","Mon","Tue","Wed","Thu","Fri","Sat"
@@ -2547,26 +2761,26 @@ MOZ_ALWAYS_INLINE bool
 date_toGMTString_impl(JSContext* cx, const CallArgs& args)
 {
     double utctime = args.thisv().toObject().as<DateObject>().UTCTime().toNumber();
-
-    JSString* str;
     if (!IsFinite(utctime)) {
-        str = NewStringCopyZ<CanGC>(cx, js_NaN_date_str);
-    } else {
-        char buf[100];
-        SprintfLiteral(buf, "%s, %.2d %s %.4d %.2d:%.2d:%.2d GMT",
-                       days[int(WeekDay(utctime))],
-                       int(DateFromTime(utctime)),
-                       months[int(MonthFromTime(utctime))],
-                       int(YearFromTime(utctime)),
-                       int(HourFromTime(utctime)),
-                       int(MinFromTime(utctime)),
-                       int(SecFromTime(utctime)));
-
-        str = NewStringCopyZ<CanGC>(cx, buf);
+        args.rval().setString(cx->names().InvalidDate);
+        return true;
     }
 
-    if (!str)
+    char buf[100];
+    SprintfLiteral(buf, "%s, %.2d %s %.4d %.2d:%.2d:%.2d GMT",
+                   days[int(WeekDay(utctime))],
+                   int(DateFromTime(utctime)),
+                   months[int(MonthFromTime(utctime))],
+                   int(YearFromTime(utctime)),
+                   int(HourFromTime(utctime)),
+                   int(MinFromTime(utctime)),
+                   int(SecFromTime(utctime)));
+
+    JSString* str = NewStringCopyZ<CanGC>(cx, buf);
+    if (!str) {
         return false;
+    }
+
     args.rval().setString(str);
     return true;
 }
@@ -2611,8 +2825,9 @@ date_toISOString_impl(JSContext* cx, const CallArgs& args)
     }
 
     JSString* str = NewStringCopyZ<CanGC>(cx, buf);
-    if (!str)
+    if (!str) {
         return false;
+    }
     args.rval().setString(str);
     return true;
 
@@ -2633,13 +2848,15 @@ date_toJSON(JSContext* cx, unsigned argc, Value* vp)
 
     /* Step 1. */
     RootedObject obj(cx, ToObject(cx, args.thisv()));
-    if (!obj)
+    if (!obj) {
         return false;
+    }
 
     /* Step 2. */
     RootedValue tv(cx, ObjectValue(*obj));
-    if (!ToPrimitive(cx, JSTYPE_NUMBER, &tv))
+    if (!ToPrimitive(cx, JSTYPE_NUMBER, &tv)) {
         return false;
+    }
 
     /* Step 3. */
     if (tv.isDouble() && !IsFinite(tv.toDouble())) {
@@ -2649,8 +2866,9 @@ date_toJSON(JSContext* cx, unsigned argc, Value* vp)
 
     /* Step 4. */
     RootedValue toISO(cx);
-    if (!GetProperty(cx, obj, obj, cx->names().toISOString, &toISO))
+    if (!GetProperty(cx, obj, obj, cx->names().toISOString, &toISO)) {
         return false;
+    }
 
     /* Step 5. */
     if (!IsCallable(toISO)) {
@@ -2662,9 +2880,46 @@ date_toJSON(JSContext* cx, unsigned argc, Value* vp)
     return Call(cx, toISO, obj, args.rval());
 }
 
+#if ENABLE_INTL_API && !MOZ_SYSTEM_ICU
+JSString*
+DateTimeHelper::timeZoneComment(JSContext* cx, double utcTime, double localTime)
+{
+    const char* locale = cx->runtime()->getDefaultLocale();
+    if (!locale) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEFAULT_LOCALE_ERROR);
+        return nullptr;
+    }
+
+    char16_t tzbuf[100];
+    tzbuf[0] = ' ';
+    tzbuf[1] = '(';
+
+    char16_t* timeZoneStart = tzbuf + 2;
+    constexpr size_t remainingSpace = mozilla::ArrayLength(tzbuf) - 2 - 1; // for the trailing ')'
+
+    int64_t utcMilliseconds = static_cast<int64_t>(utcTime);
+    if (!DateTimeInfo::timeZoneDisplayName(timeZoneStart, remainingSpace, utcMilliseconds, locale)) {
+    {
+        JS_ReportOutOfMemory(cx);
+    }
+        return nullptr;
+    }
+
+    // Reject if the result string is empty.
+    size_t len = js_strlen(timeZoneStart);
+    if (len == 0) {
+        return cx->names().empty;
+    }
+
+    // Parenthesize the returned display name.
+    timeZoneStart[len] = ')';
+
+    return NewStringCopyN<CanGC>(cx, tzbuf, 2 + len + 1);
+}
+#else
 /* Interface to PRMJTime date struct. */
-static PRMJTime
-ToPRMJTime(double localTime, double utcTime)
+PRMJTime
+DateTimeHelper::toPRMJTime(double localTime, double utcTime)
 {
     double year = YearFromTime(localTime);
 
@@ -2678,25 +2933,66 @@ ToPRMJTime(double localTime, double utcTime)
     prtm.tm_wday = int8_t(WeekDay(localTime));
     prtm.tm_year = year;
     prtm.tm_yday = int16_t(DayWithinYear(localTime, year));
-    prtm.tm_isdst = (DaylightSavingTA(utcTime) != 0);
+    prtm.tm_isdst = (daylightSavingTA(utcTime) != 0);
 
     return prtm;
 }
 
-static size_t
-FormatTime(char* buf, int buflen, const char* fmt, double utcTime, double localTime)
+size_t
+DateTimeHelper::formatTime(char* buf, size_t buflen, const char* fmt, double utcTime, double localTime)
 {
-    PRMJTime prtm = ToPRMJTime(localTime, utcTime);
+    PRMJTime prtm = toPRMJTime(localTime, utcTime);
 
     // If an equivalent year was used to compute the date/time components, use
     // the same equivalent year to determine the time zone name and offset in
     // PRMJ_FormatTime(...).
-    int timeZoneYear = IsRepresentableAsTime32(utcTime)
+    int timeZoneYear = isRepresentableAsTime32(utcTime)
                        ? prtm.tm_year
-                       : EquivalentYearForDST(prtm.tm_year);
+                       : equivalentYearForDST(prtm.tm_year);
     int offsetInSeconds = (int) floor((localTime - utcTime) / msPerSecond);
 
     return PRMJ_FormatTime(buf, buflen, fmt, &prtm, timeZoneYear, offsetInSeconds);
+}
+
+JSString*
+DateTimeHelper::timeZoneComment(JSContext* cx, double utcTime, double localTime)
+{
+    char tzbuf[100];
+
+    size_t tzlen = formatTime(tzbuf, sizeof tzbuf, " (%Z)", utcTime, localTime);
+    if (tzlen != 0) {
+        // Decide whether to use the resulting time zone string.
+        //
+        // Reject it if it contains any non-ASCII or non-printable characters.
+        // It's then likely in some other character encoding, and we probably
+        // won't display it correctly.
+        bool usetz = true;
+        for (size_t i = 0; i < tzlen; i++) {
+            char16_t c = tzbuf[i];
+            if (c > 127 || !isprint(c)) {
+                usetz = false;
+                break;
+            }
+        }
+
+        // Also reject it if it's not parenthesized or if it's ' ()'.
+        if (tzbuf[0] != ' ' || tzbuf[1] != '(' || tzbuf[2] == ')') {
+            usetz = false;
+        }
+
+        if (usetz) {
+            return NewStringCopyN<CanGC>(cx, tzbuf, tzlen);
+        }
+    }
+
+    return cx->names().empty;
+}
+#endif /* ENABLE_INTL_API && !MOZ_SYSTEM_ICU */
+
+static JSString*
+TimeZoneComment(JSContext* cx, double utcTime, double localTime)
+{
+    return DateTimeHelper::timeZoneComment(cx, utcTime, localTime);
 }
 
 enum class FormatSpec {
@@ -2708,104 +3004,91 @@ enum class FormatSpec {
 static bool
 FormatDate(JSContext* cx, double utcTime, FormatSpec format, MutableHandleValue rval)
 {
-    JSString* str;
     if (!IsFinite(utcTime)) {
-        str = NewStringCopyZ<CanGC>(cx, js_NaN_date_str);
-    } else {
-        MOZ_ASSERT(NumbersAreIdentical(TimeClip(utcTime).toDouble(), utcTime));
-
-        double localTime = LocalTime(utcTime);
-
-        int offset = 0;
-        char tzbuf[100];
-        bool usetz = false;
-        if (format == FormatSpec::DateTime || format == FormatSpec::Time) {
-            /*
-             * Offset from GMT in minutes.  The offset includes daylight
-             * savings, if it applies.
-             */
-            int minutes = (int) floor((localTime - utcTime) / msPerMinute);
-
-            /* Map 510 minutes to 0830 hours. */
-            offset = (minutes / 60) * 100 + minutes % 60;
-
-            /*
-             * Print as "Wed Nov 05 19:38:03 GMT-0800 (PST) 1997".
-             *
-             * The TZA is printed as 'GMT-0800' rather than as 'PST' to avoid
-             * operating-system dependence on strftime (which PRMJ_FormatTime
-             * calls, for %Z only.)  win32 prints PST as
-             * 'Pacific Standard Time.'  This way we always know what we're
-             * getting, and can parse it if we produce it.  The OS time zone
-             * string is included as a comment.
-             */
-
-            /* get a time zone string from the OS to include as a comment. */
-            size_t tzlen = FormatTime(tzbuf, sizeof tzbuf, "(%Z)", utcTime, localTime);
-            if (tzlen != 0) {
-                /*
-                 * Decide whether to use the resulting time zone string.
-                 *
-                 * Reject it if it contains any non-ASCII or non-printable
-                 * characters.  It's then likely in some other character
-                 * encoding, and we probably won't display it correctly.
-                 */
-                usetz = true;
-                for (size_t i = 0; i < tzlen; i++) {
-                    char16_t c = tzbuf[i];
-                    if (c > 127 || !isprint(c)) {
-                        usetz = false;
-                        break;
-                    }
-                }
-
-                /* Also reject it if it's not parenthesized or if it's '()'. */
-                if (tzbuf[0] != '(' || tzbuf[1] == ')')
-                    usetz = false;
-            }
-        }
-
-        char buf[100];
-        switch (format) {
-          case FormatSpec::DateTime:
-            /* Tue Oct 31 2000 09:41:40 GMT-0800 (PST) */
-            SprintfLiteral(buf, "%s %s %.2d %.4d %.2d:%.2d:%.2d GMT%+.4d%s%s",
-                           days[int(WeekDay(localTime))],
-                           months[int(MonthFromTime(localTime))],
-                           int(DateFromTime(localTime)),
-                           int(YearFromTime(localTime)),
-                           int(HourFromTime(localTime)),
-                           int(MinFromTime(localTime)),
-                           int(SecFromTime(localTime)),
-                           offset,
-                           usetz ? " " : "",
-                           usetz ? tzbuf : "");
-            break;
-          case FormatSpec::Date:
-            /* Tue Oct 31 2000 */
-            SprintfLiteral(buf, "%s %s %.2d %.4d",
-                           days[int(WeekDay(localTime))],
-                           months[int(MonthFromTime(localTime))],
-                           int(DateFromTime(localTime)),
-                           int(YearFromTime(localTime)));
-            break;
-          case FormatSpec::Time:
-            /* 09:41:40 GMT-0800 (PST) */
-            SprintfLiteral(buf, "%.2d:%.2d:%.2d GMT%+.4d%s%s",
-                           int(HourFromTime(localTime)),
-                           int(MinFromTime(localTime)),
-                           int(SecFromTime(localTime)),
-                           offset,
-                           usetz ? " " : "",
-                           usetz ? tzbuf : "");
-            break;
-        }
-
-        str = NewStringCopyZ<CanGC>(cx, buf);
+        rval.setString(cx->names().InvalidDate);
+        return true;
     }
 
-    if (!str)
+    MOZ_ASSERT(NumbersAreIdentical(TimeClip(utcTime).toDouble(), utcTime));
+
+    double localTime = LocalTime(utcTime);
+
+    int offset = 0;
+    RootedString timeZoneComment(cx);
+    if (format == FormatSpec::DateTime || format == FormatSpec::Time) {
+        // Offset from GMT in minutes. The offset includes daylight savings,
+        // if it applies.
+        int minutes = (int) trunc((localTime - utcTime) / msPerMinute);
+
+        // Map 510 minutes to 0830 hours.
+        offset = (minutes / 60) * 100 + minutes % 60;
+
+        // Print as "Wed Nov 05 1997 19:38:03 GMT-0800 (PST)".
+        //
+        // The TZA is printed as 'GMT-0800' rather than as 'PST' to avoid
+        // operating-system dependence on strftime (which PRMJ_FormatTime
+        // calls, for %Z only.) win32 prints PST as 'Pacific Standard Time.'
+        // This way we always know what we're getting, and can parse it if
+        // we produce it. The OS time zone string is included as a comment.
+        //
+        // When ICU is used to retrieve the time zone string, the localized
+        // 'long' name format from CLDR is used. For example when the default
+        // locale is "en-US", PST is displayed as 'Pacific Standard Time', but
+        // when it is "ru", 'Тихоокеанское стандартное время' is used. This
+        // also means the time zone string may not fit into Latin-1.
+
+        // Get a time zone string from the OS or ICU to include as a comment.
+        timeZoneComment = TimeZoneComment(cx, utcTime, localTime);
+        if (!timeZoneComment) {
+            return false;
+        }
+    }
+
+    char buf[100];
+    switch (format) {
+      case FormatSpec::DateTime:
+        /* Tue Oct 31 2000 09:41:40 GMT-0800 */
+        SprintfLiteral(buf, "%s %s %.2d %.4d %.2d:%.2d:%.2d GMT%+.4d",
+                       days[int(WeekDay(localTime))],
+                       months[int(MonthFromTime(localTime))],
+                       int(DateFromTime(localTime)),
+                       int(YearFromTime(localTime)),
+                       int(HourFromTime(localTime)),
+                       int(MinFromTime(localTime)),
+                       int(SecFromTime(localTime)),
+                       offset);
+        break;
+      case FormatSpec::Date:
+        /* Tue Oct 31 2000 */
+        SprintfLiteral(buf, "%s %s %.2d %.4d",
+                       days[int(WeekDay(localTime))],
+                       months[int(MonthFromTime(localTime))],
+                       int(DateFromTime(localTime)),
+                       int(YearFromTime(localTime)));
+        break;
+      case FormatSpec::Time:
+        /* 09:41:40 GMT-0800 */
+        SprintfLiteral(buf, "%.2d:%.2d:%.2d GMT%+.4d",
+                       int(HourFromTime(localTime)),
+                       int(MinFromTime(localTime)),
+                       int(SecFromTime(localTime)),
+                       offset);
+        break;
+    }
+
+    RootedString str(cx, NewStringCopyZ<CanGC>(cx, buf));
+    if (!str) {
         return false;
+    }
+
+    // Append the time zone string if present.
+    if (timeZoneComment && !timeZoneComment->empty()) {
+        str = js::ConcatStrings<CanGC>(cx, str, timeZoneComment);
+        if (!str) {
+            return false;
+        }
+    }
+
     rval.setString(str);
     return true;
 }
@@ -2818,16 +3101,17 @@ ToLocaleFormatHelper(JSContext* cx, HandleObject obj, const char* format, Mutabl
 
     char buf[100];
     if (!IsFinite(utcTime)) {
-        strcpy(buf, js_NaN_date_str);
+        strcpy(buf, js_InvalidDate_str);
     } else {
         double localTime = LocalTime(utcTime);
 
         /* Let PRMJTime format it. */
-        size_t result_len = FormatTime(buf, sizeof buf, format, utcTime, localTime);
+        size_t result_len = DateTimeHelper::formatTime(buf, sizeof buf, format, utcTime, localTime);
 
         /* If it failed, default to toString. */
-        if (result_len == 0)
+        if (result_len == 0) {
             return FormatDate(cx, utcTime, FormatSpec::DateTime, rval);
+        }
 
         /* Hacked check against undesired 2-digit year 00/00/00 form. */
         if (strcmp(format, "%x") == 0 && result_len >= 6 &&
@@ -2845,12 +3129,14 @@ ToLocaleFormatHelper(JSContext* cx, HandleObject obj, const char* format, Mutabl
 
     }
 
-    if (cx->runtime()->localeCallbacks && cx->runtime()->localeCallbacks->localeToUnicode)
+    if (cx->runtime()->localeCallbacks && cx->runtime()->localeCallbacks->localeToUnicode) {
         return cx->runtime()->localeCallbacks->localeToUnicode(cx, buf, rval);
+    }
 
     JSString* str = NewStringCopyZ<CanGC>(cx, buf);
-    if (!str)
+    if (!str) {
         return false;
+    }
     rval.setString(str);
     return true;
 }
@@ -2968,8 +3254,9 @@ date_toSource_impl(JSContext* cx, const CallArgs& args)
     }
 
     JSString* str = sb.finishString();
-    if (!str)
+    if (!str) {
         return false;
+    }
     args.rval().setString(str);
     return true;
 }
@@ -3026,10 +3313,12 @@ date_toPrimitive(JSContext* cx, unsigned argc, Value* vp)
 
     // Steps 3-5.
     JSType hint;
-    if (!GetFirstArgumentAsTypeHint(cx, args, &hint))
+    if (!GetFirstArgumentAsTypeHint(cx, args, &hint)) {
         return false;
-    if (hint == JSTYPE_UNDEFINED)
+    }
+    if (hint == JSTYPE_UNDEFINED) {
         hint = JSTYPE_STRING;
+    }
 
     args.rval().set(args.thisv());
     RootedObject obj(cx, &args.thisv().toObject());
@@ -3059,7 +3348,7 @@ static const JSFunctionSpec date_methods[] = {
     JS_FN("getUTCHours",         date_getUTCHours,        0,0),
     JS_FN("getMinutes",          date_getMinutes,         0,0),
     JS_FN("getUTCMinutes",       date_getUTCMinutes,      0,0),
-    JS_FN("getSeconds",          date_getUTCSeconds,      0,0),
+    JS_FN("getSeconds",          date_getSeconds,         0,0),
     JS_FN("getUTCSeconds",       date_getUTCSeconds,      0,0),
     JS_FN("getMilliseconds",     date_getUTCMilliseconds, 0,0),
     JS_FN("getUTCMilliseconds",  date_getUTCMilliseconds, 0,0),
@@ -3106,12 +3395,14 @@ NewDateObject(JSContext* cx, const CallArgs& args, ClippedTime t)
     MOZ_ASSERT(args.isConstructing());
 
     RootedObject proto(cx);
-    if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto))
+    if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
         return false;
+    }
 
     JSObject* obj = NewDateObjectMsec(cx, t, proto);
-    if (!obj)
+    if (!obj) {
         return false;
+    }
 
     args.rval().setObject(*obj);
     return true;
@@ -3130,8 +3421,9 @@ DateNoArguments(JSContext* cx, const CallArgs& args)
 
     ClippedTime now = NowAsMillis(cx);
 
-    if (args.isConstructing())
+    if (args.isConstructing()) {
         return NewDateObject(cx, args, now);
+    }
 
     return ToDateString(cx, args, now);
 }
@@ -3146,33 +3438,39 @@ DateOneArgument(JSContext* cx, const CallArgs& args)
             RootedObject obj(cx, &args[0].toObject());
 
             ESClass cls;
-            if (!GetBuiltinClass(cx, obj, &cls))
+            if (!GetBuiltinClass(cx, obj, &cls)) {
                 return false;
+            }
 
             if (cls == ESClass::Date) {
                 RootedValue unboxed(cx);
-                if (!Unbox(cx, obj, &unboxed))
+                if (!Unbox(cx, obj, &unboxed)) {
                     return false;
+                }
 
                 return NewDateObject(cx, args, TimeClip(unboxed.toNumber()));
             }
         }
 
-        if (!ToPrimitive(cx, args[0]))
+        if (!ToPrimitive(cx, args[0])) {
             return false;
+        }
 
         ClippedTime t;
         if (args[0].isString()) {
             JSLinearString* linearStr = args[0].toString()->ensureLinear(cx);
-            if (!linearStr)
+            if (!linearStr) {
                 return false;
+            }
 
-            if (!ParseDate(linearStr, &t))
+            if (!ParseDate(linearStr, &t)) {
                 t = ClippedTime::invalid();
+            }
         } else {
             double d;
-            if (!ToNumber(cx, args[0], &d))
+            if (!ToNumber(cx, args[0], &d)) {
                 return false;
+            }
             t = TimeClip(d);
         }
 
@@ -3191,19 +3489,22 @@ DateMultipleArguments(JSContext* cx, const CallArgs& args)
     if (args.isConstructing()) {
         // Steps 3a-b.
         double y;
-        if (!ToNumber(cx, args[0], &y))
+        if (!ToNumber(cx, args[0], &y)) {
             return false;
+        }
 
         // Steps 3c-d.
         double m;
-        if (!ToNumber(cx, args[1], &m))
+        if (!ToNumber(cx, args[1], &m)) {
             return false;
+        }
 
         // Steps 3e-f.
         double dt;
         if (args.length() >= 3) {
-            if (!ToNumber(cx, args[2], &dt))
+            if (!ToNumber(cx, args[2], &dt)) {
                 return false;
+            }
         } else {
             dt = 1;
         }
@@ -3211,8 +3512,9 @@ DateMultipleArguments(JSContext* cx, const CallArgs& args)
         // Steps 3g-h.
         double h;
         if (args.length() >= 4) {
-            if (!ToNumber(cx, args[3], &h))
+            if (!ToNumber(cx, args[3], &h)) {
                 return false;
+            }
         } else {
             h = 0;
         }
@@ -3220,8 +3522,9 @@ DateMultipleArguments(JSContext* cx, const CallArgs& args)
         // Steps 3i-j.
         double min;
         if (args.length() >= 5) {
-            if (!ToNumber(cx, args[4], &min))
+            if (!ToNumber(cx, args[4], &min)) {
                 return false;
+            }
         } else {
             min = 0;
         }
@@ -3229,8 +3532,9 @@ DateMultipleArguments(JSContext* cx, const CallArgs& args)
         // Steps 3k-l.
         double s;
         if (args.length() >= 6) {
-            if (!ToNumber(cx, args[5], &s))
+            if (!ToNumber(cx, args[5], &s)) {
                 return false;
+            }
         } else {
             s = 0;
         }
@@ -3238,8 +3542,9 @@ DateMultipleArguments(JSContext* cx, const CallArgs& args)
         // Steps 3m-n.
         double milli;
         if (args.length() >= 7) {
-            if (!ToNumber(cx, args[6], &milli))
+            if (!ToNumber(cx, args[6], &milli)) {
                 return false;
+            }
         } else {
             milli = 0;
         }
@@ -3248,8 +3553,9 @@ DateMultipleArguments(JSContext* cx, const CallArgs& args)
         double yr = y;
         if (!IsNaN(y)) {
             double yint = ToInteger(y);
-            if (0 <= yint && yint <= 99)
+            if (0 <= yint && yint <= 99) {
                 yr = 1900 + yint;
+            }
         }
 
         // Step 3p.
@@ -3262,16 +3568,18 @@ DateMultipleArguments(JSContext* cx, const CallArgs& args)
     return ToDateString(cx, args, NowAsMillis(cx));
 }
 
-bool
-js::DateConstructor(JSContext* cx, unsigned argc, Value* vp)
+static bool
+DateConstructor(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    if (args.length() == 0)
+    if (args.length() == 0) {
         return DateNoArguments(cx, args);
+    }
 
-    if (args.length() == 1)
+    if (args.length() == 1) {
         return DateOneArgument(cx, args);
+    }
 
     return DateMultipleArguments(cx, args);
 }
@@ -3327,8 +3635,9 @@ JSObject*
 js::NewDateObjectMsec(JSContext* cx, ClippedTime t, HandleObject proto /* = nullptr */)
 {
     DateObject* obj = NewObjectWithClassProto<DateObject>(cx, proto);
-    if (!obj)
+    if (!obj) {
         return nullptr;
+    }
     obj->setUTCTime(t);
     return obj;
 }
@@ -3346,8 +3655,9 @@ JS_FRIEND_API(bool)
 js::DateIsValid(JSContext* cx, HandleObject obj, bool* isValid)
 {
     ESClass cls;
-    if (!GetBuiltinClass(cx, obj, &cls))
+    if (!GetBuiltinClass(cx, obj, &cls)) {
         return false;
+    }
 
     if (cls != ESClass::Date) {
         *isValid = false;
@@ -3355,8 +3665,9 @@ js::DateIsValid(JSContext* cx, HandleObject obj, bool* isValid)
     }
 
     RootedValue unboxed(cx);
-    if (!Unbox(cx, obj, &unboxed))
+    if (!Unbox(cx, obj, &unboxed)) {
         return false;
+    }
 
     *isValid = !IsNaN(unboxed.toNumber());
     return true;
@@ -3366,8 +3677,9 @@ JS_FRIEND_API(bool)
 js::DateGetMsecSinceEpoch(JSContext* cx, HandleObject obj, double* msecsSinceEpoch)
 {
     ESClass cls;
-    if (!GetBuiltinClass(cx, obj, &cls))
+    if (!GetBuiltinClass(cx, obj, &cls)) {
         return false;
+    }
 
     if (cls != ESClass::Date) {
         *msecsSinceEpoch = 0;
@@ -3375,8 +3687,9 @@ js::DateGetMsecSinceEpoch(JSContext* cx, HandleObject obj, double* msecsSinceEpo
     }
 
     RootedValue unboxed(cx);
-    if (!Unbox(cx, obj, &unboxed))
+    if (!Unbox(cx, obj, &unboxed)) {
         return false;
+    }
 
     *msecsSinceEpoch = unboxed.toNumber();
     return true;

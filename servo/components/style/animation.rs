@@ -4,18 +4,25 @@
 
 //! CSS transitions and animations.
 
+// NOTE(emilio): This code isn't really executed in Gecko, but we don't want to
+// compile it out so that people remember it exists, thus the cfg'd Sender
+// import.
+
 use Atom;
 use bezier::Bezier;
 use context::SharedStyleContext;
 use dom::{OpaqueNode, TElement};
 use font_metrics::FontMetricsProvider;
-use properties::{self, CascadeFlags, ComputedValues, LonghandId};
+use properties::{self, CascadeMode, ComputedValues, LonghandId};
 use properties::animated_properties::AnimatedProperty;
 use properties::longhands::animation_direction::computed_value::single_value::T as AnimationDirection;
 use properties::longhands::animation_play_state::computed_value::single_value::T as AnimationPlayState;
 use rule_tree::CascadeLevel;
 use servo_arc::Arc;
+#[cfg(feature = "servo")]
+use servo_channel::Sender;
 use std::fmt;
+#[cfg(feature = "gecko")]
 use std::sync::mpsc::Sender;
 use stylesheets::keyframes_rule::{KeyframesAnimation, KeyframesStep, KeyframesStepValue};
 use timer::Timer;
@@ -24,6 +31,7 @@ use values::computed::box_::TransitionProperty;
 use values::computed::transform::TimingFunction;
 use values::generics::box_::AnimationIterationCount;
 use values::generics::transform::{StepPosition, TimingFunction as GenericTimingFunction};
+
 
 /// This structure represents a keyframes animation current iteration state.
 ///
@@ -213,7 +221,12 @@ pub enum Animation {
     /// node-dependent state (i.e. iteration count, etc.).
     ///
     /// TODO(emilio): The animation object could be refcounted.
-    Keyframes(OpaqueNode, KeyframesAnimation, Atom, KeyframesAnimationState),
+    Keyframes(
+        OpaqueNode,
+        KeyframesAnimation,
+        Atom,
+        KeyframesAnimationState,
+    ),
 }
 
 impl Animation {
@@ -304,8 +317,7 @@ impl PropertyAnimation {
         let duration = box_style.transition_duration_mod(transition_index);
 
         match transition_property {
-            TransitionProperty::Custom(..) |
-            TransitionProperty::Unsupported(..) => result,
+            TransitionProperty::Custom(..) | TransitionProperty::Unsupported(..) => result,
             TransitionProperty::Shorthand(ref shorthand_id) => shorthand_id
                 .longhands()
                 .filter_map(|longhand| {
@@ -316,8 +328,7 @@ impl PropertyAnimation {
                         old_style,
                         new_style,
                     )
-                })
-                .collect(),
+                }).collect(),
             TransitionProperty::Longhand(longhand_id) => {
                 let animation = PropertyAnimation::from_longhand(
                     longhand_id,
@@ -455,8 +466,7 @@ pub fn start_transitions_if_applicable(
                         property_animation: property_animation,
                     },
                     /* is_expired = */ false,
-                ))
-                .unwrap();
+                )).unwrap();
 
             had_animations = true;
         }
@@ -504,9 +514,10 @@ where
                 Some(previous_style),
                 Some(previous_style),
                 Some(previous_style),
-                /* visited_style = */ None,
                 font_metrics_provider,
-                CascadeFlags::empty(),
+                CascadeMode::Unvisited {
+                    visited_rules: None,
+                },
                 context.quirks_mode(),
                 /* rule_cache = */ None,
                 &mut Default::default(),
@@ -597,8 +608,7 @@ where
                         expired: false,
                         cascade_style: new_style.clone(),
                     },
-                ))
-                .unwrap();
+                )).unwrap();
             had_animations = true;
         }
     }
@@ -736,8 +746,7 @@ pub fn update_style_for_animation<E>(
                             } else {
                                 None
                             }
-                        })
-                        .unwrap_or(animation.steps.len() - 1);
+                        }).unwrap_or(animation.steps.len() - 1);
                 },
                 _ => unreachable!(),
             }

@@ -10,6 +10,7 @@
 #include "jit/JitFrames.h"
 #include "jit/MoveResolver.h"
 #include "jit/x86-shared/MacroAssembler-x86-shared.h"
+#include "js/HeapAPI.h"
 
 namespace js {
 namespace jit {
@@ -98,8 +99,9 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     void writeDataRelocation(const Value& val) {
         if (val.isGCThing()) {
             gc::Cell* cell = val.toGCThing();
-            if (cell && gc::IsInsideNursery(cell))
+            if (cell && gc::IsInsideNursery(cell)) {
                 embedsNurseryPointers_ = true;
+            }
             dataRelocations_.writeUnsigned(masm.currentOffset());
         }
     }
@@ -163,6 +165,20 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
             movl(Imm32(Upper32Of(GetShiftedTag(type))), ToUpper32(Operand(dest)));
         } else {
             ScratchRegisterScope scratch(asMasm());
+#ifdef NIGHTLY_BUILD
+            // Bug 1485209 - Diagnostic assert for constructing Values with
+            // nullptr or misaligned (eg poisoned) JSObject/JSString pointers.
+            if (type == JSVAL_TYPE_OBJECT || type == JSVAL_TYPE_STRING) {
+                Label crash, ok;
+                testPtr(reg, Imm32(js::gc::CellAlignMask));
+                j(Assembler::NonZero, &crash);
+                testPtr(reg, reg);
+                j(Assembler::NonZero, &ok);
+                bind(&crash);
+                breakpoint();
+                bind(&ok);
+            }
+#endif
             boxValue(type, reg, scratch);
             movq(scratch, Operand(dest));
         }
@@ -197,8 +213,9 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     void tagValue(JSValueType type, Register payload, ValueOperand dest) {
         ScratchRegisterScope scratch(asMasm());
         MOZ_ASSERT(dest.valueReg() != scratch);
-        if (payload != dest.valueReg())
+        if (payload != dest.valueReg()) {
             movq(payload, dest.valueReg());
+        }
         mov(ImmShiftedTag(type), scratch);
         orq(scratch, dest.valueReg());
     }
@@ -546,7 +563,7 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
 
     CodeOffsetJump jumpWithPatch(RepatchLabel* label) {
         JmpSrc src = jmpSrc(label);
-        return CodeOffsetJump(size(), addPatchableJump(src, Relocation::HARDCODED));
+        return CodeOffsetJump(size(), addPatchableJump(src, RelocationKind::HARDCODED));
     }
 
     void movePtr(Register src, Register dest) {
@@ -671,8 +688,9 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     }
 
     void splitTag(Register src, Register dest) {
-        if (src != dest)
+        if (src != dest) {
             movq(src, dest);
+        }
         shrq(Imm32(JSVAL_TAG_SHIFT), dest);
     }
     void splitTag(const ValueOperand& operand, Register dest) {
@@ -810,8 +828,9 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
             mov(ImmWord(JSVAL_TYPE_TO_SHIFTED_TAG(type)), scratch);
             // If src is already a register, then src and dest are the same
             // thing and we don't need to move anything into dest.
-            if (src.kind() != Operand::REG)
+            if (src.kind() != Operand::REG) {
                 movq(src, dest);
+            }
             xorq(scratch, dest);
         } else {
             mov(ImmWord(JSVAL_TYPE_TO_SHIFTED_TAG(type)), dest);
@@ -959,12 +978,13 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
 
     template <typename T>
     void loadUnboxedValue(const T& src, MIRType type, AnyRegister dest) {
-        if (dest.isFloat())
+        if (dest.isFloat()) {
             loadInt32OrDouble(src, dest.fpu());
-        else if (type == MIRType::ObjectOrNull)
+        } else if (type == MIRType::ObjectOrNull) {
             unboxObjectOrNull(src, dest.gpr());
-        else
+        } else {
             unboxNonDouble(Operand(src), dest.gpr(), ValueTypeFromMIRType(type));
+        }
     }
 
     template <typename T>

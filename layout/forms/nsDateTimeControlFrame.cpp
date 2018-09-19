@@ -152,7 +152,7 @@ nscoord
 nsDateTimeControlFrame::GetMinISize(gfxContext* aRenderingContext)
 {
   nscoord result;
-  DISPLAY_MIN_WIDTH(this, result);
+  DISPLAY_MIN_INLINE_SIZE(this, result);
 
   nsIFrame* kid = mFrames.FirstChild();
   if (kid) { // display:none?
@@ -170,7 +170,7 @@ nscoord
 nsDateTimeControlFrame::GetPrefISize(gfxContext* aRenderingContext)
 {
   nscoord result;
-  DISPLAY_PREF_WIDTH(this, result);
+  DISPLAY_PREF_INLINE_SIZE(this, result);
 
   nsIFrame* kid = mFrames.FirstChild();
   if (kid) { // display:none?
@@ -421,14 +421,14 @@ nsDateTimeControlFrame::AttributeChanged(int32_t aNameSpaceID,
               &nsIDateTimeInputArea::NotifyInputElementValueChanged));
           }
         } else {
-          if (aModType == MutationEventBinding::REMOVAL) {
+          if (aModType == MutationEvent_Binding::REMOVAL) {
             if (inputAreaContent) {
               nsAtomString name(aAttribute);
               inputAreaContent->RemoveEditAttribute(name);
             }
           } else {
-            MOZ_ASSERT(aModType == MutationEventBinding::ADDITION ||
-                       aModType == MutationEventBinding::MODIFICATION);
+            MOZ_ASSERT(aModType == MutationEvent_Binding::ADDITION ||
+                       aModType == MutationEvent_Binding::MODIFICATION);
             if (inputAreaContent) {
               nsAtomString name(aAttribute);
               nsAutoString value;

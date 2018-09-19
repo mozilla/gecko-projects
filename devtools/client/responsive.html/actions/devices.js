@@ -4,6 +4,8 @@
 
 "use strict";
 
+const Services = require("Services");
+
 const {
   ADD_DEVICE,
   ADD_DEVICE_TYPE,
@@ -14,11 +16,9 @@ const {
   UPDATE_DEVICE_DISPLAYED,
   UPDATE_DEVICE_MODAL,
 } = require("./index");
-const { removeDeviceAssociation } = require("./viewports");
 
 const { addDevice, getDevices, removeDevice } = require("devtools/client/shared/devices");
 
-const Services = require("Services");
 const DISPLAYED_DEVICES_PREF = "devtools.responsive.html.displayedDeviceList";
 
 /**
@@ -101,15 +101,7 @@ module.exports = {
   },
 
   removeCustomDevice(device) {
-    return async function(dispatch, getState) {
-      // Check if the custom device is currently associated with any viewports
-      const { viewports } = getState();
-      for (const viewport of viewports) {
-        if (viewport.device == device.name) {
-          dispatch(removeDeviceAssociation(viewport.id));
-        }
-      }
-
+    return async function(dispatch) {
       // Remove custom device from device storage
       await removeDevice(device, "custom");
       dispatch({

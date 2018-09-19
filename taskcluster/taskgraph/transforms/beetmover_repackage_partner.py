@@ -57,7 +57,7 @@ beetmover_description_schema = Schema({
     # unique label to describe this beetmover task, defaults to {dep.label}-beetmover
     Optional('label'): basestring,
 
-    Required('partner-bucket-scope'): optionally_keyed_by('project', basestring),
+    Required('partner-bucket-scope'): optionally_keyed_by('release-level', basestring),
     Required('partner-public-path'): Any(None, basestring),
     Required('partner-private-path'): Any(None, basestring),
 
@@ -83,7 +83,8 @@ def validate(config, jobs):
 def resolve_keys(config, jobs):
     for job in jobs:
         resolve_keyed_by(
-            job, 'partner-bucket-scope', item_name=job['label'], project=config.params['project']
+            job, 'partner-bucket-scope', item_name=job['label'],
+            **{'release-level': config.params.release_level()}
         )
         yield job
 
@@ -101,6 +102,7 @@ def make_task_description(config, jobs):
         if not build_platform:
             raise Exception("Cannot find build platform!")
 
+        label = dep_job.label.replace("repackage-signing-l10n", "beetmover-")
         label = dep_job.label.replace("repackage-signing-", "beetmover-")
         label = label.replace("repackage-", "beetmover-")
         label = label.replace("chunking-dummy-", "beetmover-")

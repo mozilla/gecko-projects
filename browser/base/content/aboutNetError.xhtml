@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="chrome://browser/skin/aboutNetError.css" type="text/css" media="all" />
     <!-- If the location of the favicon is changed here, the FAVICON_ERRORPAGE_URL symbol in
          toolkit/components/places/src/nsFaviconService.h should be updated. -->
-    <link rel="icon" type="image/png" id="favicon" href="chrome://global/skin/icons/warning-16.png"/>
+    <link rel="icon" id="favicon" href="chrome://global/skin/icons/warning.svg"/>
   </head>
 
   <body dir="&locale.dir;">
@@ -114,6 +114,11 @@
           <div id="errorShortDesc">
             <p id="errorShortDescText" />
           </div>
+
+          <div id="errorShortDesc2">
+              <p id="errorShortDescText2" />
+          </div>
+
           <p id="badStsCertExplanation" hidden="true">&certerror.whatShouldIDo.badStsCertExplanation;</p>
 
           <div id="wrongSystemTimePanel">
@@ -150,6 +155,7 @@
           <button id="returnButton" class="primary" autocomplete="off">&returnToPreviousPage.label;</button>
           <button id="openPortalLoginPageButton" class="primary" autocomplete="off">&openPortalLoginPage.label2;</button>
           <button id="advancedButton" autocomplete="off">&advanced.label;</button>
+          <button id="moreInformationButton" autocomplete="off">&moreInformation.label;</button>
         </div>
       </div>
 
@@ -160,6 +166,9 @@
       <div id="advancedPanelContainer">
         <div id="badCertAdvancedPanel" class="advanced-panel">
           <p id="badCertTechnicalInfo"/>
+          <div id="advancedPanelButtonContainer" class="button-container">
+            <button id="advancedPanelErrorTryAgain" class="primary" autocomplete="off">&retry.label;</button>
+          </div>
           <div class="exceptionDialogButtonContainer">
             <button id="exceptionDialogButton">&securityOverride.exceptionButtonLabel;</button>
           </div>

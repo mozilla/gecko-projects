@@ -13,7 +13,7 @@ use glyph_rasterizer::GlyphFormat;
 use renderer::{
     desc,
     MAX_VERTEX_TEXTURE_WIDTH,
-    BlendMode, ImageBufferKind, RendererError, RendererOptions,
+    BlendMode, DebugFlags, ImageBufferKind, RendererError, RendererOptions,
     TextureSampler, VertexArrayKind,
 };
 
@@ -50,6 +50,7 @@ pub const IMAGE_BUFFER_KINDS: [ImageBufferKind; 4] = [
 ];
 
 const ALPHA_FEATURE: &str = "ALPHA_PASS";
+const DEBUG_OVERDRAW_FEATURE: &str = "DEBUG_OVERDRAW";
 const DITHERING_FEATURE: &str = "DITHERING";
 const DUAL_SOURCE_FEATURE: &str = "DUAL_SOURCE_BLENDING";
 
@@ -181,6 +182,7 @@ struct BrushShader {
     opaque: LazilyCompiledShader,
     alpha: LazilyCompiledShader,
     dual_source: Option<LazilyCompiledShader>,
+    debug_overdraw: LazilyCompiledShader,
 }
 
 impl BrushShader {
@@ -227,15 +229,29 @@ impl BrushShader {
             None
         };
 
+        let mut debug_overdraw_features = features.to_vec();
+        debug_overdraw_features.push(DEBUG_OVERDRAW_FEATURE);
+
+        let debug_overdraw = LazilyCompiledShader::new(
+            ShaderKind::Brush,
+            name,
+            &debug_overdraw_features,
+            device,
+            precache,
+        )?;
+
         Ok(BrushShader {
             opaque,
             alpha,
             dual_source,
+            debug_overdraw,
         })
     }
 
-    fn get(&mut self, blend_mode: BlendMode) -> &mut LazilyCompiledShader {
+    fn get(&mut self, blend_mode: BlendMode, debug_flags: DebugFlags)
+           -> &mut LazilyCompiledShader {
         match blend_mode {
+            _ if debug_flags.contains(DebugFlags::SHOW_OVERDRAW) => &mut self.debug_overdraw,
             BlendMode::None => &mut self.opaque,
             BlendMode::Alpha |
             BlendMode::PremultipliedAlpha |
@@ -256,12 +272,14 @@ impl BrushShader {
         if let Some(dual_source) = self.dual_source {
             dual_source.deinit(device);
         }
+        self.debug_overdraw.deinit(device);
     }
 }
 
 pub struct TextShader {
     simple: LazilyCompiledShader,
     glyph_transform: LazilyCompiledShader,
+    debug_overdraw: LazilyCompiledShader,
 }
 
 impl TextShader {
@@ -290,14 +308,27 @@ impl TextShader {
             precache,
         )?;
 
-        Ok(TextShader { simple, glyph_transform })
+        let mut debug_overdraw_features = features.to_vec();
+        debug_overdraw_features.push("DEBUG_OVERDRAW");
+
+        let debug_overdraw = LazilyCompiledShader::new(
+            ShaderKind::Text,
+            name,
+            &debug_overdraw_features,
+            device,
+            precache,
+        )?;
+
+        Ok(TextShader { simple, glyph_transform, debug_overdraw })
     }
 
     pub fn get(
         &mut self,
         glyph_format: GlyphFormat,
+        debug_flags: DebugFlags,
     ) -> &mut LazilyCompiledShader {
         match glyph_format {
+            _ if debug_flags.contains(DebugFlags::SHOW_OVERDRAW) => &mut self.debug_overdraw,
             GlyphFormat::Alpha |
             GlyphFormat::Subpixel |
             GlyphFormat::Bitmap |
@@ -310,6 +341,7 @@ impl TextShader {
     fn deinit(self, device: &mut Device) {
         self.simple.deinit(device);
         self.glyph_transform.deinit(device);
+        self.debug_overdraw.deinit(device);
     }
 }
 
@@ -320,7 +352,7 @@ fn create_prim_shader(
     vertex_format: VertexArrayKind,
 ) -> Result<Program, ShaderError> {
     let mut prefix = format!(
-        "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n",
+        "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}U\n",
         MAX_VERTEX_TEXTURE_WIDTH
     );
 
@@ -351,11 +383,12 @@ fn create_prim_shader(
                 ("sDither", TextureSampler::Dither),
                 ("sCacheA8", TextureSampler::CacheA8),
                 ("sCacheRGBA8", TextureSampler::CacheRGBA8),
-                ("sClipScrollNodes", TextureSampler::ClipScrollNodes),
+                ("sTransformPalette", TextureSampler::TransformPalette),
                 ("sRenderTasks", TextureSampler::RenderTasks),
                 ("sResourceCache", TextureSampler::ResourceCache),
                 ("sSharedCacheA8", TextureSampler::SharedCacheA8),
-                ("sLocalClipRects", TextureSampler::LocalClipRects),
+                ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
+                ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
             ],
         );
     }
@@ -365,7 +398,7 @@ fn create_prim_shader(
 
 fn create_clip_shader(name: &'static str, device: &mut Device) -> Result<Program, ShaderError> {
     let prefix = format!(
-        "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n
+        "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}U\n
         #define WR_FEATURE_TRANSFORM\n",
         MAX_VERTEX_TEXTURE_WIDTH
     );
@@ -379,11 +412,12 @@ fn create_clip_shader(name: &'static str, device: &mut Device) -> Result<Program
             program,
             &[
                 ("sColor0", TextureSampler::Color0),
-                ("sClipScrollNodes", TextureSampler::ClipScrollNodes),
+                ("sTransformPalette", TextureSampler::TransformPalette),
                 ("sRenderTasks", TextureSampler::RenderTasks),
                 ("sResourceCache", TextureSampler::ResourceCache),
                 ("sSharedCacheA8", TextureSampler::SharedCacheA8),
-                ("sLocalClipRects", TextureSampler::LocalClipRects),
+                ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
+                ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
             ],
         );
     }
@@ -399,6 +433,7 @@ pub struct Shaders {
     pub cs_blur_a8: LazilyCompiledShader,
     pub cs_blur_rgba8: LazilyCompiledShader,
     pub cs_border_segment: LazilyCompiledShader,
+    pub cs_border_solid: LazilyCompiledShader,
 
     // Brush shaders
     brush_solid: BrushShader,
@@ -549,8 +584,8 @@ impl Shaders {
 
         let ps_text_run_dual_source = TextShader::new("ps_text_run",
             device,
-            &["DUAL_SOURCE_BLENDING"],
-            options.precache_shaders,
+            &[DUAL_SOURCE_FEATURE],
+            options.precache_shaders && !options.disable_dual_source_blending,
         )?;
 
         // All image configuration.
@@ -571,7 +606,7 @@ impl Shaders {
                     device,
                     &image_features,
                     options.precache_shaders,
-                    true,
+                    !options.disable_dual_source_blending,
                 )?);
             }
             image_features.clear();
@@ -629,6 +664,14 @@ impl Shaders {
              options.precache_shaders,
         )?;
 
+        let cs_border_solid = LazilyCompiledShader::new(
+            ShaderKind::Cache(VertexArrayKind::Border),
+            "cs_border_solid",
+            &[],
+            device,
+            options.precache_shaders,
+        )?;
+
         let ps_split_composite = LazilyCompiledShader::new(
             ShaderKind::Primitive,
             "ps_split_composite",
@@ -645,6 +688,7 @@ impl Shaders {
             cs_blur_a8,
             cs_blur_rgba8,
             cs_border_segment,
+            cs_border_solid,
             brush_solid,
             brush_image,
             brush_blend,
@@ -671,7 +715,7 @@ impl Shaders {
             (color_space as usize)
     }
 
-    pub fn get(&mut self, key: &BatchKey) -> &mut LazilyCompiledShader {
+    pub fn get(&mut self, key: &BatchKey, debug_flags: DebugFlags) -> &mut LazilyCompiledShader {
         match key.kind {
             BatchKind::SplitComposite => {
                 &mut self.ps_split_composite
@@ -706,14 +750,14 @@ impl Shaders {
                             .expect("Unsupported YUV shader kind")
                     }
                 };
-                brush_shader.get(key.blend_mode)
+                brush_shader.get(key.blend_mode, debug_flags)
             }
             BatchKind::TextRun(glyph_format) => {
                 let text_shader = match key.blend_mode {
                     BlendMode::SubpixelDualSource => &mut self.ps_text_run_dual_source,
                     _ => &mut self.ps_text_run,
                 };
-                text_shader.get(glyph_format)
+                text_shader.get(glyph_format, debug_flags)
             }
         }
     }
@@ -742,6 +786,7 @@ impl Shaders {
                 shader.deinit(device);
             }
         }
+        self.cs_border_solid.deinit(device);
         self.cs_border_segment.deinit(device);
         self.ps_split_composite.deinit(device);
     }

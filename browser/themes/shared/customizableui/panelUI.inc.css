@@ -109,6 +109,11 @@
   stroke: transparent;
 }
 
+.cui-widget-panel,
+#widget-overflow {
+  font: menu;
+}
+
 panelview {
   -moz-box-orient: vertical;
   -moz-box-flex: 1;
@@ -866,6 +871,10 @@ panelview .toolbarbutton-1,
   outline: 0;
 }
 
+.subviewbutton[disabled="true"] {
+  color: var(--panel-disabled-color);
+}
+
 .subviewbutton > .toolbarbutton-text {
   padding: 0;
   padding-inline-start: 24px; /* This is 16px for the icon + 8px for the padding as defined below. */
@@ -908,7 +917,6 @@ panelview .toolbarbutton-1,
 }
 
 .panel-banner-item > .toolbarbutton-multiline-text {
-  font: menu;
   margin: 0;
   padding: 0;
   padding-inline-start: 8px; /* See '.subviewbutton-iconic > .toolbarbutton-text' rule above. */
@@ -946,16 +954,6 @@ panelview .toolbarbutton-1,
 .subviewbutton > .menu-accel-container > .menu-iconic-accel,
 .subviewbutton > .menu-accel-container > .menu-accel {
   margin-inline-end: 0 !important; /* to override menu.css on Windows */
-}
-
-#widget-overflow-fixed-list .toolbarbutton-1 > .toolbarbutton-text,
-#widget-overflow-list .toolbarbutton-1 > .toolbarbutton-text,
-.subviewbutton:not(.panel-subview-footer) > .toolbarbutton-text,
-.addon-banner-item > .toolbarbutton-text,
-/* Bookmark items need a more specific selector. */
-.PanelUI-subView .subviewbutton:not(.panel-subview-footer) > .menu-text,
-.PanelUI-subView .subviewbutton:not(.panel-subview-footer) > .menu-iconic-text {
-  font: menu;
 }
 
 .subviewbutton[shortcut]::after {
@@ -1005,12 +1003,6 @@ panelview .toolbarbutton-1,
   transform: translateY(2px) scaleX(.75);
 }
 
-/* This is a <label> but it should fit in with the menu font- and colorwise. */
-#PanelUI-characterEncodingView-autodetect-label {
-  font: menu;
-  color: inherit;
-}
-
 .subviewbutton[checked="true"] {
   list-style-image: url(chrome://browser/skin/check.svg);
   -moz-context-properties: fill;
@@ -1028,7 +1020,6 @@ panelview .toolbarbutton-1,
 
 panelmultiview .toolbaritem-combined-buttons > label {
   -moz-box-flex: 1;
-  font: menu;
   margin: 0;
   padding: 4px 0px;
 }
@@ -1087,17 +1078,11 @@ panelmultiview .toolbaritem-combined-buttons > spacer.after-label {
 }
 
 .toolbaritem-combined-buttons > .subviewbutton:not(.subviewbutton-iconic) > .toolbarbutton-text {
-  font-size: 1em;
   padding-inline-start: 0;
 }
 
 .subview-subheader {
   color: var(--panel-disabled-color);
-}
-
-.subview-subheader,
-.panel-subview-footer {
-  font: menu;
 }
 
 panelview .toolbarbutton-1 {
@@ -1141,11 +1126,6 @@ menuitem.panel-subview-footer@menuStateActive@,
 .subviewbutton.panel-subview-footer@buttonStateActive@ {
   background-color: var(--arrowpanel-dimmed-even-further);
   box-shadow: 0 1px 0 hsla(210,4%,10%,.05) inset;
-}
-
-#BMB_bookmarksPopup .subviewbutton {
-  font: menu;
-  font-weight: normal;
 }
 
 #BMB_bookmarksPopup .subviewbutton:not([disabled="true"]) {

@@ -6,14 +6,19 @@
 
 /* rendering object for css3 multi-column layout */
 
-#include "mozilla/Unused.h"
-#include "gfxPrefs.h"
 #include "nsColumnSetFrame.h"
+
+#include "mozilla/Logging.h"
+#include "mozilla/ToString.h"
 #include "nsCSSRendering.h"
 
 using namespace mozilla;
 using namespace mozilla::layout;
 
+// To see this log, use $ MOZ_LOG=ColumnSet:4 ./mach run
+static LazyLogModule sColumnSetLog("ColumnSet");
+#define COLUMN_SET_LOG(msg, ...)                                               \
+  MOZ_LOG(sColumnSetLog, LogLevel::Debug, (msg, ##__VA_ARGS__))
 
 class nsDisplayColumnRule : public nsDisplayItem {
 public:
@@ -298,6 +303,16 @@ GetColumnGap(nsColumnSetFrame* aFrame,
   return nsLayoutUtils::ResolveGapToLength(columnGap, aPercentageBasis);
 }
 
+/* static */ nscoord
+nsColumnSetFrame::ClampUsedColumnWidth(const nsStyleCoord& aColumnWidth)
+{
+  MOZ_ASSERT(aColumnWidth.GetUnit() == eStyleUnit_Coord,
+             "This should only be called when column-width is a <length>!");
+
+  // Per spec, used values will be clamped to a minimum of 1px.
+  return std::max(CSSPixel::ToAppUnits(1), aColumnWidth.GetCoordValue());
+}
+
 nsColumnSetFrame::ReflowConfig
 nsColumnSetFrame::ChooseColumnStrategy(const ReflowInput& aReflowInput,
                                        bool aForceAuto = false,
@@ -333,7 +348,7 @@ nsColumnSetFrame::ChooseColumnStrategy(const ReflowInput& aReflowInput,
   int32_t numColumns = colStyle->mColumnCount;
 
   // If column-fill is set to 'balance', then we want to balance the columns.
-  const bool isBalancing = colStyle->mColumnFill == NS_STYLE_COLUMN_FILL_BALANCE
+  const bool isBalancing = colStyle->mColumnFill == StyleColumnFill::Balance
                            && !aForceAuto;
   if (isBalancing) {
     const uint32_t MAX_NESTED_COLUMN_BALANCING = 2;
@@ -353,7 +368,7 @@ nsColumnSetFrame::ChooseColumnStrategy(const ReflowInput& aReflowInput,
   // In vertical writing-mode, "column-width" (inline size) will actually be
   // physical height, but its CSS name is still column-width.
   if (colStyle->mColumnWidth.GetUnit() == eStyleUnit_Coord) {
-    colISize = colStyle->mColumnWidth.GetCoordValue();
+    colISize = ClampUsedColumnWidth(colStyle->mColumnWidth);
     NS_ASSERTION(colISize >= 0, "negative column width");
     // Reduce column count if necessary to make columns fit in the
     // available width. Compute max number of columns that fit in
@@ -432,11 +447,15 @@ nsColumnSetFrame::ChooseColumnStrategy(const ReflowInput& aReflowInput,
     colBSize = std::max(colBSize, nsPresContext::CSSPixelsToAppUnits(1));
   }
 
-#ifdef DEBUG_roc
-  printf("*** nsColumnSetFrame::ChooseColumnStrategy: numColumns=%d, colISize=%d,"
-         " expectedISizeLeftOver=%d, colBSize=%d, colGap=%d\n",
-         numColumns, colISize, expectedISizeLeftOver, colBSize, colGap);
-#endif
+  COLUMN_SET_LOG("%s: numColumns=%d, colISize=%d, expectedISizeLeftOver=%d,"
+                 " colBSize=%d, colGap=%d",
+                 __func__,
+                 numColumns,
+                 colISize,
+                 expectedISizeLeftOver,
+                 colBSize,
+                 colGap);
+
   ReflowConfig config = { numColumns, colISize, expectedISizeLeftOver, colGap,
                           colBSize, isBalancing, knownFeasibleBSize,
                           knownInfeasibleBSize, computedBSize, consumedBSize };
@@ -493,14 +512,18 @@ nscoord
 nsColumnSetFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   nscoord iSize = 0;
-  DISPLAY_MIN_WIDTH(this, iSize);
-  if (mFrames.FirstChild()) {
+  DISPLAY_MIN_INLINE_SIZE(this, iSize);
+
+  if (mFrames.FirstChild() && !StyleDisplay()->IsContainSize()) {
+    // We want to ignore this in the case that we're size contained
+    // because our children should not contribute to our
+    // intrinsic size.
     iSize = mFrames.FirstChild()->GetMinISize(aRenderingContext);
   }
   const nsStyleColumn* colStyle = StyleColumn();
   nscoord colISize;
   if (colStyle->mColumnWidth.GetUnit() == eStyleUnit_Coord) {
-    colISize = colStyle->mColumnWidth.GetCoordValue();
+    colISize = ClampUsedColumnWidth(colStyle->mColumnWidth);
     // As available width reduces to zero, we reduce our number of columns
     // to one, and don't enforce the column width, so just return the min
     // of the child's min-width with any specified column width.
@@ -532,14 +555,17 @@ nsColumnSetFrame::GetPrefISize(gfxContext *aRenderingContext)
   // of any required column gaps
   // XXX what about forced column breaks here?
   nscoord result = 0;
-  DISPLAY_PREF_WIDTH(this, result);
+  DISPLAY_PREF_INLINE_SIZE(this, result);
   const nsStyleColumn* colStyle = StyleColumn();
   nscoord colGap = GetColumnGap(this, NS_UNCONSTRAINEDSIZE);
 
   nscoord colISize;
   if (colStyle->mColumnWidth.GetUnit() == eStyleUnit_Coord) {
-    colISize = colStyle->mColumnWidth.GetCoordValue();
-  } else if (mFrames.FirstChild()) {
+    colISize = ClampUsedColumnWidth(colStyle->mColumnWidth);
+  } else if (mFrames.FirstChild() && !StyleDisplay()->IsContainSize()) {
+    // We want to ignore this in the case that we're size contained
+    // because our children should not contribute to our
+    // intrinsic size.
     colISize = mFrames.FirstChild()->GetPrefISize(aRenderingContext);
   } else {
     colISize = 0;
@@ -574,12 +600,16 @@ nsColumnSetFrame::ReflowChildren(ReflowOutput&     aDesiredSize,
   bool shrinkingBSize = mLastBalanceBSize > aConfig.mColMaxBSize;
   bool changingBSize = mLastBalanceBSize != aConfig.mColMaxBSize;
 
-#ifdef DEBUG_roc
-  printf("*** Doing column reflow pass: mLastBalanceBSize=%d, mColMaxBSize=%d, RTL=%d\n"
-         "    mBalanceColCount=%d, mColISize=%d, mColGap=%d\n",
-         mLastBalanceBSize, aConfig.mColMaxBSize, isRTL, aConfig.mBalanceColCount,
-         aConfig.mColISize, aConfig.mColGap);
-#endif
+  COLUMN_SET_LOG("%s: Doing column reflow pass: mLastBalanceBSize=%d,"
+                 " mColMaxBSize=%d, RTL=%d, mBalanceColCount=%d,"
+                 " mColISize=%d, mColGap=%d",
+                 __func__,
+                 mLastBalanceBSize,
+                 aConfig.mColMaxBSize,
+                 isRTL,
+                 aConfig.mBalanceColCount,
+                 aConfig.mColISize,
+                 aConfig.mColGap);
 
   DrainOverflowColumns();
 
@@ -627,9 +657,8 @@ nsColumnSetFrame::ReflowChildren(ReflowOutput&     aDesiredSize,
     if (availISize != NS_INTRINSICSIZE) {
       childOrigin.I(wm) = containerSize.width - borderPadding.Left(wm) -
                           availISize;
-#ifdef DEBUG_roc
-      printf("*** childOrigin.iCoord = %d\n", childOrigin.I(wm));
-#endif
+
+      COLUMN_SET_LOG("%s: childOrigin.iCoord=%d", __func__, childOrigin.I(wm));
     }
   }
 
@@ -656,7 +685,7 @@ nsColumnSetFrame::ReflowChildren(ReflowOutput&     aDesiredSize,
     // If column-fill is auto (not the default), then we might need to
     // move content between columns for any change in column block-size.
     if (skipIncremental && changingBSize &&
-        StyleColumn()->mColumnFill == NS_STYLE_COLUMN_FILL_AUTO) {
+        StyleColumn()->mColumnFill == StyleColumnFill::Auto) {
       skipIncremental = false;
     }
     // If we need to pull up content from the prev-in-flow then this is not just
@@ -685,7 +714,7 @@ nsColumnSetFrame::ReflowChildren(ReflowOutput&     aDesiredSize,
         skipIncremental = false;
         break;
       default:
-        NS_NOTREACHED("unknown block direction");
+        MOZ_ASSERT_UNREACHABLE("unknown block direction");
         break;
       }
     }
@@ -708,10 +737,13 @@ nsColumnSetFrame::ReflowChildren(ReflowOutput&     aDesiredSize,
         aStatus = mLastFrameStatus;
       }
       childContentBEnd = nsLayoutUtils::CalculateContentBEnd(wm, child);
-#ifdef DEBUG_roc
-      printf("*** Skipping child #%d %p (incremental %d): status = %d\n",
-             columnCount, (void*)child, skipIncremental, aStatus);
-#endif
+
+      COLUMN_SET_LOG("%s: Skipping child #%d %p (incremental %d): status=%s",
+                     __func__,
+                     columnCount,
+                     child,
+                     skipIncremental,
+                     ToString(aStatus).c_str());
     } else {
       LogicalSize availSize(wm, aConfig.mColISize, aConfig.mColMaxBSize);
       if (aUnboundedLastColumn && columnCount == aConfig.mBalanceColCount - 1) {
@@ -734,10 +766,11 @@ nsColumnSetFrame::ReflowChildren(ReflowOutput&     aDesiredSize,
       // hasn't changed.
       kidReflowInput.mFlags.mMustReflowPlaceholders = !colBSizeChanged;
 
-#ifdef DEBUG_roc
-      printf("*** Reflowing child #%d %p: availHeight=%d\n",
-             columnCount, (void*)child,availSize.BSize(wm));
-#endif
+      COLUMN_SET_LOG("%s: Reflowing child #%d %p: availBSize=%d",
+                     __func__,
+                     columnCount,
+                     child,
+                     availSize.BSize(wm));
 
       // Note if the column's next in flow is not being changed by this incremental reflow.
       // This may allow the current column to avoid trying to pull lines from the next column.
@@ -768,11 +801,15 @@ nsColumnSetFrame::ReflowChildren(ReflowOutput&     aDesiredSize,
 
       reflowNext = aStatus.NextInFlowNeedsReflow();
 
-#ifdef DEBUG_roc
-      printf("*** Reflowed child #%d %p: status = %d, desiredSize=%d,%d CarriedOutBEndMargin=%d\n",
-             columnCount, (void*)child, aStatus, kidDesiredSize.Width(), kidDesiredSize.Height(),
-             kidDesiredSize.mCarriedOutBEndMargin.get());
-#endif
+      COLUMN_SET_LOG("%s: Reflowed child #%d %p: status=%s,"
+                     " desiredSize=(%d,%d), CarriedOutBEndMargin=%d",
+                     __func__,
+                     columnCount,
+                     child,
+                     ToString(aStatus).c_str(),
+                     kidDesiredSize.ISize(wm),
+                     kidDesiredSize.BSize(wm),
+                     kidDesiredSize.mCarriedOutBEndMargin.get());
 
       NS_FRAME_TRACE_REFLOW_OUT("Column::Reflow", aStatus);
 
@@ -874,9 +911,9 @@ nsColumnSetFrame::ReflowChildren(ReflowOutput&     aDesiredSize,
     if (child) {
       childOrigin.I(wm) += aConfig.mColISize + aConfig.mColGap;
 
-#ifdef DEBUG_roc
-      printf("*** NEXT CHILD ORIGIN.icoord = %d\n", childOrigin.I(wm));
-#endif
+      COLUMN_SET_LOG("%s: Next childOrigin.iCoord=%d",
+                     __func__,
+                     childOrigin.I(wm));
     }
   }
 
@@ -908,6 +945,11 @@ nsColumnSetFrame::ReflowChildren(ReflowOutput&     aDesiredSize,
     } else {
       contentSize.BSize(wm) = aConfig.mComputedBSize;
     }
+  } else if (aReflowInput.mStyleDisplay->IsContainSize()) {
+    // If we are intrinsically sized, but are size contained,
+    // we need to behave as if we have no contents. Our BSize
+    // should be zero or minBSize if specified.
+    contentSize.BSize(wm) = aReflowInput.ApplyMinMaxBSize(0);
   } else {
     // We add the "consumed" block-size back in so that we're applying
     // constraints to the correct bSize value, then subtract it again
@@ -945,12 +987,12 @@ nsColumnSetFrame::ReflowChildren(ReflowOutput&     aDesiredSize,
     }
   }
 
-#ifdef DEBUG_roc
-  printf("*** DONE PASS feasible=%d\n", allFit && aStatus.IsFullyComplete()
-         && !aStatus.IsTruncated());
-#endif
-  return allFit && aStatus.IsFullyComplete()
-    && !aStatus.IsTruncated();
+  bool feasible = allFit && aStatus.IsFullyComplete() && !aStatus.IsTruncated();
+  COLUMN_SET_LOG("%s: Done column reflow pass: %s",
+                 __func__,
+                 feasible ? "Feasible :)" : "Infeasible :(");
+
+  return feasible;
 }
 
 void
@@ -1044,11 +1086,10 @@ nsColumnSetFrame::FindBestBalanceBSize(const ReflowInput& aReflowInput,
       }
     }
 
-#ifdef DEBUG_roc
-    printf("*** nsColumnSetFrame::Reflow balancing knownInfeasible=%d knownFeasible=%d\n",
-           aConfig.mKnownInfeasibleBSize, aConfig.mKnownFeasibleBSize);
-#endif
-
+    COLUMN_SET_LOG("%s: KnownInfeasibleBSize=%d, KnownFeasibleBSize=%d",
+                   __func__,
+                   aConfig.mKnownInfeasibleBSize,
+                   aConfig.mKnownFeasibleBSize);
 
     if (aConfig.mKnownInfeasibleBSize >= aConfig.mKnownFeasibleBSize - 1) {
       // aConfig.mKnownFeasibleBSize is where we want to be
@@ -1091,9 +1132,7 @@ nsColumnSetFrame::FindBestBalanceBSize(const ReflowInput& aReflowInput,
     // Don't bother guessing more than our height constraint.
     nextGuess = std::min(availableContentBSize, nextGuess);
 
-#ifdef DEBUG_roc
-    printf("*** nsColumnSetFrame::Reflow balancing choosing next guess=%d\n", nextGuess);
-#endif
+    COLUMN_SET_LOG("%s: Choosing next guess=%d", __func__, nextGuess);
 
     aConfig.mColMaxBSize = nextGuess;
 
@@ -1262,7 +1301,7 @@ nsColumnSetFrame::AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult)
   }
 
   MOZ_ASSERT(column->Style()->GetPseudo() ==
-               nsCSSAnonBoxes::columnContent,
+               nsCSSAnonBoxes::columnContent(),
              "What sort of child is this?");
   aResult.AppendElement(OwnedAnonBox(column));
 }
@@ -1274,7 +1313,7 @@ nsColumnSetFrame::SetInitialChildList(ChildListID     aListID,
 {
   MOZ_ASSERT(aListID != kPrincipalList || aChildList.OnlyChild(),
              "initial principal child list must have exactly one child");
-  nsContainerFrame::SetInitialChildList(kPrincipalList, aChildList);
+  nsContainerFrame::SetInitialChildList(aListID, aChildList);
 }
 
 void

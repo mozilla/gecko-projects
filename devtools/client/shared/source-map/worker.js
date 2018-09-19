@@ -528,6 +528,12 @@ function networkRequest(url, opts) {
     cache: opts.loadFromCache ? "default" : "no-cache"
   }).then(res => {
     if (res.status >= 200 && res.status < 300) {
+      if (res.headers.get("Content-Type") === "application/wasm") {
+        return res.arrayBuffer().then(buffer => ({
+          content: buffer,
+          isDwarf: true
+        }));
+      }
       return res.text().then(text => ({ content: text }));
     }
     return Promise.reject(`request failed with status ${res.status}`);
@@ -551,8 +557,8 @@ function WorkerDispatcher() {
    * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 WorkerDispatcher.prototype = {
-  start(url) {
-    this.worker = new Worker(url);
+  start(url, win = window) {
+    this.worker = new win.Worker(url);
     this.worker.onerror = () => {
       console.error(`Error in worker ${url}`);
     };
@@ -1981,10 +1987,11 @@ const {
   getOriginalSourceText,
   getLocationScopes,
   hasMappedSource,
+  clearSourceMaps,
   applySourceMap
 } = __webpack_require__(3710);
 
-const { clearSourceMaps } = __webpack_require__(3704);
+const { getOriginalStackFrames } = __webpack_require__(3783);
 
 const {
   workerUtils: { workerHandler }
@@ -2001,6 +2008,7 @@ self.onmessage = workerHandler({
   getOriginalLocation,
   getLocationScopes,
   getOriginalSourceText,
+  getOriginalStackFrames,
   hasMappedSource,
   applySourceMap,
   clearSourceMaps
@@ -2031,7 +2039,7 @@ const { fetchSourceMap } = __webpack_require__(3718);
 const {
   getSourceMap,
   setSourceMap,
-  clearSourceMaps
+  clearSourceMaps: clearSourceMapsRequests
 } = __webpack_require__(3704);
 const {
   originalToGeneratedId,
@@ -2040,6 +2048,7 @@ const {
   isOriginalId,
   getContentType
 } = __webpack_require__(3652);
+const { clearWasmXScopes } = __webpack_require__(3788);
 
 async function getOriginalURLs(generatedSource) {
   const map = await fetchSourceMap(generatedSource);
@@ -2283,6 +2292,11 @@ function applySourceMap(generatedId, url, code, mappings) {
 
   const map = SourceMapConsumer(generator.toJSON());
   setSourceMap(generatedId, Promise.resolve(map));
+}
+
+function clearSourceMaps() {
+  clearSourceMapsRequests();
+  clearWasmXScopes();
 }
 
 module.exports = {
@@ -4305,6 +4319,7 @@ const { networkRequest } = __webpack_require__(3651);
 const { getSourceMap, setSourceMap } = __webpack_require__(3704);
 const { WasmRemap } = __webpack_require__(3719);
 const { SourceMapConsumer } = __webpack_require__(3705);
+const { convertToJSON } = __webpack_require__(3785);
 
 function _resolveSourceMapURL(source) {
   const { url = "", sourceMapURL = "" } = source;
@@ -4331,12 +4346,21 @@ async function _resolveAndFetch(generatedSource) {
   // Fetch the sourcemap over the network and create it.
   const { sourceMapURL, baseURL } = _resolveSourceMapURL(generatedSource);
 
-  const fetched = await networkRequest(sourceMapURL, { loadFromCache: false });
+  let fetched = await networkRequest(sourceMapURL, { loadFromCache: false });
+
+  if (fetched.isDwarf) {
+    fetched = { content: await convertToJSON(fetched.content) };
+  }
 
   // Create the source map and fix it up.
   let map = new SourceMapConsumer(fetched.content, baseURL);
   if (generatedSource.isWasm) {
     map = new WasmRemap(map);
+    // Check if experimental scope info exists.
+    if (fetched.content.includes("x-scopes")) {
+      const parsedJSON = JSON.parse(fetched.content);
+      map.xScopes = parsedJSON["x-scopes"];
+    }
   }
 
   return map;
@@ -4491,6 +4515,247 @@ exports.WasmRemap = WasmRemap;
 
 module.exports = __webpack_require__(3709);
 
+
+/***/ }),
+
+/***/ 3783:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+const { getWasmXScopes } = __webpack_require__(3788);
+
+// Returns expanded stack frames details based on the generated location.
+// The function return null if not information was found.
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+async function getOriginalStackFrames(generatedLocation) {
+  const wasmXScopes = await getWasmXScopes(generatedLocation.sourceId);
+  if (!wasmXScopes) {
+    return null;
+  }
+
+  const scopes = wasmXScopes.search(generatedLocation);
+  if (scopes.length === 0) {
+    console.warn("Something wrong with debug data: none original frames found");
+    return null;
+  }
+  return scopes;
+}
+
+module.exports = {
+  getOriginalStackFrames
+};
+
+/***/ }),
+
+/***/ 3785:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+/* eslint camelcase: 0*/
+
+let cachedWasmModule;
+let utf8Decoder;
+
+function convertDwarf(wasm, instance) {
+  const { memory, alloc_mem, free_mem, convert_dwarf } = instance.exports;
+  const wasmPtr = alloc_mem(wasm.byteLength);
+  new Uint8Array(memory.buffer, wasmPtr, wasm.byteLength).set(new Uint8Array(wasm));
+  const resultPtr = alloc_mem(12);
+  const enableXScopes = true;
+  convert_dwarf(wasmPtr, wasm.byteLength, resultPtr, resultPtr + 4, enableXScopes);
+  free_mem(wasmPtr);
+  const resultView = new DataView(memory.buffer, resultPtr, 12);
+  const outputPtr = resultView.getUint32(0, true),
+        outputLen = resultView.getUint32(4, true);
+  free_mem(resultPtr);
+  if (!utf8Decoder) {
+    utf8Decoder = new TextDecoder("utf-8");
+  }
+  const output = utf8Decoder.decode(new Uint8Array(memory.buffer, outputPtr, outputLen));
+  free_mem(outputPtr);
+  return output;
+}
+
+async function convertToJSON(buffer) {
+  if (!cachedWasmModule) {
+    const isFirefoxPanel = typeof location !== "undefined" && location.protocol === "resource:";
+    const wasmPath = `${isFirefoxPanel ? "." : "/wasm"}/dwarf_to_json.wasm`;
+    const wasm = await (await fetch(wasmPath)).arrayBuffer();
+    const imports = {};
+    const { instance } = await WebAssembly.instantiate(wasm, imports);
+    cachedWasmModule = instance;
+  }
+  return convertDwarf(buffer, cachedWasmModule);
+}
+
+module.exports = {
+  convertToJSON
+};
+
+/***/ }),
+
+/***/ 3788:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+const { getSourceMap } = __webpack_require__(3704); /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                          * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                          * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+/* eslint camelcase: 0*/
+
+const { generatedToOriginalId } = __webpack_require__(3652);
+
+const xScopes = new Map();
+
+function indexLinkingNames(items) {
+  const result = new Map();
+  let queue = [...items];
+  while (queue.length > 0) {
+    const item = queue.shift();
+    if ("linkage_name" in item) {
+      result.set(item.linkage_name, item);
+    }
+    if ("children" in item) {
+      queue = [...queue, ...item.children];
+    }
+  }
+  return result;
+}
+
+async function getXScopes(sourceId) {
+  if (xScopes.has(sourceId)) {
+    return xScopes.get(sourceId);
+  }
+  const map = await getSourceMap(sourceId);
+  if (!map || !map.xScopes) {
+    xScopes.set(sourceId, null);
+    return null;
+  }
+  const { code_section_offset, debug_info } = map.xScopes;
+  const xScope = {
+    code_section_offset,
+    debug_info,
+    idIndex: indexLinkingNames(debug_info),
+    sources: map.sources
+  };
+  xScopes.set(sourceId, xScope);
+  return xScope;
+}
+
+function isInRange(item, pc) {
+  if ("ranges" in item) {
+    return item.ranges.some(r => r[0] <= pc && pc < r[1]);
+  }
+  if ("high_pc" in item) {
+    return item.low_pc <= pc && pc < item.high_pc;
+  }
+  return false;
+}
+
+function filterScopes(items, pc, lastItem, index) {
+  if (!items) {
+    return [];
+  }
+  return items.reduce((result, item) => {
+    switch (item.tag) {
+      case "compile_unit":
+        if (isInRange(item, pc)) {
+          result = [...result, ...filterScopes(item.children, pc, lastItem, index)];
+        }
+        break;
+      case "namespace":
+      case "structure_type":
+      case "union_type":
+        result = [...result, ...filterScopes(item.children, pc, lastItem, index)];
+        break;
+      case "subprogram":
+        if (isInRange(item, pc)) {
+          const s = {
+            id: item.linkage_name,
+            name: item.name
+          };
+          result = [...result, s, ...filterScopes(item.children, pc, s, index)];
+        }
+        break;
+      case "inlined_subroutine":
+        if (isInRange(item, pc)) {
+          const linkedItem = index.get(item.abstract_origin);
+          const s = {
+            id: item.abstract_origin,
+            name: linkedItem ? linkedItem.name : void 0
+          };
+          if (lastItem) {
+            lastItem.file = item.call_file;
+            lastItem.line = item.call_line;
+          }
+          result = [...result, s, ...filterScopes(item.children, pc, s, index)];
+        }
+        break;
+    }
+    return result;
+  }, []);
+}
+
+class XScope {
+
+  constructor(xScopeData) {
+    this.xScope = xScopeData;
+  }
+
+  search(generatedLocation) {
+    const { code_section_offset, debug_info, sources, idIndex } = this.xScope;
+    const pc = generatedLocation.line - (code_section_offset || 0);
+    const scopes = filterScopes(debug_info, pc, null, idIndex);
+    scopes.reverse();
+
+    return scopes.map(i => {
+      if (!("file" in i)) {
+        return {
+          displayName: i.name || ""
+        };
+      }
+      const sourceId = generatedToOriginalId(generatedLocation.sourceId, sources[i.file || 0]);
+      return {
+        displayName: i.name || "",
+        location: {
+          line: i.line || 0,
+          sourceId
+        }
+      };
+    });
+  }
+}
+
+async function getWasmXScopes(sourceId) {
+  const xScopeData = await getXScopes(sourceId);
+  if (!xScopeData) {
+    return null;
+  }
+  return new XScope(xScopeData);
+}
+
+function clearWasmXScopes() {
+  xScopes.clear();
+}
+
+module.exports = {
+  getWasmXScopes,
+  clearWasmXScopes
+};
 
 /***/ })
 

@@ -61,8 +61,42 @@ interface nsITableEditor : nsISupports
     *  have to be contiguous.
     */
   void deleteTableCell(in long  aNumber);
-  void deleteTableColumn(in long  aNumber);
-  void deleteTableRow(in long  aNumber);
+
+  /**
+   * deleteTableColumn() removes cell elements which belong to same columns
+   * of selected cell elements.
+   * If only one cell element is selected or first selection range is
+   * in a cell, removes cell elements which belong to same column.
+   * If 2 or more cell elements are selected, removes cell elements which
+   * belong to any of all selected columns.  In this case,
+   * aNumberOfColumnsToDelete is ignored.
+   * If there is no selection ranges, throws exception.
+   * If selection is not in a cell element, just does nothing without
+   * throwing exception.
+   * WARNING: This does not remove <col> nor <colgroup> elements.
+   *
+   * @param aNumberOfColumnsToDelete    Number of columns to remove.  This is
+   *                                    ignored if 2 ore more cells are
+   *                                    selected.
+   */
+  void deleteTableColumn(in long aNumberOfColumnsToDelete);
+
+  /**
+   * deleteTableRow() removes <tr> elements.
+   * If only one cell element is selected or first selection range is
+   * in a cell, removes <tr> elements starting from a <tr> element
+   * containing the selected cell or first selection range.
+   * If 2 or more cell elements are selected, all <tr> elements
+   * which contains selected cell(s).  In this case, aNumberOfRowsToDelete
+   * is ignored.
+   * If there is no selection ranges, throws exception.
+   * If selection is not in a cell element, just does nothing without
+   * throwing exception.
+   *
+   * @param aNumberOfRowsToDelete   Number of rows to remove.  This is ignored
+   *                                if 2 or more cells are selected.
+   */
+  void deleteTableRow(in long aNumberOfRowsToDelete);
 
   /** Table Selection methods
     * Selecting a row or column actually
@@ -138,37 +172,73 @@ interface nsITableEditor : nsISupports
     */
   void normalizeTable(in Element aTable);
 
-  /** Get the row an column index from the layout's cellmap
-    * If aCell is null, it will try to find enclosing table of selection anchor
-    *
-    */
-  void getCellIndexes(in Element aCell,
-                      out long aRowIndex, out long aColIndex);
+  /**
+   * getCellIndexes() computes row index and column index of a table cell.
+   * Note that this depends on layout information.  Therefore, all pending
+   * layout should've been flushed before calling this.
+   *
+   * @param aCellElement        If not null, this computes indexes of the cell.
+   *                            If null, this computes indexes of a cell which
+   *                            contains anchor of Selection.
+   * @param aRowIndex           Must be an object, whose .value will be set
+   *                            to row index of the cell.  0 is the first row.
+   *                            If rowspan is set to 2 or more, the start
+   *                            row index is used.
+   * @param aColumnIndex        Must be an object, whose .value will be set
+   *                            to column index of the cell.  0 is the first
+   *                            column.  If colspan is set to 2 or more, the
+   *                            start column index is used.
+   */
+  void getCellIndexes(in Element aCellElement,
+                      out long aRowIndex, out long aColumnIndex);
 
-  /** Get the number of rows and columns in a table from the layout's cellmap
-    * If aTable is null, it will try to find enclosing table of selection ancho
-    * Note that all rows in table will not have this many because of
-    * ROWSPAN effects or if table is not "rectangular" (has short rows)
-    */
-  void getTableSize(in Element aTable,
+  /**
+   * getTableSize() computes number of rows and columns.
+   * Note that this depends on layout information.  Therefore, all pending
+   * layout should've been flushed before calling this.
+   *
+   * @param aTableOrElementInTable  If a <table> element, this computes number
+   *                                of rows and columns of it.
+   *                                If another element and in a <table>, this
+   *                                computes number of rows and columns of
+   *                                the nearest ancestor <table> element.
+   *                                If element is not in <table> element,
+   *                                throwing an exception.
+   *                                If null, this looks for nearest ancestor
+   *                                <table> element containing anchor of
+   *                                Selection.  If found, computes the number
+   *                                of rows and columns of the <table>.
+   *                                Otherwise, throwing an exception.
+   * @param aRowCount               Number of *actual* row count.
+   *                                I.e., rowspan does NOT increase this value.
+   * @param aColumnCount            Number of column count.
+   *                                I.e., if colspan is specified with bigger
+   *                                number than actual, the value is used
+   *                                as this.
+   */
+  void getTableSize(in Element aTableOrElementInTable,
                     out long aRowCount, out long aColCount);
 
-  /** Get a cell element at cellmap grid coordinates
-    * A cell that spans across multiple cellmap locations will
-    *   be returned multiple times, once for each location it occupies
-    *
-    * @param aTable                   A table in the document
-    * @param aRowIndex, aColIndex     The 0-based cellmap indexes
-    *
-    * (in C++ returns: NS_EDITOR_ELEMENT_NOT_FOUND if an element is not found
-    *  passes NS_SUCCEEDED macro)
-    *
-    *   You can scan for all cells in a row or column
-    *   by iterating through the appropriate indexes
-    *   until the returned aCell is null
-    */
-  Element getCellAt(in Element aTable,
-                    in long aRowIndex, in long aColIndex);
+  /**
+   * getCellAt() returns a <td> or <th> element in a <table> if there is a
+   * cell at the indexes.
+   *
+   * @param aTableElement       If not null, must be a <table> element.
+   *                            If null, looks for the nearest ancestor <table>
+   *                            to look for a cell.
+   * @param aRowIndex           Row index of the cell.
+   * @param aColumnIndex        Column index of the cell.
+   * @return                    Returns a <td> or <th> element if there is.
+   *                            Otherwise, returns null without throwing
+   *                            exception.
+   *                            If aTableElement is not null and not a <table>
+   *                            element, throwing an exception.
+   *                            If aTableElement is null and anchor of Selection
+   *                            is not in any <table> element, throwing an
+   *                            exception.
+   */
+  Element getCellAt(in Element aTableElement,
+                    in long aRowIndex, in long aColumnIndex);
 
   /** Get a cell at cellmap grid coordinates and associated data
     * A cell that spans across multiple cellmap locations will
@@ -203,26 +273,25 @@ interface nsITableEditor : nsISupports
                      out long  aActualRowSpan, out long  aActualColSpan,
                      out boolean aIsSelected);
 
-  /** Get the first row element in a table
-    *
-    * @return            The row at the requested index
-    *                    Returns null if there are no rows in table
-    * (in C++ returns: NS_EDITOR_ELEMENT_NOT_FOUND if an element is not found
-    *  passes NS_SUCCEEDED macro)
-    */
-  Node getFirstRow(in Element aTableElement);
-
-  /** Get the next row element starting the search from aTableElement
-    *
-    * @param aTableElement Any TR or child-of-TR element in the document
-    *
-    * @return            The row to start search from
-    *                    and the row returned from the search
-    *                    Returns null if there isn't another row
-    * (in C++ returns: NS_EDITOR_ELEMENT_NOT_FOUND if an element is not found
-    *  passes NS_SUCCEEDED macro)
-    */
-  Node getNextRow(in Node aTableElement);
+  /**
+   * getFirstRow() returns first <tr> element in a <table> element.
+   *
+   * @param aTableOrElementInTable  If a <table> element, returns its first
+   *                                <tr> element.
+   *                                If another element, looks for nearest
+   *                                ancestor <table> element first.  Then,
+   *                                return its first <tr> element.
+   * @return                        <tr> element in the <table> element.
+   *                                If <table> element is not found, this
+   *                                throws an exception.
+   *                                If there is a <table> element but it
+   *                                does not have <tr> elements, returns
+   *                                null without throwing exception.
+   *                                Note that this may return anonymous <tr>
+   *                                element if <table> has one or more cells
+   *                                but <tr> element is not in the source.
+   */
+  Element getFirstRow(in Element aTableElement);
 
   /** Preferred direction to search for neighboring cell
     * when trying to locate a cell to place caret in after
@@ -230,21 +299,30 @@ interface nsITableEditor : nsISupports
     * Used for aDirection param in SetSelectionAfterTableEdit
     */
 
-  /** Examine the current selection and find
-    *   a selected TABLE, TD or TH, or TR element.
-    *   or return the parent TD or TH if selection is inside a table cell
-    *   Returns null if no table element is found.
-    *
-    * @param aTagName         The tagname of returned element
-    *                         Note that "td" will be returned if name
-    *                         is actually "th"
-    * @param aCount           How many table elements were selected
-    *                         This tells us if we have multiple cells selected
-    *                           (0 if element is a parent cell of selection)
-    * @return                 The table element (table, row, or first selected cell)
-    *
-    */
-  Element getSelectedOrParentTableElement(out AString aTagName, out long aCount);
+  /**
+   * getSelectedOrParentTableElement() returns a <td>, <th>, <tr> or <table>.
+   * If first selection range selects a <td> or <th>, returns it.  aTagName
+   * is set to "td" even if the result is a <th> and aCount is set to
+   * Selection.rangeCount.
+   * If first selection range does not select <td> nor <th>, but selection
+   * anchor refers <table>, returns it.  aTagName is set to "table" and
+   * aCount is set to 1.
+   * If first selection range does not select <td> nor <th>, but selection
+   * anchor refers <tr>, returns it.  aTagName is set to "tr" and aCount is
+   * set to 1.
+   * If first selection range does not select <td> nor <th>, but selection
+   * anchor refers <td> (not include <th>!), returns it.  aTagName is set to
+   * "td" and aCount is set to 0.
+   * Otherwise, if container of selection anchor is in a <td> or <th>,
+   * returns it.  aTagName is set to "td" but aCount is set to 0.
+   * Otherwise, returns null, aTagName is set to empty string and aCount is
+   * set to 0.  I.e., does not throw exception even if a cell is not found.
+   * NOTE: Calling this resets internal counter of getFirstSelectedCell()
+   *       and getNextSelectedCell().  I.e., getNextSelectedCell() will
+   *       return second selected cell element.
+   */
+  Element getSelectedOrParentTableElement(out AString aTagName,
+                                          out long aCount);
 
   /** Generally used after GetSelectedOrParentTableElement
     *   to test if selected cells are complete rows or columns
@@ -268,48 +346,64 @@ interface nsITableEditor : nsISupports
     */
   uint32_t getSelectedCellsType(in Element aElement);
 
-  /** Get first selected element from first selection range.
-    *   (If multiple cells were selected this is the first in the order they were selected)
-    * Assumes cell-selection model where each cell
-    * is in a separate range (selection parent node is table row)
-    * @param aCell     [OUT] Selected cell or null if ranges don't contain
-    *                  cell selections
-    * @param aRange    [OUT] Optional: if not null, return the selection range
-    *                     associated with the cell
-    * Returns the DOM cell element
-    *   (in C++: returns NS_EDITOR_ELEMENT_NOT_FOUND if an element is not found
-    *    passes NS_SUCCEEDED macro)
-    */
-  Element getFirstSelectedCell(out Range aRange);
+  /**
+   * getFirstSelectedCell() returns a <td> or <th> element if first range of
+   * Selection selects only one table cell element (i.e., startContainer and
+   * endContainer are same <tr> element and startOffset + 1 equals endOffset).
+   * If first range of Selection does not select a table cell element, this
+   * returns null.  However, if Selection has no range, this throws an
+   * exception.
+   *
+   * @param aFirstRangeOfSelection [OUT] Returns the first range of Selection
+   *                               only when this returns a <td> or <th>
+   *                               element.  Otherwise, returns null.
+   * @return                       A <td> or <th> element if first range of
+   *                               Selection selects only one table cell
+   *                               element.
+   */
+  Element getFirstSelectedCell(out Range aFirstRangeOfSelection);
 
-  /** Get first selected element in the table
-    *   This is the upper-left-most selected cell in table,
-    *   ignoring the order that the user selected them (order in the selection ranges)
-    * Assumes cell-selection model where each cell
-    * is in a separate range (selection parent node is table row)
-    * @param aCell       Selected cell or null if ranges don't contain
-    *                    cell selections
-    * @param aRowIndex   Optional: if not null, return row index of 1st cell
-    * @param aColIndex   Optional: if not null, return column index of 1st cell
-    *
-    * Returns the DOM cell element
-    *   (in C++: returns NS_EDITOR_ELEMENT_NOT_FOUND if an element is not found
-    *    passes NS_SUCCEEDED macro)
-    */
+  /**
+   * getFirstSelectedCellInTable() returns a cell element, its row index and
+   * its column index if first range of Selection selects a cell.  Note that
+   * that "selects a cell" means that the range container is a <tr> element
+   * and endOffset is startOffset + 1.  So, even if first range of Selection
+   * is in a cell element, this treats the range does not select a cell.
+   * NOTE: Calling this resets internal counter of getFirstSelectedCell()
+   *       and getNextSelectedCell().  I.e., getNextSelectedCell() will
+   *       return second selected cell element.
+   *
+   * @param aRowIndex    [OUT} Returns row index of the found cell.  If not
+   *                     found, returns 0.
+   * @param aColumnIndex [OUT] Returns column index of the found cell.  If
+   *                     not found, returns 0.
+   * @return             The cell element which is selected by the first
+   *                     range of Selection.  Even if this is not found,
+   *                     this returns null, not throwing exception.
+   */
   Element getFirstSelectedCellInTable(out long aRowIndex, out long aColIndex);
 
-  /** Get next selected cell element from first selection range.
-    * Assumes cell-selection model where each cell
-    * is in a separate range (selection parent node is table row)
-    * Always call GetFirstSelectedCell() to initialize stored index of "next" cell
-    * @param aCell     Selected cell or null if no more selected cells
-    *                     or ranges don't contain cell selections
-    * @param aRange    Optional: if not null, return the selection range
-    *                     associated with the cell
-    *
-    * Returns the DOM cell element
-    *   (in C++: returns NS_EDITOR_ELEMENT_NOT_FOUND if an element is not found
-    *    passes NS_SUCCEEDED macro)
-    */
-  Element getNextSelectedCell(out Range aRange);
+  /**
+   * getNextSelectedCell() is a stateful method to retrieve selected table
+   * cell elements which are selected by 2nd or later ranges of Selection.
+   * When you call getFirstSelectedCell(), it resets internal counter of
+   * this method.  Then, following calls of getNextSelectedCell() scans the
+   * remaining ranges of Selection.  If a range selects a <td> or <th>
+   * element, returns the cell element.  If a range selects an element but
+   * neither <td> nor <th> element, this ignores the range.  If a range is
+   * in a text node, returns null without throwing exception, but stops
+   * scanning the remaining ranges even you call this again.
+   * Note that this may cross <table> boundaries since this method just
+   * scans all ranges of Selection.  Therefore, returning cells which
+   * belong to different <table> elements.
+   *
+   * @param aNextSelectedCellRange [OUT] Returns null if this method returns
+   *                               null.  Otherwise, i.e., found a range which
+   *                               selects a <td> or <th> element, returns the
+   *                               range.
+   * @return                       A <td> or <th> element if one of remaining
+   *                               ranges selects a <td> or <th> element unless
+   *                               this does not meet a range in a text node.
+   */
+  Element getNextSelectedCell(out Range aNextSelectedCellRange);
 };

@@ -52,8 +52,6 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
 ChromeUtils.defineModuleGetter(this, "Services", "resource://gre/modules/Services.jsm");
 ChromeUtils.defineModuleGetter(this, "CleanupManager", "resource://normandy/lib/CleanupManager.jsm");
 ChromeUtils.defineModuleGetter(this, "JSONFile", "resource://gre/modules/JSONFile.jsm");
@@ -92,14 +90,14 @@ const PreferenceBranchType = {
 /**
  * Asynchronously load the JSON file that stores experiment status in the profile.
  */
-let storePromise;
+let gStorePromise;
 function ensureStorage() {
-  if (storePromise === undefined) {
+  if (gStorePromise === undefined) {
     const path = OS.Path.join(OS.Constants.Path.profileDir, EXPERIMENT_FILE);
     const storage = new JSONFile({path});
-    storePromise = storage.load().then(() => storage);
+    gStorePromise = storage.load().then(() => storage);
   }
-  return storePromise;
+  return gStorePromise;
 }
 
 const log = LogManager.getLogger("preference-experiments");
@@ -250,23 +248,30 @@ var PreferenceExperiments = {
    * Test wrapper that temporarily replaces the stored experiment data with fake
    * data for testing.
    */
-  withMockExperiments(testFunction) {
-    return async function inner(...args) {
-      const oldPromise = storePromise;
-      const mockExperiments = {};
-      storePromise = Promise.resolve({
-        data: mockExperiments,
-        saveSoon() { },
-      });
-      const oldObservers = experimentObservers;
-      experimentObservers = new Map();
-      try {
-        await testFunction(...args, mockExperiments);
-      } finally {
-        storePromise = oldPromise;
-        PreferenceExperiments.stopAllObservers();
-        experimentObservers = oldObservers;
-      }
+  withMockExperiments(mockExperiments = []) {
+    return function wrapper(testFunction) {
+      return async function wrappedTestFunction(...args) {
+        const data = {};
+
+        for (const exp of mockExperiments) {
+          data[exp.name] = exp;
+        }
+
+        const oldPromise = gStorePromise;
+        gStorePromise = Promise.resolve({
+          data,
+          saveSoon() { },
+        });
+        const oldObservers = experimentObservers;
+        experimentObservers = new Map();
+        try {
+          await testFunction(...args, mockExperiments);
+        } finally {
+          gStorePromise = oldPromise;
+          PreferenceExperiments.stopAllObservers();
+          experimentObservers = oldObservers;
+        }
+      };
     };
   },
 

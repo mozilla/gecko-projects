@@ -25,6 +25,7 @@
 #include "mozilla/CORSMode.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/GuardObjects.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/TaskCategory.h"
 #include "mozilla/TimeStamp.h"
 #include "nsContentListDeclarations.h"
@@ -124,6 +125,7 @@ class EventListenerManager;
 class HTMLEditor;
 
 namespace dom {
+class ContentFrameMessageManager;
 struct CustomElementDefinition;
 class DocumentFragment;
 class Element;
@@ -200,7 +202,13 @@ class nsContentUtils
 {
   friend class nsAutoScriptBlockerSuppressNodeRemoved;
   typedef mozilla::dom::Element Element;
+  typedef mozilla::Cancelable Cancelable;
+  typedef mozilla::CanBubble CanBubble;
+  typedef mozilla::Composed Composed;
+  typedef mozilla::ChromeOnlyDispatch ChromeOnlyDispatch;
+  typedef mozilla::EventMessage EventMessage;
   typedef mozilla::TimeDuration TimeDuration;
+  typedef mozilla::Trusted Trusted;
 
 public:
   static nsresult Init();
@@ -428,8 +436,14 @@ public:
   /**
    * Returns true if aNode1 is before aNode2 in the same connected
    * tree.
+   * aNode1Index and aNode2Index are in/out arguments. If non-null, and value is
+   * not -1, that value is used instead of calling slow ComputeIndexOf on the
+   * parent node. If value is -1, the value will be set to the return value of
+   * ComputeIndexOf.
    */
-  static bool PositionIsBefore(nsINode* aNode1, nsINode* aNode2);
+  static bool PositionIsBefore(nsINode* aNode1, nsINode* aNode2,
+                               int32_t* aNode1Index = nullptr,
+                               int32_t* aNode2Index = nullptr);
 
   /**
    *  Utility routine to compare two "points", where a point is a
@@ -625,18 +639,6 @@ public:
    */
   static bool IsAbsoluteURL(const nsACString& aURL);
 
-  /**
-   * GetDocumentFromCaller gets its document by looking at the last called
-   * function and finding the document that the function itself relates to.
-   * For example, consider two windows A and B in the same origin. B has a
-   * function which does something that ends up needing the current document.
-   * If a script in window A were to call B's function, GetDocumentFromCaller
-   * would find that function (in B) and return B's document.
-   *
-   * @return The document or null if no JS Context.
-   */
-  static nsIDocument* GetDocumentFromCaller();
-
   // Check if a node is in the document prolog, i.e. before the document
   // element.
   static bool InProlog(nsINode *aNode);
@@ -671,7 +673,9 @@ public:
   static nsIPrincipal* SubjectPrincipal();
 
   // Returns the prinipal of the given JS object. This may only be called on
-  // the main thread for objects from the main thread's JSRuntime.
+  // the main thread for objects from the main thread's JSRuntime. The object
+  // must not be a cross-compartment wrapper, because CCWs are not associated
+  // with a single realm.
   static nsIPrincipal* ObjectPrincipal(JSObject* aObj);
 
   static nsresult GenerateStateKey(nsIContent* aContent,
@@ -1161,12 +1165,6 @@ public:
                      nsACString& aSourceSpecOut, uint32_t *aLineOut,
                      uint32_t *aColumnOut, nsString& aMessageOut);
 
-  /**
-   * Helper function to tell if user ever enabled DevTools explicitely.
-   * Allows making DevTools related API no-op until user do so.
-   */
-  static bool DevToolsEnabled(JSContext* aCx);
-
   static nsresult CalculateBufferSizeForImage(const uint32_t& aStride,
                                             const mozilla::gfx::IntSize& aImageSize,
                                             const mozilla::gfx::SurfaceFormat& aFormat,
@@ -1349,15 +1347,29 @@ public:
    * @param aEventName     The name of the event.
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
+   * @param aCopmosed      Is the event composed.
    * @param aDefaultAction Set to true if default action should be taken,
    *                       see EventTarget::DispatchEvent.
    */
   static nsresult DispatchTrustedEvent(nsIDocument* aDoc,
                                        nsISupports* aTarget,
                                        const nsAString& aEventName,
-                                       bool aCanBubble,
-                                       bool aCancelable,
-                                       bool *aDefaultAction = nullptr);
+                                       CanBubble,
+                                       Cancelable,
+                                       Composed aComposed = Composed::eDefault,
+                                       bool* aDefaultAction = nullptr);
+
+  static nsresult DispatchTrustedEvent(nsIDocument* aDoc,
+                                       nsISupports* aTarget,
+                                       const nsAString& aEventName,
+                                       CanBubble aCanBubble,
+                                       Cancelable aCancelable,
+                                       bool* aDefaultAction)
+  {
+    return DispatchTrustedEvent(aDoc, aTarget, aEventName,
+                                aCanBubble, aCancelable,
+                                Composed::eDefault, aDefaultAction);
+  }
 
   /**
    * This method creates and dispatches a trusted event using an event message.
@@ -1371,18 +1383,19 @@ public:
    *                       see EventTarget::DispatchEvent.
    */
   template <class WidgetEventType>
-  static nsresult DispatchTrustedEvent(nsIDocument* aDoc,
-                                       nsISupports* aTarget,
-                                       mozilla::EventMessage aEventMessage,
-                                       bool aCanBubble,
-                                       bool aCancelable,
-                                       bool *aDefaultAction = nullptr,
-                                       bool aOnlyChromeDispatch = false)
+  static nsresult DispatchTrustedEvent(
+    nsIDocument* aDoc,
+    nsISupports* aTarget,
+    EventMessage aEventMessage,
+    CanBubble aCanBubble,
+    Cancelable aCancelable,
+    bool* aDefaultAction = nullptr,
+    ChromeOnlyDispatch aOnlyChromeDispatch = ChromeOnlyDispatch::eNo)
   {
     WidgetEventType event(true, aEventMessage);
     MOZ_ASSERT(GetEventClassIDFromMessage(aEventMessage) == event.mClass);
     return DispatchEvent(aDoc, aTarget, event, aEventMessage,
-                         aCanBubble, aCancelable, true,
+                         aCanBubble, aCancelable, Trusted::eYes,
                          aDefaultAction, aOnlyChromeDispatch);
   }
 
@@ -1402,9 +1415,9 @@ public:
   static nsresult DispatchUntrustedEvent(nsIDocument* aDoc,
                                          nsISupports* aTarget,
                                          const nsAString& aEventName,
-                                         bool aCanBubble,
-                                         bool aCancelable,
-                                         bool *aDefaultAction = nullptr);
+                                         CanBubble,
+                                         Cancelable,
+                                         bool* aDefaultAction = nullptr);
 
 
   /**
@@ -1419,18 +1432,19 @@ public:
    *                       see EventTarget::DispatchEvent.
    */
   template <class WidgetEventType>
-  static nsresult DispatchUntrustedEvent(nsIDocument* aDoc,
-                                         nsISupports* aTarget,
-                                         mozilla::EventMessage aEventMessage,
-                                         bool aCanBubble,
-                                         bool aCancelable,
-                                         bool *aDefaultAction = nullptr,
-                                         bool aOnlyChromeDispatch = false)
+  static nsresult DispatchUntrustedEvent(
+    nsIDocument* aDoc,
+    nsISupports* aTarget,
+    EventMessage aEventMessage,
+    CanBubble aCanBubble,
+    Cancelable aCancelable,
+    bool* aDefaultAction = nullptr,
+    ChromeOnlyDispatch aOnlyChromeDispatch = ChromeOnlyDispatch::eNo)
   {
     WidgetEventType event(false, aEventMessage);
     MOZ_ASSERT(GetEventClassIDFromMessage(aEventMessage) == event.mClass);
     return DispatchEvent(aDoc, aTarget, event, aEventMessage,
-                         aCanBubble, aCancelable, false,
+                         aCanBubble, aCancelable, Trusted::eNo,
                          aDefaultAction, aOnlyChromeDispatch);
   }
 
@@ -1455,9 +1469,9 @@ public:
   static nsresult DispatchChromeEvent(nsIDocument* aDoc,
                                       nsISupports* aTarget,
                                       const nsAString& aEventName,
-                                      bool aCanBubble,
-                                      bool aCancelable,
-                                      bool *aDefaultAction = nullptr);
+                                      CanBubble,
+                                      Cancelable,
+                                      bool* aDefaultAction = nullptr);
 
   /**
    * Helper function for dispatching a "DOMWindowFocus" event to
@@ -1488,9 +1502,9 @@ public:
   static nsresult DispatchEventOnlyToChrome(nsIDocument* aDoc,
                                             nsISupports* aTarget,
                                             const nsAString& aEventName,
-                                            bool aCanBubble,
-                                            bool aCancelable,
-                                            bool *aDefaultAction = nullptr);
+                                            CanBubble,
+                                            Cancelable,
+                                            bool* aDefaultAction = nullptr);
 
   /**
    * Determines if an event attribute name (such as onclick) is valid for
@@ -1509,13 +1523,13 @@ public:
    *
    * @param aName the event name to look up
    */
-  static mozilla::EventMessage GetEventMessage(nsAtom* aName);
+  static EventMessage GetEventMessage(nsAtom* aName);
 
   /**
    * Returns the EventMessage and nsAtom to be used for event listener
    * registration.
    */
-  static mozilla::EventMessage
+  static EventMessage
   GetEventMessageAndAtomForListener(const nsAString& aName, nsAtom** aOnName);
 
   /**
@@ -1537,8 +1551,8 @@ public:
    * @param aEventClassID only return event id for aEventClassID
    */
   static nsAtom* GetEventMessageAndAtom(const nsAString& aName,
-                                         mozilla::EventClassID aEventClassID,
-                                         mozilla::EventMessage* aEventMessage);
+                                        mozilla::EventClassID aEventClassID,
+                                        EventMessage* aEventMessage);
 
   /**
    * Used only during traversal of the XPCOM graph by the cycle
@@ -2087,7 +2101,7 @@ public:
                                      bool aMeta = false,
                                      // Including MouseEventBinding here leads
                                      // to incude loops, unfortunately.
-                                     uint16_t inputSource = 0 /* MouseEventBinding::MOZ_SOURCE_UNKNOWN */);
+                                     uint16_t inputSource = 0 /* MouseEvent_Binding::MOZ_SOURCE_UNKNOWN */);
 
   static bool CheckMayLoad(nsIPrincipal* aPrincipal, nsIChannel* aChannel, bool aAllowIfInheritsPrincipal);
 
@@ -2262,9 +2276,9 @@ public:
   static bool IsFocusedContent(const nsIContent *aContent);
 
   /**
-   * Returns true if the DOM full-screen API is enabled.
+   * Returns true if the DOM fullscreen API is enabled.
    */
-  static bool IsFullScreenApiEnabled();
+  static bool IsFullscreenApiEnabled();
 
   /**
    * Returns true if the unprefixed fullscreen API is enabled.
@@ -2273,12 +2287,12 @@ public:
     { return sIsUnprefixedFullscreenApiEnabled; }
 
   /**
-   * Returns true if requests for full-screen are allowed in the current
+   * Returns true if requests for fullscreen are allowed in the current
    * context. Requests are only allowed if the user initiated them (like with
    * a mouse-click or key press), unless this check has been disabled by
    * setting the pref "full-screen-api.allow-trusted-requests-only" to false.
    */
-  static bool IsRequestFullScreenAllowed(mozilla::dom::CallerType aCallerType);
+  static bool IsRequestFullscreenAllowed(mozilla::dom::CallerType aCallerType);
 
   /**
    * Returns true if calling execCommand with 'cut' or 'copy' arguments
@@ -2358,14 +2372,6 @@ public:
   static bool AnimationsAPICoreEnabled()
   {
     return sAnimationsAPICoreEnabled;
-  }
-
-  /*
-   * Returns true if the DOM Animations Element.animate() API should be enabled.
-   */
-  static bool AnimationsAPIElementAnimateEnabled()
-  {
-    return sAnimationsAPIElementAnimateEnabled;
   }
 
   /**
@@ -2860,10 +2866,12 @@ public:
 
   static void FirePageShowEvent(nsIDocShellTreeItem* aItem,
                                 mozilla::dom::EventTarget* aChromeEventHandler,
-                                bool aFireIfShowing);
+                                bool aFireIfShowing,
+                                bool aOnlySystemGroup = false);
 
   static void FirePageHideEvent(nsIDocShellTreeItem* aItem,
-                                mozilla::dom::EventTarget* aChromeEventHandler);
+                                mozilla::dom::EventTarget* aChromeEventHandler,
+                                bool aOnlySystemGroup = false);
 
   static already_AddRefed<nsPIWindowRoot> GetWindowRoot(nsIDocument* aDoc);
 
@@ -2886,6 +2894,16 @@ public:
                                                 nsIDocument* aDoc,
                                                 nsIHttpChannel* aChannel,
                                                 mozilla::net::ReferrerPolicy aReferrerPolicy);
+
+  /*
+   * If there is a Referrer-Policy response header in |aChannel|, parse a
+   * referrer policy from the header.
+   *
+   * @param the channel from which to get the Referrer-Policy header
+   * @return referrer policy from the response header in aChannel
+   */
+  static mozilla::net::ReferrerPolicy
+    GetReferrerPolicyFromChannel(nsIChannel* aChannel);
 
   /*
    * Parse a referrer policy from a Referrer-Policy header
@@ -2961,12 +2979,46 @@ public:
   static StorageAccess StorageAllowedForPrincipal(nsIPrincipal* aPrincipal);
 
   /*
-   * Returns true if this window/channel should disable storages because of the
-   * anti-tracking feature.
+   * Returns true if this document should disable storages because of the anti-tracking feature.
+   */
+  static bool StorageDisabledByAntiTracking(nsIDocument* aDocument,
+                                            nsIURI* aURI)
+  {
+    // Note that GetChannel() below may return null, but that's OK, since the callee
+    // is able to deal with a null channel argument, and if passed null, will only fail
+    // to notify the UI in case storage gets blocked.
+    return StorageDisabledByAntiTracking(aDocument->GetInnerWindow(),
+                                         aDocument->GetChannel(),
+                                         aDocument->NodePrincipal(),
+                                         aURI);
+  }
+
+private:
+  /*
+   * Returns true if this window/channel/aPrincipal should disable storages
+   * because of the anti-tracking feature.
+   * Note that either aWindow or aChannel may be null when calling this function.
+   * If the caller wants the UI to be notified when the storage gets disabled,
+   * it must pass a non-null channel object.
    */
   static bool StorageDisabledByAntiTracking(nsPIDOMWindowInner* aWindow,
                                             nsIChannel* aChannel,
+                                            nsIPrincipal* aPrincipal,
                                             nsIURI* aURI);
+
+public:
+  /*
+   * Returns true if this window/channel is a 3rd party context.
+   */
+  static bool IsThirdPartyWindowOrChannel(nsPIDOMWindowInner* aWindow,
+                                          nsIChannel* aChannel,
+                                          nsIURI* aURI);
+
+  /*
+   * Returns true if this window's channel has been marked as a tracking
+   * resource.
+   */
+  static bool IsTrackingResourceWindow(nsPIDOMWindowInner* aWindow);
 
   /*
    * Serializes a HTML nsINode into its markup representation.
@@ -3103,6 +3155,18 @@ public:
                                     const mozilla::dom::Sequence<JSObject*>& aTransfer,
                                     JS::MutableHandle<JS::Value> aValue);
 
+  /**
+   * Returns whether or not UA Widget is enabled, controlled by pref
+   * dom.ua_widget.enabled.
+   *
+   * When enabled, UA Widget will replace legacy XBL when rendering JS-implemented
+   * web content widgets (videocontrols/datetimebox/etc.)
+   *
+   * It is really enabled only if Shadow DOM is also enabled.
+   */
+  static bool
+  IsUAWidgetEnabled() { return sIsShadowDOMEnabled && sIsUAWidgetEnabled; }
+
   static bool
   IsShadowDOMEnabled() { return sIsShadowDOMEnabled; }
 
@@ -3165,6 +3229,12 @@ public:
    * Compose a tab id with process id and a serial number.
    */
   static uint64_t GenerateTabId();
+
+  /**
+   * Generate an id for a BrowsingContext using a range of serial
+   * numbers reserved for the current process.
+   */
+  static uint64_t GenerateBrowsingContextId();
 
   /**
    * Check whether we should skip moving the cursor for a same-value .value set
@@ -3236,8 +3306,8 @@ public:
 
   static bool ContentIsLink(nsIContent* aContent);
 
-  static already_AddRefed<mozilla::dom::EventTarget>
-  TryGetTabChildGlobalAsEventTarget(nsISupports* aFrom);
+  static already_AddRefed<mozilla::dom::ContentFrameMessageManager>
+  TryGetTabChildGlobal(nsISupports* aFrom);
 
   static PopupControlState
   PushPopupControlState(PopupControlState aState, bool aForce)
@@ -3268,6 +3338,15 @@ public:
 
   static bool CanShowPopup(nsIPrincipal* aPrincipal);
 
+  /**
+   * Serializes a JSON-like JS::Value into a string.
+   *
+   * Usage:
+   *   nsAutoString serializedValue;
+   *   nsContentUtils::StringifyJSON(cx, &value, serializedValue);
+   */
+  static bool StringifyJSON(JSContext* aCx, JS::MutableHandle<JS::Value> vp, nsAString& aOutStr);
+
 private:
   static bool InitializeEventTable();
 
@@ -3284,21 +3363,22 @@ private:
   static nsresult DispatchEvent(nsIDocument* aDoc,
                                 nsISupports* aTarget,
                                 const nsAString& aEventName,
-                                bool aCanBubble,
-                                bool aCancelable,
-                                bool aTrusted,
-                                bool *aDefaultAction = nullptr,
-                                bool aOnlyChromeDispatch = false);
+                                CanBubble,
+                                Cancelable,
+                                Composed,
+                                Trusted,
+                                bool* aDefaultAction = nullptr,
+                                ChromeOnlyDispatch = ChromeOnlyDispatch::eNo);
 
   static nsresult DispatchEvent(nsIDocument* aDoc,
                                 nsISupports* aTarget,
                                 mozilla::WidgetEvent& aWidgetEvent,
-                                mozilla::EventMessage aEventMessage,
-                                bool aCanBubble,
-                                bool aCancelable,
-                                bool aTrusted,
-                                bool *aDefaultAction = nullptr,
-                                bool aOnlyChromeDispatch = false);
+                                EventMessage aEventMessage,
+                                CanBubble,
+                                Cancelable,
+                                Trusted,
+                                bool* aDefaultAction = nullptr,
+                                ChromeOnlyDispatch = ChromeOnlyDispatch::eNo);
 
   static void InitializeModifierStrings();
 
@@ -3312,7 +3392,7 @@ private:
                                       const nsString* aClasses);
 
   static mozilla::EventClassID
-  GetEventClassIDFromMessage(mozilla::EventMessage aEventMessage);
+  GetEventClassIDFromMessage(EventMessage aEventMessage);
 
   // Fills in aInfo with the tokens from the supplied autocomplete attribute.
   static AutocompleteAttrState InternalSerializeAutocompleteAttribute(const nsAttrValue* aAttrVal,
@@ -3324,14 +3404,13 @@ private:
                                       void* aArg);
 
   /**
-   * Gets the current cookie lifetime policy and cookie behavior for a given
-   * principal by checking with preferences and the permission manager.
+   * Gets the current cookie lifetime policy for a given principal by checking
+   * with preferences and the permission manager.
    *
    * Used in the implementation of InternalStorageAllowedForPrincipal.
    */
-  static void GetCookieBehaviorForPrincipal(nsIPrincipal* aPrincipal,
-                                            uint32_t* aLifetimePolicy,
-                                            uint32_t* aBehavior);
+  static void GetCookieLifetimePolicyForPrincipal(nsIPrincipal* aPrincipal,
+                                                  uint32_t* aLifetimePolicy);
 
   /*
    * Checks if storage for a given principal is permitted by the user's
@@ -3381,7 +3460,7 @@ private:
   static RefPtr<mozilla::intl::LineBreaker> sLineBreaker;
   static RefPtr<mozilla::intl::WordBreaker> sWordBreaker;
 
-  static nsIBidiKeyboard* sBidiKeyboard;
+  static mozilla::StaticRefPtr<nsIBidiKeyboard> sBidiKeyboard;
 
   static bool sInitialized;
   static uint32_t sScriptBlockerCount;
@@ -3397,9 +3476,9 @@ private:
   static bool sIsHandlingKeyBoardEvent;
   static bool sAllowXULXBL_for_file;
   static bool sDisablePopups;
-  static bool sIsFullScreenApiEnabled;
+  static bool sIsFullscreenApiEnabled;
   static bool sIsUnprefixedFullscreenApiEnabled;
-  static bool sTrustedFullScreenOnly;
+  static bool sTrustedFullscreenOnly;
   static bool sIsCutCopyAllowed;
   static uint32_t sHandlingInputTimeout;
   static bool sIsPerformanceTimingEnabled;
@@ -3408,12 +3487,12 @@ private:
   static bool sIsUpgradableDisplayContentPrefEnabled;
   static bool sIsFrameTimingPrefEnabled;
   static bool sIsFormAutofillAutocompleteEnabled;
+  static bool sIsUAWidgetEnabled;
   static bool sIsShadowDOMEnabled;
   static bool sIsCustomElementsEnabled;
   static bool sSendPerformanceTimingNotifications;
   static bool sUseActivityCursor;
   static bool sAnimationsAPICoreEnabled;
-  static bool sAnimationsAPIElementAnimateEnabled;
   static bool sGetBoxQuadsEnabled;
   static bool sSkipCursorMoveForSameValueSet;
   static bool sRequestIdleCallbackEnabled;
@@ -3427,8 +3506,7 @@ private:
   static bool sIsBytecodeCacheEnabled;
   static int32_t sBytecodeCacheStrategy;
   static uint32_t sCookiesLifetimePolicy;
-  static uint32_t sCookiesBehavior;
-  static bool sShortcutsCustomized;
+  static bool sAntiTrackingControlCenterUIEnabled;
 
   static int32_t sPrivacyMaxInnerWidth;
   static int32_t sPrivacyMaxInnerHeight;

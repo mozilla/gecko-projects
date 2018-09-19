@@ -181,7 +181,8 @@ HttpBackgroundChannelChild::RecvOnStopRequest(
                                     const nsHttpHeaderArray& aResponseTrailers)
 {
   LOG(("HttpBackgroundChannelChild::RecvOnStopRequest [this=%p]\n", this));
-  MOZ_ASSERT(OnSocketThread());
+  MOZ_ASSERT(gSocketTransportService);
+  MOZ_ASSERT(gSocketTransportService->IsOnCurrentThreadInfallible());
 
   // It's enough to set this from (just before) OnStopRequest notification, since
   // we don't need this value sooner than a channel was done loading - everything
@@ -348,9 +349,25 @@ HttpBackgroundChannelChild::RecvNotifyTrackingProtectionDisabled()
 }
 
 IPCResult
-HttpBackgroundChannelChild::RecvNotifyTrackingResource()
+HttpBackgroundChannelChild::RecvNotifyTrackingCookieBlocked(const uint32_t& aRejectedReason)
 {
-  LOG(("HttpBackgroundChannelChild::RecvNotifyTrackingResource [this=%p]\n", this));
+  LOG(("HttpBackgroundChannelChild::RecvNotifyTrackingCookieBlocked [this=%p]\n", this));
+  MOZ_ASSERT(OnSocketThread());
+
+  if (NS_WARN_IF(!mChannelChild)) {
+    return IPC_OK();
+  }
+
+  mChannelChild->ProcessNotifyTrackingCookieBlocked(aRejectedReason);
+
+  return IPC_OK();
+}
+
+IPCResult
+HttpBackgroundChannelChild::RecvNotifyTrackingResource(const bool& aIsThirdParty)
+{
+  LOG(("HttpBackgroundChannelChild::RecvNotifyTrackingResource thirdparty=%d "
+       "[this=%p]\n", static_cast<int>(aIsThirdParty), this));
   MOZ_ASSERT(OnSocketThread());
 
   if (NS_WARN_IF(!mChannelChild)) {
@@ -359,7 +376,7 @@ HttpBackgroundChannelChild::RecvNotifyTrackingResource()
 
   // NotifyTrackingResource has no order dependency to OnStartRequest.
   // It this be handled as soon as possible
-  mChannelChild->ProcessNotifyTrackingResource();
+  mChannelChild->ProcessNotifyTrackingResource(aIsThirdParty);
 
   return IPC_OK();
 }

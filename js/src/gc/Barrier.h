@@ -17,6 +17,8 @@
 #include "js/Value.h"
 
 /*
+ * [SMDOC] GC Barriers
+ *
  * A write barrier is a mechanism used by incremental or generation GCs to
  * ensure that every value that needs to be marked is marked. In general, the
  * write barrier should be invoked whenever a write can cause the set of things
@@ -119,12 +121,12 @@
  * from the tenured generation into the nursery is know as the remembered set.
  * Post barriers are used to track this remembered set.
  *
- * Whenever a slot which could contain such a pointer is written, we use a write
- * barrier to check if the edge created is in the remembered set, and if so we
- * insert it into the store buffer, which is the collector's representation of
- * the remembered set.  This means than when we come to do a minor collection we
- * can examine the contents of the store buffer and mark any edge targets that
- * are in the nursery.
+ * Whenever a slot which could contain such a pointer is written, we check
+ * whether the pointed-to thing is in the nursery (if storeBuffer() returns a
+ * buffer).  If so we add the cell into the store buffer, which is the
+ * collector's representation of the remembered set.  This means that when we
+ * come to do a minor collection we can examine the contents of the store buffer
+ * and mark any edge targets that are in the nursery.
  *
  *                            IMPLEMENTATION DETAILS
  *
@@ -301,14 +303,16 @@ struct InternalBarrierMethods<Value>
             // skip doing the lookup to add the new entry. Note that we cannot
             // safely assert the presence of the entry because it may have been
             // added via a different store buffer.
-            if ((prev.isObject() || prev.isString()) && prev.toGCThing()->storeBuffer())
+            if ((prev.isObject() || prev.isString()) && prev.toGCThing()->storeBuffer()) {
                 return;
+            }
             sb->putValue(vp);
             return;
         }
         // Remove the prev entry if the new value does not need it.
-        if ((prev.isObject() || prev.isString()) && (sb = prev.toGCThing()->storeBuffer()))
+        if ((prev.isObject() || prev.isString()) && (sb = prev.toGCThing()->storeBuffer())) {
             sb->unputValue(vp);
+        }
     }
 
     static void readBarrier(const Value& v) {
@@ -645,8 +649,9 @@ class ReadBarriered : public ReadBarrieredBase<T>,
     }
 
     const T& get() const {
-        if (InternalBarrierMethods<T>::isMarkable(this->value))
+        if (InternalBarrierMethods<T>::isMarkable(this->value)) {
             this->read();
+        }
         return this->value;
     }
 
@@ -719,8 +724,9 @@ class HeapSlot : public WriteBarrieredBase<Value>
 #endif
         if (this->value.isObject() || this->value.isString()) {
             gc::Cell* cell = this->value.toGCThing();
-            if (cell->storeBuffer())
+            if (cell->storeBuffer()) {
                 cell->storeBuffer()->putSlot(owner, kind, slot, 1);
+            }
         }
     }
 };
@@ -869,10 +875,6 @@ struct GCPtrHasher
     static void rekey(Key& k, const Key& newKey) { k.unsafeSet(newKey); }
 };
 
-/* Specialized hashing policy for GCPtrs. */
-template <class T>
-struct DefaultHasher<GCPtr<T>> : GCPtrHasher<T> {};
-
 template <class T>
 struct PreBarrieredHasher
 {
@@ -883,9 +885,6 @@ struct PreBarrieredHasher
     static bool match(const Key& k, Lookup l) { return k.get() == l; }
     static void rekey(Key& k, const Key& newKey) { k.unsafeSet(newKey); }
 };
-
-template <class T>
-struct DefaultHasher<PreBarriered<T>> : PreBarrieredHasher<T> { };
 
 /* Useful for hashtables with a ReadBarriered as key. */
 template <class T>
@@ -899,9 +898,24 @@ struct ReadBarrieredHasher
     static void rekey(Key& k, const Key& newKey) { k.set(newKey.unbarrieredGet()); }
 };
 
+} // namespace js
+
+namespace mozilla {
+
+/* Specialized hashing policy for GCPtrs. */
+template <class T>
+struct DefaultHasher<js::GCPtr<T>> : js::GCPtrHasher<T> {};
+
+template <class T>
+struct DefaultHasher<js::PreBarriered<T>> : js::PreBarrieredHasher<T> { };
+
 /* Specialized hashing policy for ReadBarriereds. */
 template <class T>
-struct DefaultHasher<ReadBarriered<T>> : ReadBarrieredHasher<T> { };
+struct DefaultHasher<js::ReadBarriered<T>> : js::ReadBarrieredHasher<T> { };
+
+} // namespace mozilla
+
+namespace js {
 
 class ArrayObject;
 class ArrayBufferObject;

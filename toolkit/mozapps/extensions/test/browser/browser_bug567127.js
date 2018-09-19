@@ -41,8 +41,12 @@ async function checkInstallConfirmation(...names) {
     observe(aSubject, aTopic, aData) {
       var installInfo = aSubject.wrappedJSObject;
       isnot(installInfo.browser, null, "Notification should have non-null browser");
+      Assert.deepEqual(installInfo.installs[0].installTelemetryInfo, {
+        source: "about:addons",
+        method: "install-from-file",
+      }, "Got the expected installTelemetryInfo");
       notificationCount++;
-    }
+    },
   };
   Services.obs.addObserver(observer, "addon-install-started");
 
@@ -74,7 +78,7 @@ add_task(async function test_install_from_file() {
 
   var filePaths = [
                    get_addon_file_url("browser_dragdrop1.xpi"),
-                   get_addon_file_url("browser_dragdrop2.xpi")
+                   get_addon_file_url("browser_dragdrop2.xpi"),
                   ];
   MockFilePicker.setFiles(filePaths.map(aPath => aPath.file));
 

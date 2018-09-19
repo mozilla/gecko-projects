@@ -16,7 +16,6 @@
 #include "nsCOMPtr.h"
 #include "nsIStringBundle.h"
 #include "nsNSSASN1Object.h"
-#include "nsNSSCertTrust.h"
 #include "nsNSSCertValidity.h"
 #include "nsNSSCertificate.h"
 #include "nsReadableUtils.h"
@@ -777,12 +776,12 @@ ProcessExtKeyUsage(SECItem* extData, nsAString& text)
 void
 LossyUTF8ToUTF16(const char* str, uint32_t len, /*out*/ nsAString& result)
 {
-  nsDependentCSubstring substring(str, len);
-  if (IsUTF8(substring)) {
-    result.Assign(NS_ConvertUTF8toUTF16(substring));
+  auto span = MakeSpan(str, len);
+  if (IsUTF8(span)) {
+    CopyUTF8toUTF16(span, result);
   } else {
-    char16_t* newUTF16(ToNewUnicode(substring));
-    result.Adopt(newUTF16);
+    // Actually Latin1 despite ASCII in the legacy name
+    CopyASCIItoUTF16(span, result);
   }
 }
 
@@ -909,7 +908,8 @@ AppendBMPtoUTF16(const UniquePLArenaPool& arena,
         false, data, len, utf8Val, utf8ValLen, &utf8ValLen)) {
     return NS_ERROR_FAILURE;
   }
-  AppendUTF8toUTF16((char*)utf8Val, text);
+  AppendUTF8toUTF16(MakeSpan(reinterpret_cast<char*>(utf8Val), utf8ValLen),
+                    text);
   return NS_OK;
 }
 
@@ -1872,25 +1872,6 @@ nsNSSCertificate::CreateASN1Struct(nsIASN1Object** aRetVal)
   printableItem->SetDisplayValue(text);
   asn1Objects->AppendElement(printableItem);
   return NS_OK;
-}
-
-uint32_t
-getCertType(CERTCertificate* cert)
-{
-  nsNSSCertTrust trust(cert->trust);
-  if (cert->nickname && trust.HasAnyUser())
-    return nsIX509Cert::USER_CERT;
-  if (trust.HasAnyCA())
-    return nsIX509Cert::CA_CERT;
-  if (trust.HasPeer(true, false))
-    return nsIX509Cert::SERVER_CERT;
-  if (trust.HasPeer(false, true) && cert->emailAddr)
-    return nsIX509Cert::EMAIL_CERT;
-  if (CERT_IsCACert(cert, nullptr))
-    return nsIX509Cert::CA_CERT;
-  if (cert->emailAddr)
-    return nsIX509Cert::EMAIL_CERT;
-  return nsIX509Cert::UNKNOWN_CERT;
 }
 
 nsresult

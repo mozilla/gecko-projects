@@ -19,15 +19,12 @@ Object.defineProperty(this, "NetworkHelper", {
 
 const wpl = Ci.nsIWebProgressListener;
 const MockSecurityInfo = {
-  QueryInterface: ChromeUtils.generateQI([Ci.nsITransportSecurityInfo,
-                                          Ci.nsISSLStatusProvider]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsITransportSecurityInfo]),
   securityState: wpl.STATE_IS_BROKEN,
   errorCode: 0,
-  SSLStatus: {
-    // nsISSLStatus.TLS_VERSION_1_2
-    protocolVersion: 3,
-    cipherSuite: "TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256",
-  }
+  // nsISSLStatus.TLS_VERSION_1_2
+  protocolVersion: 3,
+  cipherName: "TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256",
 };
 
 function run_test() {

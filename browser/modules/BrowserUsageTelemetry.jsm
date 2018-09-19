@@ -13,7 +13,6 @@ var EXPORTED_SYMBOLS = [
  ];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
                                "resource://gre/modules/PrivateBrowsingUtils.jsm");
@@ -93,9 +92,7 @@ function getOpenTabsAndWinsCounts() {
   let tabCount = 0;
   let winCount = 0;
 
-  let browserEnum = Services.wm.getEnumerator("navigator:browser");
-  while (browserEnum.hasMoreElements()) {
-    let win = browserEnum.getNext();
+  for (let win of Services.wm.getEnumerator("navigator:browser")) {
     winCount++;
     tabCount += win.gBrowser.tabs.length;
   }
@@ -202,29 +199,7 @@ let URICountListener = {
       return;
     }
 
-    let parseURLResult = Services.search.parseSubmissionURL(uriSpec);
-    if (parseURLResult.engine) {
-      this._recordSearchTelemetry(uriSpec, parseURLResult);
-    } else if (this._urlsQueuedForParsing) {
-      if (Services.search.isInitialized) {
-        this._urlsQueuedForParsing = null;
-      } else {
-        this._urlsQueuedForParsing.push(uriSpec);
-        if (this._urlsQueuedForParsing.length == 1) {
-          Services.search.init(rv => {
-            if (Components.isSuccessCode(rv)) {
-              for (let url of this._urlsQueuedForParsing) {
-                let innerParseURLResult = Services.search.parseSubmissionURL(url);
-                if (innerParseURLResult.engine) {
-                  this._recordSearchTelemetry(url, innerParseURLResult);
-                }
-              }
-            }
-            this._urlsQueuedForParsing = null;
-          });
-        }
-      }
-    }
+    Services.search.recordSearchURLTelemetry(uriSpec);
 
     if (!shouldCountURI) {
       return;
@@ -260,31 +235,6 @@ let URICountListener = {
    */
   reset() {
     this._domainSet.clear();
-  },
-
-  _urlsQueuedForParsing: [],
-
-  _recordSearchTelemetry(url, parseURLResult) {
-    switch (parseURLResult.engine.identifier) {
-      case "google":
-      case "google-2018":
-        let type;
-        let queries = new URLSearchParams(url.split("?")[1]);
-        let code = queries.get("client");
-        if (code) {
-          // Detecting follow-on searches for sap is a little tricky.
-          // There are a few parameters that only show up
-          // with follow-ons, so we look for those. (oq/ved/ei)
-          type = queries.has("oq") || queries.has("ved") || queries.has("ei") ? "sap-follow-on" : "sap";
-        } else {
-          type = "organic";
-        }
-        let payload = `google.in-content:${type}:${code || "none"}`;
-
-        let histogram = Services.telemetry.getKeyedHistogramById("SEARCH_COUNTS");
-        histogram.add(payload);
-        break;
-    }
   },
 
   QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener,
@@ -366,10 +316,6 @@ let urlbarListener = {
       Services.telemetry
               .getKeyedHistogramById("FX_URLBAR_SELECTED_RESULT_INDEX_BY_TYPE")
               .add(actionType, idx);
-      if (actionType === "bookmark" || actionType === "history") {
-        Services.telemetry.recordEvent("savant", "follow_urlbar_link", actionType, null,
-                                      { subcategory: "navigation" });
-      }
     } else {
       Cu.reportError("Unknown FX_URLBAR_SELECTED_RESULT_TYPE type: " +
                      actionType);
@@ -503,9 +449,6 @@ let BrowserUsageTelemetry = {
                                       scalarKey, 1);
     Services.telemetry.recordEvent("navigation", "search", source, action,
                                    { engine: getSearchEngineId(engine) });
-    Services.telemetry.recordEvent("savant", "search", source, action,
-                                   { subcategory: "navigation",
-                                   engine: getSearchEngineId(engine) });
   },
 
   _handleSearchAction(engine, source, details) {
@@ -657,9 +600,8 @@ let BrowserUsageTelemetry = {
     Services.obs.addObserver(this, TELEMETRY_SUBSESSIONSPLIT_TOPIC, true);
 
     // Attach the tabopen handlers to the existing Windows.
-    let browserEnum = Services.wm.getEnumerator("navigator:browser");
-    while (browserEnum.hasMoreElements()) {
-      this._registerWindow(browserEnum.getNext());
+    for (let win of Services.wm.getEnumerator("navigator:browser")) {
+      this._registerWindow(win);
     }
 
     // Get the initial tab and windows max counts.
@@ -745,5 +687,5 @@ let BrowserUsageTelemetry = {
       Services.telemetry.getHistogramById("TAB_COUNT").add(tabCount);
       this._lastRecordTabCount = currentTime;
     }
-  }
+  },
 };

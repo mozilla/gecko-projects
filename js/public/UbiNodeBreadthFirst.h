@@ -88,9 +88,6 @@ struct BreadthFirst {
         traversalBegun(false), stopRequested(false), abandonRequested(false)
     { }
 
-    // Initialize this traversal object. Return false on OOM.
-    bool init() { return visited.init(); }
-
     // Add |node| as a starting point for the traversal. You may add
     // as many starting points as you like. Return false on OOM.
     bool addStart(Node node) { return pending.append(node); }
@@ -99,8 +96,9 @@ struct BreadthFirst {
     // add it to the |visited| set. Return false on OOM.
     bool addStartVisited(Node node) {
         typename NodeMap::AddPtr ptr = visited.lookupForAdd(node);
-        if (!ptr && !visited.add(ptr, node, typename Handler::NodeData()))
+        if (!ptr && !visited.add(ptr, node, typename Handler::NodeData())) {
             return false;
+        }
         return addStart(node);
     }
 
@@ -127,8 +125,9 @@ struct BreadthFirst {
 
             // Get a range containing all origin's outgoing edges.
             auto range = origin.edges(cx, wantNames);
-            if (!range)
+            if (!range) {
                 return false;
+            }
 
             // Traverse each edge.
             for (; !range->empty(); range->popFront()) {
@@ -141,18 +140,21 @@ struct BreadthFirst {
                 if (first) {
                     // This is the first time we've reached |edge.referent|.
                     // Mark it as visited.
-                    if (!visited.add(a, edge.referent, typename Handler::NodeData()))
+                    if (!visited.add(a, edge.referent, typename Handler::NodeData())) {
                         return false;
+                    }
                 }
 
                 MOZ_ASSERT(a);
 
                 // Report this edge to the visitor function.
-                if (!handler(*this, origin, edge, &a->value(), first))
+                if (!handler(*this, origin, edge, &a->value(), first)) {
                     return false;
+                }
 
-                if (stopRequested)
+                if (stopRequested) {
                     return true;
+                }
 
                 // Arrange to traverse this edge's referent's outgoing edges
                 // later --- unless |handler| asked us not to.
@@ -160,8 +162,9 @@ struct BreadthFirst {
                     // Skip the enqueue; reset flag for future iterations.
                     abandonRequested = false;
                 } else if (first) {
-                    if (!pending.append(edge.referent))
+                    if (!pending.append(edge.referent)) {
                         return false;
+                    }
                 }
             }
         }

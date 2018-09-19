@@ -122,15 +122,6 @@ ReadRequestedLocales(nsTArray<nsCString>& aRetVal)
     aRetVal.AppendElement(defaultLocale);
   }
 
-  // Last fallback locale is a locale for the requested locale chain.
-  // In the future we'll want to make the fallback chain differ per-locale.
-  //
-  // Notice: This is not the same as DefaultLocale,
-  // which follows the default locale the build is in.
-  LocaleService::GetInstance()->GetLastFallbackLocale(str);
-  if (!aRetVal.Contains(str)) {
-    aRetVal.AppendElement(str);
-  }
   return true;
 }
 
@@ -158,21 +149,21 @@ LocaleService::NegotiateAppLocales(nsTArray<nsCString>& aRetVal)
 
     NegotiateLanguages(requestedLocales, availableLocales, defaultLocale,
                        LangNegStrategy::Filtering, aRetVal);
-  } else {
-    // In content process, we will not do any language negotiation.
-    // Instead, the language is set manually by SetAppLocales.
+  }
+
+  nsAutoCString lastFallbackLocale;
+  GetLastFallbackLocale(lastFallbackLocale);
+
+  if (!aRetVal.Contains(lastFallbackLocale)) {
+    // This part is used in one of the two scenarios:
     //
-    // If this method has been called, it means that we did not fire
-    // SetAppLocales yet (happens during initialization).
-    // In that case, all we can do is return the default or last fallback locale.
-    //
-    // We will return last fallback here, to avoid having to trigger reading
-    // `update.locale` for default locale.
-    //
-    // Once SetAppLocales will be called later, it'll fire an event
-    // allowing callers to update the locale.
-    nsAutoCString lastFallbackLocale;
-    GetLastFallbackLocale(lastFallbackLocale);
+    // a) We're in a client mode, and no locale has been set yet,
+    //    so we need to return last fallback locale temporarily.
+    // b) We're in a server mode, and the last fallback locale was excluded
+    //    when negotiating against the requested locales.
+    //    Since we currently package it as a last fallback at build
+    //    time, we should also add it at the end of the list at
+    //    runtime.
     aRetVal.AppendElement(lastFallbackLocale);
   }
 }
@@ -315,6 +306,11 @@ LocaleService::GetRequestedLocales(nsTArray<nsCString>& aRetVal)
 bool
 LocaleService::GetAvailableLocales(nsTArray<nsCString>& aRetVal)
 {
+  MOZ_ASSERT(mIsServer, "This should only be called in the server mode.");
+  if (!mIsServer) {
+    return false;
+  }
+
   if (mAvailableLocales.IsEmpty()) {
     // If there are no available locales set, it means that L10nRegistry
     // did not register its locale pool yet. The best course of action
@@ -518,8 +514,8 @@ LocaleService::NegotiateLanguages(const nsTArray<nsCString>& aRequested,
                                   LangNegStrategy aStrategy,
                                   nsTArray<nsCString>& aRetVal)
 {
-  MOZ_ASSERT(aDefaultLocale.IsEmpty() || Locale(aDefaultLocale).IsValid(),
-    "If specified, default locale must be a valid BCP47 language tag.");
+  MOZ_ASSERT(aDefaultLocale.IsEmpty() || Locale(aDefaultLocale).IsWellFormed(),
+    "If specified, default locale must be a well-formed BCP47 language tag.");
 
   if (aStrategy == LangNegStrategy::Lookup && aDefaultLocale.IsEmpty()) {
     NS_WARNING("Default locale should be specified when using lookup strategy.");
@@ -903,6 +899,11 @@ NS_IMETHODIMP
 LocaleService::SetRequestedLocales(const char** aRequested,
                                    uint32_t aRequestedCount)
 {
+  MOZ_ASSERT(mIsServer, "This should only be called in the server mode.");
+  if (!mIsServer) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
   nsAutoCString str;
 
   for (uint32_t i = 0; i < aRequestedCount; i++) {
@@ -949,6 +950,11 @@ NS_IMETHODIMP
 LocaleService::SetAvailableLocales(const char** aAvailable,
                                    uint32_t aAvailableCount)
 {
+  MOZ_ASSERT(mIsServer, "This should only be called in the server mode.");
+  if (!mIsServer) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
   nsTArray<nsCString> newLocales;
 
   for (uint32_t i = 0; i < aAvailableCount; i++) {

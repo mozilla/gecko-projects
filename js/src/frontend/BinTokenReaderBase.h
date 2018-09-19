@@ -105,8 +105,9 @@ class MOZ_STACK_CLASS BinTokenReaderBase
      MOZ_MUST_USE JS::Result<Ok> readConst(const char (&value)[N])
      {
         updateLatestKnownGood();
-        if (!matchConst(value, false))
+        if (!matchConst(value, false)) {
             return raiseError("Could not find expected literal");
+        }
         return Ok();
      }
 
@@ -124,14 +125,18 @@ class MOZ_STACK_CLASS BinTokenReaderBase
     MOZ_MUST_USE bool matchConst(const char (&value)[N], bool expectNul) {
         MOZ_ASSERT(N > 0);
         MOZ_ASSERT(value[N - 1] == 0);
-        MOZ_ASSERT(!cx_->isExceptionPending());
+        MOZ_ASSERT(!hasRaisedError());
 
-        if (current_ + N - 1 > stop_)
+        if (current_ + N - 1 > stop_) {
             return false;
+        }
 
+#ifndef FUZZING
         // Perform lookup, without side-effects.
-        if (!std::equal(current_, current_ + N + (expectNul ? 0 : -1)/*implicit NUL*/, value))
+        if (!std::equal(current_, current_ + N + (expectNul ? 0 : -1)/*implicit NUL*/, value)) {
             return false;
+        }
+#endif
 
         // Looks like we have a match. Now perform side-effects
         current_ += N + (expectNul ? 0 : -1);
@@ -140,6 +145,10 @@ class MOZ_STACK_CLASS BinTokenReaderBase
     }
 
     void updateLatestKnownGood();
+
+#ifdef DEBUG
+    bool hasRaisedError() const;
+#endif
 
     JSContext* cx_;
 

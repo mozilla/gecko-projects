@@ -423,7 +423,13 @@ TextPropertyEditor.prototype = {
     this.valueSpan.innerHTML = "";
     this.valueSpan.appendChild(frag);
 
-    this.ruleView.emit("property-value-updated", this.valueSpan);
+    this.ruleView.emit("property-value-updated",
+      {
+        rule: this.prop.rule,
+        property: name,
+        value: val,
+      }
+    );
 
     // Highlight the currently used font in font-family properties.
     // If we cannot find a match, highlight the first generic family instead.
@@ -532,8 +538,8 @@ TextPropertyEditor.prototype = {
     const gridToggle = this.valueSpan.querySelector(".ruleview-grid");
     if (gridToggle) {
       gridToggle.setAttribute("title", l10n("rule.gridToggle.tooltip"));
-      if (this.ruleView.highlighters.gridHighlighterShown ===
-          this.ruleView.inspector.selection.nodeFront) {
+      if (this.ruleView.highlighters.gridHighlighters.has(
+            this.ruleView.inspector.selection.nodeFront)) {
         gridToggle.classList.add("active");
       }
     }
@@ -700,11 +706,15 @@ TextPropertyEditor.prototype = {
       li.classList.add("ruleview-overridden");
     }
 
-    createChild(li, "span", {
+    const nameContainer = createChild(li, "span", {
+      class: "ruleview-namecontainer"
+    });
+
+    createChild(nameContainer, "span", {
       class: "ruleview-propertyname theme-fg-color5",
       textContent: computed.name
     });
-    appendText(li, ": ");
+    appendText(nameContainer, ": ");
 
     const outputParser = this.ruleView._outputParser;
     const frag = outputParser.parseCssProperty(
@@ -719,12 +729,15 @@ TextPropertyEditor.prototype = {
     // Store the computed property value that was parsed for output
     computed.parsedValue = frag.textContent;
 
-    createChild(li, "span", {
+    const propertyContainer = createChild(li, "span", {
+      class: "ruleview-propertyvaluecontainer"
+    });
+
+    createChild(propertyContainer, "span", {
       class: "ruleview-propertyvalue theme-fg-color1",
       child: frag
     });
-
-    appendText(li, ";");
+    appendText(propertyContainer, ";");
 
     return li;
   },
@@ -913,14 +926,15 @@ TextPropertyEditor.prototype = {
       "session_id": this.toolbox.sessionId
     });
 
-    // Since the value was changed, check if the original propertywas a flex or grid
+    // Since the value was changed, check if the original property was a flex or grid
     // display declaration and hide their respective highlighters.
     if (this.isDisplayFlex()) {
       this.ruleView.highlighters.hideFlexboxHighlighter();
     }
 
     if (this.isDisplayGrid()) {
-      this.ruleView.highlighters.hideGridHighlighter();
+      this.ruleView.highlighters.hideGridHighlighter(
+        this.ruleView.inspector.selection.nodeFront);
     }
 
     // First, set this property value (common case, only modified a property)

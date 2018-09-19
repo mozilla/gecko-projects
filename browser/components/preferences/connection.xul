@@ -19,12 +19,13 @@
         helpTopic="prefs-connection-settings"
         ondialoghelp="openPrefsHelp()">
 
-  <link rel="localization" href="browser/preferences/connection.ftl"/>
 
   <!-- Used for extension-controlled lockdown message -->
-  <link rel="localization" href="browser/preferences/preferences.ftl"/>
-  <link rel="localization" href="branding/brand.ftl"/>
-  <script type="application/javascript" src="chrome://global/content/l10n.js"></script>
+  <linkset>
+    <link rel="localization" href="browser/preferences/connection.ftl"/>
+    <link rel="localization" href="browser/preferences/preferences.ftl"/>
+    <link rel="localization" href="branding/brand.ftl"/>
+  </linkset>
 
   <script type="application/javascript" src="chrome://browser/content/utilityOverlay.js"/>
   <script type="application/javascript" src="chrome://global/content/preferencesBindings.js"/>
@@ -37,7 +38,8 @@
   <vbox id="ConnectionsDialogPane" class="prefpane largeDialogContainer">
     <script type="application/javascript" src="chrome://browser/content/preferences/connection.js"/>
 
-    <hbox id="proxyExtensionContent" align="top" hidden="true">
+    <hbox id="proxyExtensionContent"
+          align="top" hidden="true" class="extension-controlled">
       <description control="disableProxyExtension" flex="1" />
       <button id="disableProxyExtension"
               class="extension-controlled-button accessory-button"
@@ -148,6 +150,18 @@
     <checkbox id="networkProxySOCKSRemoteDNS"
               preference="network.proxy.socks_remote_dns"
               data-l10n-id="connection-proxy-socks-remote-dns" />
+    <checkbox id="networkDnsOverHttps"
+              data-l10n-id="connection-dns-over-https"
+              preference="network.trr.mode"
+              onsyncfrompreference="return gConnectionsDialog.readDnsOverHttpsMode();"
+              onsynctopreference="return gConnectionsDialog.writeDnsOverHttpsMode()" />
+    <hbox class="indent" flex="1" align="center">
+      <label control="networkDnsOverHttpsUrl" data-l10n-id="connection-dns-over-https-url"
+             data-l10n-attrs="tooltiptext"/>
+      <textbox id="networkDnsOverHttpsUrl" flex="1" preference="network.trr.uri"
+               placeholder="https://doh.example.com/dns-query"
+               onsynctopreference="return gConnectionsDialog.writeDnsOverHttpsUri()" />
+    </hbox>
     <separator/>
   </vbox>
 </dialog>

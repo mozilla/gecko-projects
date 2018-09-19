@@ -89,7 +89,7 @@ class MakeUploadOutputParser(OutputParser):
         # key: property name, value: condition
         ('symbolsUrl', "m.endswith('crashreporter-symbols.zip') or "
                        "m.endswith('crashreporter-symbols-full.zip')"),
-        ('testsUrl', "m.endswith(('tests.tar.bz2', 'tests.zip'))"),
+        ('testsUrl', "m.endswith(('tests.tar.bz2', 'tests.zip', 'tests.tar.gz'))"),
         ('robocopApkUrl', "m.endswith('apk') and 'robocop' in m"),
         ('jsshellUrl', "'jsshell-' in m and m.endswith('.zip')"),
         ('partialMarUrl', "m.endswith('.mar') and '.partial.' in m"),
@@ -416,8 +416,6 @@ class BuildOptionParser(object):
         'fuzzing-debug': 'builds/releng_sub_%s_configs/%s_fuzzing_debug.py',
         'asan-and-debug': 'builds/releng_sub_%s_configs/%s_asan_and_debug.py',
         'asan-tc-and-debug': 'builds/releng_sub_%s_configs/%s_asan_tc_and_debug.py',
-        'lto-tc': 'builds/releng_sub_%s_configs/%s_lto_tc.py',
-        'lto-tc-and-debug': 'builds/releng_sub_%s_configs/%s_lto_tc_and_debug.py',
         'stat-and-debug': 'builds/releng_sub_%s_configs/%s_stat_and_debug.py',
         'code-coverage-debug': 'builds/releng_sub_%s_configs/%s_code_coverage_debug.py',
         'code-coverage-opt': 'builds/releng_sub_%s_configs/%s_code_coverage_opt.py',
@@ -427,6 +425,7 @@ class BuildOptionParser(object):
         'api-16': 'builds/releng_sub_%s_configs/%s_api_16.py',
         'api-16-artifact': 'builds/releng_sub_%s_configs/%s_api_16_artifact.py',
         'api-16-debug': 'builds/releng_sub_%s_configs/%s_api_16_debug.py',
+        'api-16-debug-ccov': 'builds/releng_sub_%s_configs/%s_api_16_debug_ccov.py',
         'api-16-debug-artifact': 'builds/releng_sub_%s_configs/%s_api_16_debug_artifact.py',
         'api-16-gradle': 'builds/releng_sub_%s_configs/%s_api_16_gradle.py',
         'api-16-gradle-artifact': 'builds/releng_sub_%s_configs/%s_api_16_gradle_artifact.py',
@@ -435,9 +434,13 @@ class BuildOptionParser(object):
         'rusttests-debug': 'builds/releng_sub_%s_configs/%s_rusttests_debug.py',
         'x86': 'builds/releng_sub_%s_configs/%s_x86.py',
         'x86-artifact': 'builds/releng_sub_%s_configs/%s_x86_artifact.py',
+        'x86-fuzzing-debug': 'builds/releng_sub_%s_configs/%s_x86_fuzzing_debug.py',
+        'x86_64': 'builds/releng_sub_%s_configs/%s_x86_64.py',
+        'x86_64-artifact': 'builds/releng_sub_%s_configs/%s_x86_64_artifact.py',
         'api-16-partner-sample1': 'builds/releng_sub_%s_configs/%s_api_16_partner_sample1.py',
         'aarch64': 'builds/releng_sub_%s_configs/%s_aarch64.py',
         'android-test': 'builds/releng_sub_%s_configs/%s_test.py',
+        'android-test-ccov': 'builds/releng_sub_%s_configs/%s_test_ccov.py',
         'android-checkstyle': 'builds/releng_sub_%s_configs/%s_checkstyle.py',
         'android-lint': 'builds/releng_sub_%s_configs/%s_lint.py',
         'android-findbugs': 'builds/releng_sub_%s_configs/%s_findbugs.py',
@@ -1204,6 +1207,7 @@ or run without that action (ie: --no-{action})"
         self._get_mozconfig()
         self._run_tooltool()
         self._create_mozbuild_dir()
+        self._ensure_upload_path()
         mach_props = os.path.join(
             self.query_abs_dirs()['abs_obj_dir'], 'dist', 'mach_build_properties.json'
         )
@@ -1495,6 +1499,7 @@ or run without that action (ie: --no-{action})"
             'value': hits,
             'extraOptions': self.perfherder_resource_options(),
             'subtests': [],
+            'lowerIsBetter': False
         }
 
         yield {
@@ -1804,14 +1809,14 @@ or run without that action (ie: --no-{action})"
             self.fatal("'mach valgrind-test' did not run successfully. Please check "
                        "log for errors.")
 
-    def ensure_upload_path(self):
+    def _ensure_upload_path(self):
         env = self.query_mach_build_env()
 
         # Some Taskcluster workers don't like it if an artifacts directory
         # is defined but no artifacts are uploaded. Guard against this by always
         # ensuring the artifacts directory exists.
         if 'UPLOAD_PATH' in env and not os.path.exists(env['UPLOAD_PATH']):
-            os.makedirs(env['UPLOAD_PATH'])
+            self.mkdir_p(env['UPLOAD_PATH'])
 
     def _post_fatal(self, message=None, exit_code=None):
         if not self.return_code:  # only overwrite return_code if it's 0

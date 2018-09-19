@@ -5,13 +5,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/BindingUtils.h"
-#include "mozilla/dom/DOMPrefs.h"
+#include "mozilla/dom/MediaCapabilities.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseWorkerProxy.h"
 #include "mozilla/dom/StorageManager.h"
 #include "mozilla/dom/WorkerNavigator.h"
 #include "mozilla/dom/WorkerNavigatorBinding.h"
 #include "mozilla/dom/network/Connection.h"
+#include "mozilla/StaticPrefs.h"
 
 #include "nsProxyRelease.h"
 #include "nsRFPService.h"
@@ -31,7 +32,7 @@ namespace dom {
 using namespace workerinternals;
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(WorkerNavigator, mStorageManager,
-                                      mConnection);
+                                      mConnection, mMediaCapabilities);
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(WorkerNavigator, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(WorkerNavigator, Release)
@@ -65,13 +66,13 @@ WorkerNavigator::Create(bool aOnLine)
 JSObject*
 WorkerNavigator::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return WorkerNavigatorBinding::Wrap(aCx, this, aGivenProto);
+  return WorkerNavigator_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
 WorkerNavigator::SetLanguages(const nsTArray<nsString>& aLanguages)
 {
-  WorkerNavigatorBinding::ClearCachedLanguagesValue(this);
+  WorkerNavigator_Binding::ClearCachedLanguagesValue(this);
   mProperties.mLanguages = aLanguages;
 }
 
@@ -82,11 +83,11 @@ WorkerNavigator::GetAppName(nsString& aAppName, CallerType aCallerType) const
   MOZ_ASSERT(workerPrivate);
 
   if ((!mProperties.mAppNameOverridden.IsEmpty() ||
-       DOMPrefs::ResistFingerprintingEnabled()) &&
+       StaticPrefs::privacy_resistFingerprinting()) &&
       !workerPrivate->UsesSystemPrincipal()) {
     // We will spoof this value when 'privacy.resistFingerprinting' is true.
     // See nsRFPService.h for spoofed value.
-    aAppName = DOMPrefs::ResistFingerprintingEnabled() ?
+    aAppName = StaticPrefs::privacy_resistFingerprinting() ?
       NS_LITERAL_STRING(SPOOFED_APPNAME) : mProperties.mAppNameOverridden;
   } else {
     aAppName = mProperties.mAppName;
@@ -101,11 +102,11 @@ WorkerNavigator::GetAppVersion(nsString& aAppVersion, CallerType aCallerType,
   MOZ_ASSERT(workerPrivate);
 
   if ((!mProperties.mAppVersionOverridden.IsEmpty() ||
-       DOMPrefs::ResistFingerprintingEnabled()) &&
+       StaticPrefs::privacy_resistFingerprinting()) &&
       !workerPrivate->UsesSystemPrincipal()) {
     // We will spoof this value when 'privacy.resistFingerprinting' is true.
     // See nsRFPService.h for spoofed value.
-    aAppVersion = DOMPrefs::ResistFingerprintingEnabled() ?
+    aAppVersion = StaticPrefs::privacy_resistFingerprinting() ?
       NS_LITERAL_STRING(SPOOFED_APPVERSION) : mProperties.mAppVersionOverridden;
   } else {
     aAppVersion = mProperties.mAppVersion;
@@ -120,11 +121,11 @@ WorkerNavigator::GetPlatform(nsString& aPlatform, CallerType aCallerType,
   MOZ_ASSERT(workerPrivate);
 
   if ((!mProperties.mPlatformOverridden.IsEmpty() ||
-       DOMPrefs::ResistFingerprintingEnabled()) &&
+       StaticPrefs::privacy_resistFingerprinting()) &&
       !workerPrivate->UsesSystemPrincipal()) {
     // We will spoof this value when 'privacy.resistFingerprinting' is true.
     // See nsRFPService.h for spoofed value.
-    aPlatform = DOMPrefs::ResistFingerprintingEnabled() ?
+    aPlatform = StaticPrefs::privacy_resistFingerprinting() ?
       NS_LITERAL_STRING(SPOOFED_PLATFORM) : mProperties.mPlatformOverridden;
   } else {
     aPlatform = mProperties.mPlatform;
@@ -175,7 +176,7 @@ WorkerNavigator::GetUserAgent(nsString& aUserAgent, CallerType aCallerType,
   RefPtr<GetUserAgentRunnable> runnable =
     new GetUserAgentRunnable(workerPrivate, aUserAgent);
 
-  runnable->Dispatch(Terminating, aRv);
+  runnable->Dispatch(Canceling, aRv);
 }
 
 uint64_t
@@ -216,6 +217,20 @@ WorkerNavigator::GetConnection(ErrorResult& aRv)
   return mConnection;
 }
 
+dom::MediaCapabilities*
+WorkerNavigator::MediaCapabilities()
+{
+  if (!mMediaCapabilities) {
+    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
+    MOZ_ASSERT(workerPrivate);
+
+    nsIGlobalObject* global = workerPrivate->GlobalScope();
+    MOZ_ASSERT(global);
+
+    mMediaCapabilities = new dom::MediaCapabilities(global);
+  }
+  return mMediaCapabilities;
+}
 
 } // namespace dom
 } // namespace mozilla

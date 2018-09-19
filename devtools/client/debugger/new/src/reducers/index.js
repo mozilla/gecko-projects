@@ -16,6 +16,10 @@ var _sources = require("./sources");
 
 var _sources2 = _interopRequireDefault(_sources);
 
+var _tabs = require("./tabs");
+
+var _tabs2 = _interopRequireDefault(_tabs);
+
 var _breakpoints = require("./breakpoints");
 
 var _breakpoints2 = _interopRequireDefault(_breakpoints);
@@ -52,10 +56,6 @@ var _projectTextSearch = require("./project-text-search");
 
 var _projectTextSearch2 = _interopRequireDefault(_projectTextSearch);
 
-var _replay = require("./replay");
-
-var _replay2 = _interopRequireDefault(_replay);
-
 var _quickOpen = require("./quick-open");
 
 var _quickOpen2 = _interopRequireDefault(_quickOpen);
@@ -82,6 +82,7 @@ exports.default = {
   expressions: _expressions2.default,
   eventListeners: _eventListeners2.default,
   sources: _sources2.default,
+  tabs: _tabs2.default,
   breakpoints: _breakpoints2.default,
   pendingBreakpoints: _pendingBreakpoints2.default,
   asyncRequests: _asyncRequests2.default,
@@ -91,7 +92,6 @@ exports.default = {
   ast: _ast2.default,
   coverage: _coverage2.default,
   projectTextSearch: _projectTextSearch2.default,
-  replay: _replay2.default,
   quickOpen: _quickOpen2.default,
   sourceTree: _sourceTree2.default,
   debuggee: _debuggee2.default

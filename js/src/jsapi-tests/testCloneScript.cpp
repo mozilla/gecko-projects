@@ -7,7 +7,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <string.h> // strlen
+
+#include "jsapi.h" // sundry symbols not moved to more-specific headers yet
 #include "jsfriendapi.h"
+#include "jspubtd.h" // JS::AutoObjectVector
+
+#include "js/CompilationAndEvaluation.h" // JS::CompileFunction
+#include "js/CompileOptions.h" // JS::CompileOptions
+#include "js/RootingAPI.h" // JS::Rooted
+#include "js/TypeDecls.h" // JSFunction, JSObject
 #include "jsapi-tests/tests.h"
 
 BEGIN_TEST(test_cloneScript)
@@ -18,7 +27,7 @@ BEGIN_TEST(test_cloneScript)
     CHECK(A);
     CHECK(B);
 
-    const char* source =
+    static const char source[] =
         "var i = 0;\n"
         "var sum = 0;\n"
         "while (i < 10) {\n"
@@ -32,12 +41,14 @@ BEGIN_TEST(test_cloneScript)
     // compile for A
     {
         JSAutoRealm a(cx, A);
-        JS::RootedFunction fun(cx);
+
         JS::CompileOptions options(cx);
         options.setFileAndLine(__FILE__, 1);
+
+        JS::RootedFunction fun(cx);
         JS::AutoObjectVector emptyScopeChain(cx);
-        CHECK(JS::CompileFunction(cx, emptyScopeChain, options, "f", 0, nullptr,
-                                  source, strlen(source), &fun));
+        CHECK(JS::CompileFunctionUtf8(cx, emptyScopeChain, options, "f", 0, nullptr,
+                                      source, strlen(source), &fun));
         CHECK(obj = JS_GetFunctionObject(fun));
     }
 
@@ -106,20 +117,22 @@ BEGIN_TEST(test_cloneScriptWithPrincipals)
     CHECK(B);
 
     const char* argnames[] = { "arg" };
-    const char* source = "return function() { return arg; }";
+    static const char source[] = "return function() { return arg; }";
 
     JS::RootedObject obj(cx);
 
     // Compile in A
     {
         JSAutoRealm a(cx, A);
+
         JS::CompileOptions options(cx);
         options.setFileAndLine(__FILE__, 1);
+
         JS::RootedFunction fun(cx);
         JS::AutoObjectVector emptyScopeChain(cx);
-        JS::CompileFunction(cx, emptyScopeChain, options, "f",
-                           mozilla::ArrayLength(argnames), argnames, source,
-                           strlen(source), &fun);
+        CHECK(JS::CompileFunctionUtf8(cx, emptyScopeChain, options, "f",
+                                      mozilla::ArrayLength(argnames), argnames,
+                                      source, strlen(source), &fun));
         CHECK(fun);
 
         JSScript* script;

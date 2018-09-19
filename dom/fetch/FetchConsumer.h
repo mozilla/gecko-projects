@@ -39,7 +39,7 @@ public:
   Create(nsIGlobalObject* aGlobal,
          nsIEventTarget* aMainThreadEventTarget,
          FetchBody<Derived>* aBody,
-         AbortSignal* aSignal,
+         AbortSignalImpl* aSignalImpl,
          FetchConsumeType aType,
          ErrorResult& aRv);
 
@@ -48,6 +48,9 @@ public:
 
   void
   BeginConsumeBodyMainThread(ThreadSafeWorkerRef* aWorkerRef);
+
+  void
+  OnBlobResult(Blob* aBlob, ThreadSafeWorkerRef* aWorkerRef = nullptr);
 
   void
   ContinueConsumeBody(nsresult aStatus, uint32_t aLength, uint8_t* aResult,
@@ -79,6 +82,9 @@ private:
 
   ~FetchBodyConsumer();
 
+  nsresult
+  GetBodyLocalFile(nsIFile** aFile) const;
+
   void
   AssertIsOnTargetThread() const;
 
@@ -95,6 +101,8 @@ private:
 
   MutableBlobStorage::MutableBlobStorageType mBlobStorageType;
   nsCString mBodyMimeType;
+
+  nsString mBodyLocalPath;
 
   nsCOMPtr<nsIGlobalObject> mGlobal;
 

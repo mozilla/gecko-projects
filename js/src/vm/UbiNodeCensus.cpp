@@ -6,8 +6,11 @@
 
 #include "js/UbiNodeCensus.h"
 
+#include "js/CharacterEncoding.h"
+#include "js/StableStringChars.h"
 #include "util/Text.h"
 #include "vm/JSContext.h"
+#include "vm/Printer.h"
 #include "vm/Realm.h"
 
 #include "vm/JSObject-inl.h"
@@ -21,20 +24,15 @@ namespace ubi {
 JS_PUBLIC_API(void)
 CountDeleter::operator()(CountBase* ptr)
 {
-    if (!ptr)
+    if (!ptr) {
         return;
+    }
 
     // Downcast to our true type and destruct, as guided by our CountType
     // pointer.
     ptr->destruct();
     js_free(ptr);
 }
-
-JS_PUBLIC_API(bool)
-Census::init() {
-    return targetZones.init();
-}
-
 
 /*** Count Types ***********************************************************************************/
 
@@ -86,8 +84,9 @@ bool
 SimpleCount::count(CountBase& countBase, mozilla::MallocSizeOf mallocSizeOf, const Node& node)
 {
     Count& count = static_cast<Count&>(countBase);
-    if (reportBytes)
+    if (reportBytes) {
         count.totalBytes_ += node.size(mallocSizeOf);
+    }
     return true;
 }
 
@@ -97,24 +96,29 @@ SimpleCount::report(JSContext* cx, CountBase& countBase, MutableHandleValue repo
     Count& count = static_cast<Count&>(countBase);
 
     RootedPlainObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
-    if (!obj)
+    if (!obj) {
         return false;
+    }
 
     RootedValue countValue(cx, NumberValue(count.total_));
-    if (reportCount && !DefineDataProperty(cx, obj, cx->names().count, countValue))
+    if (reportCount && !DefineDataProperty(cx, obj, cx->names().count, countValue)) {
         return false;
+    }
 
     RootedValue bytesValue(cx, NumberValue(count.totalBytes_));
-    if (reportBytes && !DefineDataProperty(cx, obj, cx->names().bytes, bytesValue))
+    if (reportBytes && !DefineDataProperty(cx, obj, cx->names().bytes, bytesValue)) {
         return false;
+    }
 
     if (label) {
         JSString* labelString = JS_NewUCStringCopyZ(cx, label.get());
-        if (!labelString)
+        if (!labelString) {
             return false;
+        }
         RootedValue labelValue(cx, StringValue(labelString));
-        if (!DefineDataProperty(cx, obj, cx->names().label, labelValue))
+        if (!DefineDataProperty(cx, obj, cx->names().label, labelValue)) {
             return false;
+        }
     }
 
     report.setObject(*obj);
@@ -164,12 +168,14 @@ BucketCount::report(JSContext* cx, CountBase& countBase, MutableHandleValue repo
 
     size_t length = count.ids_.length();
     RootedArrayObject arr(cx, NewDenseFullyAllocatedArray(cx, length));
-    if (!arr)
+    if (!arr) {
         return false;
+    }
     arr->ensureDenseInitializedLength(cx, 0, length);
 
-    for (size_t i = 0; i < length; i++)
+    for (size_t i = 0; i < length; i++) {
         arr->setDenseElement(i, NumberValue(count.ids_[i]));
+    }
 
     report.setObject(*arr);
     return true;
@@ -177,7 +183,7 @@ BucketCount::report(JSContext* cx, CountBase& countBase, MutableHandleValue repo
 
 
 // A type that categorizes nodes by their JavaScript type -- 'objects',
-// 'strings', 'scripts', and 'other' -- and then passes the nodes to child
+// 'strings', 'scripts', 'domNode', and 'other' -- and then passes the nodes to child
 // types.
 //
 // Implementation details of scripts like jitted code are counted under
@@ -187,36 +193,42 @@ class ByCoarseType : public CountType {
     CountTypePtr scripts;
     CountTypePtr strings;
     CountTypePtr other;
+    CountTypePtr domNode;
 
     struct Count : CountBase {
         Count(CountType& type,
               CountBasePtr& objects,
               CountBasePtr& scripts,
               CountBasePtr& strings,
-              CountBasePtr& other)
+              CountBasePtr& other,
+              CountBasePtr& domNode)
           : CountBase(type),
             objects(std::move(objects)),
             scripts(std::move(scripts)),
             strings(std::move(strings)),
-            other(std::move(other))
+            other(std::move(other)),
+            domNode(std::move(domNode))
         { }
 
         CountBasePtr objects;
         CountBasePtr scripts;
         CountBasePtr strings;
         CountBasePtr other;
+        CountBasePtr domNode;
     };
 
   public:
     ByCoarseType(CountTypePtr& objects,
                  CountTypePtr& scripts,
                  CountTypePtr& strings,
-                 CountTypePtr& other)
+                 CountTypePtr& other,
+                 CountTypePtr& domNode)
       : CountType(),
         objects(std::move(objects)),
         scripts(std::move(scripts)),
         strings(std::move(strings)),
-        other(std::move(other))
+        other(std::move(other)),
+        domNode(std::move(domNode))
     { }
 
     void destructCount(CountBase& countBase) override {
@@ -237,15 +249,18 @@ ByCoarseType::makeCount()
     CountBasePtr scriptsCount(scripts->makeCount());
     CountBasePtr stringsCount(strings->makeCount());
     CountBasePtr otherCount(other->makeCount());
+    CountBasePtr domNodeCount(domNode->makeCount());
 
-    if (!objectsCount || !scriptsCount || !stringsCount || !otherCount)
+    if (!objectsCount || !scriptsCount || !stringsCount || !otherCount || !domNodeCount) {
         return CountBasePtr(nullptr);
+    }
 
     return CountBasePtr(js_new<Count>(*this,
                                       objectsCount,
                                       scriptsCount,
                                       stringsCount,
-                                      otherCount));
+                                      otherCount,
+                                      domNodeCount));
 }
 
 void
@@ -256,6 +271,7 @@ ByCoarseType::traceCount(CountBase& countBase, JSTracer* trc)
     count.scripts->trace(trc);
     count.strings->trace(trc);
     count.other->trace(trc);
+    count.domNode->trace(trc);
 }
 
 bool
@@ -272,6 +288,8 @@ ByCoarseType::count(CountBase& countBase, mozilla::MallocSizeOf mallocSizeOf, co
         return count.strings->count(mallocSizeOf, node);
       case JS::ubi::CoarseType::Other:
         return count.other->count(mallocSizeOf, node);
+      case JS::ubi::CoarseType::DOMNode:
+        return count.domNode->count(mallocSizeOf, node);
       default:
         MOZ_CRASH("bad JS::ubi::CoarseType in JS::ubi::ByCoarseType::count");
         return false;
@@ -284,8 +302,9 @@ ByCoarseType::report(JSContext* cx, CountBase& countBase, MutableHandleValue rep
     Count& count = static_cast<Count&>(countBase);
 
     RootedPlainObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
-    if (!obj)
+    if (!obj) {
         return false;
+    }
 
     RootedValue objectsReport(cx);
     if (!count.objects->report(cx, &objectsReport) ||
@@ -306,6 +325,10 @@ ByCoarseType::report(JSContext* cx, CountBase& countBase, MutableHandleValue rep
     if (!count.other->report(cx, &otherReport) ||
         !DefineDataProperty(cx, obj, cx->names().other, otherReport))
         return false;
+    RootedValue domReport(cx);
+    if (!count.domNode->report(cx, &domReport) ||
+        !DefineDataProperty(cx, obj, cx->names().domNode, domReport))
+        return false;
 
     report.setObject(*obj);
     return true;
@@ -323,15 +346,18 @@ static int compareEntries(const void* lhsVoid, const void* rhsVoid) {
     auto rhs = (*static_cast<const Entry* const*>(rhsVoid))->value()->smallestNodeIdCounted_;
 
     // We don't want to just subtract the values, as they're unsigned.
-    if (lhs < rhs)
+    if (lhs < rhs) {
         return 1;
-    if (lhs > rhs)
+    }
+    if (lhs > rhs) {
         return -1;
+    }
     return 0;
 }
 
 // A hash map mapping from C strings to counts.
-using CStringCountMap = HashMap<const char*, CountBasePtr, CStringHasher, SystemAllocPolicy>;
+using CStringCountMap =
+    HashMap<const char*, CountBasePtr, mozilla::CStringHasher, SystemAllocPolicy>;
 
 // Convert a HashMap into an object with each key one of the entries from the
 // map and each value the associated count's report. For use during census
@@ -354,8 +380,9 @@ countMapToObject(JSContext* cx, Map& map, GetName getName) {
         return nullptr;
     }
 
-    for (auto r = map.all(); !r.empty(); r.popFront())
+    for (auto r = map.all(); !r.empty(); r.popFront()) {
         entries.infallibleAppend(&r.front());
+    }
 
     if (entries.length()) {
         qsort(entries.begin(), entries.length(), sizeof(*entries.begin()),
@@ -363,24 +390,78 @@ countMapToObject(JSContext* cx, Map& map, GetName getName) {
     }
 
     RootedPlainObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
-    if (!obj)
+    if (!obj) {
         return nullptr;
+    }
 
     for (auto& entry : entries) {
         CountBasePtr& thenCount = entry->value();
         RootedValue thenReport(cx);
-        if (!thenCount->report(cx, &thenReport))
+        if (!thenCount->report(cx, &thenReport)) {
             return nullptr;
+        }
 
         const char* name = getName(entry->key());
         MOZ_ASSERT(name);
         JSAtom* atom = Atomize(cx, name, strlen(name));
-        if (!atom)
+        if (!atom) {
             return nullptr;
+        }
 
         RootedId entryId(cx, AtomToId(atom));
-        if (!DefineDataProperty(cx, obj, entryId, thenReport))
+        if (!DefineDataProperty(cx, obj, entryId, thenReport)) {
             return nullptr;
+        }
+    }
+
+    return obj;
+}
+
+template <class Map, class GetName>
+static PlainObject*
+countMap16ToObject(JSContext* cx, Map& map, GetName getName) {
+    // Build a vector of pointers to entries; sort by total; and then use
+    // that to build the result object. This makes the ordering of entries
+    // more interesting, and a little less non-deterministic.
+
+    JS::ubi::Vector<typename Map::Entry*> entries;
+    if (!entries.reserve(map.count())) {
+        ReportOutOfMemory(cx);
+        return nullptr;
+    }
+
+    for (auto r = map.all(); !r.empty(); r.popFront()) {
+        entries.infallibleAppend(&r.front());
+    }
+
+    if (entries.length()) {
+        qsort(entries.begin(), entries.length(), sizeof(*entries.begin()),
+              compareEntries<typename Map::Entry>);
+    }
+
+    RootedPlainObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
+    if (!obj) {
+        return nullptr;
+    }
+
+    for (auto& entry : entries) {
+        CountBasePtr& thenCount = entry->value();
+        RootedValue thenReport(cx);
+        if (!thenCount->report(cx, &thenReport)) {
+            return nullptr;
+        }
+
+        const char16_t* name = getName(entry->key());
+        MOZ_ASSERT(name);
+        JSAtom* atom = AtomizeChars(cx, name, js_strlen(name));
+        if (!atom) {
+            return nullptr;
+        }
+
+        RootedId entryId(cx, AtomToId(atom));
+        if (!DefineDataProperty(cx, obj, entryId, thenReport)) {
+            return nullptr;
+        }
     }
 
     return obj;
@@ -406,8 +487,6 @@ class ByObjectClass : public CountType {
           : CountBase(type),
             other(std::move(other))
         { }
-
-        bool init() { return table.init(); }
     };
 
     CountTypePtr classesType;
@@ -435,12 +514,14 @@ CountBasePtr
 ByObjectClass::makeCount()
 {
     CountBasePtr otherCount(otherType->makeCount());
-    if (!otherCount)
+    if (!otherCount) {
         return nullptr;
+    }
 
-    UniquePtr<Count> count(js_new<Count>(*this, otherCount));
-    if (!count || !count->init())
+    auto count = js::MakeUnique<Count>(*this, otherCount);
+    if (!count) {
         return nullptr;
+    }
 
     return CountBasePtr(count.release());
 }
@@ -449,8 +530,9 @@ void
 ByObjectClass::traceCount(CountBase& countBase, JSTracer* trc)
 {
     Count& count = static_cast<Count&>(countBase);
-    for (Table::Range r = count.table.all(); !r.empty(); r.popFront())
+    for (Table::Range r = count.table.all(); !r.empty(); r.popFront()) {
         r.front().value()->trace(trc);
+    }
     count.other->trace(trc);
 }
 
@@ -460,14 +542,16 @@ ByObjectClass::count(CountBase& countBase, mozilla::MallocSizeOf mallocSizeOf, c
     Count& count = static_cast<Count&>(countBase);
 
     const char* className = node.jsObjectClassName();
-    if (!className)
+    if (!className) {
         return count.other->count(mallocSizeOf, node);
+    }
 
     Table::AddPtr p = count.table.lookupForAdd(className);
     if (!p) {
         CountBasePtr classCount(classesType->makeCount());
-        if (!classCount || !count.table.add(p, className, std::move(classCount)))
+        if (!classCount || !count.table.add(p, className, std::move(classCount))) {
             return false;
+        }
     }
     return p->value()->count(mallocSizeOf, node);
 }
@@ -480,8 +564,9 @@ ByObjectClass::report(JSContext* cx, CountBase& countBase, MutableHandleValue re
     RootedPlainObject obj(cx, countMapToObject(cx, count.table, [](const char* key) {
         return key;
     }));
-    if (!obj)
+    if (!obj) {
         return false;
+    }
 
     RootedValue otherReport(cx);
     if (!count.other->report(cx, &otherReport) ||
@@ -492,6 +577,115 @@ ByObjectClass::report(JSContext* cx, CountBase& countBase, MutableHandleValue re
     return true;
 }
 
+class ByDomObjectClass : public CountType {
+    // A table mapping descriptive names to their counts.
+    using UniqueC16String = JS::UniqueTwoByteChars;
+
+    struct UniqueC16StringHasher
+    {
+        using Lookup = UniqueC16String;
+
+        static js::HashNumber hash(const Lookup& lookup) {
+            return mozilla::HashString(lookup.get());
+        }
+
+        static bool match(const UniqueC16String& key, const Lookup& lookup) {
+            return CompareChars(key.get(), js_strlen(key.get()), lookup.get(),
+                js_strlen(lookup.get())) == 0;
+        }
+    };
+
+    using Table = HashMap<UniqueC16String,
+                          CountBasePtr,
+                          UniqueC16StringHasher,
+                          SystemAllocPolicy>;
+    using Entry = Table::Entry;
+
+    struct Count : public CountBase {
+        Table table;
+
+        explicit Count(CountType& type) : CountBase(type) { }
+    };
+
+    CountTypePtr classesType;
+
+  public:
+    explicit ByDomObjectClass(CountTypePtr& classesType)
+      : CountType(),
+        classesType(std::move(classesType))
+    { }
+
+    void destructCount(CountBase& countBase) override {
+        Count& count = static_cast<Count&>(countBase);
+        count.~Count();
+    }
+
+    CountBasePtr makeCount() override;
+    void traceCount(CountBase& countBase, JSTracer* trc) override;
+    bool count(CountBase& countBase, mozilla::MallocSizeOf mallocSizeOf, const Node& node) override;
+    bool report(JSContext* cx, CountBase& countBase, MutableHandleValue report) override;
+};
+
+CountBasePtr
+ByDomObjectClass::makeCount()
+{
+    auto count = js::MakeUnique<Count>(*this);
+    if (!count) {
+        return nullptr;
+    }
+
+    return CountBasePtr(count.release());
+}
+
+void
+ByDomObjectClass::traceCount(CountBase& countBase, JSTracer* trc)
+{
+    Count& count = static_cast<Count&>(countBase);
+    for (Table::Range r = count.table.all(); !r.empty(); r.popFront()) {
+        r.front().value()->trace(trc);
+    }
+}
+
+bool
+ByDomObjectClass::count(CountBase& countBase, mozilla::MallocSizeOf mallocSizeOf, const Node& node)
+{
+    Count& count = static_cast<Count&>(countBase);
+
+    const char16_t* nodeName = node.descriptiveTypeName();
+    if (!nodeName) {
+        return false;
+    }
+
+    UniqueC16String name = DuplicateString(nodeName);
+    if (!name) {
+        return false;
+    }
+
+    Table::AddPtr p = count.table.lookupForAdd(name);
+    if (!p) {
+        CountBasePtr classesCount(classesType->makeCount());
+        if (!classesCount || !count.table.add(p, std::move(name), std::move(classesCount))) {
+            return false;
+        }
+    }
+    return p->value()->count(mallocSizeOf, node);
+}
+
+bool
+ByDomObjectClass::report(JSContext* cx, CountBase& countBase, MutableHandleValue report)
+{
+    Count& count = static_cast<Count&>(countBase);
+
+    RootedPlainObject obj(cx, countMap16ToObject(cx, count.table, [](const UniqueC16String& key) {
+        return key.get();
+    }));
+    if (!obj) {
+        return false;
+    }
+
+    report.setObject(*obj);
+    return true;
+}
 
 // A count type that categorizes nodes by their ubi::Node::typeName.
 class ByUbinodeType : public CountType {
@@ -506,8 +700,6 @@ class ByUbinodeType : public CountType {
         Table table;
 
         explicit Count(CountType& type) : CountBase(type) { }
-
-        bool init() { return table.init(); }
     };
 
     CountTypePtr entryType;
@@ -532,9 +724,10 @@ class ByUbinodeType : public CountType {
 CountBasePtr
 ByUbinodeType::makeCount()
 {
-    UniquePtr<Count> count(js_new<Count>(*this));
-    if (!count || !count->init())
+    auto count = js::MakeUnique<Count>(*this);
+    if (!count) {
         return nullptr;
+    }
 
     return CountBasePtr(count.release());
 }
@@ -543,8 +736,9 @@ void
 ByUbinodeType::traceCount(CountBase& countBase, JSTracer* trc)
 {
     Count& count = static_cast<Count&>(countBase);
-    for (Table::Range r = count.table.all(); !r.empty(); r.popFront())
+    for (Table::Range r = count.table.all(); !r.empty(); r.popFront()) {
         r.front().value()->trace(trc);
+    }
 }
 
 bool
@@ -557,8 +751,9 @@ ByUbinodeType::count(CountBase& countBase, mozilla::MallocSizeOf mallocSizeOf, c
     Table::AddPtr p = count.table.lookupForAdd(key);
     if (!p) {
         CountBasePtr typesCount(entryType->makeCount());
-        if (!typesCount || !count.table.add(p, key, std::move(typesCount)))
+        if (!typesCount || !count.table.add(p, key, std::move(typesCount))) {
             return false;
+        }
     }
     return p->value()->count(mallocSizeOf, node);
 }
@@ -572,33 +767,40 @@ ByUbinodeType::report(JSContext* cx, CountBase& countBase, MutableHandleValue re
     // that to build the result object. This makes the ordering of entries
     // more interesting, and a little less non-deterministic.
     JS::ubi::Vector<Entry*> entries;
-    if (!entries.reserve(count.table.count()))
+    if (!entries.reserve(count.table.count())) {
         return false;
-    for (Table::Range r = count.table.all(); !r.empty(); r.popFront())
+    }
+    for (Table::Range r = count.table.all(); !r.empty(); r.popFront()) {
         entries.infallibleAppend(&r.front());
-    if (entries.length())
+    }
+    if (entries.length()) {
         qsort(entries.begin(), entries.length(), sizeof(*entries.begin()), compareEntries<Entry>);
+    }
 
     // Now build the result by iterating over the sorted vector.
     RootedPlainObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
-    if (!obj)
+    if (!obj) {
         return false;
+    }
     for (Entry** entryPtr = entries.begin(); entryPtr < entries.end(); entryPtr++) {
         Entry& entry = **entryPtr;
         CountBasePtr& typeCount = entry.value();
         RootedValue typeReport(cx);
-        if (!typeCount->report(cx, &typeReport))
+        if (!typeCount->report(cx, &typeReport)) {
             return false;
+        }
 
         const char16_t* name = entry.key();
         MOZ_ASSERT(name);
         JSAtom* atom = AtomizeChars(cx, name, js_strlen(name));
-        if (!atom)
+        if (!atom) {
             return false;
+        }
         RootedId entryId(cx, AtomToId(atom));
 
-        if (!DefineDataProperty(cx, obj, entryId, typeReport))
+        if (!DefineDataProperty(cx, obj, entryId, typeReport)) {
             return false;
+        }
     }
 
     report.setObject(*obj);
@@ -648,7 +850,6 @@ class ByAllocationStack : public CountType {
           : CountBase(type),
             noStack(std::move(noStack))
         { }
-        bool init() { return table.init(); }
     };
 
     CountTypePtr entryType;
@@ -676,12 +877,14 @@ CountBasePtr
 ByAllocationStack::makeCount()
 {
     CountBasePtr noStackCount(noStackType->makeCount());
-    if (!noStackCount)
+    if (!noStackCount) {
         return nullptr;
+    }
 
-    UniquePtr<Count> count(js_new<Count>(*this, noStackCount));
-    if (!count || !count->init())
+    auto count = js::MakeUnique<Count>(*this, noStackCount);
+    if (!count) {
         return nullptr;
+    }
     return CountBasePtr(count.release());
 }
 
@@ -714,8 +917,9 @@ ByAllocationStack::count(CountBase& countBase, mozilla::MallocSizeOf mallocSizeO
         auto p = count.table.lookupForAdd(allocationStack);
         if (!p) {
             CountBasePtr stackCount(entryType->makeCount());
-            if (!stackCount || !count.table.add(p, allocationStack, std::move(stackCount)))
+            if (!stackCount || !count.table.add(p, allocationStack, std::move(stackCount))) {
                 return false;
+            }
         }
         MOZ_ASSERT(p);
         return p->value()->count(mallocSizeOf, node);
@@ -732,24 +936,28 @@ ByAllocationStack::report(JSContext* cx, CountBase& countBase, MutableHandleValu
 
 #ifdef DEBUG
     // Check that nothing rehashes our table while we hold pointers into it.
-    Generation generation = count.table.generation();
+    mozilla::Generation generation = count.table.generation();
 #endif
 
     // Build a vector of pointers to entries; sort by total; and then use
     // that to build the result object. This makes the ordering of entries
     // more interesting, and a little less non-deterministic.
     JS::ubi::Vector<Entry*> entries;
-    if (!entries.reserve(count.table.count()))
+    if (!entries.reserve(count.table.count())) {
         return false;
-    for (Table::Range r = count.table.all(); !r.empty(); r.popFront())
+    }
+    for (Table::Range r = count.table.all(); !r.empty(); r.popFront()) {
         entries.infallibleAppend(&r.front());
-    if (entries.length())
+    }
+    if (entries.length()) {
         qsort(entries.begin(), entries.length(), sizeof(*entries.begin()), compareEntries<Entry>);
+    }
 
     // Now build the result by iterating over the sorted vector.
     Rooted<MapObject*> map(cx, MapObject::create(cx));
-    if (!map)
+    if (!map) {
         return false;
+    }
     for (Entry** entryPtr = entries.begin(); entryPtr < entries.end(); entryPtr++) {
         Entry& entry = **entryPtr;
         MOZ_ASSERT(entry.key());
@@ -764,20 +972,24 @@ ByAllocationStack::report(JSContext* cx, CountBase& countBase, MutableHandleValu
 
         CountBasePtr& stackCount = entry.value();
         RootedValue stackReport(cx);
-        if (!stackCount->report(cx, &stackReport))
+        if (!stackCount->report(cx, &stackReport)) {
             return false;
+        }
 
-        if (!MapObject::set(cx, map, stackVal, stackReport))
+        if (!MapObject::set(cx, map, stackVal, stackReport)) {
             return false;
+        }
     }
 
     if (count.noStack->total_ > 0) {
         RootedValue noStackReport(cx);
-        if (!count.noStack->report(cx, &noStackReport))
+        if (!count.noStack->report(cx, &noStackReport)) {
             return false;
+        }
         RootedValue noStack(cx, StringValue(cx->names().noStack));
-        if (!MapObject::set(cx, map, noStack, noStackReport))
+        if (!MapObject::set(cx, map, noStack, noStackReport)) {
             return false;
+        }
     }
 
     MOZ_ASSERT(generation == count.table.generation());
@@ -794,11 +1006,11 @@ class ByFilename : public CountType {
         using Lookup = UniqueCString;
 
         static js::HashNumber hash(const Lookup& lookup) {
-            return CStringHasher::hash(lookup.get());
+            return mozilla::CStringHasher::hash(lookup.get());
         }
 
         static bool match(const UniqueCString& key, const Lookup& lookup) {
-            return CStringHasher::match(key.get(), lookup.get());
+            return mozilla::CStringHasher::match(key.get(), lookup.get());
         }
     };
 
@@ -819,8 +1031,6 @@ class ByFilename : public CountType {
           , then(std::move(then))
           , noFilename(std::move(noFilename))
         { }
-
-        bool init() { return table.init(); }
     };
 
     CountTypePtr thenType;
@@ -848,16 +1058,19 @@ CountBasePtr
 ByFilename::makeCount()
 {
     CountBasePtr thenCount(thenType->makeCount());
-    if (!thenCount)
+    if (!thenCount) {
         return nullptr;
+    }
 
     CountBasePtr noFilenameCount(noFilenameType->makeCount());
-    if (!noFilenameCount)
+    if (!noFilenameCount) {
         return nullptr;
+    }
 
-    UniquePtr<Count> count(js_new<Count>(*this, std::move(thenCount), std::move(noFilenameCount)));
-    if (!count || !count->init())
+    auto count = js::MakeUnique<Count>(*this, std::move(thenCount), std::move(noFilenameCount));
+    if (!count) {
         return nullptr;
+    }
 
     return CountBasePtr(count.release());
 }
@@ -866,8 +1079,9 @@ void
 ByFilename::traceCount(CountBase& countBase, JSTracer* trc)
 {
     Count& count = static_cast<Count&>(countBase);
-    for (Table::Range r = count.table.all(); !r.empty(); r.popFront())
+    for (Table::Range r = count.table.all(); !r.empty(); r.popFront()) {
         r.front().value()->trace(trc);
+    }
     count.noFilename->trace(trc);
 }
 
@@ -877,18 +1091,21 @@ ByFilename::count(CountBase& countBase, mozilla::MallocSizeOf mallocSizeOf, cons
     Count& count = static_cast<Count&>(countBase);
 
     const char* filename = node.scriptFilename();
-    if (!filename)
+    if (!filename) {
         return count.noFilename->count(mallocSizeOf, node);
+    }
 
     UniqueCString myFilename = DuplicateString(filename);
-    if (!myFilename)
+    if (!myFilename) {
         return false;
+    }
 
     Table::AddPtr p = count.table.lookupForAdd(myFilename);
     if (!p) {
         CountBasePtr thenCount(thenType->makeCount());
-        if (!thenCount || !count.table.add(p, std::move(myFilename), std::move(thenCount)))
+        if (!thenCount || !count.table.add(p, std::move(myFilename), std::move(thenCount))) {
             return false;
+        }
     }
     return p->value()->count(mallocSizeOf, node);
 }
@@ -901,8 +1118,9 @@ ByFilename::report(JSContext* cx, CountBase& countBase, MutableHandleValue repor
     RootedPlainObject obj(cx, countMapToObject(cx, count.table, [](const UniqueCString& key) {
         return key.get();
     }));
-    if (!obj)
+    if (!obj) {
         return false;
+    }
 
     RootedValue noFilenameReport(cx);
     if (!count.noFilename->report(cx, &noFilenameReport) ||
@@ -925,8 +1143,9 @@ CensusHandler::operator() (BreadthFirst<CensusHandler>& traversal,
 {
     // We're only interested in the first time we reach edge.referent, not
     // in every edge arriving at that node.
-    if (!first)
+    if (!first) {
         return true;
+    }
 
     // Don't count nodes outside the debuggee zones. Do count things in the
     // special atoms zone, but don't traverse their outgoing edges, on the
@@ -937,10 +1156,11 @@ CensusHandler::operator() (BreadthFirst<CensusHandler>& traversal,
     const Node& referent = edge.referent;
     Zone* zone = referent.zone();
 
-    if (census.targetZones.count() == 0 || census.targetZones.has(zone))
+    if (census.targetZones.count() == 0 || census.targetZones.has(zone)) {
         return rootCount->count(mallocSizeOf, referent);
+    }
 
-    if (zone->isAtomsZone()) {
+    if (zone && zone->isAtomsZone()) {
         traversal.abandonReferent();
         return rootCount->count(mallocSizeOf, referent);
     }
@@ -956,8 +1176,9 @@ static CountTypePtr
 ParseChildBreakdown(JSContext* cx, HandleObject breakdown, PropertyName* prop)
 {
     RootedValue v(cx);
-    if (!GetProperty(cx, breakdown, breakdown, prop, &v))
+    if (!GetProperty(cx, breakdown, breakdown, prop, &v)) {
         return nullptr;
+    }
     return ParseBreakdown(cx, v);
 }
 
@@ -971,18 +1192,22 @@ ParseBreakdown(JSContext* cx, HandleValue breakdownValue)
     }
 
     RootedObject breakdown(cx, ToObject(cx, breakdownValue));
-    if (!breakdown)
+    if (!breakdown) {
         return nullptr;
+    }
 
     RootedValue byValue(cx);
-    if (!GetProperty(cx, breakdown, breakdown, cx->names().by, &byValue))
+    if (!GetProperty(cx, breakdown, breakdown, cx->names().by, &byValue)) {
         return nullptr;
+    }
     RootedString byString(cx, ToString(cx, byValue));
-    if (!byString)
+    if (!byString) {
         return nullptr;
+    }
     RootedLinearString by(cx, byString->ensureLinear(cx));
-    if (!by)
+    if (!by) {
         return nullptr;
+    }
 
     if (StringEqualsAscii(by, "count")) {
         RootedValue countValue(cx), bytesValue(cx);
@@ -999,29 +1224,34 @@ ParseBreakdown(JSContext* cx, HandleValue breakdownValue)
         // a 'label' property whose value is converted to a string and included as
         // a 'label' property on the report object.
         RootedValue label(cx);
-        if (!GetProperty(cx, breakdown, breakdown, cx->names().label, &label))
+        if (!GetProperty(cx, breakdown, breakdown, cx->names().label, &label)) {
             return nullptr;
+        }
 
         UniqueTwoByteChars labelUnique(nullptr);
         if (!label.isUndefined()) {
             RootedString labelString(cx, ToString(cx, label));
-            if (!labelString)
+            if (!labelString) {
                 return nullptr;
+            }
 
             JSFlatString* flat = labelString->ensureFlat(cx);
-            if (!flat)
+            if (!flat) {
                 return nullptr;
+            }
 
             AutoStableStringChars chars(cx);
-            if (!chars.initTwoByte(cx, flat))
+            if (!chars.initTwoByte(cx, flat)) {
                 return nullptr;
+            }
 
             // Since flat strings are null-terminated, and AutoStableStringChars
             // null- terminates if it needs to make a copy, we know that
             // chars.twoByteChars() is null-terminated.
             labelUnique = DuplicateString(cx, chars.twoByteChars());
-            if (!labelUnique)
+            if (!labelUnique) {
                 return nullptr;
+            }
         }
 
         CountTypePtr simple(cx->new_<SimpleCount>(labelUnique,
@@ -1030,83 +1260,105 @@ ParseBreakdown(JSContext* cx, HandleValue breakdownValue)
         return simple;
     }
 
-    if (StringEqualsAscii(by, "bucket"))
+    if (StringEqualsAscii(by, "bucket")) {
         return CountTypePtr(cx->new_<BucketCount>());
+    }
 
     if (StringEqualsAscii(by, "objectClass")) {
         CountTypePtr thenType(ParseChildBreakdown(cx, breakdown, cx->names().then));
-        if (!thenType)
+        if (!thenType) {
             return nullptr;
+        }
 
         CountTypePtr otherType(ParseChildBreakdown(cx, breakdown, cx->names().other));
-        if (!otherType)
+        if (!otherType) {
             return nullptr;
+        }
 
         return CountTypePtr(cx->new_<ByObjectClass>(thenType, otherType));
     }
 
     if (StringEqualsAscii(by, "coarseType")) {
         CountTypePtr objectsType(ParseChildBreakdown(cx, breakdown, cx->names().objects));
-        if (!objectsType)
+        if (!objectsType) {
             return nullptr;
+        }
         CountTypePtr scriptsType(ParseChildBreakdown(cx, breakdown, cx->names().scripts));
-        if (!scriptsType)
+        if (!scriptsType) {
             return nullptr;
+        }
         CountTypePtr stringsType(ParseChildBreakdown(cx, breakdown, cx->names().strings));
-        if (!stringsType)
+        if (!stringsType) {
             return nullptr;
+        }
         CountTypePtr otherType(ParseChildBreakdown(cx, breakdown, cx->names().other));
-        if (!otherType)
+        if (!otherType) {
             return nullptr;
+        }
+        CountTypePtr domNodeType(ParseChildBreakdown(cx, breakdown, cx->names().domNode));
+        if (!domNodeType) {
+            return nullptr;
+        }
 
         return CountTypePtr(cx->new_<ByCoarseType>(objectsType,
                                                    scriptsType,
                                                    stringsType,
-                                                   otherType));
+                                                   otherType,
+                                                   domNodeType));
     }
 
     if (StringEqualsAscii(by, "internalType")) {
         CountTypePtr thenType(ParseChildBreakdown(cx, breakdown, cx->names().then));
-        if (!thenType)
+        if (!thenType) {
             return nullptr;
+        }
 
         return CountTypePtr(cx->new_<ByUbinodeType>(thenType));
     }
 
+    if (StringEqualsAscii(by, "descriptiveType")) {
+        CountTypePtr thenType(ParseChildBreakdown(cx, breakdown, cx->names().then));
+        if (!thenType) {
+            return nullptr;
+        }
+        return CountTypePtr(cx->new_<ByDomObjectClass>(thenType));
+    }
+
     if (StringEqualsAscii(by, "allocationStack")) {
         CountTypePtr thenType(ParseChildBreakdown(cx, breakdown, cx->names().then));
-        if (!thenType)
+        if (!thenType) {
             return nullptr;
+        }
         CountTypePtr noStackType(ParseChildBreakdown(cx, breakdown, cx->names().noStack));
-        if (!noStackType)
+        if (!noStackType) {
             return nullptr;
+        }
 
         return CountTypePtr(cx->new_<ByAllocationStack>(thenType, noStackType));
     }
 
     if (StringEqualsAscii(by, "filename")) {
         CountTypePtr thenType(ParseChildBreakdown(cx, breakdown, cx->names().then));
-        if (!thenType)
+        if (!thenType) {
             return nullptr;
+        }
 
         CountTypePtr noFilenameType(ParseChildBreakdown(cx, breakdown, cx->names().noFilename));
-        if (!noFilenameType)
+        if (!noFilenameType) {
             return nullptr;
+        }
 
         return CountTypePtr(cx->new_<ByFilename>(std::move(thenType), std::move(noFilenameType)));
     }
 
     // We didn't recognize the breakdown type; complain.
-    RootedString bySource(cx, ValueToSource(cx, byValue));
-    if (!bySource)
+    UniqueChars byBytes = QuoteString(cx, by, '"');
+    if (!byBytes) {
         return nullptr;
+    }
 
-    JSAutoByteString byBytes(cx, bySource);
-    if (!byBytes)
-        return nullptr;
-
-    JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_CENSUS_BREAKDOWN,
-                               byBytes.ptr());
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_CENSUS_BREAKDOWN,
+                              byBytes.get());
     return nullptr;
 }
 
@@ -1114,51 +1366,69 @@ ParseBreakdown(JSContext* cx, HandleValue breakdownValue)
 //
 // { by: "coarseType",
 //   objects: { by: "objectClass" },
-//   other:   { by: "internalType" }
+//   other:   { by: "internalType" },
+//   domNode: { by: "descriptiveType" }
 // }
 static CountTypePtr
 GetDefaultBreakdown(JSContext* cx)
 {
-    CountTypePtr byClass(cx->new_<SimpleCount>());
-    if (!byClass)
+    CountTypePtr byDomClass(cx->new_<SimpleCount>());
+    if (!byDomClass) {
         return nullptr;
+    }
+    CountTypePtr byClass(cx->new_<SimpleCount>());
+    if (!byClass) {
+        return nullptr;
+    }
 
     CountTypePtr byClassElse(cx->new_<SimpleCount>());
-    if (!byClassElse)
+    if (!byClassElse) {
         return nullptr;
+    }
 
     CountTypePtr objects(cx->new_<ByObjectClass>(byClass, byClassElse));
-    if (!objects)
+    if (!objects) {
         return nullptr;
+    }
 
     CountTypePtr scripts(cx->new_<SimpleCount>());
-    if (!scripts)
+    if (!scripts) {
         return nullptr;
+    }
 
     CountTypePtr strings(cx->new_<SimpleCount>());
-    if (!strings)
+    if (!strings) {
         return nullptr;
+    }
 
     CountTypePtr byType(cx->new_<SimpleCount>());
-    if (!byType)
+    if (!byType) {
         return nullptr;
+    }
 
     CountTypePtr other(cx->new_<ByUbinodeType>(byType));
-    if (!other)
+    if (!other) {
         return nullptr;
+    }
+    CountTypePtr domNode(cx->new_<ByDomObjectClass>(byDomClass));
+    if (!domNode) {
+        return nullptr;
+    }
 
     return CountTypePtr(cx->new_<ByCoarseType>(objects,
                                                scripts,
                                                strings,
-                                               other));
+                                               other,
+                                               domNode));
 }
 
 JS_PUBLIC_API(bool)
 ParseCensusOptions(JSContext* cx, Census& census, HandleObject options, CountTypePtr& outResult)
 {
     RootedValue breakdown(cx, UndefinedValue());
-    if (options && !GetProperty(cx, options, options, cx->names().breakdown, &breakdown))
+    if (options && !GetProperty(cx, options, options, cx->names().breakdown, &breakdown)) {
         return false;
+    }
 
     outResult = breakdown.isUndefined()
         ? GetDefaultBreakdown(cx)

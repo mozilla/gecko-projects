@@ -15,7 +15,6 @@
             android:name="android.hardware.location.gps"
             android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen"/>
-
     <uses-feature
             android:name="android.hardware.camera"
             android:required="false"/>
@@ -77,11 +76,6 @@
                 android:enabled="true"
                 android:exported="false"
                 android:isolatedProcess="false">
-        </service>
-        <service
-                android:name="org.mozilla.gecko.CrashReporterService"
-                android:exported="false"
-                android:process=":crashreporter">
         </service>
     </application>
 

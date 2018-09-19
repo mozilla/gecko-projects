@@ -16,8 +16,9 @@
         data-l10n-attrs="title, style"
         persist="screenX screenY">
 
-  <link rel="localization" href="browser/preferences/applicationManager.ftl"/>
-  <script type="application/javascript" src="chrome://global/content/l10n.js"></script>
+  <linkset>
+    <link rel="localization" href="browser/preferences/applicationManager.ftl"/>
+  </linkset>
 
   <script type="application/javascript"
           src="chrome://browser/content/utilityOverlay.js"/>
@@ -39,7 +40,7 @@
   <description id="appDescription"/>
   <separator class="thin"/>
   <hbox flex="1">
-    <listbox id="appList" onselect="gAppManagerDialog.onSelect();" flex="1"/>
+    <richlistbox id="appList" onselect="gAppManagerDialog.onSelect();" flex="1"/>
     <vbox>
       <button id="remove"
               data-l10n-id="app-manager-remove"

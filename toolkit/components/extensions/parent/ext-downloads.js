@@ -13,10 +13,6 @@ ChromeUtils.defineModuleGetter(this, "FileUtils",
 
 var {
   EventEmitter,
-  normalizeTime,
-} = ExtensionUtils;
-
-var {
   ignoreEvent,
 } = ExtensionCommon;
 
@@ -262,7 +258,7 @@ const downloadQuery = query => {
     if (arg == null) {
       return before ? Number.MAX_VALUE : 0;
     }
-    return normalizeTime(arg).getTime();
+    return ExtensionCommon.normalizeTime(arg).getTime();
   }
 
   const startedBefore = normalizeDownloadTime(query.startedBefore, true);
@@ -473,7 +469,7 @@ this.downloads = class extends ExtensionAPI {
             if (!filename) {
               let uri = Services.io.newURI(options.url);
               if (uri instanceof Ci.nsIURL) {
-                filename = DownloadPaths.sanitize(uri.fileName);
+                filename = DownloadPaths.sanitize(Services.textToSubURI.unEscapeURIForUI("UTF-8", uri.fileName));
               }
             }
 
@@ -712,9 +708,7 @@ this.downloads = class extends ExtensionAPI {
 
             return new Promise((resolve, reject) => {
               let chromeWebNav = Services.appShell.createWindowlessBrowser(true);
-              chromeWebNav
-                .QueryInterface(Ci.nsIInterfaceRequestor)
-                .getInterface(Ci.nsIDocShell)
+              chromeWebNav.docShell
                 .createAboutBlankContentViewer(Services.scriptSecurityManager.getSystemPrincipal());
 
               let img = chromeWebNav.document.createElement("img");

@@ -10,13 +10,16 @@
 // This file declares various analysis passes that operate on MIR.
 
 #include "jit/JitAllocPolicy.h"
-#include "jit/MIR.h"
 
 namespace js {
 namespace jit {
 
+class MBasicBlock;
+class MCompare;
+class MDefinition;
 class MIRGenerator;
 class MIRGraph;
+class MTest;
 
 MOZ_MUST_USE bool
 PruneUnusedBranches(MIRGenerator* mir, MIRGraph& graph);
@@ -99,8 +102,6 @@ EliminateRedundantChecks(MIRGraph& graph);
 MOZ_MUST_USE bool
 AddKeepAliveInstructions(MIRGraph& graph);
 
-class MDefinition;
-
 // Simple linear sum of the form 'n' or 'x + n'.
 struct SimpleLinearSum
 {
@@ -158,8 +159,9 @@ class LinearSum
         constant_(other.constant_)
     {
         AutoEnterOOMUnsafeRegion oomUnsafe;
-        if (!terms_.appendAll(other.terms_))
+        if (!terms_.appendAll(other.terms_)) {
             oomUnsafe.crash("LinearSum::LinearSum");
+        }
     }
 
     // These return false on an integer overflow, and afterwards the sum must
@@ -201,7 +203,7 @@ ConvertLinearInequality(TempAllocator& alloc, MBasicBlock* block, const LinearSu
 MOZ_MUST_USE bool
 AnalyzeNewScriptDefiniteProperties(JSContext* cx, HandleFunction fun,
                                    ObjectGroup* group, HandlePlainObject baseobj,
-                                   Vector<TypeNewScript::Initializer>* initializerList);
+                                   Vector<TypeNewScriptInitializer>* initializerList);
 
 MOZ_MUST_USE bool
 AnalyzeArgumentsUsage(JSContext* cx, JSScript* script);

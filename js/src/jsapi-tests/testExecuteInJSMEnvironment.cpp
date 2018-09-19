@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "js/CompilationAndEvaluation.h"
 #include "jsapi-tests/tests.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/EnvironmentObject-inl.h"
@@ -27,7 +28,7 @@ BEGIN_TEST(testExecuteInJSMEnvironment_Basic)
     options.setNoScriptRval(true);
 
     JS::RootedScript script(cx);
-    CHECK(JS::CompileForNonSyntacticScope(cx, options, src, sizeof(src)-1, &script));
+    CHECK(JS::CompileLatin1ForNonSyntacticScope(cx, options, src, sizeof(src) - 1, &script));
 
     JS::RootedObject varEnv(cx, js::NewJSMEnvironment(cx));
     JS::RootedObject lexEnv(cx, JS_ExtensibleLexicalEnvironment(varEnv));
@@ -60,8 +61,9 @@ static bool
 test_callback(JSContext* cx, unsigned argc, JS::Value* vp)
 {
     JS::RootedObject env(cx, js::GetJSMEnvironmentOfScriptedCaller(cx));
-    if (!env)
+    if (!env) {
         return false;
+    }
 
     JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
     args.rval().setObject(*env);
@@ -86,7 +88,7 @@ BEGIN_TEST(testExecuteInJSMEnvironment_Callback)
     options.setNoScriptRval(true);
 
     JS::RootedScript script(cx);
-    CHECK(JS::CompileForNonSyntacticScope(cx, options, src, sizeof(src)-1, &script));
+    CHECK(JS::CompileLatin1ForNonSyntacticScope(cx, options, src, sizeof(src) - 1, &script));
 
     JS::RootedObject nsvo(cx, js::NewJSMEnvironment(cx));
     CHECK(nsvo);

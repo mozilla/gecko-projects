@@ -29,6 +29,7 @@ UNIFIED_SOURCES += [
     'TestLogCommandLineHandler.cpp',
     'TestMoveString.cpp',
     'TestMozPromise.cpp',
+    'TestMruCache.cpp',
     'TestMultiplexInputStream.cpp',
     'TestNonBlockingAsyncInputStream.cpp',
     'TestNsDeque.cpp',
@@ -105,7 +106,7 @@ GENERATED_FILES = [
     'dafsa_test_1.inc',
 ]
 dafsa_data = GENERATED_FILES['dafsa_test_1.inc']
-dafsa_data.script = '../../ds/make_dafsa.py'
+dafsa_data.script = '../../ds/tools/make_dafsa.py'
 dafsa_data.inputs = ['dafsa_test_1.dat']
 
 TEST_HARNESS_FILES.gtest += [

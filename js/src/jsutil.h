@@ -59,8 +59,9 @@ static inline void
 Reverse(T* beg, T* end)
 {
     while (beg != end) {
-        if (--end == beg)
+        if (--end == beg) {
             return;
+        }
         T tmp = *beg;
         *beg = *end;
         *end = tmp;
@@ -74,8 +75,9 @@ RemoveIf(T* begin, T* end, Pred pred)
 {
     T* result = begin;
     for (T* p = begin; p != end; p++) {
-        if (!pred(*p))
+        if (!pred(*p)) {
             *result++ = *p;
+        }
     }
     return result;
 }
@@ -95,8 +97,9 @@ static inline T*
 Find(T* beg, T* end, const T& v)
 {
     for (T* p = beg; p != end; ++p) {
-        if (*p == v)
+        if (*p == v) {
             return p;
+        }
     }
     return end;
 }
@@ -112,19 +115,22 @@ template <typename InputIterT, typename CallableT>
 void
 ForEach(InputIterT begin, InputIterT end, CallableT f)
 {
-    for (; begin != end; ++begin)
+    for (; begin != end; ++begin) {
         f(*begin);
+    }
 }
 
 template <class Container1, class Container2>
 static inline bool
 EqualContainers(const Container1& lhs, const Container2& rhs)
 {
-    if (lhs.length() != rhs.length())
+    if (lhs.length() != rhs.length()) {
         return false;
+    }
     for (size_t i = 0, n = lhs.length(); i < n; i++) {
-        if (lhs[i] != rhs[i])
+        if (lhs[i] != rhs[i]) {
             return false;
+        }
     }
     return true;
 }
@@ -133,8 +139,9 @@ template <class Container>
 static inline HashNumber
 AddContainerToHash(const Container& c, HashNumber hn = 0)
 {
-    for (size_t i = 0; i < c.length(); i++)
+    for (size_t i = 0; i < c.length(); i++) {
         hn = mozilla::AddToHash(hn, HashNumber(c[i]));
+    }
     return hn;
 }
 
@@ -153,18 +160,17 @@ Max(T t1, T t2)
 }
 
 template <typename T, typename U>
-static inline U
+static constexpr U
 ComputeByteAlignment(T bytes, U alignment)
 {
     static_assert(mozilla::IsUnsigned<U>::value,
                   "alignment amount must be unsigned");
 
-    MOZ_ASSERT(mozilla::IsPowerOfTwo(alignment));
     return (alignment - (bytes % alignment)) % alignment;
 }
 
 template <typename T, typename U>
-static inline T
+static constexpr T
 AlignBytes(T bytes, U alignment)
 {
     static_assert(mozilla::IsUnsigned<U>::value,
@@ -210,8 +216,9 @@ IsAnyBitArrayElementSet(const size_t* array, size_t length)
 {
     unsigned numWords = NumWordsForBitArrayOfLength(length);
     for (unsigned i = 0; i < numWords; ++i) {
-        if (array[i])
+        if (array[i]) {
             return true;
+        }
     }
     return false;
 }
@@ -231,8 +238,9 @@ ClearBitArrayElement(size_t* array, size_t length, size_t i)
 static inline void
 ClearAllBitArrayElements(size_t* array, size_t length)
 {
-    for (unsigned i = 0; i < length; ++i)
+    for (unsigned i = 0; i < length; ++i) {
         array[i] = 0;
+    }
 }
 
 }  /* namespace js */
@@ -246,8 +254,9 @@ template<typename T>
 static MOZ_ALWAYS_INLINE void
 PodSet(T* aDst, const T& aSrc, size_t aNElem)
 {
-    for (const T* dstend = aDst + aNElem; aDst < dstend; ++aDst)
+    for (const T* dstend = aDst + aNElem; aDst < dstend; ++aDst) {
         *aDst = aSrc;
+    }
 }
 
 } /* namespace mozilla */
@@ -344,12 +353,15 @@ AlwaysPoison(void* ptr, uint8_t value, size_t num, MemCheckKind kind)
     SetMemCheckKind(ptr, num, kind);
 }
 
+// JSGC_DISABLE_POISONING environment variable
+extern bool gDisablePoisoning;
+
 static inline void
 Poison(void* ptr, uint8_t value, size_t num, MemCheckKind kind)
 {
-    static bool disablePoison = bool(getenv("JSGC_DISABLE_POISONING"));
-    if (!disablePoison)
+    if (!js::gDisablePoisoning) {
         AlwaysPoison(ptr, value, num, kind);
+    }
 }
 
 } // namespace js

@@ -9,6 +9,10 @@
 #include "nsThreadUtils.h"              // for nsRunnable
 #include "gfxPlatformFontList.h"
 
+#ifdef XP_WIN
+#include <windows.h>
+#endif
+
 using namespace mozilla;
 using services::GetObserverService;
 
@@ -32,7 +36,7 @@ FontInfoData::Load()
         } MOZ_SEH_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
             gfxCriticalError() <<
                 "Exception occurred reading font data for " <<
-                NS_ConvertUTF16toUTF8(mFontFamiliesToLoad[i]).get();
+                mFontFamiliesToLoad[i].get();
         }
     }
 
@@ -131,7 +135,7 @@ gfxFontInfoLoader::ShutdownObserver::Observe(nsISupports *aSubject,
     if (!nsCRT::strcmp(aTopic, "quit-application")) {
         mLoader->CancelLoader();
     } else {
-        NS_NOTREACHED("unexpected notification topic");
+        MOZ_ASSERT_UNREACHABLE("unexpected notification topic");
     }
     return NS_OK;
 }

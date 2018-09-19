@@ -335,6 +335,10 @@
 #define NS_SYSTEMPROXYSETTINGS_CONTRACTID \
     "@mozilla.org/system-proxy-settings;1"
 
+// component implementing nsIDHCPClient.
+#define NS_DHCPCLIENT_CONTRACTID \
+    "@mozilla.org/dhcp-client;1"
+
 // service implementing nsIStreamTransportService
 #define NS_STREAMTRANSPORTSERVICE_CONTRACTID \
     "@mozilla.org/network/stream-transport-service;1"
@@ -452,34 +456,12 @@
     {0x94, 0xdb, 0xd4, 0xf8, 0x59, 0x05, 0x82, 0x15} \
 }
 
-// component implementing nsIFileStream
-#define NS_LOCALFILESTREAM_CONTRACTID \
-    "@mozilla.org/network/file-stream;1"
-#define NS_LOCALFILESTREAM_CID                       \
-{ /* f8a69bd7-176c-4a60-9a05-b6d92f8f229a */         \
-    0xf8a69bd7,                                      \
-    0x176c,                                          \
-    0x4a60,                                          \
-    {0x9a, 0x05, 0xb6, 0xd9, 0x2f, 0x8f, 0x22, 0x9a} \
-}
-
 /**
  * Contract ID for a service implementing nsIURIClassifier that identifies
  * phishing and malware sites.
  */
 #define NS_URICLASSIFIERSERVICE_CONTRACTID \
     "@mozilla.org/uriclassifierservice"
-
-// Redirect channel registrar used for redirect to various protocols
-#define NS_REDIRECTCHANNELREGISTRAR_CONTRACTID \
-    "@mozilla.org/redirectchannelregistrar;1"
-#define NS_REDIRECTCHANNELREGISTRAR_CID \
-{ /* {b69043a6-8929-4d60-8d17-a27e44a8393e} */ \
-    0xb69043a6, \
-    0x8929, \
-    0x4d60, \
-    { 0x8d, 0x17, 0xa2, 0x7e, 0x44, 0xa8, 0x39, 0x3e } \
-}
 
 // service implementing nsINetworkPredictor
 #define NS_NETWORKPREDICTOR_CONTRACTID \
@@ -540,27 +522,6 @@
     {0xa5, 0x0c, 0x2c, 0xbb, 0x08, 0x5a, 0xb7, 0xa5} \
 }
 
-#define NS_APPLICATIONCACHENAMESPACE_CONTRACTID \
-    "@mozilla.org/network/application-cache-namespace;1"
-#define NS_APPLICATIONCACHENAMESPACE_CID             \
-{ /* b00ed78a-04e2-4f74-8e1c-d1af79dfd12f */         \
-    0xb00ed78a,                                      \
-    0x04e2,                                          \
-    0x4f74,                                          \
-   {0x8e, 0x1c, 0xd1, 0xaf, 0x79, 0xdf, 0xd1, 0x2f}  \
-}
-
-#define NS_APPLICATIONCACHE_CONTRACTID \
-    "@mozilla.org/network/application-cache;1"
-
-#define NS_APPLICATIONCACHE_CID             \
-{ /* 463440c5-baad-4f3c-9e50-0b107abe7183 */ \
-    0x463440c5, \
-    0xbaad, \
-    0x4f3c, \
-   {0x9e, 0x50, 0xb, 0x10, 0x7a, 0xbe, 0x71, 0x83 } \
-}
-
 /******************************************************************************
  * netwerk/protocol/http/ classes
  */
@@ -613,16 +574,6 @@
     0xe0fa,                                          \
     0x4c49,                                          \
     {0x9f, 0xd4, 0xe0, 0x65, 0xe8, 0x55, 0x68, 0xf4} \
-}
-
-#define NS_HTTPCHANNELAUTHPROVIDER_CONTRACTID \
-    "@mozilla.org/network/http-channel-auth-provider;1"
-#define NS_HTTPCHANNELAUTHPROVIDER_CID \
-{ /* 02f5a8d8-4ef3-48b1-b527-8a643056abbd */         \
-    0x02f5a8d8,                                      \
-    0x4ef3,                                          \
-    0x48b1,                                          \
-    {0xb5, 0x27, 0x8a, 0x64, 0x30, 0x56, 0xab, 0xbd} \
 }
 
 // component implementing nsIHttpPushListener.
@@ -979,14 +930,6 @@
     0x11d3,                                          \
     {0xa1, 0x6c, 0x00, 0x50, 0x04, 0x1c, 0xaf, 0x44} \
 }
-
-/**
- * General-purpose content sniffer component. Use with CreateInstance.
- *
- * Implements nsIContentSniffer
- */
-#define NS_GENERIC_CONTENT_SNIFFER \
-    "@mozilla.org/network/content-sniffer;1"
 
 /**
  * Detector that can act as either an nsIStreamConverter or an

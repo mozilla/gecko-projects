@@ -433,10 +433,11 @@ MacroAssembler::rotateLeft64(Imm32 count, Register64 src, Register64 dest, Regis
 {
     MOZ_ASSERT(temp == InvalidReg);
 
-    if (count.value)
+    if (count.value) {
         ma_drol(dest.reg, src.reg, count);
-    else
+    } else {
         ma_move(dest.reg, src.reg);
+    }
 }
 
 void
@@ -451,10 +452,11 @@ MacroAssembler::rotateRight64(Imm32 count, Register64 src, Register64 dest, Regi
 {
     MOZ_ASSERT(temp == InvalidReg);
 
-    if (count.value)
+    if (count.value) {
         ma_dror(dest.reg, src.reg, count);
-    else
+    } else {
         ma_move(dest.reg, src.reg);
+    }
 }
 
 void
@@ -538,8 +540,9 @@ MacroAssembler::branch64(Condition cond, Register64 lhs, Imm64 val, Label* succe
                "other condition codes not supported");
 
     branchPtr(cond, lhs.reg, ImmWord(val.value), success);
-    if (fail)
+    if (fail) {
         jump(fail);
+    }
 }
 
 void
@@ -553,8 +556,9 @@ MacroAssembler::branch64(Condition cond, Register64 lhs, Register64 rhs, Label* 
                "other condition codes not supported");
 
     branchPtr(cond, lhs.reg, rhs.reg, success);
-    if (fail)
+    if (fail) {
         jump(fail);
+    }
 }
 
 void
@@ -582,8 +586,9 @@ MacroAssembler::branch64(Condition cond, const Address& lhs, const Address& rhs,
 void
 MacroAssembler::branchPrivatePtr(Condition cond, const Address& lhs, Register rhs, Label* label)
 {
-    if (rhs != ScratchRegister)
+    if (rhs != ScratchRegister) {
         movePtr(rhs, ScratchRegister);
+    }
     // Instead of unboxing lhs, box rhs and do direct comparison with lhs.
     rshiftPtr(Imm32(1), ScratchRegister);
     branchPtr(cond, lhs, ScratchRegister, label);
@@ -785,6 +790,15 @@ MacroAssembler::cmp32Set(Assembler::Condition cond, Register lhs, Address rhs,
     cmp32Set(cond, lhs, ScratchRegister, dest);
 }
 
+template<>
+inline void
+MacroAssembler::cmp32Set(Assembler::Condition cond, Address lhs, Register rhs,
+                         Register dest)
+{
+    load32(lhs, ScratchRegister);
+    cmp32Set(cond, ScratchRegister, rhs, dest);
+}
+
 void
 MacroAssemblerMIPS64Compat::incrementInt32Value(const Address& addr)
 {
@@ -795,8 +809,9 @@ void
 MacroAssemblerMIPS64Compat::computeEffectiveAddress(const BaseIndex& address, Register dest)
 {
     computeScaledAddress(address, dest);
-    if (address.offset)
+    if (address.offset) {
         asMasm().addPtr(Imm32(address.offset), dest);
+    }
 }
 
 void

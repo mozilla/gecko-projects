@@ -7,6 +7,7 @@
 #include "TelemetryGeckoViewPersistence.h"
 
 #include "jsapi.h"
+#include "js/JSON.h"
 #include "mozilla/ErrorNames.h"
 #include "mozilla/JSONWriter.h"
 #include "mozilla/Path.h"
@@ -28,8 +29,8 @@
 #include "nsXULAppAPI.h"
 #include "prenv.h"
 #include "prio.h"
-#include "TelemetryScalar.h"
-#include "TelemetryHistogram.h"
+#include "core/TelemetryScalar.h"
+#include "core/TelemetryHistogram.h"
 #include "xpcpublic.h"
 
 using mozilla::GetErrorName;

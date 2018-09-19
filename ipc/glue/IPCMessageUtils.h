@@ -137,12 +137,14 @@ struct EnumSerializer {
   static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult) {
     uintParamType value;
     if (!ReadParam(aMsg, aIter, &value)) {
-      CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCReadErrorReason"),
-                                         NS_LITERAL_CSTRING("Bad iter"));
+      CrashReporter::AnnotateCrashReport(
+        CrashReporter::Annotation::IPCReadErrorReason,
+        NS_LITERAL_CSTRING("Bad iter"));
       return false;
     } else if (!EnumValidator::IsLegalValue(paramType(value))) {
-      CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCReadErrorReason"),
-                                         NS_LITERAL_CSTRING("Illegal value"));
+      CrashReporter::AnnotateCrashReport(
+        CrashReporter::Annotation::IPCReadErrorReason,
+        NS_LITERAL_CSTRING("Illegal value"));
       return false;
     }
     *aResult = paramType(value);
@@ -950,11 +952,11 @@ struct ParamTraits<mozilla::Maybe<T>>
   }
 };
 
-template<typename T>
-struct ParamTraits<mozilla::EnumSet<T>>
+template<typename T, typename U>
+struct ParamTraits<mozilla::EnumSet<T, U>>
 {
-  typedef mozilla::EnumSet<T> paramType;
-  typedef typename mozilla::EnumSet<T>::serializedType serializedType;
+  typedef mozilla::EnumSet<T, U> paramType;
+  typedef U serializedType;
 
   static void Write(Message* msg, const paramType& param)
   {

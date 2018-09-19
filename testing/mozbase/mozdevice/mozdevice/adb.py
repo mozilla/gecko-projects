@@ -140,7 +140,8 @@ class ADBCommand(object):
                  adb_port=None,
                  logger_name='adb',
                  timeout=300,
-                 verbose=False):
+                 verbose=False,
+                 require_root=True):
         """Initializes the ADBCommand object.
 
         :param str adb: path to adb executable. Defaults to 'adb'.
@@ -149,6 +150,14 @@ class ADBCommand(object):
         :param adb_port: port of the adb server.
         :type adb_port: integer or None
         :param str logger_name: logging logger name. Defaults to 'adb'.
+        :param timeout: The default maximum time in
+            seconds for any spawned adb process to complete before
+            throwing an ADBTimeoutError.  This timeout is per adb call. The
+            total time spent may exceed this value. If it is not
+            specified, the value defaults to 300.
+        :type timeout: integer or None
+        :param bool verbose: provide verbose output
+        :param bool require_root: check that we have root permissions on device
 
         :raises: * ADBError
                  * ADBTimeoutError
@@ -158,6 +167,7 @@ class ADBCommand(object):
 
         self._logger = self._get_logger(logger_name)
         self._verbose = verbose
+        self._require_root = require_root
         self._adb_path = adb
         self._adb_host = adb_host
         self._adb_port = adb_port
@@ -176,6 +186,7 @@ class ADBCommand(object):
                                       stderr=subprocess.PIPE).communicate()
             re_version = re.compile(r'Android Debug Bridge version (.*)')
             self._adb_version = re_version.match(output[0]).group(1)
+
         except Exception as exc:
             raise ADBError('%s: %s is not executable.' % (exc, adb))
 
@@ -245,7 +256,7 @@ class ADBCommand(object):
 
         start_time = time.time()
         adb_process.exitcode = adb_process.proc.poll()
-        while ((time.time() - start_time) <= timeout and
+        while ((time.time() - start_time) <= float(timeout) and
                adb_process.exitcode is None):
             time.sleep(self._polling_interval)
             adb_process.exitcode = adb_process.proc.poll()
@@ -336,13 +347,20 @@ class ADBHost(ADBCommand):
         :param adb_port: port of the adb server.
         :type adb_port: integer or None
         :param str logger_name: logging logger name. Defaults to 'adb'.
+        :param timeout: The default maximum time in
+            seconds for any spawned adb process to complete before
+            throwing an ADBTimeoutError.  This timeout is per adb call. The
+            total time spent may exceed this value. If it is not
+            specified, the value defaults to 300.
+        :type timeout: integer or None
+        :param bool verbose: provide verbose output
 
         :raises: * ADBError
                  * ADBTimeoutError
         """
         ADBCommand.__init__(self, adb=adb, adb_host=adb_host,
                             adb_port=adb_port, logger_name=logger_name,
-                            timeout=timeout, verbose=verbose)
+                            timeout=timeout, verbose=verbose, require_root=False)
 
     def command(self, cmds, timeout=None):
         """Executes an adb command on the host.
@@ -511,6 +529,9 @@ class ADBDevice(ADBCommand):
     """
     __metaclass__ = ABCMeta
 
+    SOCKET_DIRECTON_REVERSE = "reverse"
+    SOCKET_DIRECTON_FORWARD = "forward"
+
     def __init__(self,
                  device=None,
                  adb='adb',
@@ -521,7 +542,8 @@ class ADBDevice(ADBCommand):
                  timeout=300,
                  verbose=False,
                  device_ready_retry_wait=20,
-                 device_ready_retry_attempts=3):
+                 device_ready_retry_attempts=3,
+                 require_root=True):
         """Initializes the ADBDevice object.
 
         :param device: When a string is passed, it is interpreted as the
@@ -546,11 +568,19 @@ class ADBDevice(ADBCommand):
         :param adb_port: port of the adb server to connect to.
         :type adb_port: integer or None
         :param str logger_name: logging logger name. Defaults to 'adb'.
+        :param timeout: The default maximum time in
+            seconds for any spawned adb process to complete before
+            throwing an ADBTimeoutError.  This timeout is per adb call. The
+            total time spent may exceed this value. If it is not
+            specified, the value defaults to 300.
+        :type timeout: integer or None
+        :param bool verbose: provide verbose output
         :param integer device_ready_retry_wait: number of seconds to wait
             between attempts to check if the device is ready after a
             reboot.
         :param integer device_ready_retry_attempts: number of attempts when
             checking if a device is ready.
+        :param bool require_root: check that we have root permissions on device
 
         :raises: * ADBError
                  * ADBTimeoutError
@@ -558,7 +588,9 @@ class ADBDevice(ADBCommand):
         """
         ADBCommand.__init__(self, adb=adb, adb_host=adb_host,
                             adb_port=adb_port, logger_name=logger_name,
-                            timeout=timeout, verbose=verbose)
+                            timeout=timeout, verbose=verbose,
+                            require_root=require_root)
+        self._logger.info('Using adb %s' % self._adb_version)
         self._device_serial = self._get_device_serial(device)
         self._initial_test_root = test_root
         self._test_root = None
@@ -567,6 +599,7 @@ class ADBDevice(ADBCommand):
         self._have_root_shell = False
         self._have_su = False
         self._have_android_su = False
+        self._re_internal_storage = None
 
         # Catch exceptions due to the potential for segfaults
         # calling su when using an improperly rooted device.
@@ -587,15 +620,21 @@ class ADBDevice(ADBCommand):
         uid = 'uid=0'
         # Do we have a 'Superuser' sh like su?
         try:
-            if self.shell_output("su -c id", timeout=timeout).find(uid) != -1:
+            if (self._require_root and
+                self.shell_output("su -c id", timeout=timeout).find(uid) != -1):
                 self._have_su = True
                 self._logger.info("su -c supported")
         except ADBError:
             self._logger.debug("Check for su -c failed")
 
-        # Do we have Android's su?
+        # Check if Android's su 0 command works.
+        # su 0 id will hang on Pixel 2 8.1.0/OPM2.171019.029.B1/4720900
+        # rooted via magisk. If we already have detected su -c support,
+        # we can skip this check.
         try:
-            if self.shell_output("su 0 id", timeout=timeout).find(uid) != -1:
+            if (self._require_root and
+                not self._have_su and
+                self.shell_output("su 0 id", timeout=timeout).find(uid) != -1):
                 self._have_android_su = True
                 self._logger.info("su 0 supported")
         except ADBError:
@@ -681,26 +720,31 @@ class ADBDevice(ADBCommand):
 
         raise ValueError("Unable to get device serial")
 
-    def _check_adb_root(self, timeout=None):
-        self._have_root_shell = False
+    def _check_root_user(self, timeout=None):
         uid = 'uid=0'
         # Is shell already running as root?
         try:
             if self.shell_output("id", timeout=timeout).find(uid) != -1:
-                self._have_root_shell = True
                 self._logger.info("adbd running as root")
+                return True
         except ADBError:
-            self._logger.debug("Check for root shell failed")
+            self._logger.debug("Check for root user failed")
+        return False
+
+    def _check_adb_root(self, timeout=None):
+        self._have_root_shell = self._check_root_user(timeout=timeout)
 
         # Do we need to run adb root to get a root shell?
-        try:
-            if (not self._have_root_shell and self.command_output(
-                    ["root"],
-                    timeout=timeout).find("cannot run as root") == -1):
-                self._have_root_shell = True
-                self._logger.info("adbd restarted as root")
-        except ADBError:
-            self._logger.debug("Check for root adbd failed")
+        if not self._have_root_shell:
+            try:
+                self.command_output(["root"], timeout=timeout)
+                self._have_root_shell = self._check_root_user(timeout=timeout)
+                if self._have_root_shell:
+                    self._logger.info("adbd restarted as root")
+                else:
+                    self._logger.info("adbd not restarted as root")
+            except ADBError:
+                self._logger.debug("Check for root adbd failed")
 
     @staticmethod
     def _escape_command_line(cmd):
@@ -755,6 +799,33 @@ class ADBDevice(ADBCommand):
             exitcode = None
 
         return exitcode
+
+    def is_path_internal_storage(self, path, timeout=None):
+        """
+        Return True if the path matches an internal storage path
+        as defined by either '/sdcard', '/mnt/sdcard', or any of the
+        .*_STORAGE environment variables on the device otherwise False.
+        :param str path: The path to test.
+        :param timeout: The maximum time in
+            seconds for any spawned adb process to complete before
+            throwing an ADBTimeoutError.  This timeout is per adb call. The
+            total time spent may exceed this value. If it is not
+            specified, the value set in the ADBDevice constructor is used.
+        :returns: boolean
+
+        :raises: * ADBTimeoutError
+                 * ADBError
+        """
+        if not self._re_internal_storage:
+            storage_dirs = set(['/mnt/sdcard', '/sdcard'])
+            re_STORAGE = re.compile('([^=]+STORAGE)=(.*)')
+            lines = self.shell_output('set', timeout=timeout).split()
+            for line in lines:
+                m = re_STORAGE.match(line.strip())
+                if m and m.group(2):
+                    storage_dirs.add(m.group(2))
+            self._re_internal_storage = re.compile('/|'.join(list(storage_dirs)) + '/')
+        return self._re_internal_storage.match(path) is not None
 
     @property
     def test_root(self):
@@ -818,15 +889,15 @@ class ADBDevice(ADBCommand):
 
     def _try_test_root(self, test_root):
         base_path, sub_path = posixpath.split(test_root)
-        if not self.is_dir(base_path, root=True):
+        if not self.is_dir(base_path, root=self._require_root):
             return False
 
         try:
             dummy_dir = posixpath.join(test_root, 'dummy')
-            if self.is_dir(dummy_dir, root=True):
-                self.rm(dummy_dir, recursive=True, root=True)
-            self.mkdir(dummy_dir, parents=True, root=True)
-            self.chmod(test_root, recursive=True, root=True)
+            if self.is_dir(dummy_dir, root=self._require_root):
+                self.rm(dummy_dir, recursive=True, root=self._require_root)
+            self.mkdir(dummy_dir, parents=True, root=self._require_root)
+            self.chmod(test_root, recursive=True, root=self._require_root)
         except ADBError:
             self._logger.debug("%s is not writable" % test_root)
             return False
@@ -894,7 +965,7 @@ class ADBDevice(ADBCommand):
                                          device_serial=self._device_serial,
                                          timeout=timeout)
 
-    # Port forwarding methods
+    # Networking methods
 
     def _validate_port(self, port, is_local=True):
         """Validate a port forwarding specifier. Raises ValueError on failure.
@@ -909,22 +980,24 @@ class ADBDevice(ADBCommand):
 
         parts = port.split(":", 1)
         if len(parts) != 2 or parts[0] not in prefixes:
-            raise ValueError("Invalid forward specifier %s" % port)
+            raise ValueError("Invalid port specifier %s" % port)
 
-    def forward(self, local, remote, allow_rebind=True, timeout=None):
-        """Forward a local port to a specific port on the device.
+    def _validate_direction(self, direction):
+        """Validate direction of the socket connection. Raises ValueError on failure.
 
-        Ports are specified in the form:
-            tcp:<port>
-            localabstract:<unix domain socket name>
-            localreserved:<unix domain socket name>
-            localfilesystem:<unix domain socket name>
-            dev:<character device name>
-            jdwp:<process pid> (remote only)
+        :param str direction: The socket direction specifier to validate
+        :raises: * ValueError
+        """
+        if direction not in [self.SOCKET_DIRECTON_FORWARD, self.SOCKET_DIRECTON_REVERSE]:
+            raise ValueError('Invalid direction specifier {}'.format(direction))
 
-        :param str local: Local port to forward
-        :param str remote: Remote port to which to forward
-        :param bool allow_rebind: Don't error if the local port is already forwarded
+    def create_socket_connection(self, direction, local, remote, allow_rebind=True, timeout=None):
+        """Sets up a socket connection in the specified direction.
+
+        :param str direction: Direction of the socket connection
+        :param str local: Local port
+        :param str remote: Remote port
+        :param bool allow_rebind: Do not fail if port is already bound
         :param timeout: The maximum time in seconds
             for any spawned adb process to complete before throwing
             an ADBTimeoutError. If it is not specified, the value
@@ -934,34 +1007,46 @@ class ADBDevice(ADBCommand):
                  * ADBTimeoutError
                  * ADBError
         """
-
+        # validate socket direction, and local and remote port formatting.
+        self._validate_direction(direction)
         for port, is_local in [(local, True), (remote, False)]:
             self._validate_port(port, is_local=is_local)
 
-        cmd = ["forward", local, remote]
+        cmd = [direction, local, remote]
+
         if not allow_rebind:
             cmd.insert(1, "--no-rebind")
+
+        # execute commands to establish socket connection.
         self.command_output(cmd, timeout=timeout)
 
-    def list_forwards(self, timeout=None):
-        """Return a list of tuples specifying active forwards
+    def list_socket_connections(self, direction, timeout=None):
+        """Return a list of tuples specifying active socket connectionss.
 
         Return values are of the form (device, local, remote).
 
+        :param str direction: 'forward' to list forward socket connections
+                              'reverse' to list reverse socket connections
         :param timeout: The maximum time in seconds
             for any spawned adb process to complete before throwing
             an ADBTimeoutError. If it is not specified, the value
             set in the ADBDevice constructor is used.
         :type timeout: integer or None
-        :raises: * ADBTimeoutError
+        :raises: * ValueError
+                 * ADBTimeoutError
                  * ADBError
         """
-        forwards = self.command_output(["forward", "--list"], timeout=timeout)
-        return [tuple(line.split(" ")) for line in forwards.splitlines() if line.strip()]
+        self._validate_direction(direction)
 
-    def remove_forwards(self, local=None, timeout=None):
-        """Remove existing port forwards.
+        cmd = [direction, "--list"]
+        output = self.command_output(cmd, timeout=timeout)
+        return [tuple(line.split(" ")) for line in output.splitlines() if line.strip()]
 
+    def remove_socket_connections(self, direction, local=None, timeout=None):
+        """Remove existing socket connections for a given direction.
+
+        :param str direction: 'forward' to remove forward socket connection
+                              'reverse' to remove reverse socket connection
         :param local: local port specifier as for ADBDevice.forward. If local
             is not specified removes all forwards.
         :type local: str or None
@@ -974,7 +1059,10 @@ class ADBDevice(ADBCommand):
                  * ADBTimeoutError
                  * ADBError
         """
-        cmd = ["forward"]
+        self._validate_direction(direction)
+
+        cmd = [direction]
+
         if local is None:
             cmd.extend(["--remove-all"])
         else:
@@ -982,6 +1070,55 @@ class ADBDevice(ADBCommand):
             cmd.extend(["--remove", local])
 
         self.command_output(cmd, timeout=timeout)
+
+    # Legacy port forward methods
+
+    def forward(self, local, remote, allow_rebind=True, timeout=None):
+        """Forward a local port to a specific port on the device.
+
+        See `ADBDevice.create_socket_connection`.
+        """
+        self.create_socket_connection(self.SOCKET_DIRECTON_FORWARD,
+                                      local, remote, allow_rebind, timeout)
+
+    def list_forwards(self, timeout=None):
+        """Return a list of tuples specifying active forwards.
+
+        See `ADBDevice.list_socket_connection`.
+        """
+        return self.list_socket_connections(self.SOCKET_DIRECTON_FORWARD, timeout)
+
+    def remove_forwards(self, local=None, timeout=None):
+        """Remove existing port forwards.
+
+        See `ADBDevice.remove_socket_connection`.
+        """
+        self.remove_socket_connections(self.SOCKET_DIRECTON_FORWARD, local, timeout)
+
+    # Legacy port reverse methods
+
+    def reverse(self, local, remote, allow_rebind=True, timeout=None):
+        """Sets up a reverse socket connection from device to host.
+
+        See `ADBDevice.create_socket_connection`.
+        """
+        self.create_socket_connection(self.SOCKET_DIRECTON_REVERSE,
+                                      local, remote, allow_rebind, timeout)
+
+    def list_reverses(self, timeout=None):
+        """Returns a list of tuples showing active reverse socket connections.
+
+        See `ADBDevice.list_socket_connection`.
+        """
+        return self.list_socket_connections(self.SOCKET_DIRECTON_REVERSE, timeout)
+
+    def remove_reverses(self, local=None, timeout=None):
+        """Remove existing reverse socket connections.
+
+        See `ADBDevice.remove_socket_connection`.
+        """
+        self.remove_socket_connections(self.SOCKET_DIRECTON_REVERSE,
+                                       local, timeout)
 
     # Device Shell methods
 
@@ -1060,7 +1197,7 @@ class ADBDevice(ADBCommand):
             line = ''
             default_alarm_handler = signal.getsignal(signal.SIGALRM)
             signal.signal(signal.SIGALRM, _timed_read_line_handler)
-            signal.alarm(timeout)
+            signal.alarm(int(timeout))
             try:
                 line = filehandle.readline()
             finally:
@@ -1105,12 +1242,12 @@ class ADBDevice(ADBCommand):
         start_time = time.time()
         exitcode = adb_process.proc.poll()
         if not stdout_callback:
-            while ((time.time() - start_time) <= timeout) and exitcode is None:
+            while ((time.time() - start_time) <= float(timeout)) and exitcode is None:
                 time.sleep(self._polling_interval)
                 exitcode = adb_process.proc.poll()
         else:
             stdout2 = open(adb_process.stdout_file.name, 'rb')
-            while ((time.time() - start_time) <= timeout) and exitcode is None:
+            while ((time.time() - start_time) <= float(timeout)) and exitcode is None:
                 try:
                     line = _timed_read_line(stdout2)
                     if line and len(line) > 0:
@@ -1504,6 +1641,13 @@ class ADBDevice(ADBCommand):
         path = posixpath.normpath(path.strip())
         self._logger.debug('chmod: path=%s, recursive=%s, mask=%s, root=%s' %
                            (path, recursive, mask, root))
+        if self.is_path_internal_storage(path, timeout=timeout):
+            # External storage on Android is case-insensitive and permissionless
+            # therefore even with the proper privileges it is not possible
+            # to change modes.
+            self._logger.warning('Ignoring attempt to chmod external storage')
+            return
+
         if not recursive:
             self.shell_output("chmod %s %s" % (mask, path),
                               timeout=timeout, root=root)
@@ -1543,10 +1687,33 @@ class ADBDevice(ADBCommand):
             if chmodsh:
                 self.rm(chmodsh, timeout=timeout, root=root)
 
+    def _test_path(self, argument, path, timeout=None, root=False):
+        """Performs path and file type checking.
+
+        :param str argument: Command line argument to the test command.
+        :param str path: The path or filename on the device.
+        :param timeout: The maximum time in
+            seconds for any spawned adb process to complete before
+            throwing an ADBTimeoutError.
+            This timeout is per adb call. The total time spent
+            may exceed this value. If it is not specified, the value
+            set in the ADBDevice constructor is used.
+        :type timeout: integer or None
+        :param bool root: Flag specifying if the command should be
+            executed as root.
+        :returns: boolean - True if path or filename fulfills the
+            condition of the test.
+        :raises: * ADBTimeoutError
+                 * ADBRootError
+        """
+        return self.shell_bool('test -{arg} {path}'.format(arg=argument,
+                                                           path=path),
+                               timeout=timeout, root=root)
+
     def exists(self, path, timeout=None, root=False):
         """Returns True if the path exists on the device.
 
-        :param str path: The directory name on the device.
+        :param str path: The path name on the device.
         :param timeout: The maximum time in
             seconds for any spawned adb process to complete before
             throwing an ADBTimeoutError.
@@ -1561,12 +1728,12 @@ class ADBDevice(ADBCommand):
                  * ADBRootError
         """
         path = posixpath.normpath(path)
-        return self.shell_bool('ls -a %s' % path, timeout=timeout, root=root)
+        return self._test_path('e', path, timeout, root)
 
     def is_dir(self, path, timeout=None, root=False):
         """Returns True if path is an existing directory on the device.
 
-        :param str path: The path on the device.
+        :param str path: The directory on the device.
         :param timeout: The maximum time in
             seconds for any spawned adb process to complete before
             throwing an ADBTimeoutError.
@@ -1582,7 +1749,7 @@ class ADBDevice(ADBCommand):
                  * ADBRootError
         """
         path = posixpath.normpath(path)
-        return self.shell_bool('ls -a %s/' % path, timeout=timeout, root=root)
+        return self._test_path('d', path, timeout, root)
 
     def is_file(self, path, timeout=None, root=False):
         """Returns True if path is an existing file on the device.
@@ -1603,9 +1770,7 @@ class ADBDevice(ADBCommand):
                  * ADBRootError
         """
         path = posixpath.normpath(path)
-        return (
-            self.exists(path, timeout=timeout, root=root) and
-            not self.is_dir(path, timeout=timeout, root=root))
+        return self._test_path('f', path, timeout, root)
 
     def list_files(self, path, timeout=None, root=False):
         """Return a list of files/directories contained in a directory
@@ -1811,7 +1976,7 @@ class ADBDevice(ADBCommand):
             # copy the source directory *into* the destination
             # directory otherwise it will copy the source directory
             # *onto* the destination directory.
-            if self._adb_version >= '1.0.36':
+            if self._adb_version >= '1.0.36' and self.is_dir(remote):
                 remote = '/'.join(remote.rstrip('/').split('/')[:-1])
         try:
             self.command_output(["push", local, remote], timeout=timeout)

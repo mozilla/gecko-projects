@@ -1,13 +1,13 @@
 (function webpackUniversalModuleDefinition(root, factory) {
 	if(typeof exports === 'object' && typeof module === 'object')
-		module.exports = factory(require("devtools/client/shared/vendor/react"), require("devtools/client/shared/vendor/react-redux"), require("devtools/client/shared/vendor/redux"), require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react-dom-factories"));
+		module.exports = factory(require("devtools/client/shared/vendor/react"), require("Services"), require("devtools/client/shared/vendor/react-redux"), require("devtools/client/shared/vendor/redux"), require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react-dom-factories"));
 	else if(typeof define === 'function' && define.amd)
-		define(["devtools/client/shared/vendor/react", "devtools/client/shared/vendor/react-redux", "devtools/client/shared/vendor/redux", "devtools/client/shared/vendor/react-prop-types", "devtools/client/shared/vendor/react-dom-factories"], factory);
+		define(["devtools/client/shared/vendor/react", "Services", "devtools/client/shared/vendor/react-redux", "devtools/client/shared/vendor/redux", "devtools/client/shared/vendor/react-prop-types", "devtools/client/shared/vendor/react-dom-factories"], factory);
 	else {
-		var a = typeof exports === 'object' ? factory(require("devtools/client/shared/vendor/react"), require("devtools/client/shared/vendor/react-redux"), require("devtools/client/shared/vendor/redux"), require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react-dom-factories")) : factory(root["devtools/client/shared/vendor/react"], root["devtools/client/shared/vendor/react-redux"], root["devtools/client/shared/vendor/redux"], root["devtools/client/shared/vendor/react-prop-types"], root["devtools/client/shared/vendor/react-dom-factories"]);
+		var a = typeof exports === 'object' ? factory(require("devtools/client/shared/vendor/react"), require("Services"), require("devtools/client/shared/vendor/react-redux"), require("devtools/client/shared/vendor/redux"), require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react-dom-factories")) : factory(root["devtools/client/shared/vendor/react"], root["Services"], root["devtools/client/shared/vendor/react-redux"], root["devtools/client/shared/vendor/redux"], root["devtools/client/shared/vendor/react-prop-types"], root["devtools/client/shared/vendor/react-dom-factories"]);
 		for(var i in a) (typeof exports === 'object' ? exports : root)[i] = a[i];
 	}
-})(typeof self !== 'undefined' ? self : this, function(__WEBPACK_EXTERNAL_MODULE_0__, __WEBPACK_EXTERNAL_MODULE_3592__, __WEBPACK_EXTERNAL_MODULE_3593__, __WEBPACK_EXTERNAL_MODULE_3642__, __WEBPACK_EXTERNAL_MODULE_3643__) {
+})(typeof self !== 'undefined' ? self : this, function(__WEBPACK_EXTERNAL_MODULE_0__, __WEBPACK_EXTERNAL_MODULE_22__, __WEBPACK_EXTERNAL_MODULE_3592__, __WEBPACK_EXTERNAL_MODULE_3593__, __WEBPACK_EXTERNAL_MODULE_3642__, __WEBPACK_EXTERNAL_MODULE_3643__) {
 return /******/ (function(modules) { // webpackBootstrap
 /******/ 	// The module cache
 /******/ 	var installedModules = {};
@@ -86,7 +86,7 @@ module.exports = __WEBPACK_EXTERNAL_MODULE_0__;
 /***/ (function(module, exports, __webpack_require__) {
 
 var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;/*!
-  Copyright (c) 2016 Jed Watson.
+  Copyright (c) 2017 Jed Watson.
   Licensed under the MIT License (MIT), see
   http://jedwatson.github.io/classnames
 */
@@ -108,8 +108,11 @@ var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;/*!
 
 			if (argType === 'string' || argType === 'number') {
 				classes.push(arg);
-			} else if (Array.isArray(arg)) {
-				classes.push(classNames.apply(null, arg));
+			} else if (Array.isArray(arg) && arg.length) {
+				var inner = classNames.apply(null, arg);
+				if (inner) {
+					classes.push(inner);
+				}
 			} else if (argType === 'object') {
 				for (var key in arg) {
 					if (hasOwn.call(arg, key) && arg[key]) {
@@ -123,6 +126,7 @@ var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;/*!
 	}
 
 	if (typeof module !== 'undefined' && module.exports) {
+		classNames.default = classNames;
 		module.exports = classNames;
 	} else if (true) {
 		// register as 'classnames', consistent with npm package name
@@ -135,6 +139,13 @@ var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;/*!
 	}
 }());
 
+
+/***/ }),
+
+/***/ 22:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_22__;
 
 /***/ }),
 
@@ -644,6 +655,7 @@ const NaNRep = __webpack_require__(3679);
 const Accessor = __webpack_require__(3680);
 
 // DOM types (grips)
+const Accessible = __webpack_require__(3787);
 const Attribute = __webpack_require__(3681);
 const DateTime = __webpack_require__(3682);
 const Document = __webpack_require__(3683);
@@ -668,7 +680,7 @@ const Grip = __webpack_require__(3656);
 // List of all registered template.
 // XXX there should be a way for extensions to register a new
 // or modify an existing rep.
-const reps = [RegExp, StyleSheet, Event, DateTime, CommentNode, ElementNode, TextNode, Attribute, Func, PromiseRep, ArrayRep, Document, DocumentType, Window, ObjectWithText, ObjectWithURL, ErrorRep, GripArray, GripMap, GripMapEntry, Grip, Undefined, Null, StringRep, Number, SymbolRep, InfinityRep, NaNRep, Accessor, Obj];
+const reps = [RegExp, StyleSheet, Event, DateTime, CommentNode, Accessible, ElementNode, TextNode, Attribute, Func, PromiseRep, ArrayRep, Document, DocumentType, Window, ObjectWithText, ObjectWithURL, ErrorRep, GripArray, GripMap, GripMapEntry, Grip, Undefined, Null, StringRep, Number, SymbolRep, InfinityRep, NaNRep, Accessor, Obj];
 
 /**
  * Generic rep that is used for rendering native JS types or an object.
@@ -719,6 +731,7 @@ function getRep(object, defaultRep = Grip, noGrip = false) {
 module.exports = {
   Rep,
   REPS: {
+    Accessible,
     Accessor,
     ArrayRep,
     Attribute,
@@ -958,8 +971,7 @@ function getLinkifiedElements(text, cropLimit, openLink) {
   if (currentIndex !== text.length) {
     let nonUrlText = text.slice(currentIndex, text.length);
     if (currentIndex < endCropIndex) {
-      const cutIndex = endCropIndex - currentIndex;
-      nonUrlText = nonUrlText.substring(cutIndex);
+      nonUrlText = getCroppedString(nonUrlText, currentIndex, startCropIndex, endCropIndex);
     }
     items.push(nonUrlText);
   }
@@ -1678,7 +1690,7 @@ FunctionRep.propTypes = {
 };
 
 function FunctionRep(props) {
-  const { object: grip, onViewSourceInDebugger } = props;
+  const { object: grip, onViewSourceInDebugger, recordTelemetryEvent } = props;
 
   let jumpToDefinitionButton;
   if (onViewSourceInDebugger && grip.location && grip.location.url && !IGNORED_SOURCE_URLS.includes(grip.location.url)) {
@@ -1690,6 +1702,9 @@ function FunctionRep(props) {
         // Stop the event propagation so we don't trigger ObjectInspector
         // expand/collapse.
         e.stopPropagation();
+        if (recordTelemetryEvent) {
+          recordTelemetryEvent("jump_to_definition");
+        }
         onViewSourceInDebugger(grip.location);
       }
     });
@@ -1937,9 +1952,17 @@ function getStacktraceElements(props, preview) {
   const isStacktraceALongString = isLongString(preview.stack);
   const stackString = isStacktraceALongString ? preview.stack.initial : preview.stack;
 
-  stackString.split("\n").forEach((frame, index) => {
+  stackString.split("\n").forEach((frame, index, frames) => {
     if (!frame) {
       // Skip any blank lines
+      return;
+    }
+
+    // If the stacktrace is a longString, don't include the last frame in the
+    // array, since it is certainly incomplete.
+    // Can be removed when https://bugzilla.mozilla.org/show_bug.cgi?id=1448833
+    // is fixed.
+    if (isStacktraceALongString && index === frames.length - 1) {
       return;
     }
 
@@ -1971,6 +1994,7 @@ function getStacktraceElements(props, preview) {
     // Result:
     // ["scriptLocation:2:100", "scriptLocation", "2", "100"]
     const locationParts = location.match(/^(.*):(\d+):(\d+)$/);
+
     if (props.onViewSourceInDebugger && location && locationParts && !IGNORED_SOURCE_URLS.includes(locationParts[1])) {
       const [, url, line, column] = locationParts;
       onLocationClick = e => {
@@ -1984,24 +2008,16 @@ function getStacktraceElements(props, preview) {
       };
     }
 
-    stack.push(span({
+    stack.push("\t", span({
       key: `fn${index}`,
       className: "objectBox-stackTrace-fn"
-    }, cleanFunctionName(functionName)), span({
+    }, cleanFunctionName(functionName)), " ", span({
       key: `location${index}`,
       className: "objectBox-stackTrace-location",
       onClick: onLocationClick,
       title: onLocationClick ? `View source in debugger → ${location}` : undefined
-    }, location));
+    }, location), "\n");
   });
-
-  if (isStacktraceALongString) {
-    // Remove the last frame (i.e. 2 last elements in the array, the function
-    // name and the location) which is certainly incomplete.
-    // Can be removed when https://bugzilla.mozilla.org/show_bug.cgi?id=1448833
-    // is fixed.
-    stack.splice(-2);
-  }
 
   return span({
     key: "stack",
@@ -2898,11 +2914,11 @@ function getType(item) {
 }
 
 function getValue(item) {
-  if (item && item.contents && item.contents.hasOwnProperty("value")) {
+  if (nodeHasValue(item)) {
     return item.contents.value;
   }
 
-  if (item && item.contents && item.contents.hasOwnProperty("getterValue")) {
+  if (nodeHasGetterValue(item)) {
     return item.contents.getterValue;
   }
 
@@ -2927,6 +2943,14 @@ function nodeIsMapEntry(item) {
 
 function nodeHasChildren(item) {
   return Array.isArray(item.contents);
+}
+
+function nodeHasValue(item) {
+  return item && item.contents && item.contents.hasOwnProperty("value");
+}
+
+function nodeHasGetterValue(item) {
+  return item && item.contents && item.contents.hasOwnProperty("getterValue");
 }
 
 function nodeIsObject(item) {
@@ -3376,18 +3400,15 @@ function makeNodesForProperties(objProps, parent) {
 }
 
 function setNodeFullText(loadedProps, node) {
-  if (nodeHasFullText(node)) {
+  if (nodeHasFullText(node) || !nodeIsLongString(node)) {
     return node;
   }
 
-  if (nodeIsLongString(node)) {
-    const {fullText} = loadedProps;
-
-    if (node.contents.value) {
-      node.contents.value.fullText = fullText;
-    } else if (node.contents.getterValue) {
-      node.contents.getterValue.fullText = fullText;
-    }
+  const { fullText } = loadedProps;
+  if (nodeHasValue(node)) {
+    node.contents.value.fullText = fullText;
+  } else if (nodeHasGetterValue(node)) {
+    node.contents.getterValue.fullText = fullText;
   }
 
   return node;
@@ -3992,7 +4013,9 @@ class Tree extends Component {
       // Additional classes to add to the root element.
       className: _propTypes2.default.string,
       // style object to be applied to the root element.
-      style: _propTypes2.default.object
+      style: _propTypes2.default.object,
+      // Prevents blur when Tree loses focus
+      preventBlur: _propTypes2.default.bool
     };
   }
 
@@ -4243,7 +4266,9 @@ class Tree extends Component {
    * Sets the state to have no focused item.
    */
   _onBlur() {
-    this._focus(undefined);
+    if (!this.props.preventBlur) {
+      this._focus(undefined);
+    }
   }
 
   /**
@@ -4362,15 +4387,6 @@ class Tree extends Component {
       return;
     }
 
-    const traversal = this._dfsFromRoots();
-    const length = traversal.length;
-    let parentIndex = 0;
-    for (; parentIndex < length; parentIndex++) {
-      if (traversal[parentIndex].item === parent) {
-        break;
-      }
-    }
-
     this._focus(parent, { alignTo: "top" });
   }
 
@@ -4452,7 +4468,6 @@ class Tree extends Component {
         }
 
         const { explicitOriginalTarget } = nativeEvent;
-
         // Only set default focus to the first tree node if the focus came
         // from outside the tree (e.g. by tabbing to the tree from other
         // external elements).
@@ -6143,6 +6158,10 @@ module.exports = props => {
 
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
+var _devtoolsServices = __webpack_require__(22);
+
+var _devtoolsServices2 = _interopRequireDefault(_devtoolsServices);
+
 var _devtoolsComponents = __webpack_require__(3669);
 
 var _devtoolsComponents2 = _interopRequireDefault(_devtoolsComponents);
@@ -6157,6 +6176,9 @@ const { Component, createFactory } = __webpack_require__(0);
 const dom = __webpack_require__(3643);
 const { connect } = __webpack_require__(3592);
 const { bindActionCreators } = __webpack_require__(3593);
+
+const { appinfo } = _devtoolsServices2.default;
+const isMacOS = appinfo.OS === "Darwin";
 
 const Tree = createFactory(_devtoolsComponents2.default.Tree);
 __webpack_require__(3697);
@@ -6314,6 +6336,7 @@ class ObjectInspector extends Component {
       loadedProperties,
       nodeExpand,
       nodeCollapse,
+      recordTelemetryEvent,
       roots
     } = this.props;
 
@@ -6326,6 +6349,10 @@ class ObjectInspector extends Component {
       });
       const actor = isRoot || !value ? null : value.actor;
       nodeExpand(item, actor, loadedProperties, createObjectClient, createLongStringClient);
+
+      if (recordTelemetryEvent) {
+        recordTelemetryEvent("object_expanded");
+      }
     } else {
       nodeCollapse(item);
     }
@@ -6917,6 +6944,128 @@ module.exports = reducer;
 
 module.exports = __webpack_require__(3655);
 
+
+/***/ }),
+
+/***/ 3787:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+const { button, span } = __webpack_require__(3643);
+
+// Utils
+const { isGrip, wrapRender } = __webpack_require__(3644);
+const { rep: StringRep } = __webpack_require__(3648);
+
+/**
+ * Renders Accessible object.
+ */
+Accessible.propTypes = {
+  object: PropTypes.object.isRequired,
+  inspectIconTitle: PropTypes.string,
+  nameMaxLength: PropTypes.number,
+  onAccessibleClick: PropTypes.func,
+  onAccessibleMouseOver: PropTypes.func,
+  onAccessibleMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func,
+  separatorText: PropTypes.string
+};
+
+function Accessible(props) {
+  const {
+    object,
+    inspectIconTitle,
+    nameMaxLength,
+    onAccessibleClick,
+    onAccessibleMouseOver,
+    onAccessibleMouseOut,
+    onInspectIconClick,
+    separatorText
+  } = props;
+  const elements = getElements(object, nameMaxLength, separatorText);
+  const isInTree = object.preview && object.preview.isConnected === true;
+  const baseConfig = {
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-accessible"
+  };
+
+  let inspectIcon;
+  if (isInTree) {
+    if (onAccessibleClick) {
+      Object.assign(baseConfig, {
+        onClick: _ => onAccessibleClick(object),
+        className: `${baseConfig.className} clickable`
+      });
+    }
+
+    if (onAccessibleMouseOver) {
+      Object.assign(baseConfig, {
+        onMouseOver: _ => onAccessibleMouseOver(object)
+      });
+    }
+
+    if (onAccessibleMouseOut) {
+      Object.assign(baseConfig, {
+        onMouseOut: onAccessibleMouseOut
+      });
+    }
+
+    if (onInspectIconClick) {
+      inspectIcon = button({
+        className: "open-accessibility-inspector",
+        title: inspectIconTitle,
+        onClick: e => {
+          if (onAccessibleClick) {
+            e.stopPropagation();
+          }
+
+          onInspectIconClick(object, e);
+        }
+      });
+    }
+  }
+
+  return span(baseConfig, ...elements, inspectIcon);
+}
+
+function getElements(grip, nameMaxLength, separatorText = ": ") {
+  const { name, role } = grip.preview;
+  const elements = [];
+
+  elements.push(span({ className: "accessible-role" }, role));
+  if (name) {
+    elements.push(span({ className: "separator" }, separatorText), StringRep({
+      className: "accessible-name",
+      object: name,
+      cropLimit: nameMaxLength
+    }));
+  }
+
+  return elements;
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+
+  return object.preview && object.typeName && object.typeName === "accessible";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(Accessible),
+  supportsObject
+};
 
 /***/ })
 

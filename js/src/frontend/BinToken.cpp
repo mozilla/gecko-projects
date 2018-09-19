@@ -10,12 +10,10 @@
 
 #include <sys/types.h>
 
-#include "jsapi.h"
-
 #include "frontend/BinSourceRuntimeSupport.h"
 #include "frontend/TokenStream.h"
-#include "gc/Zone.h"
 #include "js/Result.h"
+#include "vm/Runtime.h"
 
 namespace js {
 namespace frontend {
@@ -73,53 +71,56 @@ const char* describeBinVariant(const BinVariant& variant)
 
 } // namespace frontend
 
+BinaryASTSupport::BinaryASTSupport()
+  : binKindMap_(frontend::BINKIND_LIMIT)
+  , binFieldMap_(frontend::BINFIELD_LIMIT)
+  , binVariantMap_(frontend::BINVARIANT_LIMIT)
+{
+}
 
 JS::Result<const js::frontend::BinKind*>
 BinaryASTSupport::binKind(JSContext* cx, const CharSlice key)
 {
-    if (!binKindMap_.initialized()) {
-        // Initialize lazily.
-        if (!binKindMap_.init(frontend::BINKIND_LIMIT))
-            return cx->alreadyReportedError();
-
+    if (binKindMap_.empty()) {
         for (size_t i = 0; i < frontend::BINKIND_LIMIT; ++i) {
             const BinKind variant = static_cast<BinKind>(i);
             const CharSlice& key = getBinKind(variant);
             auto ptr = binKindMap_.lookupForAdd(key);
             MOZ_ASSERT(!ptr);
-            if (!binKindMap_.add(ptr, key, variant))
-                return cx->alreadyReportedError();
+            if (!binKindMap_.add(ptr, key, variant)) {
+                return ReportOutOfMemoryResult(cx);
+            }
         }
     }
 
     auto ptr = binKindMap_.lookup(key);
-    if (!ptr)
+    if (!ptr) {
         return nullptr;
+    }
 
     return &ptr->value();
 }
 
 JS::Result<const js::frontend::BinVariant*>
-BinaryASTSupport::binVariant(JSContext* cx, const CharSlice key) {
-    if (!binVariantMap_.initialized()) {
-        // Initialize lazily.
-        if (!binVariantMap_.init(frontend::BINVARIANT_LIMIT))
-            return cx->alreadyReportedError();
-
+BinaryASTSupport::binVariant(JSContext* cx, const CharSlice key)
+{
+    if (binVariantMap_.empty()) {
         for (size_t i = 0; i < frontend::BINVARIANT_LIMIT; ++i) {
             const BinVariant variant = static_cast<BinVariant>(i);
             const CharSlice& key = getBinVariant(variant);
             auto ptr = binVariantMap_.lookupForAdd(key);
             MOZ_ASSERT(!ptr);
-            if (!binVariantMap_.add(ptr, key, variant))
-                return cx->alreadyReportedError();
+            if (!binVariantMap_.add(ptr, key, variant)) {
+                return ReportOutOfMemoryResult(cx);
+            }
         }
     }
 
 
     auto ptr = binVariantMap_.lookup(key);
-    if (!ptr)
+    if (!ptr) {
         return nullptr;
+    }
 
     return &ptr->value();
 }

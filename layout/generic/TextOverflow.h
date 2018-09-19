@@ -27,13 +27,13 @@ namespace css {
  *  1. allocate an object using WillProcessLines
  *  2. then call ProcessLine for each line you are building display lists for
  */
-class MOZ_HEAP_CLASS TextOverflow final {
+class TextOverflow final {
  public:
   /**
    * Allocate an object for text-overflow processing.
    * @return nullptr if no processing is necessary.  The caller owns the object.
    */
-  static UniquePtr<TextOverflow>
+  static Maybe<TextOverflow>
   WillProcessLines(nsDisplayListBuilder* aBuilder,
                    nsIFrame*             aBlockFrame);
 
@@ -44,6 +44,13 @@ class MOZ_HEAP_CLASS TextOverflow final {
    */
   TextOverflow(nsDisplayListBuilder* aBuilder,
                nsIFrame* aBlockFrame);
+
+  TextOverflow() = default;
+  ~TextOverflow() = default;
+  TextOverflow(TextOverflow&&) = default;
+  TextOverflow(const TextOverflow&) = delete;
+  TextOverflow& operator=(TextOverflow&&) = default;
+  TextOverflow& operator=(const TextOverflow&) = delete;
 
   /**
    * Analyze the display lists for text overflow and what kind of item is at
@@ -74,7 +81,7 @@ class MOZ_HEAP_CLASS TextOverflow final {
   typedef mozilla::LogicalRect LogicalRect;
 
   struct AlignmentEdges {
-    AlignmentEdges() : mAssigned(false) {}
+    AlignmentEdges() : mIStart(0), mIEnd(0), mAssigned(false) {}
     void Accumulate(WritingMode aWM, const LogicalRect& aRect)
     {
       if (MOZ_LIKELY(mAssigned)) {
@@ -93,7 +100,11 @@ class MOZ_HEAP_CLASS TextOverflow final {
   };
 
   struct InnerClipEdges {
-    InnerClipEdges() : mAssignedIStart(false), mAssignedIEnd(false) {}
+    InnerClipEdges()
+      : mIStart(0)
+      , mIEnd(0)
+      , mAssignedIStart(false)
+      , mAssignedIEnd(false) {}
     void AccumulateIStart(WritingMode aWM, const LogicalRect& aRect)
     {
       if (MOZ_LIKELY(mAssignedIStart)) {
@@ -234,6 +245,9 @@ class MOZ_HEAP_CLASS TextOverflow final {
       mInitialized = false;
       mISize = 0;
       mStyle = &aStyle;
+      mIntrinsicISize = 0;
+      mHasOverflow = false;
+      mActive = false;
     }
 
     /**

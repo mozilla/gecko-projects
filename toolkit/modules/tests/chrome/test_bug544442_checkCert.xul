@@ -87,8 +87,8 @@ function testXHRLoad(aEvent) {
      "attributes array passed to checkCert has an element that has an " +
      "issuerName that is not the same as the certificate's");
 
-  var cert = channel.securityInfo.QueryInterface(Ci.nsISSLStatusProvider).
-             SSLStatus.QueryInterface(Ci.nsISSLStatus).serverCert;
+  var cert = channel.securityInfo.QueryInterface(Ci.nsITransportSecurityInfo).
+             serverCert;
 
   certs = [ { issuerName: cert.issuerName,
               commonName: cert.commonName } ];

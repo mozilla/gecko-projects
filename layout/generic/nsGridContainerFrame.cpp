@@ -493,7 +493,10 @@ struct nsGridContainerFrame::LineRange
     int32_t mUntranslatedEnd;
   };
 protected:
-  LineRange() {}
+  LineRange()
+    : mStart(0)
+    , mEnd(0)
+  {}
 };
 
 /**
@@ -1061,7 +1064,9 @@ struct nsGridContainerFrame::TrackSizingFunctions
 struct nsGridContainerFrame::Tracks
 {
   explicit Tracks(LogicalAxis aAxis)
-    : mStateUnion(TrackSize::StateBits(0))
+    : mContentBoxSize(0)
+    , mGridGap(0)
+    , mStateUnion(TrackSize::StateBits(0))
     , mAxis(aAxis)
     , mCanResolveLineRangeSize(false)
   {
@@ -3599,7 +3604,8 @@ MeasuringReflow(nsIFrame*           aChild,
 
   ReflowOutput childSize(childRI);
   nsReflowStatus childStatus;
-  const uint32_t flags = NS_FRAME_NO_MOVE_FRAME | NS_FRAME_NO_SIZE_VIEW;
+  const uint32_t flags = NS_FRAME_NO_MOVE_FRAME | NS_FRAME_NO_SIZE_VIEW |
+                         NS_FRAME_NO_DELETE_NEXT_IN_FLOW_CHILD;
   parent->ReflowChild(aChild, pc, childSize, childRI, wm,
                       LogicalPoint(wm), nsSize(), flags, childStatus);
   nsContainerFrame::FinishReflowChild(aChild, pc, childSize, &childRI, wm,
@@ -4976,8 +4982,6 @@ nsGridContainerFrame::ReflowInFlowChild(nsIFrame*              aChild,
   nsPresContext* pc = PresContext();
   ComputedStyle* containerSC = Style();
   WritingMode wm = aState.mReflowInput->GetWritingMode();
-  LogicalMargin pad(aState.mReflowInput->ComputedLogicalPadding());
-  const LogicalPoint padStart(wm, pad.IStart(wm), pad.BStart(wm));
   const bool isGridItem = !!aGridItemInfo;
   MOZ_ASSERT(isGridItem == !aChild->IsPlaceholderFrame());
   LogicalRect cb(wm);
@@ -5040,14 +5044,14 @@ nsGridContainerFrame::ReflowInFlowChild(nsIFrame*              aChild,
   } else {
     // By convention, for frames that perform CSS Box Alignment, we position
     // placeholder children at the start corner of their alignment container,
-    // and in this case that's usually the grid's padding box.
+    // and in this case that's usually the grid's content-box.
     // ("Usually" - the exception is when the grid *also* forms the
     // abs.pos. containing block. In that case, the alignment container isn't
-    // the padding box -- it's some grid area instead.  But that case doesn't
+    // the content-box -- it's some grid area instead.  But that case doesn't
     // require any special handling here, because we handle it later using a
     // special flag (STATIC_POS_IS_CB_ORIGIN) which will make us ignore the
     // placeholder's position entirely.)
-    cb = aContentArea - padStart;
+    cb = aContentArea;
     aChild->AddStateBits(PLACEHOLDER_STATICPOS_NEEDS_CSSALIGN);
   }
 
@@ -5472,13 +5476,13 @@ nsGridContainerFrame::ReflowRowsInFragmentainer(
     }
 
     // aFragmentainer.mIsTopOfPage is propagated to the child reflow state.
-    // When it's false the child can request BREAK_BEFORE.  We intentionally
-    // set it to false when the row is growable (as determined in CSS Grid
-    // Fragmentation) and there is a non-zero space between it and the
+    // When it's false the child may request InlineBreak::Before.  We set it
+    // to false when the row is growable (as determined in the CSS Grid
+    // Fragmentation spec) and there is a non-zero space between it and the
     // fragmentainer end (that can be used to grow it).  If the child reports
     // a forced break in this case, we grow this row to fill the fragment and
     // restart the loop.  We also restart the loop with |aEndRow = row|
-    // (but without growing any row) for a BREAK_BEFORE child if it spans
+    // (but without growing any row) for a InlineBreak::Before child if it spans
     // beyond the last row in this fragment.  This is to avoid fragmenting it.
     // We only restart the loop once.
     aFragmentainer.mIsTopOfPage = isRowTopOfPage && !rowCanGrow;
@@ -5498,7 +5502,7 @@ nsGridContainerFrame::ReflowRowsInFragmentainer(
 
     if (childStatus.IsInlineBreakBefore()) {
       MOZ_ASSERT(!child->GetPrevInFlow(),
-                 "continuations should never report BREAK_BEFORE status");
+                 "continuations should never report InlineBreak::Before status");
       MOZ_ASSERT(!aFragmentainer.mIsTopOfPage,
                  "got IsInlineBreakBefore() at top of page");
       if (!didGrowRow) {
@@ -5539,16 +5543,23 @@ nsGridContainerFrame::ReflowRowsInFragmentainer(
           aStatus.SetIncomplete();
           continue;
         }
-        NS_ERROR("got BREAK_BEFORE at top-of-page");
+        NS_ERROR("got InlineBreak::Before at top-of-page");
         childStatus.Reset();
       } else {
-        NS_ERROR("got BREAK_BEFORE again after growing the row?");
-        childStatus.SetIncomplete();
+        // We got InlineBreak::Before again after growing the row - this can happen
+        // if the child isn't splittable, e.g. some form controls.
+        childStatus.Reset();
+        if (child->GetNextInFlow()) {
+          // The child already has a fragment, so we know it's splittable.
+          childStatus.SetIncomplete();
+        } // else, report that it's complete
       }
     } else if (childStatus.IsInlineBreakAfter()) {
       MOZ_ASSERT_UNREACHABLE("unexpected child reflow status");
     }
 
+    MOZ_ASSERT(!childStatus.IsInlineBreakBefore(),
+               "should've handled InlineBreak::Before above");
     if (childStatus.IsIncomplete()) {
       incompleteItems.PutEntry(child);
     } else if (!childStatus.IsFullyComplete()) {
@@ -5876,6 +5887,31 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
     }
   }
 
+  // Push any child next-in-flows in our principal list to OverflowList.
+  if (HasAnyStateBits(NS_STATE_GRID_HAS_CHILD_NIFS)) {
+    nsFrameList framesToPush;
+    nsIFrame* firstChild = mFrames.FirstChild();
+    // Note that we potentially modify our mFrames list as we go.
+    for (auto child = firstChild; child; child = child->GetNextSibling()) {
+      if (auto* childNIF = child->GetNextInFlow()) {
+        if (childNIF->GetParent() == this) {
+          for (auto c = child->GetNextSibling(); c; c = c->GetNextSibling()) {
+            if (c == childNIF) {
+              // child's next-in-flow is in our principal child list, push it.
+              mFrames.RemoveFrame(childNIF);
+              framesToPush.AppendFrame(nullptr, childNIF);
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (!framesToPush.IsEmpty()) {
+      MergeSortedOverflow(framesToPush);
+    }
+    RemoveStateBits(NS_STATE_GRID_HAS_CHILD_NIFS);
+  }
+
   // Pull up any first-in-flow children we might have pushed.
   if (HasAnyStateBits(NS_STATE_GRID_DID_PUSH_ITEMS)) {
     RemoveStateBits(NS_STATE_GRID_DID_PUSH_ITEMS);
@@ -5983,7 +6019,7 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
   const nscoord computedBSize = aReflowInput.ComputedBSize();
   const nscoord computedISize = aReflowInput.ComputedISize();
   const WritingMode& wm = gridReflowInput.mWM;
-  LogicalSize computedSize(wm, computedISize, computedBSize);
+  const LogicalSize computedSize(wm, computedISize, computedBSize);
 
   nscoord consumedBSize = 0;
   nscoord bSize = 0;
@@ -5994,18 +6030,28 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
 
     gridReflowInput.CalculateTrackSizes(grid, computedSize,
                                         SizingConstraint::eNoConstraint);
-    // Note: we can't use GridLineEdge here since we haven't calculated
-    // the rows' mPosition yet (happens in AlignJustifyContent below).
-    for (const auto& sz : gridReflowInput.mRows.mSizes) {
-      bSize += sz.mBase;
+    // XXX Technically incorrect: We're ignoring our row sizes, when really
+    // we should use them but *they* should be computed as if we had no
+    // children. To be fixed in bug 1488878.
+    if (!aReflowInput.mStyleDisplay->IsContainSize()) {
+      // Note: we can't use GridLineEdge here since we haven't calculated
+      // the rows' mPosition yet (happens in AlignJustifyContent below).
+      for (const auto& sz : gridReflowInput.mRows.mSizes) {
+        bSize += sz.mBase;
+      }
+      bSize += gridReflowInput.mRows.SumOfGridGaps();
     }
-    bSize += gridReflowInput.mRows.SumOfGridGaps();
   } else {
     consumedBSize = ConsumedBSize(wm);
     gridReflowInput.InitializeForContinuation(this, consumedBSize);
-    const uint32_t numRows = gridReflowInput.mRows.mSizes.Length();
-    bSize = gridReflowInput.mRows.GridLineEdge(numRows,
-                                               GridLineSide::eAfterGridGap);
+    // XXX Technically incorrect: We're ignoring our row sizes, when really
+    // we should use them but *they* should be computed as if we had no
+    // children. To be fixed in bug 1488878.
+    if (!aReflowInput.mStyleDisplay->IsContainSize()) {
+      const uint32_t numRows = gridReflowInput.mRows.mSizes.Length();
+      bSize = gridReflowInput.mRows.GridLineEdge(numRows,
+                                                 GridLineSide::eAfterGridGap);
+    }
   }
   if (computedBSize == NS_AUTOHEIGHT) {
     bSize = NS_CSS_MINMAX(bSize,
@@ -6469,9 +6515,11 @@ nsGridContainerFrame::IntrinsicISize(gfxContext* aRenderingContext,
 nscoord
 nsGridContainerFrame::GetMinISize(gfxContext* aRC)
 {
-  DISPLAY_MIN_WIDTH(this, mCachedMinISize);
+  DISPLAY_MIN_INLINE_SIZE(this, mCachedMinISize);
   if (mCachedMinISize == NS_INTRINSIC_WIDTH_UNKNOWN) {
-    mCachedMinISize = IntrinsicISize(aRC, nsLayoutUtils::MIN_ISIZE);
+    mCachedMinISize = StyleDisplay()->IsContainSize()
+      ? 0
+      : IntrinsicISize(aRC, nsLayoutUtils::MIN_ISIZE);
   }
   return mCachedMinISize;
 }
@@ -6479,9 +6527,11 @@ nsGridContainerFrame::GetMinISize(gfxContext* aRC)
 nscoord
 nsGridContainerFrame::GetPrefISize(gfxContext* aRC)
 {
-  DISPLAY_PREF_WIDTH(this, mCachedPrefISize);
+  DISPLAY_PREF_INLINE_SIZE(this, mCachedPrefISize);
   if (mCachedPrefISize == NS_INTRINSIC_WIDTH_UNKNOWN) {
-    mCachedPrefISize = IntrinsicISize(aRC, nsLayoutUtils::PREF_ISIZE);
+    mCachedPrefISize = StyleDisplay()->IsContainSize()
+      ? 0
+      : IntrinsicISize(aRC, nsLayoutUtils::PREF_ISIZE);
   }
   return mCachedPrefISize;
 }
@@ -6527,10 +6577,14 @@ nsGridContainerFrame::DrainSelfOverflowList()
 {
   // Unlike nsContainerFrame::DrainSelfOverflowList we need to merge these lists
   // so that the resulting mFrames is in document content order.
-  // NOTE: nsContainerFrame::AppendFrames/InsertFrames calls this method.
+  // NOTE: nsContainerFrame::AppendFrames/InsertFrames calls this method and
+  // there are also direct calls from the fctor (FindAppendPrevSibling).
   AutoFrameListPtr overflowFrames(PresContext(), StealOverflowFrames());
   if (overflowFrames) {
     ::MergeSortedFrameLists(mFrames, *overflowFrames, GetContent());
+    // We set a frame bit to push them again in Reflow() to avoid creating
+    // multiple grid items per grid container fragment for the same content.
+    AddStateBits(NS_STATE_GRID_HAS_CHILD_NIFS);
     return true;
   }
   return false;
@@ -6591,8 +6645,8 @@ nsGridContainerFrame::CSSAlignmentForAbsPosChild(const ReflowInput& aChildRI,
     aChildRI.mStylePosition->UsedJustifySelf(Style()) :
     aChildRI.mStylePosition->UsedAlignSelf(Style());
 
-  // XXX strip off <overflow-position> bits until we implement it
-  // (bug 1311892)
+  // Extract and strip the flag bits
+  uint16_t alignmentFlags = alignment & NS_STYLE_ALIGN_FLAG_BITS;
   alignment &= ~NS_STYLE_ALIGN_FLAG_BITS;
 
   if (alignment == NS_STYLE_ALIGN_NORMAL) {
@@ -6623,7 +6677,7 @@ nsGridContainerFrame::CSSAlignmentForAbsPosChild(const ReflowInput& aChildRI,
     alignment = NS_STYLE_ALIGN_END;
   }
 
-  return alignment;
+  return (alignment | alignmentFlags);
 }
 
 nscoord

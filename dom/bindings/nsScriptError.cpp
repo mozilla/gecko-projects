@@ -41,6 +41,7 @@ nsScriptErrorBase::nsScriptErrorBase()
        mOuterWindowID(0),
        mInnerWindowID(0),
        mTimeStamp(0),
+       mTimeWarpTarget(0),
        mInitializedOnMainThread(false),
        mIsFromPrivateWindow(false)
 {
@@ -86,21 +87,17 @@ nsScriptErrorBase::InitializeOnMainThread()
 
 // nsIConsoleMessage methods
 NS_IMETHODIMP
-nsScriptErrorBase::GetMessageMoz(char16_t** result) {
-    nsresult rv;
-
+nsScriptErrorBase::GetMessageMoz(nsAString& aMessage)
+{
     nsAutoCString message;
-    rv = ToString(message);
-    if (NS_FAILED(rv))
+    nsresult rv = ToString(message);
+    if (NS_FAILED(rv)) {
         return rv;
+    }
 
-    *result = UTF8ToNewUnicode(message);
-    if (!*result)
-        return NS_ERROR_OUT_OF_MEMORY;
-
+    CopyUTF8toUTF16(message, aMessage);
     return NS_OK;
 }
-
 
 NS_IMETHODIMP
 nsScriptErrorBase::GetLogLevel(uint32_t* aLogLevel)
@@ -166,6 +163,13 @@ nsScriptErrorBase::GetStack(JS::MutableHandleValue aStack) {
 
 NS_IMETHODIMP
 nsScriptErrorBase::SetStack(JS::HandleValue aStack) {
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsScriptErrorBase::GetStackGlobal(JS::MutableHandleValue aStackGlobal)
+{
+    aStackGlobal.setUndefined();
     return NS_OK;
 }
 
@@ -424,6 +428,20 @@ nsScriptErrorBase::GetIsFromPrivateWindow(bool* aIsFromPrivateWindow)
     }
 
     *aIsFromPrivateWindow = mIsFromPrivateWindow;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsScriptErrorBase::SetTimeWarpTarget(uint64_t aTarget)
+{
+    mTimeWarpTarget = aTarget;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsScriptErrorBase::GetTimeWarpTarget(uint64_t* aTarget)
+{
+    *aTarget = mTimeWarpTarget;
     return NS_OK;
 }
 

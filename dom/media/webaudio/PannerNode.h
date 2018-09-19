@@ -41,8 +41,6 @@ public:
 
   JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  void DestroyMediaStream() override;
-
   void SetChannelCount(uint32_t aChannelCount, ErrorResult& aRv) override
   {
     if (aChannelCount > 2) {
@@ -105,29 +103,22 @@ public:
     SendThreeDPointParameterToStream(ORIENTATION, ConvertAudioParamTo3DP(mOrientationX, mOrientationY, mOrientationZ));
   }
 
-  void SetVelocity(double aX, double aY, double aZ)
-  {
-    if (WebAudioUtils::FuzzyEqual(mVelocity.x, aX) &&
-        WebAudioUtils::FuzzyEqual(mVelocity.y, aY) &&
-        WebAudioUtils::FuzzyEqual(mVelocity.z, aZ)) {
-      return;
-    }
-    mVelocity.x = aX;
-    mVelocity.y = aY;
-    mVelocity.z = aZ;
-    SendThreeDPointParameterToStream(VELOCITY, mVelocity);
-    SendDopplerToSourcesIfNeeded();
-  }
-
   double RefDistance() const
   {
     return mRefDistance;
   }
-  void SetRefDistance(double aRefDistance)
+  void SetRefDistance(double aRefDistance, ErrorResult& aRv)
   {
     if (WebAudioUtils::FuzzyEqual(mRefDistance, aRefDistance)) {
       return;
     }
+
+    if (aRefDistance < 0) {
+       aRv.template ThrowRangeError<
+        MSG_INVALID_PANNERNODE_REFDISTANCE_ERROR>();
+      return;
+    }
+
     mRefDistance = aRefDistance;
     SendDoubleParameterToStream(REF_DISTANCE, mRefDistance);
   }
@@ -136,11 +127,18 @@ public:
   {
     return mMaxDistance;
   }
-  void SetMaxDistance(double aMaxDistance)
+  void SetMaxDistance(double aMaxDistance, ErrorResult& aRv)
   {
     if (WebAudioUtils::FuzzyEqual(mMaxDistance, aMaxDistance)) {
       return;
     }
+
+    if (aMaxDistance <= 0) {
+       aRv.template ThrowRangeError<
+        MSG_INVALID_PANNERNODE_MAXDISTANCE_ERROR>();
+      return;
+    }
+
     mMaxDistance = aMaxDistance;
     SendDoubleParameterToStream(MAX_DISTANCE, mMaxDistance);
   }
@@ -149,11 +147,18 @@ public:
   {
     return mRolloffFactor;
   }
-  void SetRolloffFactor(double aRolloffFactor)
+  void SetRolloffFactor(double aRolloffFactor, ErrorResult& aRv)
   {
     if (WebAudioUtils::FuzzyEqual(mRolloffFactor, aRolloffFactor)) {
       return;
     }
+
+
+    if (aRolloffFactor < 0) {
+       aRv.template ThrowRangeError<
+        MSG_INVALID_PANNERNODE_ROLLOFF_ERROR>();
+    }
+
     mRolloffFactor = aRolloffFactor;
     SendDoubleParameterToStream(ROLLOFF_FACTOR, mRolloffFactor);
   }
@@ -188,11 +193,17 @@ public:
   {
     return mConeOuterGain;
   }
-  void SetConeOuterGain(double aConeOuterGain)
+  void SetConeOuterGain(double aConeOuterGain, ErrorResult& aRv)
   {
     if (WebAudioUtils::FuzzyEqual(mConeOuterGain, aConeOuterGain)) {
       return;
     }
+
+    if (aConeOuterGain < 0 || aConeOuterGain > 1) {
+      aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+      return;
+    }
+
     mConeOuterGain = aConeOuterGain;
     SendDoubleParameterToStream(CONE_OUTER_GAIN, mConeOuterGain);
   }
@@ -227,12 +238,6 @@ public:
     return mOrientationZ;
   }
 
-
-  float ComputeDopplerShift();
-  void SendDopplerToSourcesIfNeeded();
-  void FindConnectedSources();
-  void FindConnectedSources(AudioNode* aNode, nsTArray<AudioBufferSourceNode*>& aSources, std::set<AudioNode*>& aSeenNodes);
-
   const char* NodeType() const override
   {
     return "PannerNode";
@@ -243,17 +248,11 @@ public:
 
 private:
   explicit PannerNode(AudioContext* aContext);
-  ~PannerNode();
+  ~PannerNode() = default;
 
   friend class AudioListener;
   friend class PannerNodeEngine;
   enum EngineParameters {
-    LISTENER_POSITION,
-    LISTENER_FRONT_VECTOR, // unit length
-    LISTENER_RIGHT_VECTOR, // unit length, orthogonal to LISTENER_FRONT_VECTOR
-    LISTENER_VELOCITY,
-    LISTENER_DOPPLER_FACTOR,
-    LISTENER_SPEED_OF_SOUND,
     PANNING_MODEL,
     DISTANCE_MODEL,
     POSITION,
@@ -264,7 +263,6 @@ private:
     ORIENTATIONX,
     ORIENTATIONY,
     ORIENTATIONZ,
-    VELOCITY,
     REF_DISTANCE,
     MAX_DISTANCE,
     ROLLOFF_FACTOR,
@@ -286,7 +284,6 @@ private:
   RefPtr<AudioParam> mOrientationX;
   RefPtr<AudioParam> mOrientationY;
   RefPtr<AudioParam> mOrientationZ;
-  ThreeDPoint mVelocity;
 
   double mRefDistance;
   double mMaxDistance;
@@ -294,10 +291,6 @@ private:
   double mConeInnerAngle;
   double mConeOuterAngle;
   double mConeOuterGain;
-
-  // An array of all the AudioBufferSourceNode connected directly or indirectly
-  // to this AudioPannerNode.
-  nsTArray<AudioBufferSourceNode*> mSources;
 };
 
 } // namespace dom

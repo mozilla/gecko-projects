@@ -1,18 +1,3 @@
-if [ "x$IS_NIGHTLY" = "xyes" ]; then
-  # Some nightlies (eg: Mulet) don't want these set.
-  MOZ_AUTOMATION_UPDATE_PACKAGING=${MOZ_AUTOMATION_UPDATE_PACKAGING-1}
-fi
+. "$topsrcdir/build/unix/mozconfig.unix"
 
-. "$topsrcdir/build/mozconfig.common"
-
-TOOLTOOL_DIR=${TOOLTOOL_DIR:-$topsrcdir}
-
-# We deal with valgrind builds here
-CC="$TOOLTOOL_DIR/gcc/bin/gcc"
-CXX="$TOOLTOOL_DIR/gcc/bin/g++"
-
-# We want to make sure we use binutils and other binaries in the tooltool
-# package.
-mk_add_options "export PATH=$TOOLTOOL_DIR/gcc/bin:$PATH"
-
-. "$topsrcdir/build/unix/mozconfig.stdcxx"
+export MOZ_NO_PIE_COMPAT=1

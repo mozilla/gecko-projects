@@ -10,6 +10,7 @@
 #include "ImageLayerMLGPU.h"
 #include "CanvasLayerMLGPU.h"
 #include "GeckoProfiler.h"              // for profiler_*
+#include "gfxEnv.h"                     // for gfxEnv
 #include "MLGDevice.h"
 #include "RenderPassMLGPU.h"
 #include "RenderViewMLGPU.h"
@@ -157,13 +158,6 @@ LayerManagerMLGPU::CreateImageLayer()
   return MakeAndAddRef<ImageLayerMLGPU>(this);
 }
 
-already_AddRefed<BorderLayer>
-LayerManagerMLGPU::CreateBorderLayer()
-{
-  MOZ_ASSERT_UNREACHABLE("Not yet implemented");
-  return nullptr;
-}
-
 already_AddRefed<CanvasLayer>
 LayerManagerMLGPU::CreateCanvasLayer()
 {
@@ -283,6 +277,10 @@ LayerManagerMLGPU::EndTransaction(const TimeStamp& aTimeStamp, EndTransactionFla
 void
 LayerManagerMLGPU::Composite()
 {
+  if (gfxEnv::SkipComposition()) {
+    return;
+  }
+
   AUTO_PROFILER_LABEL("LayerManagerMLGPU::Composite", GRAPHICS);
 
   // Don't composite if we're minimized/hidden, or if there is nothing to draw.

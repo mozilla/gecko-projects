@@ -8,6 +8,7 @@ use euclid::{SideOffsets2D, TypedRect};
 use std::ops::Not;
 use {ColorF, FontInstanceKey, GlyphOptions, ImageKey, LayoutPixel, LayoutPoint};
 use {LayoutRect, LayoutSize, LayoutTransform, LayoutVector2D, PipelineId, PropertyBinding};
+use LayoutSideOffsets;
 
 
 // NOTE: some of these structs have an "IMPLICIT" comment.
@@ -263,6 +264,45 @@ pub struct NormalBorder {
     pub radius: BorderRadius,
 }
 
+impl NormalBorder {
+    // Construct a border based upon self with color
+    pub fn with_color(&self, color: ColorF) -> Self {
+        let mut b = *self;
+        b.left.color = color;
+        b.right.color = color;
+        b.top.color = color;
+        b.bottom.color = color;
+        b
+    }
+
+    /// Normalizes a border so that we don't render disallowed stuff, like inset
+    /// borders that are less than two pixels wide.
+    #[inline]
+    pub fn normalize(&mut self, widths: &LayoutSideOffsets) {
+        #[inline]
+        fn renders_small_border_solid(style: BorderStyle) -> bool {
+            match style {
+                BorderStyle::Groove |
+                BorderStyle::Ridge |
+                BorderStyle::Inset |
+                BorderStyle::Outset => true,
+                _ => false,
+            }
+        }
+
+        let normalize_side = |side: &mut BorderSide, width: f32| {
+            if renders_small_border_solid(side.style) && width < 2. {
+                side.style = BorderStyle::Solid;
+            }
+        };
+
+        normalize_side(&mut self.left, widths.left);
+        normalize_side(&mut self.right, widths.right);
+        normalize_side(&mut self.top, widths.top);
+        normalize_side(&mut self.bottom, widths.bottom);
+    }
+}
+
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RepeatMode {
@@ -273,22 +313,10 @@ pub enum RepeatMode {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct GradientBorder {
-    pub gradient: Gradient,
-    pub outset: SideOffsets2D<f32>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct RadialGradientBorder {
-    pub gradient: RadialGradient,
-    pub outset: SideOffsets2D<f32>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-/// TODO(mrobinson): Currently only images are supported, but we will
-/// eventually add support for Gradient and RadialGradient.
 pub enum NinePatchBorderSource {
     Image(ImageKey),
+    Gradient(Gradient),
+    RadialGradient(RadialGradient),
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -333,13 +361,11 @@ pub struct NinePatchBorder {
 pub enum BorderDetails {
     Normal(NormalBorder),
     NinePatch(NinePatchBorder),
-    Gradient(GradientBorder),
-    RadialGradient(RadialGradientBorder),
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct BorderDisplayItem {
-    pub widths: BorderWidths,
+    pub widths: LayoutSideOffsets,
     pub details: BorderDetails,
 }
 
@@ -357,15 +383,6 @@ pub struct BorderRadius {
     pub top_right: LayoutSize,
     pub bottom_left: LayoutSize,
     pub bottom_right: LayoutSize,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct BorderWidths {
-    pub left: f32,
-    pub top: f32,
-    pub right: f32,
-    pub bottom: f32,
 }
 
 #[repr(C)]
@@ -545,6 +562,9 @@ pub enum MixBlendMode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub enum FilterOp {
+    /// Filter that does no transformation of the colors, needed for
+    /// debug purposes only.
+    Identity,
     Blur(f32),
     Brightness(f32),
     Contrast(f32),
@@ -572,6 +592,7 @@ pub struct ImageDisplayItem {
     pub tile_spacing: LayoutSize,
     pub image_rendering: ImageRendering,
     pub alpha_type: AlphaType,
+    pub color: ColorF,
 }
 
 #[repr(u32)]
@@ -820,6 +841,7 @@ pub struct ClipChainId(pub u64, pub PipelineId);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ClipId {
+    Spatial(usize, PipelineId),
     Clip(usize, PipelineId),
     ClipChain(ClipChainId),
 }
@@ -829,15 +851,16 @@ const ROOT_SCROLL_NODE_CLIP_ID: usize = 1;
 
 impl ClipId {
     pub fn root_scroll_node(pipeline_id: PipelineId) -> ClipId {
-        ClipId::Clip(ROOT_SCROLL_NODE_CLIP_ID, pipeline_id)
+        ClipId::Spatial(ROOT_SCROLL_NODE_CLIP_ID, pipeline_id)
     }
 
     pub fn root_reference_frame(pipeline_id: PipelineId) -> ClipId {
-        ClipId::Clip(ROOT_REFERENCE_FRAME_CLIP_ID, pipeline_id)
+        ClipId::Spatial(ROOT_REFERENCE_FRAME_CLIP_ID, pipeline_id)
     }
 
     pub fn pipeline_id(&self) -> PipelineId {
         match *self {
+            ClipId::Spatial(_, pipeline_id) |
             ClipId::Clip(_, pipeline_id) |
             ClipId::ClipChain(ClipChainId(_, pipeline_id)) => pipeline_id,
         }
@@ -845,14 +868,14 @@ impl ClipId {
 
     pub fn is_root_scroll_node(&self) -> bool {
         match *self {
-            ClipId::Clip(1, _) => true,
+            ClipId::Spatial(ROOT_SCROLL_NODE_CLIP_ID, _) => true,
             _ => false,
         }
     }
 
     pub fn is_root_reference_frame(&self) -> bool {
         match *self {
-            ClipId::Clip(1, _) => true,
+            ClipId::Spatial(ROOT_REFERENCE_FRAME_CLIP_ID, _) => true,
             _ => false,
         }
     }

@@ -54,7 +54,6 @@ const AnimationPlayerFront = FrontClassWithSpec(animationPlayerSpec, {
     return {
       type: this._form.type,
       startTime: this._form.startTime,
-      previousStartTime: this._form.previousStartTime,
       currentTime: this._form.currentTime,
       playState: this._form.playState,
       playbackRate: this._form.playbackRate,
@@ -72,6 +71,7 @@ const AnimationPlayerFront = FrontClassWithSpec(animationPlayerSpec, {
       propertyState: this._form.propertyState,
       documentCurrentTime: this._form.documentCurrentTime,
       createdTime: this._form.createdTime,
+      currentTimeAtCreated: this._form.currentTimeAtCreated,
     };
   },
 

@@ -107,7 +107,6 @@ LOCAL_INCLUDES += [
     '/dom/storage',
     '/ipc/glue',
     '/xpcom/build',
-    '/xpcom/threads',
 ]
 
 XPIDL_SOURCES += [
@@ -115,3 +114,7 @@ XPIDL_SOURCES += [
 ]
 
 XPIDL_MODULE = 'dom_indexeddb'
+
+if (not CONFIG['HAVE_64BIT_BUILD'] and
+    CONFIG['ENABLE_CLANG_PLUGIN'] and CONFIG['CC_TYPE'] == 'clang-cl'):
+    AllowCompilerWarnings()  # workaround for bug 1090497

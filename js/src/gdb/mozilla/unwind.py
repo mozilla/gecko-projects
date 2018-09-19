@@ -38,17 +38,18 @@ def debug(something):
 
 # Maps frametype enum base names to corresponding class.
 SizeOfFramePrefix = {
-    'JitFrame_IonJS': 'ExitFrameLayout',
-    'JitFrame_BaselineJS': 'JitFrameLayout',
-    'JitFrame_BaselineStub': 'BaselineStubFrameLayout',
-    'JitFrame_IonStub': 'JitStubFrameLayout',
-    'JitFrame_CppToJSJit': 'JitFrameLayout',
-    'JitFrame_WasmToJSJit': 'JitFrameLayout',
-    'JitFrame_Rectifier': 'RectifierFrameLayout',
-    'JitFrame_IonAccessorIC': 'IonAccessorICFrameLayout',
-    'JitFrame_IonICCall': 'IonICCallFrameLayout',
-    'JitFrame_Exit': 'ExitFrameLayout',
-    'JitFrame_Bailout': 'JitFrameLayout',
+    'FrameType::IonJS': 'ExitFrameLayout',
+    'FrameType::BaselineJS': 'JitFrameLayout',
+    'FrameType::BaselineStub': 'BaselineStubFrameLayout',
+    'FrameType::IonStub': 'JitStubFrameLayout',
+    'FrameType::CppToJSJit': 'JitFrameLayout',
+    'FrameType::WasmToJSJit': 'JitFrameLayout',
+    'FrameType::JSJitToWasm': 'JitFrameLayout',
+    'FrameType::Rectifier': 'RectifierFrameLayout',
+    'FrameType::IonAccessorIC': 'IonAccessorICFrameLayout',
+    'FrameType::IonICCall': 'IonICCallFrameLayout',
+    'FrameType::Exit': 'ExitFrameLayout',
+    'FrameType::Bailout': 'JitFrameLayout',
 }
 
 
@@ -70,14 +71,17 @@ class UnwinderTypeCache(object):
         return self.d[name]
 
     def value(self, name):
-        return long(gdb.parse_and_eval('js::jit::' + name))
+        return long(gdb.lookup_symbol(name)[0].value())
+
+    def jit_value(self, name):
+        return self.value('js::jit::' + name)
 
     def initialize(self):
         self.d = {}
-        self.d['FRAMETYPE_MASK'] = (1 << self.value('FRAMETYPE_BITS')) - 1
-        self.d['FRAMESIZE_SHIFT'] = self.value('FRAMESIZE_SHIFT')
-        self.d['FRAME_HEADER_SIZE_SHIFT'] = self.value('FRAME_HEADER_SIZE_SHIFT')
-        self.d['FRAME_HEADER_SIZE_MASK'] = self.value('FRAME_HEADER_SIZE_MASK')
+        self.d['FRAMETYPE_MASK'] = (1 << self.jit_value('FRAMETYPE_BITS')) - 1
+        self.d['FRAMESIZE_SHIFT'] = self.jit_value('FRAMESIZE_SHIFT')
+        self.d['FRAME_HEADER_SIZE_SHIFT'] = self.jit_value('FRAME_HEADER_SIZE_SHIFT')
+        self.d['FRAME_HEADER_SIZE_MASK'] = self.jit_value('FRAME_HEADER_SIZE_MASK')
 
         self.compute_frame_info()
         commonFrameLayout = gdb.lookup_type('js::jit::CommonFrameLayout')
@@ -91,14 +95,15 @@ class UnwinderTypeCache(object):
         jitframe = gdb.lookup_type("js::jit::JitFrameLayout")
         self.d['jitFrameLayoutPointer'] = jitframe.pointer()
 
-        self.d['CalleeToken_Function'] = self.value("CalleeToken_Function")
-        self.d['CalleeToken_FunctionConstructing'] = self.value("CalleeToken_FunctionConstructing")
-        self.d['CalleeToken_Script'] = self.value("CalleeToken_Script")
+        self.d['CalleeToken_Function'] = self.jit_value("CalleeToken_Function")
+        self.d['CalleeToken_FunctionConstructing'] = self.jit_value(
+            "CalleeToken_FunctionConstructing")
+        self.d['CalleeToken_Script'] = self.jit_value("CalleeToken_Script")
         self.d['JSFunction'] = gdb.lookup_type("JSFunction").pointer()
         self.d['JSScript'] = gdb.lookup_type("JSScript").pointer()
         self.d['Value'] = gdb.lookup_type("JS::Value")
 
-        self.d['SOURCE_SLOT'] = long(gdb.parse_and_eval('js::ScriptSourceObject::SOURCE_SLOT'))
+        self.d['SOURCE_SLOT'] = self.value('js::ScriptSourceObject::SOURCE_SLOT')
         self.d['NativeObject'] = gdb.lookup_type("js::NativeObject").pointer()
         self.d['HeapSlot'] = gdb.lookup_type("js::HeapSlot").pointer()
         self.d['ScriptSource'] = gdb.lookup_type("js::ScriptSource").pointer()
@@ -183,7 +188,7 @@ class JitFrameDecorator(FrameDecorator):
                     function = str(atom)
             except gdb.MemoryError:
                 function = "(could not read function name)"
-            script = fptr['u']['i']['s']['script_']
+            script = fptr['u']['scripted']['s']['script_']
         elif tag == self.cache.CalleeToken_Script:
             script = gdb.Value(calleetoken).cast(self.cache.JSScript)
         return {"function": function, "script": script}
@@ -221,7 +226,7 @@ class JitFrameDecorator(FrameDecorator):
                         return FrameDecorator.filename(self)
                     scriptsourceobj = (
                         nativeobj + 1).cast(self.cache.HeapSlot)[self.cache.SOURCE_SLOT]
-                    scriptsource = scriptsourceobj['value']['data']['asBits'] << 1
+                    scriptsource = scriptsourceobj['value']['asBits_'] << 1
                     scriptsource = scriptsource.cast(self.cache.ScriptSource)
                     return scriptsource['filename_']['mTuple']['mFirstA'].string()
         return FrameDecorator.filename(self)
@@ -332,7 +337,7 @@ class UnwinderState(object):
 
     # Add information about a frame to the frame map.  This map is
     # queried by |self.get_frame|.  |sp| is the frame's stack pointer,
-    # and |name| the frame's type as a string, e.g. "JitFrame_Exit".
+    # and |name| the frame's type as a string, e.g. "FrameType::Exit".
     def add_frame(self, sp, name=None, this_frame=None):
         self.frame_map[long(sp)] = {"name": name, "this_frame": this_frame}
 
@@ -387,7 +392,7 @@ class UnwinderState(object):
                        self.typecache.FRAME_HEADER_SIZE_MASK)
         header_size = header_size * self.typecache.void_starstar.sizeof
         frame_type = long(value & self.typecache.FRAMETYPE_MASK)
-        if frame_type == self.typecache.JitFrame_CppToJSJit:
+        if frame_type == self.typecache.CppToJSJit:
             # Trampoline-x64.cpp pushes a JitFrameLayout object, but
             # the stack pointer is actually adjusted as if a
             # CommonFrameLayout object was pushed.
@@ -454,7 +459,7 @@ class UnwinderState(object):
             return None
         elif self.activation is None:
             cx = self.get_tls_context()
-            self.activation = cx['jitActivation']
+            self.activation = cx['jitActivation']['value']
         else:
             self.activation = self.activation['prevJitActivation_']
 
@@ -463,7 +468,7 @@ class UnwinderState(object):
             return None
 
         exit_sp = pending_frame.read_register(self.SP_REGISTER)
-        frame_type = self.typecache.JitFrame_Exit
+        frame_type = self.typecache.Exit
         return self.create_frame(pc, exit_sp, packedExitFP, frame_type, pending_frame)
 
     # A wrapper for unwind_entry_frame_registers that handles
@@ -471,7 +476,7 @@ class UnwinderState(object):
     def unwind_entry_frame(self, pc, pending_frame):
         sp = self.next_sp
         # Notify the frame filter.
-        self.add_frame(sp, name='JitFrame_CppToJSJit')
+        self.add_frame(sp, name='FrameType::CppToJSJit')
         # Make an unwind_info for the per-architecture code to fill in.
         frame_id = SpiderMonkeyFrameId(sp, pc)
         unwind_info = pending_frame.create_unwind_info(frame_id)
@@ -492,7 +497,7 @@ class UnwinderState(object):
             return None
 
         if self.next_sp is not None:
-            if self.next_type == self.typecache.JitFrame_CppToJSJit:
+            if self.next_type == self.typecache.CppToJSJit:
                 return self.unwind_entry_frame(pc, pending_frame)
             return self.unwind_ordinary(pc, pending_frame)
         # Maybe we've found an exit frame.  FIXME I currently don't

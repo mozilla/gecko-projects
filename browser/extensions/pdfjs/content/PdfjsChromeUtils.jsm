@@ -31,6 +31,9 @@ XPCOMUtils.defineLazyServiceGetter(Svc, "mime",
                                    "@mozilla.org/mime;1",
                                    "nsIMIMEService");
 
+XPCOMUtils.defineLazyPreferenceGetter(this, "matchesCountLimit",
+  "accessibility.typeaheadfind.matchesCountLimit");
+
 var PdfjsChromeUtils = {
   // For security purposes when running remote, we restrict preferences
   // content can access.
@@ -61,6 +64,7 @@ var PdfjsChromeUtils = {
       this._mmg.addMessageListener("PDFJS:Parent:addEventListener", this);
       this._mmg.addMessageListener("PDFJS:Parent:removeEventListener", this);
       this._mmg.addMessageListener("PDFJS:Parent:updateControlState", this);
+      this._mmg.addMessageListener("PDFJS:Parent:updateMatchesCount", this);
 
       // Observer to handle shutdown.
       Services.obs.addObserver(this, "quit-application");
@@ -82,30 +86,12 @@ var PdfjsChromeUtils = {
       this._mmg.removeMessageListener("PDFJS:Parent:addEventListener", this);
       this._mmg.removeMessageListener("PDFJS:Parent:removeEventListener", this);
       this._mmg.removeMessageListener("PDFJS:Parent:updateControlState", this);
+      this._mmg.removeMessageListener("PDFJS:Parent:updateMatchesCount", this);
 
       Services.obs.removeObserver(this, "quit-application");
 
       this._mmg = null;
       this._ppmm = null;
-    }
-  },
-
-  /*
-   * Called by the main module when preference changes are picked up
-   * in the parent process. Observers don't propagate so we need to
-   * instruct the child to refresh its configuration and (possibly)
-   * the module's registration.
-   */
-  notifyChildOfSettingsChange(enabled) {
-    if (Services.appinfo.processType ===
-        Services.appinfo.PROCESS_TYPE_DEFAULT && this._ppmm) {
-      // XXX kinda bad, we want to get the parent process mm associated
-      // with the content process. _ppmm is currently the global process
-      // manager, which means this is going to fire to every child process
-      // we have open. Unfortunately I can't find a way to get at that
-      // process specific mm from js.
-      this._ppmm.broadcastAsyncMessage("PDFJS:Child:updateSettings",
-                                       { enabled, });
     }
   },
 
@@ -144,6 +130,8 @@ var PdfjsChromeUtils = {
 
       case "PDFJS:Parent:updateControlState":
         return this._updateControlState(aMsg);
+      case "PDFJS:Parent:updateMatchesCount":
+        return this._updateMatchesCount(aMsg);
       case "PDFJS:Parent:addEventListener":
         return this._addEventListener(aMsg);
       case "PDFJS:Parent:removeEventListener":
@@ -167,7 +155,40 @@ var PdfjsChromeUtils = {
         return;
       }
       fb.updateControlState(data.result, data.findPrevious);
+
+      const matchesCount = this._requestMatchesCount(data.matchesCount);
+      fb.onMatchesCountResult(matchesCount);
     });
+  },
+
+  _updateMatchesCount(aMsg) {
+    let data = aMsg.data;
+    let browser = aMsg.target;
+    let tabbrowser = browser.getTabBrowser();
+    let tab = tabbrowser.getTabForBrowser(browser);
+    tabbrowser.getFindBar(tab).then(fb => {
+      if (!fb) {
+        // The tab or window closed.
+        return;
+      }
+      const matchesCount = this._requestMatchesCount(data);
+      fb.onMatchesCountResult(matchesCount);
+    });
+  },
+
+  _requestMatchesCount(data) {
+    if (!data) {
+      return {current: 0, total: 0};
+    }
+    let result = {
+      current: data.current,
+      total: data.total,
+      limit: (typeof matchesCountLimit === "number" ? matchesCountLimit : 0),
+    };
+    if (result.total > result.limit) {
+      result.total = -1;
+    }
+    return result;
   },
 
   handleEvent(aEvent) {
@@ -185,6 +206,7 @@ var PdfjsChromeUtils = {
     let detail = {
       query: aEvent.detail.query,
       caseSensitive: aEvent.detail.caseSensitive,
+      entireWord: aEvent.detail.entireWord,
       highlightAll: aEvent.detail.highlightAll,
       findPrevious: aEvent.detail.findPrevious,
     };
@@ -196,7 +218,7 @@ var PdfjsChromeUtils = {
     }
     // Only forward the events if the current browser is a registered browser.
     let mm = browser.messageManager;
-    mm.sendAsyncMessage("PDFJS:Child:handleEvent", { type, detail, });
+    mm.sendAsyncMessage("PDFJS:Child:handleEvent", { type, detail });
     aEvent.preventDefault();
   },
 
@@ -324,7 +346,7 @@ var PdfjsChromeUtils = {
     let messageSent = false;
     function sendMessage(download) {
       let mm = browser.messageManager;
-      mm.sendAsyncMessage("PDFJS:Child:fallbackDownload", { download, });
+      mm.sendAsyncMessage("PDFJS:Child:fallbackDownload", { download });
     }
     let buttons = [{
       label: data.label,

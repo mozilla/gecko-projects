@@ -204,6 +204,7 @@ public:
   BulletRenderer(imgIContainer* image, const nsRect& dest)
     : mImage(image)
     , mDest(dest)
+    , mColor(NS_RGBA(0, 0, 0, 0))
     , mListStyleType(NS_STYLE_LIST_STYLE_NONE)
   {
     MOZ_ASSERT(IsImageType());
@@ -240,7 +241,7 @@ public:
     MOZ_ASSERT(IsTextType());
   }
 
-  bool
+  ImgDrawResult
   CreateWebRenderCommands(nsDisplayItem* aItem,
                           wr::DisplayListBuilder& aBuilder,
                           wr::IpcResourceUpdateQueue& aResources,
@@ -281,9 +282,6 @@ public:
            !mText.IsEmpty();
   }
 
-  bool
-  BuildGlyphForText(nsDisplayItem* aItem, bool disableSubpixelAA);
-
   void
   PaintTextToContext(nsIFrame* aFrame,
                      gfxContext* aCtx,
@@ -293,7 +291,7 @@ public:
   IsImageContainerAvailable(layers::LayerManager* aManager, uint32_t aFlags);
 
 private:
-  bool
+  ImgDrawResult
   CreateWebRenderCommandsForImage(nsDisplayItem* aItem,
                                   wr::DisplayListBuilder& aBuilder,
                                   wr::IpcResourceUpdateQueue& aResources,
@@ -351,7 +349,7 @@ private:
   int32_t mListStyleType;
 };
 
-bool
+ImgDrawResult
 BulletRenderer::CreateWebRenderCommands(nsDisplayItem* aItem,
                                         wr::DisplayListBuilder& aBuilder,
                                         wr::IpcResourceUpdateQueue& aResources,
@@ -362,14 +360,19 @@ BulletRenderer::CreateWebRenderCommands(nsDisplayItem* aItem,
   if (IsImageType()) {
     return CreateWebRenderCommandsForImage(aItem, aBuilder, aResources,
                                     aSc, aManager, aDisplayListBuilder);
-  } else if (IsPathType()) {
-    return CreateWebRenderCommandsForPath(aItem, aBuilder, aResources,
-                                   aSc, aManager, aDisplayListBuilder);
+  }
+
+  bool success;
+  if (IsPathType()) {
+    success = CreateWebRenderCommandsForPath(aItem, aBuilder, aResources, aSc,
+                                             aManager, aDisplayListBuilder);
   } else {
     MOZ_ASSERT(IsTextType());
-    return CreateWebRenderCommandsForText(aItem, aBuilder, aResources, aSc,
-                                          aManager, aDisplayListBuilder);
+    success = CreateWebRenderCommandsForText(aItem, aBuilder, aResources, aSc,
+                                             aManager, aDisplayListBuilder);
   }
+
+  return success ? ImgDrawResult::SUCCESS : ImgDrawResult::NOT_SUPPORTED;
 }
 
 ImgDrawResult
@@ -427,37 +430,6 @@ BulletRenderer::Paint(gfxContext& aRenderingContext, nsPoint aPt,
   return ImgDrawResult::SUCCESS;
 }
 
-bool
-BulletRenderer::BuildGlyphForText(nsDisplayItem* aItem, bool disableSubpixelAA)
-{
-  MOZ_ASSERT(IsTextType());
-
-  RefPtr<DrawTarget> screenTarget = gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget();
-  RefPtr<DrawTargetCapture> capture =
-    Factory::CreateCaptureDrawTarget(screenTarget->GetBackendType(),
-                                     IntSize(),
-                                     screenTarget->GetFormat());
-
-  RefPtr<gfxContext> captureCtx = gfxContext::CreateOrNull(capture);
-
-  PaintTextToContext(aItem->Frame(), captureCtx, disableSubpixelAA);
-
-  layers::GlyphArray* g = mGlyphs.AppendElement();
-  std::vector<Glyph> glyphs;
-  Color color;
-  if (!capture->ContainsOnlyColoredGlyphs(mFont, color, glyphs)) {
-    mFont = nullptr;
-    mGlyphs.Clear();
-    return false;
-  }
-
-  g->glyphs().SetLength(glyphs.size());
-  PodCopy(g->glyphs().Elements(), glyphs.data(), glyphs.size());
-  g->color() = color;
-
-  return true;
-}
-
 void
 BulletRenderer::PaintTextToContext(nsIFrame* aFrame,
                                    gfxContext* aCtx,
@@ -487,7 +459,7 @@ BulletRenderer::IsImageContainerAvailable(layers::LayerManager* aManager, uint32
   return mImage->IsImageContainerAvailable(aManager, aFlags);
 }
 
-bool
+ImgDrawResult
 BulletRenderer::CreateWebRenderCommandsForImage(nsDisplayItem* aItem,
                                                 wr::DisplayListBuilder& aBuilder,
                                                 wr::IpcResourceUpdateQueue& aResources,
@@ -512,28 +484,30 @@ BulletRenderer::CreateWebRenderCommandsForImage(nsDisplayItem* aItem,
   gfx::IntSize decodeSize =
     nsLayoutUtils::ComputeImageContainerDrawingParameters(mImage, aItem->Frame(), destRect,
                                                           aSc, flags, svgContext);
-  RefPtr<layers::ImageContainer> container =
-    mImage->GetImageContainerAtSize(aManager, decodeSize, svgContext, flags);
+
+  RefPtr<layers::ImageContainer> container;
+  ImgDrawResult drawResult =
+    mImage->GetImageContainerAtSize(aManager, decodeSize, svgContext,
+                                    flags, getter_AddRefs(container));
   if (!container) {
-    return false;
+    return drawResult;
   }
 
+  mozilla::wr::ImageRendering rendering = wr::ToImageRendering(
+    nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame()));
   gfx::IntSize size;
-  Maybe<wr::ImageKey> key = aManager->CommandBuilder().CreateImageKey(aItem, container, aBuilder, aResources,
-                                                                      aSc, size, Nothing());
+  Maybe<wr::ImageKey> key = aManager->CommandBuilder().CreateImageKey(
+    aItem, container, aBuilder, aResources, rendering, aSc, size, Nothing());
   if (key.isNothing()) {
-    return true;  // Nothing to do
+    return drawResult;
   }
 
   wr::LayoutRect dest = wr::ToRoundedLayoutRect(destRect);
 
-  aBuilder.PushImage(dest,
-                     dest,
-                     !aItem->BackfaceIsHidden(),
-                     wr::ImageRendering::Auto,
-                     key.value());
+  aBuilder.PushImage(
+    dest, dest, !aItem->BackfaceIsHidden(), rendering, key.value());
 
-  return true;
+  return drawResult;
 }
 
 bool
@@ -561,11 +535,8 @@ BulletRenderer::CreateWebRenderCommandsForPath(nsDisplayItem* aItem,
       return true;
     }
     case NS_STYLE_LIST_STYLE_DISC: {
-      nsTArray<wr::ComplexClipRegion> clips;
-      clips.AppendElement(wr::ToComplexClipRegion(
-        RoundedRect(ThebesRect(mPathRect.ToUnknownRect()),
-                    RectCornerRadii(dest.size.width / 2.0))
-      ));
+      AutoTArray<wr::ComplexClipRegion, 1> clips;
+      clips.AppendElement(wr::SimpleRadii(dest, dest.size.width / 2));
       auto clipId = aBuilder.DefineClip(Nothing(), dest, &clips, nullptr);
       aBuilder.PushClip(clipId);
       aBuilder.PushRect(dest, dest, isBackfaceVisible, color);
@@ -603,7 +574,7 @@ BulletRenderer::CreateWebRenderCommandsForText(nsDisplayItem* aItem,
     return true;
   }
 
-  RefPtr<TextDrawTarget> textDrawer = new TextDrawTarget(aBuilder, aSc, aManager, aItem, bounds);
+  RefPtr<TextDrawTarget> textDrawer = new TextDrawTarget(aBuilder, aResources, aSc, aManager, aItem, bounds);
   RefPtr<gfxContext> captureCtx = gfxContext::CreateOrNull(textDrawer);
   PaintTextToContext(aItem->Frame(), captureCtx, aItem->IsSubpixelAADisabled());
   textDrawer->TerminateShadows();
@@ -702,8 +673,15 @@ nsDisplayBullet::CreateWebRenderCommands(wr::DisplayListBuilder& aBuilder,
     return false;
   }
 
-  return br->CreateWebRenderCommands(this, aBuilder, aResources, aSc,
-                                     aManager, aDisplayListBuilder);
+  ImgDrawResult drawResult =
+    br->CreateWebRenderCommands(this, aBuilder, aResources, aSc,
+                                aManager, aDisplayListBuilder);
+  if (drawResult == ImgDrawResult::NOT_SUPPORTED) {
+    return false;
+  }
+
+  nsDisplayBulletGeometry::UpdateDrawResult(this, drawResult);
+  return true;
 }
 
 void nsDisplayBullet::Paint(nsDisplayListBuilder* aBuilder,
@@ -1114,7 +1092,7 @@ nsBulletFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   WritingMode wm = GetWritingMode();
   ReflowOutput reflowOutput(wm);
-  DISPLAY_MIN_WIDTH(this, reflowOutput.ISize(wm));
+  DISPLAY_MIN_INLINE_SIZE(this, reflowOutput.ISize(wm));
   LogicalMargin padding(wm);
   GetDesiredSize(PresContext(), aRenderingContext, reflowOutput, 1.0f, &padding);
   reflowOutput.ISize(wm) += padding.IStartEnd(wm);
@@ -1126,7 +1104,7 @@ nsBulletFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   WritingMode wm = GetWritingMode();
   ReflowOutput metrics(wm);
-  DISPLAY_PREF_WIDTH(this, metrics.ISize(wm));
+  DISPLAY_PREF_INLINE_SIZE(this, metrics.ISize(wm));
   LogicalMargin padding(wm);
   GetDesiredSize(PresContext(), aRenderingContext, metrics, 1.0f, &padding);
   metrics.ISize(wm) += padding.IStartEnd(wm);

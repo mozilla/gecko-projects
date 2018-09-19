@@ -19,7 +19,11 @@ namespace jit {
 #define CACHE_IR_SHARED_OPS(_)            \
     _(GuardIsObject)                      \
     _(GuardIsNullOrUndefined)             \
+    _(GuardIsNotNullOrUndefined)          \
+    _(GuardIsNull)                        \
+    _(GuardIsUndefined)                   \
     _(GuardIsObjectOrNull)                \
+    _(GuardIsBoolean)                     \
     _(GuardIsString)                      \
     _(GuardIsSymbol)                      \
     _(GuardIsNumber)                      \
@@ -29,6 +33,7 @@ namespace jit {
     _(GuardClass)                         \
     _(GuardGroupHasUnanalyzedNewScript)   \
     _(GuardIsNativeFunction)              \
+    _(GuardFunctionPrototype)             \
     _(GuardIsNativeObject)                \
     _(GuardIsProxy)                       \
     _(GuardNotDOMProxy)                   \
@@ -38,9 +43,13 @@ namespace jit {
     _(GuardAndLoadUnboxedExpando)         \
     _(GuardNoDetachedTypedObjects)        \
     _(GuardNoDenseElements)               \
+    _(GuardAndGetNumberFromString)        \
     _(GuardAndGetIndexFromString)         \
     _(GuardIndexIsNonNegative)            \
     _(GuardTagNotEqual)                   \
+    _(GuardXrayExpandoShapeAndDefaultProto)\
+    _(GuardNoAllocationMetadataBuilder)   \
+    _(GuardObjectGroupNotPretenured)      \
     _(LoadObject)                         \
     _(LoadProto)                          \
     _(LoadEnclosingEnvironment)           \
@@ -51,6 +60,22 @@ namespace jit {
     _(LoadUndefinedResult)                \
     _(LoadBooleanResult)                  \
     _(LoadInt32ArrayLengthResult)         \
+    _(DoubleAddResult)                    \
+    _(DoubleSubResult)                    \
+    _(DoubleMulResult)                    \
+    _(DoubleDivResult)                    \
+    _(DoubleModResult)                    \
+    _(Int32AddResult)                     \
+    _(Int32SubResult)                     \
+    _(Int32MulResult)                     \
+    _(Int32DivResult)                     \
+    _(Int32ModResult)                     \
+    _(Int32BitOrResult)                   \
+    _(Int32BitXorResult)                  \
+    _(Int32BitAndResult)                  \
+    _(Int32LeftShiftResult)               \
+    _(Int32RightShiftResult)              \
+    _(Int32URightShiftResult)             \
     _(Int32NegationResult)                \
     _(Int32NotResult)                     \
     _(DoubleNegationResult)               \
@@ -73,8 +98,12 @@ namespace jit {
     _(LoadDoubleTruthyResult)             \
     _(LoadStringTruthyResult)             \
     _(LoadObjectTruthyResult)             \
+    _(LoadNewObjectFromTemplateResult)    \
     _(CompareObjectResult)                \
     _(CompareSymbolResult)                \
+    _(CompareInt32Result)                 \
+    _(CompareDoubleResult)                \
+    _(CompareObjectUndefinedNullResult)   \
     _(ArrayJoinResult)                    \
     _(CallPrintString)                    \
     _(Breakpoint)                         \
@@ -83,6 +112,8 @@ namespace jit {
     _(MegamorphicStoreSlot)               \
     _(MegamorphicHasPropResult)           \
     _(CallObjectHasSparseElementResult)   \
+    _(CallInt32ToString)                  \
+    _(CallNumberToString)                 \
     _(WrapResult)
 
 // Represents a Value on the Baseline frame's expression stack. Slot 0 is the
@@ -168,8 +199,9 @@ class OperandLocation
         return data_.valueStackPushed;
     }
     JSValueType payloadType() const {
-        if (kind_ == PayloadReg)
+        if (kind_ == PayloadReg) {
             return data_.payloadReg.type;
+        }
         MOZ_ASSERT(kind_ == PayloadStack);
         return data_.payloadStack.type;
     }
@@ -218,14 +250,16 @@ class OperandLocation
     bool isOnStack() const { return kind_ == PayloadStack || kind_ == ValueStack; }
 
     size_t stackPushed() const {
-        if (kind_ == PayloadStack)
+        if (kind_ == PayloadStack) {
             return data_.payloadStack.stackPushed;
+        }
         MOZ_ASSERT(kind_ == ValueStack);
         return data_.valueStackPushed;
     }
     size_t stackSizeInBytes() const {
-        if (kind_ == PayloadStack)
+        if (kind_ == PayloadStack) {
             return sizeof(uintptr_t);
+        }
         MOZ_ASSERT(kind_ == ValueStack);
         return sizeof(js::Value);
     }
@@ -239,10 +273,12 @@ class OperandLocation
     }
 
     bool aliasesReg(Register reg) const {
-        if (kind_ == PayloadReg)
+        if (kind_ == PayloadReg) {
             return payloadReg() == reg;
-        if (kind_ == ValueReg)
+        }
+        if (kind_ == ValueReg) {
             return valueReg().aliases(reg);
+        }
         return false;
     }
     bool aliasesReg(ValueOperand reg) const {
@@ -329,6 +365,7 @@ class MOZ_RAII CacheRegisterAllocator
 
     void popPayload(MacroAssembler& masm, OperandLocation* loc, Register dest);
     void popValue(MacroAssembler& masm, OperandLocation* loc, ValueOperand dest);
+    Address valueAddress(MacroAssembler& masm, OperandLocation* loc);
 
 #ifdef DEBUG
     void assertValidState() const;
@@ -468,6 +505,11 @@ class MOZ_RAII CacheRegisterAllocator
     // Allocates an output register for the given operand.
     Register defineRegister(MacroAssembler& masm, TypedOperandId typedId);
     ValueOperand defineValueRegister(MacroAssembler& masm, ValOperandId val);
+
+    // Loads (potentially coercing) and unboxes a value into a float register
+    // This is infallible, as there should have been a previous guard
+    // to ensure the ValOperandId is already a number.
+    void ensureDoubleRegister(MacroAssembler&, ValOperandId, FloatRegister);
 
     // Returns |val|'s JSValueType or JSVAL_TYPE_UNKNOWN.
     JSValueType knownType(ValOperandId val) const;
@@ -612,8 +654,6 @@ class MOZ_RAII CacheIRCompiler
     // sizeof(stubType)
     uint32_t stubDataOffset_;
 
-    uint32_t nextStubField_;
-
     enum class StubFieldPolicy {
         Address,
         Constant
@@ -629,7 +669,6 @@ class MOZ_RAII CacheIRCompiler
         liveFloatRegs_(FloatRegisterSet::All()),
         mode_(mode),
         stubDataOffset_(stubDataOffset),
-        nextStubField_(0),
         stubFieldPolicy_(policy)
     {
         MOZ_ASSERT(!writer.failed());
@@ -694,15 +733,12 @@ class MOZ_RAII CacheIRCompiler
     uintptr_t readStubWord(uint32_t offset, StubField::Type type) {
         MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
         MOZ_ASSERT((offset % sizeof(uintptr_t)) == 0);
-        // We use nextStubField_ to access the data as it's stored in an as-of-yet
-        // unpacked vector, and so using the offset can be incorrect where the index
-        // would change as a result of packing.
-        return writer_.readStubFieldForIon(nextStubField_++, type).asWord();
+        return writer_.readStubFieldForIon(offset, type).asWord();
     }
     uint64_t readStubInt64(uint32_t offset, StubField::Type type) {
         MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
         MOZ_ASSERT((offset % sizeof(uintptr_t)) == 0);
-        return writer_.readStubFieldForIon(nextStubField_++, type).asInt64();
+        return writer_.readStubFieldForIon(offset, type).asInt64();
     }
     int32_t int32StubField(uint32_t offset) {
         MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
@@ -715,6 +751,13 @@ class MOZ_RAII CacheIRCompiler
     JSObject* objectStubField(uint32_t offset) {
         MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
         return (JSObject*)readStubWord(offset, StubField::Type::JSObject);
+    }
+    // This accessor is for cases where the stubField policy is
+    // being respected through other means, so we don't check the
+    // policy here. (see LoadNewObjectFromTemplateResult)
+    JSObject* objectStubFieldUnchecked(uint32_t offset) {
+        return (JSObject*)writer_.readStubFieldForIon(offset,
+                                                      StubField::Type::JSObject).asWord();
     }
     JSString* stringStubField(uint32_t offset) {
         MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
@@ -760,10 +803,12 @@ class MOZ_RAII AutoOutputRegister
     ~AutoOutputRegister();
 
     Register maybeReg() const {
-        if (output_.hasValue())
+        if (output_.hasValue()) {
             return output_.valueReg().scratchReg();
-        if (!output_.typedReg().isFloat())
+        }
+        if (!output_.typedReg().isFloat()) {
             return output_.typedReg().gpr();
+        }
         return InvalidReg;
     }
 
@@ -867,6 +912,12 @@ class CacheIRStubInfo
 
 template <typename T>
 void TraceCacheIRStub(JSTracer* trc, T* stub, const CacheIRStubInfo* stubInfo);
+
+void
+LoadTypedThingData(MacroAssembler& masm, TypedThingLayout layout, Register obj, Register result);
+
+void
+LoadTypedThingLength(MacroAssembler& masm, TypedThingLayout layout, Register obj, Register result);
 
 } // namespace jit
 } // namespace js

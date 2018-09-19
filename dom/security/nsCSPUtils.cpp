@@ -118,7 +118,7 @@ CSP_LogStrMessage(const nsAString& aMsg)
   if (!console) {
     return;
   }
-  nsString msg = PromiseFlatString(aMsg);
+  nsString msg(aMsg);
   console->LogStringMessage(msg.get());
 }
 
@@ -153,7 +153,7 @@ CSP_LogMessage(const nsAString& aMessage,
   // E.g. 'aSourceLine' might be: 'onclick attribute on DIV element'.
   // In such cases we append 'aSourceLine' directly to the error message.
   if (!aSourceLine.IsEmpty()) {
-    cspMsg.AppendLiteral(" Source: ");
+    cspMsg.AppendLiteral(u" Source: ");
     cspMsg.Append(aSourceLine);
     cspMsg.AppendLiteral(u".");
   }
@@ -345,8 +345,8 @@ CSP_IsKeyword(const nsAString& aValue, enum CSPKeyword aKey)
 bool
 CSP_IsQuotelessKeyword(const nsAString& aKey)
 {
-  nsString lowerKey = PromiseFlatString(aKey);
-  ToLowerCase(lowerKey);
+  nsString lowerKey;
+  ToLowerCase(aKey, lowerKey);
 
   nsAutoString keyword;
   for (uint32_t i = 0; i < CSP_LAST_KEYWORD_VALUE; i++) {
@@ -537,7 +537,7 @@ void
 nsCSPSchemeSrc::toString(nsAString& outStr) const
 {
   outStr.Append(mScheme);
-  outStr.AppendASCII(":");
+  outStr.AppendLiteral(":");
 }
 
 /* ===== nsCSPHostSrc ======================== */
@@ -768,6 +768,11 @@ nsCSPHostSrc::visit(nsCSPSrcVisitor* aVisitor) const
 void
 nsCSPHostSrc::toString(nsAString& outStr) const
 {
+  if (mGeneratedFromSelfKeyword) {
+    outStr.AppendLiteral("'self'");
+    return;
+  }
+
   // If mHost is a single "*", we append the wildcard and return.
   if (mHost.EqualsASCII("*") &&
       mScheme.IsEmpty() &&
@@ -780,12 +785,12 @@ nsCSPHostSrc::toString(nsAString& outStr) const
   outStr.Append(mScheme);
 
   // append host
-  outStr.AppendASCII("://");
+  outStr.AppendLiteral("://");
   outStr.Append(mHost);
 
   // append port
   if (!mPort.IsEmpty()) {
-    outStr.AppendASCII(":");
+    outStr.AppendLiteral(":");
     outStr.Append(mPort);
   }
 
@@ -923,7 +928,7 @@ nsCSPNonceSrc::toString(nsAString& outStr) const
 {
   outStr.Append(CSP_EnumToUTF16Keyword(CSP_NONCE));
   outStr.Append(mNonce);
-  outStr.AppendASCII("'");
+  outStr.AppendLiteral("'");
 }
 
 /* ===== nsCSPHashSrc ===================== */
@@ -984,11 +989,11 @@ nsCSPHashSrc::visit(nsCSPSrcVisitor* aVisitor) const
 void
 nsCSPHashSrc::toString(nsAString& outStr) const
 {
-  outStr.AppendASCII("'");
+  outStr.AppendLiteral("'");
   outStr.Append(mAlgorithm);
-  outStr.AppendASCII("-");
+  outStr.AppendLiteral("-");
   outStr.Append(mHash);
-  outStr.AppendASCII("'");
+  outStr.AppendLiteral("'");
 }
 
 /* ===== nsCSPReportURI ===================== */
@@ -1095,14 +1100,14 @@ nsCSPDirective::toString(nsAString& outStr) const
 {
   // Append directive name
   outStr.AppendASCII(CSP_CSPDirectiveToString(mDirective));
-  outStr.AppendASCII(" ");
+  outStr.AppendLiteral(" ");
 
   // Append srcs
   uint32_t length = mSrcs.Length();
   for (uint32_t i = 0; i < length; i++) {
     mSrcs[i]->toString(outStr);
     if (i != (length - 1)) {
-      outStr.AppendASCII(" ");
+      outStr.AppendLiteral(" ");
     }
   }
 }
@@ -1269,6 +1274,18 @@ nsCSPDirective::getDirName(nsAString& outStr) const
   outStr.AppendASCII(CSP_CSPDirectiveToString(mDirective));
 }
 
+bool
+nsCSPDirective::hasReportSampleKeyword() const
+{
+  for (nsCSPBaseSrc* src : mSrcs) {
+    if (src->isReportSample()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /* =============== nsCSPChildSrcDirective ============= */
 
 nsCSPChildSrcDirective::nsCSPChildSrcDirective(CSPDirective aDirective)
@@ -1404,10 +1421,10 @@ nsRequireSRIForDirective::toString(nsAString &outStr) const
     nsIContentSecurityPolicy::REQUIRE_SRI_FOR));
   for (uint32_t i = 0; i < mTypes.Length(); i++) {
     if (mTypes[i] == nsIContentPolicy::TYPE_SCRIPT) {
-      outStr.AppendASCII(" script");
+      outStr.AppendLiteral(" script");
     }
     else if (mTypes[i] == nsIContentPolicy::TYPE_STYLESHEET) {
-      outStr.AppendASCII(" style");
+      outStr.AppendLiteral(" style");
     }
   }
 }
@@ -1586,7 +1603,7 @@ nsCSPPolicy::toString(nsAString& outStr) const
   for (uint32_t i = 0; i < length; ++i) {
     mDirectives[i]->toString(outStr);
     if (i != (length - 1)) {
-      outStr.AppendASCII("; ");
+      outStr.AppendLiteral("; ");
     }
   }
 }
@@ -1619,13 +1636,18 @@ nsCSPPolicy::hasDirective(CSPDirective aDir) const
  * for the ::permits() function family.
  */
 void
-nsCSPPolicy::getDirectiveStringForContentType(nsContentPolicyType aContentType,
-                                              nsAString& outDirective) const
+nsCSPPolicy::getDirectiveStringAndReportSampleForContentType(nsContentPolicyType aContentType,
+                                                             nsAString& outDirective,
+                                                             bool* aReportSample) const
 {
+  MOZ_ASSERT(aReportSample);
+  *aReportSample = false;
+
   nsCSPDirective* defaultDir = nullptr;
   for (uint32_t i = 0; i < mDirectives.Length(); i++) {
     if (mDirectives[i]->restrictsContentType(aContentType)) {
       mDirectives[i]->getDirName(outDirective);
+      *aReportSample = mDirectives[i]->hasReportSampleKeyword();
       return;
     }
     if (mDirectives[i]->isDefaultDirective()) {
@@ -1636,10 +1658,11 @@ nsCSPPolicy::getDirectiveStringForContentType(nsContentPolicyType aContentType,
   // the contentType must be restricted by the default directive
   if (defaultDir) {
     defaultDir->getDirName(outDirective);
+    *aReportSample = defaultDir->hasReportSampleKeyword();
     return;
   }
   NS_ASSERTION(false, "Can not query directive string for contentType!");
-  outDirective.AppendASCII("couldNotQueryViolatedDirective");
+  outDirective.AppendLiteral("couldNotQueryViolatedDirective");
 }
 
 void

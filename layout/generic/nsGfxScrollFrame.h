@@ -58,7 +58,7 @@ public:
   ScrollFrameHelper(nsContainerFrame* aOuter, bool aIsRoot);
   ~ScrollFrameHelper();
 
-  mozilla::ScrollbarStyles GetScrollbarStylesFromFrame() const;
+  mozilla::ScrollStyles GetScrollStylesFromFrame() const;
 
   // If a child frame was added or removed on the scrollframe,
   // reload our child frame list.
@@ -214,9 +214,9 @@ public:
     return pt;
   }
   nsRect GetScrollRange() const;
-  // Get the scroll range assuming the scrollport has size (aWidth, aHeight).
+  // Get the scroll range assuming the viewport has size (aWidth, aHeight).
   nsRect GetScrollRange(nscoord aWidth, nscoord aHeight) const;
-  nsSize GetScrollPositionClampingScrollPortSize() const;
+  nsSize GetVisualViewportSize() const;
   void ScrollSnap(nsIScrollableFrame::ScrollMode aMode = nsIScrollableFrame::SMOOTH_MSD);
   void ScrollSnap(const nsPoint &aDestination,
                   nsIScrollableFrame::ScrollMode aMode = nsIScrollableFrame::SMOOTH_MSD);
@@ -687,6 +687,8 @@ protected:
   bool HasBgAttachmentLocal() const;
   uint8_t GetScrolledFrameDir() const;
 
+  bool IsForTextControlWithNoScrollbars() const;
+
   static void EnsureFrameVisPrefsCached();
   static bool sFrameVisPrefsCached;
   // The number of scrollports wide/high to expand when tracking frame visibility.
@@ -815,8 +817,8 @@ public:
   virtual nsIFrame* GetScrolledFrame() const override {
     return mHelper.GetScrolledFrame();
   }
-  virtual mozilla::ScrollbarStyles GetScrollbarStyles() const override {
-    return mHelper.GetScrollbarStylesFromFrame();
+  virtual mozilla::ScrollStyles GetScrollStyles() const override {
+    return mHelper.GetScrollStylesFromFrame();
   }
   virtual uint32_t GetScrollbarVisibility() const override {
     return mHelper.GetScrollbarVisibility();
@@ -852,8 +854,8 @@ public:
   virtual nsRect GetScrollRange() const override {
     return mHelper.GetScrollRange();
   }
-  virtual nsSize GetScrollPositionClampingScrollPortSize() const override {
-    return mHelper.GetScrollPositionClampingScrollPortSize();
+  virtual nsSize GetVisualViewportSize() const override {
+    return mHelper.GetVisualViewportSize();
   }
   virtual nsSize GetLineScrollAmount() const override {
     return mHelper.GetLineScrollAmount();
@@ -1267,8 +1269,8 @@ public:
   virtual nsIFrame* GetScrolledFrame() const override {
     return mHelper.GetScrolledFrame();
   }
-  virtual mozilla::ScrollbarStyles GetScrollbarStyles() const override {
-    return mHelper.GetScrollbarStylesFromFrame();
+  virtual mozilla::ScrollStyles GetScrollStyles() const override {
+    return mHelper.GetScrollStylesFromFrame();
   }
   virtual uint32_t GetScrollbarVisibility() const override {
     return mHelper.GetScrollbarVisibility();
@@ -1304,8 +1306,8 @@ public:
   virtual nsRect GetScrollRange() const override {
     return mHelper.GetScrollRange();
   }
-  virtual nsSize GetScrollPositionClampingScrollPortSize() const override {
-    return mHelper.GetScrollPositionClampingScrollPortSize();
+  virtual nsSize GetVisualViewportSize() const override {
+    return mHelper.GetVisualViewportSize();
   }
   virtual nsSize GetLineScrollAmount() const override {
     return mHelper.GetLineScrollAmount();

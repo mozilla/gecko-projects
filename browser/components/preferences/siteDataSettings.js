@@ -2,6 +2,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
@@ -26,16 +27,16 @@ let gSiteDataSettings = {
   _searchBox: null,
 
   _createSiteListItem(site) {
-    let item = document.createElement("richlistitem");
+    let item = document.createXULElement("richlistitem");
     item.setAttribute("host", site.host);
-    let container = document.createElement("hbox");
+    let container = document.createXULElement("hbox");
 
     // Creates a new column item with the specified relative width.
     function addColumnItem(l10n, flexWidth, tooltipText) {
-      let box = document.createElement("hbox");
+      let box = document.createXULElement("hbox");
       box.className = "item-box";
       box.setAttribute("flex", flexWidth);
-      let label = document.createElement("label");
+      let label = document.createXULElement("label");
       label.setAttribute("crop", "end");
       if (l10n) {
         if (l10n.hasOwnProperty("raw")) {
@@ -64,7 +65,7 @@ let gSiteDataSettings = {
       let strName = site.persisted ? "site-usage-persistent" : "site-usage-pattern";
       addColumnItem({
         id: strName,
-        args: { value, unit }
+        args: { value, unit },
       }, "2");
     } else {
       // Pass null to avoid showing "0KB" when there is no site data stored.
@@ -114,7 +115,7 @@ let gSiteDataSettings = {
     setEventListener("save", "command", this.saveChanges);
     setEventListener("searchBox", "command", this.onCommandSearch);
     setEventListener("removeAll", "command", this.onClickRemoveAll);
-    setEventListener("removeSelected", "command", this.onClickRemoveSelected);
+    setEventListener("removeSelected", "command", this.removeSelected);
   },
 
   _updateButtonsState() {
@@ -253,18 +254,7 @@ let gSiteDataSettings = {
     window.close();
   },
 
-  onClickTreeCol(e) {
-    this._sortSites(this._sites, e.target);
-    this._buildSitesList(this._sites);
-    this._list.clearSelection();
-  },
-
-  onCommandSearch() {
-    this._buildSitesList(this._sites);
-    this._list.clearSelection();
-  },
-
-  onClickRemoveSelected() {
+  removeSelected() {
     let lastIndex = this._list.selectedItems.length - 1;
     let lastSelectedItem = this._list.selectedItems[lastIndex];
     let lastSelectedItemPosition = this._list.getIndexOfItem(lastSelectedItem);
@@ -280,6 +270,17 @@ let gSiteDataSettings = {
     }
   },
 
+  onClickTreeCol(e) {
+    this._sortSites(this._sites, e.target);
+    this._buildSitesList(this._sites);
+    this._list.clearSelection();
+  },
+
+  onCommandSearch() {
+    this._buildSitesList(this._sites);
+    this._list.clearSelection();
+  },
+
   onClickRemoveAll() {
     let siteItems = this._list.getElementsByTagName("richlistitem");
     if (siteItems.length > 0) {
@@ -290,10 +291,14 @@ let gSiteDataSettings = {
   onKeyPress(e) {
     if (e.keyCode == KeyEvent.DOM_VK_ESCAPE) {
       this.close();
+    } else if (e.keyCode == KeyEvent.DOM_VK_DELETE ||
+               (AppConstants.platform == "macosx" &&
+                e.keyCode == KeyEvent.DOM_VK_BACK_SPACE)) {
+      this.removeSelected();
     }
   },
 
   onSelect() {
     this._updateButtonsState();
-  }
+  },
 };

@@ -31,7 +31,7 @@
 #ifndef HB_OT_SHAPE_COMPLEX_USE_MACHINE_HH
 #define HB_OT_SHAPE_COMPLEX_USE_MACHINE_HH
 
-#include "hb-private.hh"
+#include "hb.hh"
 
 
 #line 38 "hb-ot-shape-complex-use-machine.hh"
@@ -331,7 +331,7 @@ static const int use_syllable_machine_en_main = 4;
 static void
 find_syllables (hb_buffer_t *buffer)
 {
-  unsigned int p, pe, eof, ts HB_UNUSED, te HB_UNUSED, act HB_UNUSED;
+  unsigned int p, pe, eof, ts HB_UNUSED, te, act;
   int cs;
   hb_glyph_info_t *info = buffer->info;
   
