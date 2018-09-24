@@ -103,31 +103,15 @@ endif
 # The VERSION_NUMBER is suffixed onto the end of the DLLs we ship.
 VERSION_NUMBER		= 50
 
-ifeq ($(HOST_OS_ARCH),WINNT)
-  ifeq ($(MOZILLA_DIR),$(topsrcdir))
-    win_srcdir := $(subst $(topsrcdir),$(WIN_TOP_SRC),$(srcdir))
-  else
-    # This means we're in comm-central's topsrcdir, so we need to adjust
-    # WIN_TOP_SRC (which points to mozilla's topsrcdir) for the substitution
-    # to win_srcdir.
-		cc_WIN_TOP_SRC := $(WIN_TOP_SRC:%/mozilla=%)
-    win_srcdir := $(subst $(topsrcdir),$(cc_WIN_TOP_SRC),$(srcdir))
-  endif
-  BUILD_TOOLS = $(WIN_TOP_SRC)/build/unix
-else
-  win_srcdir := $(srcdir)
-  BUILD_TOOLS = $(MOZILLA_DIR)/build/unix
-endif
-
 CONFIG_TOOLS	= $(MOZ_BUILD_ROOT)/config
 AUTOCONF_TOOLS	= $(MOZILLA_DIR)/build/autoconf
 
 ifdef _MSC_VER
 # clang-cl is smart enough to generate dependencies directly.
-ifndef CLANG_CL
+ifeq (,$(CLANG_CL)$(MOZ_USING_SCCACHE))
 CC_WRAPPER ?= $(call py_action,cl)
 CXX_WRAPPER ?= $(call py_action,cl)
-endif # CLANG_CL
+endif # CLANG_CL/MOZ_USING_SCCACHE
 endif # _MSC_VER
 
 CC := $(CC_WRAPPER) $(CC)

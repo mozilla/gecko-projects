@@ -238,7 +238,7 @@ var promiseLoadHandlersList;
 function getBundleForLocales(newLocales) {
   let locales = Array.from(new Set([
     ...newLocales,
-    ...Services.locale.getRequestedLocales(),
+    ...Services.locale.requestedLocales,
     Services.locale.lastFallbackLocale,
   ]));
   function generateContexts(resourceIds) {
@@ -785,7 +785,7 @@ var gMainPane = {
   },
 
   initBrowserLocale() {
-    let localeCodes = Services.locale.getAvailableLocales();
+    let localeCodes = Services.locale.availableLocales;
     let localeNames = Services.intl.getLocaleDisplayNames(undefined, localeCodes);
     let locales = localeCodes.map((code, i) => ({code, name: localeNames[i]}));
     locales.sort((a, b) => a.name > b.name);
@@ -800,7 +800,7 @@ var gMainPane = {
     let menulist = document.getElementById("defaultBrowserLanguage");
     let menupopup = menulist.querySelector("menupopup");
     menupopup.appendChild(fragment);
-    menulist.value = Services.locale.getRequestedLocale();
+    menulist.value = Services.locale.requestedLocale;
 
     document.getElementById("browserLanguagesBox").hidden = false;
   },
@@ -836,7 +836,7 @@ var gMainPane = {
       return;
     }
     let locales = localesString.split(",");
-    Services.locale.setRequestedLocales(locales);
+    Services.locale.requestedLocales = locales;
 
     // Restart with the new locale.
     let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"].createInstance(Ci.nsISupportsPRBool);
@@ -849,13 +849,13 @@ var gMainPane = {
   /* Show or hide the confirm change message bar based on the new locale. */
   onBrowserLanguageChange(event) {
     let locale = event.target.value;
-    if (locale == Services.locale.getRequestedLocale()) {
+    if (locale == Services.locale.requestedLocale) {
       this.hideConfirmLanguageChangeMessageBar();
       return;
     }
     let locales = Array.from(new Set([
       locale,
-      ...Services.locale.getRequestedLocales(),
+      ...Services.locale.requestedLocales,
     ]).values());
     this.showConfirmLanguageChangeMessageBar(locales);
   },
@@ -993,14 +993,14 @@ var gMainPane = {
   /* Show or hide the confirm change message bar based on the updated ordering. */
   browserLanguagesClosed() {
     let requesting = this.gBrowserLanguagesDialog.requestedLocales;
-    let requested = Services.locale.getRequestedLocales();
+    let requested = Services.locale.requestedLocales;
     let defaultBrowserLanguage = document.getElementById("defaultBrowserLanguage");
     if (requesting && requesting.join(",") != requested.join(",")) {
       gMainPane.showConfirmLanguageChangeMessageBar(requesting);
       defaultBrowserLanguage.value = requesting[0];
       return;
     }
-    defaultBrowserLanguage.value = Services.locale.getRequestedLocale();
+    defaultBrowserLanguage.value = Services.locale.requestedLocale;
     gMainPane.hideConfirmLanguageChangeMessageBar();
   },
 
@@ -1738,7 +1738,7 @@ var gMainPane = {
                    getService(Ci.nsIGIOService);
       var gioApps = gIOSvc.getAppsForURIScheme(handlerInfo.type);
       let possibleHandlers = handlerInfo.possibleApplicationHandlers;
-      for (let handler of gioApps.enumerate()) {
+      for (let handler of gioApps.enumerate(Ci.nsIHandlerApp)) {
         // OS handler share the same name, it's most likely the same app, skipping...
         if (handler.name == handlerInfo.defaultDescription) {
           continue;
@@ -2428,34 +2428,6 @@ function getLocalHandlerApp(aFile) {
   return localHandlerApp;
 }
 
-/**
- * An enumeration of items in a JS array.
- *
- * FIXME: use ArrayConverter once it lands (bug 380839).
- *
- * @constructor
- */
-function ArrayEnumerator(aItems) {
-  this._index = 0;
-  this._contents = aItems;
-}
-
-ArrayEnumerator.prototype = {
-  _index: 0,
-
-  [Symbol.iterator]() {
-    return this._contents.values();
-  },
-
-  hasMoreElements() {
-    return this._index < this._contents.length;
-  },
-
-  getNext() {
-    return this._contents[this._index++];
-  },
-};
-
 function isFeedType(t) {
   return t == TYPE_MAYBE_FEED || t == TYPE_MAYBE_VIDEO_FEED || t == TYPE_MAYBE_AUDIO_FEED;
 }
@@ -3006,7 +2978,7 @@ class FeedHandlerInfo extends HandlerInfoWrapper {
       },
 
       enumerate() {
-        return new ArrayEnumerator(this._inner);
+        return this._inner.values();
       },
 
       appendElement(aHandlerApp, aWeak) {

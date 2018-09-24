@@ -96,21 +96,11 @@ function installAddonEngine(name = "engine-addon") {
     },
 
     getFiles(prop) {
-      let result = [];
-
-      switch (prop) {
-      case XRE_EXTENSIONS_DIR_LIST:
-        result.push(addonDir);
-        break;
-      default:
-        throw Cr.NS_ERROR_FAILURE;
+      if (prop == XRE_EXTENSIONS_DIR_LIST) {
+        return [addonDir].values();
       }
 
-      return {
-        QueryInterface: ChromeUtils.generateQI([Ci.nsISimpleEnumerator]),
-        hasMoreElements: () => result.length > 0,
-        getNext: () => result.shift(),
-      };
+      throw Cr.NS_ERROR_FAILURE;
     },
   });
 }
@@ -244,7 +234,7 @@ function getDefaultEngineName(isUS) {
   let defaultEngineName = searchSettings.default.searchDefault;
 
   if (isUS === undefined)
-    isUS = Services.locale.getRequestedLocale() == "en-US" && isUSTimezone();
+    isUS = Services.locale.requestedLocale == "en-US" && isUSTimezone();
 
   if (isUS && ("US" in searchSettings &&
                "searchDefault" in searchSettings.US)) {
@@ -263,7 +253,7 @@ function getDefaultEngineList(isUS) {
   let visibleDefaultEngines = json.default.visibleDefaultEngines;
 
   if (isUS === undefined)
-    isUS = Services.locale.getRequestedLocale() == "en-US" && isUSTimezone();
+    isUS = Services.locale.requestedLocale == "en-US" && isUSTimezone();
 
   if (isUS) {
     let searchSettings = json.locales["en-US"];

@@ -595,6 +595,10 @@ public:
                                    int32_t aDepth,
                                    int32_t aIncrement,
                                    bool aForCounting) override;
+
+  // @see nsIFrame::AddSizeOfExcludingThisForTree
+  void AddSizeOfExcludingThisForTree(nsWindowSizes&) const override;
+
 protected:
   /** @see DoRemoveFrame */
   void DoRemoveFrameInternal(nsIFrame* aDeletedFrame, uint32_t aFlags,
@@ -951,6 +955,8 @@ protected:
   int32_t GetDepth() const;
 #endif
 
+  // FIXME The two variables should go through a renaming refactoring to reflect
+  // the fact that they mean an inline size, not a width.
   nscoord mMinWidth, mPrefWidth;
 
   nsLineList mLines;

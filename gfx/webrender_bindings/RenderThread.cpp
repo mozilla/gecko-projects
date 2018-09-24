@@ -13,6 +13,7 @@
 #include "mozilla/gfx/GPUParent.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
+#include "mozilla/layers/WebRenderBridgeParent.h"
 #include "mozilla/layers/SharedSurfacesParent.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Telemetry.h"
@@ -139,6 +140,36 @@ bool
 RenderThread::IsInRenderThread()
 {
   return sRenderThread && sRenderThread->mThread->thread_id() == PlatformThread::CurrentId();
+}
+
+void
+RenderThread::DoAccumulateMemoryReport(MemoryReport aReport, const RefPtr<MemoryReportPromise::Private>& aPromise)
+{
+  MOZ_ASSERT(IsInRenderThread());
+  for (auto& r: mRenderers) {
+    wr_renderer_accumulate_memory_report(r.second->GetRenderer(), &aReport);
+  }
+
+  aPromise->Resolve(aReport, __func__);
+}
+
+// static
+RefPtr<MemoryReportPromise>
+RenderThread::AccumulateMemoryReport(MemoryReport aInitial)
+{
+  RefPtr<MemoryReportPromise::Private> p = new MemoryReportPromise::Private(__func__);
+  MOZ_ASSERT(!IsInRenderThread());
+  MOZ_ASSERT(Get());
+  Get()->Loop()->PostTask(
+    NewRunnableMethod<MemoryReport, RefPtr<MemoryReportPromise::Private>>(
+      "wr::RenderThread::DoAccumulateMemoryReport",
+      Get(),
+      &RenderThread::DoAccumulateMemoryReport,
+      aInitial, p
+    )
+  );
+
+  return p;
 }
 
 void
@@ -295,6 +326,10 @@ NotifyDidRender(layers::CompositorBridgeParent* aBridge,
                 TimeStamp aStart,
                 TimeStamp aEnd)
 {
+  if (aBridge->GetWrBridge()) {
+    aBridge->GetWrBridge()->RecordFrame();
+  }
+
   for (uintptr_t i = 0; i < aInfo.epochs.length; i++) {
     aBridge->NotifyPipelineRendered(
         aInfo.epochs.data[i].pipeline_id,

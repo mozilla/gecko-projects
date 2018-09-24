@@ -85,9 +85,21 @@ nsSVGElement::StringInfo SVGTextPathElement::sStringInfo[2] =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGTextPathElement::SVGTextPathElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-  : SVGTextPathElementBase(aNodeInfo)
+SVGTextPathElement::SVGTextPathElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
+  : SVGTextPathElementBase(std::move(aNodeInfo))
 {
+}
+
+void
+SVGTextPathElement::HrefAsString(nsAString& aHref)
+{
+  if (mStringAttributes[SVGTextPathElement::HREF].IsExplicitlySet()) {
+    mStringAttributes[SVGTextPathElement::HREF]
+      .GetAnimValue(aHref, this);
+  } else {
+    mStringAttributes[SVGTextPathElement::XLINK_HREF]
+      .GetAnimValue(aHref, this);
+  }
 }
 
 //----------------------------------------------------------------------

@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 var FastBlock = {
+  reportBreakageLabel: "fastblock",
   PREF_ENABLED: "browser.fastblock.enabled",
   PREF_UI_ENABLED: "browser.contentblocking.fastblock.control-center.ui.enabled",
 
@@ -15,9 +16,14 @@ var FastBlock = {
     XPCOMUtils.defineLazyPreferenceGetter(this, "enabled", this.PREF_ENABLED, false);
     XPCOMUtils.defineLazyPreferenceGetter(this, "visible", this.PREF_UI_ENABLED, false);
   },
+
+  isBlockerActivated(state) {
+    return state & Ci.nsIWebProgressListener.STATE_BLOCKED_SLOW_TRACKING_CONTENT;
+  },
 };
 
 var TrackingProtection = {
+  reportBreakageLabel: "trackingprotection",
   PREF_ENABLED_GLOBALLY: "privacy.trackingprotection.enabled",
   PREF_ENABLED_IN_PRIVATE_WINDOWS: "privacy.trackingprotection.pbmode.enabled",
   PREF_UI_ENABLED: "browser.contentblocking.trackingprotection.control-center.ui.enabled",
@@ -128,9 +134,14 @@ var TrackingProtection = {
       }
     }
   },
+
+  isBlockerActivated(state) {
+    return state & Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT;
+  },
 };
 
 var ThirdPartyCookies = {
+  reportBreakageLabel: "cookierestrictions",
   PREF_ENABLED: "network.cookie.cookieBehavior",
   PREF_ENABLED_VALUES: [
     // These values match the ones exposed under the Content Blocking section
@@ -154,6 +165,11 @@ var ThirdPartyCookies = {
   get enabled() {
     return this.PREF_ENABLED_VALUES.includes(this.behaviorPref);
   },
+
+  isBlockerActivated(state) {
+    return (state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER) != 0 ||
+           (state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_FOREIGN) != 0;
+  },
 };
 
 
@@ -167,6 +183,7 @@ var ContentBlocking = {
   PREF_REPORT_BREAKAGE_URL: "browser.contentblocking.reportBreakage.url",
   PREF_INTRO_COUNT_CB: "browser.contentblocking.introCount",
   PREF_INTRO_COUNT_TP: "privacy.trackingprotection.introCount",
+  PREF_GLOBAL_TOGGLE: "browser.contentblocking.global-toggle.enabled",
   content: null,
   icon: null,
   activeTooltipText: null,
@@ -184,6 +201,11 @@ var ContentBlocking = {
   get appMenuButton() {
     delete this.appMenuButton;
     return this.appMenuButton = document.getElementById("appMenu-tp-toggle");
+  },
+
+  get appMenuVerticalSeparator() {
+    delete this.appMenuVerticalSeparator;
+    return this.appMenuVerticalSeparator = document.getElementById("appMenu-tp-vertical-separator");
   },
 
   strings: {
@@ -251,6 +273,20 @@ var ContentBlocking = {
     let baseURL = Services.urlFormatter.formatURLPref("app.support.baseURL");
     this.reportBreakageLearnMore.href = baseURL + "blocking-breakage";
 
+    this.updateGlobalToggleVisibility = () => {
+      if (Services.prefs.getBoolPref(this.PREF_GLOBAL_TOGGLE, true)) {
+        this.appMenuButton.removeAttribute("hidden");
+        this.appMenuVerticalSeparator.removeAttribute("hidden");
+      } else {
+        this.appMenuButton.setAttribute("hidden", "true");
+        this.appMenuVerticalSeparator.setAttribute("hidden", "true");
+      }
+    };
+
+    this.updateGlobalToggleVisibility();
+
+    Services.prefs.addObserver(this.PREF_GLOBAL_TOGGLE, this.updateGlobalToggleVisibility);
+
     this.updateReportBreakageUI = () => {
       this.reportBreakageButton.hidden = !Services.prefs.getBoolPref(this.PREF_REPORT_BREAKAGE_ENABLED);
     };
@@ -297,6 +333,7 @@ var ContentBlocking = {
 
     Services.prefs.removeObserver(this.PREF_ANIMATIONS_ENABLED, this.updateAnimationsEnabled);
     Services.prefs.removeObserver(this.PREF_REPORT_BREAKAGE_ENABLED, this.updateReportBreakageUI);
+    Services.prefs.removeObserver(this.PREF_GLOBAL_TOGGLE, this.updateGlobalToggleVisibility);
   },
 
   get enabled() {
@@ -382,6 +419,17 @@ var ContentBlocking = {
 
     formData.set("body", body);
 
+    let activatedBlockers = [];
+    for (let blocker of this.blockers) {
+      if (blocker.activated) {
+        activatedBlockers.push(blocker.reportBreakageLabel);
+      }
+    }
+
+    if (activatedBlockers.length) {
+      formData.set("labels", activatedBlockers.join(","));
+    }
+
     fetch(reportEndpoint, {
       method: "POST",
       credentials: "omit",
@@ -434,23 +482,26 @@ var ContentBlocking = {
       this.iconBox.removeAttribute("animate");
     }
 
-    let isBlocking = state & Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT;
-    let isAllowing = state & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT;
-    let detected = isBlocking || isAllowing;
-
-    let anyBlockerEnabled = false;
+    let anyBlockerActivated = false;
 
     for (let blocker of this.blockers) {
+      // Store data on whether the blocker is activated in the current document for
+      // reporting it using the "report breakage" dialog. Under normal circumstances this
+      // dialog should only be able to open in the currently selected tab and onSecurityChange
+      // runs on tab switch, so we can avoid associating the data with the document directly.
+      blocker.activated = blocker.isBlockerActivated(state);
       blocker.categoryItem.classList.toggle("blocked", this.enabled && blocker.enabled);
       blocker.categoryItem.hidden = !blocker.visible;
-      anyBlockerEnabled = anyBlockerEnabled || blocker.enabled;
+      anyBlockerActivated = anyBlockerActivated || blocker.activated;
     }
 
-    // We consider the shield state "active" when any kind of blocking-related
-    // activity occurs on the page (blocking or allowing) and at least one blocker
-    // is enabled.
+    // We consider the shield state "active" when some kind of blocking activity
+    // occurs on the page.  Note that merely allowing the loading of content that
+    // we could have blocked does not trigger the appearance of the shield.
     // This state will be overriden later if there's an exception set for this site.
-    let active = this.enabled && detected && anyBlockerEnabled;
+    let active = this.enabled && anyBlockerActivated;
+    let isAllowing = state & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT;
+    let detected = anyBlockerActivated || isAllowing;
 
     let isBrowserPrivate = PrivateBrowsingUtils.isBrowserPrivate(gBrowser.selectedBrowser);
 
@@ -461,6 +512,7 @@ var ContentBlocking = {
 
     this.content.toggleAttribute("detected", detected);
     this.content.toggleAttribute("hasException", hasException);
+    this.content.toggleAttribute("active", active);
 
     this.iconBox.toggleAttribute("active", active);
     this.iconBox.toggleAttribute("hasException", this.enabled && hasException);

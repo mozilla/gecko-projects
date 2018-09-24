@@ -69,6 +69,7 @@ robocop:
     chunks:
         by-test-platform:
             # android-em-4.3-arm7-api-16/debug -- not run
+            android-em-4.3-arm7-api-16-ccov/debug: 8
             android-em-4.3-arm7-api-16/opt: 4
     loopback-video: true
     e10s: false
@@ -83,7 +84,7 @@ robocop:
 telemetry-tests-client:
     description: "Telemetry tests client run"
     suite: telemetry-tests-client
-    treeherder-symbol: tt-c()
+    treeherder-symbol: tt(c)
     max-run-time: 5400
     checkout: true
     tier: 3

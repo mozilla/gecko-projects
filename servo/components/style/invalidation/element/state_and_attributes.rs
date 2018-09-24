@@ -155,22 +155,11 @@ where
             return false;
         }
 
-        // If we are sensitive to visitedness and the visited state changed, we
-        // force a restyle here. Matching doesn't depend on the actual visited
-        // state at all, so we can't look at matching results to decide what to
-        // do for this case.
-        if state_changes.intersects(ElementState::IN_VISITED_OR_UNVISITED_STATE) &&
-            self.shared_context.visited_styles_enabled
-        {
+        // If we the visited state changed, we force a restyle here. Matching
+        // doesn't depend on the actual visited state at all, so we can't look
+        // at matching results to decide what to do for this case.
+        if state_changes.intersects(ElementState::IN_VISITED_OR_UNVISITED_STATE) {
             trace!(" > visitedness change, force subtree restyle");
-            // We shouldn't get here with visited links disabled, but it's hard
-            // to assert in cases where you record a visitedness change and
-            // afterwards you change some of the stuff (like the pref) that
-            // changes whether visited styles are enabled.
-            //
-            // So just avoid the restyle here, because it kind of would kill the
-            // point of disabling visited links.
-            //
             // We can't just return here because there may also be attribute
             // changes as well that imply additional hints for siblings.
             self.data.hint.insert(RestyleHint::restyle_subtree());
@@ -211,17 +200,12 @@ where
                 debug!(" > state: {:?}", state_changes);
             }
             if snapshot.id_changed() {
-                debug!(
-                    " > id changed: +{:?} -{:?}",
-                    id_added,
-                    id_removed
-                );
+                debug!(" > id changed: +{:?} -{:?}", id_added, id_removed);
             }
             if snapshot.class_changed() {
                 debug!(
                     " > class changed: +{:?} -{:?}",
-                    classes_added,
-                    classes_removed
+                    classes_added, classes_removed
                 );
             }
             if snapshot.other_attr_changed() {
@@ -243,7 +227,6 @@ where
             element.each_applicable_non_document_style_rule_data(|data, quirks_mode, host| {
                 shadow_rule_datas.push((data, quirks_mode, host.map(|h| h.opaque())))
             });
-
 
         let invalidated_self = {
             let mut collector = Collector {
@@ -421,10 +404,7 @@ where
     }
 
     /// Check whether a dependency should be taken into account.
-    fn check_dependency(
-        &mut self,
-        dependency: &Dependency,
-    ) -> bool {
+    fn check_dependency(&mut self, dependency: &Dependency) -> bool {
         let element = &self.element;
         let wrapper = &self.wrapper;
         let matches_now = matches_selector(

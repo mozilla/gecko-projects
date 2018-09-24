@@ -70,7 +70,7 @@ static_assert(sizeof(void*) == sizeof(nullptr),
 nsresult
 NS_NewSVGElement(Element **aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
 {
-  RefPtr<nsSVGElement> it = new nsSVGElement(aNodeInfo);
+  RefPtr<nsSVGElement> it = new nsSVGElement(std::move(aNodeInfo));
   nsresult rv = it->Init();
 
   if (NS_FAILED(rv)) {
@@ -89,8 +89,8 @@ nsSVGEnumMapping nsSVGElement::sSVGUnitTypesMap[] = {
   {nullptr, 0}
 };
 
-nsSVGElement::nsSVGElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-  : nsSVGElementBase(aNodeInfo)
+nsSVGElement::nsSVGElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
+  : nsSVGElementBase(std::move(aNodeInfo))
 {
 }
 
@@ -1194,8 +1194,9 @@ MappedAttrParser::ParseMappedAttrValue(nsAtom* aMappedAttrName,
     bool changed = false; // outparam for ParseProperty.
     NS_ConvertUTF16toUTF8 value(aMappedAttrValue);
     // FIXME (bug 1343964): Figure out a better solution for sending the base uri to servo
-    RefPtr<URLExtraData> data = new URLExtraData(mBaseURI, mDocURI,
-                                                 mElement->NodePrincipal());
+    RefPtr<URLExtraData> data =
+      new URLExtraData(mBaseURI, mDocURI, mElement->NodePrincipal(),
+                       mElement->OwnerDoc()->GetReferrerPolicy());
     changed = Servo_DeclarationBlock_SetPropertyById(
       mDecl->Raw(), propertyID, &value, false, data,
       ParsingMode::AllowUnitlessLength,

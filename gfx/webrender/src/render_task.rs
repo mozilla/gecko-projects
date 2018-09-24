@@ -7,7 +7,8 @@ use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceSize, DeviceIntSid
 use api::FontRenderMode;
 use border::BorderCacheKey;
 use box_shadow::{BoxShadowCacheKey};
-use clip::{ClipItem, ClipStore, ClipNodeRange};
+use clip::{ClipDataStore, ClipItem, ClipStore, ClipNodeRange};
+use clip_scroll_tree::SpatialNodeIndex;
 use device::TextureFilter;
 #[cfg(feature = "pathfinder")]
 use euclid::{TypedPoint2D, TypedVector2D};
@@ -187,6 +188,7 @@ pub enum RenderTaskLocation {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct CacheMaskTask {
     actual_rect: DeviceIntRect,
+    pub root_spatial_node_index: SpatialNodeIndex,
     pub clip_node_range: ClipNodeRange,
 }
 
@@ -205,6 +207,7 @@ pub struct PictureTask {
     pub can_merge: bool,
     pub content_origin: DeviceIntPoint,
     pub uv_rect_handle: GpuCacheHandle,
+    pub root_spatial_node_index: SpatialNodeIndex,
     uv_rect_kind: UvRectKind,
 }
 
@@ -346,6 +349,7 @@ impl RenderTask {
         content_origin: DeviceIntPoint,
         children: Vec<RenderTaskId>,
         uv_rect_kind: UvRectKind,
+        root_spatial_node_index: SpatialNodeIndex,
     ) -> Self {
         let size = match location {
             RenderTaskLocation::Dynamic(_, size) => size,
@@ -367,6 +371,7 @@ impl RenderTask {
                 can_merge,
                 uv_rect_handle: GpuCacheHandle::new(),
                 uv_rect_kind,
+                root_spatial_node_index,
             }),
             clear_mode: ClearMode::Transparent,
             saved_index: None,
@@ -422,10 +427,12 @@ impl RenderTask {
     pub fn new_mask(
         outer_rect: DeviceIntRect,
         clip_node_range: ClipNodeRange,
+        root_spatial_node_index: SpatialNodeIndex,
         clip_store: &mut ClipStore,
         gpu_cache: &mut GpuCache,
         resource_cache: &mut ResourceCache,
         render_tasks: &mut RenderTaskTree,
+        clip_data_store: &mut ClipDataStore,
     ) -> Self {
         let mut children = Vec::new();
 
@@ -439,7 +446,8 @@ impl RenderTask {
         //           whether a ClipSources contains any box-shadows and skip
         //           this iteration for the majority of cases.
         for i in 0 .. clip_node_range.count {
-            let (clip_node, _) = clip_store.get_node_from_range_mut(&clip_node_range, i);
+            let clip_instance = clip_store.get_instance_from_range(&clip_node_range, i);
+            let clip_node = &mut clip_data_store[clip_instance.handle];
             match clip_node.item {
                 ClipItem::BoxShadow(ref mut info) => {
                     let (cache_size, cache_key) = info.cache_key
@@ -498,6 +506,7 @@ impl RenderTask {
             RenderTaskKind::CacheMask(CacheMaskTask {
                 actual_rect: outer_rect,
                 clip_node_range,
+                root_spatial_node_index,
             }),
             ClearMode::One,
         )
@@ -733,7 +742,7 @@ impl RenderTask {
         // so the shader doesn't need to shift by the origin.
         if let RenderTaskLocation::Fixed(_) = self.location {
             target_rect.origin = DeviceIntPoint::origin();
-        };
+        }
 
         RenderTaskData {
             data: [

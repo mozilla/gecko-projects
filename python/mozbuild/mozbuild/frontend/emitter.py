@@ -83,7 +83,6 @@ from .reader import SandboxValidationError
 from ..testing import (
     TEST_MANIFESTS,
     REFTEST_FLAVORS,
-    WEB_PLATFORM_TESTS_FLAVORS,
     SupportFilesConverter,
 )
 
@@ -1036,7 +1035,6 @@ class TreeMetadataEmitter(LoggingMixin):
             'RCFILE',
             'RESFILE',
             'RCINCLUDE',
-            'DEFFILE',
             'WIN32_EXE_LDFLAGS',
             'USE_EXTENSION_MANIFEST',
             'NO_JS_MANIFEST',
@@ -1067,13 +1065,28 @@ class TreeMetadataEmitter(LoggingMixin):
         if 'LDFLAGS' in context and context['LDFLAGS']:
             computed_link_flags.resolve_flags('MOZBUILD', context['LDFLAGS'])
 
-        deffile = context['DEFFILE']
-        if deffile and context.config.substs.get('OS_ARCH') == 'WINNT':
+        deffile = context.get('DEFFILE')
+        if deffile and context.config.substs.get('OS_TARGET') == 'WINNT':
+            if isinstance(deffile, SourcePath):
+                if not os.path.exists(deffile.full_path):
+                    raise SandboxValidationError(
+                        'Path specified in DEFFILE does not exist: %s '
+                        '(resolved to %s)' % (deffile,
+                        deffile.full_path), context)
+                path = mozpath.relpath(deffile.full_path, context.objdir)
+            else:
+                path = deffile.target_basename
+
+            # We don't have any better way to indicate that the def file
+            # is a dependency to whatever we're building beyond stuffing
+            # it into EXTRA_DEPS.
+            passthru.variables['EXTRA_DEPS'] = [path]
+
             if context.config.substs.get('GNU_CC'):
-                computed_link_flags.resolve_flags('DEFFILE', [deffile])
+                computed_link_flags.resolve_flags('DEFFILE', [path])
             else:
                 computed_link_flags.resolve_flags('DEFFILE',
-                                                  ['-DEF:' + deffile])
+                                                  ['-DEF:' + path])
 
         dist_install = context['DIST_INSTALL']
         if dist_install is True:
@@ -1444,11 +1457,6 @@ class TreeMetadataEmitter(LoggingMixin):
                 for obj in self._process_reftest_manifest(context, flavor, path, manifest):
                     yield obj
 
-        for flavor in WEB_PLATFORM_TESTS_FLAVORS:
-            for path, manifest in context.get("%s_MANIFESTS" % flavor.upper().replace('-', '_'), []):
-                for obj in self._process_web_platform_tests_manifest(context, path, manifest):
-                    yield obj
-
     def _process_test_manifest(self, context, info, manifest_path, mpmanifest):
         flavor, install_root, install_subdir, package_tests = info
 
@@ -1574,40 +1582,6 @@ class TreeMetadataEmitter(LoggingMixin):
                 'support-files': '',
                 'subsuite': '',
             })
-
-        yield obj
-
-    def _process_web_platform_tests_manifest(self, context, paths, manifest):
-        manifest_path, tests_root = paths
-        manifest_full_path = mozpath.normpath(mozpath.join(
-            context.srcdir, manifest_path))
-        manifest_reldir = mozpath.dirname(mozpath.relpath(manifest_full_path,
-            context.config.topsrcdir))
-        tests_root = mozpath.normpath(mozpath.join(context.srcdir, tests_root))
-
-        # Create a equivalent TestManifest object
-        obj = TestManifest(context, manifest_full_path, manifest,
-                           flavor="web-platform-tests",
-                           relpath=mozpath.join(manifest_reldir,
-                                                mozpath.basename(manifest_path)),
-                           install_prefix="web-platform/")
-
-
-        for test_type, path, tests in manifest:
-            path = mozpath.join(tests_root, path)
-            if test_type not in ["testharness", "reftest", "wdspec"]:
-                continue
-
-            for test in tests:
-                obj.tests.append({
-                    'path': path,
-                    'here': mozpath.dirname(path),
-                    'manifest': manifest_path,
-                    'name': test.id,
-                    'head': '',
-                    'support-files': '',
-                    'subsuite': '',
-                })
 
         yield obj
 

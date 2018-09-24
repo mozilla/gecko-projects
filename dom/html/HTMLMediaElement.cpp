@@ -3689,15 +3689,10 @@ HTMLMediaElement::MozCaptureStreamUntilEnded(ErrorResult& aRv)
 class MediaElementSetForURI : public nsURIHashKey
 {
 public:
-  explicit MediaElementSetForURI(const nsIURI* aKey)
-    : nsURIHashKey(aKey)
-  {
-  }
-  MediaElementSetForURI(const MediaElementSetForURI& toCopy)
-    : nsURIHashKey(toCopy)
-    , mElements(toCopy.mElements)
-  {
-  }
+  explicit MediaElementSetForURI(const nsIURI* aKey) : nsURIHashKey(aKey) {}
+  MediaElementSetForURI(MediaElementSetForURI&& aOther)
+    : nsURIHashKey(std::move(aOther))
+    , mElements(std::move(aOther.mElements)) {}
   nsTArray<HTMLMediaElement*> mElements;
 };
 
@@ -3875,8 +3870,8 @@ private:
 NS_IMPL_ISUPPORTS(HTMLMediaElement::ShutdownObserver, nsIObserver)
 
 HTMLMediaElement::HTMLMediaElement(
-  already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-  : nsGenericHTMLElement(aNodeInfo)
+  already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
+  : nsGenericHTMLElement(std::move(aNodeInfo))
   , mWatchManager(this, OwnerDoc()->AbstractMainThreadFor(TaskCategory::Other))
   , mMainThreadEventTarget(OwnerDoc()->EventTargetFor(TaskCategory::Other))
   , mAbstractMainThread(OwnerDoc()->AbstractMainThreadFor(TaskCategory::Other))
@@ -4147,7 +4142,7 @@ HTMLMediaElement::DispatchEventsWhenPlayWasNotAllowed()
   }
 #if defined(MOZ_WIDGET_ANDROID)
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
-    new AsyncEventDispatcher(OwnerDoc(),
+    new AsyncEventDispatcher(this,
                              NS_LITERAL_STRING("MozAutoplayMediaBlocked"),
                              CanBubble::eYes,
                              ChromeOnlyDispatch::eYes);
@@ -6798,6 +6793,9 @@ void
 HTMLMediaElement::NotifyShutdownEvent()
 {
   mShuttingDown = true;
+  // Since target thread had been shutdown, it's no chance to execute the Then()
+  // afterward. Therefore, we should disconnect the request.
+  mAutoplayPermissionRequest.DisconnectIfExists();
   ResetState();
   AddRemoveSelfReference();
 }

@@ -631,6 +631,102 @@ static uint32_t GetSkiaGlyphCacheSize()
 }
 #endif
 
+class WebRenderMemoryReporter final : public nsIMemoryReporter {
+public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIMEMORYREPORTER
+
+private:
+  ~WebRenderMemoryReporter() = default;
+};
+
+// Memory reporter for WebRender.
+//
+// The reporting within WebRender is manual and incomplete. We could do a much
+// more thorough job by depending on the malloc_size_of crate, but integrating
+// that into WebRender is tricky [1].
+//
+// So the idea is to start with manual reporting for the large allocations
+// detected by DMD, and see how much that can cover in practice (which may
+// require a few rounds of iteration). If that approach turns out to be
+// fundamentally insufficient, we can either duplicate more of the malloc_size_of
+// functionality in WebRender, or deal with the complexity of a gecko-only
+// crate dependency.
+//
+// [1] See https://bugzilla.mozilla.org/show_bug.cgi?id=1480293#c1
+struct WebRenderMemoryReporterHelper {
+  WebRenderMemoryReporterHelper(nsIHandleReportCallback* aCallback, nsISupports* aData)
+    : mCallback(aCallback), mData(aData)
+  {}
+  nsCOMPtr<nsIHandleReportCallback> mCallback;
+  nsCOMPtr<nsISupports> mData;
+
+  void Report(size_t aBytes, const char* aName) const
+  {
+    // Generally, memory reporters pass the empty string as the process name to
+    // indicate "current process". However, if we're using a GPU process, the
+    // measurements will actually take place in that process, and it's easier to
+    // just note that here rather than trying to invoke the memory reporter in
+    // the GPU process.
+    nsAutoCString processName;
+    if (gfxConfig::IsEnabled(Feature::GPU_PROCESS)) {
+      GPUParent::GetGPUProcessName(processName);
+    }
+
+    nsPrintfCString path("explicit/gfx/webrender/%s", aName);
+    mCallback->Callback(processName, path,
+                        nsIMemoryReporter::KIND_HEAP, nsIMemoryReporter::UNITS_BYTES,
+                        aBytes, EmptyCString(), mData);
+  }
+};
+
+static void
+FinishAsyncMemoryReport()
+{
+  nsCOMPtr<nsIMemoryReporterManager> imgr =
+    do_GetService("@mozilla.org/memory-reporter-manager;1");
+  if (imgr) {
+    imgr->EndReport();
+  }
+}
+
+NS_IMPL_ISUPPORTS(WebRenderMemoryReporter, nsIMemoryReporter)
+
+NS_IMETHODIMP
+WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
+                                        nsISupports* aData, bool aAnonymize)
+{
+  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+  layers::CompositorManagerChild* manager = CompositorManagerChild::GetInstance();
+  if (!manager) {
+    FinishAsyncMemoryReport();
+    return NS_OK;
+  }
+
+  WebRenderMemoryReporterHelper helper(aHandleReport, aData);
+  manager->SendReportMemory(
+    [=](wr::MemoryReport aReport) {
+      helper.Report(aReport.primitive_stores, "primitive-stores");
+      helper.Report(aReport.clip_stores, "clip-stores");
+      helper.Report(aReport.gpu_cache_metadata, "gpu-cache/metadata");
+      helper.Report(aReport.gpu_cache_cpu_mirror, "gpu-cache/cpu-mirror");
+      helper.Report(aReport.render_tasks, "render-tasks");
+      helper.Report(aReport.hit_testers, "hit-testers");
+      helper.Report(aReport.fonts, "resource-cache/font");
+      helper.Report(aReport.images, "resource-cache/images");
+      helper.Report(aReport.rasterized_blobs, "resource-cache/rasterized-blobs");
+      FinishAsyncMemoryReport();
+    },
+    [](mozilla::ipc::ResponseRejectReason aReason) {
+      FinishAsyncMemoryReport();
+    }
+  );
+
+  return NS_OK;
+}
+
+
 void
 gfxPlatform::Init()
 {
@@ -823,6 +919,10 @@ gfxPlatform::Init()
     }
 
     RegisterStrongMemoryReporter(new GfxMemoryImageReporter());
+    if (XRE_IsParentProcess() && gfxVars::UseWebRender()) {
+      RegisterStrongAsyncMemoryReporter(new WebRenderMemoryReporter());
+    }
+
 #ifdef USE_SKIA
     RegisterStrongMemoryReporter(new SkMemoryReporter());
 #endif
@@ -1645,22 +1745,21 @@ gfxPlatform::UpdateFontList()
     return NS_OK;
 }
 
-nsresult
-gfxPlatform::GetStandardFamilyName(const nsAString& aFontName,
-                                   nsAString& aFamilyName)
+void
+gfxPlatform::GetStandardFamilyName(const nsCString& aFontName,
+                                   nsACString& aFamilyName)
 {
     gfxPlatformFontList::PlatformFontList()->GetStandardFamilyName(aFontName,
                                                                    aFamilyName);
-    return NS_OK;
 }
 
-nsAutoString
+nsAutoCString
 gfxPlatform::GetDefaultFontName(const nsACString& aLangGroup,
                                 const nsACString& aGenericFamily)
 {
     // To benefit from Return Value Optimization, all paths here must return
     // this one variable:
-    nsAutoString result;
+    nsAutoCString result;
 
     gfxFontFamily* fontFamily = gfxPlatformFontList::PlatformFontList()->
         GetDefaultFontFamily(aLangGroup, aGenericFamily);
@@ -1765,7 +1864,7 @@ gfxPlatform::IsFontFormatSupported(uint32_t aFormatFlags)
 }
 
 gfxFontEntry*
-gfxPlatform::LookupLocalFont(const nsAString& aFontName,
+gfxPlatform::LookupLocalFont(const nsACString& aFontName,
                              WeightRange aWeightForEntry,
                              StretchRange aStretchForEntry,
                              SlantStyleRange aStyleForEntry)
@@ -1776,7 +1875,7 @@ gfxPlatform::LookupLocalFont(const nsAString& aFontName,
 }
 
 gfxFontEntry*
-gfxPlatform::MakePlatformFont(const nsAString& aFontName,
+gfxPlatform::MakePlatformFont(const nsACString& aFontName,
                               WeightRange aWeightForEntry,
                               StretchRange aStretchForEntry,
                               SlantStyleRange aStyleForEntry,
@@ -2599,7 +2698,9 @@ gfxPlatform::InitWebRenderConfig()
           featureWebRenderQualified.Disable(FeatureStatus::Blocked,
                                             "Bad device id",
                                             NS_LITERAL_CSTRING("FEATURE_FAILURE_BAD_DEVICE_ID"));
-        } else if (deviceID < 1000) { // > 1000 or 0x3e8 roughly corresponds to Tesla and newer
+        } else if (deviceID < 0x6c0) {
+           // 0x6c0 is the lowest Fermi device id. Unfortunately some Tesla devices that don't support D3D 10.1
+           // have higher deviceIDs. They will be included, but blocked by ANGLE.
           featureWebRenderQualified.Disable(FeatureStatus::Blocked,
                                             "Device too old",
                                             NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));

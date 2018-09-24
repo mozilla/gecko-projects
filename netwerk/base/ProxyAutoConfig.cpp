@@ -305,6 +305,13 @@ public:
     return NS_OK;
   }
 
+  NS_IMETHOD OnLookupByTypeComplete(nsICancelable *request,
+                                    nsIDNSByTypeRecord *res,
+                                    nsresult status) override
+  {
+    return NS_OK;
+  }
+
   // nsITimerCallback
   NS_IMETHOD Notify(nsITimer *timer) override
   {
@@ -662,8 +669,6 @@ private:
       return NS_ERROR_OUT_OF_MEMORY;
     }
 
-    JSAutoRequest areq(mContext);
-
     JS::RealmOptions options;
     options.creationOptions().setNewCompartmentInSystemZone();
     mGlobal = JS_NewGlobalObject(mContext, &sGlobalClass, nullptr,
@@ -750,7 +755,6 @@ ProxyAutoConfig::SetupJS()
     return NS_ERROR_FAILURE;
 
   JSContext* cx = mJSContext->Context();
-  JSAutoRequest areq(cx);
   JSAutoRealm ar(cx, mJSContext->Global());
   AutoPACErrorReporter aper(cx);
 
@@ -760,12 +764,15 @@ ProxyAutoConfig::SetupJS()
   bool isDataURI = nsDependentCSubstring(mPACURI, 0, 5).LowerCaseEqualsASCII("data:", 5);
 
   SetRunning(this);
+
   JS::Rooted<JSObject*> global(cx, mJSContext->Global());
+
   JS::CompileOptions options(cx);
   options.setFileAndLine(mPACURI.get(), 1);
+
   JS::Rooted<JSScript*> script(cx);
-  if (!JS_CompileScript(cx, mPACScript.get(), mPACScript.Length(), options,
-                        &script) ||
+  if (!JS::CompileLatin1(cx, options, mPACScript.get(), mPACScript.Length(),
+                         &script) ||
       !JS_ExecuteScript(cx, script))
   {
     nsString alertMessage(NS_LITERAL_STRING("PAC file failed to install from "));
@@ -810,7 +817,6 @@ ProxyAutoConfig::GetProxyForURI(const nsCString &aTestURI,
     return NS_ERROR_NOT_AVAILABLE;
 
   JSContext *cx = mJSContext->Context();
-  JSAutoRequest areq(cx);
   JSAutoRealm ar(cx, mJSContext->Global());
   AutoPACErrorReporter aper(cx);
 

@@ -55,11 +55,11 @@
 
 #include "nsIAppShellService.h"
 #include "nsIAppStartup.h"
-#include "nsIAppStartupNotifier.h"
+#include "nsAppStartupNotifier.h"
 #include "nsIMutableArray.h"
 #include "nsICategoryManager.h"
 #include "nsIChromeRegistry.h"
-#include "nsICommandLineRunner.h"
+#include "nsCommandLine.h"
 #include "nsIComponentManager.h"
 #include "nsIComponentRegistrar.h"
 #include "nsIConsoleService.h"
@@ -1399,11 +1399,11 @@ public:
   nsresult Initialize();
   nsresult SetWindowCreator(nsINativeAppSupport* native);
 
-  static nsresult CreateAppSupport(nsISupports* aOuter, REFNSIID aIID, void** aResult);
-
 private:
   nsIServiceManager* mServiceManager;
   static nsINativeAppSupport* gNativeAppSupport;
+
+  friend already_AddRefed<nsINativeAppSupport> NS_GetNativeAppSupport();
 };
 
 ScopedXPCOMStartup::~ScopedXPCOMStartup()
@@ -1435,10 +1435,6 @@ ScopedXPCOMStartup::~ScopedXPCOMStartup()
 #define APPINFO_CID \
   { 0x95d89e3e, 0xa169, 0x41a3, { 0x8e, 0x56, 0x71, 0x99, 0x78, 0xe1, 0x5b, 0x12 } }
 
-// {0C4A446C-EE82-41f2-8D04-D366D2C7A7D4}
-static const nsCID kNativeAppSupportCID =
-  { 0xc4a446c, 0xee82, 0x41f2, { 0x8d, 0x4, 0xd3, 0x66, 0xd2, 0xc7, 0xa7, 0xd4 } };
-
 // {5F5E59CE-27BC-47eb-9D1F-B09CA9049836}
 static const nsCID kProfileServiceCID =
   { 0x5f5e59ce, 0x27bc, 0x47eb, { 0x9d, 0x1f, 0xb0, 0x9c, 0xa9, 0x4, 0x98, 0x36 } };
@@ -1456,7 +1452,6 @@ NS_DEFINE_NAMED_CID(APPINFO_CID);
 static const mozilla::Module::CIDEntry kXRECIDs[] = {
   { &kAPPINFO_CID, false, nullptr, AppInfoConstructor },
   { &kProfileServiceCID, false, ProfileServiceFactoryConstructor, nullptr },
-  { &kNativeAppSupportCID, false, nullptr, ScopedXPCOMStartup::CreateAppSupport },
   { nullptr }
 };
 
@@ -1467,7 +1462,6 @@ static const mozilla::Module::ContractIDEntry kXREContracts[] = {
   { NS_CRASHREPORTER_CONTRACTID, &kAPPINFO_CID },
 #endif // MOZ_CRASHREPORTER
   { NS_PROFILESERVICE_CONTRACTID, &kProfileServiceCID },
-  { NS_NATIVEAPPSUPPORT_CONTRACTID, &kNativeAppSupportCID },
   { nullptr }
 };
 
@@ -1571,16 +1565,14 @@ ScopedXPCOMStartup::SetWindowCreator(nsINativeAppSupport* native)
   return wwatch->SetWindowCreator(creator);
 }
 
-/* static */ nsresult
-ScopedXPCOMStartup::CreateAppSupport(nsISupports* aOuter, REFNSIID aIID, void** aResult)
+/* static */ already_AddRefed<nsINativeAppSupport>
+NS_GetNativeAppSupport()
 {
-  if (aOuter)
-    return NS_ERROR_NO_AGGREGATION;
+  if (!ScopedXPCOMStartup::gNativeAppSupport) {
+    return nullptr;
+  }
 
-  if (!gNativeAppSupport)
-    return NS_ERROR_NOT_INITIALIZED;
-
-  return gNativeAppSupport->QueryInterface(aIID, aResult);
+  return do_AddRef(ScopedXPCOMStartup::gNativeAppSupport);
 }
 
 nsINativeAppSupport* ScopedXPCOMStartup::gNativeAppSupport;
@@ -1595,10 +1587,7 @@ static void DumpArbitraryHelp()
     ScopedXPCOMStartup xpcom;
     xpcom.Initialize();
 
-    nsCOMPtr<nsICommandLineRunner> cmdline
-      (do_CreateInstance("@mozilla.org/toolkit/command-line;1"));
-    if (!cmdline)
-      return;
+    nsCOMPtr<nsICommandLineRunner> cmdline(new nsCommandLine());
 
     nsCString text;
     rv = cmdline->GetHelpText(text);
@@ -2130,6 +2119,7 @@ ShowProfileManager(nsIToolkitProfileService* aProfileSvc,
   nsCOMPtr<nsIFile> profD, profLD;
   char16_t* profileNamePtr;
   nsAutoCString profileName;
+  bool offline = false;
 
   {
     ScopedXPCOMStartup xpcom;
@@ -2183,6 +2173,10 @@ ShowProfileManager(nsIToolkitProfileService* aProfileSvc,
       rv = ioParamBlock->GetInt(0, &dialogConfirmed);
       if (NS_FAILED(rv) || dialogConfirmed == 0) return NS_ERROR_ABORT;
 
+      int32_t startOffline;
+      rv = ioParamBlock->GetInt(1, &startOffline);
+      offline = NS_SUCCEEDED(rv) && startOffline == 1;
+
       nsCOMPtr<nsIProfileLock> lock;
       rv = dlgArray->QueryElementAt(0, NS_GET_IID(nsIProfileLock),
                                     getter_AddRefs(lock));
@@ -2208,8 +2202,6 @@ ShowProfileManager(nsIToolkitProfileService* aProfileSvc,
   SaveFileToEnv("XRE_PROFILE_LOCAL_PATH", profLD);
   SaveWordToEnv("XRE_PROFILE_NAME", profileName);
 
-  bool offline = false;
-  aProfileSvc->GetStartOffline(&offline);
   if (offline) {
     SaveToEnv("XRE_START_OFFLINE=1");
   }
@@ -3239,6 +3231,19 @@ XREMain::XRE_mainInit(bool* aExitFlag)
     ChaosMode::SetChaosFeature(feature);
   }
 
+#ifdef MOZ_ASAN_REPORTER
+  // In ASan Reporter builds, we enable certain chaos features by default unless
+  // the user explicitly requests a particular set of features.
+  if (!PR_GetEnv("MOZ_CHAOSMODE")) {
+    ChaosMode::SetChaosFeature(static_cast<ChaosFeature>(
+                               ChaosFeature::ThreadScheduling
+                               | ChaosFeature::NetworkScheduling
+                               | ChaosFeature::TimerScheduling
+                               | ChaosFeature::TaskDispatching
+                               | ChaosFeature::TaskRunning));
+  }
+#endif
+
   if (ChaosMode::isActive(ChaosFeature::Any)) {
     printf_stderr("*** You are running in chaos test mode. See ChaosMode.h. ***\n");
   }
@@ -3670,12 +3675,57 @@ XREMain::XRE_mainInit(bool* aExitFlag)
 }
 
 #ifdef XP_WIN
+static bool QueryOneWMIProperty(IWbemServices* aServices,
+                                const wchar_t* aWMIClass,
+                                const wchar_t* aProperty,
+                                VARIANT* aResult)
+{
+  RefPtr<IEnumWbemClassObject> enumerator;
+
+  _bstr_t query(L"SELECT * FROM ");
+  query += _bstr_t(aWMIClass);
+
+  HRESULT hr = aServices->ExecQuery(_bstr_t(L"WQL"), query,
+                                    WBEM_FLAG_FORWARD_ONLY |
+                                      WBEM_FLAG_RETURN_IMMEDIATELY,
+                                    nullptr, getter_AddRefs(enumerator));
+
+  if (FAILED(hr) || !enumerator) {
+    return false;
+  }
+
+  RefPtr<IWbemClassObject> classObject;
+  ULONG results;
+
+  hr = enumerator->Next(WBEM_INFINITE, 1, getter_AddRefs(classObject), &results);
+
+  if (FAILED(hr) || results == 0) {
+    return false;
+  }
+
+  hr = classObject->Get(aProperty, 0, aResult, 0, 0);
+
+  return SUCCEEDED(hr);
+}
+
 /**
- * Uses WMI to read some manufacturer information that may be useful for
- * diagnosing hardware-specific crashes. This function is best-effort; failures
- * shouldn't burden the caller. COM must be initialized before calling.
+ * Uses WMI to read some information that may be useful for diagnosing
+ * crashes. This function is best-effort; failures shouldn't burden the
+ * caller. COM must be initialized before calling.
  */
-static void AnnotateSystemManufacturer()
+
+static const char kMemoryErrorCorrectionValues[][15] = {
+  "Reserved", // 0
+  "Other", // 1
+  "Unknown", // 2
+  "None", // 3
+  "Parity", // 4
+  "Single-bit ECC", // 5
+  "Multi-bit ECC", // 6
+  "CRC" // 7
+};
+
+static void AnnotateWMIData()
 {
   RefPtr<IWbemLocator> locator;
 
@@ -3703,40 +3753,39 @@ static void AnnotateSystemManufacturer()
     return;
   }
 
-  RefPtr<IEnumWbemClassObject> enumerator;
-
-  hr = services->ExecQuery(_bstr_t(L"WQL"), _bstr_t(L"SELECT * FROM Win32_BIOS"),
-                           WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
-                           nullptr, getter_AddRefs(enumerator));
-
-  if (FAILED(hr) || !enumerator) {
-    return;
-  }
-
-  RefPtr<IWbemClassObject> classObject;
-  ULONG results;
-
-  hr = enumerator->Next(WBEM_INFINITE, 1, getter_AddRefs(classObject), &results);
-
-  if (FAILED(hr) || results == 0) {
-    return;
-  }
 
   VARIANT value;
   VariantInit(&value);
 
-  hr = classObject->Get(L"Manufacturer", 0, &value, 0, 0);
-
-  if (SUCCEEDED(hr) && V_VT(&value) == VT_BSTR) {
+  // Annotate information about the system manufacturer.
+  if (QueryOneWMIProperty(services, L"Win32_BIOS", L"Manufacturer", &value) &&
+      V_VT(&value) == VT_BSTR) {
     CrashReporter::AnnotateCrashReport(
       CrashReporter::Annotation::BIOS_Manufacturer,
       NS_ConvertUTF16toUTF8(V_BSTR(&value)));
   }
 
   VariantClear(&value);
+
+  // Annotate information about type of memory error correction.
+  if (QueryOneWMIProperty(services, L"Win32_PhysicalMemoryArray",
+                          L"MemoryErrorCorrection", &value) &&
+      V_VT(&value) == VT_I4) {
+    long valueInt = V_I4(&value);
+    nsCString valueString;
+    if (valueInt < 0 || valueInt >= long(ArrayLength(kMemoryErrorCorrectionValues))) {
+      valueString.AssignLiteral("Unexpected value");
+    } else {
+      valueString.AssignASCII(kMemoryErrorCorrectionValues[valueInt]);
+    }
+    CrashReporter::AnnotateCrashReport(
+      CrashReporter::Annotation::MemoryErrorCorrection, valueString);
+  }
+
+  VariantClear(&value);
 }
 
-static void PR_CALLBACK AnnotateSystemManufacturer_ThreadStart(void*)
+static void PR_CALLBACK AnnotateWMIData_ThreadStart(void*)
 {
   HRESULT hr = CoInitialize(nullptr);
 
@@ -3744,7 +3793,7 @@ static void PR_CALLBACK AnnotateSystemManufacturer_ThreadStart(void*)
     return;
   }
 
-  AnnotateSystemManufacturer();
+  AnnotateWMIData();
 
   CoUninitialize();
 }
@@ -4465,7 +4514,7 @@ XREMain::XRE_mainRun()
   CrashReporter::SetIncludeContextHeap(includeContextHeap);
 
 #ifdef XP_WIN
-  PR_CreateThread(PR_USER_THREAD, AnnotateSystemManufacturer_ThreadStart, 0,
+  PR_CreateThread(PR_USER_THREAD, AnnotateWMIData_ThreadStart, 0,
                   PR_PRIORITY_LOW, PR_GLOBAL_THREAD, PR_UNJOINABLE_THREAD, 0);
 #endif
 
@@ -4595,13 +4644,7 @@ XREMain::XRE_mainRun()
   // ready in time for early consumers, such as the component loader.
   mDirProvider.InitializeUserPrefs();
 
-  {
-    nsCOMPtr<nsIObserver> startupNotifier
-      (do_CreateInstance(NS_APPSTARTUPNOTIFIER_CONTRACTID, &rv));
-    NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
-
-    startupNotifier->Observe(nullptr, APPSTARTUP_TOPIC, nullptr);
-  }
+  nsAppStartupNotifier::NotifyObservers(APPSTARTUP_TOPIC);
 
   nsCOMPtr<nsIAppStartup> appStartup
     (do_GetService(NS_APPSTARTUP_CONTRACTID));
@@ -4629,8 +4672,7 @@ XREMain::XRE_mainRun()
   NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
 
   if (!mShuttingDown) {
-    cmdLine = do_CreateInstance("@mozilla.org/toolkit/command-line;1");
-    NS_ENSURE_TRUE(cmdLine, NS_ERROR_FAILURE);
+    cmdLine = new nsCommandLine();
 
     rv = cmdLine->Init(gArgc, gArgv, workingDir,
                        nsICommandLine::STATE_INITIAL_LAUNCH);
@@ -4696,8 +4738,7 @@ XREMain::XRE_mainRun()
 #ifdef XP_MACOSX
     // we re-initialize the command-line service and do appleevents munging
     // after we are sure that we're not restarting
-    cmdLine = do_CreateInstance("@mozilla.org/toolkit/command-line;1");
-    NS_ENSURE_TRUE(cmdLine, NS_ERROR_FAILURE);
+    cmdLine = new nsCommandLine();
 
     CommandLineServiceMac::SetupMacCommandLine(gArgc, gArgv, false);
 

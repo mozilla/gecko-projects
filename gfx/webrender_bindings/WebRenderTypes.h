@@ -351,6 +351,23 @@ static inline wr::LayoutRect ToRoundedLayoutRect(const mozilla::LayoutDeviceRect
   return wr::ToLayoutRect(rect);
 }
 
+static inline wr::LayoutRect IntersectLayoutRect(const wr::LayoutRect& aRect,
+                                                 const wr::LayoutRect& aOther)
+{
+  wr::LayoutRect r;
+  r.origin.x = std::max(aRect.origin.x, aOther.origin.x);
+  r.origin.y = std::max(aRect.origin.y, aOther.origin.y);
+  r.size.width = std::min(aRect.origin.x + aRect.size.width,
+                          aOther.origin.x + aOther.size.width) - r.origin.x;
+  r.size.height = std::min(aRect.origin.y + aRect.size.height,
+                           aOther.origin.y + aOther.size.height) - r.origin.y;
+  if (r.size.width < 0 || r.size.height < 0) {
+    r.size.width = 0;
+    r.size.height = 0;
+  }
+  return r;
+}
+
 static inline wr::LayoutSize ToLayoutSize(const mozilla::LayoutDeviceSize& size)
 {
   wr::LayoutSize ls;
@@ -367,6 +384,19 @@ static inline wr::ComplexClipRegion ToComplexClipRegion(const gfx::RoundedRect& 
   ret.radii.top_right    = ToLayoutSize(LayoutDeviceSize::FromUnknownSize(rect.corners.radii[mozilla::eCornerTopRight]));
   ret.radii.bottom_left  = ToLayoutSize(LayoutDeviceSize::FromUnknownSize(rect.corners.radii[mozilla::eCornerBottomLeft]));
   ret.radii.bottom_right = ToLayoutSize(LayoutDeviceSize::FromUnknownSize(rect.corners.radii[mozilla::eCornerBottomRight]));
+  ret.mode = wr::ClipMode::Clip;
+  return ret;
+}
+
+static inline wr::ComplexClipRegion SimpleRadii(const wr::LayoutRect& aRect, float aRadii)
+{
+  wr::ComplexClipRegion ret;
+  wr::LayoutSize radii { aRadii, aRadii };
+  ret.rect = aRect;
+  ret.radii.top_left = radii;
+  ret.radii.top_right = radii;
+  ret.radii.bottom_left = radii;
+  ret.radii.bottom_right = radii;
   ret.mode = wr::ClipMode::Clip;
   return ret;
 }
@@ -456,9 +486,9 @@ static inline wr::BorderRadius ToBorderRadius(const mozilla::LayoutDeviceSize& t
   return br;
 }
 
-static inline wr::BorderWidths ToBorderWidths(float top, float right, float bottom, float left)
+static inline wr::LayoutSideOffsets ToBorderWidths(float top, float right, float bottom, float left)
 {
-  wr::BorderWidths bw;
+  wr::LayoutSideOffsets bw;
   bw.top = top;
   bw.right = right;
   bw.bottom = bottom;

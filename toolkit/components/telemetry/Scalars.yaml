@@ -35,20 +35,6 @@ a11y:
     record_in_processes:
       - 'main'
 
-# The following section contains the aushelper system add-on scalars.
-aushelper:
-  websense_reg_version:
-    bug_numbers:
-      - 1305847
-    description: The Websense version from the Windows registry.
-    expires: "60"
-    kind: string
-    notification_emails:
-      - application-update-telemetry-alerts@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - 'main'
-
 # The following section contains the browser engagement scalars.
 browser.engagement:
   max_concurrent_tab_count:
@@ -266,6 +252,20 @@ browser.engagement.navigation:
     record_in_processes:
       - 'main'
 
+  webextension:
+    bug_numbers:
+      - 1492233
+    description: >
+      The count URI loads triggered in a subsession from a webextension.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - mkaply@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
 # The following section contains (RSS/Atom) feed usage
 browser.feeds:
   preview_loaded:
@@ -435,7 +435,7 @@ services.sync:
     description: >
       Records transitions between login states of "success", "unverified"
       and "rejected.
-    expires: "65"
+    expires: "68"
     kind: boolean
     keyed: true
     notification_emails:
@@ -1525,7 +1525,7 @@ telemetry:
     description: >
       How many times the GeckoView Telemetry persistence timer was hit during
       the current subsession.
-    expires: "65"
+    expires: "70"
     kind: uint
     notification_emails:
       - telemetry-client-dev@mozilla.com
@@ -1540,7 +1540,7 @@ telemetry:
     description: >
       The number of times the pending operations list reached the
       high-water mark, leading to operations being applied immediately.
-    expires: "65"
+    expires: "70"
     kind: uint
     keyed: false
     notification_emails:

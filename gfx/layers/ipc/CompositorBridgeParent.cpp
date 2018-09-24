@@ -117,6 +117,16 @@ using namespace std;
 using base::ProcessId;
 using base::Thread;
 
+
+/// Equivalent to asserting CompositorThreadHolder::IsInCompositorThread with the
+/// addition that it doesn't assert if the compositor thread holder is already gone
+/// during late shutdown.
+static void AssertIsInCompositorThread()
+{
+  MOZ_RELEASE_ASSERT(!CompositorThread() ||
+                     CompositorThreadHolder::IsInCompositorThread());
+}
+
 CompositorBridgeParentBase::CompositorBridgeParentBase(CompositorManagerParent* aManager)
   : mCanSend(true)
   , mCompositorManager(aManager)
@@ -304,16 +314,15 @@ CompositorBridgeParent::Setup()
 }
 
 void
-CompositorBridgeParent::Shutdown()
-{
-  MOZ_ASSERT(sCompositorMap);
-  MOZ_ASSERT(sCompositorMap->empty());
-  sCompositorMap = nullptr;
-}
-
-void
 CompositorBridgeParent::FinishShutdown()
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (sCompositorMap) {
+    MOZ_ASSERT(sCompositorMap->empty());
+    sCompositorMap = nullptr;
+  }
+
   // TODO: this should be empty by now...
   sIndirectLayerTrees.clear();
 }
@@ -658,6 +667,8 @@ CompositorBridgeParent::RecvStartFrameTimeRecording(const int32_t& aBufferSize, 
 {
   if (mLayerManager) {
     *aOutStartIndex = mLayerManager->StartFrameTimeRecording(aBufferSize);
+  } else if (mWrBridge) {
+    *aOutStartIndex = mWrBridge->StartFrameTimeRecording(aBufferSize);
   } else {
     *aOutStartIndex = 0;
   }
@@ -670,6 +681,8 @@ CompositorBridgeParent::RecvStopFrameTimeRecording(const uint32_t& aStartIndex,
 {
   if (mLayerManager) {
     mLayerManager->StopFrameTimeRecording(aStartIndex, *intervals);
+  } else if (mWrBridge) {
+    mWrBridge->StopFrameTimeRecording(aStartIndex, *intervals);
   }
   return IPC_OK();
 }
@@ -1663,15 +1676,14 @@ CompositorBridgeParent::DeallocPLayerTransactionParent(PLayerTransactionParent* 
 
 CompositorBridgeParent* CompositorBridgeParent::GetCompositorBridgeParent(uint64_t id)
 {
-  MOZ_RELEASE_ASSERT(CompositorThreadHolder::IsInCompositorThread());
-
+  AssertIsInCompositorThread();
   CompositorMap::iterator it = sCompositorMap->find(id);
   return it != sCompositorMap->end() ? it->second : nullptr;
 }
 
 void CompositorBridgeParent::AddCompositor(CompositorBridgeParent* compositor, uint64_t* outID)
 {
-  MOZ_RELEASE_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+  AssertIsInCompositorThread();
 
   static uint64_t sNextID = 1;
 
@@ -1682,7 +1694,7 @@ void CompositorBridgeParent::AddCompositor(CompositorBridgeParent* compositor, u
 
 CompositorBridgeParent* CompositorBridgeParent::RemoveCompositor(uint64_t id)
 {
-  MOZ_RELEASE_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+  AssertIsInCompositorThread();
 
   CompositorMap::iterator it = sCompositorMap->find(id);
   if (it == sCompositorMap->end()) {
@@ -1777,6 +1789,12 @@ CompositorBridgeParent::RecvAdoptChild(const LayersId& child)
 
   { // scope lock
     MonitorAutoLock lock(*sIndirectLayerTreesLock);
+    // If child is already belong to this CompositorBridgeParent,
+    // no need to handle adopting child.
+    if (sIndirectLayerTrees[child].mParent == this) {
+      return IPC_OK();
+    }
+
     if (sIndirectLayerTrees[child].mParent) {
       // We currently don't support adopting children from one compositor to
       // another if the two compositors don't have the same options.
@@ -1919,6 +1937,17 @@ CompositorBridgeParent::NotifyMemoryPressure()
     RefPtr<wr::WebRenderAPI> api = mWrBridge->GetWebRenderAPI();
     if (api) {
       api->NotifyMemoryPressure();
+    }
+  }
+}
+
+void
+CompositorBridgeParent::AccumulateMemoryReport(wr::MemoryReport* aReport)
+{
+  if (mWrBridge) {
+    RefPtr<wr::WebRenderAPI> api = mWrBridge->GetWebRenderAPI();
+    if (api) {
+      api->AccumulateMemoryReport(aReport);
     }
   }
 }

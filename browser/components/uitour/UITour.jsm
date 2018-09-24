@@ -238,7 +238,7 @@ var UITour = {
       query: (aDocument) => {
         aDocument.ownerGlobal.BrowserPageActions.placeLazyActionsInPanel();
         return aDocument.getElementById("pageAction-urlbar-screenshots") ||
-               aDocument.getElementById("pageAction-panel-screenshots");
+               aDocument.getElementById("pageAction-panel-screenshots_mozilla_org");
       },
     }],
   ]),
@@ -468,7 +468,9 @@ var UITour = {
           }
 
           // We want to replace the current tab.
-          browser.loadURI(url.href);
+          browser.loadURI(url.href, {
+            triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({}),
+          });
         });
         break;
       }
@@ -483,7 +485,9 @@ var UITour = {
           }
 
           // We want to replace the current tab.
-          browser.loadURI(url.href);
+          browser.loadURI(url.href, {
+            triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({}),
+          });
         });
         break;
       }
@@ -1246,14 +1250,14 @@ var UITour = {
   showMenu(aWindow, aMenuName, aOpenCallback = null) {
     log.debug("showMenu:", aMenuName);
     function openMenuButton(aMenuBtn) {
-      if (!aMenuBtn || !aMenuBtn.boxObject || aMenuBtn.open) {
+      if (!aMenuBtn || !aMenuBtn.hasMenu() || aMenuBtn.open) {
         if (aOpenCallback)
           aOpenCallback();
         return;
       }
       if (aOpenCallback)
         aMenuBtn.addEventListener("popupshown", aOpenCallback, { once: true });
-      aMenuBtn.boxObject.openMenu(true);
+      aMenuBtn.openMenu(true);
     }
 
     if (aMenuName == "appMenu" || aMenuName == "pageActionPanel") {
@@ -1342,8 +1346,9 @@ var UITour = {
   hideMenu(aWindow, aMenuName) {
     log.debug("hideMenu:", aMenuName);
     function closeMenuButton(aMenuBtn) {
-      if (aMenuBtn && aMenuBtn.boxObject)
-        aMenuBtn.boxObject.openMenu(false);
+      if (aMenuBtn && aMenuBtn.hasMenu()) {
+        aMenuBtn.openMenu(false);
+      }
     }
 
     if (aMenuName == "appMenu") {

@@ -824,6 +824,16 @@ public:
     return nullptr;
   }
 
+  virtual already_AddRefed<ScaledFont>
+    CreateScaledFontFromWRFont(Float aGlyphSize,
+                               const wr::FontInstanceOptions* aOptions,
+                               const wr::FontInstancePlatformOptions* aPlatformOptions,
+                               const FontVariation* aVariations,
+                               uint32_t aNumVariations)
+  {
+    return CreateScaledFont(aGlyphSize, nullptr, 0, aVariations, aNumVariations);
+  }
+
 protected:
   UnscaledFont() {}
 
@@ -1849,7 +1859,7 @@ public:
                                   Float aGamma,
                                   Float aContrast);
 
-  static void UpdateSystemTextQuality();
+  static void SetSystemTextQuality(uint8_t aQuality);
 
 private:
   static StaticRefPtr<ID2D1Device> mD2D1Device;

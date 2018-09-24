@@ -188,6 +188,45 @@ const SEARCH_DEFAULT_UPDATE_INTERVAL = 7;
 // from the server doesn't specify an interval.
 const SEARCH_GEO_DEFAULT_UPDATE_INTERVAL = 2592000; // 30 days.
 
+// Regular expressions used to identify common search URLS.
+const SEARCH_URL_REGEX = new RegExp([
+  /^https:\/\/www\.(google)\.(?:.+)\/search/,
+  /^https:\/\/(?:.*)search\.(yahoo)\.com\/search/,
+  /^https:\/\/www\.(bing)\.com\/search/,
+  /^https:\/\/(duckduckgo)\.com\//,
+  /^https:\/\/www\.(baidu)\.com\/(?:s|baidu)/,
+].map(regex => regex.source).join("|"));
+
+// Used to identify various parameters (query, code, etc.) in search URLS.
+const SEARCH_PROVIDER_INFO = {
+  "google": {
+    "queryParam": "q",
+    "codeParam": "client",
+    "codePrefixes": ["firefox"],
+    "followonParams": ["oq", "ved", "ei"],
+  },
+  "duckduckgo": {
+    "queryParam": "q",
+    "codeParam": "t",
+    "codePrefixes": ["ff"],
+  },
+  "yahoo": {
+    "queryParam": "p",
+  },
+  "baidu": {
+    "queryParam": "wd",
+    "codeParam": "tn",
+    "codePrefixes": ["monline_dg"],
+    "followonParams": ["oq"],
+  },
+  "bing": {
+    "queryParam": "q",
+    "codeParam": "pc",
+    "codePrefixes": ["MOZ", "MZ"],
+  },
+};
+
+const SEARCH_COUNTS_HISTOGRAM_KEY = "SEARCH_COUNTS";
 /**
  * Prefixed to all search debug output.
  */
@@ -761,7 +800,7 @@ function getDir(aKey, aIFace) {
  * exists in nsHttpHandler.cpp when building the UA string.
  */
 function getLocale() {
-  return Services.locale.getRequestedLocale();
+  return Services.locale.requestedLocale;
 }
 
 /**
@@ -1022,7 +1061,7 @@ EngineURL.prototype = {
 
     // Create an application/x-www-form-urlencoded representation of our params
     // (name=value&name=value&name=value)
-    var dataString = "";
+    let dataArray = [];
     for (var i = 0; i < this.params.length; ++i) {
       var param = this.params[i];
 
@@ -1032,8 +1071,9 @@ EngineURL.prototype = {
 
       var value = ParamSubstitution(param.value, aSearchTerms, aEngine);
 
-      dataString += (i > 0 ? "&" : "") + param.name + "=" + value;
+      dataArray.push(param.name + "=" + value);
     }
+    let dataString = dataArray.join("&");
 
     var postData = null;
     if (this.method == "GET") {
@@ -3082,11 +3122,16 @@ SearchService.prototype = {
 
   _blackList: [
     "blacklist=true",
+    "hspart=lvs",
+    "form=CONBDF",
+    "clid=2308146",
+    "fr=mcafee",
+    "PC=MC0",
   ],
 
   _addEngineToStore: function SRCH_SVC_addEngineToStore(aEngine) {
-    let url = aEngine._getURLOfType("text/html").getSubmission("dummy", aEngine).uri.spec;
-    if (this._blackList.some(code => url.includes(code))) {
+    let url = aEngine._getURLOfType("text/html").getSubmission("dummy", aEngine).uri.spec.toLowerCase();
+    if (this._blackList.some(code => url.includes(code.toLowerCase()))) {
       LOG("_addEngineToStore: Ignoring blacklisted engine");
       return;
     }
@@ -3396,7 +3441,7 @@ SearchService.prototype = {
     }
 
     let searchSettings;
-    let locale = Services.locale.getAppLocaleAsBCP47();
+    let locale = Services.locale.appLocaleAsBCP47;
     if ("locales" in json &&
         locale in json.locales) {
       searchSettings = json.locales[locale];
@@ -4420,6 +4465,58 @@ SearchService.prototype = {
     return new ParseSubmissionResult(mapEntry.engine, terms, offset, length);
   },
 
+  recordSearchURLTelemetry(url) {
+    let matches = url.match(SEARCH_URL_REGEX);
+    if (!matches) {
+      return;
+    }
+    let provider = matches.filter((e, i) => e && i != 0)[0];
+    let searchProviderInfo = SEARCH_PROVIDER_INFO[provider];
+    let queries = new URLSearchParams(url.split("#")[0].split("?")[1]);
+    if (!queries.get(searchProviderInfo.queryParam)) {
+      return;
+    }
+    // Default to organic to simplify things.
+    // We override type in the sap cases.
+    let type = "organic";
+    let code;
+    if (searchProviderInfo.codeParam) {
+      code = queries.get(searchProviderInfo.codeParam);
+      if (code &&
+          searchProviderInfo.codePrefixes.some(p => code.startsWith(p))) {
+        if (searchProviderInfo.followonParams &&
+           searchProviderInfo.followonParams.some(p => queries.has(p))) {
+          type = "sap-follow-on";
+        } else {
+          type = "sap";
+        }
+      } else if (provider == "bing") {
+        // Bing requires lots of extra work related to cookies.
+        let secondaryCode = queries.get("form");
+        // This code is used for all Bing follow-on searches.
+        if (secondaryCode == "QBRE") {
+          for (let cookie of Services.cookies.getCookiesFromHost("www.bing.com", {})) {
+            if (cookie.name == "SRCHS") {
+              // If this cookie is present, it's probably an SAP follow-on.
+              // This might be an organic follow-on in the same session,
+              // but there is no way to tell the difference.
+              if (searchProviderInfo.codePrefixes.some(p => cookie.value.startsWith("PC=" + p))) {
+                type = "sap-follow-on";
+                code = cookie.value.split("=")[1];
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    let payload = `${provider}.in-content:${type}:${code || "none"}`;
+    let histogram = Services.telemetry.getKeyedHistogramById(SEARCH_COUNTS_HISTOGRAM_KEY);
+    histogram.add(payload);
+    LOG("nsSearchService::recordSearchURLTelemetry: " + payload);
+  },
+
   // nsIObserver
   observe: function SRCH_SVC_observe(aEngine, aTopic, aVerb) {
     switch (aTopic) {
@@ -4456,7 +4553,10 @@ SearchService.prototype = {
         // Locale changed. Re-init. We rely on observers, because we can't
         // return this promise to anyone.
         // FYI, This is also used by the search tests to do an async reinit.
-        this._asyncReInit();
+        // Locales are removed during shutdown, so ignore this message
+        if (!Services.startup.shuttingDown) {
+          this._asyncReInit();
+        }
         break;
     }
   },

@@ -16,6 +16,7 @@
 #include "nsScreen.h"
 #include "nsHistory.h"
 #include "nsDOMNavigationTiming.h"
+#include "nsICookieService.h"
 #include "nsIDOMStorageManager.h"
 #include "nsISecureBrowserUI.h"
 #include "nsIWebProgressListener.h"
@@ -66,7 +67,7 @@
 
 // Helper Classes
 #include "nsJSUtils.h"
-#include "jsapi.h"              // for JSAutoRequest
+#include "jsapi.h"
 #include "js/Wrapper.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsReadableUtils.h"
@@ -91,6 +92,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/ProcessHangMonitor.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/ThrottledEventQueue.h"
 #include "AudioChannelService.h"
 #include "nsAboutProtocolUtils.h"
@@ -216,6 +218,8 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "prrng.h"
 #include "nsSandboxFlags.h"
+#include "nsBaseCommandController.h"
+#include "nsXULControllers.h"
 #include "mozilla/dom/AudioContext.h"
 #include "mozilla/dom/BrowserElementDictionariesBinding.h"
 #include "mozilla/dom/cache/CacheStorage.h"
@@ -312,9 +316,6 @@ static LazyLogModule gDOMLeakPRLogOuter("DOMLeakOuter");
 static int32_t              gOpenPopupSpamCount               = 0;
 
 nsGlobalWindowOuter::OuterWindowByIdTable *nsGlobalWindowOuter::sOuterWindowsById = nullptr;
-
-// CIDs
-static NS_DEFINE_CID(kXULControllersCID, NS_XULCONTROLLERS_CID);
 
 /* static */
 nsPIDOMWindowOuter*
@@ -817,7 +818,7 @@ nsGlobalWindowOuter::nsGlobalWindowOuter()
     mIdleCallbackIndex(-1),
     mCurrentlyIdle(false),
     mAddActiveEventFuzzTime(true),
-    mFullScreen(false),
+    mFullscreen(false),
     mFullscreenMode(false),
     mIsClosed(false),
     mInClose(false),
@@ -830,6 +831,7 @@ nsGlobalWindowOuter::nsGlobalWindowOuter()
     mIsChrome(false),
     mAllowScriptsToClose(false),
     mTopLevelOuterContentWindow(false),
+    mHasStorageAccess(false),
     mSerial(0),
 #ifdef DEBUG
     mSetOpenerWindowCalled(false),
@@ -2016,6 +2018,25 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
   ReportLargeAllocStatus();
   mLargeAllocStatus = LargeAllocStatus::NONE;
 
+  mHasStorageAccess = false;
+  nsIURI* uri = aDocument->GetDocumentURI();
+  if (newInnerWindow) {
+    if (AntiTrackingCommon::ShouldHonorContentBlockingCookieRestrictions() &&
+        StaticPrefs::network_cookie_cookieBehavior() ==
+          nsICookieService::BEHAVIOR_REJECT_TRACKER &&
+        nsContentUtils::IsThirdPartyWindowOrChannel(newInnerWindow, nullptr,
+                                                    uri) &&
+        nsContentUtils::IsTrackingResourceWindow(newInnerWindow)) {
+      // Grant storage access by default if the first-party storage access
+      // permission has been granted already.
+      // Don't notify in this case, since we would be notifying the user needlessly.
+      mHasStorageAccess =
+        AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(newInnerWindow,
+                                                                uri,
+                                                                nullptr);
+    }
+  }
+
   return NS_OK;
 }
 
@@ -2925,18 +2946,17 @@ nsIControllers*
 nsGlobalWindowOuter::GetControllersOuter(ErrorResult& aError)
 {
   if (!mControllers) {
-    nsresult rv;
-    mControllers = do_CreateInstance(kXULControllersCID, &rv);
-    if (NS_FAILED(rv)) {
-      aError.Throw(rv);
+    mControllers = new nsXULControllers();
+    if (!mControllers) {
+      aError.Throw(NS_ERROR_FAILURE);
       return nullptr;
     }
 
     // Add in the default controller
-    nsCOMPtr<nsIController> controller = do_CreateInstance(
-                               NS_WINDOWCONTROLLER_CONTRACTID, &rv);
-    if (NS_FAILED(rv)) {
-      aError.Throw(rv);
+    nsCOMPtr<nsIController> controller =
+      nsBaseCommandController::CreateWindowController();
+    if (!controller) {
+      aError.Throw(NS_ERROR_FAILURE);
       return nullptr;
     }
 
@@ -3876,15 +3896,15 @@ nsGlobalWindowOuter::GetNearestWidget() const
 }
 
 void
-nsGlobalWindowOuter::SetFullScreenOuter(bool aFullScreen, mozilla::ErrorResult& aError)
+nsGlobalWindowOuter::SetFullscreenOuter(bool aFullscreen, mozilla::ErrorResult& aError)
 {
-  aError = SetFullscreenInternal(FullscreenReason::ForFullscreenMode, aFullScreen);
+  aError = SetFullscreenInternal(FullscreenReason::ForFullscreenMode, aFullscreen);
 }
 
 nsresult
-nsGlobalWindowOuter::SetFullScreen(bool aFullScreen)
+nsGlobalWindowOuter::SetFullScreen(bool aFullscreen)
 {
-  return SetFullscreenInternal(FullscreenReason::ForFullscreenMode, aFullScreen);
+  return SetFullscreenInternal(FullscreenReason::ForFullscreenMode, aFullscreen);
 }
 
 static void
@@ -4045,14 +4065,14 @@ FullscreenTransitionTask::Run()
   } else if (stage == eToggleFullscreen) {
     PROFILER_ADD_MARKER("Fullscreen toggle start");
     mFullscreenChangeStartTime = TimeStamp::Now();
-    if (MOZ_UNLIKELY(mWindow->mFullScreen != mFullscreen)) {
+    if (MOZ_UNLIKELY(mWindow->mFullscreen != mFullscreen)) {
       // This could happen in theory if several fullscreen requests in
       // different direction happen continuously in a short time. We
       // need to ensure the fullscreen state matches our target here,
       // otherwise the widget would change the window state as if we
       // toggle for Fullscreen Mode instead of Fullscreen API.
       NS_WARNING("The fullscreen state of the window does not match");
-      mWindow->mFullScreen = mFullscreen;
+      mWindow->mFullscreen = mFullscreen;
     }
     // Toggle the fullscreen state on the widget
     if (!mWindow->SetWidgetFullscreen(FullscreenReason::ForFullscreenAPI,
@@ -4166,7 +4186,7 @@ MakeWidgetFullscreen(nsGlobalWindowOuter* aWindow, FullscreenReason aReason,
 
 nsresult
 nsGlobalWindowOuter::SetFullscreenInternal(FullscreenReason aReason,
-                                           bool aFullScreen)
+                                           bool aFullscreen)
 {
   MOZ_ASSERT(nsContentUtils::IsSafeToRunScript(),
              "Requires safe to run script as it "
@@ -4174,7 +4194,7 @@ nsGlobalWindowOuter::SetFullscreenInternal(FullscreenReason aReason,
 
   NS_ENSURE_TRUE(mDocShell, NS_ERROR_FAILURE);
 
-  MOZ_ASSERT(aReason != FullscreenReason::ForForceExitFullscreen || !aFullScreen,
+  MOZ_ASSERT(aReason != FullscreenReason::ForForceExitFullscreen || !aFullscreen,
              "FullscreenReason::ForForceExitFullscreen can "
              "only be used with exiting fullscreen");
 
@@ -4185,16 +4205,16 @@ nsGlobalWindowOuter::SetFullscreenInternal(FullscreenReason aReason,
     return NS_OK;
   }
 
-  // SetFullScreen needs to be called on the root window, so get that
+  // SetFullscreen needs to be called on the root window, so get that
   // via the DocShell tree, and if we are not already the root,
-  // call SetFullScreen on that window instead.
+  // call SetFullscreen on that window instead.
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
   mDocShell->GetRootTreeItem(getter_AddRefs(rootItem));
   nsCOMPtr<nsPIDOMWindowOuter> window = rootItem ? rootItem->GetWindow() : nullptr;
   if (!window)
     return NS_ERROR_FAILURE;
   if (rootItem != mDocShell)
-    return window->SetFullscreenInternal(aReason, aFullScreen);
+    return window->SetFullscreenInternal(aReason, aFullscreen);
 
   // make sure we don't try to set full screen on a non-chrome window,
   // which might happen in embedding world
@@ -4202,27 +4222,28 @@ nsGlobalWindowOuter::SetFullscreenInternal(FullscreenReason aReason,
     return NS_ERROR_FAILURE;
 
   // If we are already in full screen mode, just return.
-  if (mFullScreen == aFullScreen)
+  if (mFullscreen == aFullscreen) {
     return NS_OK;
+  }
 
   // Note that although entering DOM fullscreen could also cause
   // consequential calls to this method, those calls will be skipped
   // at the condition above.
   if (aReason == FullscreenReason::ForFullscreenMode) {
-    if (!aFullScreen && !mFullscreenMode) {
+    if (!aFullscreen && !mFullscreenMode) {
       // If we are exiting fullscreen mode, but we actually didn't
       // entered fullscreen mode, the fullscreen state was only for
       // the Fullscreen API. Change the reason here so that we can
       // perform transition for it.
       aReason = FullscreenReason::ForFullscreenAPI;
     } else {
-      mFullscreenMode = aFullScreen;
+      mFullscreenMode = aFullscreen;
     }
   } else {
     // If we are exiting from DOM fullscreen while we initially make
     // the window fullscreen because of fullscreen mode, don't restore
     // the window. But we still need to exit the DOM fullscreen state.
-    if (!aFullScreen && mFullscreenMode) {
+    if (!aFullscreen && mFullscreenMode) {
       FinishDOMFullscreenChange(mDoc, false);
       return NS_OK;
     }
@@ -4232,20 +4253,20 @@ nsGlobalWindowOuter::SetFullscreenInternal(FullscreenReason aReason,
   // the window after we set fullscreen mode.
   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin = GetTreeOwnerWindow();
   nsCOMPtr<nsIXULWindow> xulWin(do_GetInterface(treeOwnerAsWin));
-  if (aFullScreen && xulWin) {
+  if (aFullscreen && xulWin) {
     xulWin->SetIntrinsicallySized(false);
   }
 
   // Set this before so if widget sends an event indicating its
   // gone full screen, the state trap above works.
-  mFullScreen = aFullScreen;
+  mFullscreen = aFullscreen;
 
   // Sometimes we don't want the top-level widget to actually go fullscreen,
   // for example in the B2G desktop client, we don't want the emulated screen
   // dimensions to appear to increase when entering fullscreen mode; we just
   // want the content to fill the entire client area of the emulator window.
   if (!Preferences::GetBool("full-screen-api.ignore-widgets", false)) {
-    if (MakeWidgetFullscreen(this, aReason, aFullScreen)) {
+    if (MakeWidgetFullscreen(this, aReason, aFullscreen)) {
       // The rest of code for switching fullscreen is in nsGlobalWindowOuter::
       // FinishFullscreenChange() which will be called after sizemodechange
       // event is dispatched.
@@ -4253,7 +4274,7 @@ nsGlobalWindowOuter::SetFullscreenInternal(FullscreenReason aReason,
     }
   }
 
-  FinishFullscreenChange(aFullScreen);
+  FinishFullscreenChange(aFullscreen);
   return NS_OK;
 }
 
@@ -4298,16 +4319,16 @@ nsGlobalWindowOuter::FullscreenWillChange(bool aIsFullscreen)
 /* virtual */ void
 nsGlobalWindowOuter::FinishFullscreenChange(bool aIsFullscreen)
 {
-  if (aIsFullscreen != mFullScreen) {
+  if (aIsFullscreen != mFullscreen) {
     NS_WARNING("Failed to toggle fullscreen state of the widget");
     // We failed to make the widget enter fullscreen.
     // Stop further changes and restore the state.
     if (!aIsFullscreen) {
-      mFullScreen = false;
+      mFullscreen = false;
       mFullscreenMode = false;
     } else {
       MOZ_ASSERT_UNREACHABLE("Failed to exit fullscreen?");
-      mFullScreen = true;
+      mFullscreen = true;
       // We don't know how code can reach here. Not sure
       // what value should be set for fullscreen mode.
       mFullscreenMode = false;
@@ -4319,7 +4340,7 @@ nsGlobalWindowOuter::FinishFullscreenChange(bool aIsFullscreen)
   // of the document before dispatching the "fullscreen" event, so
   // that the chrome can distinguish between browser fullscreen mode
   // and DOM fullscreen.
-  FinishDOMFullscreenChange(mDoc, mFullScreen);
+  FinishDOMFullscreenChange(mDoc, mFullscreen);
 
   // dispatch a "fullscreen" DOM event so that XUL apps can
   // respond visually if we are kicked into full screen mode
@@ -4335,7 +4356,7 @@ nsGlobalWindowOuter::FinishFullscreenChange(bool aIsFullscreen)
     }
   }
 
-  if (!mWakeLock && mFullScreen) {
+  if (!mWakeLock && mFullscreen) {
     RefPtr<power::PowerManagerService> pmService =
       power::PowerManagerService::GetInstance();
     if (!pmService) {
@@ -4348,7 +4369,7 @@ nsGlobalWindowOuter::FinishFullscreenChange(bool aIsFullscreen)
                                        GetCurrentInnerWindow(), rv);
     NS_WARNING_ASSERTION(!rv.Failed(), "Failed to lock the wakelock");
     rv.SuppressException();
-  } else if (mWakeLock && !mFullScreen) {
+  } else if (mWakeLock && !mFullscreen) {
     ErrorResult rv;
     mWakeLock->Unlock(rv);
     mWakeLock = nullptr;
@@ -4357,9 +4378,9 @@ nsGlobalWindowOuter::FinishFullscreenChange(bool aIsFullscreen)
 }
 
 bool
-nsGlobalWindowOuter::FullScreen() const
+nsGlobalWindowOuter::Fullscreen() const
 {
-  NS_ENSURE_TRUE(mDocShell, mFullScreen);
+  NS_ENSURE_TRUE(mDocShell, mFullscreen);
 
   // Get the fullscreen value of the root window, to always have the value
   // accurate, even when called from content.
@@ -4368,7 +4389,7 @@ nsGlobalWindowOuter::FullScreen() const
   if (rootItem == mDocShell) {
     if (!XRE_IsContentProcess()) {
       // We are the root window. Return our internal value.
-      return mFullScreen;
+      return mFullscreen;
     }
     if (nsCOMPtr<nsIWidget> widget = GetNearestWidget()) {
       // We are in content process, figure out the value from
@@ -4379,15 +4400,15 @@ nsGlobalWindowOuter::FullScreen() const
   }
 
   nsCOMPtr<nsPIDOMWindowOuter> window = rootItem->GetWindow();
-  NS_ENSURE_TRUE(window, mFullScreen);
+  NS_ENSURE_TRUE(window, mFullscreen);
 
-  return nsGlobalWindowOuter::Cast(window)->FullScreen();
+  return nsGlobalWindowOuter::Cast(window)->Fullscreen();
 }
 
 bool
-nsGlobalWindowOuter::GetFullScreenOuter()
+nsGlobalWindowOuter::GetFullscreenOuter()
 {
-  return FullScreen();
+  return Fullscreen();
 }
 
 bool
@@ -5291,8 +5312,16 @@ nsGlobalWindowOuter::NotifyContentBlockingState(unsigned aState,
   securityUI->GetState(&state);
   if (aState == nsIWebProgressListener::STATE_BLOCKED_TRACKING_CONTENT) {
     doc->SetHasTrackingContentBlocked(true);
+  } else if (aState == nsIWebProgressListener::STATE_BLOCKED_SLOW_TRACKING_CONTENT) {
+    doc->SetHasSlowTrackingContentBlocked(true);
+  } else if (aState == nsIWebProgressListener::STATE_COOKIES_BLOCKED_BY_PERMISSION) {
+    doc->SetHasCookiesBlockedByPermission(true);
   } else if (aState == nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER) {
     doc->SetHasTrackingCookiesBlocked(true);
+  } else if (aState == nsIWebProgressListener::STATE_COOKIES_BLOCKED_ALL) {
+    doc->SetHasAllCookiesBlocked(true);
+  } else if (aState == nsIWebProgressListener::STATE_COOKIES_BLOCKED_FOREIGN) {
+    doc->SetHasForeignCookiesBlocked(true);
   } else {
     // Ignore nsIWebProgressListener::STATE_BLOCKED_UNSAFE_CONTENT;
   }
@@ -6325,7 +6354,7 @@ nsGlobalWindowOuter::FindOuter(const nsAString& aString, bool aCaseSensitive,
   }
 
   // Set the options of the search
-  aError = finder->SetSearchString(PromiseFlatString(aString).get());
+  aError = finder->SetSearchString(aString);
   if (aError.Failed()) {
     return false;
   }
@@ -7053,7 +7082,8 @@ nsGlobalWindowOuter::MaybeAllowStorageForOpenedWindow(nsIURI* aURI)
 
   // We don't care when the asynchronous work finishes here.
   Unused << AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(origin,
-                                                                     inner);
+                                                                     inner,
+                                                                     AntiTrackingCommon::eHeuristic);
 }
 
 //*****************************************************************************

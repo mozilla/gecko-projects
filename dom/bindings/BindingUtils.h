@@ -8,7 +8,7 @@
 #define mozilla_dom_BindingUtils_h__
 
 #include "jsfriendapi.h"
-#include "js/AutoByteString.h"
+#include "js/CharacterEncoding.h"
 #include "js/Wrapper.h"
 #include "js/Conversions.h"
 #include "mozilla/ArrayUtils.h"
@@ -44,6 +44,7 @@
 
 class nsGenericHTMLElement;
 class nsIJSID;
+class nsIDocument;
 
 namespace mozilla {
 
@@ -53,6 +54,7 @@ namespace dom {
 class CustomElementReactionsStack;
 class MessageManagerGlobal;
 template<typename KeyType, typename ValueType> class Record;
+class Location;
 
 nsresult
 UnwrapArgImpl(JSContext* cx, JS::Handle<JSObject*> src, const nsIID& iid,
@@ -1060,7 +1062,29 @@ struct CheckWrapperCacheTracing<T, true>
 void
 AssertReflectorHasGivenProto(JSContext* aCx, JSObject* aReflector,
                              JS::Handle<JSObject*> aGivenProto);
+
 #endif // DEBUG
+
+template <class T>
+MOZ_ALWAYS_INLINE void
+CrashIfDocumentOrLocationWrapFailed()
+{
+  // Do nothing.
+}
+
+template<>
+MOZ_ALWAYS_INLINE void
+CrashIfDocumentOrLocationWrapFailed<nsIDocument>()
+{
+  MOZ_CRASH("Looks like bug 1488480/1405521, with WrapObject() on nsIDocument throwing");
+}
+
+template<>
+MOZ_ALWAYS_INLINE void
+CrashIfDocumentOrLocationWrapFailed<Location>()
+{
+  MOZ_CRASH("Looks like bug 1488480/1405521, with WrapObject() on Location throwing");
+}
 
 template <class T, GetOrCreateReflectorWrapBehavior wrapBehavior>
 MOZ_ALWAYS_INLINE bool
@@ -1084,6 +1108,7 @@ DoGetOrCreateDOMReflector(JSContext* cx, T* value,
       // At this point, obj is null, so just return false.
       // Callers seem to be testing JS_IsExceptionPending(cx) to
       // figure out whether WrapObject() threw.
+      CrashIfDocumentOrLocationWrapFailed<T>();
       return false;
     }
 
@@ -1113,19 +1138,35 @@ DoGetOrCreateDOMReflector(JSContext* cx, T* value,
   rval.set(JS::ObjectValue(*obj));
 
   if (js::GetObjectCompartment(obj) == js::GetContextCompartment(cx)) {
-    return TypeNeedsOuterization<T>::value ? TryToOuterize(rval) : true;
+    if (!TypeNeedsOuterization<T>::value) {
+      return true;
+    }
+    if (TryToOuterize(rval)) {
+      return true;
+    }
+
+    return false;
   }
 
   if (wrapBehavior == eDontWrapIntoContextCompartment) {
     if (TypeNeedsOuterization<T>::value) {
       JSAutoRealm ar(cx, obj);
-      return TryToOuterize(rval);
+      if (TryToOuterize(rval)) {
+        return true;
+      }
+
+      return false;
     }
 
     return true;
   }
 
-  return JS_WrapValue(cx, rval);
+  if (JS_WrapValue(cx, rval)) {
+    return true;
+  }
+
+  MOZ_CRASH("Looks like bug 1488480/1405521, with JS_WrapValue failing");
+  return false;
 }
 
 } // namespace binding_detail
@@ -1313,12 +1354,12 @@ inline bool
 EnumValueNotFound<true>(JSContext* cx, JS::HandleString str, const char* type,
                         const char* sourceDescription)
 {
-  JSAutoByteString deflated;
-  if (!deflated.encodeUtf8(cx, str)) {
+  JS::UniqueChars deflated = JS_EncodeStringToUTF8(cx, str);
+  if (!deflated) {
     return false;
   }
   return ThrowErrorMessage(cx, MSG_INVALID_ENUM_VALUE, sourceDescription,
-                           deflated.ptr(), type);
+                           deflated.get(), type);
 }
 
 template<typename CharT>
@@ -1477,7 +1518,7 @@ UpdateWrapper(T* p, void*, JSObject* obj, const JSObject* old)
 // This operation will return false only for non-nsISupports cycle-collected
 // objects, because we cannot determine if they are wrappercached or not.
 bool
-TryPreserveWrapper(JSObject* obj);
+TryPreserveWrapper(JS::Handle<JSObject*> obj);
 
 // Can only be called with a DOM JSClass.
 bool

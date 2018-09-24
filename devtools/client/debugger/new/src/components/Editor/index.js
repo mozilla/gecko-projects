@@ -228,14 +228,22 @@ class Editor extends _react.PureComponent {
       return;
     }
 
+    (0, _editor.startOperation)();
     (0, _ui.resizeBreakpointGutter)(this.state.editor.codeMirror);
     (0, _ui.resizeToggleButton)(this.state.editor.codeMirror);
+    (0, _editor.endOperation)();
   }
 
   componentWillUpdate(nextProps) {
+    if (!this.state.editor) {
+      return;
+    }
+
+    (0, _editor.startOperation)();
     this.setText(nextProps);
     this.setSize(nextProps);
     this.scrollToLocation(nextProps);
+    (0, _editor.endOperation)();
   }
 
   setupEditor() {
@@ -254,8 +262,10 @@ class Editor extends _react.PureComponent {
       codeMirror
     } = editor;
     const codeMirrorWrapper = codeMirror.getWrapperElement();
+    (0, _editor.startOperation)();
     (0, _ui.resizeBreakpointGutter)(codeMirror);
     (0, _ui.resizeToggleButton)(codeMirror);
+    (0, _editor.endOperation)();
     codeMirror.on("gutterClick", this.onGutterClick); // Set code editor wrapper to be focusable
 
     codeMirrorWrapper.tabIndex = 0;
@@ -330,8 +340,10 @@ class Editor extends _react.PureComponent {
         const editor = this.setupEditor();
         (0, _editor.updateDocument)(editor, selectedSource);
       } else {
+        (0, _editor.startOperation)();
         this.setText(this.props);
         this.setSize(this.props);
+        (0, _editor.endOperation)();
       }
     }
   }
@@ -566,7 +578,9 @@ class Editor extends _react.PureComponent {
       return null;
     }
 
-    return _react2.default.createElement("div", null, _react2.default.createElement(_DebugLine2.default, null), _react2.default.createElement(_HighlightLine2.default, null), _react2.default.createElement(_EmptyLines2.default, {
+    return _react2.default.createElement("div", null, _react2.default.createElement(_DebugLine2.default, {
+      editor: editor
+    }), _react2.default.createElement(_HighlightLine2.default, null), _react2.default.createElement(_EmptyLines2.default, {
       editor: editor
     }), _react2.default.createElement(_Breakpoints2.default, {
       editor: editor

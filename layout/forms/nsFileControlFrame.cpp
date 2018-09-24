@@ -11,7 +11,6 @@
 #include "nsIDocument.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/Directory.h"
@@ -22,6 +21,7 @@
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/MutationEventBinding.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsNodeInfoManager.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentUtils.h"
@@ -351,7 +351,7 @@ nsFileControlFrame::DnDListener::GetBlobImplForWebkitDirectory(FileList* aFileLi
   HTMLInputElement* inputElement =
     HTMLInputElement::FromNode(mFrame->GetContent());
   bool webkitDirPicker =
-    DOMPrefs::WebkitBlinkDirectoryPickerEnabled() &&
+    StaticPrefs::dom_webkitBlink_dirPicker_enabled() &&
     inputElement->HasAttr(kNameSpaceID_None, nsGkAtoms::webkitdirectory);
   if (!webkitDirPicker) {
     return NS_OK;
@@ -419,9 +419,9 @@ nscoord
 nsFileControlFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   nscoord result;
-  DISPLAY_MIN_WIDTH(this, result);
+  DISPLAY_MIN_INLINE_SIZE(this, result);
 
-  // Our min width is our pref width
+  // Our min inline size is our pref inline size
   result = GetPrefISize(aRenderingContext);
   return result;
 }

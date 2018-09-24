@@ -37,6 +37,7 @@
 #include "mozilla/devtools/HeapSnapshotTempFileHelperParent.h"
 #include "mozilla/docshell/OfflineCacheUpdateParent.h"
 #include "mozilla/dom/BrowsingContext.h"
+#include "mozilla/dom/ChromeBrowsingContext.h"
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ClientOpenWindowOpActors.h"
 #include "mozilla/dom/DataTransfer.h"
@@ -152,7 +153,7 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsISiteSecurityService.h"
 #include "nsISound.h"
-#include "nsISpellChecker.h"
+#include "mozilla/mozSpellChecker.h"
 #include "nsIStringBundle.h"
 #include "nsISupportsPrimitives.h"
 #include "nsITimer.h"
@@ -1898,7 +1899,7 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
   a11y::AccessibleWrap::ReleaseContentProcessIdFor(ChildID());
 #endif
 
-  BrowsingContext::CleanupContexts(ChildID());
+  ChromeBrowsingContext::CleanupContexts(ChildID());
 }
 
 bool
@@ -2221,7 +2222,7 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
 
   // Scheduler prefs need to be handled differently because the scheduler needs
   // to start up in the content process before the normal preferences service.
-  nsCString schedulerPrefs = Scheduler::GetPrefs();
+  nsPrintfCString schedulerPrefs = Scheduler::GetPrefs();
   extraArgs.push_back("-schedulerPrefs");
   extraArgs.push_back(schedulerPrefs.get());
 
@@ -2402,7 +2403,7 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority)
     bidi->GetHaveBidiKeyboards(&xpcomInit.haveBidiKeyboards());
   }
 
-  nsCOMPtr<nsISpellChecker> spellChecker(do_GetService(NS_SPELLCHECKER_CONTRACTID));
+  nsCOMPtr<nsISpellChecker> spellChecker(mozSpellChecker::Create());
   MOZ_ASSERT(spellChecker, "No spell checker?");
 
   spellChecker->GetDictionaryList(&xpcomInit.dictionaries());
@@ -3377,33 +3378,16 @@ ContentParent::KillHard(const char* aReason)
     mCrashReporter->AddAnnotation(CrashReporter::Annotation::ipc_channel_error,
                                   reason);
 
-    Telemetry::Accumulate(Telemetry::SUBPROCESS_KILL_HARD, reason, 1);
-
-    RefPtr<ContentParent> self = this;
-    std::function<void(bool)> callback = [self](bool aResult) {
-      self->OnGenerateMinidumpComplete(aResult);
-    };
     // Generate the report and insert into the queue for submittal.
-    mCrashReporter->GenerateMinidumpAndPair(Process(),
-                                            nullptr,
-                                            NS_LITERAL_CSTRING("browser"),
-                                            std::move(callback),
-                                            true);
-    return;
+    if (mCrashReporter->GenerateMinidumpAndPair(this,
+                                                nullptr,
+                                                NS_LITERAL_CSTRING("browser")))
+    {
+      mCreatedPairedMinidumps = mCrashReporter->FinalizeCrashReport();
+    }
+
+    Telemetry::Accumulate(Telemetry::SUBPROCESS_KILL_HARD, reason, 1);
   }
-
-  OnGenerateMinidumpComplete(false);
-}
-
-void
-ContentParent::OnGenerateMinidumpComplete(bool aDumpResult)
-{
-  if (mCrashReporter && aDumpResult) {
-    // CrashReporterHost::GenerateMinidumpAndPair() is successful.
-    mCreatedPairedMinidumps = mCrashReporter->FinalizeCrashReport();
-  }
-
-  Unused << aDumpResult; // Don't care about result if no minidump was requested.
 
   ProcessHandle otherProcessHandle;
   if (!base::OpenProcessHandle(OtherPid(), &otherProcessHandle)) {
@@ -4612,7 +4596,7 @@ ContentParent::IgnoreIPCPrincipal()
 void
 ContentParent::NotifyUpdatedDictionaries()
 {
-  nsCOMPtr<nsISpellChecker> spellChecker(do_GetService(NS_SPELLCHECKER_CONTRACTID));
+  nsCOMPtr<nsISpellChecker> spellChecker(mozSpellChecker::Create());
   MOZ_ASSERT(spellChecker, "No spell checker?");
 
   InfallibleTArray<nsString> dictionaries;
@@ -5963,12 +5947,19 @@ ContentParent::RecvFirstPartyStorageAccessGrantedForOrigin(const Principal& aPar
 }
 
 mozilla::ipc::IPCResult
+ContentParent::RecvStoreUserInteractionAsPermission(const Principal& aPrincipal)
+{
+  AntiTrackingCommon::StoreUserInteractionFor(aPrincipal);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
 ContentParent::RecvAttachBrowsingContext(
   const BrowsingContextId& aParentId,
   const BrowsingContextId& aChildId,
   const nsString& aName)
 {
-  RefPtr<BrowsingContext> parent = BrowsingContext::Get(aParentId);
+  RefPtr<ChromeBrowsingContext> parent = ChromeBrowsingContext::Get(aParentId);
   if (aParentId && !parent) {
     // Unless 'aParentId' is 0 (which it is when the child is a root
     // BrowsingContext) there should always be a corresponding
@@ -5990,7 +5981,7 @@ ContentParent::RecvAttachBrowsingContext(
     return IPC_OK();
   }
 
-  if (parent && parent->OwnerProcessId() != ChildID()) {
+  if (parent && !parent->IsOwnedByProcess(ChildID())) {
     // Where trying attach a child BrowsingContext to a parent
     // BrowsingContext in another process. This is illegal since the
     // only thing that could create that child BrowsingContext is a
@@ -6028,7 +6019,7 @@ ContentParent::RecvAttachBrowsingContext(
   }
 
   if (!child) {
-    child = new BrowsingContext(aChildId, aName, Some(ChildID()));
+    child = ChromeBrowsingContext::Create(aChildId, aName, ChildID());
   }
   child->Attach(parent);
 
@@ -6039,7 +6030,7 @@ mozilla::ipc::IPCResult
 ContentParent::RecvDetachBrowsingContext(const BrowsingContextId& aContextId,
                                          const bool& aMoveToBFCache)
 {
-  RefPtr<BrowsingContext> context = BrowsingContext::Get(aContextId);
+  RefPtr<ChromeBrowsingContext> context = ChromeBrowsingContext::Get(aContextId);
 
   if (!context) {
     MOZ_LOG(BrowsingContext::GetLog(),
@@ -6049,7 +6040,7 @@ ContentParent::RecvDetachBrowsingContext(const BrowsingContextId& aContextId,
     return IPC_OK();
   }
 
-  if (context->OwnerProcessId() != ChildID()) {
+  if (!context->IsOwnedByProcess(ChildID())) {
     // Where trying to detach a child BrowsingContext in another child
     // process. This is illegal since the owner of the BrowsingContext
     // is the proccess with the in-process docshell, which is tracked

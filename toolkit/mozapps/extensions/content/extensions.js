@@ -640,6 +640,9 @@ function attachUpdateHandler(install) {
             type: "update",
             addon: info.addon,
             icon: info.addon.icon,
+            // Reference to the related AddonInstall object (used in AMTelemetry to
+            // link the recorded event to the other events from the same install flow).
+            install,
             permissions: difference,
             resolve,
             reject,
@@ -1241,9 +1244,14 @@ var gViewController = {
           if (result != nsIFilePicker.returnOK)
             return;
 
+          let installTelemetryInfo = {
+            source: "about:addons",
+            method: "install-from-file",
+          };
+
           let browser = getBrowserElement();
           for (let file of fp.files) {
-            let install = await AddonManager.getInstallForFile(file);
+            let install = await AddonManager.getInstallForFile(file, null, installTelemetryInfo);
             AddonManager.installAddonFromAOM(browser, document.documentURIObject, install);
           }
         });
@@ -1978,7 +1986,8 @@ var gDiscoverView = {
       this._browser.addProgressListener(this);
 
       if (this.loaded)
-        this._loadURL(this.homepageURL.spec, false, notifyInitialized);
+        this._loadURL(this.homepageURL.spec, false, notifyInitialized,
+                      Services.scriptSecurityManager.getSystemPrincipal());
       else
         notifyInitialized();
     };
@@ -2047,7 +2056,8 @@ var gDiscoverView = {
     }
 
     this._loadURL(this.homepageURL.spec, aIsRefresh,
-                  gViewController.notifyViewChanged.bind(gViewController));
+                  gViewController.notifyViewChanged.bind(gViewController),
+                  Services.scriptSecurityManager.getSystemPrincipal());
   },
 
   canRefresh() {
@@ -2067,7 +2077,7 @@ var gDiscoverView = {
     this.node.selectedPanel = this._error;
   },
 
-  _loadURL(aURL, aKeepHistory, aCallback) {
+  _loadURL(aURL, aKeepHistory, aCallback, aPrincipal) {
     if (this._browser.currentURI.spec == aURL) {
       if (aCallback)
         aCallback();
@@ -2081,7 +2091,10 @@ var gDiscoverView = {
     if (!aKeepHistory)
       flags |= Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY;
 
-    this._browser.loadURI(aURL, { flags });
+    this._browser.loadURI(aURL, {
+      flags,
+      triggeringPrincipal: aPrincipal || Services.scriptSecurityManager.createNullPrincipal({}),
+    });
   },
 
   onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {
@@ -3111,7 +3124,9 @@ var gDetailView = {
 
       mm.sendAsyncMessage("Extension:InitBrowser", browserOptions);
 
-      browser.loadURI(optionsURL);
+      browser.loadURI(optionsURL, {
+        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+      });
     });
   },
 
@@ -3433,7 +3448,11 @@ var gDragDrop = {
       }
 
       if (url) {
-        let install = await AddonManager.getInstallForURL(url, "application/x-xpinstall");
+        let install = await AddonManager.getInstallForURL(url, "application/x-xpinstall",
+                                                          null, null, null, null, null, {
+                                                            source: "about:addons",
+                                                            method: "drag-and-drop",
+                                                          });
         AddonManager.installAddonFromAOM(browser, document.documentURIObject, install);
       }
     }

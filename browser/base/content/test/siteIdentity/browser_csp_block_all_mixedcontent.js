@@ -38,9 +38,9 @@ function runTests() {
   newTab.linkedBrowser.stop();
 
   // Starting the test
-  BrowserTestUtils.browserLoaded(gTestBrowser).then(verifyUInotDegraded);
   var url = PRE_PATH + "file_csp_block_all_mixedcontent.html";
-  gTestBrowser.loadURI(url);
+  BrowserTestUtils.browserLoaded(gTestBrowser, false, url).then(verifyUInotDegraded);
+  BrowserTestUtils.loadURI(gTestBrowser, url);
 }
 
 // ------------------------------------------------------

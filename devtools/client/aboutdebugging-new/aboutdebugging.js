@@ -4,12 +4,6 @@
 
 "use strict";
 
-const { BrowserLoader } =
-  ChromeUtils.import("resource://devtools/client/shared/browser-loader.js", {});
-const { require } = BrowserLoader({
-  baseURI: "resource://devtools/client/aboutdebugging-new/",
-  window,
-});
 const Services = require("Services");
 
 const { bindActionCreators } = require("devtools/client/shared/vendor/redux");
@@ -30,11 +24,19 @@ const {
 const {
   addNetworkLocationsObserver,
   getNetworkLocations,
+  removeNetworkLocationsObserver,
 } = require("./src/modules/network-locations");
+const {
+  addUSBRuntimesObserver,
+  disableUSBRuntimes,
+  enableUSBRuntimes,
+  getUSBRuntimes,
+  removeUSBRuntimesObserver,
+} = require("./src/modules/usb-runtimes");
 
 const App = createFactory(require("./src/components/App"));
 
-const { PAGES } = require("./src/constants");
+const { PAGES, RUNTIMES } = require("./src/constants");
 
 const AboutDebugging = {
   async init() {
@@ -43,6 +45,9 @@ const AboutDebugging = {
       window.location = "about:devtools?reason=AboutDebugging";
       return;
     }
+
+    this.onNetworkLocationsUpdated = this.onNetworkLocationsUpdated.bind(this);
+    this.onUSBRuntimesUpdated = this.onUSBRuntimesUpdated.bind(this);
 
     this.store = configureStore();
     this.actions = bindActionCreators(actions, this.store.dispatch);
@@ -54,10 +59,12 @@ const AboutDebugging = {
       this.mount
     );
 
-    this.actions.selectPage(PAGES.THIS_FIREFOX);
-    addNetworkLocationsObserver(() => {
-      this.actions.updateNetworkLocations(getNetworkLocations());
-    });
+    this.actions.selectPage(PAGES.THIS_FIREFOX, RUNTIMES.THIS_FIREFOX);
+    this.actions.updateNetworkLocations(getNetworkLocations());
+
+    addNetworkLocationsObserver(this.onNetworkLocationsUpdated);
+    addUSBRuntimesObserver(this.onUSBRuntimesUpdated);
+    await enableUSBRuntimes();
   },
 
   async createMessageContexts() {
@@ -73,7 +80,7 @@ const AboutDebugging = {
       L10nRegistry.registerSource(temporarySource);
     }
 
-    const locales = Services.locale.getAppLocalesAsBCP47();
+    const locales = Services.locale.appLocalesAsBCP47;
     const generator =
       L10nRegistry.generateContexts(locales, ["aboutdebugging.ftl"]);
 
@@ -85,8 +92,28 @@ const AboutDebugging = {
     return contexts;
   },
 
-  destroy() {
-    setDebugTargetCollapsibilities(this.store.getState().ui.debugTargetCollapsibilities);
+  onNetworkLocationsUpdated() {
+    this.actions.updateNetworkLocations(getNetworkLocations());
+  },
+
+  onUSBRuntimesUpdated() {
+    this.actions.updateUSBRuntimes(getUSBRuntimes());
+  },
+
+  async destroy() {
+    const state = this.store.getState();
+
+    L10nRegistry.removeSource("aboutdebugging");
+
+    const currentRuntimeId = state.runtimes.selectedRuntimeId;
+    if (currentRuntimeId) {
+      await this.actions.unwatchRuntime(currentRuntimeId);
+    }
+
+    removeNetworkLocationsObserver(this.onNetworkLocationsUpdated);
+    removeUSBRuntimesObserver(this.onUSBRuntimesUpdated);
+    disableUSBRuntimes();
+    setDebugTargetCollapsibilities(state.ui.debugTargetCollapsibilities);
     unmountComponentAtNode(this.mount);
   },
 

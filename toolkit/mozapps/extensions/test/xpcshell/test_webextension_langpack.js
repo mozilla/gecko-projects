@@ -1,6 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
+"use strict";
 
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
 const { L10nRegistry } = ChromeUtils.import("resource://gre/modules/L10nRegistry.jsm", {});
@@ -58,6 +59,10 @@ function promiseLangpackStartup() {
   });
 }
 
+add_task(async function setup() {
+  Services.prefs.clearUserPref("extensions.startupScanScopes");
+});
+
 /**
  * This is a basic life-cycle test which verifies that
  * the language pack registers and unregisters correct
@@ -68,7 +73,7 @@ add_task(async function() {
 
   // Make sure that `und` locale is not installed.
   equal(L10nRegistry.getAvailableLocales().includes("und"), false);
-  equal(Services.locale.getAvailableLocales().includes("und"), false);
+  equal(Services.locale.availableLocales.includes("und"), false);
 
   let [, {addon}] = await Promise.all([
     promiseLangpackStartup(),
@@ -77,13 +82,13 @@ add_task(async function() {
 
   // Now make sure that `und` locale is available.
   equal(L10nRegistry.getAvailableLocales().includes("und"), true);
-  equal(Services.locale.getAvailableLocales().includes("und"), true);
+  equal(Services.locale.availableLocales.includes("und"), true);
 
   await addon.disable();
 
   // It is not available after the langpack has been disabled.
   equal(L10nRegistry.getAvailableLocales().includes("und"), false);
-  equal(Services.locale.getAvailableLocales().includes("und"), false);
+  equal(Services.locale.availableLocales.includes("und"), false);
 
   // This quirky code here allows us to handle a scenario where enabling the
   // addon is synchronous or asynchronous.
@@ -94,13 +99,13 @@ add_task(async function() {
 
   // After re-enabling it, the `und` locale is available again.
   equal(L10nRegistry.getAvailableLocales().includes("und"), true);
-  equal(Services.locale.getAvailableLocales().includes("und"), true);
+  equal(Services.locale.availableLocales.includes("und"), true);
 
   await addon.uninstall();
 
   // After the langpack has been uninstalled, no more `und` in locales.
   equal(L10nRegistry.getAvailableLocales().includes("und"), false);
-  equal(Services.locale.getAvailableLocales().includes("und"), false);
+  equal(Services.locale.availableLocales.includes("und"), false);
 });
 
 /**
@@ -129,8 +134,8 @@ add_task(async function() {
 
   {
     // Test chrome package
-    let reqLocs = Services.locale.getRequestedLocales();
-    Services.locale.setRequestedLocales(["und"]);
+    let reqLocs = Services.locale.requestedLocales;
+    Services.locale.requestedLocales = ["und"];
 
     let bundle = Services.strings.createBundle(
       "chrome://global/locale/test.properties"
@@ -138,10 +143,40 @@ add_task(async function() {
     let entry = bundle.GetStringFromName("message");
     equal(entry, "Value from .properties");
 
-    Services.locale.setRequestedLocales(reqLocs);
+    Services.locale.requestedLocales = reqLocs;
   }
 
   await addon.uninstall();
+  await promiseShutdownManager();
+});
+
+add_task(async function test_amazing_disappearing_langpacks() {
+  let check = (yes) => {
+    equal(L10nRegistry.getAvailableLocales().includes("und"), yes);
+    equal(Services.locale.availableLocales.includes("und"), yes);
+  };
+
+  await promiseStartupManager();
+
+  check(false);
+
+  await Promise.all([
+    promiseLangpackStartup(),
+    AddonTestUtils.promiseInstallXPI(ADDONS.langpack_1),
+  ]);
+
+  check(true);
+
+  await promiseShutdownManager();
+
+  check(false);
+
+  await AddonTestUtils.manuallyUninstall(AddonTestUtils.profileExtensions,
+                                        ID);
+
+  await promiseStartupManager();
+
+  check(false);
 });
 
 /**

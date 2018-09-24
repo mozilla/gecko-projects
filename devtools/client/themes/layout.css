@@ -14,47 +14,36 @@
 }
 
 /**
- * Common styles for shared components
+ * Common styles for the layout container
  */
-
-.grid-container {
-  display: flex;
-  flex-direction: column;
-  flex: 1 auto;
-  min-width: 140px;
-  margin-inline-start: 16px;
-}
-
-.grid-container:first-child {
-  margin-bottom: 10px;
-}
-
-.grid-container > span {
-  font-weight: 600;
-  margin-bottom: 5px;
-  pointer-events: none;
-}
-
-.grid-container > ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
 
 #layout-container li {
   padding: 3px 0;
   -moz-user-select: none;
 }
 
-.flex-container input,
-.grid-container input {
+#layout-container input {
   margin-inline-end: 7px;
   vertical-align: middle;
 }
 
-.flex-container label,
-.grid-container label {
+#layout-container label {
   margin-inline-start: -3px;
+}
+
+.layout-color-swatch {
+  width: 12px;
+  height: 12px;
+  margin-inline-start: -1px;
+  border: 1px solid var(--theme-highlight-gray);
+  border-radius: 50%;
+  cursor: pointer;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.layout-color-value {
+  display: none;
 }
 
 /* Layout Properties: Common styles used for the Box Model and Flexbox Properties */
@@ -91,19 +80,43 @@
   display: block;
 }
 
+/**
+ * Flex Container
+ */
+
 #layout-flexbox-container {
   display: flex;
   flex-direction: column;
 }
 
 /**
- * Flex Container
+ * Header
  */
 
-.flex-container {
+.flex-header {
+  display: flex;
+  align-items: center;
+  height: 32px;
   border-bottom: 1px solid var(--theme-splitter-color);
-  padding: 5px 0;
+  padding: 0 3px;
+}
+
+.flex-header-button-prev::before {
+  background-image: url("chrome://devtools/skin/images/arrowhead-left.svg");
+  background-size: 16px;
+}
+
+.flex-header-content {
+  flex: 1;
+  padding-top: 2px;
   padding-inline-start: 20px;
+  -moz-user-select: none;
+}
+
+.flex-header-content.flex-item-shown {
+  display: flex;
+  justify-content: center;
+  padding: 0;
 }
 
 /**
@@ -121,6 +134,28 @@
 
 .flex-item-list .devtools-button {
   background-color: transparent;
+}
+
+/**
+ * Flex Item Selector
+ */
+
+#flex-item-selector {
+  background-position: right 4px center;
+  padding-left: 0;
+  vertical-align: middle;
+  width: 140px;
+}
+
+#flex-item-selector .objectBox-node {
+  display: inline-block;
+  font-size: 12px;
+  overflow: hidden;
+  padding-top: 0.15em;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 85%;
 }
 
 /**
@@ -152,6 +187,30 @@
   display: flex;
   flex-direction: column;
   padding: 5px;
+}
+
+.grid-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1 auto;
+  min-width: 140px;
+  margin-inline-start: 16px;
+}
+
+.grid-container:first-child {
+  margin-bottom: 10px;
+}
+
+.grid-container > span {
+  font-weight: 600;
+  margin-bottom: 5px;
+  pointer-events: none;
+}
+
+.grid-container > ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 /**
@@ -213,27 +272,6 @@
   margin-inline-end: 5px;
   width: 16px;
   height: 16px;
-}
-
-/**
- * Flexbox and Grid Item
- */
-
-.flexbox-color-swatch,
-.grid-color-swatch {
-  width: 12px;
-  height: 12px;
-  margin-inline-start: -1px;
-  border: 1px solid var(--theme-highlight-gray);
-  border-radius: 50%;
-  cursor: pointer;
-  display: inline-block;
-  vertical-align: middle;
-}
-
-.flexbox-color-value,
-.grid-color-value {
-  display: none;
 }
 
 /**

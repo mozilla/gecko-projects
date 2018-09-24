@@ -15,6 +15,7 @@
 
 #include "nsHttp.h"
 #include "nsHttpChannel.h"
+#include "nsHttpChannelAuthProvider.h"
 #include "nsHttpHandler.h"
 #include "nsIApplicationCacheService.h"
 #include "nsIApplicationCacheContainer.h"
@@ -70,7 +71,6 @@
 #include "nsIPrincipal.h"
 #include "nsIScriptError.h"
 #include "nsIScriptSecurityManager.h"
-#include "nsISSLStatus.h"
 #include "nsITransportSecurityInfo.h"
 #include "nsIWebProgressListener.h"
 #include "LoadContextInfo.h"
@@ -116,6 +116,8 @@
 #include "nsIMultiplexInputStream.h"
 #include "../../cache2/CacheFileUtils.h"
 #include "nsINetworkLinkService.h"
+#include "mozilla/dom/PromiseNativeHandler.h"
+#include "mozilla/dom/Promise.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -158,6 +160,24 @@ enum CacheDisposition {
     kCacheHitViaReval = 2,
     kCacheMissedViaReval = 3,
     kCacheMissed = 4
+};
+
+using mozilla::Telemetry::LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED;
+
+static const struct {
+  LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED mTelemetryLabel;
+  const char* mHostName;
+} gFastBlockAnalyticsProviders[] = {
+  { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::googleanalytics, "google-analytics.com" },
+  { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::scorecardresearch, "scorecardresearch.com" },
+  { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::hotjar, "hotjar.com" },
+  { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::newrelic, "newrelic.com" },
+  { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::nrdata, "nr-data.net" },
+  { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::crwdcntrl, "crwdcntrl.net" },
+  { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::eyeota, "eyeota.net" },
+  { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::yahooanalytics, "analytics.yahoo.com" },
+  { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::statcounter, "statcounter.com" },
+  { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::v12group, "v12group.com" }
 };
 
 void
@@ -397,17 +417,6 @@ nsHttpChannel::Init(nsIURI *uri,
                                         proxyResolveFlags, proxyURI, channelId);
     if (NS_FAILED(rv))
         return rv;
-
-#ifdef MOZ_GECKO_PROFILER
-    mLastStatusReported = TimeStamp::Now(); // in case we enable the profiler after Init()
-    if (profiler_is_active()) {
-        int32_t priority = PRIORITY_NORMAL;
-        GetPriority(&priority);
-        profiler_add_network_marker(uri, priority, channelId, NetworkLoadType::LOAD_START,
-                                    mChannelCreationTimestamp, mLastStatusReported,
-                                    0);
-    }
-#endif
 
     LOG(("nsHttpChannel::Init [this=%p]\n", this));
 
@@ -697,13 +706,20 @@ nsHttpChannel::CheckFastBlocked()
     MOZ_ASSERT(mIsThirdPartyTrackingResource);
 
     static bool sFastBlockInited = false;
-    static bool sIsFastBlockEnabled = false;
     static uint32_t sFastBlockTimeout = 0;
+    static uint32_t sFastBlockLimit = 0;
 
     if (!sFastBlockInited) {
         sFastBlockInited = true;
-        Preferences::AddBoolVarCache(&sIsFastBlockEnabled, "browser.fastblock.enabled");
         Preferences::AddUintVarCache(&sFastBlockTimeout, "browser.fastblock.timeout");
+        Preferences::AddUintVarCache(&sFastBlockLimit, "browser.fastblock.limit");
+    }
+
+    if (!StaticPrefs::browser_contentblocking_enabled() ||
+        !StaticPrefs::browser_fastblock_enabled()) {
+        LOG(("FastBlock disabled by pref [this=%p]\n", this));
+
+        return false;
     }
 
     TimeStamp timestamp;
@@ -713,29 +729,80 @@ nsHttpChannel::CheckFastBlocked()
         return false;
     }
 
-    if (!StaticPrefs::browser_contentblocking_enabled() ||
-        !sIsFastBlockEnabled ||
-        IsContentPolicyTypeWhitelistedForFastBlock(mLoadInfo) ||
+    bool engageFastBlock = false;
+
+    if (IsContentPolicyTypeWhitelistedForFastBlock(mLoadInfo) ||
         // If the user has interacted with the document, we disable fastblock.
         (mLoadInfo && mLoadInfo->GetDocumentHasUserInteracted())) {
 
         LOG(("FastBlock passed (invalid) [this=%p]\n", this));
-        
-        return false;
+    } else {
+        TimeDuration duration = TimeStamp::NowLoRes() - timestamp;
+        bool hasFastBlockStarted = duration.ToMilliseconds() >= sFastBlockTimeout;
+        bool hasFastBlockStopped = false;
+        if ((sFastBlockLimit != 0) && (sFastBlockLimit > sFastBlockTimeout)) {
+            hasFastBlockStopped = duration.ToMilliseconds() > sFastBlockLimit;
+        }
+        LOG(("FastBlock started=%d stopped=%d (%lf) [this=%p]\n",
+             static_cast<int>(hasFastBlockStarted),
+             static_cast<int>(hasFastBlockStopped),
+             duration.ToMilliseconds(),
+             this));
+        engageFastBlock = hasFastBlockStarted && !hasFastBlockStopped;
     }
 
-    TimeDuration duration = TimeStamp::NowLoRes() - timestamp;
-    bool isFastBlocking = duration.ToMilliseconds() >= sFastBlockTimeout;
+    // Remember the data needed for fastblock telemetry in case fastblock is
+    // enabled, we have decided to block the channel, and the channel isn't
+    // marked as private.
+    if (engageFastBlock && !NS_UsePrivateBrowsing(this)) {
+        nsCOMPtr<nsIURI> uri;
+        nsresult rv = GetURI(getter_AddRefs(uri));
+        NS_ENSURE_SUCCESS(rv, false);
 
-    if (isFastBlocking && mLoadInfo) {
-        MOZ_ALWAYS_SUCCEEDS(mLoadInfo->SetIsTrackerBlocked(true));
+        nsAutoCString host;
+        rv = uri->GetHost(host);
+        NS_ENSURE_SUCCESS(rv, false);
+
+        nsCOMPtr<nsIEffectiveTLDService> tldService =
+            do_GetService(NS_EFFECTIVETLDSERVICE_CONTRACTID);
+        NS_ENSURE_TRUE(tldService, false);
+
+        LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED label =
+            LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::other;
+        for (const auto& entry : gFastBlockAnalyticsProviders) {
+          // For each entry in the list of our analytics providers, use the
+          // effective TLD service to look up subdomains to make sure we find a
+          // potential match if one is available.
+          while (true) {
+            if (host == entry.mHostName) {
+              label = entry.mTelemetryLabel;
+              break;
+            }
+
+            nsAutoCString newHost;
+            rv = tldService->GetNextSubDomain(host, newHost);
+            if (rv == NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS) {
+              // we're done searching this entry.
+              break;
+            }
+            NS_ENSURE_SUCCESS(rv, false);
+
+            host = newHost;
+          }
+
+          if (label != LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::other) {
+            // We have found a label in the previous loop, bail out now!
+            break;
+          }
+        }
+
+        if (mLoadInfo) {
+          MOZ_ALWAYS_SUCCEEDS(mLoadInfo->SetIsTrackerBlocked(true));
+          MOZ_ALWAYS_SUCCEEDS(mLoadInfo->SetTrackerBlockedReason(label));
+        }
     }
 
-    LOG(("FastBlock %s (%lf) [this=%p]\n",
-         isFastBlocking ? "timeout" : "passed",
-         duration.ToMilliseconds(),
-         this));
-    return isFastBlocking;
+    return engageFastBlock;
 }
 
 nsresult
@@ -749,7 +816,7 @@ nsHttpChannel::ConnectOnTailUnblock()
     if (isTrackingResource && CheckFastBlocked()) {
         AntiTrackingCommon::NotifyRejection(this,
                                             nsIWebProgressListener::STATE_BLOCKED_SLOW_TRACKING_CONTENT);
-        Unused << AsyncAbort(NS_ERROR_ABORT);
+        Unused << AsyncAbort(NS_ERROR_TRACKING_ANNOTATION_URI);
         CloseCacheEntry(false);
         return NS_OK;
     }
@@ -1922,7 +1989,7 @@ GetPKPConsoleErrorTag(uint32_t failureResult, nsAString& consoleErrorTag)
  */
 nsresult
 nsHttpChannel::ProcessSingleSecurityHeader(uint32_t aType,
-                                           nsISSLStatus *aSSLStatus,
+                                           nsITransportSecurityInfo* aSecInfo,
                                            uint32_t aFlags)
 {
     nsHttpAtom atom;
@@ -1949,7 +2016,7 @@ nsHttpChannel::ProcessSingleSecurityHeader(uint32_t aType,
         NS_GetOriginAttributes(this, originAttributes);
         uint32_t failureResult;
         uint32_t headerSource = nsISiteSecurityService::SOURCE_ORGANIC_REQUEST;
-        rv = sss->ProcessHeader(aType, mURI, securityHeader, aSSLStatus,
+        rv = sss->ProcessHeader(aType, mURI, securityHeader, aSecInfo,
                                 aFlags, headerSource, originAttributes,
                                 nullptr, nullptr, &failureResult);
         if (NS_FAILED(rv)) {
@@ -2024,17 +2091,13 @@ nsHttpChannel::ProcessSecurityHeaders()
     // Get the TransportSecurityInfo
     nsCOMPtr<nsITransportSecurityInfo> transSecInfo = do_QueryInterface(mSecurityInfo);
     NS_ENSURE_TRUE(transSecInfo, NS_ERROR_FAILURE);
-    nsCOMPtr<nsISSLStatus> sslStatus;
-    rv = transSecInfo->GetSSLStatus(getter_AddRefs(sslStatus));
-    NS_ENSURE_SUCCESS(rv, rv);
-    NS_ENSURE_TRUE(sslStatus, NS_ERROR_FAILURE);
 
     rv = ProcessSingleSecurityHeader(nsISiteSecurityService::HEADER_HSTS,
-                                     sslStatus, flags);
+                                     transSecInfo, flags);
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = ProcessSingleSecurityHeader(nsISiteSecurityService::HEADER_HPKP,
-                                     sslStatus, flags);
+                                     transSecInfo, flags);
     NS_ENSURE_SUCCESS(rv, rv);
 
     return NS_OK;
@@ -2160,10 +2223,6 @@ nsHttpChannel::ProcessSSLInformation()
         do_QueryInterface(mSecurityInfo);
     if (!securityInfo)
         return;
-    nsCOMPtr<nsISSLStatus> sslstat;
-    securityInfo->GetSSLStatus(getter_AddRefs(sslstat));
-    if (!sslstat)
-        return;
 
     uint32_t state;
     if (securityInfo &&
@@ -2179,7 +2238,7 @@ nsHttpChannel::ProcessSSLInformation()
 
     // Send (SHA-1) signature algorithm errors to the web console
     nsCOMPtr<nsIX509Cert> cert;
-    sslstat->GetServerCert(getter_AddRefs(cert));
+    securityInfo->GetServerCert(getter_AddRefs(cert));
     if (cert) {
         UniqueCERTCertificate nssCert(cert->GetCert());
         if (nssCert) {
@@ -3906,7 +3965,8 @@ nsHttpChannel::OpenCacheEntryInternal(bool isHttps,
         extension.Append("TRR");
     }
 
-    if (!AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(this, mURI, nullptr)) {
+    if (mIsThirdPartyTrackingResource &&
+        !AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(this, mURI, nullptr)) {
         nsCOMPtr<nsIURI> topWindowURI;
         rv = GetTopWindowURI(getter_AddRefs(topWindowURI));
         bool isDocument = false;
@@ -6218,11 +6278,18 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
         uint64_t sourceEventId, parentTaskId;
         tasktracer::SourceEventType sourceEventType;
         GetCurTraceInfo(&sourceEventId, &parentTaskId, &sourceEventType);
-        nsCOMPtr<nsIURI> uri;
-        GetURI(getter_AddRefs(uri));
         nsAutoCString urispec;
-        uri->GetSpec(urispec);
+        mURI->GetSpec(urispec);
         tasktracer::AddLabel("nsHttpChannel::AsyncOpen %s", urispec.get());
+    }
+#endif
+
+#ifdef MOZ_GECKO_PROFILER
+    mLastStatusReported = TimeStamp::Now(); // in case we enable the profiler after AsyncOpen()
+    if (profiler_is_active()) {
+        profiler_add_network_marker(mURI, mPriority, mChannelId, NetworkLoadType::LOAD_START,
+                                    mChannelCreationTimestamp, mLastStatusReported,
+                                    0);
     }
 #endif
 
@@ -6490,11 +6557,8 @@ nsHttpChannel::BeginConnect()
         Telemetry::Accumulate(Telemetry::HTTP_TRANSACTION_USE_ALTSVC, false);
     }
 
-    mAuthProvider =
-        do_CreateInstance("@mozilla.org/network/http-channel-auth-provider;1",
-                          &rv);
-    if (NS_SUCCEEDED(rv))
-        rv = mAuthProvider->Init(this);
+    mAuthProvider = new nsHttpChannelAuthProvider();
+    rv = mAuthProvider->Init(this);
     if (NS_FAILED(rv)) {
         return rv;
     }
@@ -7103,6 +7167,77 @@ nsHttpChannel::GetRequestMethod(nsACString& aMethod)
 // nsHttpChannel::nsIRequestObserver
 //-----------------------------------------------------------------------------
 
+// This class is used to convert from a DOM promise to a MozPromise.
+// Once we have a native implementation of nsIRedirectProcessChooser we can
+// remove it and use MozPromises directly.
+class DomPromiseListener final
+    : dom::PromiseNativeHandler
+{
+    NS_DECL_ISUPPORTS
+
+    static RefPtr<nsHttpChannel::TabPromise>
+    Create(dom::Promise* aDOMPromise)
+    {
+        MOZ_ASSERT(aDOMPromise);
+        RefPtr<DomPromiseListener> handler = new DomPromiseListener();
+        RefPtr<nsHttpChannel::TabPromise> promise = handler->mPromiseHolder.Ensure(__func__);
+        aDOMPromise->AppendNativeHandler(handler);
+        return promise;
+    }
+
+    virtual void
+    ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override
+    {
+        nsCOMPtr<nsITabParent> tabParent;
+        JS::Rooted<JSObject*> obj(aCx, &aValue.toObject());
+        nsresult rv = UnwrapArg<nsITabParent>(aCx, obj, getter_AddRefs(tabParent));
+        if (NS_FAILED(rv)) {
+            mPromiseHolder.Reject(rv, __func__);
+            return;
+        }
+        mPromiseHolder.Resolve(tabParent, __func__);
+    }
+
+    virtual void
+    RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override
+    {
+        if (!aValue.isInt32()) {
+            mPromiseHolder.Reject(NS_ERROR_DOM_NOT_NUMBER_ERR, __func__);
+            return;
+        }
+        mPromiseHolder.Reject((nsresult) aValue.toInt32(), __func__);
+    }
+
+private:
+    DomPromiseListener() = default;
+    ~DomPromiseListener() = default;
+    MozPromiseHolder<nsHttpChannel::TabPromise> mPromiseHolder;
+};
+
+NS_IMPL_ISUPPORTS0(DomPromiseListener)
+
+nsresult
+nsHttpChannel::StartCrossProcessRedirect()
+{
+    nsresult rv = CheckRedirectLimit(nsIChannelEventSink::REDIRECT_INTERNAL);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    RefPtr<HttpChannelParentListener> listener = do_QueryObject(mCallbacks);
+    MOZ_ASSERT(listener);
+
+    nsCOMPtr<nsILoadInfo> redirectLoadInfo =
+      CloneLoadInfoForRedirect(mURI, nsIChannelEventSink::REDIRECT_INTERNAL);
+
+    listener->TriggerCrossProcessRedirect(this,
+                                          redirectLoadInfo,
+                                          mCrossProcessRedirectIdentifier);
+
+    // This will suspend the channel
+    rv = WaitForRedirectCallback();
+
+    return rv;
+}
+
 NS_IMETHODIMP
 nsHttpChannel::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
 {
@@ -7206,6 +7341,32 @@ nsHttpChannel::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
         rv = StartRedirectChannelToURI(mURI, nsIChannelEventSink::REDIRECT_INTERNAL);
         if (NS_SUCCEEDED(rv))
             return NS_OK;
+    }
+
+    // Check if the channel should be redirected to another process.
+    // If so, trigger a redirect, and the HttpChannelParentListener will
+    // redirect to the correct process
+    nsCOMPtr<nsIRedirectProcessChooser> requestChooser =
+        do_GetClassObject("@mozilla.org/network/processChooser");
+    if (requestChooser) {
+        nsCOMPtr<nsITabParent> tp;
+        nsCOMPtr<nsIParentChannel> parentChannel;
+        NS_QueryNotificationCallbacks(this, parentChannel);
+
+        RefPtr<dom::Promise> tabPromise;
+        rv = requestChooser->GetChannelRedirectTarget(this, parentChannel, &mCrossProcessRedirectIdentifier, getter_AddRefs(tabPromise));
+
+        if (NS_SUCCEEDED(rv) && tabPromise) {
+            // The promise will be handled in AsyncOnChannelRedirect.
+            mRedirectTabPromise = DomPromiseListener::Create(tabPromise);
+
+            PushRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest3);
+            rv = StartCrossProcessRedirect();
+            if (NS_SUCCEEDED(rv)) {
+                return NS_OK;
+            }
+            PopRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest3);
+        }
     }
 
     // avoid crashing if mListener happens to be null...
@@ -8614,6 +8775,14 @@ nsHttpChannel::OnLookupComplete(nsICancelable *request,
         }
     }
 
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsHttpChannel::OnLookupByTypeComplete(nsICancelable      *aRequest,
+                                      nsIDNSByTypeRecord *aRes,
+                                      nsresult            aStatus)
+{
     return NS_OK;
 }
 

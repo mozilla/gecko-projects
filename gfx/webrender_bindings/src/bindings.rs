@@ -73,7 +73,7 @@ type WrImageKey = ImageKey;
 /// cbindgen:field-names=[mNamespace, mHandle]
 pub type WrFontKey = FontKey;
 /// cbindgen:field-names=[mNamespace, mHandle]
-type WrFontInstanceKey = FontInstanceKey;
+pub type WrFontInstanceKey = FontInstanceKey;
 /// cbindgen:field-names=[mNamespace, mHandle]
 type WrYuvColorSpace = YuvColorSpace;
 
@@ -344,7 +344,7 @@ struct WrExternalImage {
     size: usize,
 }
 
-type LockExternalImageCallback = unsafe extern "C" fn(*mut c_void, WrExternalImageId, u8) -> WrExternalImage;
+type LockExternalImageCallback = unsafe extern "C" fn(*mut c_void, WrExternalImageId, u8, ImageRendering) -> WrExternalImage;
 type UnlockExternalImageCallback = unsafe extern "C" fn(*mut c_void, WrExternalImageId, u8);
 
 #[repr(C)]
@@ -357,10 +357,11 @@ pub struct WrExternalImageHandler {
 impl ExternalImageHandler for WrExternalImageHandler {
     fn lock(&mut self,
             id: ExternalImageId,
-            channel_index: u8)
+            channel_index: u8,
+            rendering: ImageRendering)
             -> ExternalImage {
 
-        let image = unsafe { (self.lock_func)(self.external_image_obj, id.into(), channel_index) };
+        let image = unsafe { (self.lock_func)(self.external_image_obj, id.into(), channel_index, rendering) };
         ExternalImage {
             uv: TexelRect::new(image.u0, image.v0, image.u1, image.v1),
             source: match image.image_type {
@@ -637,6 +638,12 @@ pub unsafe extern "C" fn wr_renderer_delete(renderer: *mut Renderer) {
     // let renderer go out of scope and get dropped
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn wr_renderer_accumulate_memory_report(renderer: &mut Renderer,
+                                                              report: &mut MemoryReport) {
+    *report += renderer.report_memory();
+}
+
 // cbindgen doesn't support tuples, so we have a little struct instead, with
 // an Into implementation to convert from the tuple to the struct.
 #[repr(C)]
@@ -893,8 +900,10 @@ fn env_var_to_bool(key: &'static str) -> bool {
 pub extern "C" fn wr_window_new(window_id: WrWindowId,
                                 window_width: u32,
                                 window_height: u32,
+                                support_low_priority_transactions: bool,
                                 gl_context: *mut c_void,
                                 thread_pool: *mut WrThreadPool,
+                                size_of_op: VoidPtrToSizeFn,
                                 out_handle: &mut *mut DocumentHandle,
                                 out_renderer: &mut *mut Renderer,
                                 out_max_texture_size: *mut u32)
@@ -933,11 +942,12 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
     let opts = RendererOptions {
         enable_aa: true,
         enable_subpixel_aa: true,
+        support_low_priority_transactions,
         recorder: recorder,
         blob_image_handler: Some(Box::new(Moz2dBlobImageHandler::new(workers.clone()))),
         workers: Some(workers.clone()),
         thread_listener: Some(Box::new(GeckoProfilerThreadListener::new())),
-        enable_render_on_scroll: false,
+        size_of_op: Some(size_of_op),
         resource_override_path: unsafe {
             let override_charptr = gfx_wr_resource_path_override();
             if override_charptr.is_null() {
@@ -1039,6 +1049,14 @@ pub unsafe extern "C" fn wr_api_notify_memory_pressure(dh: &mut DocumentHandle) 
     dh.api.notify_memory_pressure();
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn wr_api_accumulate_memory_report(
+    dh: &mut DocumentHandle,
+    report: &mut MemoryReport
+) {
+    *report += dh.api.report_memory();
+}
+
 /// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_api_clear_all_caches(dh: &mut DocumentHandle) {
@@ -1067,6 +1085,11 @@ pub extern "C" fn wr_transaction_new(do_async: bool) -> *mut Transaction {
 #[no_mangle]
 pub extern "C" fn wr_transaction_delete(txn: *mut Transaction) {
     unsafe { let _ = Box::from_raw(txn); }
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_set_low_priority(txn: &mut Transaction, low_priority: bool) {
+    txn.set_low_priority(low_priority);
 }
 
 #[no_mangle]
@@ -1656,7 +1679,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
                                               filters: *const WrFilterOp,
                                               filter_count: usize,
                                               is_backface_visible: bool,
-                                              glyph_raster_space: GlyphRasterSpace,
+                                              glyph_raster_space: RasterSpace,
                                               out_is_reference_frame: &mut bool,
                                               out_reference_frame_id: &mut usize) {
     debug_assert!(unsafe { !is_in_render_thread() });
@@ -1921,12 +1944,13 @@ pub extern "C" fn wr_dp_pop_clip_and_scroll_info(state: &mut WrState) {
 #[no_mangle]
 pub extern "C" fn wr_dp_push_iframe(state: &mut WrState,
                                     rect: LayoutRect,
+                                    clip: LayoutRect,
                                     is_backface_visible: bool,
                                     pipeline_id: WrPipelineId,
                                     ignore_missing_pipeline: bool) {
     debug_assert!(unsafe { is_in_main_thread() });
 
-    let mut prim_info = LayoutPrimitiveInfo::new(rect);
+    let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(rect, clip.into());
     prim_info.is_backface_visible = is_backface_visible;
     prim_info.tag = state.current_tag;
     state.frame_builder.dl_builder.push_iframe(&prim_info, pipeline_id, ignore_missing_pipeline);
@@ -1949,10 +1973,11 @@ pub extern "C" fn wr_dp_push_rect(state: &mut WrState,
 
 #[no_mangle]
 pub extern "C" fn wr_dp_push_clear_rect(state: &mut WrState,
-                                        rect: LayoutRect) {
+                                        rect: LayoutRect,
+                                        clip: LayoutRect) {
     debug_assert!(unsafe { !is_in_render_thread() });
 
-    let prim_info = LayoutPrimitiveInfo::new(rect);
+    let prim_info = LayoutPrimitiveInfo::with_clip_rect(rect, clip.into());
     state.frame_builder.dl_builder.push_clear_rect(&prim_info);
 }
 
@@ -2133,7 +2158,7 @@ pub extern "C" fn wr_dp_push_border(state: &mut WrState,
                                     rect: LayoutRect,
                                     clip: LayoutRect,
                                     is_backface_visible: bool,
-                                    widths: BorderWidths,
+                                    widths: LayoutSideOffsets,
                                     top: BorderSide,
                                     right: BorderSide,
                                     bottom: BorderSide,
@@ -2163,7 +2188,7 @@ pub extern "C" fn wr_dp_push_border_image(state: &mut WrState,
                                           rect: LayoutRect,
                                           clip: LayoutRect,
                                           is_backface_visible: bool,
-                                          widths: BorderWidths,
+                                          widths: LayoutSideOffsets,
                                           image: WrImageKey,
                                           width: u32,
                                           height: u32,
@@ -2194,7 +2219,7 @@ pub extern "C" fn wr_dp_push_border_gradient(state: &mut WrState,
                                              rect: LayoutRect,
                                              clip: LayoutRect,
                                              is_backface_visible: bool,
-                                             widths: BorderWidths,
+                                             widths: LayoutSideOffsets,
                                              width: u32,
                                              height: u32,
                                              slice: SideOffsets2D<u32>,
@@ -2240,7 +2265,7 @@ pub extern "C" fn wr_dp_push_border_radial_gradient(state: &mut WrState,
                                                     rect: LayoutRect,
                                                     clip: LayoutRect,
                                                     is_backface_visible: bool,
-                                                    widths: BorderWidths,
+                                                    widths: LayoutSideOffsets,
                                                     center: LayoutPoint,
                                                     radius: LayoutSize,
                                                     stops: *const GradientStop,

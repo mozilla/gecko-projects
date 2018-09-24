@@ -257,7 +257,6 @@ nsIFrame::DestroyAnonymousContent(nsPresContext* aPresContext,
 
 // Formerly the nsIFrameDebug interface
 
-#ifdef DEBUG
 std::ostream& operator<<(std::ostream& aStream,
                          const nsReflowStatus& aStatus)
 {
@@ -285,16 +284,7 @@ std::ostream& operator<<(std::ostream& aStream,
   return aStream;
 }
 
-nsCString
-nsReflowStatus::ToString() const
-{
-  nsCString result;
-  std::stringstream ss;
-  ss << *this;
-  result.Append(ss.str().c_str());
-  return result;
-}
-
+#ifdef DEBUG
 static bool gShowFrameBorders = false;
 
 void nsFrame::ShowFrameBorders(bool aEnable)
@@ -815,7 +805,7 @@ nsFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData)
     // aPostDestroyData to unbind it after frame destruction is done.
     if (HasAnyStateBits(NS_FRAME_GENERATED_CONTENT) &&
         mContent->IsRootOfNativeAnonymousSubtree()) {
-      aPostDestroyData.AddGeneratedContent(mContent.forget());
+      aPostDestroyData.AddAnonymousContent(mContent.forget());
     }
   }
 
@@ -839,12 +829,14 @@ nsFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData)
     nsIFrame* rootFrame = shell->GetRootFrame();
     MOZ_ASSERT(rootFrame);
     if (this != rootFrame) {
-      nsTArray<nsIFrame*>* modifiedFrames =
-        rootFrame->GetProperty(nsIFrame::ModifiedFrameList());
-      if (modifiedFrames) {
-        MOZ_ASSERT(!modifiedFrames->Contains(this),
-                   "A dtor added this frame to ModifiedFrameList");
-      }
+      const RetainedDisplayListData* data =
+        GetRetainedDisplayListData(rootFrame);
+
+      const bool inModifiedList = data &&
+        (data->GetFlags(this) & RetainedDisplayListData::FrameFlags::Modified);
+
+      MOZ_ASSERT(!inModifiedList,
+                 "A dtor added this frame to modified frames list!");
     }
   }
 #endif
@@ -975,36 +967,36 @@ nsIFrame::RemoveDisplayItemDataForDeletion()
     delete items;
   }
 
-  if (IsFrameModified()) {
-    nsIFrame* rootFrame = PresShell()->GetRootFrame();
-    MOZ_ASSERT(rootFrame);
-
-    nsTArray<nsIFrame*>* modifiedFrames =
-      rootFrame->GetProperty(nsIFrame::ModifiedFrameList());
-    MOZ_ASSERT(modifiedFrames);
-
-    for (auto& frame : *modifiedFrames) {
-      if (frame == this) {
-        frame = nullptr;
-        break;
-      }
-    }
+  if (!nsLayoutUtils::AreRetainedDisplayListsEnabled()) {
+    // Retained display lists are disabled, no need to update
+    // RetainedDisplayListData.
+    return;
   }
 
-  if (HasOverrideDirtyRegion()) {
-    nsIFrame* rootFrame = PresShell()->GetRootFrame();
-    MOZ_ASSERT(rootFrame);
+  const bool updateData =
+    IsFrameModified() || HasOverrideDirtyRegion() || MayHaveWillChangeBudget();
 
-    nsTArray<nsIFrame*>* frames =
-      rootFrame->GetProperty(nsIFrame::OverriddenDirtyRectFrameList());
-    MOZ_ASSERT(frames);
+  if (!updateData) {
+    // No RetainedDisplayListData to update.
+    return;
+  }
 
-    for (auto& frame : *frames) {
-      if (frame == this) {
-        frame = nullptr;
-        break;
-      }
-    }
+  nsIFrame* rootFrame = PresShell()->GetRootFrame();
+  MOZ_ASSERT(rootFrame);
+
+  RetainedDisplayListData* data = GetOrSetRetainedDisplayListData(rootFrame);
+
+  if (MayHaveWillChangeBudget()) {
+    // Keep the frame in list, so it can be removed from the will-change budget.
+    data->Flags(this) = RetainedDisplayListData::FrameFlags::HadWillChange;
+    return;
+  }
+
+  if (IsFrameModified() || HasOverrideDirtyRegion()) {
+    // Remove deleted frames from RetainedDisplayListData.
+    DebugOnly<bool> removed = data->Remove(this);
+    MOZ_ASSERT(removed,
+               "Frame had flags set, but it was not found in DisplayListData!");
   }
 }
 
@@ -1027,13 +1019,7 @@ nsIFrame::MarkNeedsDisplayItemRebuild()
     return;
   }
 
-  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
-  MOZ_ASSERT(displayRoot);
-
-  RetainedDisplayListBuilder* retainedBuilder =
-    displayRoot->GetProperty(RetainedDisplayListBuilder::Cached());
-
-  if (!retainedBuilder) {
+  if (!nsLayoutUtils::DisplayRootHasRetainedDisplayListBuilder(this)) {
     return;
   }
 
@@ -1044,35 +1030,12 @@ nsIFrame::MarkNeedsDisplayItemRebuild()
     return;
   }
 
-  nsTArray<nsIFrame*>* modifiedFrames =
-    rootFrame->GetProperty(nsIFrame::ModifiedFrameList());
-
-  if (!modifiedFrames) {
-    modifiedFrames = new nsTArray<nsIFrame*>();
-    rootFrame->SetProperty(nsIFrame::ModifiedFrameList(), modifiedFrames);
-  }
-
-  if (this == rootFrame) {
-    // If this is the root frame, then marking us as needing a display
-    // item rebuild implies the same for all our descendents. Clear them
-    // all out to reduce the number of modified frames we keep around.
-    for (nsIFrame* f : *modifiedFrames) {
-      if (f) {
-        f->SetFrameIsModified(false);
-      }
-    }
-    modifiedFrames->Clear();
-  } else if (modifiedFrames->Length() > gfxPrefs::LayoutRebuildFrameLimit()) {
-    // If the list starts getting too big, then just mark the root frame
-    // as needing a rebuild.
-    rootFrame->MarkNeedsDisplayItemRebuild();
-    return;
-  }
-
-  modifiedFrames->AppendElement(this);
-
-  MOZ_ASSERT(PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
+  RetainedDisplayListData* data = GetOrSetRetainedDisplayListData(rootFrame);
+  data->Flags(this) |= RetainedDisplayListData::FrameFlags::Modified;
   SetFrameIsModified(true);
+
+  MOZ_ASSERT(
+    PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
 
   // Hopefully this is cheap, but we could use a frame state bit to note
   // the presence of dependencies to speed it up.
@@ -1201,6 +1164,18 @@ nsFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
       imageLoader->AssociateRequestToFrame(newShapeImage, this,
         ImageLoader::REQUEST_REQUIRES_REFLOW);
     }
+  }
+
+  // SVGObserverUtils::GetEffectProperties() asserts that we only invoke it with
+  // the first continuation so we need to check that in advance. Continuing text
+  // frame doesn't initialize its continuation pointer before reaching here for
+  // the first time, so we have to exclude text frames. This doesn't affect
+  // correctness because text nodes themselves shouldn't have effects applied.
+  if (!IsTextFrame() && !GetPrevContinuation()) {
+    // Kick off loading of external SVG resources referenced from properties if
+    // any. This currently includes filter, clip-path, and mask. We don't care
+    // about the return value. We only want its side effect.
+    Unused << SVGObserverUtils::GetEffectProperties(this);
   }
 
   // If the page contains markup that overrides text direction, and
@@ -1629,7 +1604,7 @@ bool
 nsIFrame::Combines3DTransformWithAncestors(const nsStyleDisplay* aStyleDisplay) const
 {
   MOZ_ASSERT(aStyleDisplay == StyleDisplay());
-  nsIFrame* parent = GetInFlowParent();
+  nsIFrame* parent = GetClosestFlattenedTreeAncestorPrimaryFrame();
   if (!parent || !parent->Extend3DContext()) {
     return false;
   }
@@ -2650,9 +2625,9 @@ FrameParticipatesIn3DContext(nsIFrame* aAncestor, nsIFrame* aDescendant) {
   MOZ_ASSERT(aAncestor != aDescendant);
   MOZ_ASSERT(aAncestor->Extend3DContext());
   nsIFrame* frame;
-  for (frame = aDescendant->GetInFlowParent();
+  for (frame = aDescendant->GetClosestFlattenedTreeAncestorPrimaryFrame();
        frame && aAncestor != frame;
-       frame = frame->GetInFlowParent()) {
+       frame = frame->GetClosestFlattenedTreeAncestorPrimaryFrame()) {
     if (!frame->Extend3DContext()) {
       return false;
     }
@@ -3517,7 +3492,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
        NS_FRAME_TOO_DEEP_IN_FRAME_TREE | NS_FRAME_IS_NONDISPLAY))
     return;
 
-  aBuilder->ClearWillChangeBudget(child);
+  aBuilder->RemoveFromWillChangeBudget(child);
 
   const bool shortcutPossible = aBuilder->IsPaintingToWindow() &&
      aBuilder->BuildCompositorHitTestInfo();
@@ -3594,7 +3569,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     isPlaceholder = true;
     nsPlaceholderFrame* placeholder = static_cast<nsPlaceholderFrame*>(child);
     child = placeholder->GetOutOfFlowFrame();
-    aBuilder->ClearWillChangeBudget(child);
+    aBuilder->RemoveFromWillChangeBudget(child);
     NS_ASSERTION(child, "No out of flow frame?");
     // If 'child' is a pushed float then it's owned by a block that's not an
     // ancestor of the placeholder, and it will be painted by that block and
@@ -5238,6 +5213,13 @@ nsFrame::MarkIntrinsicISizesDirty()
     CoordNeedsRecalc(metrics->mAscent);
   }
 
+  // If we're a flex item, clear our flex-item-specific cached measurements
+  // (which likely depended on our now-stale intrinsic isize).
+  auto* parentFrame = GetParent();
+  if (parentFrame && parentFrame->IsFlexContainerFrame()) {
+    DeleteProperty(CachedFlexMeasuringReflow());
+  }
+
   if (GetStateBits() & NS_FRAME_FONT_INFLATION_FLOW_ROOT) {
     nsFontInflationData::MarkFontInflationDataTextDirty(this);
   }
@@ -5247,7 +5229,7 @@ nsFrame::MarkIntrinsicISizesDirty()
 nsFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   nscoord result = 0;
-  DISPLAY_MIN_WIDTH(this, result);
+  DISPLAY_MIN_INLINE_SIZE(this, result);
   return result;
 }
 
@@ -5255,7 +5237,7 @@ nsFrame::GetMinISize(gfxContext *aRenderingContext)
 nsFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   nscoord result = 0;
-  DISPLAY_PREF_WIDTH(this, result);
+  DISPLAY_PREF_INLINE_SIZE(this, result);
   return result;
 }
 
@@ -9443,6 +9425,44 @@ nsIFrame::FinishAndStoreOverflow(nsOverflowAreas& aOverflowAreas,
 #endif
   }
 
+  nsSize oldSize = mRect.Size();
+  bool sizeChanged = ((aOldSize ? *aOldSize : oldSize) != aNewSize);
+
+  // Our frame size may not have been computed and set yet, but code under
+  // functions such as ComputeEffectsRect (which we're about to call) use the
+  // values that are stored in our frame rect to compute their results.  We
+  // need the results from those functions to be based on the frame size that
+  // we *will* have, so we temporarily set our frame size here before calling
+  // those functions.
+  //
+  // XXX Someone should document here why we revert the frame size before we
+  // return rather than just leaving it set.
+  //
+  // We pass false here to avoid invalidating display items for this temporary
+  // change. We sometimes reflow frames multiple times, with the final size being
+  // the same as the initial. The single call to SetSize after reflow is done
+  // will take care of invalidating display items if the size has actually
+  // changed.
+  SetSize(aNewSize, false);
+
+  const bool applyOverflowClipping =
+    nsFrame::ShouldApplyOverflowClipping(this, disp);
+
+  if (ChildrenHavePerspective(disp) && sizeChanged) {
+    RecomputePerspectiveChildrenOverflow(this);
+
+    if (!applyOverflowClipping) {
+      aOverflowAreas.SetAllTo(bounds);
+      DebugOnly<bool> ok = ComputeCustomOverflow(aOverflowAreas);
+
+      // ComputeCustomOverflow() should not return false, when
+      // FrameMaintainsOverflow() returns true.
+      MOZ_ASSERT(ok, "FrameMaintainsOverflow() != ComputeCustomOverflow()");
+
+      UnionChildOverflow(aOverflowAreas);
+    }
+  }
+
   // This is now called FinishAndStoreOverflow() instead of
   // StoreOverflow() because frame-generic ways of adding overflow
   // can happen here, e.g. CSS2 outline and native theme.
@@ -9467,7 +9487,7 @@ nsIFrame::FinishAndStoreOverflow(nsOverflowAreas& aOverflowAreas,
   NS_ASSERTION((disp->mOverflowY == NS_STYLE_OVERFLOW_CLIP) ==
                (disp->mOverflowX == NS_STYLE_OVERFLOW_CLIP),
                "If one overflow is clip, the other should be too");
-  if (nsFrame::ShouldApplyOverflowClipping(this, disp)) {
+  if (applyOverflowClipping) {
     // The contents are actually clipped to the padding area
     aOverflowAreas.SetAllTo(bounds);
   }
@@ -9501,26 +9521,6 @@ nsIFrame::FinishAndStoreOverflow(nsOverflowAreas& aOverflowAreas,
 
   ComputeAndIncludeOutlineArea(this, aOverflowAreas, aNewSize);
 
-  nsSize oldSize = mRect.Size();
-  bool sizeChanged = ((aOldSize ? *aOldSize : oldSize) != aNewSize);
-
-  // Our frame size may not have been computed and set yet, but code under
-  // functions such as ComputeEffectsRect (which we're about to call) use the
-  // values that are stored in our frame rect to compute their results.  We
-  // need the results from those functions to be based on the frame size that
-  // we *will* have, so we temporarily set our frame size here before calling
-  // those functions.
-  //
-  // XXX Someone should document here why we revert the frame size before we
-  // return rather than just leaving it set.
-  //
-  // We pass false here to avoid invalidating display items for this temporary
-  // change. We sometimes reflow frames multiple times, with the final size being
-  // the same as the initial. The single call to SetSize after reflow is done
-  // will take care of invalidating display items if the size has actually
-  // changed.
-  SetSize(aNewSize, false);
-
   // Nothing in here should affect scrollable overflow.
   aOverflowAreas.VisualOverflow() =
     ComputeEffectsRect(this, aOverflowAreas.VisualOverflow(), aNewSize);
@@ -9537,11 +9537,6 @@ nsIFrame::FinishAndStoreOverflow(nsOverflowAreas& aOverflowAreas,
   }
 
   /* If we're transformed, transform the overflow rect by the current transformation. */
-  if (ChildrenHavePerspective(disp) && sizeChanged) {
-    nsRect newBounds(nsPoint(0, 0), aNewSize);
-    RecomputePerspectiveChildrenOverflow(this);
-  }
-
   if (hasTransform) {
     SetProperty(nsIFrame::PreTransformOverflowAreasProperty(),
                 new nsOverflowAreas(aOverflowAreas));
@@ -10786,7 +10781,7 @@ nsIFrame::UpdateStyleOfOwnedChildFrame(
   // frame tree.
   if (!aChildFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW)) {
     childHint = NS_RemoveSubsumedHints(
-      childHint, aRestyleState.ChangesHandledFor(*aChildFrame));
+      childHint, aRestyleState.ChangesHandledFor(aChildFrame));
   }
   if (childHint) {
     if (childHint & nsChangeHint_ReconstructFrame) {
@@ -11549,7 +11544,7 @@ DR_layout_cookie::~DR_layout_cookie()
   nsFrame::DisplayLayoutExit(mFrame, mValue);
 }
 
-DR_intrinsic_width_cookie::DR_intrinsic_width_cookie(
+DR_intrinsic_inline_size_cookie::DR_intrinsic_inline_size_cookie(
                      nsIFrame*                aFrame,
                      const char*              aType,
                      nscoord&                 aResult)
@@ -11557,13 +11552,13 @@ DR_intrinsic_width_cookie::DR_intrinsic_width_cookie(
   , mType(aType)
   , mResult(aResult)
 {
-  MOZ_COUNT_CTOR(DR_intrinsic_width_cookie);
+  MOZ_COUNT_CTOR(DR_intrinsic_inline_size_cookie);
   mValue = nsFrame::DisplayIntrinsicISizeEnter(mFrame, mType);
 }
 
-DR_intrinsic_width_cookie::~DR_intrinsic_width_cookie()
+DR_intrinsic_inline_size_cookie::~DR_intrinsic_inline_size_cookie()
 {
-  MOZ_COUNT_DTOR(DR_intrinsic_width_cookie);
+  MOZ_COUNT_DTOR(DR_intrinsic_inline_size_cookie);
   nsFrame::DisplayIntrinsicISizeExit(mFrame, mType, mResult, mValue);
 }
 
@@ -12308,11 +12303,11 @@ static void DisplayReflowEnterPrint(nsPresContext*          aPresContext,
     else
       printf("cnt=%d \n", DR_state->mCount);
     if (DR_state->mDisplayPixelErrors) {
-      int32_t p2t = aPresContext->AppUnitsPerDevPixel();
-      CheckPixelError(aReflowInput.AvailableWidth(), p2t);
-      CheckPixelError(aReflowInput.AvailableHeight(), p2t);
-      CheckPixelError(aReflowInput.ComputedWidth(), p2t);
-      CheckPixelError(aReflowInput.ComputedHeight(), p2t);
+      int32_t d2a = aPresContext->AppUnitsPerDevPixel();
+      CheckPixelError(aReflowInput.AvailableWidth(), d2a);
+      CheckPixelError(aReflowInput.AvailableHeight(), d2a);
+      CheckPixelError(aReflowInput.ComputedWidth(), d2a);
+      CheckPixelError(aReflowInput.ComputedHeight(), d2a);
     }
   }
 }
@@ -12359,7 +12354,7 @@ void* nsFrame::DisplayIntrinsicISizeEnter(nsIFrame* aFrame,
   DR_FrameTreeNode* treeNode = DR_state->CreateTreeNode(aFrame, nullptr);
   if (treeNode && treeNode->mDisplay) {
     DR_state->DisplayFrameTypeInfo(aFrame, treeNode->mIndent);
-    printf("Get%sWidth\n", aType);
+    printf("Get%sISize\n", aType);
   }
   return treeNode;
 }
@@ -12435,9 +12430,9 @@ void nsFrame::DisplayReflowExit(nsPresContext* aPresContext,
     }
     printf("\n");
     if (DR_state->mDisplayPixelErrors) {
-      int32_t p2t = aPresContext->AppUnitsPerDevPixel();
-      CheckPixelError(aMetrics.Width(), p2t);
-      CheckPixelError(aMetrics.Height(), p2t);
+      int32_t d2a = aPresContext->AppUnitsPerDevPixel();
+      CheckPixelError(aMetrics.Width(), d2a);
+      CheckPixelError(aMetrics.Height(), d2a);
     }
   }
   DR_state->DeleteTreeNode(*treeNode);
@@ -12473,9 +12468,9 @@ void nsFrame::DisplayIntrinsicISizeExit(nsIFrame*            aFrame,
   DR_FrameTreeNode* treeNode = (DR_FrameTreeNode*)aFrameTreeNode;
   if (treeNode->mDisplay) {
     DR_state->DisplayFrameTypeInfo(aFrame, treeNode->mIndent);
-    char width[16];
-    DR_state->PrettyUC(aResult, width, 16);
-    printf("Get%sWidth=%s\n", aType, width);
+    char iSize[16];
+    DR_state->PrettyUC(aResult, iSize, 16);
+    printf("Get%sISize=%s\n", aType, iSize);
   }
   DR_state->DeleteTreeNode(*treeNode);
 }

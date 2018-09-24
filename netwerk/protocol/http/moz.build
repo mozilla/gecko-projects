@@ -20,12 +20,14 @@ XPIDL_SOURCES += [
     'nsIHttpHeaderVisitor.idl',
     'nsIHttpProtocolHandler.idl',
     'nsIRaceCacheWithNetwork.idl',
+    'nsIRedirectProcessChooser.idl',
     'nsIWellKnownOpportunisticUtils.idl',
 ]
 
 XPIDL_MODULE = 'necko_http'
 
 EXPORTS += [
+    'DocumentAnalyticsTrackerFastBlocked.h',
     'nsCORSListenerProxy.h',
     'nsHttp.h',
     'nsHttpAtomList.h',

@@ -10,7 +10,6 @@ XPIDL_SOURCES += [
     'nsIASN1Object.idl',
     'nsIASN1PrintableItem.idl',
     'nsIASN1Sequence.idl',
-    'nsIAssociatedContentSecurity.idl',
     'nsIBadCertListener2.idl',
     'nsICertBlocklist.idl',
     'nsICertificateDialogs.idl',
@@ -36,7 +35,6 @@ XPIDL_SOURCES += [
     'nsISecretDecoderRing.idl',
     'nsISecurityUITelemetry.idl',
     'nsISiteSecurityService.idl',
-    'nsISSLStatus.idl',
     'nsITokenDialogs.idl',
     'nsITokenPasswordDialogs.idl',
     'nsIX509Cert.idl',
@@ -126,7 +124,6 @@ UNIFIED_SOURCES += [
     'nsSiteSecurityService.cpp',
     'NSSKeyStore.cpp',
     'nsSSLSocketProvider.cpp',
-    'nsSSLStatus.cpp',
     'nsTLSSocketProvider.cpp',
     'OSKeyStore.cpp',
     'PKCS11ModuleDB.cpp',
@@ -198,8 +195,6 @@ if CONFIG['NSS_DISABLE_DBM']:
 
 DEFINES['SSL_DISABLE_DEPRECATED_CIPHER_SUITE_NAMES'] = 'True'
 DEFINES['NSS_ENABLE_ECC'] = 'True'
-for var in ('DLL_PREFIX', 'DLL_SUFFIX'):
-    DEFINES[var] = '"%s"' % CONFIG[var]
 
 if not CONFIG['MOZ_SYSTEM_NSS']:
     USE_LIBS += [

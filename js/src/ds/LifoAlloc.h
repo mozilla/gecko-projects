@@ -17,6 +17,7 @@
 #include "mozilla/TypeTraits.h"
 
 #include <new>
+#include <stddef.h> // size_t
 
 // This data structure supports stacky LIFO allocation (mark/release and
 // LifoAllocScope). It does not maintain one contiguous segment; instead, it
@@ -196,7 +197,8 @@ static const size_t LIFO_ALLOC_ALIGN = 8;
 
 MOZ_ALWAYS_INLINE
 uint8_t*
-AlignPtr(uint8_t* orig) {
+AlignPtr(uint8_t* orig)
+{
     static_assert(mozilla::IsPowerOfTwo(LIFO_ALLOC_ALIGN),
                   "LIFO_ALLOC_ALIGN must be a power of two");
 
@@ -226,13 +228,6 @@ class BumpChunk : public SingleLinkedListElement<BumpChunk>
 
 #if defined(DEBUG)
 # define LIFO_CHUNK_PROTECT 1
-#endif
-
-#ifdef LIFO_CHUNK_PROTECT
-    // Constant used to know if the current chunk should be protected. This is
-    // mainly use to prevent dead-lock in the MemoryProtectionExceptionHandler
-    // methods.
-    const uintptr_t protect_ : 1;
 #endif
 
     // Poison the memory with memset, in order to catch errors due to
@@ -286,14 +281,11 @@ class BumpChunk : public SingleLinkedListElement<BumpChunk>
     BumpChunk& operator=(const BumpChunk&) = delete;
     BumpChunk(const BumpChunk&) = delete;
 
-    explicit BumpChunk(uintptr_t capacity, bool protect)
+    explicit BumpChunk(uintptr_t capacity)
       : bump_(begin()),
         capacity_(base() + capacity)
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
       , magic_(magicNumber)
-#endif
-#ifdef LIFO_CHUNK_PROTECT
-      , protect_(protect ? 1 : 0)
 #endif
     {
         assertInvariants();
@@ -303,7 +295,6 @@ class BumpChunk : public SingleLinkedListElement<BumpChunk>
         // no-access, as it has not been allocated within the BumpChunk.
         LIFO_MAKE_MEM_NOACCESS(bump_, capacity_ - bump_);
 #endif
-        addMProtectHandler();
     }
 
     // Cast |this| into a uint8_t* pointer.
@@ -343,7 +334,6 @@ class BumpChunk : public SingleLinkedListElement<BumpChunk>
   public:
     ~BumpChunk() {
         release();
-        removeMProtectHandler();
     }
 
     // Returns true if this chunk contains no allocated content.
@@ -363,10 +353,7 @@ class BumpChunk : public SingleLinkedListElement<BumpChunk>
     // This function is the only way to allocate and construct a chunk. It
     // returns a UniquePtr to the newly allocated chunk.  The size given as
     // argument includes the space needed for the header of the chunk.
-    //
-    // The protect boolean is used to indicate whether the Bumpchunk memory
-    // should be reported within the MemoryProtectionExceptionHandler.
-    static UniquePtr<BumpChunk> newWithCapacity(size_t size, bool protect);
+    static UniquePtr<BumpChunk> newWithCapacity(size_t size);
 
     // Report allocation.
     size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
@@ -430,6 +417,11 @@ class BumpChunk : public SingleLinkedListElement<BumpChunk>
         setBump(m.bump_);
     }
 
+    // Given an amount, compute the total size of a chunk for it: reserved
+    // space before |begin()|, space for |amount| bytes, and red-zone space
+    // after those bytes that will ultimately end at |capacity_|.
+    static inline MOZ_MUST_USE bool allocSizeWithRedZone(size_t amount, size_t* size);
+
     // Given a bump chunk pointer, find the next base/end pointers. This is
     // useful for having consistent allocations, and iterating over known size
     // allocations.
@@ -474,42 +466,12 @@ class BumpChunk : public SingleLinkedListElement<BumpChunk>
         return aligned;
     }
 
-    // These locations are approximated locations, with the base rounded up to
-    // the nearest page boundary.
-    enum class Loc {
-        // Refers to the inherited linked list, this includes any allocated any
-        // reserved bytes, from base() to capacity_.
-        //
-        // This is used when freezing a LifoAlloc, such as moving a LifoAlloc to
-        // another thread.
-        Header = 0,
-        // Refers to the set of allocated and reserved bytes, from
-        // PageRoundup(begin()), to capacity_.
-        //
-        // This is used when a BumpChunk is moved to the list of unused chunks,
-        // as we want the header to remain mutable.
-        Allocated = 1,
-        // Refers to the set of reserved bytes, from PageRoundup(end()) to
-        // capacity_.
-        //
-        // This is used when a BumpChunk is no longer used for allocation, while
-        // containing live data. This should catch out-of-bound accesses within
-        // the LifoAlloc content.
-        Reserved = 2,
-        // Refers to the end of the BumpChunk.
-        //
-        // This is used when a BumpChunk is used for doing allocation, as
-        // re-protecting at each setBump would be too costly.
-        End = 3
-    };
 #ifdef LIFO_CHUNK_PROTECT
-    void setRWUntil(Loc loc) const;
-    void addMProtectHandler() const;
-    void removeMProtectHandler() const;
+    void setReadOnly();
+    void setReadWrite();
 #else
-    void setRWUntil(Loc loc) const {}
-    void addMProtectHandler() const {}
-    void removeMProtectHandler() const {}
+    void setReadOnly() const {}
+    void setReadWrite() const {}
 #endif
 };
 
@@ -517,6 +479,23 @@ class BumpChunk : public SingleLinkedListElement<BumpChunk>
 // first allocation content. This can be used to ensure there is enough space
 // for the next allocation (see LifoAlloc::newChunkWithCapacity).
 static constexpr size_t BumpChunkReservedSpace = AlignBytes(sizeof(BumpChunk), LIFO_ALLOC_ALIGN);
+
+/* static */ inline MOZ_MUST_USE bool
+BumpChunk::allocSizeWithRedZone(size_t amount, size_t* size)
+{
+    constexpr size_t SpaceBefore = BumpChunkReservedSpace;
+    static_assert((SpaceBefore % LIFO_ALLOC_ALIGN) == 0,
+                   "reserved space presumed already aligned");
+
+    constexpr size_t SpaceAfter = RedZoneSize; // may be zero
+
+    constexpr size_t SpaceBeforeAndAfter = SpaceBefore + SpaceAfter;
+    static_assert(SpaceBeforeAndAfter >= SpaceBefore,
+                  "intermediate addition must not overflow");
+
+    *size = SpaceBeforeAndAfter + amount;
+    return MOZ_LIKELY(*size >= SpaceBeforeAndAfter);
+}
 
 inline const uint8_t*
 BumpChunk::begin() const
@@ -538,7 +517,6 @@ BumpChunk::begin()
 // been released to avoid thrashing before a GC.
 class LifoAlloc
 {
-    using Loc = detail::BumpChunk::Loc;
     using UniqueBumpChunk = js::UniquePtr<detail::BumpChunk>;
     using BumpChunkList = detail::SingleLinkedList<detail::BumpChunk>;
 
@@ -557,9 +535,6 @@ class LifoAlloc
     size_t      peakSize_;
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
     bool        fallibleScope_;
-#endif
-#ifdef LIFO_CHUNK_PROTECT
-    const bool  protect_;
 #endif
 
     void operator=(const LifoAlloc&) = delete;
@@ -616,13 +591,10 @@ class LifoAlloc
     }
 
   public:
-    explicit LifoAlloc(size_t defaultChunkSize, bool protect = true)
+    explicit LifoAlloc(size_t defaultChunkSize)
       : peakSize_(0)
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
       , fallibleScope_(true)
-#endif
-#ifdef LIFO_CHUNK_PROTECT
-      , protect_(protect)
 #endif
     {
         reset(defaultChunkSize);
@@ -725,7 +697,6 @@ class LifoAlloc
         if (!newChunk)
             return false;
         size_t size = newChunk->computedSizeOfIncludingThis();
-        newChunk->setRWUntil(Loc::Allocated);
         unused_.pushFront(std::move(newChunk));
         incrementCurSize(size);
         return true;
@@ -799,48 +770,40 @@ class LifoAlloc
             released = chunks_.splitAfter(mark.markedChunk());
 
         // Release the content of all the blocks which are after the marks.
-        for (detail::BumpChunk& bc : released) {
+        for (detail::BumpChunk& bc : released)
             bc.release();
-            bc.setRWUntil(Loc::Allocated);
-        }
         unused_.appendAll(std::move(released));
 
         // Release everything which follows the mark in the last chunk.
-        if (!chunks_.empty()) {
-            chunks_.last()->setRWUntil(Loc::End);
+        if (!chunks_.empty())
             chunks_.last()->release(mark);
-        }
     }
 
     void releaseAll() {
         MOZ_ASSERT(!markCount);
-        for (detail::BumpChunk& bc : chunks_) {
+        for (detail::BumpChunk& bc : chunks_)
             bc.release();
-            bc.setRWUntil(Loc::Allocated);
-        }
         unused_.appendAll(std::move(chunks_));
     }
 
     // Protect the content of the LifoAlloc chunks.
-    void setReadOnly() {
 #ifdef LIFO_CHUNK_PROTECT
+    void setReadOnly() {
         for (detail::BumpChunk& bc : chunks_)
-            bc.setRWUntil(Loc::Header);
+            bc.setReadOnly();
         for (detail::BumpChunk& bc : unused_)
-            bc.setRWUntil(Loc::Header);
-#endif
+            bc.setReadOnly();
     }
     void setReadWrite() {
-#ifdef LIFO_CHUNK_PROTECT
-        BumpChunkList::Iterator e(chunks_.last());
-        for (BumpChunkList::Iterator i(chunks_.begin()); i != e; ++i)
-            i->setRWUntil(Loc::Reserved);
-        if (!chunks_.empty())
-            chunks_.last()->setRWUntil(Loc::End);
+        for (detail::BumpChunk& bc : chunks_)
+            bc.setReadWrite();
         for (detail::BumpChunk& bc : unused_)
-            bc.setRWUntil(Loc::Allocated);
-#endif
+            bc.setReadWrite();
     }
+#else
+    void setReadOnly() const {}
+    void setReadWrite() const {}
+#endif
 
     // Get the total "used" (occupied bytes) count for the arena chunks.
     size_t used() const {

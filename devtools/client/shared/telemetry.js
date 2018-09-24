@@ -137,7 +137,15 @@ class Telemetry {
    *          to the histogram, False otherwise.
    */
   finish(histogramId, obj, canceledOkay) {
-    return TelemetryStopwatch.finish(histogramId, obj, canceledOkay);
+    // Avoid errors caused by the toolbox not being properly initialized.
+    this.ignoreStopwatchErrors(true);
+
+    const result = TelemetryStopwatch.finish(histogramId, obj, canceledOkay);
+
+    // Watch for errors again.
+    this.ignoreStopwatchErrors(false);
+
+    return result;
   }
 
   /**
@@ -162,7 +170,28 @@ class Telemetry {
    *          to the histogram, False otherwise.
    */
   finishKeyed(histogramId, key, obj, canceledOkay) {
-    return TelemetryStopwatch.finishKeyed(histogramId, key, obj, canceledOkay);
+    // Avoid errors caused by the toolbox not being properly initialized.
+    this.ignoreStopwatchErrors(true);
+
+    const result = TelemetryStopwatch.finishKeyed(histogramId, key, obj, canceledOkay);
+
+    // Watch for errors again.
+    this.ignoreStopwatchErrors(false);
+
+    return result;
+  }
+
+  /**
+   * Set a flag to ignore TelemetryStopwatch errors.
+   *
+   * @param {Boolean} testing
+   *        Flag to select whether to ignore TelemetryStopwatch errors.
+   */
+  ignoreStopwatchErrors(testing) {
+    // FIXME: https://bugzil.la/1491879 - Fix telemetry support for multiple
+    //        tabs / windows. This method should be removed as it is hiding
+    //        a problem with using telemetry in multiple tabs / windows.
+    TelemetryStopwatch.setTestModeEnabled(testing);
   }
 
   /**
@@ -575,10 +604,6 @@ class Telemetry {
     }
 
     if (charts.useTimedEvent) {
-      if (id === "newanimationinspector") {
-        id = "animationinspector";
-      }
-
       this.preparePendingEvent("devtools.main", "tool_timer", id, null, [
         "os",
         "time_open",
@@ -619,12 +644,15 @@ class Telemetry {
     }
 
     if (charts.useTimedEvent) {
-      if (id === "newanimationinspector") {
-        id = "animationinspector";
-      }
-
       const sig = `devtools.main,tool_timer,${id},null`;
       const event = PENDING_EVENTS.get(sig);
+
+      if (!event) {
+        // FIXME: https://bugzil.la/1491879 - Fix telemetry support for multiple
+        //        tabs / windows. For the moment we need to bail out.
+        return;
+      }
+
       const time = this.msSystemNow() - event.extra.time_open;
 
       this.addEventProperties("devtools.main", "tool_timer", id, null, {
@@ -664,15 +692,11 @@ function getChartsFromToolId(id) {
   if (id === "PERFORMANCE") {
     id = "JSPROFILER";
   }
-  if (id === "NEWANIMATIONINSPECTOR") {
-    id = "ANIMATIONINSPECTOR";
-  }
 
   switch (id) {
     case "ABOUTDEBUGGING":
     case "BROWSERCONSOLE":
     case "CANVASDEBUGGER":
-    case "DEVELOPERTOOLBAR":
     case "DOM":
     case "INSPECTOR":
     case "JSBROWSERDEBUGGER":

@@ -27,7 +27,7 @@ job-defaults:
          default:
             - project:releng:bouncer:action:locations
             - project:releng:bouncer:server:staging
-   run-on-projects: ['mozilla-central', 'maple']
+   run-on-projects: ['maple', 'mozilla-central']
    treeherder:
       symbol: BncLoc
       kind: other
@@ -36,16 +36,9 @@ job-defaults:
 jobs:
    firefox:
       bouncer-products:
-         by-project:
-            mozilla-central:
-                - firefox-nightly-latest
-                - firefox-nightly-latest-ssl
-                - firefox-nightly-latest-l10n
-                - firefox-nightly-latest-l10n-ssl
-            default:
-                - firefox-nightly-latest
-                - firefox-nightly-latest-ssl
-                - firefox-nightly-latest-l10n
-                - firefox-nightly-latest-l10n-ssl
+         - firefox-nightly-latest
+         - firefox-nightly-latest-ssl
+         - firefox-nightly-latest-l10n
+         - firefox-nightly-latest-l10n-ssl
       treeherder:
          platform: firefox-release/opt

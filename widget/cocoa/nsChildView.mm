@@ -3097,6 +3097,50 @@ nsChildView::LookUpDictionary(
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
+nsresult
+nsChildView::SetPrefersReducedMotionOverrideForTest(bool aValue)
+{
+  // Tell that the cache value we are going to set isn't cleared via
+  // nsPresContext::ThemeChangedInternal which is called right before
+  // we queue the media feature value change for this prefers-reduced-motion
+  // change.
+  LookAndFeel::SetShouldRetainCacheForTest(true);
+
+  LookAndFeelInt prefersReducedMotion;
+  prefersReducedMotion.id = LookAndFeel::eIntID_PrefersReducedMotion;
+  prefersReducedMotion.value = aValue ? 1 : 0;
+
+  AutoTArray<LookAndFeelInt, 1> lookAndFeelCache;
+  lookAndFeelCache.AppendElement(prefersReducedMotion);
+
+  // If we could have a way to modify
+  // NSWorkspace.accessibilityDisplayShouldReduceMotion, we could use it, but
+  // unfortunately there is no way, so we change the cache value instead as if
+  // it's set in the parent process.
+  LookAndFeel::SetIntCache(lookAndFeelCache);
+
+  if (nsCocoaFeatures::OnMojaveOrLater()) {
+    [[[NSWorkspace sharedWorkspace] notificationCenter]
+         postNotificationName: NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+         object:nil];
+  } else if (nsCocoaFeatures::OnYosemiteOrLater()) {
+    [[NSNotificationCenter defaultCenter]
+       postNotificationName: NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+       object:nil];
+  } else {
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
+nsresult
+nsChildView::ResetPrefersReducedMotionOverrideForTest()
+{
+  LookAndFeel::SetShouldRetainCacheForTest(false);
+  return NS_OK;
+}
+
 #ifdef ACCESSIBILITY
 already_AddRefed<a11y::Accessible>
 nsChildView::GetDocumentAccessible()
@@ -3334,6 +3378,20 @@ NSEvent* gLastDragMouseDownEvent = nil;
                                            selector:@selector(systemMetricsChanged)
                                                name:NSSystemColorsDidChangeNotification
                                              object:nil];
+
+  if (nsCocoaFeatures::OnMojaveOrLater()) {
+    [[[NSWorkspace sharedWorkspace] notificationCenter]
+           addObserver:self
+              selector:@selector(systemMetricsChanged)
+                  name:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+                object:nil];
+  } else if (nsCocoaFeatures::OnYosemiteOrLater()) {
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(systemMetricsChanged)
+                                                 name:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+                                               object:nil];
+  }
+
   [[NSNotificationCenter defaultCenter] addObserver:self
                                            selector:@selector(scrollbarSystemMetricChanged)
                                                name:NSPreferredScrollerStyleDidChangeNotification

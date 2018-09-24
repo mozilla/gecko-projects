@@ -278,7 +278,7 @@
         <body>
         <![CDATA[
           var startTab = this.selectedItem;
-          var next = startTab[aDir == -1 ? "previousSibling" : "nextSibling"];
+          var next = startTab[(aDir == -1 ? "previous" : "next") + "ElementSibling"];
           if (!next && aWrap) {
             next = aDir == -1 ? this.children[this.children.length - 1] :
                                 this.children[0];
@@ -401,7 +401,11 @@
 
           var panel = this._selectedPanel;
           this._selectedPanel = this.children[val];
-          this.setAttribute("selectedIndex", val);
+
+          if (this.getAttribute("async") != "true") {
+            this.setAttribute("selectedIndex", val);
+          }
+
           if (this._selectedPanel != panel) {
             var event = document.createEvent("Events");
             event.initEvent("select", true, true);
@@ -538,39 +542,39 @@
       ]]>
       </handler>
 
-      <handler event="keydown" keycode="VK_LEFT" group="system" preventdefault="true">
+      <handler event="keydown" keycode="VK_LEFT" preventdefault="true">
       <![CDATA[
         var direction = window.getComputedStyle(this.parentNode).direction;
         this.parentNode.advanceSelectedTab(direction == "ltr" ? -1 : 1, this.arrowKeysShouldWrap);
       ]]>
       </handler>
 
-      <handler event="keydown" keycode="VK_RIGHT" group="system" preventdefault="true">
+      <handler event="keydown" keycode="VK_RIGHT" preventdefault="true">
       <![CDATA[
         var direction = window.getComputedStyle(this.parentNode).direction;
         this.parentNode.advanceSelectedTab(direction == "ltr" ? 1 : -1, this.arrowKeysShouldWrap);
       ]]>
       </handler>
 
-      <handler event="keydown" keycode="VK_UP" group="system" preventdefault="true">
+      <handler event="keydown" keycode="VK_UP" preventdefault="true">
       <![CDATA[
         this.parentNode.advanceSelectedTab(-1, this.arrowKeysShouldWrap);
       ]]>
       </handler>
 
-      <handler event="keydown" keycode="VK_DOWN" group="system" preventdefault="true">
+      <handler event="keydown" keycode="VK_DOWN" preventdefault="true">
       <![CDATA[
         this.parentNode.advanceSelectedTab(1, this.arrowKeysShouldWrap);
       ]]>
       </handler>
 
-      <handler event="keydown" keycode="VK_HOME" group="system" preventdefault="true">
+      <handler event="keydown" keycode="VK_HOME" preventdefault="true">
       <![CDATA[
         this.parentNode._selectNewTab(this.parentNode.children[0]);
       ]]>
       </handler>
 
-      <handler event="keydown" keycode="VK_END" group="system" preventdefault="true">
+      <handler event="keydown" keycode="VK_END" preventdefault="true">
       <![CDATA[
         var tabs = this.parentNode.children;
         this.parentNode._selectNewTab(tabs[tabs.length - 1], -1);

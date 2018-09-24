@@ -10,10 +10,13 @@
 #include "mozilla/dom/PaymentRequestChild.h"
 #include "mozilla/dom/PaymentResponse.h"
 #include "mozilla/EventStateManager.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsContentUtils.h"
+#include "nsIScriptError.h"
 #include "nsIURLParser.h"
 #include "nsNetCID.h"
 #include "PaymentRequestManager.h"
+#include "mozilla/dom/MerchantValidationEvent.h"
 
 namespace mozilla {
 namespace dom {
@@ -604,7 +607,6 @@ PaymentRequest::Constructor(const GlobalObject& aGlobal,
     aRv.Throw(NS_ERROR_DOM_TYPE_ERR);
     return nullptr;
   }
-
   return request.forget();
 }
 
@@ -691,15 +693,23 @@ already_AddRefed<Promise>
 PaymentRequest::Show(const Optional<OwningNonNull<Promise>>& aDetailsPromise,
                      ErrorResult& aRv)
 {
-  if (!EventStateManager::IsHandlingUserInput()) {
-    aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
-    return nullptr;
-  }
-
   nsIGlobalObject* global = GetOwnerGlobal();
   nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(global);
   MOZ_ASSERT(win);
   nsIDocument* doc = win->GetExtantDoc();
+
+  if (!EventStateManager::IsHandlingUserInput()) {
+    nsString msg = NS_LITERAL_STRING("User activation is now required to call PaymentRequest.show()");
+    nsContentUtils::ReportToConsoleNonLocalized(msg,
+                                                nsIScriptError::warningFlag,
+                                                NS_LITERAL_CSTRING("Security"),
+                                                doc);
+    if (StaticPrefs::dom_payments_request_user_interaction_required()) {
+      aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
+      return nullptr;
+    }
+  }
+
   if (!doc || !doc->IsCurrentActiveDocument()) {
     aRv.Throw(NS_ERROR_DOM_ABORT_ERR);
     return nullptr;
@@ -745,10 +755,14 @@ PaymentRequest::Show(const Optional<OwningNonNull<Promise>>& aDetailsPromise,
 void
 PaymentRequest::RejectShowPayment(nsresult aRejectReason)
 {
-  MOZ_ASSERT(mAcceptPromise);
+  MOZ_ASSERT(mAcceptPromise || mResponse);
   MOZ_ASSERT(mState == eInteractive);
 
-  mAcceptPromise->MaybeReject(aRejectReason);
+  if (mResponse) {
+    mResponse->RejectRetry(aRejectReason);
+  } else {
+    mAcceptPromise->MaybeReject(aRejectReason);
+  }
   mState = eClosed;
   mAcceptPromise = nullptr;
 }
@@ -761,7 +775,7 @@ PaymentRequest::RespondShowPayment(const nsAString& aMethodName,
                                    const nsAString& aPayerPhone,
                                    nsresult aRv)
 {
-  MOZ_ASSERT(mAcceptPromise);
+  MOZ_ASSERT(mAcceptPromise || mResponse);
   MOZ_ASSERT(mState == eInteractive);
 
   if (NS_FAILED(aRv)) {
@@ -773,12 +787,17 @@ PaymentRequest::RespondShowPayment(const nsAString& aMethodName,
   mShippingAddress.swap(mFullShippingAddress);
   mFullShippingAddress = nullptr;
 
-  RefPtr<PaymentResponse> paymentResponse =
-    new PaymentResponse(GetOwner(), this, mId, aMethodName,
-                        mShippingOption, mShippingAddress, aDetails,
-                        aPayerName, aPayerEmail, aPayerPhone);
-  mResponse = paymentResponse;
-  mAcceptPromise->MaybeResolve(paymentResponse);
+  if (mResponse) {
+    mResponse->RespondRetry(aMethodName, mShippingOption, mShippingAddress,
+                            aDetails, aPayerName, aPayerEmail, aPayerPhone);
+  } else {
+    RefPtr<PaymentResponse> paymentResponse =
+      new PaymentResponse(GetOwner(), this, mId, aMethodName,
+                          mShippingOption, mShippingAddress, aDetails,
+                          aPayerName, aPayerEmail, aPayerPhone);
+    mResponse = paymentResponse;
+    mAcceptPromise->MaybeResolve(paymentResponse);
+  }
 
   mState = eClosed;
   mAcceptPromise = nullptr;
@@ -903,6 +922,22 @@ PaymentRequest::AbortUpdate(nsresult aRv, bool aDeferredShow)
   mUpdateError = aRv;
 }
 
+nsresult
+PaymentRequest::RetryPayment(JSContext* aCx, const PaymentValidationErrors& aErrors)
+{
+  if (mState == eInteractive) {
+    return NS_ERROR_DOM_INVALID_STATE_ERR;
+  }
+  RefPtr<PaymentRequestManager> manager = PaymentRequestManager::GetSingleton();
+  MOZ_ASSERT(manager);
+  nsresult rv = manager->RetryPayment(aCx, this, aErrors);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  mState = eInteractive;
+  return NS_OK;
+}
+
 void
 PaymentRequest::GetId(nsAString& aRetVal) const
 {
@@ -939,6 +974,13 @@ PaymentRequest::SetUpdating(bool aUpdating)
   mUpdating = aUpdating;
 }
 
+already_AddRefed<PaymentResponse>
+PaymentRequest::GetResponse() const
+{
+  RefPtr<PaymentResponse> response = mResponse;
+  return response.forget();
+}
+
 nsresult
 PaymentRequest::DispatchUpdateEvent(const nsAString& aType)
 {
@@ -954,6 +996,29 @@ PaymentRequest::DispatchUpdateEvent(const nsAString& aType)
   event->SetRequest(this);
 
   ErrorResult rv;
+  DispatchEvent(*event, rv);
+  return rv.StealNSResult();
+}
+
+nsresult
+PaymentRequest::DispatchMerchantValidationEvent(const nsAString& aType)
+{
+  MOZ_ASSERT(ReadyForUpdate());
+
+  MerchantValidationEventInit init;
+  init.mBubbles = false;
+  init.mCancelable = false;
+  init.mValidationURL = EmptyString();
+
+  ErrorResult rv;
+  RefPtr<MerchantValidationEvent> event =
+    MerchantValidationEvent::Constructor(this, aType, init, rv);
+  if (rv.Failed()) {
+    return rv.StealNSResult();
+  }
+  event->SetTrusted(true);
+  event->SetRequest(this);
+
   DispatchEvent(*event, rv);
   return rv.StealNSResult();
 }
@@ -1021,6 +1086,16 @@ Nullable<PaymentShippingType>
 PaymentRequest::GetShippingType() const
 {
   return mShippingType;
+}
+
+void PaymentRequest::GetOptions(PaymentOptions& aRetVal) const
+{
+  aRetVal = mOptions;
+}
+
+void PaymentRequest::SetOptions(const PaymentOptions& aOptions)
+{
+  mOptions = aOptions;
 }
 
 void

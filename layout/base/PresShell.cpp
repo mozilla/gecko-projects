@@ -23,6 +23,7 @@
 #include "mozilla/Logging.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/TouchEvents.h"
@@ -725,25 +726,18 @@ nsIPresShell::FrameSelection()
 
 static bool sSynthMouseMove = true;
 static uint32_t sNextPresShellId;
-static bool sAccessibleCaretEnabled = false;
-static bool sAccessibleCaretOnTouch = false;
 
 /* static */ bool
 PresShell::AccessibleCaretEnabled(nsIDocShell* aDocShell)
 {
-  static bool initialized = false;
-  if (!initialized) {
-    Preferences::AddBoolVarCache(&sAccessibleCaretEnabled, "layout.accessiblecaret.enabled");
-    Preferences::AddBoolVarCache(&sAccessibleCaretOnTouch, "layout.accessiblecaret.enabled_on_touch");
-    initialized = true;
-  }
   // If the pref forces it on, then enable it.
-  if (sAccessibleCaretEnabled) {
+  if (StaticPrefs::layout_accessiblecaret_enabled()) {
     return true;
   }
   // If the touch pref is on, and touch events are enabled (this depends
   // on the specific device running), then enable it.
-  if (sAccessibleCaretOnTouch && dom::TouchEvent::PrefEnabled(aDocShell)) {
+  if (StaticPrefs::layout_accessiblecaret_enabled_on_touch() &&
+      dom::TouchEvent::PrefEnabled(aDocShell)) {
     return true;
   }
   // Otherwise, disabled.
@@ -4265,10 +4259,12 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
 
     // Process pending restyles, since any flush of the presshell wants
     // up-to-date style data.
-    if (!mIsDestroying) {
+    if (MOZ_LIKELY(!mIsDestroying)) {
       viewManager->FlushDelayedResize(false);
       mPresContext->FlushPendingMediaFeatureValuesChanged();
+    }
 
+    if (MOZ_LIKELY(!mIsDestroying)) {
       // Now that we have flushed media queries, update the rules before looking
       // up @font-face / @counter-style / @font-feature-values rules.
       mStyleSet->UpdateStylistIfNeeded();
@@ -4290,22 +4286,22 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
       if (aFlush.mFlushAnimations && mPresContext->EffectCompositor()) {
         mPresContext->EffectCompositor()->PostRestyleForThrottledAnimations();
       }
+    }
 
-      // The FlushResampleRequests() above flushed style changes.
-      if (!mIsDestroying) {
-        nsAutoScriptBlocker scriptBlocker;
+    // The FlushResampleRequests() above flushed style changes.
+    if (MOZ_LIKELY(!mIsDestroying)) {
+      nsAutoScriptBlocker scriptBlocker;
 #ifdef MOZ_GECKO_PROFILER
-        AutoProfilerStyleMarker tracingStyleFlush(std::move(mStyleCause));
+      AutoProfilerStyleMarker tracingStyleFlush(std::move(mStyleCause));
 #endif
 
-        mPresContext->RestyleManager()->ProcessPendingRestyles();
-      }
+      mPresContext->RestyleManager()->ProcessPendingRestyles();
     }
 
     // Process whatever XBL constructors those restyles queued up.  This
     // ensures that onload doesn't fire too early and that we won't do extra
     // reflows after those constructors run.
-    if (!mIsDestroying) {
+    if (MOZ_LIKELY(!mIsDestroying)) {
       mDocument->BindingManager()->ProcessAttachedQueue();
     }
 
@@ -4316,7 +4312,7 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     // happen during reflow, might suddenly pick up the new rules and
     // we'll end up with frames whose style doesn't match the frame
     // type.
-    if (!mIsDestroying) {
+    if (MOZ_LIKELY(!mIsDestroying)) {
       nsAutoScriptBlocker scriptBlocker;
 #ifdef MOZ_GECKO_PROFILER
       AutoProfilerStyleMarker tracingStyleFlush(std::move(mStyleCause));
@@ -4340,11 +4336,6 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
                         ? FlushType::Layout
                         : FlushType::InterruptibleLayout) &&
         !mIsDestroying) {
-#ifdef MOZ_GECKO_PROFILER
-      AutoProfilerTracing tracingLayoutFlush("Paint", "Reflow",
-                                              std::move(mReflowCause));
-      mReflowCause = nullptr;
-#endif
       didLayoutFlush = true;
       mFrameConstructor->RecalcQuotesAndCounters();
       viewManager->FlushDelayedResize(true);
@@ -6442,12 +6433,6 @@ PresShell::GetCurrentEventFrame()
   return mCurrentEventFrame;
 }
 
-nsIFrame*
-PresShell::GetEventTargetFrame()
-{
-  return GetCurrentEventFrame();
-}
-
 already_AddRefed<nsIContent>
 PresShell::GetEventTargetContent(WidgetEvent* aEvent)
 {
@@ -7950,7 +7935,6 @@ DispatchKeyPressEventsEvenForNonPrintableKeys(nsIURI* aURI)
     host = NS_LITERAL_CSTRING("*") +
              nsDependentCSubstring(host, startIndexOfNextLevel);
   }
-  return false;
 }
 #endif // #ifdef NIGHTLY_BUILD
 
@@ -8914,6 +8898,13 @@ PresShell::ScheduleReflowOffTimer()
 bool
 PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
 {
+#ifdef MOZ_GECKO_PROFILER
+  nsIURI* uri = mDocument->GetDocumentURI();
+  AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING(
+    "PresShell::DoReflow", LAYOUT,
+    uri ? uri->GetSpecOrDefault() : NS_LITERAL_CSTRING("N/A"));
+#endif
+
   gfxTextPerfMetrics* tp = mPresContext->GetTextPerfMetrics();
   TimeStamp timeStart;
   if (tp) {
@@ -8928,13 +8919,6 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
   // schedule a similar paint when a frame is deleted.
   target->SchedulePaint(nsIFrame::PAINT_DEFAULT, false);
 
-#ifdef MOZ_GECKO_PROFILER
-  nsIURI* uri = mDocument->GetDocumentURI();
-  AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING(
-    "PresShell::DoReflow", LAYOUT,
-    uri ? uri->GetSpecOrDefault() : NS_LITERAL_CSTRING("N/A"));
-#endif
-
   nsDocShell* docShell = static_cast<nsDocShell*>(GetPresContext()->GetDocShell());
   RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
   bool isTimelineRecording = timelines && timelines->HasConsumer(docShell);
@@ -8942,6 +8926,12 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
   if (isTimelineRecording) {
     timelines->AddMarkerForDocShell(docShell, "Reflow", MarkerTracingType::START);
   }
+
+#ifdef MOZ_GECKO_PROFILER
+  AutoProfilerTracing tracingLayoutFlush("Paint", "Reflow",
+                                          std::move(mReflowCause));
+  mReflowCause = nullptr;
+#endif
 
   if (mReflowContinueTimer) {
     mReflowContinueTimer->Cancel();

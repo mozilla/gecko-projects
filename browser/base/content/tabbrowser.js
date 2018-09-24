@@ -283,11 +283,17 @@ window._gBrowser = {
   },
 
   _setupInitialBrowserAndTab() {
+    // See browser.js for the meaning of window.arguments.
+    let userContextId = window.arguments && window.arguments[6];
+
     // Bug 1362774 will adjust this to only set `uriIsAboutBlank` when
     // necessary. For now, we always pass it.
-    let browser = this._createBrowser({uriIsAboutBlank: true});
+    let browser = this._createBrowser({uriIsAboutBlank: true, userContextId});
     browser.setAttribute("primary", "true");
     browser.setAttribute("blank", "true");
+    if (gBrowserAllowScriptsToCloseInitialTabs) {
+      browser.setAttribute("allowscriptstoclose", "true");
+    }
     browser.droppedLinkHandler = handleDroppedLink;
     browser.loadURI = _loadURI.bind(null, browser);
 
@@ -304,6 +310,12 @@ window._gBrowser = {
     tab._tPos = 0;
     tab._fullyOpen = true;
     tab.linkedBrowser = browser;
+
+    if (userContextId) {
+      tab.setAttribute("usercontextid", userContextId);
+      ContextualIdentityService.setTabStyle(tab);
+    }
+
     this._tabForBrowser.set(browser, tab);
 
     this._appendStatusPanel();
@@ -925,7 +937,7 @@ window._gBrowser = {
     // Update the URL bar.
     let webProgress = newBrowser.webProgress;
     this._callProgressListeners(null, "onLocationChange",
-                                [webProgress, null, newBrowser.currentURI, 0],
+                                [webProgress, null, newBrowser.currentURI, 0, true],
                                 true, false);
 
     let securityUI = newBrowser.securityUI;
@@ -1094,7 +1106,9 @@ window._gBrowser = {
         newBrowser._urlbarFocused &&
         gURLBar &&
         gURLBar.focused;
-      if (!keepFocusOnUrlBar) {
+      // In an HTML document (built with MOZ_BROWSER_XHTML), the activeElement
+      // can be null, so check before attempting to blur it (Bug 1485157).
+      if (!keepFocusOnUrlBar && document.activeElement) {
         // Clear focus so that _adjustFocusAfterTabSwitch can detect if
         // some element has been focused and respect that.
         document.activeElement.blur();
@@ -1419,6 +1433,7 @@ window._gBrowser = {
   },
 
   loadTabs(aURIs, {
+    allowInheritPrincipal,
     allowThirdPartyFixup,
     inBackground,
     newIndex,
@@ -1475,6 +1490,9 @@ window._gBrowser = {
         flags |= Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP |
           Ci.nsIWebNavigation.LOAD_FLAGS_FIXUP_SCHEME_TYPOS;
       }
+      if (!allowInheritPrincipal) {
+        flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL;
+      }
       try {
         browser.loadURI(aURIs[0], {
           flags,
@@ -1487,6 +1505,7 @@ window._gBrowser = {
       }
     } else {
       let params = {
+        allowInheritPrincipal,
         ownerTab: owner,
         skipAnimation: multiple,
         allowThirdPartyFixup,
@@ -1507,6 +1526,7 @@ window._gBrowser = {
     let tabNum = targetTabIndex;
     for (let i = 1; i < aURIs.length; ++i) {
       let params = {
+        allowInheritPrincipal,
         skipAnimation: true,
         allowThirdPartyFixup,
         postData: postDatas && postDatas[i],
@@ -1778,7 +1798,9 @@ window._gBrowser = {
       browser.webProgress;
     }
 
-    browser.loadURI(BROWSER_NEW_TAB_URL);
+    browser.loadURI(BROWSER_NEW_TAB_URL, {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+    });
     browser.docShellIsActive = false;
     browser._urlbarFocused = true;
 

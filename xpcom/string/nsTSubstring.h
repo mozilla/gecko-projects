@@ -9,6 +9,7 @@
 #define nsTSubstring_h
 
 #include "mozilla/Casting.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/MemoryReporting.h"
@@ -22,6 +23,11 @@
 #ifndef MOZILLA_INTERNAL_API
 #error "Using XPCOM strings is limited to code linked into libxul."
 #endif
+
+// The max number of logically uninitialized code units to
+// fill with a marker byte or to mark as unintialized for
+// memory checking. (Limited to avoid quadratic behavior.)
+const size_t kNsStringBufferMaxPoison = 16;
 
 template <typename T> class nsTSubstringSplitter;
 template <typename T> class nsTString;
@@ -321,7 +327,6 @@ public:
 
   typedef typename base_string_type::comparator_type comparator_type;
 
-  typedef typename base_string_type::char_iterator char_iterator;
   typedef typename base_string_type::const_char_iterator const_char_iterator;
 
   typedef typename base_string_type::index_type index_type;
@@ -360,7 +365,7 @@ public:
    * the above paragraph says.
    */
 
-  char_iterator BeginWriting()
+  iterator BeginWriting()
   {
     if (!EnsureMutable()) {
       AllocFailed(base_string_type::mLength);
@@ -369,12 +374,12 @@ public:
     return base_string_type::mData;
   }
 
-  char_iterator BeginWriting(const fallible_t&)
+  iterator BeginWriting(const fallible_t&)
   {
-    return EnsureMutable() ? base_string_type::mData : char_iterator(0);
+    return EnsureMutable() ? base_string_type::mData : iterator(0);
   }
 
-  char_iterator EndWriting()
+  iterator EndWriting()
   {
     if (!EnsureMutable()) {
       AllocFailed(base_string_type::mLength);
@@ -383,29 +388,9 @@ public:
     return base_string_type::mData + base_string_type::mLength;
   }
 
-  char_iterator EndWriting(const fallible_t&)
+  iterator EndWriting(const fallible_t&)
   {
-    return EnsureMutable() ? (base_string_type::mData + base_string_type::mLength) : char_iterator(0);
-  }
-
-  char_iterator& BeginWriting(char_iterator& aIter)
-  {
-    return aIter = BeginWriting();
-  }
-
-  char_iterator& BeginWriting(char_iterator& aIter, const fallible_t& aFallible)
-  {
-    return aIter = BeginWriting(aFallible);
-  }
-
-  char_iterator& EndWriting(char_iterator& aIter)
-  {
-    return aIter = EndWriting();
-  }
-
-  char_iterator& EndWriting(char_iterator& aIter, const fallible_t& aFallible)
-  {
-    return aIter = EndWriting(aFallible);
+    return EnsureMutable() ? (base_string_type::mData + base_string_type::mLength) : iterator(0);
   }
 
   /**
@@ -423,28 +408,6 @@ public:
    * @return  64-bit int rep of string value, and possible (out) error code
    */
   int64_t ToInteger64(nsresult* aErrorCode, uint32_t aRadix = 10) const;
-
-  /**
-   * deprecated writing iterators
-   */
-
-  iterator& BeginWriting(iterator& aIter)
-  {
-    char_type* data = BeginWriting();
-    aIter.mStart = data;
-    aIter.mEnd = data + base_string_type::mLength;
-    aIter.mPosition = aIter.mStart;
-    return aIter;
-  }
-
-  iterator& EndWriting(iterator& aIter)
-  {
-    char_type* data = BeginWriting();
-    aIter.mStart = data;
-    aIter.mEnd = data + base_string_type::mLength;
-    aIter.mPosition = aIter.mEnd;
-    return aIter;
-  }
 
   /**
    * assignment
@@ -908,21 +871,60 @@ public:
    * past the current length (as returned by Length()) of the
    * string. Please use either BulkWrite() or SetLength()
    * instead.
+   *
+   * Note: SetCapacity() won't make the string shorter if
+   * called with an argument smaller than the length of the
+   * string.
+   *
+   * Note: You must not use previously obtained iterators
+   * or spans after calling SetCapacity().
    */
   void NS_FASTCALL SetCapacity(size_type aNewCapacity);
   MOZ_MUST_USE bool NS_FASTCALL SetCapacity(size_type aNewCapacity,
                                             const fallible_t&);
 
+  /**
+   * Changes the logical length of the string, potentially
+   * allocating a differently-sized buffer for the string.
+   *
+   * When making the string shorter, this method never
+   * reports allocation failure.
+   *
+   * Exposes uninitialized memory if the string got longer.
+   *
+   * If called with the argument 0, releases the
+   * heap-allocated buffer, if any. (But the no-argument
+   * overload of Truncate() is a more idiomatic and efficient
+   * option than SetLength(0).)
+   *
+   * Note: You must not use previously obtained iterators
+   * or spans after calling SetLength().
+   */
   void NS_FASTCALL SetLength(size_type aNewLength);
   MOZ_MUST_USE bool NS_FASTCALL SetLength(size_type aNewLength,
                                           const fallible_t&);
 
-  void Truncate(size_type aNewLength = 0)
+  /**
+   * Like SetLength() but asserts in that the string
+   * doesn't become longer. Never fails, so doesn't need a
+   * fallible variant.
+   *
+   * Note: You must not use previously obtained iterators
+   * or spans after calling Truncate().
+   */
+  void Truncate(size_type aNewLength)
   {
-    NS_ASSERTION(aNewLength <= base_string_type::mLength, "Truncate cannot make string longer");
-    SetLength(aNewLength);
+    MOZ_RELEASE_ASSERT(aNewLength <= base_string_type::mLength,
+                       "Truncate cannot make string longer");
+    mozilla::DebugOnly<bool> success = SetLength(aNewLength, mozilla::fallible);
+    MOZ_ASSERT(success);
   }
 
+  /**
+   * A more efficient overload for Truncate(0). Releases the
+   * heap-allocated buffer if any.
+   */
+  void Truncate();
 
   /**
    * buffer access
@@ -1333,6 +1335,31 @@ public:
                                  size_type aSuffixLength = 0,
                                  size_type aOldSuffixStart = 0,
                                  size_type aNewSuffixStart = 0);
+
+private:
+  /**
+   * Do not call this except from within FinishBulkWriteImpl() and
+   * SetCapacity().
+   */
+  MOZ_ALWAYS_INLINE void NS_FASTCALL FinishBulkWriteImplImpl(size_type aLength)
+  {
+    base_string_type::mData[aLength] = char_type(0);
+    base_string_type::mLength = aLength;
+#ifdef DEBUG
+    // ifdefed in order to avoid the call to Capacity() in non-debug
+    // builds.
+    //
+    // Our string is mutable, so Capacity() doesn't return zero.
+    // Capacity() doesn't include the space for the zero terminator,
+    // but we want to unitialize that slot, too. Since we start
+    // counting after the zero terminator the we just wrote above,
+    // we end up overwriting the space for terminator not reflected
+    // in the capacity number.
+    char_traits::uninitialize(
+      base_string_type::mData + aLength + 1,
+      XPCOM_MIN(size_t(Capacity() - aLength), kNsStringBufferMaxPoison));
+#endif
+  }
 
 protected:
   /**

@@ -149,6 +149,7 @@ wasm::Classify(OpBytes op)
       case Op::F64Le:
       case Op::F64Gt:
       case Op::F64Ge:
+      case Op::RefEq:
         return OpKind::Comparison;
       case Op::I32Eqz:
       case Op::I32WrapI64:
@@ -256,9 +257,26 @@ wasm::Classify(OpBytes op)
 #endif
 #ifdef ENABLE_WASM_BULKMEM_OPS
             case MiscOp::MemCopy:
-              return OpKind::MemCopy;
+            case MiscOp::TableCopy:
+              return OpKind::MemOrTableCopy;
+            case MiscOp::MemDrop:
+            case MiscOp::TableDrop:
+              return OpKind::MemOrTableDrop;
             case MiscOp::MemFill:
               return OpKind::MemFill;
+            case MiscOp::MemInit:
+            case MiscOp::TableInit:
+              return OpKind::MemOrTableInit;
+#endif
+#ifdef ENABLE_WASM_GC
+            case MiscOp::StructNew:
+              return OpKind::StructNew;
+            case MiscOp::StructGet:
+              return OpKind::StructGet;
+            case MiscOp::StructSet:
+              return OpKind::StructSet;
+            case MiscOp::StructNarrow:
+              return OpKind::StructNarrow;
 #endif
             default:
               break;

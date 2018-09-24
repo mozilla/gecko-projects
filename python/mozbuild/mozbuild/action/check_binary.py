@@ -172,7 +172,7 @@ def check_nsmodules(target, binary):
         raise Skip()
     symbols = []
     if buildconfig.substs.get('_MSC_VER'):
-        for line in get_output('dumpbin', '-exports', binary):
+        for line in get_output('dumpbin.exe', '-exports', binary):
             data = line.split(None, 3)
             if data and len(data) == 4 and data[0].isdigit() and \
                     ishex(data[1]) and ishex(data[2]):
@@ -222,8 +222,11 @@ def check_nsmodules(target, binary):
     # MSVC linker, when doing incremental linking, adds padding when
     # merging sections. Allow there to be more space between the NSModule
     # symbols, as long as they are in the right order.
-    if buildconfig.substs.get('_MSC_VER') and \
-            buildconfig.substs.get('DEVELOPER_OPTIONS'):
+    test_msvc = (buildconfig.substs.get('_MSC_VER') and \
+        buildconfig.substs.get('DEVELOPER_OPTIONS'))
+    test_clang = (buildconfig.substs.get('CC_TYPE') == 'clang' and \
+        buildconfig.substs.get('OS_ARCH') == 'WINNT')
+    if test_msvc or test_clang:
         sym_cmp = lambda guessed, actual: guessed <= actual
     else:
         sym_cmp = lambda guessed, actual: guessed == actual

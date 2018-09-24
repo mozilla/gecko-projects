@@ -323,14 +323,15 @@ nsSVGIntegrationUtils::AdjustInvalidAreaForSVGEffects(nsIFrame* aFrame,
   // already have been set up during reflow/ComputeFrameEffectsRect
   nsIFrame* firstFrame =
     nsLayoutUtils::FirstContinuationOrIBSplitSibling(aFrame);
-  nsSVGFilterProperty *prop = SVGObserverUtils::GetFilterProperty(firstFrame);
-  if (!prop || !prop->IsInObserverLists()) {
+  SVGFilterObserverListForCSSProp* observers =
+    SVGObserverUtils::GetFilterObserverList(firstFrame);
+  if (!observers || !observers->IsInObserverLists()) {
     return aInvalidRegion;
   }
 
   int32_t appUnitsPerDevPixel = aFrame->PresContext()->AppUnitsPerDevPixel();
 
-  if (!prop || !prop->ReferencesValidResources()) {
+  if (!observers || !observers->ReferencesValidResources()) {
     // The frame is either not there or not currently available,
     // perhaps because we're in the middle of tearing stuff down.
     // Be conservative, return our visual overflow rect relative
@@ -363,8 +364,9 @@ nsSVGIntegrationUtils::GetRequiredSourceForInvalidArea(nsIFrame* aFrame,
   // already have been set up during reflow/ComputeFrameEffectsRect
   nsIFrame* firstFrame =
     nsLayoutUtils::FirstContinuationOrIBSplitSibling(aFrame);
-  nsSVGFilterProperty *prop = SVGObserverUtils::GetFilterProperty(firstFrame);
-  if (!prop || !prop->ReferencesValidResources()) {
+  SVGFilterObserverListForCSSProp* observers =
+    SVGObserverUtils::GetFilterObserverList(firstFrame);
+  if (!observers || !observers->ReferencesValidResources()) {
     return aDirtyRect;
   }
 
@@ -860,10 +862,10 @@ nsSVGIntegrationUtils::PaintMask(const PaintFramesParams& aParams)
   return true;
 }
 
-void
-nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
+template<class T>
+void PaintMaskAndClipPathInternal(const PaintFramesParams& aParams, const T& aPaintChild)
 {
-  MOZ_ASSERT(UsingMaskOrClipPathForFrame(aParams.frame),
+  MOZ_ASSERT(nsSVGIntegrationUtils::UsingMaskOrClipPathForFrame(aParams.frame),
              "Should not use this method when no mask or clipPath effect"
              "on this frame");
 
@@ -980,7 +982,7 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
     }
 
     if (shouldPushMask) {
-      if (aParams.layerManager->GetRoot()->GetContentFlags() &
+      if (aParams.layerManager && aParams.layerManager->GetRoot()->GetContentFlags() &
           Layer::CONTENT_COMPONENT_ALPHA) {
         context.PushGroupAndCopyBackground(gfxContentType::COLOR_ALPHA,
                                            opacityApplied
@@ -1014,12 +1016,7 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
 
   /* Paint the child */
   context.SetMatrix(matrixAutoSaveRestore.Matrix());
-  BasicLayerManager* basic = aParams.layerManager->AsBasicLayerManager();
-  RefPtr<gfxContext> oldCtx = basic->GetTarget();
-  basic->SetTarget(&context);
-  aParams.layerManager->EndTransaction(FrameLayerBuilder::DrawPaintedLayer,
-                                       aParams.builder);
-  basic->SetTarget(oldCtx);
+  aPaintChild();
 
   if (gfxPrefs::DrawMaskLayer()) {
     gfxContextAutoSaveRestore saver(&context);
@@ -1054,6 +1051,27 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
     context.PopGroupAndBlend();
   }
 
+}
+
+
+void
+nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
+{
+  PaintMaskAndClipPathInternal(aParams, [&] {
+    gfxContext& context = aParams.ctx;
+    BasicLayerManager* basic = aParams.layerManager->AsBasicLayerManager();
+    RefPtr<gfxContext> oldCtx = basic->GetTarget();
+    basic->SetTarget(&context);
+    aParams.layerManager->EndTransaction(FrameLayerBuilder::DrawPaintedLayer,
+                                         aParams.builder);
+    basic->SetTarget(oldCtx);
+  });
+}
+
+void
+nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams, const std::function<void()>& aPaintChild)
+{
+  PaintMaskAndClipPathInternal(aParams, aPaintChild);
 }
 
 void

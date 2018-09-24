@@ -34,7 +34,6 @@ import android.nfc.NfcEvent;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.StrictMode;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.annotation.StringRes;
@@ -159,6 +158,7 @@ import org.mozilla.gecko.util.IntentUtils;
 import org.mozilla.gecko.util.MenuUtils;
 import org.mozilla.gecko.util.PrefUtils;
 import org.mozilla.gecko.util.ShortcutUtils;
+import org.mozilla.gecko.util.StrictModeContext;
 import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.WindowUtil;
@@ -183,6 +183,7 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 import static org.mozilla.gecko.mma.MmaDelegate.NEW_TAB;
+import static org.mozilla.gecko.util.JavaUtil.getBundleSizeInBytes;
 
 public class BrowserApp extends GeckoApp
                         implements ActionModePresenter,
@@ -212,6 +213,8 @@ public class BrowserApp extends GeckoApp
     private static final String STATE_ABOUT_HOME_TOP_PADDING = "abouthome_top_padding";
 
     private static final String BROWSER_SEARCH_TAG = "browser_search";
+
+    private static final int MAX_BUNDLE_SIZE = 300000; // 300 kilobytes
 
     // Request ID for startActivityForResult.
     public static final int ACTIVITY_REQUEST_PREFERENCES = 1001;
@@ -1058,6 +1061,7 @@ public class BrowserApp extends GeckoApp
             mPipController.tryEnteringPictureInPictureMode();
         } catch (IllegalStateException exception) {
             Log.e(LOGTAG, "Cannot enter in Picture In Picture mode:\n" + exception.getMessage());
+            setRequestedOrientationForCurrentActivity(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
         }
     }
 
@@ -1084,6 +1088,10 @@ public class BrowserApp extends GeckoApp
                 // that the user had before entering in Picture-in-picture mode.
                 if (userReturnedToFullApp) {
                     ActivityUtils.setFullScreen(this, true);
+                } else {
+                    // User closed the PIP mode.
+                    // Make sure that after restarting, the activity will match device's orientation.
+                    setRequestedOrientationForCurrentActivity(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
                 }
             }
         }
@@ -2262,6 +2270,15 @@ public class BrowserApp extends GeckoApp
         super.onSaveInstanceState(outState);
         mDynamicToolbar.onSaveInstanceState(outState);
         outState.putInt(STATE_ABOUT_HOME_TOP_PADDING, mHomeScreenContainer.getPaddingTop());
+
+        // Under key “android:viewHierarchyState” the OS stores another object of type Bundle.
+        // This bundle stores the state of the view which is in a SparseArray that can grow pretty big.
+        // This in some cases can lead to TransactionTooLargeException as per
+        // [https://developer.android.com/reference/android/os/TransactionTooLargeException] it's
+        // specified that the limit is fixed to 1MB per process.
+        if (getBundleSizeInBytes(outState) > MAX_BUNDLE_SIZE) {
+            outState.remove("android:viewHierarchyState");
+        }
     }
 
     /**
@@ -3707,6 +3724,7 @@ public class BrowserApp extends GeckoApp
      * If the app has been launched a certain number of times, and we haven't asked for feedback before,
      * open a new tab with about:feedback when launching the app from the icon shortcut.
      */
+    @SuppressWarnings("try")
     @Override
     protected void onNewIntent(Intent externalIntent) {
 
@@ -3801,10 +3819,9 @@ public class BrowserApp extends GeckoApp
 
         // Check to see how many times the app has been launched.
         final String keyName = getPackageName() + ".feedback_launch_count";
-        final StrictMode.ThreadPolicy savedPolicy = StrictMode.allowThreadDiskReads();
 
         // Faster on main thread with an async apply().
-        try {
+        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
             SharedPreferences settings = getPreferences(Activity.MODE_PRIVATE);
             int launchCount = settings.getInt(keyName, 0);
             if (launchCount < FEEDBACK_LAUNCH_COUNT) {
@@ -3817,8 +3834,6 @@ public class BrowserApp extends GeckoApp
                     EventDispatcher.getInstance().dispatch("Feedback:Show", null);
                 }
             }
-        } finally {
-            StrictMode.setThreadPolicy(savedPolicy);
         }
     }
 

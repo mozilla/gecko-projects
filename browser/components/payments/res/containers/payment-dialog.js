@@ -9,6 +9,7 @@ import paymentRequest from "../paymentRequest.js";
 
 import "../components/currency-amount.js";
 import "../components/payment-request-page.js";
+import "../components/accepted-cards.js";
 import "./address-picker.js";
 import "./address-form.js";
 import "./basic-card-form.js";
@@ -52,6 +53,7 @@ export default class PaymentDialog extends PaymentStateSubscriberMixin(HTMLEleme
     this._payerRelatedEls = contents.querySelectorAll(".payer-related");
     this._payerAddressPicker = contents.querySelector("address-picker.payer-related");
     this._paymentMethodPicker = contents.querySelector("payment-method-picker");
+    this._acceptedCardsList = contents.querySelector("accepted-cards");
 
     this._header = contents.querySelector("header");
 
@@ -263,6 +265,39 @@ export default class PaymentDialog extends PaymentStateSubscriberMixin(HTMLEleme
     }
   }
 
+  _renderPayerFields(state) {
+    let paymentOptions = state.request.paymentOptions;
+    let payerRequested = this._isPayerRequested(paymentOptions);
+    for (let element of this._payerRelatedEls) {
+      element.hidden = !payerRequested;
+    }
+
+    if (payerRequested) {
+      let fieldNames = new Set(); // default: ["name", "tel", "email"]
+      if (paymentOptions.requestPayerName) {
+        fieldNames.add("name");
+      }
+      if (paymentOptions.requestPayerEmail) {
+        fieldNames.add("email");
+      }
+      if (paymentOptions.requestPayerPhone) {
+        fieldNames.add("tel");
+      }
+      this._payerAddressPicker.setAttribute("address-fields", [...fieldNames].join(" "));
+      // For the payer picker we want to have a line break after the name field (#1)
+      // if all three fields are requested.
+      if (fieldNames.size == 3) {
+        this._payerAddressPicker.setAttribute("break-after-nth-field", 1);
+      } else {
+        this._payerAddressPicker.removeAttribute("break-after-nth-field");
+      }
+    } else {
+      this._payerAddressPicker.removeAttribute("address-fields");
+    }
+    this._payerAddressPicker.dataset.addAddressTitle = this.dataset.payerTitleAdd;
+    this._payerAddressPicker.dataset.editAddressTitle = this.dataset.payerTitleEdit;
+  }
+
   stateChangeCallback(state) {
     super.stateChangeCallback(state);
 
@@ -323,28 +358,15 @@ export default class PaymentDialog extends PaymentStateSubscriberMixin(HTMLEleme
     for (let element of this._shippingRelatedEls) {
       element.hidden = !paymentOptions.requestShipping;
     }
-    let payerRequested = this._isPayerRequested(paymentOptions);
-    for (let element of this._payerRelatedEls) {
-      element.hidden = !payerRequested;
-    }
 
-    if (payerRequested) {
-      let fieldNames = new Set(); // default: ["name", "tel", "email"]
-      if (paymentOptions.requestPayerName) {
-        fieldNames.add("name");
-      }
-      if (paymentOptions.requestPayerEmail) {
-        fieldNames.add("email");
-      }
-      if (paymentOptions.requestPayerPhone) {
-        fieldNames.add("tel");
-      }
-      this._payerAddressPicker.setAttribute("address-fields", [...fieldNames].join(" "));
-    } else {
-      this._payerAddressPicker.removeAttribute("address-fields");
-    }
-    this._payerAddressPicker.dataset.addAddressTitle = this.dataset.payerTitleAdd;
-    this._payerAddressPicker.dataset.editAddressTitle = this.dataset.payerTitleEdit;
+    this._renderPayerFields(state);
+
+    // hide the accepted cards list if the merchant didn't specify a preference
+    let basicCardMethod = request.paymentMethods
+      .find(method => method.supportedMethods == "basic-card");
+    let merchantNetworks = basicCardMethod && basicCardMethod.data &&
+                           basicCardMethod.data.supportedNetworks;
+    this._acceptedCardsList.hidden = !(merchantNetworks && merchantNetworks.length);
 
     this._renderPayButton(state);
 
@@ -359,6 +381,16 @@ export default class PaymentDialog extends PaymentStateSubscriberMixin(HTMLEleme
     }
     this.setAttribute("complete-status", request.completeStatus);
     this._disabledOverlay.hidden = !state.changesPrevented;
+  }
+
+  static maybeCreateFieldErrorElement(container) {
+    let span = container.querySelector(".error-text");
+    if (!span) {
+      span = document.createElement("span");
+      span.className = "error-text";
+      container.appendChild(span);
+    }
+    return span;
   }
 }
 

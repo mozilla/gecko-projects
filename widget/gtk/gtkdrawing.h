@@ -31,6 +31,7 @@ typedef struct {
   /* The depressed state is for buttons which remain active for a longer period:
    * activated toggle buttons or buttons showing a popup menu. */
   guint8 depressed;
+  guint8 backdrop;
   gint32 curpos; /* curpos and maxpos are used for scrollbars */
   gint32 maxpos;
   gint32 scale;  /* actual widget scale */
@@ -296,8 +297,10 @@ typedef enum {
   MOZ_GTK_SPLITTER_SEPARATOR_VERTICAL,
   /* Paints the background of a window, dialog or page. */
   MOZ_GTK_WINDOW,
+  /* Used only as a container for MOZ_GTK_HEADER_BAR. */
+  MOZ_GTK_HEADERBAR_WINDOW,
   /* Used only as a container for MOZ_GTK_HEADER_BAR_MAXIMIZED. */
-  MOZ_GTK_WINDOW_MAXIMIZED,
+  MOZ_GTK_HEADERBAR_WINDOW_MAXIMIZED,
   /* Window container for all widgets */
   MOZ_GTK_WINDOW_CONTAINER,
   /* Paints a GtkInfoBar, for notifications. */

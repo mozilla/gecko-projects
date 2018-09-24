@@ -130,9 +130,7 @@ var gMenuBuilder = {
     if (root.extension.manifest.icons) {
       this.setMenuItemIcon(rootElement, root.extension, contextData, root.extension.manifest.icons);
     } else {
-      // Undo changes from setMenuItemIcon:
-      rootElement.removeAttribute("class");
-      rootElement.removeAttribute("image");
+      this.removeMenuItemIcon(rootElement);
     }
     return rootElement;
   },
@@ -251,8 +249,12 @@ var gMenuBuilder = {
 
     element.setAttribute("id", item.elementId);
 
-    if (item.icons) {
-      this.setMenuItemIcon(element, item.extension, contextData, item.icons);
+    if ("icons" in item) {
+      if (item.icons) {
+        this.setMenuItemIcon(element, item.extension, contextData, item.icons);
+      } else {
+        this.removeMenuItemIcon(element);
+      }
     }
 
     if (item.type == "checkbox") {
@@ -272,7 +274,9 @@ var gMenuBuilder = {
       element.setAttribute("disabled", "true");
     }
 
-    element.addEventListener("command", event => { // eslint-disable-line mozilla/balanced-listeners
+    let button;
+
+    element.addEventListener("command", event => {
       if (event.target !== event.currentTarget) {
         return;
       }
@@ -302,6 +306,8 @@ var gMenuBuilder = {
         info.modifiers.push("MacCtrl");
       }
 
+      info.button = button;
+
       // Allow menus to open various actions supported in webext prior
       // to notifying onclicked.
       let actionFor = {
@@ -315,6 +321,18 @@ var gMenuBuilder = {
       }
 
       item.extension.emit("webext-menu-menuitem-click", info, contextData.tab);
+    }, {once: true});
+
+    element.addEventListener("click", event => { // eslint-disable-line mozilla/balanced-listeners
+      if (event.target !== event.currentTarget) {
+        return;
+      }
+
+      button = event.button;
+      if (event.button) {
+        element.doCommand();
+        contextData.menu.hidePopup();
+      }
     });
 
     // Don't publish the ID of the root because the root element is
@@ -344,6 +362,12 @@ var gMenuBuilder = {
     }
 
     element.setAttribute("image", resolvedURL);
+  },
+
+  // Undo changes from setMenuItemIcon.
+  removeMenuItemIcon(element) {
+    element.removeAttribute("class");
+    element.removeAttribute("image");
   },
 
   rebuildMenu(extension) {
@@ -557,6 +581,10 @@ MenuItem.prototype = {
         continue;
       }
       this[propName] = createProperties[propName];
+    }
+
+    if ("icons" in createProperties && createProperties.icons === null) {
+      this.icons = null;
     }
 
     if (createProperties.documentUrlPatterns != null) {

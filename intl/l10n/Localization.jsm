@@ -97,7 +97,7 @@ class CachedAsyncIterable extends CachedIterable {
     return {
       async next() {
         if (cached.length <= cur) {
-          cached.push(await cached.iterator.next());
+          cached.push(cached.iterator.next());
         }
         return cached[cur++];
       }
@@ -114,10 +114,10 @@ class CachedAsyncIterable extends CachedIterable {
     let idx = 0;
     while (idx++ < count) {
       const last = this[this.length - 1];
-      if (last && last.done) {
+      if (last && await (last).done) {
         break;
       }
-      this.push(await this.iterator.next());
+      this.push(this.iterator.next());
     }
     // Return the last cached {value, done} object to allow the calling
     // code to decide if it needs to call touchNext again.
@@ -135,7 +135,7 @@ class CachedAsyncIterable extends CachedIterable {
  * be localized into a different language - for example DevTools.
  */
 function defaultGenerateMessages(resourceIds) {
-  const appLocales = Services.locale.getAppLocalesAsBCP47();
+  const appLocales = Services.locale.appLocalesAsBCP47;
   return L10nRegistry.generateContexts(appLocales, resourceIds);
 }
 
@@ -160,9 +160,14 @@ class Localization {
       this.generateMessages(this.resourceIds));
   }
 
-  addResourceIds(resourceIds) {
+  /**
+   * @param {Array<String>} resourceIds - List of resource IDs
+   * @param {bool}                eager - whether the I/O for new context should
+   *                                      begin eagerly
+   */
+  addResourceIds(resourceIds, eager = false) {
     this.resourceIds.push(...resourceIds);
-    this.onChange();
+    this.onChange(eager);
     return this.resourceIds.length;
   }
 
@@ -318,11 +323,23 @@ class Localization {
   /**
    * This method should be called when there's a reason to believe
    * that language negotiation or available resources changed.
+   *
+   * @param {bool} eager - whether the I/O for new context should begin eagerly
    */
-  onChange() {
+  onChange(eager = false) {
     this.ctxs = CachedAsyncIterable.from(
       this.generateMessages(this.resourceIds));
-    this.ctxs.touchNext(2);
+    if (eager) {
+      // If the first app locale is the same as last fallback
+      // it means that we have all resources in this locale, and
+      // we want to eagerly fetch just that one.
+      // Otherwise, we're in a scenario where the first locale may
+      // be partial and we want to eagerly fetch a fallback as well.
+      const appLocale = Services.locale.appLocaleAsBCP47;
+      const lastFallback = Services.locale.lastFallbackLocale;
+      const prefetchCount = appLocale === lastFallback ? 1 : 2;
+      this.ctxs.touchNext(prefetchCount);
+    }
   }
 }
 

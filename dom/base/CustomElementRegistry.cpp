@@ -229,12 +229,6 @@ CustomElementData::GetCustomElementDefinition()
   return mCustomElementDefinition;
 }
 
-nsAtom*
-CustomElementData::GetCustomElementType()
-{
-  return mType;
-}
-
 void
 CustomElementData::Traverse(nsCycleCollectionTraversalCallback& aCb) const
 {
@@ -428,7 +422,7 @@ CustomElementRegistry::LookupCustomElementDefinition(nsAtom* aNameAtom,
       mElementCreationCallbacksUpgradeCandidatesMap.LookupOrAdd(aTypeAtom);
       RefPtr<Runnable> runnable =
         new RunCustomElementCreationCallback(this, aTypeAtom, callback);
-      nsContentUtils::AddScriptRunner(runnable);
+      nsContentUtils::AddScriptRunner(runnable.forget());
       data = mCustomDefinitions.GetWeak(aTypeAtom);
     }
   }
@@ -752,7 +746,7 @@ int32_t
 CustomElementRegistry::InferNamespace(JSContext* aCx,
                                       JS::Handle<JSObject*> constructor)
 {
-  JSObject* XULConstructor = XULElement_Binding::GetConstructorObject(aCx);
+  JS::Rooted<JSObject*> XULConstructor(aCx, XULElement_Binding::GetConstructorObject(aCx));
 
   JS::Rooted<JSObject*> proto(aCx, constructor);
   while (proto) {
@@ -1299,31 +1293,20 @@ CustomElementRegistry::CallGetCustomInterface(Element* aElement,
       func->Call(aElement, iid, &customInterface);
       JS::Rooted<JSObject*> funcGlobal(RootingCx(), func->CallbackGlobalOrNull());
       if (customInterface && funcGlobal) {
-        RefPtr<nsXPCWrappedJS> wrappedJS;
         AutoJSAPI jsapi;
         if (jsapi.Init(funcGlobal)) {
+          nsIXPConnect *xpConnect = nsContentUtils::XPConnect();
           JSContext* cx = jsapi.cx();
-          nsresult rv =
-            nsXPCWrappedJS::GetNewOrUsed(cx, customInterface,
-                                         NS_GET_IID(nsISupports),
-                                         getter_AddRefs(wrappedJS));
-          if (NS_SUCCEEDED(rv) && wrappedJS) {
-            // Check if the returned object implements the desired interface.
-            nsCOMPtr<nsISupports> retval;
-            if (NS_SUCCEEDED(wrappedJS->QueryInterface(aIID,
-                                                       getter_AddRefs(retval)))) {
-              return retval.forget();
-            }
+
+          nsCOMPtr<nsISupports> wrapper;
+          nsresult rv = xpConnect->WrapJSAggregatedToNative(aElement, cx, customInterface,
+                                                            aIID, getter_AddRefs(wrapper));
+          if (NS_SUCCEEDED(rv)) {
+            return wrapper.forget();
           }
         }
       }
     }
-  }
-
-  // Otherwise, check if the element supports the interface directly, and just use that.
-  nsCOMPtr<nsISupports> supports;
-  if (NS_SUCCEEDED(aElement->QueryInterface(aIID, getter_AddRefs(supports)))) {
-    return supports.forget();
   }
 
   return nullptr;

@@ -1141,13 +1141,7 @@ Gecko_nsTArray_FontFamilyName_AppendNamed(nsTArray<FontFamilyName>* aNames,
                                           nsAtom* aName,
                                           bool aQuoted)
 {
-  FontFamilyName family;
-  aName->ToString(family.mName);
-  if (aQuoted) {
-    family.mType = eFamily_named_quoted;
-  }
-
-  aNames->AppendElement(family);
+  aNames->AppendElement(FontFamilyName(aName, aQuoted ? eQuotedName : eUnquotedName));
 }
 
 void
@@ -1231,7 +1225,7 @@ Gecko_AppendFeatureValueHashEntry(gfxFontFeatureValueSet* aFontFeatureValues,
   static_assert(sizeof(unsigned int) == sizeof(uint32_t),
                 "sizeof unsigned int and uint32_t must be the same");
   return aFontFeatureValues->AppendFeatureValueHashEntry(
-    nsDependentAtomString(aFamily),
+    nsAtomCString(aFamily),
     nsDependentAtomString(aName),
     aAlternate
   );
@@ -1436,10 +1430,9 @@ CreateStyleImageRequest(nsStyleImageRequest::Mode aModeFlags,
 }
 
 mozilla::css::ImageValue*
-Gecko_ImageValue_Create(ServoBundledURI aURI)
+Gecko_ImageValue_Create(ServoBundledURI aURI, mozilla::CORSMode aCORSMode)
 {
-  // Bug 1434963: Change this to accept a CORS mode from the caller.
-  return aURI.IntoCssImage(mozilla::CORSMode::CORS_NONE).take();
+  return aURI.IntoCssImage(aCORSMode).take();
 }
 
 MOZ_DEFINE_MALLOC_SIZE_OF(GeckoImageValueMallocSizeOf)
@@ -2391,8 +2384,7 @@ Gecko_CSSValue_SetFontWeight(nsCSSValueBorrowedMut aCSSValue,
 void
 Gecko_nsStyleFont_SetLang(nsStyleFont* aFont, nsAtom* aAtom)
 {
-  already_AddRefed<nsAtom> atom = already_AddRefed<nsAtom>(aAtom);
-  aFont->mLanguage = atom;
+  aFont->mLanguage = dont_AddRef(aAtom);
   aFont->mExplicitLanguage = true;
 }
 
@@ -2563,7 +2555,7 @@ Gecko_GetFontMetrics(RawGeckoPresContextBorrowed aPresContext,
   ret.mXSize = fm->XHeight();
   gfxFloat zeroWidth = fm->GetThebesFontGroup()->GetFirstValidFont()->
                            GetMetrics(fm->Orientation()).zeroOrAveCharWidth;
-  ret.mChSize = ceil(aPresContext->AppUnitsPerDevPixel() * zeroWidth);
+  ret.mChSize = NS_round(aPresContext->AppUnitsPerDevPixel() * zeroWidth);
   return ret;
 }
 

@@ -61,9 +61,6 @@ function finishTest()
   if (SpecialPowers.isMainProcess()) {
     resetExperimental();
     resetTesting();
-
-    SpecialPowers.notifyObserversInParentProcess(null, "disk-space-watcher",
-                                                 "free");
   }
 
   SpecialPowers.removeFiles();
@@ -289,9 +286,7 @@ function installPackagedProfile(packageName)
   zipReader.open(packageFile);
 
   let entryNames = [];
-  let entries = zipReader.findEntries(null);
-  while (entries.hasMore()) {
-    let entry = entries.getNext();
+  for (let entry of zipReader.findEntries(null)) {
     if (entry != "create_db.html") {
       entryNames.push(entry);
     }

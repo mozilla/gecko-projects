@@ -579,6 +579,9 @@ parent:
     sync SetSystemFont(nsCString aFontName);
     sync GetSystemFont() returns (nsCString retval);
 
+    sync SetPrefersReducedMotionOverrideForTest(bool aValue);
+    sync ResetPrefersReducedMotionOverrideForTest();
+
 child:
     /**
      * Notify the remote browser that it has been Show()n on this
@@ -865,6 +868,11 @@ child:
      * Tell the TabChild to set the name of its toplevel docshell to the given name.
      */
     async SetWindowName(nsString aName);
+
+    /**
+     * Tell the TabChild to allow scripts in the docshell to close the window.
+     */
+    async AllowScriptsToClose();
 
     /**
      * Tell the TabChild what OriginAttributes it should inherit from. This must

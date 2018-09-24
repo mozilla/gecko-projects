@@ -53,7 +53,7 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
    * @param options
    *        Other options associated with toggling.  Currently includes:
    *        - `trigger`: String denoting the UI entry point, such as:
-   *          - `command`:  GCLI command bar or toolbox button
+   *          - `toolbox`:  Toolbox Button
    *          - `menu`:     Web Developer menu item
    *          - `shortcut`: Keyboard shortcut
    * @return Promise
@@ -78,7 +78,7 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
    * @param options
    *        Other options associated with opening.  Currently includes:
    *        - `trigger`: String denoting the UI entry point, such as:
-   *          - `command`:  GCLI command bar or toolbox button
+   *          - `toolbox`:  Toolbox Button
    *          - `menu`:     Web Developer menu item
    *          - `shortcut`: Keyboard shortcut
    * @return Promise
@@ -135,7 +135,7 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
    * @param options
    *        Other options associated with closing.  Currently includes:
    *        - `trigger`: String denoting the UI entry point, such as:
-   *          - `command`:  GCLI command bar or toolbox button
+   *          - `toolbox`:  Toolbox Button
    *          - `menu`:     Web Developer menu item
    *          - `shortcut`: Keyboard shortcut
    *        - `reason`: String detailing the specific cause for closing
@@ -212,39 +212,6 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
     return this.activeTabs.get(tab);
   },
 
-  /**
-   * Handle GCLI commands.
-   *
-   * @param window
-   *        The main browser chrome window.
-   * @param tab
-   *        The browser tab.
-   * @param command
-   *        The GCLI command name.
-   * @param args
-   *        The GCLI command arguments.
-   */
-  handleGcliCommand(window, tab, command, args) {
-    let completed;
-    switch (command) {
-      case "resize to":
-        completed = this.openIfNeeded(window, tab, { trigger: "command" });
-        this.activeTabs.get(tab).setViewportSize(args);
-        break;
-      case "resize on":
-        completed = this.openIfNeeded(window, tab, { trigger: "command" });
-        break;
-      case "resize off":
-        completed = this.closeIfNeeded(window, tab, { trigger: "command" });
-        break;
-      case "resize toggle":
-        completed = this.toggle(window, tab, { trigger: "command" });
-        break;
-      default:
-    }
-    completed.catch(console.error);
-  },
-
   handleMenuCheck({target}) {
     ResponsiveUIManager.setMenuCheckFor(target);
   },
@@ -272,15 +239,13 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
 
   showRemoteOnlyNotification(window, tab, { trigger } = {}) {
     showNotification(window, tab, {
-      command: trigger == "command",
+      toolboxButton: trigger == "toolbox",
       msg: l10n.getStr("responsive.remoteOnly"),
       priority: PriorityLevels.PRIORITY_CRITICAL_MEDIUM,
     });
   },
 };
 
-// GCLI commands in ./commands.js listen for events from this object to know
-// when the UI for a tab has opened or closed.
 EventEmitter.decorate(ResponsiveUIManager);
 
 /**
@@ -491,8 +456,7 @@ ResponsiveUI.prototype = {
   showReloadNotification() {
     if (Services.prefs.getBoolPref(RELOAD_NOTIFICATION_PREF, false)) {
       showNotification(this.browserWindow, this.tab, {
-        msg: l10n.getFormatStr("responsive.reloadNotification.description",
-                               l10n.getStr("responsive.reloadConditions.label")),
+        msg: l10n.getFormatStr("responsive.reloadNotification.description2"),
       });
       Services.prefs.setBoolPref(RELOAD_NOTIFICATION_PREF, false);
     }
@@ -539,6 +503,9 @@ ResponsiveUI.prototype = {
       case "change-touch-simulation":
         this.onChangeTouchSimulation(event);
         break;
+      case "change-user-agent":
+        this.onChangeUserAgent(event);
+        break;
       case "content-resize":
         this.onContentResize(event);
         break;
@@ -581,12 +548,22 @@ ResponsiveUI.prototype = {
   async onChangeTouchSimulation(event) {
     const { enabled } = event.data;
     const reloadNeeded = await this.updateTouchSimulation(enabled) &&
-                       this.reloadOnChange("touchSimulation");
+                         this.reloadOnChange("touchSimulation");
     if (reloadNeeded) {
       this.getViewportBrowser().reload();
     }
     // Used by tests
     this.emit("touch-simulation-changed");
+  },
+
+  async onChangeUserAgent(event) {
+    const { userAgent } = event.data;
+    const reloadNeeded = await this.updateUserAgent(userAgent) &&
+                         this.reloadOnChange("userAgent");
+    if (reloadNeeded) {
+      this.getViewportBrowser().reload();
+    }
+    this.emit("user-agent-changed");
   },
 
   onContentResize(event) {
@@ -690,7 +667,7 @@ ResponsiveUI.prototype = {
   },
 
   /**
-   * Helper for tests, GCLI, etc. Assumes a single viewport for now.
+   * Helper for tests, etc. Assumes a single viewport for now.
    */
   async setViewportSize(size) {
     await this.inited;

@@ -18,10 +18,6 @@
   </binding>
 
   <binding id="arrowscrollbox" extends="chrome://global/content/bindings/general.xml#basecontrol">
-    <resources>
-      <stylesheet src="chrome://global/skin/scrollbox.css"/>
-    </resources>
-
     <content>
       <xul:toolbarbutton class="scrollbutton-up"
                          anonid="scrollbutton-up"
@@ -104,6 +100,12 @@
           this.setAttribute("smoothscroll", !!val);
           return val;
         ]]></setter>
+      </property>
+
+      <property name="scrollBoxObject" readonly="true">
+        <getter><![CDATA[
+          return this._scrollbox.boxObject;
+        ]]></getter>
       </property>
 
       <property name="scrollClientRect" readonly="true">

@@ -64,6 +64,7 @@
 #include "GeckoNetworkManager.h"
 #include "GeckoProcessManager.h"
 #include "GeckoScreenOrientation.h"
+#include "GeckoSystemStateListener.h"
 #include "GeckoVRManager.h"
 #include "PrefsHelper.h"
 #include "fennec/MemoryMonitor.h"
@@ -405,6 +406,8 @@ nsAppShell::nsAppShell()
         sAppShell = this;
     }
 
+    hal::Init();
+
     if (!XRE_IsParentProcess()) {
         if (jni::IsAvailable()) {
             GeckoThreadSupport::Init();
@@ -428,6 +431,7 @@ nsAppShell::nsAppShell()
         mozilla::GeckoNetworkManager::Init();
         mozilla::GeckoProcessManager::Init();
         mozilla::GeckoScreenOrientation::Init();
+        mozilla::GeckoSystemStateListener::Init();
         mozilla::PrefsHelper::Init();
         nsWindow::InitNatives();
 
@@ -472,6 +476,8 @@ nsAppShell::~nsAppShell()
         sPowerManagerService = nullptr;
         sWakeLockListener = nullptr;
     }
+
+    hal::Shutdown();
 
     if (jni::IsAvailable() && XRE_IsParentProcess()) {
         DestroyAndroidUiThread();

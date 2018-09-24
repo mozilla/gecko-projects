@@ -392,6 +392,7 @@ nsDOMWindowUtils::UpdateLayerTree()
     RefPtr<nsViewManager> vm = presShell->GetViewManager();
     nsView* view = vm->GetRootView();
     if (view) {
+      nsAutoScriptBlocker scriptBlocker;
       presShell->Paint(view, view->GetBounds(),
           nsIPresShell::PAINT_LAYERS | nsIPresShell::PAINT_SYNC_DECODE_IMAGES);
       presShell->GetLayerManager()->WaitOnTransactionProcessed();
@@ -4358,6 +4359,28 @@ nsDOMWindowUtils::EnsureDirtyRootFrame()
   presShell->FrameNeedsReflow(frame, nsIPresShell::eStyleChange,
                               NS_FRAME_IS_DIRTY);
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::SetPrefersReducedMotionOverrideForTest(bool aValue)
+{
+  nsIWidget* widget = GetWidget();
+  if (!widget) {
+    return NS_OK;
+  }
+
+  return widget->SetPrefersReducedMotionOverrideForTest(aValue);
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::ResetPrefersReducedMotionOverrideForTest()
+{
+  nsIWidget* widget = GetWidget();
+  if (!widget) {
+    return NS_OK;
+  }
+
+  return widget->ResetPrefersReducedMotionOverrideForTest();
 }
 
 NS_INTERFACE_MAP_BEGIN(nsTranslationNodeList)

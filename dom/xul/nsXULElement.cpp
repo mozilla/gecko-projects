@@ -75,6 +75,7 @@
 #include "nsICSSDeclaration.h"
 #include "nsLayoutUtils.h"
 #include "XULFrameElement.h"
+#include "XULMenuElement.h"
 #include "XULPopupElement.h"
 #include "XULScrollElement.h"
 
@@ -102,8 +103,8 @@ uint32_t             nsXULPrototypeAttribute::gNumCacheFills;
 // nsXULElement
 //
 
-nsXULElement::nsXULElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-    : nsStyledElement(aNodeInfo),
+nsXULElement::nsXULElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
+    : nsStyledElement(std::move(aNodeInfo)),
       mBindingParent(nullptr)
 {
     XUL_PROTOTYPE_ATTRIBUTE_METER(gNumElements);
@@ -138,7 +139,7 @@ nsXULElement::MaybeUpdatePrivateLifetime()
 /* static */
 nsXULElement* NS_NewBasicXULElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
 {
-  return new nsXULElement(aNodeInfo);
+    return new nsXULElement(std::move(aNodeInfo));
 }
 
  /* static */
@@ -155,13 +156,16 @@ nsXULElement* nsXULElement::Construct(already_AddRefed<mozilla::dom::NodeInfo>&&
   if (nodeInfo->Equals(nsGkAtoms::iframe) ||
       nodeInfo->Equals(nsGkAtoms::browser) ||
       nodeInfo->Equals(nsGkAtoms::editor)) {
-    already_AddRefed<mozilla::dom::NodeInfo> frameni = nodeInfo.forget();
-    return new XULFrameElement(frameni);
+    return new XULFrameElement(nodeInfo.forget());
+  }
+
+  if (nodeInfo->Equals(nsGkAtoms::menu) ||
+      nodeInfo->Equals(nsGkAtoms::menulist)) {
+    return new XULMenuElement(nodeInfo.forget());
   }
 
   if (nodeInfo->Equals(nsGkAtoms::scrollbox)) {
-    already_AddRefed<mozilla::dom::NodeInfo> scrollni = nodeInfo.forget();
-    return new XULScrollElement(scrollni);
+    return new XULScrollElement(nodeInfo.forget());
   }
 
   return NS_NewBasicXULElement(nodeInfo.forget());
@@ -304,7 +308,17 @@ NS_IMPL_RELEASE_INHERITED(nsXULElement, nsStyledElement)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(nsXULElement)
     NS_ELEMENT_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_INTERFACE_MAP_END_INHERITING(nsStyledElement)
+
+    nsCOMPtr<nsISupports> iface =
+      CustomElementRegistry::CallGetCustomInterface(this, aIID);
+    if (iface) {
+      iface->QueryInterface(aIID, aInstancePtr);
+      if (*aInstancePtr) {
+        return NS_OK;
+      }
+    }
+
+NS_INTERFACE_MAP_END_INHERITING(Element)
 
 //----------------------------------------------------------------------
 // nsINode interface
@@ -497,6 +511,39 @@ nsXULElement::IsFocusableInternal(int32_t *aTabIndex, bool aWithMouse)
 }
 
 bool
+nsXULElement::HasMenu()
+{
+  nsMenuFrame* menu = do_QueryFrame(GetPrimaryFrame());
+  return menu != nullptr;
+}
+
+void
+nsXULElement::OpenMenu(bool aOpenFlag)
+{
+  nsCOMPtr<nsIDocument> doc = GetUncomposedDoc();
+  if (doc) {
+    doc->FlushPendingNotifications(FlushType::Frames);
+  }
+
+  nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
+  if (pm) {
+    if (aOpenFlag) {
+      // Nothing will happen if this element isn't a menu.
+      pm->ShowMenu(this, false, false);
+    }
+    else {
+      nsMenuFrame* menu = do_QueryFrame(GetPrimaryFrame());
+      if (menu) {
+        nsMenuPopupFrame* popupFrame = menu->GetPopup();
+        if (popupFrame) {
+          pm->HidePopup(popupFrame->GetContent(), false, true, false, false);
+        }
+      }
+    }
+  }
+}
+
+bool
 nsXULElement::PerformAccesskey(bool aKeyCausesActivation,
                                bool aIsTrustedEvent)
 {
@@ -620,27 +667,6 @@ nsXULElement::UpdateEditableState(bool aNotify)
     UpdateState(aNotify);
 }
 
-#ifdef DEBUG
-/**
- * Returns true if the user-agent style sheet rules for this XUL element are
- * in minimal-xul.css instead of xul.css.
- */
-static inline bool XULElementsRulesInMinimalXULSheet(nsAtom* aTag)
-{
-  return // scrollbar parts:
-         aTag == nsGkAtoms::scrollbar ||
-         aTag == nsGkAtoms::scrollbarbutton ||
-         aTag == nsGkAtoms::scrollcorner ||
-         aTag == nsGkAtoms::slider ||
-         aTag == nsGkAtoms::thumb ||
-         // other
-         aTag == nsGkAtoms::datetimebox ||
-         aTag == nsGkAtoms::resizer ||
-         aTag == nsGkAtoms::label ||
-         aTag == nsGkAtoms::videocontrols;
-}
-#endif
-
 class XULInContentErrorReporter : public Runnable
 {
 public:
@@ -697,13 +723,30 @@ nsXULElement::BindToTree(nsIDocument* aDocument,
     // 'scrollbar' that may be created implicitly for their content (those
     // rules being in minimal-xul.css).
     //
-    // This assertion makes sure no other XUL element than the ones in the
-    // minimal XUL sheet is used in the bindings.
-    if (!XULElementsRulesInMinimalXULSheet(NodeInfo()->NameAtom())) {
-      NS_ERROR("Unexpected XUL element in non-XUL doc");
-    }
+    // This assertion makes sure no other XUL element is used in a non-XUL
+    // document.
+    nsAtom* tag = NodeInfo()->NameAtom();
+    MOZ_ASSERT(
+      // scrollbar parts
+      tag == nsGkAtoms::scrollbar ||
+      tag == nsGkAtoms::scrollbarbutton ||
+      tag == nsGkAtoms::scrollcorner ||
+      tag == nsGkAtoms::slider ||
+      tag == nsGkAtoms::thumb ||
+      // other
+      tag == nsGkAtoms::datetimebox ||
+      tag == nsGkAtoms::resizer ||
+      tag == nsGkAtoms::label ||
+      tag == nsGkAtoms::videocontrols,
+      "Unexpected XUL element in non-XUL doc"
+    );
   }
 #endif
+
+  if (doc && NodeInfo()->Equals(nsGkAtoms::keyset, kNameSpaceID_XUL)) {
+    // Create our XUL key listener and hook it up.
+    nsXBLService::AttachGlobalKeyHandler(this);
+  }
 
   if (doc && NeedTooltipSupport(*this)) {
       AddTooltipSupport();
@@ -715,6 +758,10 @@ nsXULElement::BindToTree(nsIDocument* aDocument,
 void
 nsXULElement::UnbindFromTree(bool aDeep, bool aNullParent)
 {
+    if (NodeInfo()->Equals(nsGkAtoms::keyset, kNameSpaceID_XUL)) {
+        nsXBLService::DetachGlobalKeyHandler(this);
+    }
+
     if (NeedTooltipSupport(*this)) {
         RemoveTooltipSupport();
     }
@@ -1147,13 +1194,7 @@ nsXULElement::GetControllers(ErrorResult& rv)
     if (! Controllers()) {
         nsExtendedDOMSlots* slots = ExtendedDOMSlots();
 
-        rv = NS_NewXULControllers(nullptr, NS_GET_IID(nsIControllers),
-                                  reinterpret_cast<void**>(&slots->mControllers));
-
-        NS_ASSERTION(!rv.Failed(), "unable to create a controllers");
-        if (rv.Failed()) {
-            return nullptr;
-        }
+        slots->mControllers = new nsXULControllers();
     }
 
     return Controllers();
@@ -1884,8 +1925,10 @@ nsXULPrototypeElement::SetAttrAt(uint32_t aPos, const nsAString& aValue,
         // TODO: If we implement Content Security Policy for chrome documents
         // as has been discussed, the CSP should be checked here to see if
         // inline styles are allowed to be applied.
+        // XXX No specific specs talk about xul and referrer policy, pass Unset
         RefPtr<URLExtraData> data =
-          new URLExtraData(aDocumentURI, aDocumentURI, principal);
+          new URLExtraData(aDocumentURI, aDocumentURI, principal,
+                           mozilla::net::RP_Unset);
         RefPtr<DeclarationBlock> declaration =
           DeclarationBlock::FromCssText(
             aValue, data, eCompatibility_FullStandards, nullptr);

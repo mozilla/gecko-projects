@@ -22,6 +22,7 @@ _ARTIFACT_ID_PER_PLATFORM = {
     'android-aarch64': 'geckoview{update_channel}-arm64-v8a',
     'android-api-16': 'geckoview{update_channel}-armeabi-v7a',
     'android-x86': 'geckoview{update_channel}-x86',
+    'android-x86_64': 'geckoview{update_channel}-x86_64',
 }
 
 _MOZ_UPDATE_CHANNEL_PER_BRANCH = {
@@ -42,7 +43,7 @@ beetmover_description_schema = Schema({
     Optional('label'): basestring,
     Optional('treeherder'): task_description_schema['treeherder'],
 
-    Optional('bucket-scope'): optionally_keyed_by('project', basestring),
+    Optional('bucket-scope'): optionally_keyed_by('release-level', basestring),
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
 })
@@ -91,7 +92,7 @@ def make_task_description(config, jobs):
 
         resolve_keyed_by(
             job, 'bucket-scope', item_name=job['label'],
-            project=config.params['project']
+            **{'release-level': config.params.release_level()}
         )
 
         task = {

@@ -2982,21 +2982,19 @@ nsComputedDOMStyle::DoGetScrollSnapCoordinate()
 }
 
 already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetScrollbarFaceColor()
+nsComputedDOMStyle::DoGetScrollbarColor()
 {
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetValueForWidgetColor(val, StyleUI()->mScrollbarFaceColor,
-                         StyleAppearance::ScrollbarthumbVertical);
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetScrollbarTrackColor()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetValueForWidgetColor(val, StyleUI()->mScrollbarTrackColor,
-                         StyleAppearance::ScrollbarVertical);
-  return val.forget();
+  const nsStyleUI* ui = StyleUI();
+  RefPtr<nsDOMCSSValueList> list = GetROCSSValueList(false);
+  auto put = [this, &list](const StyleComplexColor& color,
+                           StyleAppearance type) {
+    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+    SetValueForWidgetColor(val, color, type);
+    list->AppendCSSValue(val.forget());
+  };
+  put(ui->mScrollbarFaceColor, StyleAppearance::ScrollbarthumbVertical);
+  put(ui->mScrollbarTrackColor, StyleAppearance::ScrollbarVertical);
+  return list.forget();
 }
 
 already_AddRefed<CSSValue>
@@ -3856,21 +3854,21 @@ nsComputedDOMStyle::DoGetOverflow()
 {
   const nsStyleDisplay* display = StyleDisplay();
 
-  RefPtr<nsROCSSPrimitiveValue> overflowY = new nsROCSSPrimitiveValue;
-  overflowY->SetIdent(
-    nsCSSProps::ValueToKeywordEnum(display->mOverflowY,
-                                   nsCSSProps::kOverflowKTable));
-  if (display->mOverflowX == display->mOverflowY) {
-    return overflowY.forget();
-  }
-  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
-  valueList->AppendCSSValue(overflowY.forget());
-
   RefPtr<nsROCSSPrimitiveValue> overflowX = new nsROCSSPrimitiveValue;
   overflowX->SetIdent(
     nsCSSProps::ValueToKeywordEnum(display->mOverflowX,
                                    nsCSSProps::kOverflowKTable));
+  if (display->mOverflowX == display->mOverflowY) {
+    return overflowX.forget();
+  }
+  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
   valueList->AppendCSSValue(overflowX.forget());
+
+  RefPtr<nsROCSSPrimitiveValue> overflowY= new nsROCSSPrimitiveValue;
+  overflowY->SetIdent(
+    nsCSSProps::ValueToKeywordEnum(display->mOverflowY,
+                                   nsCSSProps::kOverflowKTable));
+  valueList->AppendCSSValue(overflowY.forget());
   return valueList.forget();
 }
 
@@ -4162,6 +4160,10 @@ nsComputedDOMStyle::GetAbsoluteOffset(mozilla::Side aSide)
     if (scrollFrame) {
       scrollbarSizes = scrollFrame->GetActualScrollbarSizes();
     }
+  } else if (container->IsGridContainerFrame() &&
+             (mOuterFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW))) {
+    containerRect = nsGridContainerFrame::GridItemCB(mOuterFrame);
+    rect.MoveBy(-containerRect.x, -containerRect.y);
   }
 
   nscoord offset = 0;

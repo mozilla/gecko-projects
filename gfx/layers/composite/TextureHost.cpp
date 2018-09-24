@@ -336,7 +336,8 @@ CreateBackendIndependentTextureHost(const SurfaceDescriptor& aDesc,
       break;
     }
     case SurfaceDescriptor::TSurfaceDescriptorGPUVideo: {
-      result = new GPUVideoTextureHost(aFlags, aDesc.get_SurfaceDescriptorGPUVideo());
+      result = GPUVideoTextureHost::CreateFromDescriptor(
+        aFlags, aDesc.get_SurfaceDescriptorGPUVideo());
       break;
     }
 #ifdef XP_WIN
@@ -924,6 +925,10 @@ BufferTextureHost::UnbindTextureSource()
 {
   if (mFirstSource && mFirstSource->IsOwnedBy(this)) {
     mFirstSource->Unbind();
+  }
+
+  if (mFirstSource && mFirstSource->IsDirectMap() && mProvider) {
+    mProvider->ReferenceUntilAfterComposition(mFirstSource);
   }
 
   // This texture is not used by any layer anymore.

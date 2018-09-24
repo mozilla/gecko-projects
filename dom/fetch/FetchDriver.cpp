@@ -11,6 +11,7 @@
 #include "nsIDocument.h"
 #include "nsIInputStream.h"
 #include "nsIOutputStream.h"
+#include "nsIFileChannel.h"
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIScriptSecurityManager.h"
@@ -950,6 +951,19 @@ FetchDriver::OnStartRequest(nsIRequest* aRequest,
   }
   response->SetBody(pipeInputStream, contentLength);
 
+  // If the request is a file channel, then remember the local path to
+  // that file so we can later create File blobs rather than plain ones.
+  nsCOMPtr<nsIFileChannel> fc = do_QueryInterface(aRequest);
+  if (fc) {
+    nsCOMPtr<nsIFile> file;
+    rv = fc->GetFile(getter_AddRefs(file));
+    if (!NS_WARN_IF(NS_FAILED(rv))) {
+      nsAutoString path;
+      file->GetPath(path);
+      response->SetBodyLocalPath(path);
+    }
+  }
+
   response->InitChannelInfo(channel);
 
   nsCOMPtr<nsIURI> channelURI;
@@ -1282,27 +1296,31 @@ FetchDriver::AsyncOnChannelRedirect(nsIChannel* aOldChannel,
   // However, ignore internal redirects here.  We don't want to flip
   // Response.redirected to true if an internal redirect occurs.  These
   // should be transparent to script.
+  nsCOMPtr<nsIURI> uri;
+  MOZ_ALWAYS_SUCCEEDS(aNewChannel->GetURI(getter_AddRefs(uri)));
+
+  nsCOMPtr<nsIURI> uriClone;
+  nsresult rv = NS_GetURIWithoutRef(uri, getter_AddRefs(uriClone));
+  if(NS_WARN_IF(NS_FAILED(rv))){
+    return rv;
+  }
+  nsCString spec;
+  rv = uriClone->GetSpec(spec);
+  if(NS_WARN_IF(NS_FAILED(rv))){
+    return rv;
+  }
+  nsCString fragment;
+  rv = uri->GetRef(fragment);
+  if(NS_WARN_IF(NS_FAILED(rv))){
+    return rv;
+  }
+
   if (!(aFlags & nsIChannelEventSink::REDIRECT_INTERNAL)) {
-    nsCOMPtr<nsIURI> uri;
-    MOZ_ALWAYS_SUCCEEDS(aNewChannel->GetURI(getter_AddRefs(uri)));
-
-    nsCOMPtr<nsIURI> uriClone;
-    nsresult rv = NS_GetURIWithoutRef(uri, getter_AddRefs(uriClone));
-    if(NS_WARN_IF(NS_FAILED(rv))){
-      return rv;
-    }
-    nsCString spec;
-    rv = uriClone->GetSpec(spec);
-    if(NS_WARN_IF(NS_FAILED(rv))){
-      return rv;
-    }
-    nsCString fragment;
-    rv = uri->GetRef(fragment);
-    if(NS_WARN_IF(NS_FAILED(rv))){
-      return rv;
-    }
-
     mRequest->AddURL(spec, fragment);
+  } else {
+    // Overwrite the URL only when the request is redirected by a service
+    // worker.
+    mRequest->SetURLForInternalRedirect(aFlags, spec, fragment);
   }
 
   NS_ConvertUTF8toUTF16 tRPHeaderValue(tRPHeaderCValue);

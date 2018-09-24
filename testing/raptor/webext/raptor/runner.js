@@ -36,11 +36,13 @@ var testTabID = 0;
 var getHero = false;
 var getFNBPaint = false;
 var getFCP = false;
+var getDCF = false;
 var isHeroPending = false;
 var pendingHeroes = [];
 var settings = {};
 var isFNBPaintPending = false;
 var isFCPPending = false;
+var isDCFPending = false;
 var isBenchmarkPending = false;
 var pageTimeout = 10000; // default pageload timeout
 
@@ -79,8 +81,8 @@ function getTestSettings() {
         results.name = testName;
         results.unit = settings.unit;
         results.subtest_unit = settings.subtest_unit;
-        results.lower_is_better = settings.lower_is_better == "true";
-        results.subtest_lower_is_better = settings.subtest_lower_is_better == "true";
+        results.lower_is_better = settings.lower_is_better === true;
+        results.subtest_lower_is_better = settings.subtest_lower_is_better === true;
         results.alert_threshold = settings.alert_threshold;
 
         if (settings.page_timeout !== undefined) {
@@ -92,6 +94,9 @@ function getTestSettings() {
           if (settings.measure !== undefined) {
             if (settings.measure.fnbpaint !== undefined) {
               getFNBPaint = settings.measure.fnbpaint;
+            }
+            if (settings.measure.dcf !== undefined) {
+              getDCF = settings.measure.dcf;
             }
             if (settings.measure.fcp !== undefined) {
               getFCP = settings.measure.fcp;
@@ -172,7 +177,7 @@ function waitForResult() {
   return new Promise(resolve => {
     function checkForResult() {
       if (testType == "pageload") {
-        if (!isHeroPending && !isFNBPaintPending && !isFCPPending) {
+        if (!isHeroPending && !isFNBPaintPending && !isFCPPending && !isDCFPending) {
           cancelTimeoutAlarm("raptor-page-timeout");
           resolve();
         } else {
@@ -215,6 +220,8 @@ function nextCycle() {
           isFNBPaintPending = true;
         if (getFCP)
           isFCPPending = true;
+        if (getDCF)
+          isDCFPending = true;
       } else if (testType == "benchmark") {
         isBenchmarkPending = true;
       }
@@ -226,10 +233,9 @@ function nextCycle() {
   }
 }
 
-function timeoutAlarmListener(alarm) {
-  var text = alarm.name;
-  console.error(text);
-  postToControlServer("status", text);
+function timeoutAlarmListener() {
+  console.error("raptor-page-timeout on %s" % testURL);
+  postToControlServer("raptor-page-timeout", [testName, testURL]);
   // call clean-up to shutdown gracefully
   cleanUp();
 }
@@ -289,6 +295,9 @@ function resultListener(request, sender, sendResponse) {
       } else if (request.type == "fnbpaint") {
         results.measurements.fnbpaint.push(request.value);
         isFNBPaintPending = false;
+      } else if (request.type == "dcf") {
+        results.measurements.dcf.push(request.value);
+        isDCFPending = false;
       } else if (request.type == "fcp") {
         results.measurements.fcp.push(request.value);
         isFCPPending = false;

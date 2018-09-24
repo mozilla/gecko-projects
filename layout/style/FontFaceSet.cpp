@@ -295,8 +295,12 @@ FontFaceSet::FindMatchingFontFaces(const nsAString& aFont,
   nsTHashtable<nsPtrHashKey<FontFace>> matchingFaces;
 
   for (const FontFamilyName& fontFamilyName : familyList->mNames) {
+    if (!fontFamilyName.IsNamed()) {
+      continue;
+    }
+
     RefPtr<gfxFontFamily> family =
-      mUserFontSet->LookupFamily(fontFamilyName.mName);
+      mUserFontSet->LookupFamily(nsAtomCString(fontFamilyName.mName));
 
     if (!family) {
       continue;
@@ -653,7 +657,7 @@ FontFaceSet::StartLoad(gfxUserFontEntry* aUserFontEntry,
   nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(channel));
   if (httpChannel) {
     rv = httpChannel->SetReferrerWithPolicy(aFontFaceSrc->mReferrer,
-                                            mDocument->GetReferrerPolicy());
+                                            aFontFaceSrc->mReferrerPolicy);
     Unused << NS_WARN_IF(NS_FAILED(rv));
 
     nsAutoCString accept("application/font-woff;q=0.9,*/*;q=0.8");
@@ -852,7 +856,7 @@ void
 FontFaceSet::InsertNonRuleFontFace(FontFace* aFontFace,
                                    bool& aFontSetModified)
 {
-  nsAutoString fontfamily;
+  nsAutoCString fontfamily;
   if (!aFontFace->GetFamilyName(fontfamily)) {
     // If there is no family name, this rule cannot contribute a
     // usable font, so there is no point in processing it further.
@@ -881,7 +885,7 @@ FontFaceSet::InsertRuleFontFace(FontFace* aFontFace, SheetType aSheetType,
                                 nsTArray<FontFaceRecord>& aOldRecords,
                                 bool& aFontSetModified)
 {
-  nsAutoString fontfamily;
+  nsAutoCString fontfamily;
   if (!aFontFace->GetFamilyName(fontfamily)) {
     // If there is no family name, this rule cannot contribute a
     // usable font, so there is no point in processing it further.
@@ -981,7 +985,7 @@ FontFaceSet::InsertRuleFontFace(FontFace* aFontFace, SheetType aSheetType,
 /* static */ already_AddRefed<gfxUserFontEntry>
 FontFaceSet::FindOrCreateUserFontEntryFromFontFace(FontFace* aFontFace)
 {
-  nsAutoString fontfamily;
+  nsAutoCString fontfamily;
   if (!aFontFace->GetFamilyName(fontfamily)) {
     // If there is no family name, this rule cannot contribute a
     // usable font, so there is no point in processing it further.
@@ -1087,7 +1091,7 @@ GetStretchRangeForDescriptor(const nsCSSValue& aVal,
 }
 
 /* static */ already_AddRefed<gfxUserFontEntry>
-FontFaceSet::FindOrCreateUserFontEntryFromFontFace(const nsAString& aFamilyName,
+FontFaceSet::FindOrCreateUserFontEntryFromFontFace(const nsACString& aFamilyName,
                                                    FontFace* aFontFace,
                                                    SheetType aSheetType)
 {
@@ -1195,20 +1199,23 @@ FontFaceSet::FindOrCreateUserFontEntryFromFontFace(const nsAString& aFamilyName,
 
         switch (unit) {
 
-        case eCSSUnit_Local_Font:
-          val.GetStringValue(face->mLocalName);
+        case eCSSUnit_Local_Font: {
+          nsAutoString localName;
+          val.GetStringValue(localName);
+          face->mLocalName.Append(NS_ConvertUTF16toUTF8(localName));
           face->mSourceType = gfxFontFaceSrc::eSourceType_Local;
           face->mURI = nullptr;
           face->mFormatFlags = 0;
           face->mReferrerPolicy = mozilla::net::RP_Unset;
           break;
+        }
         case eCSSUnit_URL: {
           face->mSourceType = gfxFontFaceSrc::eSourceType_URL;
           nsIURI* uri = val.GetURLValue();
           face->mURI = uri ? new gfxFontSrcURI(uri) : nullptr;
           URLValue* url = val.GetURLStructValue();
           face->mReferrer = url->mExtraData->GetReferrer();
-          face->mReferrerPolicy = set->mDocument->GetReferrerPolicy();
+          face->mReferrerPolicy = url->mExtraData->GetReferrerPolicy();
           face->mOriginPrincipal =
             new gfxFontSrcPrincipal(url->mExtraData->GetPrincipal());
           NS_ASSERTION(face->mOriginPrincipal, "null origin principal in @font-face rule");

@@ -402,8 +402,17 @@ Editor.prototype = {
       popup.openPopupAtScreen(ev.screenX, ev.screenY, true);
     });
 
-    cm.on("focus", () => this.emit("focus"));
-    cm.on("scroll", () => this.emit("scroll"));
+    const pipedEvents = [
+      "beforeChange",
+      "changes",
+      "cursorActivity",
+      "focus",
+      "scroll",
+    ];
+    for (const eventName of pipedEvents) {
+      cm.on(eventName, () => this.emit(eventName));
+    }
+
     cm.on("change", () => {
       this.emit("change");
       if (!this._lastDirty) {
@@ -411,8 +420,6 @@ Editor.prototype = {
         this.emit("dirty-change");
       }
     });
-    cm.on("changes", () => this.emit("changes"));
-    cm.on("cursorActivity", () => this.emit("cursorActivity"));
 
     cm.on("gutterClick", (cmArg, line, gutter, ev) => {
       const lineOrOffset = !this.isWasm ? line : this.lineToWasmOffset(line);
@@ -1298,15 +1305,17 @@ Editor.prototype = {
     const cm = editors.get(this);
     const className = AUTOCOMPLETE_MARK_CLASSNAME;
 
-    cm.getAllMarks().forEach(mark => {
-      if (mark.className === className) {
-        mark.clear();
+    cm.operation(() => {
+      cm.getAllMarks().forEach(mark => {
+        if (mark.className === className) {
+          mark.clear();
+        }
+      });
+
+      if (text) {
+        cm.markText({...cursor, ch: cursor.ch - 1}, cursor, { className, title: text });
       }
     });
-
-    if (text) {
-      cm.markText({...cursor, ch: cursor.ch - 1}, cursor, { className, title: text });
-    }
   },
 
   /**

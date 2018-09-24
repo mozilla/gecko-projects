@@ -90,7 +90,6 @@ raptor-firefox:
     - raptor-webaudio-firefox
     - raptor-gdocs-firefox
     - raptor-sunspider-firefox
-    - raptor-assorted-dom-firefox
 
 raptor-chrome:
     - raptor-tp6-chrome
@@ -101,7 +100,6 @@ raptor-chrome:
     - raptor-webaudio-chrome
     - raptor-gdocs-chrome
     - raptor-sunspider-chrome
-    - raptor-assorted-dom-chrome
 
 # Fetch tasks are only supported on Linux for now,
 # so these need to be separate sets.
@@ -110,10 +108,12 @@ raptor-fetch-firefox:
     - raptor-wasm-misc-firefox
     - raptor-wasm-misc-baseline-firefox
     - raptor-wasm-misc-ion-firefox
+    - raptor-assorted-dom-firefox
 
 raptor-fetch-chrome:
     - raptor-unity-webgl-chrome
     - raptor-wasm-misc-chrome
+    - raptor-assorted-dom-chrome
 
 awsy:
     - awsy
@@ -279,6 +279,7 @@ macosx64-tests:
     - test-verify-wpt
     - web-platform-tests
     - web-platform-tests-reftests
+    - web-platform-tests-wdspec
     - xpcshell
 
 macosx64-talos:
@@ -407,6 +408,7 @@ android-x86-kvm-tests:
 
 android-ccov-tests:
     - geckoview-junit
+    - robocop
 
 devtools-tests:
     - mochitest-devtools-chrome
@@ -422,3 +424,10 @@ android-hw-arm7-debug-unittests:
 
 android-hw-aarch64-opt-unittests:
     - jittest
+
+# Coming soonish!
+android-hw-arm7-raptor:
+    - raptor-speedometer-geckoview
+
+android-hw-aarch64-raptor:
+    - raptor-speedometer-geckoview

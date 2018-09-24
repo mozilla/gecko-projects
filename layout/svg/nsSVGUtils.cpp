@@ -148,8 +148,9 @@ nsSVGUtils::GetPostFilterVisualOverflowRect(nsIFrame *aFrame,
   MOZ_ASSERT(aFrame->GetStateBits() & NS_FRAME_SVG_LAYOUT,
              "Called on invalid frame type");
 
-  nsSVGFilterProperty *property = SVGObserverUtils::GetFilterProperty(aFrame);
-  if (!property || !property->ReferencesValidResources()) {
+  SVGFilterObserverListForCSSProp* observers =
+    SVGObserverUtils::GetFilterObserverList(aFrame);
+  if (!observers || !observers->ReferencesValidResources()) {
     return aPreFilterRect;
   }
 
@@ -267,9 +268,10 @@ nsSVGUtils::NotifyAncestorsOfFilterRegionChange(nsIFrame *aFrame)
     if (aFrame->GetStateBits() & NS_STATE_IS_OUTER_SVG)
       return;
 
-    nsSVGFilterProperty *property = SVGObserverUtils::GetFilterProperty(aFrame);
-    if (property) {
-      property->Invalidate();
+    SVGFilterObserverListForCSSProp* observers =
+      SVGObserverUtils::GetFilterObserverList(aFrame);
+    if (observers) {
+      observers->Invalidate();
     }
     aFrame = aFrame->GetParent();
   }
@@ -1498,8 +1500,7 @@ nsSVGUtils::MakeFillPatternFor(nsIFrame* aFrame,
   const DrawTarget* dt = aContext->GetDrawTarget();
 
   nsSVGPaintServerFrame *ps =
-    SVGObserverUtils::GetPaintServer(aFrame, &nsStyleSVG::mFill,
-                                     SVGObserverUtils::FillProperty());
+    SVGObserverUtils::GetPaintServer(aFrame, &nsStyleSVG::mFill);
 
   if (ps) {
     RefPtr<gfxPattern> pattern =
@@ -1574,8 +1575,7 @@ nsSVGUtils::MakeStrokePatternFor(nsIFrame* aFrame,
   const DrawTarget* dt = aContext->GetDrawTarget();
 
   nsSVGPaintServerFrame *ps =
-    SVGObserverUtils::GetPaintServer(aFrame, &nsStyleSVG::mStroke,
-                                     SVGObserverUtils::StrokeProperty());
+    SVGObserverUtils::GetPaintServer(aFrame, &nsStyleSVG::mStroke);
 
   if (ps) {
     RefPtr<gfxPattern> pattern =

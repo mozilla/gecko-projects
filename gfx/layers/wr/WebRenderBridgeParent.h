@@ -46,6 +46,7 @@ class WebRenderImageHost;
 class WebRenderBridgeParent final : public PWebRenderBridgeParent
                                   , public CompositorVsyncSchedulerOwner
                                   , public CompositableParentManager
+                                  , public layers::FrameRecorder
 {
 public:
   WebRenderBridgeParent(CompositorBridgeParentBase* aCompositorBridge,
@@ -88,6 +89,7 @@ public:
                                              nsTArray<RefCountedShmem>&& aSmallShmems,
                                              nsTArray<ipc::Shmem>&& aLargeShmems,
                                              const wr::IdNamespace& aIdNamespace,
+                                             const bool& aContainsSVGGroup,
                                              const TimeStamp& aRefreshStartTime,
                                              const TimeStamp& aTxnStartTime,
                                              const TimeStamp& aFwdTime) override;
@@ -150,6 +152,7 @@ public:
 
   void HoldPendingTransactionId(const wr::Epoch& aWrEpoch,
                                 TransactionId aTransactionId,
+                                bool aContainsSVGGroup,
                                 const TimeStamp& aRefreshStartTime,
                                 const TimeStamp& aTxnStartTime,
                                 const TimeStamp& aFwdTime,
@@ -225,7 +228,7 @@ private:
   void ReleaseTextureOfImage(const wr::ImageKey& aKey);
 
   LayersId GetLayersId() const;
-  void ProcessWebRenderParentCommands(const InfallibleTArray<WebRenderParentCommand>& aCommands,
+  bool ProcessWebRenderParentCommands(const InfallibleTArray<WebRenderParentCommand>& aCommands,
                                       wr::TransactionBuilder& aTxn);
 
   void ClearResources();
@@ -259,6 +262,7 @@ private:
   struct PendingTransactionId {
     PendingTransactionId(const wr::Epoch& aEpoch,
                          TransactionId aId,
+                         bool aContainsSVGGroup,
                          const TimeStamp& aRefreshStartTime,
                          const TimeStamp& aTxnStartTime,
                          const TimeStamp& aFwdTime,
@@ -268,6 +272,7 @@ private:
       , mRefreshStartTime(aRefreshStartTime)
       , mTxnStartTime(aTxnStartTime)
       , mFwdTime(aFwdTime)
+      , mContainsSVGGroup(aContainsSVGGroup)
       , mUseForTelemetry(aUseForTelemetry)
     {}
     wr::Epoch mEpoch;
@@ -275,6 +280,7 @@ private:
     TimeStamp mRefreshStartTime;
     TimeStamp mTxnStartTime;
     TimeStamp mFwdTime;
+    bool mContainsSVGGroup;
     bool mUseForTelemetry;
   };
 

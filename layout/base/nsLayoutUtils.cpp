@@ -469,9 +469,22 @@ nsLayoutUtils::AreRetainedDisplayListsEnabled()
 {
   if (XRE_IsContentProcess()) {
     return gfxPrefs::LayoutRetainDisplayList();
-  } else {
+  }
+
+  if (XRE_IsE10sParentProcess()) {
     return gfxPrefs::LayoutRetainDisplayListChrome();
   }
+
+  // Retained display lists require e10s.
+  return false;
+}
+
+bool
+nsLayoutUtils::DisplayRootHasRetainedDisplayListBuilder(nsIFrame* aFrame)
+{
+  const nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
+  MOZ_ASSERT(displayRoot);
+  return displayRoot->HasProperty(RetainedDisplayListBuilder::Cached());
 }
 
 bool
@@ -503,22 +516,6 @@ nsLayoutUtils::AnimatedImageLayersEnabled()
   }
 
   return sAnimatedImageLayersEnabled;
-}
-
-bool
-nsLayoutUtils::CSSFiltersEnabled()
-{
-  static bool sCSSFiltersEnabled;
-  static bool sCSSFiltersPrefCached = false;
-
-  if (!sCSSFiltersPrefCached) {
-    sCSSFiltersPrefCached = true;
-    Preferences::AddBoolVarCache(&sCSSFiltersEnabled,
-                                 "layout.css.filters.enabled",
-                                 false);
-  }
-
-  return sCSSFiltersEnabled;
 }
 
 bool
@@ -1199,15 +1196,8 @@ nsLayoutUtils::InvalidateForDisplayPortChange(nsIContent* aContent,
     // rect properties on so we can find the frame later to remove the properties.
     frame->SchedulePaint();
 
-    if (!nsLayoutUtils::AreRetainedDisplayListsEnabled()) {
-      return;
-    }
-
-    nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(frame);
-    RetainedDisplayListBuilder* retainedBuilder =
-      displayRoot->GetProperty(RetainedDisplayListBuilder::Cached());
-
-    if (!retainedBuilder) {
+    if (!nsLayoutUtils::AreRetainedDisplayListsEnabled() ||
+        !nsLayoutUtils::DisplayRootHasRetainedDisplayListBuilder(frame)) {
       return;
     }
 
@@ -1219,18 +1209,12 @@ nsLayoutUtils::InvalidateForDisplayPortChange(nsIContent* aContent,
       frame->SetProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), rect);
       frame->SetHasOverrideDirtyRegion(true);
 
-      nsIFrame* rootFrame = frame->PresContext()->PresShell()->GetRootFrame();
+      nsIFrame* rootFrame = frame->PresShell()->GetRootFrame();
       MOZ_ASSERT(rootFrame);
 
-      nsTArray<nsIFrame*>* frames =
-        rootFrame->GetProperty(nsIFrame::OverriddenDirtyRectFrameList());
-
-      if (!frames) {
-        frames = new nsTArray<nsIFrame*>();
-        rootFrame->SetProperty(nsIFrame::OverriddenDirtyRectFrameList(), frames);
-      }
-
-      frames->AppendElement(frame);
+      RetainedDisplayListData* data =
+        GetOrSetRetainedDisplayListData(rootFrame);
+      data->Flags(frame) |= RetainedDisplayListData::FrameFlags::HasProps;
     }
 
     if (aHadDisplayPort) {
@@ -1380,11 +1364,14 @@ nsContainerFrame*
 nsLayoutUtils::LastContinuationWithChild(nsContainerFrame* aFrame)
 {
   MOZ_ASSERT(aFrame, "NULL frame pointer");
-  nsIFrame* f = aFrame->LastContinuation();
-  while (!f->PrincipalChildList().FirstChild() && f->GetPrevContinuation()) {
-    f = f->GetPrevContinuation();
+  for (auto f = aFrame->LastContinuation(); f; f = f->GetPrevContinuation()) {
+    for (nsIFrame::ChildListIterator lists(f); !lists.IsDone(); lists.Next()) {
+      if (MOZ_LIKELY(!lists.CurrentList().IsEmpty())) {
+        return static_cast<nsContainerFrame*>(f);
+      }
+    }
   }
-  return static_cast<nsContainerFrame*>(f);
+  return aFrame;
 }
 
 //static
@@ -2875,7 +2862,7 @@ TransformGfxRectToAncestor(const nsIFrame *aFrame,
                            const nsIFrame *aAncestor,
                            bool* aPreservesAxisAlignedRectangles = nullptr,
                            Maybe<Matrix4x4Flagged>* aMatrixCache = nullptr,
-                           bool aStopAtStackingContextAndDisplayPort = false,
+                           bool aStopAtStackingContextAndDisplayPortAndOOFFrame = false,
                            nsIFrame** aOutAncestor = nullptr)
 {
   Matrix4x4Flagged ctm;
@@ -2885,7 +2872,7 @@ TransformGfxRectToAncestor(const nsIFrame *aFrame,
   } else {
     // Else, compute it
     uint32_t flags = 0;
-    if (aStopAtStackingContextAndDisplayPort) {
+    if (aStopAtStackingContextAndDisplayPortAndOOFFrame) {
       flags |= nsIFrame::STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT;
     }
     ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor, flags, aOutAncestor);
@@ -2952,7 +2939,7 @@ nsLayoutUtils::TransformFrameRectToAncestor(const nsIFrame* aFrame,
                                             const nsIFrame* aAncestor,
                                             bool* aPreservesAxisAlignedRectangles /* = nullptr */,
                                             Maybe<Matrix4x4Flagged>* aMatrixCache /* = nullptr */,
-                                            bool aStopAtStackingContextAndDisplayPort /* = false */,
+                                            bool aStopAtStackingContextAndDisplayPortAndOOFFrame /* = false */,
                                             nsIFrame** aOutAncestor /* = nullptr */)
 {
   SVGTextFrame* text = GetContainingSVGTextFrame(aFrame);
@@ -2964,7 +2951,7 @@ nsLayoutUtils::TransformFrameRectToAncestor(const nsIFrame* aFrame,
     result = ToRect(text->TransformFrameRectFromTextChild(aRect, aFrame));
     result = TransformGfxRectToAncestor(text, result, aAncestor,
                                         nullptr, aMatrixCache,
-                                        aStopAtStackingContextAndDisplayPort, aOutAncestor);
+                                        aStopAtStackingContextAndDisplayPortAndOOFFrame, aOutAncestor);
     // TransformFrameRectFromTextChild could involve any kind of transform, we
     // could drill down into it to get an answer out of it but we don't yet.
     if (aPreservesAxisAlignedRectangles)
@@ -2976,7 +2963,7 @@ nsLayoutUtils::TransformFrameRectToAncestor(const nsIFrame* aFrame,
                   NSAppUnitsToFloatPixels(aRect.height, srcAppUnitsPerDevPixel));
     result = TransformGfxRectToAncestor(aFrame, result, aAncestor,
                                         aPreservesAxisAlignedRectangles, aMatrixCache,
-                                        aStopAtStackingContextAndDisplayPort, aOutAncestor);
+                                        aStopAtStackingContextAndDisplayPortAndOOFFrame, aOutAncestor);
   }
 
   float destAppUnitsPerDevPixel = aAncestor->PresContext()->AppUnitsPerDevPixel();
@@ -3713,11 +3700,15 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
 
       if (updateState == PartialUpdateResult::Failed) {
         list.DeleteAll(&builder);
+
+        builder.ClearRetainedWindowRegions();
+        builder.ClearWillChangeBudget();
+
         builder.EnterPresShell(aFrame);
         builder.SetDirtyRect(visibleRect);
-        builder.ClearRetainedWindowRegions();
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
-        AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
+        AddExtraBackgroundItems(
+          builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
 
         builder.LeavePresShell(aFrame, &list);
         updateState = PartialUpdateResult::Updated;
@@ -5810,7 +5801,7 @@ nsLayoutUtils::MinISizeFromInline(nsIFrame* aFrame,
                "should not be container for font size inflation");
 
   nsIFrame::InlineMinISizeData data;
-  DISPLAY_MIN_WIDTH(aFrame, data.mPrevLines);
+  DISPLAY_MIN_INLINE_SIZE(aFrame, data.mPrevLines);
   aFrame->AddInlineMinISize(aRenderingContext, &data);
   data.ForceBreak();
   return data.mPrevLines;
@@ -5824,7 +5815,7 @@ nsLayoutUtils::PrefISizeFromInline(nsIFrame* aFrame,
                "should not be container for font size inflation");
 
   nsIFrame::InlinePrefISizeData data;
-  DISPLAY_PREF_WIDTH(aFrame, data.mPrevLines);
+  DISPLAY_PREF_INLINE_SIZE(aFrame, data.mPrevLines);
   aFrame->AddInlinePrefISize(aRenderingContext, &data);
   data.ForceBreak();
   return data.mPrevLines;
@@ -6153,7 +6144,7 @@ nsLayoutUtils::PaintTextShadow(const nsIFrame* aFrame,
     if (!shadowContext)
       continue;
 
-    
+
 
     aDestCtx->Save();
     aDestCtx->NewPath();
@@ -10090,7 +10081,8 @@ nsLayoutUtils::ComputeSystemFont(nsFont* aSystemFont, LookAndFeel::FontID aFontI
   nsAutoString systemFontName;
   if (LookAndFeel::GetFont(aFontID, systemFontName, fontStyle, devPerCSS)) {
     systemFontName.Trim("\"'");
-    aSystemFont->fontlist = FontFamilyList(systemFontName, eUnquotedName);
+    aSystemFont->fontlist =
+      FontFamilyList(NS_ConvertUTF16toUTF8(systemFontName), eUnquotedName);
     aSystemFont->fontlist.SetDefaultFontType(eFamily_none);
     aSystemFont->style = fontStyle.style;
     aSystemFont->systemFont = fontStyle.systemFont;
@@ -10228,18 +10220,21 @@ nsLayoutUtils::ParseFontLanguageOverride(const nsAString& aLangTag)
 /* static */ ComputedStyle*
 nsLayoutUtils::StyleForScrollbar(nsIFrame* aScrollbarPart)
 {
-  // Get the closest non-native-anonymous content node, which should be
-  // the originating element of the scrollbar part. In theory we could
-  // have an XBL binding attached to NAC element, and that binding
-  // creates a scrollable element. It's unlikely we want to control the
-  // style of scrollbars from inside the binding, so that case is not
-  // considered below.
+  // Get the closest content node which is not an anonymous scrollbar
+  // part. It should be the originating element of the scrollbar part.
   nsIContent* content = aScrollbarPart->GetContent();
   // Note that the content may be a normal element with scrollbar part
   // value specified for its -moz-appearance, so don't rely on it being
-  // a native anonymous.
+  // a native anonymous. Also note that we have to check the node name
+  // because anonymous element like generated content may originate a
+  // scrollbar.
   MOZ_ASSERT(content, "No content for the scrollbar part?");
-  while (content && content->IsInNativeAnonymousSubtree()) {
+  while (content && content->IsInNativeAnonymousSubtree() &&
+         content->IsAnyOfXULElements(nsGkAtoms::scrollbar,
+                                     nsGkAtoms::scrollbarbutton,
+                                     nsGkAtoms::scrollcorner,
+                                     nsGkAtoms::slider,
+                                     nsGkAtoms::thumb)) {
     content = content->GetParent();
   }
   MOZ_ASSERT(content, "Native anonymous element with no originating node?");

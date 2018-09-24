@@ -2403,7 +2403,8 @@ fn static_assert() {
     /// Calculates the constrained and unconstrained font sizes to be inherited
     /// from the parent.
     ///
-    /// See ComputeScriptLevelSize in Gecko's nsRuleNode.cpp
+    /// This is a port of Gecko's old ComputeScriptLevelSize function:
+    /// https://dxr.mozilla.org/mozilla-central/rev/35fbf14b9/layout/style/nsRuleNode.cpp#3197-3254
     ///
     /// scriptlevel is a property that affects how font-size is inherited. If scriptlevel is
     /// +1, for example, it will inherit as the script size multiplier times
@@ -2511,17 +2512,18 @@ fn static_assert() {
             = self.calculate_script_level_size(parent, device);
         if adjusted_size.0 != parent.gecko.mSize ||
            adjusted_unconstrained_size.0 != parent.gecko.mScriptUnconstrainedSize {
-            // This is incorrect. When there is both a keyword size being inherited
-            // and a scriptlevel change, we must handle the keyword size the same
-            // way we handle em units. This complicates things because we now have
-            // to keep track of the adjusted and unadjusted ratios in the kw font size.
-            // This only affects the use case of a generic font being used in MathML.
+            // FIXME(Manishearth): This is incorrect. When there is both a
+            // keyword size being inherited and a scriptlevel change, we must
+            // handle the keyword size the same way we handle em units. This
+            // complicates things because we now have to keep track of the
+            // adjusted and unadjusted ratios in the kw font size. This only
+            // affects the use case of a generic font being used in MathML.
             //
-            // If we were to fix this I would prefer doing it by removing the
-            // ruletree walk on the Gecko side in nsRuleNode::SetGenericFont
-            // and instead using extra bookkeeping in the mSize and mScriptUnconstrainedSize
-            // values, and reusing those instead of font_size_keyword.
-
+            // If we were to fix this I would prefer doing it not doing
+            // something like the ruletree walk that Gecko used to do in
+            // nsRuleNode::SetGenericFont and instead using extra bookkeeping in
+            // the mSize and mScriptUnconstrainedSize values, and reusing those
+            // instead of font_size_keyword.
 
             // In the case that MathML has given us an adjusted size, apply it.
             // Keep track of the unconstrained adjusted size.
@@ -5302,7 +5304,7 @@ clip-path
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="InheritedUI"
-                  skip_longhands="cursor">
+                  skip_longhands="cursor scrollbar-color">
     pub fn set_cursor(&mut self, v: longhands::cursor::computed_value::T) {
         use style_traits::cursor::CursorKind;
 
@@ -5447,6 +5449,48 @@ clip-path
         }).collect::<Vec<_>>().into_boxed_slice();
 
         longhands::cursor::computed_value::T { images, keyword }
+    }
+
+    pub fn set_scrollbar_color(&mut self, v: longhands::scrollbar_color::computed_value::T) {
+        use gecko_bindings::structs::StyleComplexColor;
+        use values::generics::ui::ScrollbarColor;
+        match v {
+            ScrollbarColor::Auto => {
+                self.gecko.mScrollbarFaceColor = StyleComplexColor::auto();
+                self.gecko.mScrollbarTrackColor = StyleComplexColor::auto();
+            }
+            ScrollbarColor::Colors { thumb, track } => {
+                self.gecko.mScrollbarFaceColor = thumb.into();
+                self.gecko.mScrollbarTrackColor = track.into();
+            }
+        }
+    }
+
+    pub fn copy_scrollbar_color_from(&mut self, other: &Self) {
+        self.gecko.mScrollbarFaceColor = other.gecko.mScrollbarFaceColor;
+        self.gecko.mScrollbarTrackColor = other.gecko.mScrollbarTrackColor;
+    }
+
+    pub fn reset_scrollbar_color(&mut self, other: &Self) {
+        self.copy_scrollbar_color_from(other);
+    }
+
+    pub fn clone_scrollbar_color(&self) -> longhands::scrollbar_color::computed_value::T {
+        use gecko_bindings::structs::StyleComplexColor_Tag as Tag;
+        use values::generics::ui::ScrollbarColor;
+        debug_assert!(
+            (self.gecko.mScrollbarFaceColor.mTag == Tag::eAuto) ==
+            (self.gecko.mScrollbarTrackColor.mTag == Tag::eAuto),
+            "Whether the two colors are `auto` should match",
+        );
+        if self.gecko.mScrollbarFaceColor.mTag == Tag::eAuto {
+            ScrollbarColor::Auto
+        } else {
+            ScrollbarColor::Colors {
+                thumb: self.gecko.mScrollbarFaceColor.into(),
+                track: self.gecko.mScrollbarTrackColor.into(),
+            }
+        }
     }
 </%self:impl_trait>
 

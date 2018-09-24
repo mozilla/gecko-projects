@@ -44,7 +44,6 @@ from ..testing import (
     all_test_flavors,
     read_manifestparser_manifest,
     read_reftest_manifest,
-    read_wpt_manifest,
 )
 
 import mozpack.path as mozpath
@@ -895,12 +894,8 @@ def TypedListWithAction(typ, action):
             super(_TypedListWithAction, self).__init__(action=_action, *args)
     return _TypedListWithAction
 
-WebPlatformTestManifest = TypedNamedTuple("WebPlatformTestManifest",
-                                          [("manifest_path", unicode),
-                                           ("test_root", unicode)])
 ManifestparserManifestList = OrderedPathListWithAction(read_manifestparser_manifest)
 ReftestManifestList = OrderedPathListWithAction(read_reftest_manifest)
-WptManifestList = TypedListWithAction(WebPlatformTestManifest, read_wpt_manifest)
 
 OrderedSourceList = ContextDerivedTypedList(SourcePath, StrictOrderingOnAppendList)
 OrderedTestFlavorList = TypedList(Enum(*all_test_flavors()),
@@ -1069,9 +1064,9 @@ class Files(SubContext):
             """),
     }
 
-    def __init__(self, parent, pattern=None):
+    def __init__(self, parent, *patterns):
         super(Files, self).__init__(parent)
-        self.pattern = pattern
+        self.patterns = patterns
         self.finalized = set()
         self.test_files = set()
         self.test_tags = set()
@@ -1614,7 +1609,7 @@ VARIABLES = {
         This variable can only be used on Windows.
         """),
 
-    'DEFFILE': (unicode, unicode,
+    'DEFFILE': (Path, unicode,
         """The program .def (module definition) file.
 
         This variable can only be used on Windows.
@@ -1880,10 +1875,6 @@ VARIABLES = {
         """List of manifest files defining crashtests.
 
         These are commonly named crashtests.list.
-        """),
-
-    'WEB_PLATFORM_TESTS_MANIFESTS': (WptManifestList, list,
-        """List of (manifest_path, test_path) defining web-platform-tests.
         """),
 
     'WEBRTC_SIGNALLING_TEST_MANIFESTS': (ManifestparserManifestList, list,

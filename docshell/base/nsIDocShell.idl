@@ -119,9 +119,6 @@ interface nsIDocShell : nsIDocShellTreeItem
   // Whether a top-level data URI navigation is allowed for that load
   const long INTERNAL_LOAD_FLAGS_FORCE_ALLOW_DATA_URI    = 0x200;
 
-  // Whether load delegates have already been checked for this load
-  const long INTERNAL_LOAD_FLAGS_DELEGATES_CHECKED       = 0x400;
-
   // Whether the load was triggered by user interaction.
   const long INTERNAL_LOAD_FLAGS_IS_USER_TRIGGERED       = 0x1000;
 
@@ -539,12 +536,12 @@ interface nsIDocShell : nsIDocShellTreeItem
   readonly attribute nsIChannel failedChannel;
 
   /**
-   * Keeps track of the previous SHTransaction index and the current
-   * SHTransaction index at the time that the doc shell begins to load.
+   * Keeps track of the previous nsISHEntry index and the current
+   * nsISHEntry index at the time that the doc shell begins to load.
    * Used for ContentViewer eviction.
    */
-  readonly attribute long previousTransIndex;
-  readonly attribute long loadedTransIndex;
+  readonly attribute long previousEntryIndex;
+  readonly attribute long loadedEntryIndex;
 
   /**
    * Notification that entries have been removed from the beginning of a
@@ -624,6 +621,36 @@ interface nsIDocShell : nsIDocShellTreeItem
    * loaded (or is about to load) on the page.
    */
   [infallible] readonly attribute boolean hasTrackingContentLoaded;
+
+   /**
+   * This attribute determines whether a document has Slow Tracking Content
+   * that has been blocked from loading.
+   */
+   [infallible] readonly attribute boolean hasSlowTrackingContentBlocked;
+
+   /**
+   * This attribute determines whether a document seen cookies or storage
+   * blocked due to a site permission being denied.
+   */
+   [infallible] readonly attribute boolean hasCookiesBlockedByPermission;
+
+   /**
+   * This attribute determines whether a document seen cookies or storage
+   * blocked due to a the request being made by a tracker.
+   */
+   [infallible] readonly attribute boolean hasCookiesBlockedDueToTrackers;
+
+   /**
+   * This attribute determines whether a document seen cookies or storage
+   * blocked due to cookie behavior settings blocking all cookies.
+   */
+   [infallible] readonly attribute boolean hasAllCookiesBeenBlocked;
+
+   /**
+   * This attribute determines whether a document seen cookies or storage
+   * blocked due to cookie behavior settings blocking all third-party cookies.
+   */
+   [infallible] readonly attribute boolean hasForeignCookiesBeenBlocked;
 
   /**
    * Disconnects this docshell's editor from its window, and stores the

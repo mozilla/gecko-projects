@@ -183,6 +183,7 @@
 #include "nsIURIWithSpecialOrigin.h"
 #include "nsIURL.h"
 #include "nsIWebNavigation.h"
+#include "nsIWidget.h"
 #include "nsIWindowMediator.h"
 #include "nsIXPConnect.h"
 #include "nsJSUtils.h"
@@ -272,7 +273,7 @@ nsIContentPolicy *nsContentUtils::sContentPolicyService;
 bool nsContentUtils::sTriedToGetContentPolicy = false;
 RefPtr<mozilla::intl::LineBreaker> nsContentUtils::sLineBreaker;
 RefPtr<mozilla::intl::WordBreaker> nsContentUtils::sWordBreaker;
-nsIBidiKeyboard *nsContentUtils::sBidiKeyboard = nullptr;
+StaticRefPtr<nsIBidiKeyboard> nsContentUtils::sBidiKeyboard;
 uint32_t nsContentUtils::sScriptBlockerCount = 0;
 uint32_t nsContentUtils::sDOMNodeRemovedSuppressCount = 0;
 AutoTArray<nsCOMPtr<nsIRunnable>, 8>* nsContentUtils::sBlockedScriptRunners = nullptr;
@@ -291,9 +292,9 @@ nsString* nsContentUtils::sAltText = nullptr;
 nsString* nsContentUtils::sModifierSeparator = nullptr;
 
 bool nsContentUtils::sInitialized = false;
-bool nsContentUtils::sIsFullScreenApiEnabled = false;
+bool nsContentUtils::sIsFullscreenApiEnabled = false;
 bool nsContentUtils::sIsUnprefixedFullscreenApiEnabled = false;
-bool nsContentUtils::sTrustedFullScreenOnly = true;
+bool nsContentUtils::sTrustedFullscreenOnly = true;
 bool nsContentUtils::sIsCutCopyAllowed = true;
 bool nsContentUtils::sIsUpgradableDisplayContentPrefEnabled = false;
 bool nsContentUtils::sIsFrameTimingPrefEnabled = false;
@@ -640,13 +641,13 @@ nsContentUtils::Init()
   Preferences::AddBoolVarCache(&sAllowXULXBL_for_file,
                                "dom.allow_XUL_XBL_for_file");
 
-  Preferences::AddBoolVarCache(&sIsFullScreenApiEnabled,
+  Preferences::AddBoolVarCache(&sIsFullscreenApiEnabled,
                                "full-screen-api.enabled");
 
   Preferences::AddBoolVarCache(&sIsUnprefixedFullscreenApiEnabled,
                                "full-screen-api.unprefix.enabled");
 
-  Preferences::AddBoolVarCache(&sTrustedFullScreenOnly,
+  Preferences::AddBoolVarCache(&sTrustedFullscreenOnly,
                                "full-screen-api.allow-trusted-requests-only");
 
   Preferences::AddBoolVarCache(&sIsCutCopyAllowed,
@@ -1633,10 +1634,7 @@ nsIBidiKeyboard*
 nsContentUtils::GetBidiKeyboard()
 {
   if (!sBidiKeyboard) {
-    nsresult rv = CallGetService("@mozilla.org/widget/bidikeyboard;1", &sBidiKeyboard);
-    if (NS_FAILED(rv)) {
-      sBidiKeyboard = nullptr;
-    }
+    sBidiKeyboard = nsIWidget::CreateBidiKeyboard();
   }
   return sBidiKeyboard;
 }
@@ -1986,7 +1984,7 @@ nsContentUtils::Shutdown()
   NS_IF_RELEASE(sUUIDGenerator);
   sLineBreaker = nullptr;
   sWordBreaker = nullptr;
-  NS_IF_RELEASE(sBidiKeyboard);
+  sBidiKeyboard = nullptr;
 
   delete sAtomEventTable;
   sAtomEventTable = nullptr;
@@ -2217,7 +2215,7 @@ nsContentUtils::IsCallerChrome()
 bool
 nsContentUtils::ShouldResistFingerprinting()
 {
-  return DOMPrefs::ResistFingerprintingEnabled();
+  return StaticPrefs::privacy_resistFingerprinting();
 }
 
 bool
@@ -2654,9 +2652,12 @@ nsContentUtils::GetCommonFlattenedTreeAncestorForStyle(Element* aElement1,
 
 /* static */
 bool
-nsContentUtils::PositionIsBefore(nsINode* aNode1, nsINode* aNode2)
+nsContentUtils::PositionIsBefore(nsINode* aNode1, nsINode* aNode2,
+                                 int32_t* aNode1Index,
+                                 int32_t* aNode2Index)
 {
-  return (aNode2->CompareDocumentPosition(*aNode1) &
+  // Note, CompareDocumentPosition takes the latter params in different order.
+  return (aNode2->CompareDocumentPosition(*aNode1, aNode2Index, aNode1Index) &
     (Node_Binding::DOCUMENT_POSITION_PRECEDING |
      Node_Binding::DOCUMENT_POSITION_DISCONNECTED)) ==
     Node_Binding::DOCUMENT_POSITION_PRECEDING;
@@ -4368,6 +4369,7 @@ nsresult GetEventAndTarget(nsIDocument* aDoc, nsISupports* aTarget,
                            const nsAString& aEventName,
                            CanBubble aCanBubble,
                            Cancelable aCancelable,
+                           Composed aComposed,
                            Trusted aTrusted,
                            Event** aEvent,
                            EventTarget** aTargetOut)
@@ -4382,7 +4384,7 @@ nsresult GetEventAndTarget(nsIDocument* aDoc, nsISupports* aTarget,
     return err.StealNSResult();
   }
 
-  event->InitEvent(aEventName, aCanBubble, aCancelable);
+  event->InitEvent(aEventName, aCanBubble, aCancelable, aComposed);
   event->SetTrusted(aTrusted == Trusted::eYes);
 
   event->SetTarget(target);
@@ -4398,10 +4400,11 @@ nsContentUtils::DispatchTrustedEvent(nsIDocument* aDoc, nsISupports* aTarget,
                                      const nsAString& aEventName,
                                      CanBubble aCanBubble,
                                      Cancelable aCancelable,
+                                     Composed aComposed,
                                      bool* aDefaultAction)
 {
   return DispatchEvent(aDoc, aTarget, aEventName, aCanBubble, aCancelable,
-                       Trusted::eYes, aDefaultAction);
+                       aComposed, Trusted::eYes, aDefaultAction);
 }
 
 // static
@@ -4413,7 +4416,7 @@ nsContentUtils::DispatchUntrustedEvent(nsIDocument* aDoc, nsISupports* aTarget,
                                        bool* aDefaultAction)
 {
   return DispatchEvent(aDoc, aTarget, aEventName, aCanBubble, aCancelable,
-                       Trusted::eNo, aDefaultAction);
+                       Composed::eDefault, Trusted::eNo, aDefaultAction);
 }
 
 // static
@@ -4422,6 +4425,7 @@ nsContentUtils::DispatchEvent(nsIDocument* aDoc, nsISupports* aTarget,
                               const nsAString& aEventName,
                               CanBubble aCanBubble,
                               Cancelable aCancelable,
+                              Composed aComposed,
                               Trusted aTrusted,
                               bool* aDefaultAction,
                               ChromeOnlyDispatch aOnlyChromeDispatch)
@@ -4429,7 +4433,8 @@ nsContentUtils::DispatchEvent(nsIDocument* aDoc, nsISupports* aTarget,
   RefPtr<Event> event;
   nsCOMPtr<EventTarget> target;
   nsresult rv = GetEventAndTarget(aDoc, aTarget, aEventName, aCanBubble,
-                                  aCancelable, aTrusted, getter_AddRefs(event),
+                                  aCancelable, aComposed, aTrusted,
+                                  getter_AddRefs(event),
                                   getter_AddRefs(target));
   NS_ENSURE_SUCCESS(rv, rv);
   event->WidgetEventPtr()->mFlags.mOnlyChromeDispatch =
@@ -4493,7 +4498,8 @@ nsContentUtils::DispatchChromeEvent(nsIDocument *aDoc,
   RefPtr<Event> event;
   nsCOMPtr<EventTarget> target;
   nsresult rv = GetEventAndTarget(aDoc, aTarget, aEventName, aCanBubble,
-                                  aCancelable, Trusted::eYes,
+                                  aCancelable, Composed::eDefault,
+                                  Trusted::eYes,
                                   getter_AddRefs(event),
                                   getter_AddRefs(target));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -4540,7 +4546,8 @@ nsContentUtils::DispatchEventOnlyToChrome(nsIDocument* aDoc,
                                           bool* aDefaultAction)
 {
   return DispatchEvent(aDoc, aTarget, aEventName, aCanBubble, aCancelable,
-                       Trusted::eYes, aDefaultAction, ChromeOnlyDispatch::eYes);
+                       Composed::eDefault, Trusted::eYes, aDefaultAction,
+                       ChromeOnlyDispatch::eYes);
 }
 
 /* static */
@@ -7105,20 +7112,20 @@ nsContentUtils::ChannelShouldInheritPrincipal(nsIPrincipal* aLoadingPrincipal,
 
 /* static */
 bool
-nsContentUtils::IsFullScreenApiEnabled()
+nsContentUtils::IsFullscreenApiEnabled()
 {
-  return sIsFullScreenApiEnabled;
+  return sIsFullscreenApiEnabled;
 }
 
 /* static */
 bool
-nsContentUtils::IsRequestFullScreenAllowed(CallerType aCallerType)
+nsContentUtils::IsRequestFullscreenAllowed(CallerType aCallerType)
 {
   // If more time has elapsed since the user input than is specified by the
   // dom.event.handling-user-input-time-limit pref (default 1 second), this
   // function also returns false.
 
-  if (!sTrustedFullScreenOnly || aCallerType == CallerType::System) {
+  if (!sTrustedFullscreenOnly || aCallerType == CallerType::System) {
     return true;
   }
 
@@ -8667,6 +8674,26 @@ nsContentUtils::GetReferrerPolicyFromHeader(const nsAString& aHeader)
 }
 
 // static
+net::ReferrerPolicy
+nsContentUtils::GetReferrerPolicyFromChannel(nsIChannel* aChannel)
+{
+  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aChannel);
+  if (!httpChannel) {
+    return net::RP_Unset;
+  }
+
+  nsresult rv;
+  nsAutoCString headerValue;
+  rv = httpChannel->GetResponseHeader(NS_LITERAL_CSTRING("referrer-policy"),
+                                      headerValue);
+  if (NS_FAILED(rv) || headerValue.IsEmpty()) {
+    return net::RP_Unset;
+  }
+
+  return GetReferrerPolicyFromHeader(NS_ConvertUTF8toUTF16(headerValue));
+}
+
+// static
 bool
 nsContentUtils::IsNonSubresourceRequest(nsIChannel* aChannel)
 {
@@ -9027,6 +9054,54 @@ namespace {
 
 // We put StringBuilder in the anonymous namespace to prevent anything outside
 // this file from accidentally being linked against it.
+class BulkAppender
+{
+  typedef typename nsAString::size_type size_type;
+
+public:
+  explicit BulkAppender(BulkWriteHandle<char16_t>&& aHandle)
+    : mHandle(std::move(aHandle))
+    , mPosition(0)
+  {
+  }
+  ~BulkAppender() = default;
+
+  template<int N>
+  void AppendLiteral(const char16_t (&aStr)[N])
+  {
+    size_t len = N - 1;
+    MOZ_ASSERT(mPosition + len <= mHandle.Length());
+    memcpy(mHandle.Elements() + mPosition, aStr, len * sizeof(char16_t));
+    mPosition += len;
+  }
+
+  void Append(Span<const char16_t> aStr)
+  {
+    size_t len = aStr.Length();
+    MOZ_ASSERT(mPosition + len <= mHandle.Length());
+    // Both mHandle.Elements() and aStr.Elements() are guaranteed
+    // to be non-null (by the string implementation and by Span,
+    // respectively), so not checking the pointers for null before
+    // memcpy does not lead to UB even if len was zero.
+    memcpy(
+      mHandle.Elements() + mPosition, aStr.Elements(), len * sizeof(char16_t));
+    mPosition += len;
+  }
+
+  void Append(Span<const char> aStr)
+  {
+    size_t len = aStr.Length();
+    MOZ_ASSERT(mPosition + len <= mHandle.Length());
+    ConvertLatin1toUTF16(aStr, mHandle.AsSpan().From(mPosition));
+    mPosition += len;
+  }
+
+  void Finish() { mHandle.Finish(mPosition, false); }
+
+private:
+  mozilla::BulkWriteHandle<char16_t> mHandle;
+  size_type mPosition;
+};
 
 class StringBuilder
 {
@@ -9061,8 +9136,8 @@ private:
 
     union
     {
-      nsAtom*              mAtom;
-      const char*           mLiteral;
+      nsAtom*               mAtom;
+      const char16_t*       mLiteral;
       nsAutoString*         mString;
       const nsTextFragment* mTextFragment;
     };
@@ -9091,18 +9166,7 @@ public:
   }
 
   template<int N>
-  void Append(const char (&aLiteral)[N])
-  {
-    Unit* u = AddUnit();
-    u->mLiteral = aLiteral;
-    u->mType = Unit::eLiteral;
-    uint32_t len = N - 1;
-    u->mLength = len;
-    mLength += len;
-  }
-
-  template<int N>
-  void Append(char (&aLiteral)[N])
+  void Append(const char16_t (&aLiteral)[N])
   {
     Unit* u = AddUnit();
     u->mLiteral = aLiteral;
@@ -9162,7 +9226,9 @@ public:
 
   bool ToString(nsAString& aOut)
   {
-    if (!aOut.SetCapacity(mLength, fallible)) {
+    nsresult rv;
+    BulkAppender appender(aOut.BulkWrite(mLength, 0, true, rv));
+    if (NS_FAILED(rv)) {
       return false;
     }
 
@@ -9172,28 +9238,43 @@ public:
         Unit& u = current->mUnits[i];
         switch (u.mType) {
           case Unit::eAtom:
-            aOut.Append(nsDependentAtomString(u.mAtom));
+            appender.Append(*(u.mAtom));
             break;
           case Unit::eString:
-            aOut.Append(*(u.mString));
+            appender.Append(*(u.mString));
             break;
           case Unit::eStringWithEncode:
-            EncodeAttrString(*(u.mString), aOut);
+            EncodeAttrString(*(u.mString), appender);
             break;
           case Unit::eLiteral:
-            aOut.AppendASCII(u.mLiteral, u.mLength);
+            appender.Append(MakeSpan(u.mLiteral, u.mLength));
             break;
           case Unit::eTextFragment:
-            u.mTextFragment->AppendTo(aOut);
+            if (u.mTextFragment->Is2b()) {
+              appender.Append(MakeSpan(u.mTextFragment->Get2b(),
+                                       u.mTextFragment->GetLength()));
+            } else {
+              appender.Append(MakeSpan(u.mTextFragment->Get1b(),
+                                       u.mTextFragment->GetLength()));
+            }
             break;
           case Unit::eTextFragmentWithEncode:
-            EncodeTextFragment(u.mTextFragment, aOut);
+            if (u.mTextFragment->Is2b()) {
+              EncodeTextFragment(MakeSpan(u.mTextFragment->Get2b(),
+                                          u.mTextFragment->GetLength()),
+                                 appender);
+            } else {
+              EncodeTextFragment(MakeSpan(u.mTextFragment->Get1b(),
+                                          u.mTextFragment->GetLength()),
+                                 appender);
+            }
             break;
           default:
             MOZ_CRASH("Unknown unit type?");
         }
       }
     }
+    appender.Finish();
     return true;
   }
 private:
@@ -9213,76 +9294,71 @@ private:
     aFirst->mLast = this;
   }
 
-  void EncodeAttrString(const nsAutoString& aValue, nsAString& aOut)
+  void EncodeAttrString(Span<const char16_t> aStr, BulkAppender& aAppender)
   {
-    const char16_t* c = aValue.BeginReading();
-    const char16_t* end = aValue.EndReading();
-    while (c < end) {
-      switch (*c) {
-      case '"':
-        aOut.AppendLiteral("&quot;");
-        break;
-      case '&':
-        aOut.AppendLiteral("&amp;");
-        break;
-      case 0x00A0:
-        aOut.AppendLiteral("&nbsp;");
-        break;
-      default:
-        aOut.Append(*c);
-        break;
+    size_t flushedUntil = 0;
+    size_t currentPosition = 0;
+    for (char16_t c : aStr) {
+      switch (c) {
+        case '"':
+          aAppender.Append(aStr.FromTo(flushedUntil, currentPosition));
+          aAppender.AppendLiteral(u"&quot;");
+          flushedUntil = currentPosition + 1;
+          break;
+        case '&':
+          aAppender.Append(aStr.FromTo(flushedUntil, currentPosition));
+          aAppender.AppendLiteral(u"&amp;");
+          flushedUntil = currentPosition + 1;
+          break;
+        case 0x00A0:
+          aAppender.Append(aStr.FromTo(flushedUntil, currentPosition));
+          aAppender.AppendLiteral(u"&nbsp;");
+          flushedUntil = currentPosition + 1;
+          break;
+        default:
+          break;
       }
-      ++c;
+      currentPosition++;
+    }
+    if (currentPosition > flushedUntil) {
+      aAppender.Append(aStr.FromTo(flushedUntil, currentPosition));
     }
   }
 
-  void EncodeTextFragment(const nsTextFragment* aValue, nsAString& aOut)
+  template<class T>
+  void EncodeTextFragment(Span<const T> aStr, BulkAppender& aAppender)
   {
-    uint32_t len = aValue->GetLength();
-    if (aValue->Is2b()) {
-      const char16_t* data = aValue->Get2b();
-      for (uint32_t i = 0; i < len; ++i) {
-        const char16_t c = data[i];
-        switch (c) {
-          case '<':
-            aOut.AppendLiteral("&lt;");
-            break;
-          case '>':
-            aOut.AppendLiteral("&gt;");
-            break;
-          case '&':
-            aOut.AppendLiteral("&amp;");
-            break;
-          case 0x00A0:
-            aOut.AppendLiteral("&nbsp;");
-            break;
-          default:
-            aOut.Append(c);
-            break;
-        }
+    size_t flushedUntil = 0;
+    size_t currentPosition = 0;
+    for (T c : aStr) {
+      switch (c) {
+        case '<':
+          aAppender.Append(aStr.FromTo(flushedUntil, currentPosition));
+          aAppender.AppendLiteral(u"&lt;");
+          flushedUntil = currentPosition + 1;
+          break;
+        case '>':
+          aAppender.Append(aStr.FromTo(flushedUntil, currentPosition));
+          aAppender.AppendLiteral(u"&gt;");
+          flushedUntil = currentPosition + 1;
+          break;
+        case '&':
+          aAppender.Append(aStr.FromTo(flushedUntil, currentPosition));
+          aAppender.AppendLiteral(u"&amp;");
+          flushedUntil = currentPosition + 1;
+          break;
+        case T(0xA0):
+          aAppender.Append(aStr.FromTo(flushedUntil, currentPosition));
+          aAppender.AppendLiteral(u"&nbsp;");
+          flushedUntil = currentPosition + 1;
+          break;
+        default:
+          break;
       }
-    } else {
-      const char* data = aValue->Get1b();
-      for (uint32_t i = 0; i < len; ++i) {
-        const unsigned char c = data[i];
-        switch (c) {
-          case '<':
-            aOut.AppendLiteral("&lt;");
-            break;
-          case '>':
-            aOut.AppendLiteral("&gt;");
-            break;
-          case '&':
-            aOut.AppendLiteral("&amp;");
-            break;
-          case 0x00A0:
-            aOut.AppendLiteral("&nbsp;");
-            break;
-          default:
-            aOut.Append(c);
-            break;
-        }
-      }
+      currentPosition++;
+    }
+    if (currentPosition > flushedUntil) {
+      aAppender.Append(aStr.FromTo(flushedUntil, currentPosition));
     }
   }
 
@@ -9388,7 +9464,7 @@ StartElement(Element* aContent, StringBuilder& aBuilder)
   nsAtom* localName = aContent->NodeInfo()->NameAtom();
   int32_t tagNS = aContent->GetNameSpaceID();
 
-  aBuilder.Append("<");
+  aBuilder.Append(u"<");
   if (aContent->IsHTMLElement() || aContent->IsSVGElement() ||
       aContent->IsMathMLElement()) {
     aBuilder.Append(localName);
@@ -9400,9 +9476,9 @@ StartElement(Element* aContent, StringBuilder& aBuilder)
   if (ceData) {
     nsAtom* isAttr = ceData->GetIs(aContent);
     if (isAttr && !aContent->HasAttr(kNameSpaceID_None, nsGkAtoms::is)) {
-      aBuilder.Append(R"( is=")");
+      aBuilder.Append(uR"( is=")");
       aBuilder.Append(nsDependentAtomString(isAttr));
-      aBuilder.Append(R"(")");
+      aBuilder.Append(uR"(")");
     }
   }
 
@@ -9431,33 +9507,33 @@ StartElement(Element* aContent, StringBuilder& aBuilder)
       continue;
     }
 
-    aBuilder.Append(" ");
+    aBuilder.Append(u" ");
 
     if (MOZ_LIKELY(attNs == kNameSpaceID_None) ||
         (attNs == kNameSpaceID_XMLNS &&
          attName == nsGkAtoms::xmlns)) {
       // Nothing else required
     } else if (attNs == kNameSpaceID_XML) {
-      aBuilder.Append("xml:");
+      aBuilder.Append(u"xml:");
     } else if (attNs == kNameSpaceID_XMLNS) {
-      aBuilder.Append("xmlns:");
+      aBuilder.Append(u"xmlns:");
     } else if (attNs == kNameSpaceID_XLink) {
-      aBuilder.Append("xlink:");
+      aBuilder.Append(u"xlink:");
     } else {
       nsAtom* prefix = name->GetPrefix();
       if (prefix) {
         aBuilder.Append(prefix);
-        aBuilder.Append(":");
+        aBuilder.Append(u":");
       }
     }
 
     aBuilder.Append(attName);
-    aBuilder.Append(R"(=")");
+    aBuilder.Append(uR"(=")");
     AppendEncodedAttributeValue(attValue, aBuilder);
-    aBuilder.Append(R"(")");
+    aBuilder.Append(uR"(")");
   }
 
-  aBuilder.Append(">");
+  aBuilder.Append(u">");
 
   /*
   // Per HTML spec we should append one \n if the first child of
@@ -9572,32 +9648,32 @@ nsContentUtils::SerializeNodeToMarkup(nsINode* aRoot,
       }
 
       case nsINode::COMMENT_NODE: {
-        builder.Append("<!--");
+        builder.Append(u"<!--");
         builder.Append(static_cast<nsIContent*>(current)->GetText());
-        builder.Append("-->");
+        builder.Append(u"-->");
         break;
       }
 
       case nsINode::DOCUMENT_TYPE_NODE: {
-        builder.Append("<!DOCTYPE ");
+        builder.Append(u"<!DOCTYPE ");
         builder.Append(current->NodeName());
-        builder.Append(">");
+        builder.Append(u">");
         break;
       }
 
       case nsINode::PROCESSING_INSTRUCTION_NODE: {
-        builder.Append("<?");
+        builder.Append(u"<?");
         builder.Append(current->NodeName());
-        builder.Append(" ");
+        builder.Append(u" ");
         builder.Append(static_cast<nsIContent*>(current)->GetText());
-        builder.Append(">");
+        builder.Append(u">");
         break;
       }
     }
 
     while (true) {
       if (!isVoid && current->NodeType() == nsINode::ELEMENT_NODE) {
-        builder.Append("</");
+        builder.Append(u"</");
         nsIContent* elem = static_cast<nsIContent*>(current);
         if (elem->IsHTMLElement() || elem->IsSVGElement() ||
             elem->IsMathMLElement()) {
@@ -9605,7 +9681,7 @@ nsContentUtils::SerializeNodeToMarkup(nsINode* aRoot,
         } else {
           builder.Append(current->NodeName());
         }
-        builder.Append(">");
+        builder.Append(u">");
       }
       isVoid = false;
 
@@ -10108,7 +10184,7 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
 }
 
 CustomElementRegistry*
-GetCustomElementRegistry(nsIDocument* aDoc)
+nsContentUtils::GetCustomElementRegistry(nsIDocument* aDoc)
 {
   MOZ_ASSERT(aDoc);
 
@@ -10135,7 +10211,7 @@ nsContentUtils::LookupCustomElementDefinition(nsIDocument* aDoc,
     return nullptr;
   }
 
-  RefPtr<CustomElementRegistry> registry(GetCustomElementRegistry(aDoc));
+  RefPtr<CustomElementRegistry> registry = GetCustomElementRegistry(aDoc);
   if (!registry) {
     return nullptr;
   }

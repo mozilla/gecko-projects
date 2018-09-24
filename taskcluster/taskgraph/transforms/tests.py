@@ -147,7 +147,9 @@ test_description_schema = Schema({
         basestring),
 
     # base work directory used to set up the task.
-    Optional('workdir'): basestring,
+    Optional('workdir'): optionally_keyed_by(
+        'test-platform',
+        Any(basestring, 'default')),
 
     # the name by which this test suite is addressed in try syntax; defaults to
     # the test-name.  This will translate to the `unittest_try_name` or
@@ -341,6 +343,10 @@ test_description_schema = Schema({
         'test-platform',
         [basestring]),
 
+    Optional('run-as-administrator'): optionally_keyed_by(
+        'test-platform',
+        bool),
+
     # -- values supplied by the task-generation infrastructure
 
     # the platform of the build this task is testing
@@ -443,6 +449,7 @@ def set_defaults(config, tests):
         test.setdefault('try-name', test['test-name'])
 
         test.setdefault('os-groups', [])
+        test.setdefault('run-as-administrator', False)
         test.setdefault('chunks', 1)
         test.setdefault('run-on-projects', 'built-projects')
         test.setdefault('instance-size', 'default')
@@ -683,11 +690,13 @@ def handle_keyed_by(config, tests):
         'suite',
         'run-on-projects',
         'os-groups',
+        'run-as-administrator',
         'mozharness.chunked',
         'mozharness.config',
         'mozharness.extra-options',
         'mozharness.requires-signed-builds',
         'mozharness.script',
+        'workdir',
         'worker-type',
         'virtualization',
     ]
@@ -999,7 +1008,7 @@ def set_worker_type(config, tests):
         elif test_platform.startswith('linux') or test_platform.startswith('android'):
             if test.get('suite', '') in ['talos', 'raptor'] and \
                  not test['build-platform'].startswith('linux64-ccov'):
-                test['worker-type'] = 'releng-hardware/gecko-t-linux-talos'
+                test['worker-type'] = 'releng-hardware/gecko-t-linux-talos-tw'
             else:
                 test['worker-type'] = LINUX_WORKER_TYPES[test['instance-size']]
         else:

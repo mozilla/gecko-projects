@@ -65,6 +65,7 @@
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
+#include "mozilla/FullscreenChange.h"
 #include "mozilla/InternalMutationEvent.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/RestyleManager.h"
@@ -526,6 +527,23 @@ Element::ClearStyleStateLocks()
 }
 
 static bool
+IsLikelyCustomElement(const nsXULElement& aElement)
+{
+  const CustomElementData* data = aElement.GetCustomElementData();
+  if (!data) {
+    return false;
+  }
+
+  const CustomElementRegistry* registry =
+    nsContentUtils::GetCustomElementRegistry(aElement.OwnerDoc());
+  if (!registry) {
+    return false;
+  }
+
+  return registry->IsLikelyToBeCustomElement(data->GetCustomElementType());
+}
+
+static bool
 MayNeedToLoadXBLBinding(const nsIDocument& aDocument, const Element& aElement)
 {
   // If we have a frame, the frame has already loaded the binding.
@@ -536,11 +554,8 @@ MayNeedToLoadXBLBinding(const nsIDocument& aDocument, const Element& aElement)
     return false;
   }
 
-  if (aElement.IsXULElement()) {
-    // We know dropmarkers don't have XBL bindings, and they get
-    // accessed while hidden when opening new windows. So skip
-    // looking up -moz-binding for performance reasons (bug 1478999).
-    return !aElement.IsXULElement(nsGkAtoms::dropMarker);
+  if (auto* xulElem = nsXULElement::FromNode(aElement)) {
+    return !IsLikelyCustomElement(*xulElem);
   }
 
   return aElement.IsAnyOfHTMLElements(nsGkAtoms::object, nsGkAtoms::embed);
@@ -1181,7 +1196,8 @@ Element::AttachShadow(const ShadowRootInit& aInit, ErrorResult& aError)
    * 1. If context object’s namespace is not the HTML namespace,
    *    then throw a "NotSupportedError" DOMException.
    */
-  if (!IsHTMLElement()) {
+  if (!IsHTMLElement() &&
+      !(XRE_IsParentProcess() && IsXULElement() && nsContentUtils::AllowXULXBLForPrincipal(NodePrincipal()))) {
     aError.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return nullptr;
   }
@@ -1920,14 +1936,14 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
   if (HasPointerLock()) {
     nsIDocument::UnlockPointer();
   }
-  if (mState.HasState(NS_EVENT_STATE_FULL_SCREEN)) {
-    // The element being removed is an ancestor of the full-screen element,
-    // exit full-screen state.
+  if (mState.HasState(NS_EVENT_STATE_FULLSCREEN)) {
+    // The element being removed is an ancestor of the fullscreen element,
+    // exit fullscreen state.
     nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
                                     NS_LITERAL_CSTRING("DOM"), OwnerDoc(),
                                     nsContentUtils::eDOM_PROPERTIES,
                                     "RemovedFullscreenElement");
-    // Fully exit full-screen.
+    // Fully exit fullscreen.
     nsIDocument::ExitFullscreenInDocTree(OwnerDoc());
   }
 
@@ -3560,34 +3576,33 @@ Element::AttrValueToCORSMode(const nsAttrValue* aValue)
 }
 
 static const char*
-GetFullScreenError(CallerType aCallerType)
+GetFullscreenError(CallerType aCallerType)
 {
-  if (!nsContentUtils::IsRequestFullScreenAllowed(aCallerType)) {
+  if (!nsContentUtils::IsRequestFullscreenAllowed(aCallerType)) {
     return "FullscreenDeniedNotInputDriven";
   }
 
   return nullptr;
 }
 
-void
-Element::RequestFullscreen(CallerType aCallerType, ErrorResult& aError)
+already_AddRefed<Promise>
+Element::RequestFullscreen(CallerType aCallerType, ErrorResult& aRv)
 {
-  // Only grant full-screen requests if this is called from inside a trusted
+  auto request = FullscreenRequest::Create(this, aCallerType, aRv);
+  RefPtr<Promise> promise = request->GetPromise();
+  // Only grant fullscreen requests if this is called from inside a trusted
   // event handler (i.e. inside an event handler for a user initiated event).
-  // This stops the full-screen from being abused similar to the popups of old,
-  // and it also makes it harder for bad guys' script to go full-screen and
+  // This stops the fullscreen from being abused similar to the popups of old,
+  // and it also makes it harder for bad guys' script to go fullscreen and
   // spoof the browser chrome/window and phish logins etc.
   // Note that requests for fullscreen inside a web app's origin are exempt
   // from this restriction.
-  if (const char* error = GetFullScreenError(aCallerType)) {
-    OwnerDoc()->DispatchFullscreenError(error);
-    return;
+  if (const char* error = GetFullscreenError(aCallerType)) {
+    request->Reject(error);
+  } else {
+    OwnerDoc()->AsyncRequestFullscreen(std::move(request));
   }
-
-  auto request = MakeUnique<FullscreenRequest>(this);
-  request->mIsCallerChrome = (aCallerType == CallerType::System);
-
-  OwnerDoc()->AsyncRequestFullScreen(std::move(request));
+  return promise.forget();
 }
 
 void

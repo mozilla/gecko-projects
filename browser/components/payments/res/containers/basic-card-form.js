@@ -3,7 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* import-globals-from ../../../../../browser/extensions/formautofill/content/autofillEditForms.js*/
+import AcceptedCards from "../components/accepted-cards.js";
 import LabelledCheckbox from "../components/labelled-checkbox.js";
+import PaymentDialog from "./payment-dialog.js";
 import PaymentRequestPage from "../components/payment-request-page.js";
 import PaymentStateSubscriberMixin from "../mixins/PaymentStateSubscriberMixin.js";
 import paymentRequest from "../paymentRequest.js";
@@ -36,6 +38,8 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
 
     this.persistCheckbox = new LabelledCheckbox();
     this.persistCheckbox.className = "persist-checkbox";
+
+    this.acceptedCardsList = new AcceptedCards();
 
     // page footer
     this.cancelButton = document.createElement("button");
@@ -87,11 +91,18 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
         getSupportedNetworks: PaymentDialogUtils.getCreditCardNetworks,
       });
 
-      // The EditCreditCard constructor adds `input` event listeners on the same element,
-      // which update field validity. By adding our event listeners after this constructor,
-      // validity will be updated before our handlers get the event
+      // The EditCreditCard constructor adds `change` and `input` event listeners on the same
+      // element, which update field validity. By adding our event listeners after this
+      // constructor, validity will be updated before our handlers get the event
+      form.addEventListener("change", this);
       form.addEventListener("input", this);
       form.addEventListener("invalid", this);
+
+      // The "invalid" event does not bubble and needs to be listened for on each
+      // form element.
+      for (let field of this.form.elements) {
+        field.addEventListener("invalid", this);
+      }
 
       let fragment = document.createDocumentFragment();
       fragment.append(this.addressAddLink);
@@ -102,6 +113,7 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
 
       this.body.appendChild(this.persistCheckbox);
       this.body.appendChild(this.genericErrorText);
+      this.body.appendChild(this.acceptedCardsList);
       // Only call the connected super callback(s) once our markup is fully
       // connected, including the shared form fetched asynchronously.
       super.connectedCallback();
@@ -123,11 +135,16 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
     let editing = !!basicCardPage.guid;
     this.cancelButton.textContent = this.dataset.cancelButtonLabel;
     this.backButton.textContent = this.dataset.backButtonLabel;
-    this.saveButton.textContent = editing ? this.dataset.updateButtonLabel :
-                                            this.dataset.addButtonLabel;
+    if (page.onboardingWizard) {
+      this.saveButton.textContent = this.dataset.nextButtonLabel;
+    } else {
+      this.saveButton.textContent = editing ? this.dataset.updateButtonLabel :
+                                              this.dataset.addButtonLabel;
+    }
     this.persistCheckbox.label = this.dataset.persistCheckboxLabel;
     this.addressAddLink.textContent = this.dataset.addressAddLinkLabel;
     this.addressEditLink.textContent = this.dataset.addressEditLinkLabel;
+    this.acceptedCardsList.label = this.dataset.acceptedCardsLabel;
 
     // The next line needs an onboarding check since we don't set previousId
     // when navigating to add/edit directly from the summary page.
@@ -199,6 +216,10 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
 
   handleEvent(event) {
     switch (event.type) {
+      case "change": {
+        this.onChange(event);
+        break;
+      }
       case "click": {
         this.onClick(event);
         break;
@@ -208,10 +229,19 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
         break;
       }
       case "invalid": {
-        this.onInvalid(event);
+        if (event.target instanceof HTMLFormElement) {
+          this.onInvalidForm(event);
+          break;
+        }
+
+        this.onInvalidField(event);
         break;
       }
     }
+  }
+
+  onChange(evt) {
+    this.updateSaveButtonState();
   }
 
   onClick(evt) {
@@ -301,10 +331,22 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
   }
 
   onInput(event) {
+    event.target.setCustomValidity("");
     this.updateSaveButtonState();
   }
 
-  onInvalid(event) {
+  /**
+   * @param {Event} event - "invalid" event
+   * Note: Keep this in-sync with the equivalent version in address-form.js
+   */
+  onInvalidField(event) {
+    let field = event.target;
+    let container = field.closest(`#${field.id}-container`);
+    let errorTextSpan = PaymentDialog.maybeCreateFieldErrorElement(container);
+    errorTextSpan.textContent = field.validationMessage;
+  }
+
+  onInvalidForm() {
     this.saveButton.disabled = true;
   }
 

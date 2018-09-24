@@ -433,8 +433,8 @@ class DOMLocalization extends Localization {
     };
   }
 
-  onChange() {
-    super.onChange();
+  onChange(eager = false) {
+    super.onChange(eager);
     this.translateRoots();
   }
 
@@ -581,7 +581,7 @@ class DOMLocalization extends Localization {
         // This means that the DOM alternations and directionality
         // are set in the same microtask.
         await this.translateFragment(root);
-        let primaryLocale = Services.locale.getAppLocaleAsBCP47();
+        let primaryLocale = Services.locale.appLocaleAsBCP47;
         let direction = Services.locale.isAppLocaleRTL ? "rtl" : "ltr";
         root.setAttribute("lang", primaryLocale);
         root.setAttribute(root.namespaceURI ===

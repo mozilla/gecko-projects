@@ -112,6 +112,7 @@ struct BlobItemData
   Matrix mMatrix; // updated to track the current transform to device space
   Matrix4x4Flagged mTransform; // only used with nsDisplayTransform items to detect transform changes
   float mOpacity; // only used with nsDisplayOpacity items to detect change to opacity
+  RefPtr<BasicLayerManager> mLayerManager;
 
   IntRect mImageRect;
   LayerIntPoint mGroupOffset;
@@ -355,6 +356,7 @@ struct DIGroup
   LayerIntRect mLayerBounds;
   Maybe<wr::ImageKey> mKey;
   std::vector<RefPtr<SourceSurface>> mExternalSurfaces;
+  std::vector<RefPtr<ScaledFont>> mFonts;
 
   DIGroup()
     : mAppUnitsPerDevPixel(0)
@@ -383,6 +385,16 @@ struct DIGroup
       iter.Remove();
       delete data;
     }
+  }
+
+  void ClearImageKey(WebRenderLayerManager* aManager, bool aForce = false)
+  {
+    if (mKey) {
+      MOZ_RELEASE_ASSERT(aForce || mInvalidRect.IsEmpty());
+      aManager->AddImageKeyForDiscard(mKey.value());
+      mKey = Nothing();
+    }
+    mFonts.clear();
   }
 
   static IntRect
@@ -438,7 +450,7 @@ struct DIGroup
       GP("mRect %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.width, aData->mRect.height);
       InvalidateRect(aData->mRect);
       aData->mInvalid = true;
-    } else if (/*aData->mIsInvalid || XXX: handle image load invalidation */ (aItem->IsInvalid(invalid) && invalid.IsEmpty())) {
+    } else if (aData->mInvalid || /* XXX: handle image load invalidation */ (aItem->IsInvalid(invalid) && invalid.IsEmpty())) {
       MOZ_RELEASE_ASSERT(imageRect.IsEqualEdges(aData->mImageRect));
       MOZ_RELEASE_ASSERT(mLayerBounds.TopLeft() == aData->mGroupOffset);
       UniquePtr<nsDisplayItemGeometry> geometry(aItem->AllocateGeometry(aBuilder));
@@ -626,15 +638,20 @@ struct DIGroup
     }
 
     gfx::SurfaceFormat format = gfx::SurfaceFormat::B8G8R8A8;
+    std::vector<RefPtr<ScaledFont>> fonts;
     RefPtr<WebRenderDrawEventRecorder> recorder =
       MakeAndAddRef<WebRenderDrawEventRecorder>(
-        [&](MemStream& aStream, std::vector<RefPtr<UnscaledFont>>& aUnscaledFonts) {
-          size_t count = aUnscaledFonts.size();
+        [&](MemStream& aStream, std::vector<RefPtr<ScaledFont>>& aScaledFonts) {
+          size_t count = aScaledFonts.size();
           aStream.write((const char*)&count, sizeof(count));
-          for (auto unscaled : aUnscaledFonts) {
-            wr::FontKey key = aWrManager->WrBridge()->GetFontKeyForUnscaledFont(unscaled);
-            aStream.write((const char*)&key, sizeof(key));
+          for (auto& scaled : aScaledFonts) {
+            BlobFont font = {
+              aWrManager->WrBridge()->GetFontKeyForScaledFont(scaled, &aResources),
+              scaled
+            };
+            aStream.write((const char*)&font, sizeof(font));
           }
+          fonts = std::move(aScaledFonts);
         });
 
     RefPtr<gfx::DrawTarget> dummyDt =
@@ -650,10 +667,7 @@ struct DIGroup
 
     bool empty = aStartItem == aEndItem;
     if (empty) {
-      if (mKey) {
-        aWrManager->AddImageKeyForDiscard(mKey.value());
-        mKey = Nothing();
-      }
+      ClearImageKey(aWrManager, true);
       return;
     }
 
@@ -687,6 +701,7 @@ struct DIGroup
         return;
       }
     }
+    mFonts = std::move(fonts);
     mInvalidRect.SetEmpty();
     SetBlobImageVisibleArea(aResources, mKey.value(), mPaintRect, bounds);
     PushImage(aBuilder, bounds);
@@ -792,6 +807,32 @@ struct DIGroup
   }
 };
 
+// If we have an item we need to make sure it matches the current group
+// otherwise it means the item switched groups and we need to invalidate
+// it and recreate the data.
+static BlobItemData*
+GetBlobItemDataForGroup(nsDisplayItem* aItem, DIGroup* aGroup)
+{
+  BlobItemData* data = GetBlobItemData(aItem);
+  if (data) {
+    MOZ_RELEASE_ASSERT(data->mGroup->mDisplayItems.Contains(data));
+    if (data->mGroup != aGroup) {
+      GP("group don't match %p %p\n", data->mGroup, aGroup);
+      data->ClearFrame();
+      // the item is for another group
+      // it should be cleared out as being unused at the end of this paint
+      data = nullptr;
+    }
+  }
+  if (!data) {
+    GP("Allocating blob data\n");
+    data = new BlobItemData(aGroup, aItem);
+    aGroup->mDisplayItems.PutEntry(data);
+  }
+  data->mUsed = true;
+  return data;
+}
+
 void
 Grouper::PaintContainerItem(DIGroup* aGroup, nsDisplayItem* aItem, const IntRect& aItemBounds,
                             nsDisplayList* aChildren, gfxContext* aContext,
@@ -814,15 +855,25 @@ Grouper::PaintContainerItem(DIGroup* aGroup, nsDisplayItem* aItem, const IntRect
       auto transformItem = static_cast<nsDisplayTransform*>(aItem);
       Matrix4x4Flagged trans = transformItem->GetTransform();
       Matrix trans2d;
-      MOZ_RELEASE_ASSERT(trans.Is2D(&trans2d));
-      aContext->Multiply(ThebesMatrix(trans2d));
-      aGroup->PaintItemRange(this, aChildren->GetBottom(), nullptr, aContext, aRecorder);
-
-      if (currentClip.HasClip()) {
-        aContext->Restore();
-        aContext->GetDrawTarget()->FlushItem(aItemBounds);
+      if (!trans.Is2D(&trans2d)) {
+        // We don't currently support doing invalidation inside 3d transforms.
+        // For now just paint it as a single item.
+        BlobItemData* data = GetBlobItemDataForGroup(aItem, aGroup);
+        if (data->mLayerManager->GetRoot()) {
+          data->mLayerManager->BeginTransaction();
+          data->mLayerManager->EndTransaction(FrameLayerBuilder::DrawPaintedLayer, mDisplayListBuilder);
+          aContext->GetDrawTarget()->FlushItem(aItemBounds);
+        }
       } else {
-        aContext->SetMatrix(matrix);
+        aContext->Multiply(ThebesMatrix(trans2d));
+        aGroup->PaintItemRange(this, aChildren->GetBottom(), nullptr, aContext, aRecorder);
+
+        if (currentClip.HasClip()) {
+          aContext->Restore();
+          aContext->GetDrawTarget()->FlushItem(aItemBounds);
+        } else {
+          aContext->SetMatrix(matrix);
+        }
       }
       break;
     }
@@ -856,28 +907,33 @@ Grouper::PaintContainerItem(DIGroup* aGroup, nsDisplayItem* aItem, const IntRect
     }
     case DisplayItemType::TYPE_MASK: {
       GP("Paint Mask\n");
-      // We don't currently support doing invalidation inside nsDisplayMask
-      // for now just paint it as a single item
-      gfx::Size scale(1, 1);
-      RefPtr<BasicLayerManager> blm = new BasicLayerManager(BasicLayerManager::BLM_INACTIVE);
-      PaintByLayer(aItem, mDisplayListBuilder, blm, aContext, scale, [&]() {
-                   static_cast<nsDisplayMask*>(aItem)->PaintAsLayer(mDisplayListBuilder,
-                                                                    aContext, blm);
-                   });
-      aContext->GetDrawTarget()->FlushItem(aItemBounds);
+      auto maskItem = static_cast<nsDisplayMask*>(aItem);
+      maskItem->SetPaintRect(maskItem->GetClippedBounds(mDisplayListBuilder));
+      if (maskItem->IsValidMask()) {
+        maskItem->PaintWithContentsPaintCallback(mDisplayListBuilder, aContext, [&] {
+          GP("beginGroup %s %p-%d\n", aItem->Name(), aItem->Frame(), aItem->GetPerFrameKey());
+          aContext->GetDrawTarget()->FlushItem(aItemBounds);
+          aGroup->PaintItemRange(this, aChildren->GetBottom(), nullptr, aContext, aRecorder);
+          GP("endGroup %s %p-%d\n", aItem->Name(), aItem->Frame(), aItem->GetPerFrameKey());
+          });
+        aContext->GetDrawTarget()->FlushItem(aItemBounds);
+      }
       break;
     }
     case DisplayItemType::TYPE_FILTER: {
       GP("Paint Filter\n");
       // We don't currently support doing invalidation inside nsDisplayFilter
       // for now just paint it as a single item
-      RefPtr<BasicLayerManager> blm = new BasicLayerManager(BasicLayerManager::BLM_INACTIVE);
-      gfx::Size scale(1, 1);
-      PaintByLayer(aItem, mDisplayListBuilder, blm, aContext, scale, [&]() {
-                   static_cast<nsDisplayFilter*>(aItem)->PaintAsLayer(mDisplayListBuilder,
-                                                                      aContext, blm);
-                   });
-      aContext->GetDrawTarget()->FlushItem(aItemBounds);
+      BlobItemData* data = GetBlobItemDataForGroup(aItem, aGroup);
+      if (data->mLayerManager->GetRoot()) {
+        data->mLayerManager->BeginTransaction();
+        static_cast<nsDisplayFilter*>(aItem)->PaintAsLayer(mDisplayListBuilder,
+                                                           aContext, data->mLayerManager);
+        if (data->mLayerManager->InTransaction()) {
+          data->mLayerManager->AbortTransaction();
+        }
+        aContext->GetDrawTarget()->FlushItem(aItemBounds);
+      }
       break;
     }
 
@@ -938,6 +994,9 @@ IsItemProbablyActive(nsDisplayItem* aItem, nsDisplayListBuilder* aDisplayListBui
     GP("active: %d\n", active);
     return active || HasActiveChildren(*opacityItem->GetChildren(), aDisplayListBuilder);
   }
+  case DisplayItemType::TYPE_FOREIGN_OBJECT: {
+    return true;
+  }
   case DisplayItemType::TYPE_WRAP_LIST:
   case DisplayItemType::TYPE_PERSPECTIVE: {
     if (aItem->GetChildren()) {
@@ -949,32 +1008,6 @@ IsItemProbablyActive(nsDisplayItem* aItem, nsDisplayListBuilder* aDisplayListBui
     // TODO: handle other items?
     return false;
   }
-}
-
-// If we have an item we need to make sure it matches the current group
-// otherwise it means the item switched groups and we need to invalidate
-// it and recreate the data.
-static BlobItemData*
-GetBlobItemDataForGroup(nsDisplayItem* aItem, DIGroup* aGroup)
-{
-  BlobItemData* data = GetBlobItemData(aItem);
-  if (data) {
-    MOZ_RELEASE_ASSERT(data->mGroup->mDisplayItems.Contains(data));
-    if (data->mGroup != aGroup) {
-      GP("group don't match %p %p\n", data->mGroup, aGroup);
-      data->ClearFrame();
-      // the item is for another group
-      // it should be cleared out as being unused at the end of this paint
-      data = nullptr;
-    }
-  }
-  if (!data) {
-    GP("Allocating blob data\n");
-    data = new BlobItemData(aGroup, aItem);
-    aGroup->mDisplayItems.PutEntry(data);
-  }
-  data->mUsed = true;
-  return data;
 }
 
 // This does a pass over the display lists and will join the display items
@@ -1022,11 +1055,7 @@ Grouper::ConstructGroups(nsDisplayListBuilder* aDisplayListBuilder,
         // The group changed size
         GP("Inner group size change\n");
         groupData->mFollowingGroup.ClearItems();
-        if (groupData->mFollowingGroup.mKey) {
-          MOZ_RELEASE_ASSERT(groupData->mFollowingGroup.mInvalidRect.IsEmpty());
-          aCommandBuilder->mManager->AddImageKeyForDiscard(groupData->mFollowingGroup.mKey.value());
-          groupData->mFollowingGroup.mKey = Nothing();
-        }
+        groupData->mFollowingGroup.ClearImageKey(aCommandBuilder->mManager);
       }
       groupData->mFollowingGroup.mGroupBounds = currentGroup->mGroupBounds;
       groupData->mFollowingGroup.mAppUnitsPerDevPixel = currentGroup->mAppUnitsPerDevPixel;
@@ -1066,6 +1095,10 @@ Grouper::ConstructGroupInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
   }
 }
 
+bool BuildLayer(nsDisplayItem* aItem, BlobItemData* aData,
+                nsDisplayListBuilder* aDisplayListBuilder,
+                const gfx::Size& aScale);
+
 void
 Grouper::ConstructItemInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
                                      wr::DisplayListBuilder& aBuilder,
@@ -1074,29 +1107,42 @@ Grouper::ConstructItemInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
                                      const StackingContextHelper& aSc)
 {
   nsDisplayList* children = aItem->GetChildren();
+  BlobItemData* data = GetBlobItemDataForGroup(aItem, aGroup);
 
-  if (aItem->GetType() == DisplayItemType::TYPE_TRANSFORM) {
+  if (aItem->GetType() == DisplayItemType::TYPE_FILTER) {
+    gfx::Size scale(1, 1);
+    // If ComputeDifferences finds any change, we invalidate the entire container item.
+    // This is needed because blob merging requires the entire item to be within the invalid region.
+    data->mInvalid = BuildLayer(aItem, data, mDisplayListBuilder, scale);
+  } else if (aItem->GetType() == DisplayItemType::TYPE_TRANSFORM) {
     nsDisplayTransform* transformItem = static_cast<nsDisplayTransform*>(aItem);
     const Matrix4x4Flagged& t = transformItem->GetTransform();
     Matrix t2d;
     bool is2D = t.Is2D(&t2d);
-    MOZ_RELEASE_ASSERT(is2D, "Non-2D transforms should be treated as active");
+    if (!is2D) {
+      // We'll use BasicLayerManager to handle 3d transforms.
+      gfx::Size scale(1, 1);
+      // If ComputeDifferences finds any change, we invalidate the entire container item.
+      // This is needed because blob merging requires the entire item to be within the invalid region.
+      data->mInvalid = BuildLayer(aItem, data, mDisplayListBuilder, scale);
+    } else {
+      Matrix m = mTransform;
 
-    Matrix m = mTransform;
+      GP("t2d: %f %f\n", t2d._31, t2d._32);
+      mTransform.PreMultiply(t2d);
+      GP("mTransform: %f %f\n", mTransform._31, mTransform._32);
+      ConstructGroupInsideInactive(aCommandBuilder, aBuilder, aResources, aGroup, children, aSc);
 
-    GP("t2d: %f %f\n", t2d._31, t2d._32);
-    mTransform.PreMultiply(t2d);
-    GP("mTransform: %f %f\n", mTransform._31, mTransform._32);
-    ConstructGroupInsideInactive(aCommandBuilder, aBuilder, aResources, aGroup, children, aSc);
-
-    mTransform = m;
+      mTransform = m;
+    }
   } else if (children) {
+    sIndent++;
     ConstructGroupInsideInactive(aCommandBuilder, aBuilder, aResources, aGroup, children, aSc);
+    sIndent--;
   }
 
   GP("Including %s of %d\n", aItem->Name(), aGroup->mDisplayItems.Count());
 
-  BlobItemData* data = GetBlobItemDataForGroup(aItem, aGroup);
   aGroup->ComputeGeometryChange(aItem, data, mTransform, mDisplayListBuilder); // we compute the geometry change here because we have the transform around still
 }
 
@@ -1153,21 +1199,29 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
       group.mAppUnitsPerDevPixel != appUnitsPerDevPixel ||
       group.mScale != scale ||
       group.mResidualOffset != residualOffset) {
+    GP("Property change. Deleting blob\n");
+
     if (group.mAppUnitsPerDevPixel != appUnitsPerDevPixel) {
-      GP("app unit %d %d\n", group.mAppUnitsPerDevPixel, appUnitsPerDevPixel);
+      GP(" App unit change %d -> %d\n", group.mAppUnitsPerDevPixel, appUnitsPerDevPixel);
     }
     // The bounds have changed so we need to discard the old image and add all
     // the commands again.
     auto p = group.mGroupBounds;
     auto q = groupBounds;
-    GP("Bounds change: %d %d %d %d vs %d %d %d %d\n", p.x, p.y, p.width, p.height, q.x, q.y, q.width, q.height);
+    if (!group.mGroupBounds.IsEqualEdges(groupBounds)) {
+      GP(" Bounds change: %d %d %d %d -> %d %d %d %d\n", p.x, p.y, p.width, p.height, q.x, q.y, q.width, q.height);
+    }
+
+    if (group.mScale != scale) {
+      GP(" Scale %f %f -> %f %f\n", group.mScale.width, group.mScale.height, scale.width, scale.height);
+    }
+
+    if (group.mResidualOffset != residualOffset) {
+      GP(" Residual Offset %f %f -> %f %f\n", group.mResidualOffset.x, group.mResidualOffset.y, residualOffset.x, residualOffset.y);
+    }
 
     group.ClearItems();
-    if (group.mKey) {
-      MOZ_RELEASE_ASSERT(group.mInvalidRect.IsEmpty());
-      mManager->AddImageKeyForDiscard(group.mKey.value());
-      group.mKey = Nothing();
-    }
+    group.ClearImageKey(mManager);
   }
 
   FrameMetrics::ViewID scrollId = FrameMetrics::NULL_SCROLL_ID;
@@ -1238,6 +1292,7 @@ WebRenderCommandBuilder::BuildWebRenderCommands(wr::DisplayListBuilder& aBuilder
   mLastCanvasDatas.Clear();
   mLastAsr = nullptr;
   mBuilderDumpIndex = 0;
+  mContainsSVGGroup = false;
   MOZ_ASSERT(mDumpIndent == 0);
   mClipManager.BeginBuild(mManager, aBuilder);
 
@@ -1368,13 +1423,9 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
         // display items (like animated transforms / opacity) share the same
         // animated geometry root, so we can combine subsequent items of that
         // type into the same image.
-        mDoGrouping = true;
+        mContainsSVGGroup = mDoGrouping = true;
         GP("attempting to enter the grouping code\n");
-      }/* else if (itemType == DisplayItemType::TYPE_FOREIGN_OBJECT) {
-        // We do not want to apply grouping inside <foreignObject>.
-        // TODO: TYPE_FOREIGN_OBJECT does not exist yet, make it exist
-        mDoGrouping = false;
-      }*/
+      }
 
       if (dumpEnabled) {
         std::stringstream ss;
@@ -1479,6 +1530,7 @@ WebRenderCommandBuilder::CreateImageKey(nsDisplayItem* aItem,
                                         ImageContainer* aContainer,
                                         mozilla::wr::DisplayListBuilder& aBuilder,
                                         mozilla::wr::IpcResourceUpdateQueue& aResources,
+                                        mozilla::wr::ImageRendering aRendering,
                                         const StackingContextHelper& aSc,
                                         gfx::IntSize& aSize,
                                         const Maybe<LayoutDeviceRect>& aAsyncImageBounds)
@@ -1506,7 +1558,7 @@ WebRenderCommandBuilder::CreateImageKey(nsDisplayItem* aItem,
                                                  scBounds,
                                                  transform,
                                                  scaleToSize,
-                                                 wr::ImageRendering::Auto,
+                                                 aRendering,
                                                  wr::MixBlendMode::Normal,
                                                  !aItem->BackfaceIsHidden());
     return Nothing();
@@ -1530,10 +1582,11 @@ WebRenderCommandBuilder::PushImage(nsDisplayItem* aItem,
                                    const StackingContextHelper& aSc,
                                    const LayoutDeviceRect& aRect)
 {
+  mozilla::wr::ImageRendering rendering = wr::ToImageRendering(
+    nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame()));
   gfx::IntSize size;
-  Maybe<wr::ImageKey> key = CreateImageKey(aItem, aContainer,
-                                           aBuilder, aResources,
-                                           aSc, size, Some(aRect));
+  Maybe<wr::ImageKey> key = CreateImageKey(
+    aItem, aContainer, aBuilder, aResources, rendering, aSc, size, Some(aRect));
   if (aContainer->IsAsync()) {
     // Async ImageContainer does not create ImageKey, instead it uses Pipeline.
     MOZ_ASSERT(key.isNothing());
@@ -1544,10 +1597,53 @@ WebRenderCommandBuilder::PushImage(nsDisplayItem* aItem,
   }
 
   auto r = wr::ToRoundedLayoutRect(aRect);
-  gfx::SamplingFilter sampleFilter = nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame());
-  aBuilder.PushImage(r, r, !aItem->BackfaceIsHidden(), wr::ToImageRendering(sampleFilter), key.value());
+  aBuilder.PushImage(r, r, !aItem->BackfaceIsHidden(), rendering, key.value());
 
   return true;
+}
+
+bool
+BuildLayer(nsDisplayItem* aItem,
+           BlobItemData* aData,
+           nsDisplayListBuilder* aDisplayListBuilder,
+           const gfx::Size& aScale)
+{
+  if (!aData->mLayerManager) {
+    aData->mLayerManager = new BasicLayerManager(BasicLayerManager::BLM_INACTIVE);
+  }
+  RefPtr<BasicLayerManager> blm = aData->mLayerManager;
+  UniquePtr<LayerProperties> props;
+  if (blm->GetRoot()) {
+    props = LayerProperties::CloneFrom(blm->GetRoot());
+  }
+  FrameLayerBuilder* layerBuilder = new FrameLayerBuilder();
+  layerBuilder->Init(aDisplayListBuilder, blm, nullptr, true);
+  layerBuilder->DidBeginRetainedLayerTransaction(blm);
+
+  blm->BeginTransaction();
+  bool isInvalidated = false;
+
+  ContainerLayerParameters param(aScale.width, aScale.height);
+  RefPtr<Layer> root = aItem->BuildLayer(aDisplayListBuilder, blm, param);
+
+  if (root) {
+    blm->SetRoot(root);
+    layerBuilder->WillEndTransaction();
+
+    // Check if there is any invalidation region.
+    nsIntRegion invalid;
+    if (props) {
+      props->ComputeDifferences(root, invalid, nullptr);
+      if (!invalid.IsEmpty()) {
+        isInvalidated = true;
+      }
+    } else {
+      isInvalidated = true;
+    }
+  }
+  blm->AbortTransaction();
+
+  return isInvalidated;
 }
 
 static bool
@@ -1796,15 +1892,20 @@ WebRenderCommandBuilder::GenerateFallbackData(nsDisplayItem* aItem,
     if (useBlobImage) {
       bool snapped;
       bool isOpaque = aItem->GetOpaqueRegion(aDisplayListBuilder, &snapped).Contains(paintBounds);
+      std::vector<RefPtr<ScaledFont>> fonts;
 
       RefPtr<WebRenderDrawEventRecorder> recorder =
-        MakeAndAddRef<WebRenderDrawEventRecorder>([&] (MemStream &aStream, std::vector<RefPtr<UnscaledFont>> &aUnscaledFonts) {
-          size_t count = aUnscaledFonts.size();
+        MakeAndAddRef<WebRenderDrawEventRecorder>([&] (MemStream &aStream, std::vector<RefPtr<ScaledFont>> &aScaledFonts) {
+          size_t count = aScaledFonts.size();
           aStream.write((const char*)&count, sizeof(count));
-          for (auto unscaled : aUnscaledFonts) {
-            wr::FontKey key = mManager->WrBridge()->GetFontKeyForUnscaledFont(unscaled);
-            aStream.write((const char*)&key, sizeof(key));
+          for (auto& scaled : aScaledFonts) {
+            BlobFont font = {
+              mManager->WrBridge()->GetFontKeyForScaledFont(scaled, &aResources),
+              scaled
+            };
+            aStream.write((const char*)&font, sizeof(font));
           }
+          fonts = std::move(aScaledFonts);
         });
       RefPtr<gfx::DrawTarget> dummyDt =
         gfx::Factory::CreateDrawTarget(gfx::BackendType::SKIA, gfx::IntSize(1, 1), format);
@@ -1826,6 +1927,7 @@ WebRenderCommandBuilder::GenerateFallbackData(nsDisplayItem* aItem,
           return nullptr;
         }
         fallbackData->SetKey(key);
+        fallbackData->SetFonts(fonts);
       } else {
         // If there is no invalidation region and we don't have a image key,
         // it means we don't need to push image for the item.
@@ -1992,6 +2094,8 @@ WebRenderGroupData::~WebRenderGroupData()
 {
   MOZ_COUNT_DTOR(WebRenderGroupData);
   GP("Group data destruct\n");
+  mSubGroup.ClearImageKey(mWRManager, true);
+  mFollowingGroup.ClearImageKey(mWRManager, true);
 }
 
 } // namespace layers

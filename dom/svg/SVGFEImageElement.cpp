@@ -48,8 +48,8 @@ NS_IMPL_ISUPPORTS_INHERITED(SVGFEImageElement, SVGFEImageElementBase,
 //----------------------------------------------------------------------
 // Implementation
 
-SVGFEImageElement::SVGFEImageElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-  : SVGFEImageElementBase(aNodeInfo)
+SVGFEImageElement::SVGFEImageElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
+  : SVGFEImageElementBase(std::move(aNodeInfo))
 {
   // We start out broken
   AddStatesSilently(NS_EVENT_STATE_BROKEN);
@@ -217,7 +217,7 @@ SVGFEImageElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
 {
   nsIFrame* frame = GetPrimaryFrame();
   if (!frame) {
-    return FilterPrimitiveDescription(PrimitiveType::Empty);
+    return FilterPrimitiveDescription();
   }
 
   nsCOMPtr<imgIRequest> currentRequest;
@@ -236,7 +236,7 @@ SVGFEImageElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
   }
 
   if (!image) {
-    return FilterPrimitiveDescription(PrimitiveType::Empty);
+    return FilterPrimitiveDescription();
   }
 
   IntSize nativeSize;
@@ -252,16 +252,15 @@ SVGFEImageElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
 
   SamplingFilter samplingFilter = nsLayoutUtils::GetSamplingFilterForFrame(frame);
 
-  FilterPrimitiveDescription descr(PrimitiveType::Image);
-  descr.Attributes().Set(eImageFilter, (uint32_t)samplingFilter);
-  descr.Attributes().Set(eImageTransform, TM);
+  ImageAttributes atts;
+  atts.mFilter = (uint32_t)samplingFilter;
+  atts.mTransform = TM;
 
   // Append the image to aInputImages and store its index in the description.
   size_t imageIndex = aInputImages.Length();
   aInputImages.AppendElement(image);
-  descr.Attributes().Set(eImageInputIndex, (uint32_t)imageIndex);
-
-  return descr;
+  atts.mInputIndex = (uint32_t)imageIndex;
+  return FilterPrimitiveDescription(AsVariant(std::move(atts)));
 }
 
 bool

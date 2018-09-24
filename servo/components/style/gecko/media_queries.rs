@@ -126,7 +126,8 @@ impl Device {
 
     /// Set the font size of the root element (for rem)
     pub fn set_root_font_size(&self, size: Au) {
-        self.root_font_size.store(size.0 as isize, Ordering::Relaxed)
+        self.root_font_size
+            .store(size.0 as isize, Ordering::Relaxed)
     }
 
     /// Sets the body text color for the "inherit color from body" quirk.
@@ -233,10 +234,13 @@ impl Device {
     }
 
     /// Applies text zoom to a font-size or line-height value (see nsStyleFont::ZoomText).
+    #[inline]
     pub fn zoom_text(&self, size: Au) -> Au {
         size.scale_by(self.pres_context().mEffectiveTextZoom)
     }
-    /// Un-apply text zoom (see nsStyleFont::UnzoomText).
+
+    /// Un-apply text zoom.
+    #[inline]
     pub fn unzoom_text(&self, size: Au) -> Au {
         size.scale_by(1. / self.pres_context().mEffectiveTextZoom)
     }

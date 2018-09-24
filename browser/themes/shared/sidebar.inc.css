@@ -26,7 +26,7 @@
   -moz-appearance: none;
   border: 0 solid;
   border-inline-end-width: 1px;
-  border-inline-end-color: var(--sidebar-border-color);
+  border-color: var(--sidebar-border-color);
   min-width: 1px;
   width: 4px;
   background-image: none !important;
@@ -110,7 +110,7 @@ toolbarseparator + #sidebar-extensions-separator {
 
 #sidebarMenu-popup > .subviewbutton[checked="true"] {
   list-style-image: none;
-  background: url(chrome://browser/skin/check.svg) no-repeat transparent;
+  background: url(chrome://global/skin/icons/check.svg) no-repeat transparent;
   background-size: 11px 11px;
 }
 

@@ -21,6 +21,7 @@
 #include "mozilla/StaticPrefs.h"
 #include "nsIDocument.h"
 #include "nsStyleUtil.h"
+#include "mozilla/net/ReferrerPolicy.h"
 
 namespace mozilla {
 namespace dom {
@@ -530,7 +531,10 @@ FontFace::GetURLExtraData() const
   nsCOMPtr<nsIURI> docURI = window->GetDocumentURI();
   nsCOMPtr<nsIURI> base = window->GetDocBaseURI();
 
-  RefPtr<URLExtraData> url = new URLExtraData(base, docURI, principal);
+  // We pass RP_Unset when creating URLExtraData object here because it's not
+  // going to result to change referer policy in a resource request.
+  RefPtr<URLExtraData> url = new URLExtraData(base, docURI, principal,
+                                              net::RP_Unset);
   return url.forget();
 }
 
@@ -663,7 +667,7 @@ FontFace::SetUserFontEntry(gfxUserFontEntry* aEntry)
 }
 
 bool
-FontFace::GetFamilyName(nsString& aResult)
+FontFace::GetFamilyName(nsCString& aResult)
 {
   nsCSSValue value;
   GetDesc(eCSSFontDesc_Family, value);
@@ -671,7 +675,7 @@ FontFace::GetFamilyName(nsString& aResult)
   if (value.GetUnit() == eCSSUnit_String) {
     nsString familyname;
     value.GetStringValue(familyname);
-    aResult.Append(familyname);
+    AppendUTF16toUTF8(familyname, aResult);
   }
 
   return !aResult.IsEmpty();

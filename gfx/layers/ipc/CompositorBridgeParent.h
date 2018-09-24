@@ -176,6 +176,7 @@ public:
   }
 
   virtual void NotifyMemoryPressure() {}
+  virtual void AccumulateMemoryReport(wr::MemoryReport*) {}
 
 protected:
   ~CompositorBridgeParentBase() override;
@@ -239,6 +240,7 @@ public:
   mozilla::ipc::IPCResult RecvAllPluginsCaptured() override;
 
   virtual void NotifyMemoryPressure() override;
+  virtual void AccumulateMemoryReport(wr::MemoryReport*) override;
 
   void ActorDestroy(ActorDestroyReason why) override;
 
@@ -508,6 +510,8 @@ public:
   }
 #endif // defined(MOZ_WIDGET_ANDROID)
 
+  WebRenderBridgeParent* GetWrBridge() { return mWrBridge; }
+
 private:
 
   void Initialize();
@@ -574,12 +578,7 @@ protected:
   static void Setup();
 
   /**
-   * Destroys the compositor thread and global compositor map.
-   */
-  static void Shutdown();
-
-  /**
-   * Finish the shutdown operation on the compositor thread.
+   * Remaning cleanups after the compositore thread is gone.
    */
   static void FinishShutdown();
 

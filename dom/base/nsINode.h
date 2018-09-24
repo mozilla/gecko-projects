@@ -370,7 +370,7 @@ public:
   friend class AttrArray;
 
 #ifdef MOZILLA_INTERNAL_API
-  explicit nsINode(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
+  explicit nsINode(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
 #endif
 
   virtual ~nsINode();
@@ -1769,7 +1769,11 @@ public:
   {
     return HasChildren();
   }
-  uint16_t CompareDocumentPosition(nsINode& aOther) const;
+
+  // See nsContentUtils::PositionIsBefore for aThisIndex and aOtherIndex usage.
+  uint16_t CompareDocumentPosition(nsINode& aOther,
+                                   int32_t* aThisIndex = nullptr,
+                                   int32_t* aOtherIndex = nullptr) const;
   void GetNodeValue(nsAString& aNodeValue)
   {
     GetNodeValueInternal(aNodeValue);
@@ -1836,8 +1840,8 @@ public:
   }
 
   // ChildNode methods
-  mozilla::dom::Element* GetPreviousElementSibling() const;
-  mozilla::dom::Element* GetNextElementSibling() const;
+  inline mozilla::dom::Element* GetPreviousElementSibling() const;
+  inline mozilla::dom::Element* GetNextElementSibling() const;
 
   MOZ_CAN_RUN_SCRIPT void Before(const Sequence<OwningNodeOrString>& aNodes,
                                  ErrorResult& aRv);

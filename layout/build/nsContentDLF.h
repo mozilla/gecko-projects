@@ -19,7 +19,7 @@ class nsIStreamListener;
 #define CONTENT_DLF_CONTRACTID "@mozilla.org/content/document-loader-factory;1"
 #define PLUGIN_DLF_CONTRACTID "@mozilla.org/content/plugin/document-loader-factory;1"
 
-class nsContentDLF : public nsIDocumentLoaderFactory
+class nsContentDLF final : public nsIDocumentLoaderFactory
 {
 protected:
   virtual ~nsContentDLF();
@@ -32,11 +32,12 @@ public:
 
   nsresult InitUAStyleSheet();
 
+  typedef already_AddRefed<nsIDocument> (*DocumentCreator)();
   nsresult CreateDocument(const char* aCommand,
                           nsIChannel* aChannel,
                           nsILoadGroup* aLoadGroup,
                           nsIDocShell* aContainer,
-                          const nsCID& aDocumentCID,
+                          DocumentCreator aDocumentCreator,
                           nsIStreamListener** aDocListener,
                           nsIContentViewer** aContentViewer);
 

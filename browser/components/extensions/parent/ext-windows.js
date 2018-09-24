@@ -12,10 +12,6 @@ var {
   promiseObserved,
 } = ExtensionUtils;
 
-const onXULFrameLoaderCreated = ({target}) => {
-  target.messageManager.sendAsyncMessage("AllowScriptsToClose", {});
-};
-
 /**
  * An event manager API provider which listens for a DOM event in any browser
  * window, and calls the given listener function whenever an event is received.
@@ -138,6 +134,7 @@ this.windows = class extends ExtensionAPI {
 
           let args = Cc["@mozilla.org/array;1"].createInstance(Ci.nsIMutableArray);
 
+          let principal = context.principal;
           if (createData.tabId !== null) {
             if (createData.url !== null) {
               return Promise.reject({message: "`tabId` may not be used in conjunction with `url`"});
@@ -160,6 +157,10 @@ this.windows = class extends ExtensionAPI {
             }
             createData.incognito = incognito;
 
+            if (createData.cookieStoreId && createData.cookieStoreId !== getCookieStoreIdForTab(createData, tab)) {
+              return Promise.reject({message: "`cookieStoreId` must match the tab's cookieStoreId"});
+            }
+
             args.appendElement(tab);
           } else if (createData.url !== null) {
             if (Array.isArray(createData.url)) {
@@ -172,8 +173,34 @@ this.windows = class extends ExtensionAPI {
               args.appendElement(mkstr(createData.url));
             }
           } else {
-            args.appendElement(mkstr(aboutNewTabService.newTabURL));
+            let url = aboutNewTabService.newTabURL;
+            args.appendElement(mkstr(url));
+
+            if (url === "about:newtab") {
+              // The extension principal cannot directly load about:newtab,
+              // so use the system principal instead.
+              principal = Services.scriptSecurityManager.getSystemPrincipal();
+            }
           }
+
+          args.appendElement(null); // unused
+          args.appendElement(null); // referrer
+          args.appendElement(null); // postData
+          args.appendElement(null); // allowThirdPartyFixup
+          args.appendElement(null); // referrerPolicy
+
+          if (createData.cookieStoreId) {
+            let userContextIdSupports = Cc["@mozilla.org/supports-PRUint32;1"].createInstance(Ci.nsISupportsPRUint32);
+            // May throw if validation fails.
+            userContextIdSupports.data = getUserContextIdForCookieStoreId(extension, createData.cookieStoreId, createData.incognito);
+            args.appendElement(userContextIdSupports); // userContextId
+          } else {
+            args.appendElement(null);
+          }
+
+          args.appendElement(context.principal); // originPrincipal - not important.
+          args.appendElement(principal); // triggeringPrincipal
+          args.appendElement(Cc["@mozilla.org/supports-PRBool;1"].createInstance(Ci.nsISupportsPRBool)); // allowInheritPrincipal
 
           let features = ["chrome"];
 
@@ -206,19 +233,15 @@ this.windows = class extends ExtensionAPI {
           // TODO: focused, type
 
           return new Promise(resolve => {
-            window.addEventListener("load", function() {
+            window.addEventListener("DOMContentLoaded", function() {
+              if (allowScriptsToClose) {
+                window.gBrowserAllowScriptsToCloseInitialTabs = true;
+              }
               resolve(promiseObserved("browser-delayed-startup-finished", win => win == window));
             }, {once: true});
           }).then(() => {
             if (["minimized", "fullscreen", "docked", "normal", "maximized"].includes(createData.state)) {
               win.state = createData.state;
-            }
-            if (allowScriptsToClose) {
-              for (let {linkedBrowser} of window.gBrowser.tabs) {
-                onXULFrameLoaderCreated({target: linkedBrowser});
-                // eslint-disable-next-line mozilla/balanced-listeners
-                linkedBrowser.addEventListener("XULFrameLoaderCreated", onXULFrameLoaderCreated);
-              }
             }
             if (createData.titlePreface !== null) {
               win.setTitlePreface(createData.titlePreface);

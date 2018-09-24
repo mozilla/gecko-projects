@@ -72,8 +72,6 @@ button > hbox > label {
 
 .checkbox-check {
   margin-inline-end: 8px;
-  width: 20px;
-  height: 20px;
 }
 
 .tail-with-learn-more {
@@ -354,12 +352,9 @@ button > hbox > label {
 
 #engineList > treechildren::-moz-tree-image(engineShown, checked),
 #blocklistsTree > treechildren::-moz-tree-image(selectionCol, checked) {
-  list-style-image: url("chrome://global/skin/in-content/check.svg");
+  list-style-image: url("chrome://global/skin/icons/check.svg");
   -moz-context-properties: fill, stroke;
   fill: #2292d0;
-  stroke: none;
-  width: 21px;
-  height: 21px;
 }
 
 #engineList > treechildren::-moz-tree-image(engineShown, checked, selected),
@@ -433,6 +428,11 @@ button > hbox > label {
 #blockCookies,
 #keepRow {
   margin-top: 1.5em;
+}
+
+#blockCookiesWarning {
+  margin-top: 1.5em !important;
+  margin-bottom: -1em !important;
 }
 
 /* Collapse the non-active vboxes in decks to use only the height the
@@ -946,10 +946,22 @@ menulist[indicator=true] > menupopup menuitem[indicator=true]:not([image]) > .me
   min-width: 20em;
 }
 
+#LanguagesDialog > .dialog-button-box > .dialog-button[dlgtype="help"],
 #BrowserLanguagesDialog > .dialog-button-box > .dialog-button[dlgtype="help"] {
   margin-inline-start: 0;
 }
 
-#activeLocales {
+#requestedLocales {
   min-height: 200px;
+}
+
+#availableLanguages,
+#availableLocales {
+  margin: 0;
+  margin-inline-end: 4px;
+}
+
+.add-web-language,
+.add-browser-language {
+  margin: 0 4px;
 }

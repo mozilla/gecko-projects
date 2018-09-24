@@ -141,6 +141,12 @@ nsLookAndFeelIntPref nsXPLookAndFeel::sIntPrefs[] =
   { "ui.prefersReducedMotion",
     eIntID_PrefersReducedMotion,
     false, 0 },
+  { "ui.primaryPointerCapabilities",
+    eIntID_PrimaryPointerCapabilities,
+    false, 6 /* fine and hover-capable pointer, i.e. mouse-type */ },
+  { "ui.allPointerCapabilities",
+    eIntID_AllPointerCapabilities,
+    false, 6 /* fine and hover-capable pointer, i.e. mouse-type */ },
 };
 
 nsLookAndFeelFloatPref nsXPLookAndFeel::sFloatPrefs[] =
@@ -311,7 +317,9 @@ nsXPLookAndFeel::Shutdown()
   sInstance = nullptr;
 }
 
-nsXPLookAndFeel::nsXPLookAndFeel() : LookAndFeel()
+nsXPLookAndFeel::nsXPLookAndFeel()
+  : LookAndFeel()
+  , mShouldRetainCacheForTest(false)
 {
 }
 
@@ -1055,6 +1063,13 @@ void
 LookAndFeel::SetIntCache(const nsTArray<LookAndFeelInt>& aLookAndFeelIntCache)
 {
   return nsLookAndFeel::GetInstance()->SetIntCacheImpl(aLookAndFeelIntCache);
+}
+
+// static
+void
+LookAndFeel::SetShouldRetainCacheForTest(bool aValue)
+{
+  nsLookAndFeel::GetInstance()->SetShouldRetainCacheImplForTest(aValue);
 }
 
 } // namespace mozilla

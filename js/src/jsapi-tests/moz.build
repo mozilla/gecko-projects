@@ -6,6 +6,8 @@
 
 GeckoProgram('jsapi-tests', linkage=None)
 
+include('../js-cxxflags.mozbuild')
+
 UNIFIED_SOURCES += [
     'selfTest.cpp',
     'testAddPropertyPropcache.cpp',
@@ -145,11 +147,13 @@ if CONFIG['NIGHTLY_BUILD']:
         'testErrorInterceptor.cpp',
     ]
 
-if CONFIG['JS_BUILD_BINAST'] and CONFIG['JS_STANDALONE']:
+if CONFIG['JS_BUILD_BINAST'] and CONFIG['JS_STANDALONE'] and not CONFIG['FUZZING']:
     # Standalone builds leave the source directory untouched,
     # which lets us run tests with the data files intact.
     # Otherwise, in the current state of the build system,
     # we can't have data files in js/src tests.
+    # Also, fuzzing builds modify the const matching in the
+    # token reader and hence affect the correctness of the tests.
     UNIFIED_SOURCES += [
         'testBinASTReader.cpp',
         'testBinTokenReaderTester.cpp'
@@ -171,13 +175,6 @@ if CONFIG['MOZ_NEEDS_LIBATOMIC']:
     OS_LIBS += ['atomic']
 
 OS_LIBS += CONFIG['MOZ_ZLIB_LIBS']
-
-if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
-    CXXFLAGS += ['-Wno-shadow', '-Werror=format', '-fno-strict-aliasing']
-
-# This is intended as a temporary workaround to enable VS2015.
-if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
-    CXXFLAGS += ['-wd4312']
 
 DEFINES['topsrcdir'] = '%s/js/src' % TOPSRCDIR
 OBJDIR_PP_FILES.js.src['jsapi-tests'] += ['jsapi-tests-gdb.py.in']

@@ -392,7 +392,7 @@ AsyncImagePipelineManager::ApplyAsyncImageForPipeline(const wr::Epoch& aEpoch,
     nsTArray<wr::WrFilterOp>(),
     true,
     // This is fine to do unconditionally because we only push images here.
-    wr::GlyphRasterSpace::Screen());
+    wr::RasterSpace::Screen());
 
   if (aPipeline->mCurrentTexture && !keys.IsEmpty()) {
     LayoutDeviceRect rect(0, 0, aPipeline->mCurrentTexture->GetSize().width, aPipeline->mCurrentTexture->GetSize().height);
@@ -621,7 +621,16 @@ AsyncImagePipelineManager::ProcessPipelineRemoved(const wr::PipelineId& aPipelin
     return;
   }
   if (auto entry = mPipelineTexturesHolders.Lookup(wr::AsUint64(aPipelineId))) {
-    if (entry.Data()->mDestroyedEpoch.isSome()) {
+    PipelineTexturesHolder* holder = entry.Data();
+    if (holder->mDestroyedEpoch.isSome()) {
+      // Explicitly release all of the shared surfaces.
+      while (!holder->mExternalImages.empty()) {
+        DebugOnly<bool> released =
+          SharedSurfacesParent::Release(holder->mExternalImages.front().mImageId);
+        MOZ_ASSERT(released);
+        holder->mExternalImages.pop();
+      }
+
       // Remove Pipeline
       entry.Remove();
     }

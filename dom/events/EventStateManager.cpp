@@ -168,7 +168,7 @@ UITimerCallback::Notify(nsITimer* aTimer)
 NS_IMETHODIMP
 UITimerCallback::GetName(nsACString& aName)
 {
-  aName.AssignASCII("UITimerCallback_timer");
+  aName.AssignLiteral("UITimerCallback_timer");
   return NS_OK;
 }
 
@@ -504,8 +504,8 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
          aEvent->mMessage == eWheel || aEvent->mMessage == eTouchEnd ||
          aEvent->mMessage == ePointerUp)) {
       nsIDocument* doc = node->OwnerDoc();
-      while (doc && !doc->UserHasInteracted()) {
-        doc->SetUserHasInteracted(true);
+      while (doc) {
+        doc->SetUserHasInteracted();
         doc = nsContentUtils::IsChildOfSameType(doc) ?
           doc->GetParentDocument() : nullptr;
       }
@@ -5070,7 +5070,7 @@ EventStateManager::GetEventTarget()
     }
   }
 
-  nsIFrame* frame = shell->GetEventTargetFrame();
+  nsIFrame* frame = shell->GetCurrentEventFrame();
   return (mCurrentTarget = frame);
 }
 
@@ -5117,9 +5117,9 @@ GetLabelTarget(nsIContent* aPossibleLabel)
 
 /* static */
 void
-EventStateManager::SetFullScreenState(Element* aElement, bool aIsFullScreen)
+EventStateManager::SetFullscreenState(Element* aElement, bool aIsFullscreen)
 {
-  DoStateChange(aElement, NS_EVENT_STATE_FULL_SCREEN, aIsFullScreen);
+  DoStateChange(aElement, NS_EVENT_STATE_FULLSCREEN, aIsFullscreen);
 }
 
 /* static */
@@ -5378,9 +5378,7 @@ EventStateManager::RemoveNodeFromChainIfNeeded(EventStates aState,
 void
 EventStateManager::NativeAnonymousContentRemoved(nsIContent* aContent)
 {
-  // FIXME(bug 1450250): <svg:use> is nasty.
-  MOZ_ASSERT(aContent->IsRootOfNativeAnonymousSubtree() ||
-             aContent->GetParentNode()->IsSVGElement(nsGkAtoms::use));
+  MOZ_ASSERT(aContent->IsRootOfNativeAnonymousSubtree());
   RemoveNodeFromChainIfNeeded(NS_EVENT_STATE_HOVER, aContent, false);
   RemoveNodeFromChainIfNeeded(NS_EVENT_STATE_ACTIVE, aContent, false);
 }
@@ -6200,7 +6198,7 @@ EventStateManager::WheelPrefs::HonoursRootForAutoDir()
 }
 
 // static
-Maybe<layers::APZWheelAction> 
+Maybe<layers::APZWheelAction>
 EventStateManager::APZWheelActionFor(const WidgetWheelEvent* aEvent)
 {
   if (aEvent->mMessage != eWheel) {

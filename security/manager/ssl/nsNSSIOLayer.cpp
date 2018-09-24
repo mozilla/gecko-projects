@@ -103,7 +103,7 @@ getSiteKey(const nsACString& hostName, uint16_t port,
            /*out*/ nsACString& key)
 {
   key = hostName;
-  key.AppendASCII(":");
+  key.AppendLiteral(":");
   key.AppendInt(port);
 }
 
@@ -460,15 +460,16 @@ nsNSSSocketInfo::IsAcceptableForHost(const nsACString& hostname, bool* _retval)
 
   // Before checking the server certificate we need to make sure the
   // handshake has completed.
-  if (!mHandshakeCompleted || !SSLStatus() || !SSLStatus()->HasServerCert()) {
+  if (!mHandshakeCompleted || !HasServerCert()) {
     return NS_OK;
   }
 
   // If the cert has error bits (e.g. it is untrusted) then do not join.
   // The value of mHaveCertErrorBits is only reliable because we know that
   // the handshake completed.
-  if (SSLStatus()->mHaveCertErrorBits)
+  if (mHaveCertErrorBits) {
     return NS_OK;
+  }
 
   // If the connection is using client certificates then do not join
   // because the user decides on whether to send client certs to hosts on a
@@ -482,7 +483,7 @@ nsNSSSocketInfo::IsAcceptableForHost(const nsACString& hostname, bool* _retval)
   UniqueCERTCertificate nssCert;
 
   nsCOMPtr<nsIX509Cert> cert;
-  if (NS_FAILED(SSLStatus()->GetServerCert(getter_AddRefs(cert)))) {
+  if (NS_FAILED(GetServerCert(getter_AddRefs(cert)))) {
     return NS_OK;
   }
   if (cert) {
@@ -1004,6 +1005,62 @@ nsNSSSocketInfo::CloseSocketAndDestroy()
   popped->dtor(popped);
 
   return PR_SUCCESS;
+}
+
+NS_IMETHODIMP
+nsNSSSocketInfo::GetEsniTxt(nsACString & aEsniTxt)
+{
+  aEsniTxt = mEsniTxt;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNSSSocketInfo::SetEsniTxt(const nsACString & aEsniTxt)
+{
+  mEsniTxt = aEsniTxt;
+
+  if (mEsniTxt.Length()) {
+    fprintf(stderr,"\n\nTODO - SSL_EnableSNI() [%s] (%d bytes)\n",
+            mEsniTxt.get(), mEsniTxt.Length());
+
+#if 0
+    if (SECSuccess != SSL_EnableESNI(mFd,
+                                     reinterpret_cast<const PRUint8*>(mEsniTxt.get()),
+                                     mEsniTxt.Length(), "dummy.invalid")) {
+      return NS_ERROR_FAILURE;
+    }
+#endif
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNSSSocketInfo::GetServerRootCertIsBuiltInRoot(bool *aIsBuiltInRoot)
+{
+  *aIsBuiltInRoot = false;
+
+  if (!HasServerCert()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  nsCOMPtr<nsIX509CertList> certList;
+  nsresult rv = GetSucceededCertChain(getter_AddRefs(certList));
+  if (NS_SUCCEEDED(rv)) {
+    if (!certList) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+    RefPtr<nsNSSCertList> nssCertList = certList->GetCertList();
+    nsCOMPtr<nsIX509Cert> cert;
+    rv = nssCertList->GetRootCertificate(cert);
+    if (NS_SUCCEEDED(rv)) {
+      if (!cert) {
+        return NS_ERROR_NOT_AVAILABLE;
+      }
+      rv = cert->GetIsBuiltInRoot(aIsBuiltInRoot);
+    }
+  }
+  return rv;
 }
 
 #if defined(DEBUG_SSL_VERBOSE) && defined(DUMP_BUFFER)

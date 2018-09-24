@@ -4,6 +4,7 @@
 
 /* import-globals-from ../../../../../browser/extensions/formautofill/content/autofillEditForms.js*/
 import LabelledCheckbox from "../components/labelled-checkbox.js";
+import PaymentDialog from "./payment-dialog.js";
 import PaymentRequestPage from "../components/payment-request-page.js";
 import PaymentStateSubscriberMixin from "../mixins/PaymentStateSubscriberMixin.js";
 import paymentRequest from "../paymentRequest.js";
@@ -87,7 +88,7 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
       }, record, {
         DEFAULT_REGION: PaymentDialogUtils.DEFAULT_REGION,
         getFormFormat: PaymentDialogUtils.getFormFormat,
-        supportedCountries: PaymentDialogUtils.supportedCountries,
+        countries: PaymentDialogUtils.countries,
       });
 
       // The EditAddress constructor adds `input` event listeners on the same element,
@@ -96,6 +97,12 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
       this.form.addEventListener("input", this);
       this.form.addEventListener("invalid", this);
       this.form.addEventListener("change", this);
+
+      // The "invalid" event does not bubble and needs to be listened for on each
+      // form element.
+      for (let field of this.form.elements) {
+        field.addEventListener("invalid", this);
+      }
 
       this.body.appendChild(this.persistCheckbox);
       this.body.appendChild(this.genericErrorText);
@@ -125,8 +132,12 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
     let editing = !!addressPage.guid;
     this.cancelButton.textContent = this.dataset.cancelButtonLabel;
     this.backButton.textContent = this.dataset.backButtonLabel;
-    this.saveButton.textContent = editing ? this.dataset.updateButtonLabel :
-                                            this.dataset.addButtonLabel;
+    if (page.onboardingWizard) {
+      this.saveButton.textContent = this.dataset.nextButtonLabel;
+    } else {
+      this.saveButton.textContent = editing ? this.dataset.updateButtonLabel :
+                                              this.dataset.addButtonLabel;
+    }
     this.persistCheckbox.label = this.dataset.persistCheckboxLabel;
 
     this.backButton.hidden = page.onboardingWizard;
@@ -172,38 +183,9 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
       let container = this.form.querySelector(errorSelector + "-container");
       let field = this.form.querySelector(errorSelector);
       let errorText = (shippingAddressErrors && shippingAddressErrors[errorName]) || "";
-      container.classList.toggle("error", !!errorText);
       field.setCustomValidity(errorText);
-      let span = container.querySelector(".error-text");
-      if (!span) {
-        span = document.createElement("span");
-        span.className = "error-text";
-        container.appendChild(span);
-      }
+      let span = PaymentDialog.maybeCreateFieldErrorElement(container);
       span.textContent = errorText;
-    }
-
-    // Position the error messages all at once so layout flushes only once.
-    let formRect = this.form.getBoundingClientRect();
-    let errorSpanData = [...this.form.querySelectorAll(".error-text:not(:empty)")].map(span => {
-      let relatedInput = span.previousElementSibling;
-      let relatedRect = relatedInput.getBoundingClientRect();
-      return {
-        span,
-        top: relatedRect.bottom,
-        left: relatedRect.left - formRect.left,
-        right: formRect.right - relatedRect.right,
-      };
-    });
-    let isRTL = this.form.matches(":dir(rtl)");
-    for (let data of errorSpanData) {
-      // Subtract 10px for the padding-top and padding-bottom.
-      data.span.style.top = (data.top - 10) + "px";
-      if (isRTL) {
-        data.span.style.right = data.right + "px";
-      } else {
-        data.span.style.left = data.left + "px";
-      }
     }
 
     this.updateSaveButtonState();
@@ -224,7 +206,12 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
         break;
       }
       case "invalid": {
-        this.onInvalid(event);
+        if (event.target instanceof HTMLFormElement) {
+          this.onInvalidForm(event);
+          break;
+        }
+
+        this.onInvalidField(event);
         break;
       }
     }
@@ -265,10 +252,22 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
   }
 
   onInput(event) {
+    event.target.setCustomValidity("");
     this.updateSaveButtonState();
   }
 
-  onInvalid(event) {
+  /**
+   * @param {Event} event - "invalid" event
+   * Note: Keep this in-sync with the equivalent version in basic-card-form.js
+   */
+  onInvalidField(event) {
+    let field = event.target;
+    let container = field.closest(`#${field.id}-container`);
+    let errorTextSpan = PaymentDialog.maybeCreateFieldErrorElement(container);
+    errorTextSpan.textContent = field.validationMessage;
+  }
+
+  onInvalidForm() {
     this.saveButton.disabled = true;
   }
 

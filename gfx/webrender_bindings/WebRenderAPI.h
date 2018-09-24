@@ -57,6 +57,8 @@ public:
 
   ~TransactionBuilder();
 
+  void SetLowPriority(bool aIsLowPriority);
+
   void UpdateEpoch(PipelineId aPipelineId, Epoch aEpoch);
 
   void SetRootPipeline(PipelineId aPipelineId);
@@ -207,6 +209,7 @@ public:
   void FlushSceneBuilder();
 
   void NotifyMemoryPressure();
+  void AccumulateMemoryReport(wr::MemoryReport*);
 
   wr::WrIdNamespace GetNamespace();
   uint32_t GetMaxTextureSize() const { return mMaxTextureSize; }
@@ -307,7 +310,7 @@ public:
           const wr::MixBlendMode& aMixBlendMode,
           const nsTArray<wr::WrFilterOp>& aFilters,
           bool aIsBackfaceVisible,
-          const wr::GlyphRasterSpace& aRasterSpace);
+          const wr::RasterSpace& aRasterSpace);
   void PopStackingContext(bool aIsReferenceFrame);
 
   wr::WrClipChainId DefineClipChain(const Maybe<wr::WrClipChainId>& aParent,
@@ -335,9 +338,10 @@ public:
                                  const wr::LayoutRect& aContentRect, // TODO: We should work with strongly typed rects
                                  const wr::LayoutRect& aClipRect);
 
-  void PushClipAndScrollInfo(const wr::WrClipId& aScrollId,
-                             const wr::WrClipChainId* aClipChainId);
-  void PopClipAndScrollInfo();
+  void PushClipAndScrollInfo(const wr::WrClipId* aScrollId,
+                             const wr::WrClipChainId* aClipChainId,
+                             const Maybe<wr::LayoutRect>& aClipChainLeaf);
+  void PopClipAndScrollInfo(const wr::WrClipId* aScrollId);
 
   void PushRect(const wr::LayoutRect& aBounds,
                 const wr::LayoutRect& aClip,
@@ -418,14 +422,14 @@ public:
   void PushBorder(const wr::LayoutRect& aBounds,
                   const wr::LayoutRect& aClip,
                   bool aIsBackfaceVisible,
-                  const wr::BorderWidths& aWidths,
+                  const wr::LayoutSideOffsets& aWidths,
                   const Range<const wr::BorderSide>& aSides,
                   const wr::BorderRadius& aRadius);
 
   void PushBorderImage(const wr::LayoutRect& aBounds,
                        const wr::LayoutRect& aClip,
                        bool aIsBackfaceVisible,
-                       const wr::BorderWidths& aWidths,
+                       const wr::LayoutSideOffsets& aWidths,
                        wr::ImageKey aImage,
                        const uint32_t aWidth,
                        const uint32_t aHeight,
@@ -437,7 +441,7 @@ public:
   void PushBorderGradient(const wr::LayoutRect& aBounds,
                           const wr::LayoutRect& aClip,
                           bool aIsBackfaceVisible,
-                          const wr::BorderWidths& aWidths,
+                          const wr::LayoutSideOffsets& aWidths,
                           const uint32_t aWidth,
                           const uint32_t aHeight,
                           const wr::SideOffsets2D<uint32_t>& aSlice,
@@ -450,7 +454,7 @@ public:
   void PushBorderRadialGradient(const wr::LayoutRect& aBounds,
                                 const wr::LayoutRect& aClip,
                                 bool aIsBackfaceVisible,
-                                const wr::BorderWidths& aWidths,
+                                const wr::LayoutSideOffsets& aWidths,
                                 const wr::LayoutPoint& aCenter,
                                 const wr::LayoutSize& aRadius,
                                 const nsTArray<wr::GradientStop>& aStops,
@@ -523,12 +527,25 @@ public:
   };
 
 protected:
+  wr::LayoutRect MergeClipLeaf(const wr::LayoutRect& aClip)
+  {
+    if (mClipChainLeaf) {
+      return wr::IntersectLayoutRect(*mClipChainLeaf, aClip);
+    }
+    return aClip;
+  }
+
   wr::WrState* mWrState;
 
   // Track each scroll id that we encountered. We use this structure to
   // ensure that we don't define a particular scroll layer multiple times,
   // as that results in undefined behaviour in WR.
   std::unordered_map<layers::FrameMetrics::ViewID, wr::WrClipId> mScrollIds;
+
+  // Contains the current leaf of the clip chain to be merged with the
+  // display item's clip rect when pushing an item. May be set to Nothing() if
+  // there is no clip rect to merge with.
+  Maybe<wr::LayoutRect> mClipChainLeaf;
 
   FixedPosScrollTargetTracker* mActiveFixedPosTracker;
 

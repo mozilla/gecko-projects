@@ -97,8 +97,11 @@ def add_command(config, tasks):
             resolve_keyed_by(
                 task, thing,
                 item_name=task['name'],
-                project=config.params['project'],
                 platform=task['attributes']['build_platform'],
+                **{
+                    'release-type': config.params['release_type'],
+                    'release-level': config.params.release_level(),
+                }
             )
             # ignore things that resolved to null
             if not task["extra"].get(arg):

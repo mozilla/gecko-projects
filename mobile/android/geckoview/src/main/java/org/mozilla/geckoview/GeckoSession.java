@@ -46,12 +46,13 @@ import android.support.annotation.NonNull;
 import android.support.annotation.StringDef;
 import android.util.Base64;
 import android.util.Log;
+import android.view.Surface;
 import android.view.inputmethod.CursorAnchorInfo;
 import android.view.inputmethod.ExtractedText;
 import android.view.inputmethod.ExtractedTextRequest;
 
-public class GeckoSession extends LayerSession
-                          implements Parcelable {
+public final class GeckoSession extends LayerSession
+        implements Parcelable {
     private static final String LOGTAG = "GeckoSession";
     private static final boolean DEBUG = false;
 
@@ -99,6 +100,8 @@ public class GeckoSession extends LayerSession
 
     private String mId = UUID.randomUUID().toString().replace("-", "");
     /* package */ String getId() { return mId; }
+
+    private boolean mShouldPinOnScreen;
 
     /* package */ static abstract class CallbackResult<T> extends GeckoResult<T>
                                                           implements EventCallback {
@@ -705,6 +708,7 @@ public class GeckoSession extends LayerSession
         @WrapForJNI(dispatchTo = "proxy")
         public static native void open(Window instance, NativeQueue queue,
                                        Compositor compositor, EventDispatcher dispatcher,
+                                       SessionAccessibility.NativeProvider sessionAccessibility,
                                        GeckoBundle initData, String id, String chromeUri,
                                        int screenId, boolean privateMode);
 
@@ -753,6 +757,7 @@ public class GeckoSession extends LayerSession
         public synchronized void transfer(final NativeQueue queue,
                                           final Compositor compositor,
                                           final EventDispatcher dispatcher,
+                                          final SessionAccessibility.NativeProvider sessionAccessibility,
                                           final GeckoBundle initData) {
             if (mNativeQueue == null) {
                 // Already closed.
@@ -760,13 +765,14 @@ public class GeckoSession extends LayerSession
             }
 
             if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
-                nativeTransfer(queue, compositor, dispatcher, initData);
+                nativeTransfer(queue, compositor, dispatcher, sessionAccessibility, initData);
             } else {
                 GeckoThread.queueNativeCallUntil(GeckoThread.State.PROFILE_READY,
                         this, "nativeTransfer",
                         NativeQueue.class, queue,
                         Compositor.class, compositor,
                         EventDispatcher.class, dispatcher,
+                        SessionAccessibility.NativeProvider.class, sessionAccessibility,
                         GeckoBundle.class, initData);
             }
 
@@ -780,11 +786,16 @@ public class GeckoSession extends LayerSession
 
         @WrapForJNI(dispatchTo = "proxy", stubName = "Transfer")
         private native void nativeTransfer(NativeQueue queue, Compositor compositor,
-                                           EventDispatcher dispatcher, GeckoBundle initData);
+                                           EventDispatcher dispatcher,
+                                           SessionAccessibility.NativeProvider sessionAccessibility,
+                                           GeckoBundle initData);
 
         @WrapForJNI(dispatchTo = "proxy")
         public native void attachEditable(IGeckoEditableParent parent,
                                           GeckoEditableChild child);
+
+        @WrapForJNI(dispatchTo = "proxy")
+        public native void attachAccessibility(SessionAccessibility.NativeProvider sessionAccessibility);
 
         @WrapForJNI(calledFrom = "gecko")
         private synchronized void onReady(final @Nullable NativeQueue queue) {
@@ -812,6 +823,7 @@ public class GeckoSession extends LayerSession
     private class Listener implements BundleEventListener {
         /* package */ void registerListeners() {
             getEventDispatcher().registerUiThreadListener(this,
+                "GeckoView:PinOnScreen",
                 "GeckoView:Prompt",
                 null);
         }
@@ -823,7 +835,9 @@ public class GeckoSession extends LayerSession
                 Log.d(LOGTAG, "handleMessage: event = " + event);
             }
 
-            if ("GeckoView:Prompt".equals(event)) {
+            if ("GeckoView:PinOnScreen".equals(event)) {
+                GeckoSession.this.setShouldPinOnScreen(message.getBoolean("pinned"));
+            } else if ("GeckoView:Prompt".equals(event)) {
                 handlePromptEvent(GeckoSession.this, message, callback);
             }
         }
@@ -870,7 +884,8 @@ public class GeckoSession extends LayerSession
 
         if (mWindow != null) {
             mWindow.transfer(mNativeQueue, mCompositor,
-                             mEventDispatcher, createInitData());
+                             mEventDispatcher, mAccessibility != null ? mAccessibility.nativeProvider : null,
+                             createInitData());
 
             onWindowChanged(WINDOW_TRANSFER_IN, /* inProgress */ false);
         }
@@ -927,6 +942,16 @@ public class GeckoSession extends LayerSession
             return new GeckoSession[size];
         }
     };
+
+    @Override
+    public int hashCode() {
+        return mId.hashCode();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        return obj instanceof GeckoSession && mId.equals(((GeckoSession) obj).mId);
+    }
 
     /**
      * Return whether this session is open.
@@ -987,6 +1012,7 @@ public class GeckoSession extends LayerSession
 
         if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
             Window.open(mWindow, mNativeQueue, mCompositor, mEventDispatcher,
+                        mAccessibility != null ? mAccessibility.nativeProvider : null,
                         createInitData(), mId, chromeUri, screenId, isPrivate);
         } else {
             GeckoThread.queueNativeCallUntil(
@@ -996,6 +1022,8 @@ public class GeckoSession extends LayerSession
                 NativeQueue.class, mNativeQueue,
                 Compositor.class, mCompositor,
                 EventDispatcher.class, mEventDispatcher,
+                SessionAccessibility.NativeProvider.class,
+                mAccessibility != null ? mAccessibility.nativeProvider : null,
                 GeckoBundle.class, createInitData(),
                 String.class, mId,
                 String.class, chromeUri,
@@ -1060,8 +1088,18 @@ public class GeckoSession extends LayerSession
       * @return SessionAccessibility instance.
       */
     public @NonNull SessionAccessibility getAccessibility() {
-        if (mAccessibility == null) {
-            mAccessibility = new SessionAccessibility(this);
+        ThreadUtils.assertOnUiThread();
+        if (mAccessibility != null) { return mAccessibility; }
+
+        mAccessibility = new SessionAccessibility(this);
+        if (mWindow != null) {
+            if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
+                mWindow.attachAccessibility(mAccessibility.nativeProvider);
+            } else {
+                GeckoThread.queueNativeCallUntil(GeckoThread.State.PROFILE_READY,
+                        mWindow, "attachAccessibility",
+                        SessionAccessibility.NativeProvider.class, mAccessibility.nativeProvider);
+            }
         }
         return mAccessibility;
     }
@@ -1447,6 +1485,49 @@ public class GeckoSession extends LayerSession
         mEventDispatcher.dispatch("GeckoView:RestoreState", msg);
     }
 
+    // This is the GeckoDisplay acquired via acquireDisplay(), if any.
+    private GeckoDisplay mDisplay;
+    /* package */ GeckoDisplay getDisplay() {
+        return mDisplay;
+    }
+
+    /**
+     * Acquire the GeckoDisplay instance for providing the session with a drawing Surface.
+     * Be sure to call {@link GeckoDisplay#surfaceChanged(Surface, int, int)} on the
+     * acquired display if there is already a valid Surface.
+     *
+     * @return GeckoDisplay instance.
+     * @see #releaseDisplay(GeckoDisplay)
+     */
+    public @NonNull GeckoDisplay acquireDisplay() {
+        ThreadUtils.assertOnUiThread();
+
+        if (mDisplay != null) {
+            throw new IllegalStateException("Display already acquired");
+        }
+
+        mDisplay = new GeckoDisplay(this);
+        return mDisplay;
+    }
+
+    /**
+     * Release an acquired GeckoDisplay instance. Be sure to call {@link
+     * GeckoDisplay#surfaceDestroyed()} before releasing the display if it still has a
+     * valid Surface.
+     *
+     * @param display Acquired GeckoDisplay instance.
+     * @see #acquireDisplay()
+     */
+    public void releaseDisplay(final @NonNull GeckoDisplay display) {
+        ThreadUtils.assertOnUiThread();
+
+        if (display != mDisplay) {
+            throw new IllegalArgumentException("Display not attached");
+        }
+
+        mDisplay = null;
+    }
+
     public GeckoSessionSettings getSettings() {
         return mSettings;
     }
@@ -1561,6 +1642,13 @@ public class GeckoSession extends LayerSession
      * @param delegate SelectionActionDelegate instance or null to unset.
      */
     public void setSelectionActionDelegate(@Nullable SelectionActionDelegate delegate) {
+        if (getSelectionActionDelegate() != null) {
+            // When the delegate is changed or cleared, make sure onHideAction is called
+            // one last time to hide any existing selection action UI. Gecko doesn't keep
+            // track of the old delegate, so we can't rely on Gecko to do that for us.
+            getSelectionActionDelegate().onHideAction(
+                    this, GeckoSession.SelectionActionDelegate.HIDE_REASON_NO_SELECTION);
+        }
         mSelectionActionDelegate.setDelegate(delegate, this);
     }
 
@@ -1929,6 +2017,17 @@ public class GeckoSession extends LayerSession
                 break;
             }
         }
+    }
+
+    @Override
+    protected void setShouldPinOnScreen(final boolean pinned) {
+        super.setShouldPinOnScreen(pinned);
+        mShouldPinOnScreen = pinned;
+    }
+
+    /* package */ boolean shouldPinOnScreen() {
+        ThreadUtils.assertOnUiThread();
+        return mShouldPinOnScreen;
     }
 
     public EventDispatcher getEventDispatcher() {

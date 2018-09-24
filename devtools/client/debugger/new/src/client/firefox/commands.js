@@ -9,8 +9,6 @@ var _breakpoint = require("../../utils/breakpoint/index");
 
 var _create = require("./create");
 
-var _frontsDevice = require("devtools/shared/fronts/device");
-
 var _devtoolsServices = require("Services");
 
 var _devtoolsServices2 = _interopRequireDefault(_devtoolsServices);
@@ -344,7 +342,12 @@ function pauseGrip(func) {
 async function fetchSources() {
   const {
     sources
-  } = await threadClient.getSources();
+  } = await threadClient.getSources(); // NOTE: this happens when we fetch sources and then immediately navigate
+
+  if (!sources) {
+    return;
+  }
+
   return sources.map(source => (0, _create.createSource)(source, {
     supportsWasm
   }));

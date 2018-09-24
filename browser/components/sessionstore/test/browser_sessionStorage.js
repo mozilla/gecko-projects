@@ -76,7 +76,7 @@ add_task(async function session_storage() {
     "sessionStorage data for mochi.test has been duplicated correctly");
 
   // Check that loading a new URL discards data.
-  browser2.loadURI("http://mochi.test:8888/");
+  BrowserTestUtils.loadURI(browser2, "http://mochi.test:8888/");
   await promiseBrowserLoaded(browser2);
   await TabStateFlusher.flush(browser2);
 
@@ -86,12 +86,28 @@ add_task(async function session_storage() {
   ok(!storage["http://example.com"], "storage data was discarded");
 
   // Check that loading a new URL discards data.
-  browser2.loadURI("about:mozilla");
+  BrowserTestUtils.loadURI(browser2, "about:mozilla");
   await promiseBrowserLoaded(browser2);
   await TabStateFlusher.flush(browser2);
 
   let state = JSON.parse(ss.getTabState(tab2));
   ok(!state.hasOwnProperty("storage"), "storage data was discarded");
+
+  // Test that clearing the data in the first tab works properly within
+  // the subframe
+  await modifySessionStorage(browser, {}, {frameIndex: 0});
+  await TabStateFlusher.flush(browser);
+  ({storage} = JSON.parse(ss.getTabState(tab)));
+  is(storage["http://example.com"], undefined,
+    "sessionStorage data for example.com has been cleared correctly");
+
+  // Test that clearing the data in the first tab works properly within
+  // the top-level frame
+  await modifySessionStorage(browser, {});
+  await TabStateFlusher.flush(browser);
+  ({storage} = JSON.parse(ss.getTabState(tab)));
+  is(storage, null,
+    "sessionStorage data for the entire tab has been cleared correctly");
 
   // Clean up.
   BrowserTestUtils.removeTab(tab);

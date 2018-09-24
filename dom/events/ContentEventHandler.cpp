@@ -345,7 +345,7 @@ ContentEventHandler::InitCommon(SelectionType aSelectionType)
   if (mSelection->Type() == SelectionType::eNormal) {
     normalSelection = mSelection;
   } else {
-    normalSelection = 
+    normalSelection =
       selectionController->GetSelection(nsISelectionController::SELECTION_NORMAL);
     if (NS_WARN_IF(!normalSelection)) {
       return NS_ERROR_NOT_AVAILABLE;
@@ -941,7 +941,7 @@ ContentEventHandler::AppendFontRanges(FontRangeArray& aFontRanges,
       }
 
       FontRange* fontRange = AppendFontRange(aFontRanges, baseOffset);
-      fontRange->mFontName = font->GetName();
+      fontRange->mFontName.Append(NS_ConvertUTF8toUTF16(font->GetName()));
       fontRange->mFontSize = font->GetAdjustedSize();
 
       // The converted original offset may exceed the range,
@@ -1020,7 +1020,9 @@ ContentEventHandler::GenerateFlatFontRanges(const RawRange& aRawRange,
           const FontFamilyName& fontName = fontList.IsEmpty() ?
             FontFamilyName(fontList.GetDefaultFontType()) :
             fontList.GetFontlist()->mNames[0];
-          fontName.AppendToString(fontRange->mFontName, false);
+          nsAutoCString name;
+          fontName.AppendToString(name, false);
+          AppendUTF8toUTF16(name, fontRange->mFontName);
           fontRange->mFontSize =
             frame->PresContext()->AppUnitsToDevPixels(font.size);
         }

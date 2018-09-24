@@ -18,10 +18,12 @@ if CONFIG['MOZ_XUL']:
     EXPORTS += [
         'nsXULCommandDispatcher.h',
         'nsXULElement.h',
+        'nsXULSortService.h',
     ]
 
     EXPORTS.mozilla.dom += [
         'XULFrameElement.h',
+        'XULMenuElement.h',
         'XULPopupElement.h',
         'XULScrollElement.h',
     ]
@@ -37,6 +39,7 @@ if CONFIG['MOZ_XUL']:
         'nsXULSortService.cpp',
         'XULDocument.cpp',
         'XULFrameElement.cpp',
+        'XULMenuElement.cpp',
         'XULPopupElement.cpp',
         'XULScrollElement.cpp',
     ]
@@ -44,7 +47,6 @@ if CONFIG['MOZ_XUL']:
 XPIDL_SOURCES += [
     'nsIController.idl',
     'nsIControllers.idl',
-    'nsIXULSortService.idl',
 ]
 
 XPIDL_MODULE = 'xul'

@@ -282,7 +282,7 @@ public:
   virtual nsIGlobalObject* GetOwnerGlobal() const override;
 
   EventTarget* GetTargetForEventTargetChain() override;
-  
+
   using mozilla::dom::EventTarget::DispatchEvent;
   bool DispatchEvent(mozilla::dom::Event& aEvent,
                      mozilla::dom::CallerType aCallerType,
@@ -347,7 +347,7 @@ public:
   virtual bool DispatchCustomEvent(const nsAString& aEventName) override;
   bool DispatchResizeEvent(const mozilla::CSSIntSize& aSize);
 
-  // For accessing protected field mFullScreen
+  // For accessing protected field mFullscreen
   friend class FullscreenTransitionTask;
 
   // Outer windows only.
@@ -357,7 +357,7 @@ public:
   void FinishFullscreenChange(bool aIsFullscreen) final;
   bool SetWidgetFullscreen(FullscreenReason aReason, bool aIsFullscreen,
                            nsIWidget* aWidget, nsIScreen* aScreen);
-  bool FullScreen() const;
+  bool Fullscreen() const;
 
   // nsIInterfaceRequestor
   NS_DECL_NSIINTERFACEREQUESTOR
@@ -658,10 +658,10 @@ public:
   float GetMozInnerScreenXOuter(mozilla::dom::CallerType aCallerType);
   float GetMozInnerScreenYOuter(mozilla::dom::CallerType aCallerType);
   double GetDevicePixelRatioOuter(mozilla::dom::CallerType aCallerType);
-  bool GetFullScreenOuter();
+  bool GetFullscreenOuter();
   bool GetFullScreen() override;
-  void SetFullScreenOuter(bool aFullScreen, mozilla::ErrorResult& aError);
-  nsresult SetFullScreen(bool aFullScreen) override;
+  void SetFullscreenOuter(bool aFullscreen, mozilla::ErrorResult& aError);
+  nsresult SetFullScreen(bool aFullscreen) override;
   bool FindOuter(const nsAString& aString, bool aCaseSensitive, bool aBackwards,
                  bool aWrapAround, bool aWholeWord, bool aSearchInFrames,
                  bool aShowDialog, mozilla::ErrorResult& aError);
@@ -964,6 +964,15 @@ public:
 
   bool IsInModalState();
 
+  bool HasStorageAccess() const
+  {
+    return mHasStorageAccess;
+  }
+  void SetHasStorageAccess(bool aHasStorageAccess)
+  {
+    mHasStorageAccess = aHasStorageAccess;
+  }
+
   // Convenience functions for the many methods that need to scale
   // from device to CSS pixels or vice versa.  Note: if a presentation
   // context is not available, they will assume a 1:1 ratio.
@@ -1058,7 +1067,7 @@ public:
   virtual mozilla::AbstractThread*
   AbstractMainThreadFor(mozilla::TaskCategory aCategory) override;
 protected:
-  bool                          mFullScreen : 1;
+  bool                          mFullscreen : 1;
   bool                          mFullscreenMode : 1;
   bool                          mIsClosed : 1;
   bool                          mInClose : 1;
@@ -1087,6 +1096,9 @@ protected:
   bool                   mAllowScriptsToClose : 1;
 
   bool mTopLevelOuterContentWindow : 1;
+
+  // whether storage access has been granted to this frame.
+  bool mHasStorageAccess : 1;
 
   nsCOMPtr<nsIScriptContext>    mContext;
   nsWeakPtr                     mOpener;

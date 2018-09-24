@@ -449,9 +449,11 @@ with only_when('--enable-compile-environment'):
 
     set_config('LIBFUZZER', enable_libfuzzer)
     set_define('LIBFUZZER', enable_libfuzzer)
+    add_old_configure_assignment('LIBFUZZER', enable_libfuzzer)
 
     set_config('FUZZING_INTERFACES', enable_fuzzing_interfaces)
     set_define('FUZZING_INTERFACES', enable_fuzzing_interfaces)
+    add_old_configure_assignment('FUZZING_INTERFACES', enable_fuzzing_interfaces)
 
 # Enable pipeline operator
 # ===================================================
@@ -491,5 +493,5 @@ def enable_cranelift(value):
     if value:
         return True
 
-set_config('MOZ_WASM_CRANELIFT', enable_cranelift)
-set_define('MOZ_WASM_CRANELIFT', enable_cranelift)
+set_config('ENABLE_WASM_CRANELIFT', enable_cranelift)
+set_define('ENABLE_WASM_CRANELIFT', enable_cranelift)

@@ -4,10 +4,16 @@
 
 "use strict";
 
-const { PureComponent } = require("devtools/client/shared/vendor/react");
+const {
+  createElement,
+  Fragment,
+  PureComponent,
+} = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const { KeyCodes } = require("devtools/client/shared/keycodes");
+
+const { toFixed } = require("../utils/font-utils");
 
 // Milliseconds between auto-increment interval iterations.
 const AUTOINCREMENT_DELAY = 1000;
@@ -17,14 +23,20 @@ class FontPropertyValue extends PureComponent {
     return {
       autoIncrement: PropTypes.bool,
       className: PropTypes.string,
-      defaultValue: PropTypes.oneOfType([ PropTypes.string, PropTypes.number ]),
+      defaultValue: PropTypes.number,
       label: PropTypes.string.isRequired,
       min: PropTypes.number.isRequired,
+      // Whether to show the `min` prop value as a label.
+      minLabel: PropTypes.bool,
       max: PropTypes.number.isRequired,
+      // Whether to show the `max` prop value as a label.
+      maxLabel: PropTypes.bool,
       name: PropTypes.string.isRequired,
+      // Whether to show the `name` prop value as an extra label (used to show axis tags).
+      nameLabel: PropTypes.bool,
       onChange: PropTypes.func.isRequired,
       step: PropTypes.number,
-      unit: PropTypes.oneOfType([ PropTypes.string, null ]),
+      unit: PropTypes.string,
       unitOptions: PropTypes.array,
       value: PropTypes.number,
     };
@@ -34,7 +46,11 @@ class FontPropertyValue extends PureComponent {
     return {
       autoIncrement: false,
       className: "",
+      minLabel: false,
+      maxLabel: false,
+      nameLabel: false,
       step: 1,
+      unit: null,
       unitOptions: []
     };
   }
@@ -84,6 +100,22 @@ class FontPropertyValue extends PureComponent {
   autoIncrement() {
     const value = this.props.value + this.props.step * 10;
     this.updateValue(value);
+  }
+
+  /**
+   * Given a `prop` key found on the component's props, check the matching `propLabel`.
+   * If `propLabel` is true, return the `prop` value; Otherwise, return null.
+   *
+   * @param {String} prop
+   *        Key found on the component's props.
+   * @return {Number|null}
+   */
+  getPropLabel(prop) {
+    const label = this.props[`${prop}Label`];
+    // Decimal count used to limit numbers in labels.
+    const decimals = Math.abs(Math.log10(this.props.step));
+
+    return label ? toFixed(this.props[prop], decimals) : null;
   }
 
   /**
@@ -162,9 +194,12 @@ class FontPropertyValue extends PureComponent {
    *        Change event.
    */
   onChange(e) {
-    // Regular expresion to check for positive floating point or integer numbers.
+    // Regular expresion to check for floating point or integer numbers. Accept negative
+    // numbers only if the min value is negative. Otherwise, expect positive numbers.
     // Whitespace and non-digit characters are invalid (aside from a single dot).
-    const regex = /^[0-9]+(.[0-9]+)?$/;
+    const regex = (this.props.min && this.props.min < 0)
+      ? /^-?[0-9]+(.[0-9]+)?$/
+      : /^[0-9]+(.[0-9]+)?$/;
     let string = e.target.value.trim();
 
     if (e.target.validity.badInput) {
@@ -190,7 +225,6 @@ class FontPropertyValue extends PureComponent {
       return;
     }
 
-    // Catch any negative or irrational numbers.
     if (!regex.test(string)) {
       return;
     }
@@ -355,6 +389,36 @@ class FontPropertyValue extends PureComponent {
     );
   }
 
+  renderLabelContent() {
+    const {
+      label,
+      name,
+      nameLabel,
+    } = this.props;
+
+    const labelEl = dom.span(
+      {
+        className: "font-control-label-text",
+        "aria-describedby": nameLabel ? `detail-${name}` : null,
+      },
+      label
+    );
+
+    // Show the `name` prop value as an additional label if the `nameLabel` prop is true.
+    const detailEl = nameLabel ?
+      dom.span(
+        {
+          className: "font-control-label-detail",
+          id: `detail-${name}`
+        },
+        this.getPropLabel("name")
+      )
+      :
+      null;
+
+    return createElement(Fragment, null, labelEl, detailEl);
+  }
+
   render() {
     // Guard against bad axis data.
     if (this.props.min === this.props.max) {
@@ -407,17 +471,25 @@ class FontPropertyValue extends PureComponent {
       {
         className: `font-control ${this.props.className}`,
       },
-      dom.span(
+      dom.div(
         {
           className: "font-control-label",
+          title: this.props.label,
         },
-        this.props.label
+        this.renderLabelContent()
       ),
       dom.div(
         {
           className: "font-control-input"
         },
-        range,
+        dom.div(
+          {
+            className: "font-value-slider-container",
+            "data-min": this.getPropLabel("min"),
+            "data-max": this.getPropLabel("max"),
+          },
+          range
+        ),
         input,
         this.renderUnitSelect()
       )

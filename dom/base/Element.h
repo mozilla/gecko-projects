@@ -148,8 +148,8 @@ class Element : public FragmentOrElement
 {
 public:
 #ifdef MOZILLA_INTERNAL_API
-  explicit Element(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo) :
-    FragmentOrElement(aNodeInfo),
+  explicit Element(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo) :
+    FragmentOrElement(std::move(aNodeInfo)),
     mState(NS_EVENT_STATE_MOZ_READONLY | NS_EVENT_STATE_DEFINED)
   {
     MOZ_ASSERT(mNodeInfo->NodeType() == ELEMENT_NODE,
@@ -1248,7 +1248,7 @@ public:
     }
   }
 
-  void RequestFullscreen(CallerType aCallerType, ErrorResult& aError);
+  already_AddRefed<Promise> RequestFullscreen(CallerType, ErrorResult&);
   void RequestPointerLock(CallerType aCallerType);
   Attr* GetAttributeNode(const nsAString& aName);
   already_AddRefed<Attr> SetAttributeNode(Attr& aNewAttr,
@@ -1968,7 +1968,7 @@ private:
 
   /**
    * GetCustomInterface is somewhat like a GetInterface, but it is expected
-   * that the implementation is provided by a custom element or via the 
+   * that the implementation is provided by a custom element or via the
    * the XBL implements keyword. To use this, create a public method that
    * wraps a call to GetCustomInterface.
    */
@@ -2044,21 +2044,52 @@ Element::AttrValueIs(int32_t aNameSpaceID,
 } // namespace dom
 } // namespace mozilla
 
-inline mozilla::dom::Element* nsINode::AsElement()
+inline mozilla::dom::Element*
+nsINode::AsElement()
 {
   MOZ_ASSERT(IsElement());
   return static_cast<mozilla::dom::Element*>(this);
 }
 
-inline const mozilla::dom::Element* nsINode::AsElement() const
+inline const mozilla::dom::Element*
+nsINode::AsElement() const
 {
   MOZ_ASSERT(IsElement());
   return static_cast<const mozilla::dom::Element*>(this);
 }
 
-inline mozilla::dom::Element* nsINode::GetParentElement() const
+inline mozilla::dom::Element*
+nsINode::GetParentElement() const
 {
   return mozilla::dom::Element::FromNodeOrNull(mParent);
+}
+
+inline mozilla::dom::Element*
+nsINode::GetPreviousElementSibling() const
+{
+  nsIContent* previousSibling = GetPreviousSibling();
+  while (previousSibling) {
+    if (previousSibling->IsElement()) {
+      return previousSibling->AsElement();
+    }
+    previousSibling = previousSibling->GetPreviousSibling();
+  }
+
+  return nullptr;
+}
+
+inline mozilla::dom::Element*
+nsINode::GetNextElementSibling() const
+{
+  nsIContent* nextSibling = GetNextSibling();
+  while (nextSibling) {
+    if (nextSibling->IsElement()) {
+      return nextSibling->AsElement();
+    }
+    nextSibling = nextSibling->GetNextSibling();
+  }
+
+  return nullptr;
 }
 
 /**
@@ -2070,9 +2101,8 @@ nsresult                                                                    \
 _elementName::Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult) const \
 {                                                                           \
   *aResult = nullptr;                                                       \
-  already_AddRefed<mozilla::dom::NodeInfo> ni =                             \
-    RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();                     \
-  _elementName *it = new _elementName(ni);                                  \
+  RefPtr<mozilla::dom::NodeInfo> ni(aNodeInfo);                             \
+  _elementName *it = new _elementName(ni.forget());                         \
   if (!it) {                                                                \
     return NS_ERROR_OUT_OF_MEMORY;                                          \
   }                                                                         \
@@ -2093,9 +2123,8 @@ _elementName::Clone(mozilla::dom::NodeInfo* aNodeInfo,                      \
                     nsINode** aResult) const                                \
 {                                                                           \
   *aResult = nullptr;                                                       \
-  already_AddRefed<mozilla::dom::NodeInfo> ni =                             \
-    RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();                     \
-  _elementName *it = new _elementName(ni EXPAND extra_args_);               \
+  RefPtr<mozilla::dom::NodeInfo> ni(aNodeInfo);                             \
+  _elementName *it = new _elementName(ni.forget() EXPAND extra_args_);      \
   if (!it) {                                                                \
     return NS_ERROR_OUT_OF_MEMORY;                                          \
   }                                                                         \

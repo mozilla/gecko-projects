@@ -34,6 +34,13 @@ repackage_signing_description_schema = Schema({
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
 })
 
+SIGNING_FORMATS = {
+    'target.complete.mar': ["autograph_mar384"],
+    'target.bz2.complete.mar': ["mar"],
+    "target.installer.exe": ["sha2signcode"],
+    "target.stub-installer.exe": ["sha2signcodestub"],
+}
+
 
 @transforms.add
 def validate(config, jobs):

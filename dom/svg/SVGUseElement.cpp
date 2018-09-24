@@ -20,6 +20,7 @@
 #include "mozilla/URLExtraData.h"
 #include "SVGObserverUtils.h"
 #include "nsSVGUseFrame.h"
+#include "mozilla/net/ReferrerPolicy.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Use)
 
@@ -73,8 +74,8 @@ NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(SVGUseElement,
 //----------------------------------------------------------------------
 // Implementation
 
-SVGUseElement::SVGUseElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-  : SVGUseElementBase(aNodeInfo)
+SVGUseElement::SVGUseElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
+  : SVGUseElementBase(std::move(aNodeInfo))
   , mReferencedElementTracker(this)
 {
 }
@@ -95,8 +96,7 @@ nsresult
 SVGUseElement::Clone(dom::NodeInfo* aNodeInfo, nsINode** aResult) const
 {
   *aResult = nullptr;
-  already_AddRefed<mozilla::dom::NodeInfo> ni = RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
-  SVGUseElement *it = new SVGUseElement(ni);
+  SVGUseElement *it = new SVGUseElement(do_AddRef(aNodeInfo));
 
   nsCOMPtr<nsINode> kungFuDeathGrip(it);
   nsresult rv1 = it->Init();
@@ -326,10 +326,12 @@ SVGUseElement::UpdateShadowTree()
       newSVGElement->SetLength(nsGkAtoms::height, mLengthAttributes[ATTR_HEIGHT]);
   }
 
-  // Store the base URI
+  // The specs do not say which referrer policy we should use, pass RP_Unset for
+  // now
   mContentURLData = new URLExtraData(baseURI.forget(),
                                      do_AddRef(OwnerDoc()->GetDocumentURI()),
-                                     do_AddRef(NodePrincipal()));
+                                     do_AddRef(NodePrincipal()),
+                                     mozilla::net::RP_Unset);
 
   targetElement->AddMutationObserver(this);
 }
@@ -419,7 +421,10 @@ SVGUseElement::LookupHref()
   nsCOMPtr<nsIURI> targetURI;
   nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI), href,
                                             GetComposedDoc(), baseURI);
-  mReferencedElementTracker.Reset(this, targetURI);
+  // Bug 1415044 to investigate which referrer we should use
+  mReferencedElementTracker.Reset(this, targetURI,
+                                  OwnerDoc()->GetDocumentURI(),
+                                  OwnerDoc()->GetReferrerPolicy());
 }
 
 void

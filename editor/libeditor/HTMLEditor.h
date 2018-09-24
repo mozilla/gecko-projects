@@ -23,7 +23,6 @@
 #include "nsIDOMEventListener.h"
 #include "nsIEditorMailSupport.h"
 #include "nsIEditorStyleSheets.h"
-#include "nsIEditorUtils.h"
 #include "nsIHTMLAbsPosEditor.h"
 #include "nsIHTMLEditor.h"
 #include "nsIHTMLInlineTableEditor.h"
@@ -43,12 +42,14 @@ class nsRange;
 
 namespace mozilla {
 class AutoSelectionSetterAfterTableEdit;
+class DocumentResizeEventListener;
 class EmptyEditableFunctor;
 class ResizerSelectionListener;
 enum class EditSubAction : int32_t;
 struct PropItem;
 template<class T> class OwningNonNull;
 namespace dom {
+class Blob;
 class DocumentFragment;
 class Event;
 class MouseEvent;
@@ -450,6 +451,28 @@ public:
     */
   Element* GetActiveEditingHost() const;
 
+  /** Insert a string as quoted text
+    * (whose representation is dependant on the editor type),
+    * replacing the selected text (if any).
+    *
+    * @param aQuotedText    The actual text to be quoted
+    * @parem aNodeInserted  Return the node which was inserted.
+    */
+  nsresult InsertAsQuotation(const nsAString& aQuotedText,
+                             nsINode** aNodeInserted);
+
+  /**
+   * Inserts a plaintext string at the current location,
+   * with special processing for lines beginning with ">",
+   * which will be treated as mail quotes and inserted
+   * as plaintext quoted blocks.
+   * If the selection is not collapsed, the selection is deleted
+   * and the insertion takes place at the resulting collapsed selection.
+   *
+   * @param aString   the string to be inserted
+   */
+   nsresult InsertTextWithQuotations(const nsAString& aStringToInsert);
+
 protected: // May be called by friends.
   /****************************************************************************
    * Some classes like TextEditRules, HTMLEditRules, WSRunObject which are
@@ -618,6 +641,15 @@ protected: // May be called by friends.
   already_AddRefed<Element>
   GetNextSelectedTableCellElement(Selection& aSelection,
                                   ErrorResult& aRv) const;
+
+  /**
+   * DeleteTableCellContentsWithTransaction() removes any contents in cell
+   * elements.  If two or more cell elements are selected, this removes
+   * all selected cells' contents.  Otherwise, this removes contents of
+   * a cell which contains first selection range.  This does not return
+   * error even if selection is not in cell element, just does nothing.
+   */
+  nsresult DeleteTableCellContentsWithTransaction();
 
   void IsNextCharInNodeWhitespace(nsIContent* aContent,
                                   int32_t aOffset,
@@ -1089,6 +1121,8 @@ protected: // Shouldn't be used by friend classes
   GetNextTableRowElement(Element& aTableRowElement,
                          ErrorResult& aRv) const;
 
+  struct CellAndIndexes;
+
   /**
    * CellIndexes store both row index and column index of a table cell.
    */
@@ -1146,6 +1180,42 @@ protected: // Shouldn't be used by friend classes
      */
     void Update(HTMLEditor& aHTMLEditor, Selection& aSelection,
                 ErrorResult& aRv);
+
+  private:
+    CellIndexes()
+      : mRow(-1)
+      , mColumn(-1)
+    {
+    }
+
+    friend struct CellAndIndexes;
+  };
+
+  struct MOZ_STACK_CLASS CellAndIndexes final
+  {
+    RefPtr<Element> mElement;
+    CellIndexes mIndexes;
+
+    /**
+     * This constructor initializes the members with cell element which is
+     * selected by first range of the Selection.  Note that even if the
+     * first range is in the cell element, this does not treat it as the
+     * cell element is selected.
+     */
+    CellAndIndexes(HTMLEditor& aHTMLEditor, Selection& aSelection,
+                   ErrorResult& aRv)
+    {
+      Update(aHTMLEditor, aSelection, aRv);
+    }
+
+    /**
+     * Update mElement and mIndexes with cell element which is selected by
+     * first range of the Selection.  Note that even if the first range is
+     * in the cell element, this does not treat it as the cell element is
+     * selected.
+     */
+    void Update(HTMLEditor& aHTMLEditor, Selection& aSelection,
+                ErrorResult& aRv);
   };
 
   /**
@@ -1185,6 +1255,11 @@ protected: // Shouldn't be used by friend classes
      */
     void Update(HTMLEditor& aHTMLEditor, Element& aTableOrElementInTable,
                 ErrorResult& aRv);
+
+    bool IsEmpty() const
+    {
+      return !mRowCount || !mColumnCount;
+    }
   };
 
   /**
@@ -1209,6 +1284,26 @@ protected: // Shouldn't be used by friend classes
   Element* GetTableCellElementAt(Element& aTableElement,
                                  int32_t aRowIndex,
                                  int32_t aColumnIndex) const;
+
+  /**
+   * GetSelectedOrParentTableElement() returns <td>, <th>, <tr> or <table>
+   * element:
+   *   #1 if the first selection range selects a cell, returns it.
+   *   #2 if the first selection range does not select a cell and
+   *      the selection anchor refers a <table>, returns it.
+   *   #3 if the first selection range does not select a cell and
+   *      the selection anchor refers a <tr>, returns it.
+   *   #4 if the first selection range does not select a cell and
+   *      the selection anchor refers a <td>, returns it.
+   *   #5 otherwise, nearest ancestor <td> or <th> element of the
+   *      selection anchor if there is.
+   * In #1 and #4, *aIsCellSelected will be set to true (i.e,, when
+   * a selection range selects a cell element).
+   */
+  already_AddRefed<Element>
+  GetSelectedOrParentTableElement(Selection& aSelection,
+                                  ErrorResult& aRv,
+                                  bool* aIsCellSelected = nullptr) const;
 
   /**
    * PasteInternal() pasts text with replacing selected content.
@@ -1408,7 +1503,7 @@ protected: // Shouldn't be used by friend classes
   MaybeCollapseSelectionAtFirstEditableNode(
     bool aIgnoreIfSelectionInEditingHost);
 
-  class BlobReader final : public nsIEditorBlobListener
+  class BlobReader final
   {
   public:
     BlobReader(dom::BlobImpl* aBlob, HTMLEditor* aHTMLEditor,
@@ -1416,8 +1511,11 @@ protected: // Shouldn't be used by friend classes
                nsINode* aDestinationNode, int32_t aDestOffset,
                bool aDoDeleteSelection);
 
-    NS_DECL_ISUPPORTS
-    NS_DECL_NSIEDITORBLOBLISTENER
+    NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(BlobReader)
+    NS_DECL_CYCLE_COLLECTION_NATIVE_CLASS(BlobReader)
+
+    nsresult OnResult(const nsACString& aResult);
+    nsresult OnError(const nsAString& aErrorName);
 
   private:
     ~BlobReader()
@@ -1460,6 +1558,69 @@ protected: // Shouldn't be used by friend classes
   nsresult TabInTable(bool inIsShift, bool* outHandled);
 
   /**
+   * InsertPosition is an enum to indicate where the method should insert to.
+   */
+  enum class InsertPosition
+  {
+    // Before selected cell or a cell containing first selection range.
+    eBeforeSelectedCell,
+    // After selected cell or a cell containing first selection range.
+    eAfterSelectedCell,
+  };
+
+  /**
+   * InsertTableCellsWithTransaction() inserts <td> elements before or after
+   * a cell element containing first selection range.  I.e., if the cell
+   * spans columns and aInsertPosition is eAfterSelectedCell, new columns
+   * will be inserted after the right-most column which contains the cell.
+   * Note that this simply inserts <td> elements, i.e., colspan and rowspan
+   * around the cell containing selection are not modified.  So, for example,
+   * adding a cell to rectangular table changes non-rectangular table.
+   * And if the cell containing selection is at left of row-spanning cell,
+   * it may be moved to right side of the row-spanning cell after inserting
+   * some cell elements before it.  Similarly, colspan won't be adjusted
+   * for keeping table rectangle.
+   * If first selection range is not in table cell element, this does nothing
+   * but does not return error.
+   *
+   * @param aNumberOfCellssToInsert     Number of cells to insert.
+   * @param aInsertPosition             Before or after the target cell which
+   *                                    contains first selection range.
+   */
+  nsresult InsertTableCellsWithTransaction(int32_t aNumberOfCellsToInsert,
+                                           InsertPosition aInsertPosition);
+
+  /**
+   * InsertTableColumnsWithTransaction() inserts columns before or after
+   * a cell element containing first selection range.  I.e., if the cell
+   * spans columns and aInsertPosition is eAfterSelectedCell, new columns
+   * will be inserted after the right-most row which contains the cell.
+   * If first selection range is not in table cell element, this does nothing
+   * but does not return error.
+   *
+   * @param aNumberOfColumnsToInsert    Number of columns to insert.
+   * @param aInsertPosition             Before or after the target cell which
+   *                                    contains first selection range.
+   */
+  nsresult InsertTableColumnsWithTransaction(int32_t aNumberOfColumnsToInsert,
+                                             InsertPosition aInsertPosition);
+
+  /**
+   * InsertTableRowsWithTransaction() inserts <tr> elements before or after
+   * a cell element containing first selection range.  I.e., if the cell
+   * spans rows and aInsertPosition is eAfterSelectedCell, new rows will be
+   * inserted after the most-bottom row which contains the cell.  If first
+   * selection range is not in table cell element, this does nothing but
+   * does not return error.
+   *
+   * @param aNumberOfRowsToInsert       Number of rows to insert.
+   * @param aInsertPosition             Before or after the target cell which
+   *                                    contains first selection range.
+   */
+  nsresult InsertTableRowsWithTransaction(int32_t aNumberOfRowsToInsert,
+                                          InsertPosition aInsertPosition);
+
+  /**
    * Insert a new cell after or before supplied aCell.
    * Optional: If aNewCell supplied, returns the newly-created cell (addref'd,
    * of course)
@@ -1470,11 +1631,96 @@ protected: // Shouldn't be used by friend classes
                       Element** aNewCell);
 
   /**
-   * Helpers that don't touch the selection or do batch transactions.
+   * DeleteSelectedTableColumnsWithTransaction() removes cell elements which
+   * belong to same columns of selected cell elements.
+   * If only one cell element is selected or first selection range is
+   * in a cell, removes cell elements which belong to same column.
+   * If 2 or more cell elements are selected, removes cell elements which
+   * belong to any of all selected columns.  In this case,
+   * aNumberOfColumnsToDelete is ignored.
+   * If there is no selection ranges, returns error.
+   * If selection is not in a cell element, this does not return error,
+   * just does nothing.
+   * WARNING: This does not remove <col> nor <colgroup> elements.
+   *
+   * @param aNumberOfColumnsToDelete    Number of columns to remove.  This is
+   *                                    ignored if 2 ore more cells are
+   *                                    selected.
    */
-  nsresult DeleteRow(Element* aTable, int32_t aRowIndex);
-  nsresult DeleteColumn(Element* aTable, int32_t aColIndex);
-  nsresult DeleteCellContents(Element* aCell);
+  nsresult
+  DeleteSelectedTableColumnsWithTransaction(int32_t aNumberOfColumnsToDelete);
+
+  /**
+   * DeleteTableColumnWithTransaction() removes cell elements which belong
+   * to the specified column.
+   * This method adjusts colspan attribute value if cells spanning the
+   * column to delete.
+   * WARNING: This does not remove <col> nor <colgroup> elements.
+   *
+   * @param aTableElement       The <table> element which contains the
+   *                            column which you want to remove.
+   * @param aRowIndex           Index of the column which you want to remove.
+   *                            0 is the first column.
+   */
+  nsresult
+  DeleteTableColumnWithTransaction(Element& aTableElement,
+                                   int32_t aColumnIndex);
+
+  /**
+   * DeleteSelectedTableRowsWithTransaction() removes <tr> elements.
+   * If only one cell element is selected or first selection range is
+   * in a cell, removes <tr> elements starting from a <tr> element
+   * containing the selected cell or first selection range.
+   * If 2 or more cell elements are selected, all <tr> elements
+   * which contains selected cell(s).  In this case, aNumberOfRowsToDelete
+   * is ignored.
+   * If there is no selection ranges, returns error.
+   * If selection is not in a cell element, this does not return error,
+   * just does nothing.
+   *
+   * @param aNumberOfRowsToDelete   Number of rows to remove.  This is ignored
+   *                                if 2 or more cells are selected.
+   */
+  nsresult
+  DeleteSelectedTableRowsWithTransaction(int32_t aNumberOfRowsToDelete);
+
+  /**
+   * DeleteTableRowWithTransaction() removes a <tr> element whose index in
+   * the <table> is aRowIndex.
+   * This method adjusts rowspan attribute value if the <tr> element contains
+   * cells which spans rows.
+   *
+   * @param aTableElement       The <table> element which contains the
+   *                            <tr> element which you want to remove.
+   * @param aRowIndex           Index of the <tr> element which you want to
+   *                            remove.  0 is the first row.
+   */
+  nsresult
+  DeleteTableRowWithTransaction(Element& aTableElement, int32_t aRowIndex);
+
+  /**
+   * DeleteTableCellWithTransaction() removes table cell elements.  If two or
+   * more cell elements are selected, this removes all selected cell elements.
+   * Otherwise, this removes some cell elements starting from selected cell
+   * element or a cell containing first selection range.  When this removes
+   * last cell element in <tr> or <table>, this removes the <tr> or the
+   * <table> too.  Note that when removing a cell causes number of its row
+   * becomes less than the others, this method does NOT fill the place with
+   * rowspan nor colspan.  This does not return error even if selection is not
+   * in cell element, just does nothing.
+   *
+   * @param aNumberOfCellsToDelete  Number of cells to remove.  This is ignored
+   *                                if 2 or more cells are selected.
+   */
+  nsresult DeleteTableCellWithTransaction(int32_t aNumberOfCellsToDelete);
+
+  /**
+   * DeleteAllChildrenWithTransaction() removes all children of aElement from
+   * the tree.
+   *
+   * @param aElement        The element whose children you want to remove.
+   */
+  nsresult DeleteAllChildrenWithTransaction(Element& aElement);
 
   /**
    * Move all contents from aCellToMerge into aTargetCell (append at end).
@@ -1483,7 +1729,17 @@ protected: // Shouldn't be used by friend classes
                       RefPtr<Element> aCellToMerge,
                       bool aDeleteCellToMerge);
 
-  nsresult DeleteTable2(Element* aTable, Selection* aSelection);
+  /**
+   * DeleteTableElementAndChildren() removes aTableElement (and its children)
+   * from the DOM tree with transaction.
+   *
+   * @param aSelection      The normal Selection for the editor.
+   * @param aTableElement   The <table> element which you want to remove.
+   */
+  nsresult
+  DeleteTableElementAndChildrenWithTransaction(Selection& aSelection,
+                                               Element& aTableElement);
+
   nsresult SetColSpan(Element* aCell, int32_t aColSpan);
   nsresult SetRowSpan(Element* aCell, int32_t aRowSpan);
 
@@ -1493,11 +1749,16 @@ protected: // Shouldn't be used by friend classes
   static nsTableWrapperFrame* GetTableFrame(Element* aTable);
 
   /**
-   * Needed to do appropriate deleting when last cell or row is about to be
-   * deleted.  This doesn't count cells that don't start in the given row (are
-   * spanning from row above).
+   * GetNumberOfCellsInRow() returns number of actual cell elements in the row.
+   * If some cells appear by "rowspan" in other rows, they are ignored.
+   *
+   * @param aTableElement   The <table> element.
+   * @param aRowIndex       Valid row index in aTableElement.  This method
+   *                        counts cell elements in the row.
+   * @return                -1 if this meets unexpected error.
+   *                        Otherwise, number of cells which this method found.
    */
-  int32_t GetNumberOfCellsInRow(Element* aTable, int32_t rowIndex);
+  int32_t GetNumberOfCellsInRow(Element& aTableElement, int32_t aRowIndex);
 
   /**
    * Test if all cells in row or column at given index are selected.
@@ -1546,6 +1807,20 @@ protected: // Shouldn't be used by friend classes
                          int32_t& aNewRowCount);
   nsresult FixBadColSpan(Element* aTable, int32_t aColIndex,
                          int32_t& aNewColCount);
+
+  /**
+   * XXX NormalizeTable() is broken.  If it meets a cell which has bigger or
+   *     smaller rowspan or colspan than actual number of cells, this always
+   *     failed to scan the table.  Therefore, this does nothing when the
+   *     table should be normalized.
+   *
+   * @param aSelection              The Selection for the editor.
+   * @param aTableOrElementInTable  An element which is in a <table> element
+   *                                or <table> element itself.  Otherwise,
+   *                                this returns NS_OK but does nothing.
+   */
+  nsresult NormalizeTable(Selection& aSelection,
+                          Element& aTableOrElementInTable);
 
   /**
    * Fallback method: Call this after using ClearSelection() and you
@@ -1779,8 +2054,6 @@ protected: // Shouldn't be used by friend classes
    */
   nsresult RefereshEditingUI(Selection& aSelection);
 
-  nsresult ShowResizersInner(Element& aResizedElement);
-
   /**
    * Returns the offset of an element's frame to its absolute containing block.
    */
@@ -1798,13 +2071,31 @@ protected: // Shouldn't be used by friend classes
 
   void UpdateRootElement();
 
+  /**
+   * SetAllResizersPosition() moves all resizers to proper position.
+   * If the resizers are hidden or replaced with another set of resizers
+   * while this is running, this returns error.  So, callers shouldn't
+   * keep handling the resizers if this returns error.
+   */
   nsresult SetAllResizersPosition();
 
   /**
    * Shows active resizers around an element's frame
    * @param aResizedElement [IN] a DOM Element
    */
-  nsresult ShowResizers(Element& aResizedElement);
+  nsresult ShowResizersInternal(Element& aResizedElement);
+
+  /**
+   * Hide resizers if they are visible.  If this is called while there is no
+   * visible resizers, this does not return error, but does nothing.
+   */
+  nsresult HideResizersInternal();
+
+  /**
+   * RefreshResizersInternal() moves resizers to proper position.  This does
+   * nothing if there is no resizing target.
+   */
+  nsresult RefreshResizersInternal();
 
   ManualNACPtr CreateResizer(int16_t aLocation, nsIContent& aParentContent);
   void SetAnonymousElementPosition(int32_t aX, int32_t aY,
@@ -1812,9 +2103,19 @@ protected: // Shouldn't be used by friend classes
 
   ManualNACPtr CreateShadow(nsIContent& aParentContent,
                             Element& aOriginalObject);
-  nsresult SetShadowPosition(Element* aShadow, Element* aOriginalObject,
-                             int32_t aOriginalObjectX,
-                             int32_t aOriginalObjectY);
+
+  /**
+   * SetShadowPosition() moves the shadow element to proper position.
+   *
+   * @param aShadowElement      Must be mResizingShadow or mPositioningShadow.
+   * @param aElement            The element which has the shadow.
+   * @param aElementX           Left of aElement.
+   * @param aElementY           Top of aElement.
+   */
+  nsresult SetShadowPosition(Element& aShadowElement,
+                             Element& aElement,
+                             int32_t aElementLeft,
+                             int32_t aElementTop);
 
   ManualNACPtr CreateResizingInfo(nsIContent& aParentContent);
   nsresult SetResizingInfoPosition(int32_t aX, int32_t aY,
@@ -1866,14 +2167,29 @@ protected: // Shouldn't be used by friend classes
    * document. See chrome://editor/content/images/grabber.gif
    * @param aElement [IN] the element
    */
-  nsresult ShowGrabber(Element& aElement);
+  nsresult ShowGrabberInternal(Element& aElement);
+
+  /**
+   * Setting grabber to proper position for current mAbsolutelyPositionedObject.
+   * For example, while an element has grabber, the element may be resized
+   * or repositioned by script or something.  Then, you need to reset grabber
+   * position with this.
+   */
+  nsresult RefreshGrabberInternal();
 
   /**
    * hide the grabber if it shown.
    */
-  void HideGrabber();
+  void HideGrabberInternal();
 
-  ManualNACPtr CreateGrabber(nsIContent& aParentContent);
+  /**
+   * CreateGrabberInternal() creates a grabber for moving aParentContent.
+   * This sets mGrabber to the new grabber.  If this returns true, it's
+   * always non-nullptr.  Otherwise, i.e., the grabber is hidden during
+   * creation, this returns false.
+   */
+  bool CreateGrabberInternal(nsIContent& aParentContent);
+
   nsresult StartMoving();
   nsresult SetFinalPosition(int32_t aX, int32_t aY);
   void AddPositioningOffset(int32_t& aX, int32_t& aY);
@@ -1884,15 +2200,26 @@ protected: // Shouldn't be used by friend classes
                                                         nsAString& aReturn);
 
   /**
-   * Shows inline table editing UI around a table cell
-   * @param aCell [IN] a DOM Element being a table cell, td or th
+   * Shows inline table editing UI around a <table> element which contains
+   * aCellElement.  This returns error if creating UI is hidden during this,
+   * or detects another set of UI during this.  In such case, callers
+   * shouldn't keep handling anything for the UI.
+   *
+   * @param aCellElement    Must be an <td> or <th> element.
    */
-  nsresult ShowInlineTableEditingUI(Element* aCell);
+  nsresult ShowInlineTableEditingUIInternal(Element& aCellElement);
 
   /**
-   * Hide all inline table editing UI
+   * Hide all inline table editing UI.
    */
-  void HideInlineTableEditingUI();
+  void HideInlineTableEditingUIInternal();
+
+  /**
+   * RefreshInlineTableEditingUIInternal() moves inline table editing UI to
+   * proper position.  This returns error if the UI is hidden or replaced
+   * during moving.
+   */
+  nsresult RefreshInlineTableEditingUIInternal();
 
   /**
    * IsEmptyTextNode() returns true if aNode is a text node and does not have
@@ -1929,6 +2256,18 @@ protected: // Shouldn't be used by friend classes
                                       nsIContent& aParentContent,
                                       const nsAString& aAnonClass,
                                       bool aIsCreatedHidden);
+
+  /**
+   * Reads a blob into memory and notifies the BlobReader object when the read
+   * operation is finished.
+   *
+   * @param aBlob       The input blob
+   * @param aWindow     The global object under which the read should happen.
+   * @param aBlobReader The blob reader object to be notified when finished.
+   */
+  static nsresult SlurpBlob(dom::Blob* aBlob,
+                            nsPIDOMWindowOuter* aWindow,
+                            BlobReader* aBlobReader);
 protected:
   RefPtr<TypeInState> mTypeInState;
   RefPtr<ComposerCommandsUpdater> mComposerCommandsUpdater;
@@ -2034,7 +2373,7 @@ protected:
   int32_t mPositionedObjectBorderLeft;
   int32_t mPositionedObjectBorderTop;
 
-  nsCOMPtr<Element> mAbsolutelyPositionedObject;
+  RefPtr<Element> mAbsolutelyPositionedObject;
   ManualNACPtr mGrabber;
   ManualNACPtr mPositioningShadow;
 
@@ -2060,9 +2399,11 @@ protected:
 
   friend class AutoSelectionSetterAfterTableEdit;
   friend class CSSEditUtils;
+  friend class DocumentResizeEventListener;
   friend class EditorBase;
   friend class EmptyEditableFunctor;
   friend class HTMLEditRules;
+  friend class SlurpBlobEventListener;
   friend class TextEditor;
   friend class WSRunObject;
 };

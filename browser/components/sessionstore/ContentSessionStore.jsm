@@ -301,12 +301,10 @@ class SessionHistoryListener extends Handler {
   OnHistoryGotoIndex(index, gotoURI) {
     // We ought to collect the previously current entry as well, see bug 1350567.
     this.collectFrom(kLastIndex);
-    return true;
   }
 
   OnHistoryPurge(numEntries) {
     this.collect();
-    return true;
   }
 
   OnHistoryReload(reloadURI, reloadFlags) {
@@ -316,14 +314,6 @@ class SessionHistoryListener extends Handler {
 
   OnHistoryReplaceEntry(index) {
     this.collect();
-  }
-
-  OnLengthChanged(aCount) {
-    // Ignore, the method is implemented so that XPConnect doesn't throw!
-  }
-
-  OnIndexChanged(aIndex) {
-    // Ignore, the method is implemented so that XPConnect doesn't throw!
   }
 }
 SessionHistoryListener.prototype.QueryInterface =
@@ -524,7 +514,15 @@ class SessionStorageListener extends Handler {
     if (!this._changes[domain]) {
       this._changes[domain] = {};
     }
-    this._changes[domain][key] = newValue;
+
+    // If the key isn't defined, then .clear() was called, and we send
+    // up null for this domain to indicate that storage has been cleared
+    // for it.
+    if (!key) {
+      this._changes[domain] = null;
+    } else {
+      this._changes[domain][key] = newValue;
+    }
 
     this.messageQueue.push("storagechange", () => {
       let tmp = this._changes;

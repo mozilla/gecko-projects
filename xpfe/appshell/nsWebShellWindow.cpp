@@ -242,7 +242,7 @@ nsresult nsWebShellWindow::Initialize(nsIXULWindow* aParent,
     NS_ConvertUTF8toUTF16 urlString(tmpStr);
     nsCOMPtr<nsIWebNavigation> webNav(do_QueryInterface(mDocShell));
     NS_ENSURE_TRUE(webNav, NS_ERROR_FAILURE);
-    rv = webNav->LoadURI(urlString.get(),
+    rv = webNav->LoadURI(urlString,
                          nsIWebNavigation::LOAD_FLAGS_NONE,
                          nullptr,
                          nullptr,
@@ -472,7 +472,7 @@ nsWebShellWindow::WindowActivated()
 
   // focusing the window could cause it to close, so keep a reference to it
   nsCOMPtr<nsPIDOMWindowOuter> window = mDocShell ? mDocShell->GetWindow() : nullptr;
-  nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
+  nsFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm && window)
     fm->WindowRaised(window);
 
@@ -489,8 +489,8 @@ nsWebShellWindow::WindowDeactivated()
 
   nsCOMPtr<nsPIDOMWindowOuter> window =
     mDocShell ? mDocShell->GetWindow() : nullptr;
-  nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
-  if (fm && window)
+  nsFocusManager* fm = nsFocusManager::GetFocusManager();
+  if (fm && window && !fm->IsTestMode())
     fm->WindowLowered(window);
 }
 

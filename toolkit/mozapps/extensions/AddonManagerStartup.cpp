@@ -410,11 +410,16 @@ public:
 
   nsString Path() { return GetString("path"); }
 
-  bool Bootstrapped() { return GetBool("bootstrapped"); }
+  nsString Type() { return GetString("type", "extension"); }
 
   bool Enabled() { return GetBool("enabled"); }
 
   double LastModifiedTime() { return GetNumber("lastModifiedTime"); }
+
+  bool ShouldCheckStartupModifications()
+  {
+    return Type().EqualsLiteral("webextension-langpack");
+  }
 
 
   Result<nsCOMPtr<nsIFile>, nsresult> FullPath();
@@ -451,8 +456,15 @@ Addon::UpdateLastModifiedTime()
   nsCOMPtr<nsIFile> file;
   MOZ_TRY_VAR(file, FullPath());
 
+  JS::RootedObject obj(mCx, mObject);
+
   bool result;
   if (NS_FAILED(file->Exists(&result)) || !result) {
+    JS::RootedValue value(mCx, JS::NullValue());
+    if (!JS_SetProperty(mCx, obj, "currentModifiedTime", value)) {
+      JS_ClearPendingException(mCx);
+    }
+
     return true;
   }
 
@@ -472,8 +484,6 @@ Addon::UpdateLastModifiedTime()
   if (NS_FAILED(manifest->GetLastModifiedTime(&time))) {
     return true;
   }
-
-  JS::RootedObject obj(mCx, mObject);
 
   double lastModified = time;
   JS::RootedValue value(mCx, JS::NumberValue(lastModified));
@@ -529,14 +539,12 @@ AddonManagerStartup::ReadStartupData(JSContext* cx, JS::MutableHandleValue locat
   for (auto e1 : PropertyIter(cx, locs)) {
     InstallLocation loc(e1);
 
-    if (!loc.ShouldCheckStartupModifications()) {
-      continue;
-    }
+    bool shouldCheck = loc.ShouldCheckStartupModifications();
 
     for (auto e2 : loc.Addons()) {
       Addon addon(e2);
 
-      if (addon.Enabled()) {
+      if (addon.Enabled() && (shouldCheck || addon.ShouldCheckStartupModifications())) {
         bool changed;
         MOZ_TRY_VAR(changed, addon.UpdateLastModifiedTime());
         if (changed) {
@@ -663,6 +671,30 @@ AddonManagerStartup::InitializeURLPreloader()
 namespace {
 static bool sObserverRegistered;
 
+struct ContentEntry final
+{
+  explicit ContentEntry(nsTArray<nsCString>& aArgs, uint8_t aFlags=0)
+    : mArgs(aArgs)
+    , mFlags(aFlags)
+  {}
+
+  ContentEntry(const ContentEntry& other)
+    : mArgs(other.mArgs)
+    , mFlags(other.mFlags)
+  {}
+
+  AutoTArray<nsCString, 2> mArgs;
+  uint8_t mFlags;
+};
+
+}; // anonymous namespace
+}; // namespace mozilla
+
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::ContentEntry);
+
+namespace mozilla {
+namespace {
+
 class RegistryEntries final : public nsIJSRAIIHelper
                             , public LinkedListElement<RegistryEntries>
 {
@@ -671,10 +703,9 @@ public:
   NS_DECL_NSIJSRAIIHELPER
 
   using Override = AutoTArray<nsCString, 2>;
-  using Content = AutoTArray<nsCString, 2>;
   using Locale = AutoTArray<nsCString, 3>;
 
-  RegistryEntries(FileLocation& location, nsTArray<Override>&& overrides, nsTArray<Content>&& content, nsTArray<Locale>&& locales)
+  RegistryEntries(FileLocation& location, nsTArray<Override>&& overrides, nsTArray<ContentEntry>&& content, nsTArray<Locale>&& locales)
     : mLocation(location)
     , mOverrides(std::move(overrides))
     , mContent(std::move(content))
@@ -692,7 +723,7 @@ protected:
 private:
   FileLocation mLocation;
   const nsTArray<Override> mOverrides;
-  const nsTArray<Content> mContent;
+  const nsTArray<ContentEntry> mContent;
   const nsTArray<Locale> mLocales;
 };
 
@@ -710,9 +741,9 @@ RegistryEntries::Register()
     cr->ManifestOverride(context, 0, const_cast<char**>(args), 0);
   }
 
-  for (auto& content: mContent) {
-    const char* args[] = {content[0].get(), content[1].get()};
-    cr->ManifestContent(context, 0, const_cast<char**>(args), 0);
+  for (auto& content : mContent) {
+    const char* args[] = {content.mArgs[0].get(), content.mArgs[1].get()};
+    cr->ManifestContent(context, 0, const_cast<char**>(args), content.mFlags);
   }
 
   for (auto& locale : mLocales) {
@@ -760,7 +791,7 @@ AddonManagerStartup::RegisterChrome(nsIURI* manifestURI, JS::HandleValue locatio
 
 
   nsTArray<RegistryEntries::Locale> locales;
-  nsTArray<RegistryEntries::Content> content;
+  nsTArray<ContentEntry> content;
   nsTArray<RegistryEntries::Override> overrides;
 
   JS::RootedObject locs(cx, &locations.toObject());
@@ -789,8 +820,14 @@ AddonManagerStartup::RegisterChrome(nsIURI* manifestURI, JS::HandleValue locatio
       NS_ENSURE_TRUE(vals.Length() == 2, NS_ERROR_INVALID_ARG);
       overrides.AppendElement(vals);
     } else if (type.EqualsLiteral("content")) {
-      NS_ENSURE_TRUE(vals.Length() == 2, NS_ERROR_INVALID_ARG);
-      content.AppendElement(vals);
+      if (vals.Length() == 3 && vals[2].EqualsLiteral("contentaccessible=yes")) {
+        NS_ENSURE_TRUE(xpc::IsInAutomation(), NS_ERROR_INVALID_ARG);
+        vals.RemoveElementAt(2);
+        content.AppendElement(ContentEntry(vals, nsChromeRegistry::CONTENT_ACCESSIBLE));
+      } else {
+        NS_ENSURE_TRUE(vals.Length() == 2, NS_ERROR_INVALID_ARG);
+        content.AppendElement(ContentEntry(vals));
+      }
     } else if (type.EqualsLiteral("locale")) {
       NS_ENSURE_TRUE(vals.Length() == 3, NS_ERROR_INVALID_ARG);
       locales.AppendElement(vals);

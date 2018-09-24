@@ -227,9 +227,6 @@ static char* androidUserSerial = nullptr;
 // Before Android 8 we needed to use "startservice" to start the crash reporting service.
 // After Android 8 we need to use "start-foreground-service"
 static const char* androidStartServiceCommand = nullptr;
-// After targeting API 26 (Oreo) we ned to use a JobIntentService for the background
-// work regarding crash reporting. That Service needs a unique Job Id.
-static const char* androidCrashReporterJobId = nullptr;
 #endif
 
 // this holds additional data sent via the API
@@ -308,8 +305,6 @@ typedef nsTHashtable<ChildProcessData> ChildMinidumpMap;
 static ChildMinidumpMap* pidToMinidump;
 static uint32_t crashSequence;
 static bool OOPInitialized();
-
-static nsIThread* sMinidumpWriterThread;
 
 #ifdef MOZ_CRASHREPORTER_INJECTOR
 static nsIThread* sInjectorThread;
@@ -838,35 +833,43 @@ LaunchProgram(const XP_CHAR* aProgramPath, const XP_CHAR* aMinidumpPath)
  */
 
 static bool
-LaunchCrashReporterActivity(XP_CHAR* aProgramPath, XP_CHAR* aMinidumpPath,
-                            bool aSucceeded)
+LaunchCrashHandlerService(XP_CHAR* aProgramPath, XP_CHAR* aMinidumpPath,
+                          bool aSucceeded)
 {
+  static XP_CHAR extrasPath[XP_PATH_MAX];
+  size_t size = XP_PATH_MAX;
+
+  XP_CHAR* p = Concat(extrasPath, aMinidumpPath, &size);
+  p = Concat(p - 3, "extra", &size);
+
   pid_t pid = sys_fork();
 
   if (pid == -1)
     return false;
   else if (pid == 0) {
-    // Invoke the reportCrash activity using am
+    // Invoke the crash handler service using am
     if (androidUserSerial) {
       Unused << execlp("/system/bin/am",
                        "/system/bin/am",
                        androidStartServiceCommand,
                        "--user", androidUserSerial,
-                       "-a", "org.mozilla.gecko.reportCrash",
+                       "-a", "org.mozilla.gecko.ACTION_CRASHED",
                        "-n", aProgramPath,
                        "--es", "minidumpPath", aMinidumpPath,
-                       "--ei", "jobId", androidCrashReporterJobId,
+                       "--es", "extrasPath", extrasPath,
                        "--ez", "minidumpSuccess", aSucceeded ? "true" : "false",
+                       "--ez", "fatal", "true",
                        (char*)0);
     } else {
       Unused << execlp("/system/bin/am",
                        "/system/bin/am",
                        androidStartServiceCommand,
-                       "-a", "org.mozilla.gecko.reportCrash",
+                       "-a", "org.mozilla.gecko.ACTION_CRASHED",
                        "-n", aProgramPath,
                        "--es", "minidumpPath", aMinidumpPath,
-                       "--ei", "jobId", androidCrashReporterJobId,
+                       "--es", "extrasPath", extrasPath,
                        "--ez", "minidumpSuccess", aSucceeded ? "true" : "false",
+                       "--ez", "fatal", "true",
                        (char*)0);
     }
     _exit(1);
@@ -1132,8 +1135,8 @@ MinidumpCallback(
   }
 
 #if defined(MOZ_WIDGET_ANDROID) // Android
-  returnValue = LaunchCrashReporterActivity(crashReporterPath, minidumpPath,
-                                            succeeded);
+  returnValue = LaunchCrashHandlerService(crashReporterPath, minidumpPath,
+                                          succeeded);
 #else // Windows, Mac, Linux, etc...
   returnValue = LaunchProgram(crashReporterPath, minidumpPath);
 #ifdef XP_WIN
@@ -1379,13 +1382,13 @@ ChildFPEFilter(void* context, EXCEPTION_POINTERS* exinfo,
 static MINIDUMP_TYPE
 GetMinidumpType()
 {
-  MINIDUMP_TYPE minidump_type = MiniDumpWithFullMemoryInfo;
+  MINIDUMP_TYPE minidump_type = static_cast<MINIDUMP_TYPE>(
+      MiniDumpWithFullMemoryInfo | MiniDumpWithUnloadedModules);
 
 #ifdef NIGHTLY_BUILD
   // This is Nightly only because this doubles the size of minidumps based
   // on the experimental data.
   minidump_type = static_cast<MINIDUMP_TYPE>(minidump_type |
-      MiniDumpWithUnloadedModules |
       MiniDumpWithProcessThreadData);
 
   // dbghelp.dll on Win7 can't handle overlapping memory regions so we only
@@ -1551,17 +1554,12 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
 #endif
 #endif // XP_WIN32
 #else
-  // On Android, we launch using the application package name instead of a
-  // filename, so use the dynamically set MOZ_ANDROID_PACKAGE_NAME, or fall
-  // back to the static ANDROID_PACKAGE_NAME.
-  const char* androidPackageName = PR_GetEnv("MOZ_ANDROID_PACKAGE_NAME");
-  if (androidPackageName != nullptr) {
-    nsCString package(androidPackageName);
-    package.AppendLiteral("/org.mozilla.gecko.CrashReporterService");
-    crashReporterPath = ToNewCString(package);
+  // On Android, we launch a service defined via MOZ_ANDROID_CRASH_HANDLER
+  const char* androidCrashHandler = PR_GetEnv("MOZ_ANDROID_CRASH_HANDLER");
+  if (androidCrashHandler) {
+    crashReporterPath = strdup(androidCrashHandler);
   } else {
-    nsCString package(ANDROID_PACKAGE_NAME "/org.mozilla.gecko.CrashReporterService");
-    crashReporterPath = ToNewCString(package);
+    NS_WARNING("No Android crash handler set");
   }
 
   const char *deviceAndroidVersion = PR_GetEnv("MOZ_ANDROID_DEVICE_SDK_VERSION");
@@ -1572,11 +1570,6 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
     } else {
       androidStartServiceCommand = (char*)"startservice";
     }
-  }
-
-  const char *crashReporterJobId = PR_GetEnv("MOZ_ANDROID_CRASH_REPORTER_JOB_ID");
-  if (crashReporterJobId != nullptr) {
-    androidCrashReporterJobId = crashReporterJobId;
   }
 #endif // !defined(MOZ_WIDGET_ANDROID)
 
@@ -1592,6 +1585,9 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
 
 #ifdef XP_WIN32
   ReserveBreakpadVM();
+
+  // Pre-load psapi.dll to prevent it from being loaded during exception handling.
+  ::LoadLibraryW(L"psapi.dll");
 #endif // XP_WIN32
 
 #ifdef MOZ_WIDGET_ANDROID
@@ -2130,8 +2126,8 @@ EnqueueDelayedNote(DelayedNote* aNote)
   gDelayedAnnotations->AppendElement(aNote);
 }
 
-static void
-RunAndCleanUpDelayedNotes()
+void
+NotifyCrashReporterClientCreated()
 {
   if (gDelayedAnnotations) {
     for (nsAutoPtr<DelayedNote>& note : *gDelayedAnnotations) {
@@ -3413,11 +3409,6 @@ OOPDeinit()
   }
 #endif
 
-  if (sMinidumpWriterThread) {
-    sMinidumpWriterThread->Shutdown();
-    NS_RELEASE(sMinidumpWriterThread);
-  }
-
   delete crashServer;
   crashServer = nullptr;
 
@@ -3569,7 +3560,6 @@ SetRemoteExceptionHandler(const nsACString& crashPipe,
     NS_ConvertASCIItoUTF16(crashPipe).get(),
     nullptr);
   gExceptionHandler->set_handle_debug_exceptions(true);
-  RunAndCleanUpDelayedNotes();
 
 #ifdef _WIN64
   SetJitExceptionHandler();
@@ -3622,7 +3612,6 @@ SetRemoteExceptionHandler()
                      nullptr,    // no callback context
                      true,       // install signal handlers
                      gMagicChildCrashReportFd);
-  RunAndCleanUpDelayedNotes();
 
   mozalloc_set_oom_abort_handler(AnnotateOOMAllocationSize);
 
@@ -3653,7 +3642,6 @@ SetRemoteExceptionHandler(const nsACString& crashPipe)
                      nullptr,    // no callback context
                      true,       // install signal handlers
                      crashPipe.BeginReading());
-  RunAndCleanUpDelayedNotes();
 
   mozalloc_set_oom_abort_handler(AnnotateOOMAllocationSize);
 
@@ -3859,37 +3847,17 @@ bool TakeMinidump(nsIFile** aResult, bool aMoveToPending)
   return true;
 }
 
-static inline void
-NotifyDumpResult(bool aResult,
-                 bool aAsync,
-                 std::function<void(bool)>&& aCallback,
-                 RefPtr<nsIThread>&& aCallbackThread)
+bool
+CreateMinidumpsAndPair(ProcessHandle aTargetPid,
+                       ThreadId aTargetBlamedThread,
+                       const nsACString& aIncomingPairName,
+                       nsIFile* aIncomingDumpToPair,
+                       nsIFile** aMainDumpOut)
 {
-  std::function<void()> runnable = [&](){
-    aCallback(aResult);
-  };
-
-  if (aAsync) {
-    MOZ_ASSERT(!!aCallbackThread);
-    Unused << aCallbackThread->Dispatch(NS_NewRunnableFunction("CrashReporter::InvokeCallback",
-                                                               std::move(runnable)),
-                                        NS_DISPATCH_SYNC);
-  } else {
-    runnable();
+  if (!GetEnabled()) {
+    return false;
   }
-}
 
-static void
-CreatePairedChildMinidumpAsync(ProcessHandle aTargetPid,
-                               ThreadId aTargetBlamedThread,
-                               nsCString aIncomingPairName,
-                               nsCOMPtr<nsIFile> aIncomingDumpToPair,
-                               nsIFile** aMainDumpOut,
-                               xpstring aDumpPath,
-                               std::function<void(bool)>&& aCallback,
-                               RefPtr<nsIThread>&& aCallbackThread,
-                               bool aAsync)
-{
   AutoIOInterposerDisable disableIOInterposition;
 
 #ifdef XP_MACOSX
@@ -3898,64 +3866,6 @@ CreatePairedChildMinidumpAsync(ProcessHandle aTargetPid,
   ThreadId targetThread = aTargetBlamedThread;
 #endif
 
-  // dump the target
-  nsCOMPtr<nsIFile> targetMinidump;
-  if (!google_breakpad::ExceptionHandler::WriteMinidumpForChild(
-         aTargetPid,
-         targetThread,
-         aDumpPath,
-         PairedDumpCallbackExtra,
-         static_cast<void*>(&targetMinidump)
-#ifdef XP_WIN32
-         , GetMinidumpType()
-#endif
-      )) {
-    NotifyDumpResult(false, aAsync, std::move(aCallback), std::move(aCallbackThread));
-    return;
-  }
-
-  nsCOMPtr<nsIFile> targetExtra;
-  GetExtraFileForMinidump(targetMinidump, getter_AddRefs(targetExtra));
-  if (!targetExtra) {
-    targetMinidump->Remove(false);
-
-    NotifyDumpResult(false, aAsync, std::move(aCallback), std::move(aCallbackThread));
-    return;
-  }
-
-  RenameAdditionalHangMinidump(aIncomingDumpToPair,
-                               targetMinidump,
-                               aIncomingPairName);
-
-  if (ShouldReport()) {
-    MoveToPending(targetMinidump, targetExtra, nullptr);
-    MoveToPending(aIncomingDumpToPair, nullptr, nullptr);
-  }
-
-  targetMinidump.forget(aMainDumpOut);
-
-  NotifyDumpResult(true, aAsync, std::move(aCallback), std::move(aCallbackThread));
-}
-
-void
-CreateMinidumpsAndPair(ProcessHandle aTargetPid,
-                       ThreadId aTargetBlamedThread,
-                       const nsACString& aIncomingPairName,
-                       nsIFile* aIncomingDumpToPair,
-                       nsIFile** aMainDumpOut,
-                       std::function<void(bool)>&& aCallback,
-                       bool aAsync)
-{
-  if (!GetEnabled()) {
-    aCallback(false);
-    return;
-  }
-#if defined(DEBUG) && defined(HAS_DLL_BLOCKLIST)
-  DllBlocklist_Shutdown();
-#endif
-
-  AutoIOInterposerDisable disableIOInterposition;
-
   xpstring dump_path;
 #ifndef XP_LINUX
   dump_path = gExceptionHandler->dump_path();
@@ -3963,10 +3873,26 @@ CreateMinidumpsAndPair(ProcessHandle aTargetPid,
   dump_path = gExceptionHandler->minidump_descriptor().directory();
 #endif
 
+  // dump the target
+  nsCOMPtr<nsIFile> targetMinidump;
+  if (!google_breakpad::ExceptionHandler::WriteMinidumpForChild(
+         aTargetPid,
+         targetThread,
+         dump_path,
+         PairedDumpCallbackExtra,
+         static_cast<void*>(&targetMinidump)
+#ifdef XP_WIN32
+         , GetMinidumpType()
+#endif
+      )) {
+    return false;
+  }
+
+  nsCOMPtr<nsIFile> targetExtra;
+  GetExtraFileForMinidump(targetMinidump, getter_AddRefs(targetExtra));
+
   // If aIncomingDumpToPair isn't valid, create a dump of this process.
-  // This part needs to be synchronous, unfortunately, so that the parent dump
-  // contains the stack symmetrical with the child dump.
-  nsCOMPtr<nsIFile> incomingDumpToPair;
+  nsCOMPtr<nsIFile> incomingDump;
   if (aIncomingDumpToPair == nullptr) {
     if (!google_breakpad::ExceptionHandler::WriteMinidump(
         dump_path,
@@ -3974,52 +3900,32 @@ CreateMinidumpsAndPair(ProcessHandle aTargetPid,
         true,
 #endif
         PairedDumpCallback,
-        static_cast<void*>(&incomingDumpToPair)
+        static_cast<void*>(&incomingDump)
 #ifdef XP_WIN32
         , GetMinidumpType()
 #endif
         )) {
-      aCallback(false);
-      return;
-    } // else incomingDump is assigned in PairedDumpCallback().
+      targetMinidump->Remove(false);
+      targetExtra->Remove(false);
+      return false;
+    }
   } else {
-    incomingDumpToPair = aIncomingDumpToPair;
-  }
-  MOZ_ASSERT(!!incomingDumpToPair);
-
-  if (aAsync &&
-      !sMinidumpWriterThread &&
-      NS_FAILED(NS_NewNamedThread("Minidump Writer", &sMinidumpWriterThread))) {
-    aCallback(false);
-    return;
+    incomingDump = aIncomingDumpToPair;
   }
 
-  nsCString incomingPairName(aIncomingPairName);
-  std::function<void(bool)> callback = std::move(aCallback);
-  // Don't call do_GetCurrentThread() if this is called synchronously because
-  // 1. it's unnecessary, and 2. more importantly, it might create one if called
-  // from a native thread, and the thread will be leaked.
-  RefPtr<nsIThread> callbackThread = aAsync ? do_GetCurrentThread() : nullptr;
+  RenameAdditionalHangMinidump(incomingDump, targetMinidump, aIncomingPairName);
 
-  std::function<void()> doDump = [=]() mutable {
-    CreatePairedChildMinidumpAsync(aTargetPid,
-                                   aTargetBlamedThread,
-                                   incomingPairName,
-                                   incomingDumpToPair,
-                                   aMainDumpOut,
-                                   dump_path,
-                                   std::move(callback),
-                                   std::move(callbackThread),
-                                   aAsync);
-  };
-
-  if (aAsync) {
-    sMinidumpWriterThread->Dispatch(NS_NewRunnableFunction("CrashReporter::CreateMinidumpsAndPair",
-                                                           std::move(doDump)),
-                                    nsIEventTarget::DISPATCH_NORMAL);
-  } else {
-    doDump();
+  if (ShouldReport()) {
+    MoveToPending(targetMinidump, targetExtra, nullptr);
+    MoveToPending(incomingDump, nullptr, nullptr);
   }
+#if defined(DEBUG) && defined(HAS_DLL_BLOCKLIST)
+  DllBlocklist_Shutdown();
+#endif
+
+  targetMinidump.forget(aMainDumpOut);
+
+  return true;
 }
 
 bool

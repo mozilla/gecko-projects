@@ -54,8 +54,9 @@
   margin-top: 4px !important;
 }
 
+#contentBlockingCategories,
 #contentBlockingCheckboxContainer {
-  margin: 16px 0;
+  margin-top: 16px;
 }
 
 #contentBlockingToggleLabel {
@@ -127,13 +128,21 @@
   margin-inline-start: 25px !important;
 }
 
-#trackingProtectionMenu,
-#blockCookiesCB {
+#trackingProtectionMenu {
   margin-top: 0.75em;
 }
 
-#blockCookiesCBDeck {
+#blockCookiesCBDeck[selectedIndex]:not([selectedIndex="0"]) {
   max-width: 444px;
+}
+
+#blockCookiesCBDeck:not([selectedIndex]) > .warning-description,
+#blockCookiesCBDeck[selectedIndex="0"] > .warning-description {
+  display: none;
+}
+
+#blockCookiesCBDeck > .warning-description {
+  margin-bottom: 0.75em !important;
 }
 
 #changeBlockListLink {
@@ -147,8 +156,9 @@
   opacity: 0.6;
 }
 
-.reject-trackers-warning-icon {
+.warning-description {
   background: url(chrome://browser/skin/controlcenter/warning.svg) no-repeat 0 5px;
+  opacity: 0.6;
   -moz-context-properties: fill, stroke;
   fill: #d7b600;
   stroke: white;

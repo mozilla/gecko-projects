@@ -395,6 +395,8 @@ gfxWindowsPlatform::InitDWriteSupport()
 
   SetupClearTypeParams();
   reporter.SetSuccessful();
+  Factory::SetSystemTextQuality(gfxVars::SystemTextQuality());
+  gfxVars::SetSystemTextQualityListener(gfxDWriteFont::SystemTextQualityChanged);
   return true;
 }
 
@@ -451,7 +453,7 @@ gfxWindowsPlatform::GetBackendPrefs() const
       data.mContentDefault = BackendType::DIRECT2D1_1;
     }
   }
-  return std::move(data);
+  return data;
 }
 
 void

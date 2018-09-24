@@ -23,11 +23,6 @@ from mach.decorators import (
 from mach_commands_base import WebPlatformTestsRunner, create_parser_wpt
 
 
-def is_firefox_or_android(cls):
-    """Must have Firefox build or Android build."""
-    return conditions.is_firefox(cls) or conditions.is_android(cls)
-
-
 class WebPlatformTestsRunnerSetup(MozbuildObject):
     default_log_type = "mach"
 
@@ -39,7 +34,7 @@ class WebPlatformTestsRunnerSetup(MozbuildObject):
             sys.path.append(build_path)
 
         if kwargs["config"] is None:
-            kwargs["config"] = os.path.join(here, 'wptrunner.ini')
+            kwargs["config"] = os.path.join(self.topobjdir, '_tests', 'web-platform', 'wptrunner.local.ini')
 
         if kwargs["prefs_root"] is None:
             kwargs["prefs_root"] = os.path.join(self.topsrcdir, 'testing', 'profiles')
@@ -136,7 +131,7 @@ class WebPlatformTestsUpdater(MozbuildObject):
         from update import updatecommandline
 
         if kwargs["config"] is None:
-            kwargs["config"] = os.path.join(self.topsrcdir, 'testing', 'web-platform', 'wptrunner.ini')
+            kwargs["config"] = os.path.join(self.topobjdir, '_tests', 'web-platform', 'wptrunner.local.ini')
         if kwargs["product"] is None:
             kwargs["product"] = "firefox"
 
@@ -293,21 +288,22 @@ testing/web-platform/tests for tests that may be shared
 
 
 class WPTManifestUpdater(MozbuildObject):
-    def run_update(self, check_clean=False, rebuild=False, **kwargs):
+    def run_update(self, rebuild=False, **kwargs):
         import manifestupdate
         from wptrunner import wptlogging
         logger = wptlogging.setup(kwargs, {"mach": sys.stdout})
         wpt_dir = os.path.abspath(os.path.join(self.topsrcdir, 'testing', 'web-platform'))
-        manifestupdate.update(logger, wpt_dir, check_clean, rebuild)
+        config_dir = os.path.abspath(os.path.join(self.topobjdir, '_tests', 'web-platform'))
+        manifestupdate.update(logger, wpt_dir, rebuild, config_dir)
 
 
 class WPTManifestDownloader(MozbuildObject):
-    def run_download(self, path=None, tests_root=None, force=False, **kwargs):
+    def run_download(self, manifest_update=True, force=False, **kwargs):
         import manifestdownload
         from wptrunner import wptlogging
         logger = wptlogging.setup(kwargs, {"mach": sys.stdout})
-        wpt_dir = os.path.abspath(os.path.join(self.topsrcdir, 'testing', 'web-platform'))
-        manifestdownload.run(logger, wpt_dir, self.topsrcdir, force)
+        wpt_dir = os.path.abspath(os.path.join(self.topobjdir, '_tests', 'web-platform'))
+        manifestdownload.run(wpt_dir, self.topsrcdir, logger, force, manifest_update)
 
 
 def create_parser_update():
@@ -357,7 +353,7 @@ class MachCommands(MachCommandBase):
 
     @Command("web-platform-tests",
              category="testing",
-             conditions=[is_firefox_or_android],
+             conditions=[conditions.is_firefox_or_android],
              parser=create_parser_wpt)
     def run_web_platform_tests(self, **params):
         self.setup()
@@ -371,13 +367,15 @@ class MachCommands(MachCommandBase):
                 params["include"].append(item["name"])
             del params["test_objects"]
 
+        self.wpt_manifest_download(**params)
+        params["manifest_update"] = False
         wpt_setup = self._spawn(WebPlatformTestsRunnerSetup)
         wpt_runner = WebPlatformTestsRunner(wpt_setup)
         return wpt_runner.run(**params)
 
     @Command("wpt",
              category="testing",
-             conditions=[is_firefox_or_android],
+             conditions=[conditions.is_firefox_or_android],
              parser=create_parser_wpt)
     def run_wpt(self, **params):
         return self.run_web_platform_tests(**params)
@@ -436,7 +434,6 @@ class MachCommands(MachCommandBase):
         self.setup()
         wpt_manifest_updater = self._spawn(WPTManifestUpdater)
         return wpt_manifest_updater.run_update(**params)
-
 
     @Command("wpt-manifest-download",
              category="testing",

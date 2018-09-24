@@ -52,8 +52,8 @@ NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(SVGMPathElement,
                                              nsIMutationObserver)
 
 // Constructor
-SVGMPathElement::SVGMPathElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-  : SVGMPathElementBase(aNodeInfo)
+SVGMPathElement::SVGMPathElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
+  : SVGMPathElementBase(std::move(aNodeInfo))
   , mPathTracker(this)
 {
 }
@@ -239,7 +239,10 @@ SVGMPathElement::UpdateHrefTarget(nsIContent* aParent,
     // Pass in |aParent| instead of |this| -- first argument is only used
     // for a call to GetComposedDoc(), and |this| might not have a current
     // document yet (if our caller is BindToTree).
-    mPathTracker.Reset(aParent, targetURI);
+    // Bug 1415044 to investigate which referrer we should use
+    mPathTracker.Reset(aParent, targetURI,
+                       OwnerDoc()->GetDocumentURI(),
+                       OwnerDoc()->GetReferrerPolicy());
   } else {
     // if we don't have a parent, then there's no animateMotion element
     // depending on our target, so there's no point tracking it right now.

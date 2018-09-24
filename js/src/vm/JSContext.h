@@ -183,16 +183,18 @@ struct JSContext : public JS::RootingContext,
     template <typename T>
     T* pod_callocCanGC(size_t numElems, arena_id_t arena = js::MallocArena) {
         T* p = maybe_pod_calloc<T>(numElems, arena);
-        if (MOZ_LIKELY(!!p))
+        if (MOZ_LIKELY(!!p)) {
             return p;
+        }
         size_t bytes;
         if (MOZ_UNLIKELY(!js::CalculateAllocSize<T>(numElems, &bytes))) {
             reportAllocationOverflow();
             return nullptr;
         }
         p = static_cast<T*>(runtime()->onOutOfMemoryCanGC(js::AllocFunction::Calloc, bytes));
-        if (!p)
+        if (!p) {
             return nullptr;
+        }
         updateMallocCounter(bytes);
         return p;
     }
@@ -226,7 +228,6 @@ struct JSContext : public JS::RootingContext,
     bool permanentAtomsPopulated() { return runtime_->permanentAtomsPopulated(); }
     const js::FrozenAtomSet& permanentAtoms() { return *runtime_->permanentAtoms(); }
     js::WellKnownSymbols& wellKnownSymbols() { return *runtime_->wellKnownSymbols; }
-    JS::BuildIdOp buildIdOp() { return runtime_->buildIdOp; }
     const JS::AsmJSCacheOps& asmJSCacheOps() { return runtime_->asmJSCacheOps; }
     js::PropertyName* emptyString() { return runtime_->emptyString; }
     js::FreeOp* defaultFreeOp() { return runtime_->defaultFreeOp(); }
@@ -471,15 +472,7 @@ struct JSContext : public JS::RootingContext,
      */
     js::ThreadData<js::EnterDebuggeeNoExecute*> noExecuteDebuggerTop;
 
-    js::ThreadData<js::ActivityCallback> activityCallback;
-    js::ThreadData<void*>                activityCallbackArg;
-    void triggerActivityCallback(bool active);
-
-    /* The request depth for this thread. */
-    js::ThreadData<unsigned> requestDepth;
-
 #ifdef DEBUG
-    js::ThreadData<unsigned> checkRequestDepth;
     js::ThreadData<uint32_t> inUnsafeCallWithABI;
     js::ThreadData<bool> hasAutoUnsafeCallWithABI;
 #endif
@@ -544,7 +537,6 @@ struct JSContext : public JS::RootingContext,
     // Whether this thread is currently manipulating possibly-gray GC things.
     js::ThreadData<size_t> isTouchingGrayThings;
 
-    js::ThreadData<size_t> noGCOrAllocationCheck;
     js::ThreadData<size_t> noNurseryAllocationCheck;
 
     /*
@@ -554,13 +546,6 @@ struct JSContext : public JS::RootingContext,
      * creation.
      */
     js::ThreadData<uintptr_t> disableStrictProxyCheckingCount;
-
-    bool isAllocAllowed() { return noGCOrAllocationCheck == 0; }
-    void disallowAlloc() { ++noGCOrAllocationCheck; }
-    void allowAlloc() {
-        MOZ_ASSERT(!isAllocAllowed());
-        --noGCOrAllocationCheck;
-    }
 
     bool isNurseryAllocAllowed() { return noNurseryAllocationCheck == 0; }
     void disallowNurseryAlloc() { ++noNurseryAllocationCheck; }
@@ -664,8 +649,9 @@ struct JSContext : public JS::RootingContext,
     js::ThreadData<JS::PersistentRooted<JS::Value>> unwrappedException_; /* most-recently-thrown exception */
 
     JS::Value& unwrappedException() {
-        if (!unwrappedException_.ref().initialized())
+        if (!unwrappedException_.ref().initialized()) {
             unwrappedException_.ref().init(this);
+        }
         return unwrappedException_.ref().get();
     }
 
@@ -721,9 +707,6 @@ struct JSContext : public JS::RootingContext,
         return runtime_ == rt;
     }
 
-    // Number of JS_BeginRequest calls without the corresponding JS_EndRequest.
-    js::ThreadData<unsigned> outstandingRequests;
-
     js::ThreadData<bool> jitIsBroken;
 
     void updateJITEnabled();
@@ -742,8 +725,9 @@ struct JSContext : public JS::RootingContext,
   public:
 
     js::SavedFrame*& asyncStackForNewActivations() {
-        if (!asyncStackForNewActivations_.ref().initialized())
+        if (!asyncStackForNewActivations_.ref().initialized()) {
             asyncStackForNewActivations_.ref().init(this);
+        }
         return asyncStackForNewActivations_.ref().get();
     }
 
@@ -1349,5 +1333,8 @@ struct MOZ_RAII AutoSetThreadIsSweeping
 } // namespace gc
 
 } /* namespace js */
+
+#define CHECK_THREAD(cx) \
+    MOZ_ASSERT_IF(cx && !cx->helperThread(), CurrentThreadCanAccessRuntime(cx->runtime()))
 
 #endif /* vm_JSContext_h */

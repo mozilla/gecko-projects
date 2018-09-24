@@ -77,6 +77,7 @@
 #include <wtsapi32.h>
 #include <process.h>
 #include <commctrl.h>
+#include <dbt.h>
 #include <unknwn.h>
 #include <psapi.h>
 
@@ -119,6 +120,7 @@
 #include "nsIServiceManager.h"
 #include "nsWindowGfx.h"
 #include "gfxWindowsPlatform.h"
+#include "gfxDWriteFonts.h"
 #include "Layers.h"
 #include "nsPrintfCString.h"
 #include "mozilla/Preferences.h"
@@ -143,6 +145,7 @@
 #include "nsStyleConsts.h"
 #include "gfxConfig.h"
 #include "InProcessWinCompositorWidget.h"
+#include "InputDeviceUtils.h"
 #include "ScreenHelperWin.h"
 
 #include "nsIGfxInfo.h"
@@ -604,6 +607,7 @@ nsWindow::nsWindow(bool aIsChildWindow)
   mPaintDC              = nullptr;
   mPrevWndProc          = nullptr;
   mNativeDragTarget     = nullptr;
+  mDeviceNotifyHandle   = nullptr;
   mInDtor               = false;
   mIsVisible            = false;
   mIsTopWidgetWindow    = false;
@@ -848,6 +852,9 @@ nsWindow::Create(nsIWidget* aParent,
     NS_WARNING("nsWindow CreateWindowEx failed.");
     return NS_ERROR_FAILURE;
   }
+
+  mDeviceNotifyHandle = InputDeviceUtils::RegisterNotification(mWnd);
+
   // If mDefaultScale is set before mWnd has been set, it will have the scale of the
   // primary monitor, rather than the monitor that the window is actually on. For
   // non-popup windows this gets corrected by the WM_DPICHANGED message which resets
@@ -980,6 +987,9 @@ void nsWindow::Destroy()
   /* We should clear our cached resources now and not wait for the GC to
    * delete the nsWindow. */
   ClearCachedResources();
+
+  InputDeviceUtils::UnregisterNotification(mDeviceNotifyHandle);
+  mDeviceNotifyHandle = nullptr;
 
   // The DestroyWindow function destroys the specified window. The function sends WM_DESTROY
   // and WM_NCDESTROY messages to the window to deactivate it and remove the keyboard focus
@@ -1977,6 +1987,15 @@ nsWindow::Resize(double aX, double aY, double aWidth,
     Invalidate();
 
   NotifyRollupGeometryChange();
+}
+
+mozilla::Maybe<bool>
+nsWindow::IsResizingNativeWidget()
+{
+  if (mResizeState == RESIZING) {
+    return Some(true);
+  }
+  return Some(false);
 }
 
 nsresult
@@ -5100,22 +5119,6 @@ static void ForceFontUpdate()
   Preferences::SetBool(kPrefName, !fontInternalChange);
 }
 
-static bool CleartypeSettingChanged()
-{
-  static int currentQuality = -1;
-  BYTE quality = cairo_win32_get_system_text_quality();
-
-  if (currentQuality == quality)
-    return false;
-
-  if (currentQuality < 0) {
-    currentQuality = quality;
-    return false;
-  }
-  currentQuality = quality;
-  return true;
-}
-
 bool
 nsWindow::ExternalHandlerProcessMessage(UINT aMessage,
                                         WPARAM& aWParam,
@@ -5319,6 +5322,10 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
         NotifyThemeChanged();
         break;
       }
+      if (wParam == SPI_SETFONTSMOOTHING || wParam == SPI_SETFONTSMOOTHINGTYPE) {
+        gfxDWriteFont::UpdateSystemTextQuality();
+        break;
+      }
       if (lParam) {
         auto lParamString = reinterpret_cast<const wchar_t*>(lParam);
         if (!wcscmp(lParamString, L"ImmersiveColorSet")) {
@@ -5339,6 +5346,22 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
               uiUtils->UpdateTabletModeState();
             }
           }
+        }
+      }
+    }
+    break;
+
+    case WM_DEVICECHANGE:
+    {
+      if (wParam == DBT_DEVICEARRIVAL ||
+          wParam == DBT_DEVICEREMOVECOMPLETE) {
+        DEV_BROADCAST_HDR* hdr = reinterpret_cast<DEV_BROADCAST_HDR*>(lParam);
+        // Check dbch_devicetype explicitly since we will get other device types
+        // (e.g. DBT_DEVTYP_VOLUME) for some reasons even if we specify
+        // DBT_DEVTYP_DEVICEINTERFACE in the filter for
+        // RegisterDeviceNotification.
+        if (hdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) {
+          NotifyThemeChanged();
         }
       }
     }
@@ -5494,6 +5517,12 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
     case WM_NCPAINT:
     {
       /*
+       * ClearType changes often don't send a WM_SETTINGCHANGE message. But they
+       * do seem to always send a WM_NCPAINT message, so let's update on that.
+       */
+      gfxDWriteFont::UpdateSystemTextQuality();
+
+      /*
        * Reset the non-client paint region so that it excludes the
        * non-client areas we paint manually. Then call defwndproc
        * to do the actual painting.
@@ -5544,13 +5573,6 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       break;
 
     case WM_PAINT:
-      if (CleartypeSettingChanged()) {
-        ForceFontUpdate();
-        gfxFontCache *fc = gfxFontCache::GetCache();
-        if (fc) {
-          fc->Flush();
-        }
-      }
       *aRetValue = (int) OnPaint(nullptr, 0);
       result = true;
       break;

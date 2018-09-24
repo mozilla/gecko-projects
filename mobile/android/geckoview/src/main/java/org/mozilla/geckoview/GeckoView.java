@@ -10,7 +10,6 @@ import org.mozilla.gecko.AndroidGamepadManager;
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.gfx.DynamicToolbarAnimator;
 import org.mozilla.gecko.gfx.PanZoomController;
-import org.mozilla.gecko.gfx.GeckoDisplay;
 import org.mozilla.gecko.InputMethods;
 import org.mozilla.gecko.util.ActivityUtils;
 
@@ -111,8 +110,8 @@ public class GeckoView extends FrameLayout {
                 final SurfaceHolder holder = GeckoView.this.mSurfaceView.getHolder();
                 final Rect frame = holder.getSurfaceFrame();
                 mDisplay.surfaceChanged(holder.getSurface(), frame.right, frame.bottom);
+                GeckoView.this.setActive(true);
             }
-            GeckoView.this.setActive(true);
         }
 
         public GeckoDisplay release() {
@@ -135,8 +134,10 @@ public class GeckoView extends FrameLayout {
                                    final int width, final int height) {
             if (mDisplay != null) {
                 mDisplay.surfaceChanged(holder.getSurface(), width, height);
+                if (!mValid) {
+                    GeckoView.this.setActive(true);
+                }
             }
-            GeckoView.this.setActive(true);
             mValid = true;
         }
 
@@ -144,8 +145,8 @@ public class GeckoView extends FrameLayout {
         public void surfaceDestroyed(final SurfaceHolder holder) {
             if (mDisplay != null) {
                 mDisplay.surfaceDestroyed();
+                GeckoView.this.setActive(false);
             }
-            GeckoView.this.setActive(false);
             mValid = false;
         }
 
@@ -157,6 +158,10 @@ public class GeckoView extends FrameLayout {
                 GeckoView.this.mSurfaceView.getLocationOnScreen(mOrigin);
                 mDisplay.screenOriginChanged(mOrigin[0], mOrigin[1]);
             }
+        }
+
+        public boolean shouldPinOnScreen() {
+            return mDisplay != null ? mDisplay.shouldPinOnScreen() : false;
         }
     }
 
@@ -211,6 +216,19 @@ public class GeckoView extends FrameLayout {
         }
     }
 
+    /**
+     * Return whether the view should be pinned on the screen. When pinned, the view
+     * should not be moved on the screen due to animation, scrolling, etc. A common reason
+     * for the view being pinned is when the user is dragging a selection caret inside
+     * the view; normal user interaction would be disrupted in that case if the view
+     * was moved on screen.
+     *
+     * @return True if view should be pinned on the screen.
+     */
+    public boolean shouldPinOnScreen() {
+        return mDisplay.shouldPinOnScreen();
+    }
+
     /* package */ void setActive(final boolean active) {
         if (mSession != null) {
             mSession.setActive(active);
@@ -246,6 +264,7 @@ public class GeckoView extends FrameLayout {
             mSession.setFocused(false);
         }
         mSession = null;
+        mRuntime = null;
         return session;
     }
 
@@ -427,7 +446,7 @@ public class GeckoView extends FrameLayout {
     }
 
     private void restoreSession(final @Nullable GeckoSession savedSession) {
-        if (savedSession == null) {
+        if (savedSession == null || savedSession.equals(mSession)) {
             return;
         }
 
@@ -460,13 +479,26 @@ public class GeckoView extends FrameLayout {
     public void onWindowFocusChanged(boolean hasWindowFocus) {
         super.onWindowFocusChanged(hasWindowFocus);
 
-        if (mSession != null) {
-            mSession.setFocused(hasWindowFocus && isFocused());
+        // Only call setFocus(true) when the window gains focus. Any focus loss could be temporary
+        // (e.g. due to auto-fill popups) and we don't want to call setFocus(false) in those cases.
+        // Instead, we call setFocus(false) in onWindowVisibilityChanged.
+        if (mSession != null && hasWindowFocus && isFocused()) {
+            mSession.setFocused(true);
         }
     }
 
     @Override
-    public void onFocusChanged(boolean gainFocus, int direction, Rect previouslyFocusedRect) {
+    protected void onWindowVisibilityChanged(int visibility) {
+        super.onWindowVisibilityChanged(visibility);
+
+        // We can be reasonably sure that the focus loss is not temporary, so call setFocus(false).
+        if (mSession != null && visibility != View.VISIBLE && !hasWindowFocus()) {
+            mSession.setFocused(false);
+        }
+    }
+
+    @Override
+    protected void onFocusChanged(boolean gainFocus, int direction, Rect previouslyFocusedRect) {
         super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
 
         if (mIsResettingFocus) {

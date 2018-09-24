@@ -30,8 +30,8 @@ treeherder:
         'Tsd-e10s': 'Talos performance tests with e10s, Stylo disabled'
         'Tss-e10s': 'Talos performance tests with e10s, Stylo sequential'
         'T-P-e10s': 'Talos performance tests with e10s and gecko profiling'
-        'tt-c': 'Telemetry client marionette tests'
-        'tt-c-e10s': 'Telemetry client marionette tests with e10s'
+        'tt': 'Telemetry tests'
+        'tt-e10s': 'Telemetry tests with e10s'
         'SY-e10s': 'Are we slim yet tests by TaskCluster with e10s'
         'SYsd-e10s': 'Are we slim yet tests by TaskCluster with e10s, Stylo disabled'
         'SYss-e10s': 'Are we slim yet tests by TaskCluster with e10s, Stylo sequential'
@@ -63,6 +63,7 @@ treeherder:
         'TW64': 'Toolchain builds for Windows 64-bits'
         'WM32': 'MinGW builds for Windows 32-bits'
         'WM64': 'MinGW builds for Windows 64-bits'
+        'WMC64': 'MinGW-Clang builds for Windows 64-bits'
         'Searchfox': 'Searchfox builds'
         'SM': 'Spidermonkey builds'
         'pub': 'APK publishing'
@@ -141,7 +142,7 @@ release-promotion:
             target-tasks-method: promote_desktop
         promote_firefox_rc:
             product: firefox
-            release-type: rc
+            is-rc: true
             target-tasks-method: promote_desktop
             partial-updates: true
         push_devedition:
@@ -163,7 +164,7 @@ release-promotion:
             version-bump: true
         ship_fennec_rc:
             product: fennec
-            release-type: rc
+            is-rc: true
             target-tasks-method: ship_fennec
         ship_firefox:
             product: firefox
@@ -172,7 +173,7 @@ release-promotion:
             partial-updates: true
         ship_firefox_rc:
             product: firefox
-            release-type: rc
+            is-rc: true
             target-tasks-method: ship_desktop
             partial-updates: true
 

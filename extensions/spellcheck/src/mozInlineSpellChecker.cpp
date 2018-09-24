@@ -55,7 +55,6 @@
 #include "nsIRunnable.h"
 #include "nsISelectionController.h"
 #include "nsIServiceManager.h"
-#include "nsITextServicesFilter.h"
 #include "nsString.h"
 #include "nsThreadUtils.h"
 #include "nsUnicharUtils.h"
@@ -668,16 +667,13 @@ nsresult mozInlineSpellChecker::Cleanup(bool aDestroyingFrames)
 bool // static
 mozInlineSpellChecker::CanEnableInlineSpellChecking()
 {
-  nsresult rv;
   if (gCanEnableSpellChecking == SpellCheck_Uninitialized) {
     gCanEnableSpellChecking = SpellCheck_NotAvailable;
 
-    nsCOMPtr<nsIEditorSpellCheck> spellchecker =
-      do_CreateInstance("@mozilla.org/editor/editorspellchecker;1", &rv);
-    NS_ENSURE_SUCCESS(rv, false);
+    nsCOMPtr<nsIEditorSpellCheck> spellchecker = new EditorSpellCheck();
 
     bool canSpellCheck = false;
-    rv = spellchecker->CanSpellCheck(&canSpellCheck);
+    nsresult rv = spellchecker->CanSpellCheck(&canSpellCheck);
     NS_ENSURE_SUCCESS(rv, false);
 
     if (canSpellCheck)
@@ -770,14 +766,8 @@ mozInlineSpellChecker::SetEnableRealTimeSpell(bool aEnabled)
     return NS_OK;
   }
 
-  nsCOMPtr<nsITextServicesFilter> filter =
-    do_CreateInstance("@mozilla.org/editor/txtsrvfiltermail;1");
-  if (NS_WARN_IF(!filter)) {
-    return NS_ERROR_FAILURE;
-  }
-
   mPendingSpellCheck = new EditorSpellCheck();
-  mPendingSpellCheck->SetFilter(filter);
+  mPendingSpellCheck->SetFilterType(nsIEditorSpellCheck::FILTERTYPE_MAIL);
 
   mPendingInitEditorSpellCheckCallback = new InitEditorSpellCheckCallback(this);
   nsresult rv = mPendingSpellCheck->InitSpellChecker(

@@ -67,7 +67,6 @@ from ..frontend.context import (
 )
 from .cargo_build_defs import (
     cargo_extra_outputs,
-    cargo_extra_flags,
 )
 
 
@@ -184,6 +183,7 @@ class BackendTupfile(object):
         ]
         for srcs, compiler, flags, dash_c, prefix in compilers:
             for src in sorted(srcs):
+                self.export_icecc()
                 # AS can be set to $(CC), so we need to call expand_variables on
                 # the compiler to get the real value.
                 compiler_value = self.variables.get(compiler, self.environment.substs[compiler])
@@ -209,6 +209,9 @@ class BackendTupfile(object):
         # These are used by mach/mixin/process.py to determine the current
         # shell.
         self.export(['SHELL', 'MOZILLABUILD', 'COMSPEC'])
+
+    def export_icecc(self):
+        self.export(['ICECC_VERSION', 'ICECC_CC', 'ICECC_CXX'])
 
     def close(self):
         return self.fh.close()
@@ -297,6 +300,19 @@ class TupBackend(CommonBackend):
     def build(self, config, output, jobs, verbose, what=None):
         if not what:
             what = ['%s/<default>' % config.topobjdir]
+        else:
+            # Translate relsrcdir paths to the objdir when possible.
+            translated = []
+            topsrcdir = mozpath.normpath(config.topsrcdir)
+            for path in what:
+                path = mozpath.abspath(path)
+                if path.startswith(topsrcdir):
+                    objdir_path = path.replace(topsrcdir, config.topobjdir)
+                    if os.path.exists(objdir_path):
+                        path = objdir_path
+                translated.append(path)
+            what = translated
+
         args = [self.environment.substs['TUP'], 'upd'] + what
         if self.environment.substs.get('MOZ_AUTOMATION'):
             args += ['--quiet']
@@ -671,6 +687,7 @@ class TupBackend(CommonBackend):
                                     (backend_file.host_library, self._gen_host_library)):
                 if var:
                     backend_file.export_shell()
+                    backend_file.export_icecc()
                     gen_method(backend_file)
             for obj in backend_file.delayed_generated_files:
                 self._process_generated_file(backend_file, obj)
@@ -701,11 +718,26 @@ class TupBackend(CommonBackend):
             fh.write('IDL_PARSER_DIR = $(topsrcdir)/xpcom/idl-parser\n')
             fh.write('IDL_PARSER_CACHE_DIR = $(MOZ_OBJ_ROOT)/xpcom/idl-parser/xpidl\n')
 
-        # Run 'tup init' if necessary.
-        if not os.path.exists(mozpath.join(self.environment.topsrcdir, ".tup")):
+        # Run 'tup init' if necessary, attempting to cover both the objdir
+        # and srcdir.
+        tup_base_dir = os.path.commonprefix([self.environment.topsrcdir,
+                                             self.environment.topobjdir])
+        if tup_base_dir != self.environment.topsrcdir:
+            if os.path.isdir(mozpath.join(self.environment.topsrcdir, '.tup')):
+                print("Found old tup root at '%s', removing..." %
+                      mozpath.join(self.environment.topsrcdir, '.tup'))
+                shutil.rmtree(mozpath.join(self.environment.topsrcdir, '.tup'))
+        if not os.path.isdir(mozpath.join(tup_base_dir, '.tup')):
+            if tup_base_dir != self.environment.topsrcdir:
+                # Ask the user to figure out where to run 'tup init' before
+                # continuing.
+                raise Exception("Please run `tup init --no-sync` in a common "
+                    "ancestor directory of your objdir and srcdir, possibly "
+                    "%s. To reduce file scanning overhead, this directory "
+                    "should contain the fewest files possible that are not "
+                    "necessary for this build." % tup_base_dir)
             tup = self.environment.substs.get('TUP', 'tup')
-            self._cmd.run_process(cwd=self.environment.topsrcdir, log_name='tup', args=[tup, 'init', '--no-sync'])
-
+            self._cmd.run_process(cwd=tup_base_dir, log_name='tup', args=[tup, 'init', '--no-sync'])
 
     def _get_cargo_flags(self, obj):
         cargo_flags = ['--build-plan', '-Z', 'unstable-options']
@@ -770,9 +802,19 @@ class TupBackend(CommonBackend):
         invocations = build_plan['invocations']
         processed = set()
 
+        rust_build_home = mozpath.join(self.environment.topobjdir,
+                                       'toolkit/library/rust')
+
         def get_libloading_outdir():
             for invocation in invocations:
                 if (invocation['package_name'] == 'libloading' and
+                    invocation['outputs'][0].endswith('.rlib')):
+                    return invocation['env']['OUT_DIR']
+
+        def get_lmdb_sys_outdir():
+            for invocation in invocations:
+                if (invocation['package_name'] == 'lmdb-sys' and
+                    len(invocation['outputs']) >= 1 and
                     invocation['outputs'][0].endswith('.rlib')):
                     return invocation['env']['OUT_DIR']
 
@@ -808,7 +850,6 @@ class TupBackend(CommonBackend):
                 inputs.update(depmod['full-deps'])
 
             command = [
-                'cd %s &&' % invocation['cwd'],
                 'env',
             ]
             envvars = invocation.get('env')
@@ -819,15 +860,71 @@ class TupBackend(CommonBackend):
             command.extend(cargo_quote(a.replace('dep-info,', ''))
                            for a in invocation['args'])
             outputs = invocation['outputs']
+
+            invocation['full-deps'] = set()
+
             if os.path.basename(invocation['program']) == 'build-script-build':
                 for output in cargo_extra_outputs.get(shortname, []):
                     outputs.append(os.path.join(invocation['env']['OUT_DIR'], output))
 
-            if (invocation['target_kind'][0] == 'custom-build' and
-                os.path.basename(invocation['program']) == 'rustc'):
-                flags = cargo_extra_flags.get(shortname, [])
-                for flag in flags:
-                    command.append(flag % {'libloading_outdir': get_libloading_outdir()})
+                script_stdout = mozpath.join(rust_build_home,
+                                             '%s_%s_build_out.txt' % (shortname,
+                                                                      invocation['kind']))
+                command.extend(['>', script_stdout])
+                outputs.append(script_stdout)
+                invocation['full-deps'].add(script_stdout)
+
+            if os.path.basename(invocation['program']) == 'rustc':
+                all_dep_build_outputs = set(p for p in inputs
+                                            if p.endswith('%s_build_out.txt' %
+                                                          invocation['kind']))
+                crate_output = [p for p in all_dep_build_outputs
+                                if p.endswith('%s_%s_build_out.txt' %
+                                              (shortname, invocation['kind']))]
+
+                dep_build_outputs = []
+                seen_dep_outputs = set()
+
+                def is_lib(inv):
+                    return any(t not in ('bin', 'example', 'test', 'custom-build',
+                                         'bench')
+                               for t in inv['target_kind'])
+
+                def get_output_files(inv):
+                    candidate_file = mozpath.join(rust_build_home,
+                                                  '%s_%s_build_out.txt' %
+                                                  (inv['package_name'],
+                                                   inv['kind']))
+                    if (candidate_file in all_dep_build_outputs and
+                        candidate_file not in seen_dep_outputs):
+                        dep_build_outputs.append(candidate_file)
+                        seen_dep_outputs.add(candidate_file)
+
+                    for dep in inv['deps']:
+                        dep_inv = invocations[dep]
+                        if shortname == inv['package_name'] or is_lib(dep_inv):
+                            get_output_files(dep_inv)
+
+                get_output_files(invocation)
+
+                # If this is a lib, or a binary without an accompanying
+                # lib, pass -l. When we see a binary here, the corresponding
+                # lib for that package will appear in its dependencies.
+                deps = (invocations[d] for d in invocation['deps']
+                        if invocations[d]['package_name'] == shortname)
+                pass_l_flag = is_lib(invocation) or not any(is_lib(d) for d in deps)
+
+                if dep_build_outputs:
+                    command = (self._py_action('wrap_rustc') +
+                               ['--crate-out'] + crate_output +
+                               ['--deps-out'] + dep_build_outputs +
+                               ['--cwd', invocation['cwd']] +
+                               (['--pass-l-flag'] if pass_l_flag else []) +
+                               ['--cmd'] + command)
+                else:
+                    command = ['cd', invocation['cwd'], '&&'] + command
+            else:
+                command = ['cd', invocation['cwd'], '&&'] + command
 
             if 'rustc' in invocation['program']:
                 header = 'RUSTC'
@@ -835,7 +932,7 @@ class TupBackend(CommonBackend):
                 inputs.add(invocation['program'])
                 header = 'RUN'
 
-            invocation['full-deps'] = set(inputs)
+            invocation['full-deps'].update(inputs)
             invocation['full-deps'].update(invocation['outputs'])
 
             cmd_key = ' '.join(command)

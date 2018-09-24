@@ -70,7 +70,7 @@ nsSVGPatternFrame::AttributeChanged(int32_t         aNameSpaceID,
        aNameSpaceID == kNameSpaceID_None) &&
       aAttribute == nsGkAtoms::href) {
     // Blow away our reference, if any
-    DeleteProperty(SVGObserverUtils::HrefAsPaintingProperty());
+    DeleteProperty(SVGObserverUtils::HrefToTemplateProperty());
     mNoHRefURI = false;
     // And update whoever references us
     SVGObserverUtils::InvalidateDirectRenderingObservers(this);
@@ -578,10 +578,10 @@ nsSVGPatternFrame::GetReferencedPattern()
   if (mNoHRefURI)
     return nullptr;
 
-  nsSVGPaintingProperty *property =
-    GetProperty(SVGObserverUtils::HrefAsPaintingProperty());
+  SVGTemplateElementObserver* observer =
+    GetProperty(SVGObserverUtils::HrefToTemplateProperty());
 
-  if (!property) {
+  if (!observer) {
     // Fetch our pattern element's href or xlink:href attribute
     SVGPatternElement *pattern = static_cast<SVGPatternElement *>(GetContent());
     nsAutoString href;
@@ -604,14 +604,21 @@ nsSVGPatternFrame::GetReferencedPattern()
     nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI), href,
                                               mContent->GetUncomposedDoc(), base);
 
-    property =
-      SVGObserverUtils::GetPaintingProperty(targetURI, this,
-                          SVGObserverUtils::HrefAsPaintingProperty());
-    if (!property)
+    // There's no clear refererer policy spec about non-CSS SVG resource references
+    // Bug 1415044 to investigate which referrer we should use
+    RefPtr<URLAndReferrerInfo> target =
+      new URLAndReferrerInfo(targetURI,
+                             mContent->OwnerDoc()->GetDocumentURI(),
+                             mContent->OwnerDoc()->GetReferrerPolicy());
+
+    observer = SVGObserverUtils::GetTemplateElementObserver(target, this,
+                 SVGObserverUtils::HrefToTemplateProperty());
+    if (!observer) {
       return nullptr;
+    }
   }
 
-  nsIFrame *result = property->GetReferencedFrame();
+  nsIFrame* result = observer->GetReferencedFrame();
   if (!result)
     return nullptr;
 

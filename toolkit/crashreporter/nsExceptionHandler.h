@@ -17,7 +17,6 @@
 
 #include "CrashAnnotations.h"
 
-#include <functional>
 #include <stddef.h>
 #include <stdint.h>
 #include "nsError.h"
@@ -99,6 +98,10 @@ nsresult AnnotateCrashReport(Annotation key, unsigned int data);
 nsresult AnnotateCrashReport(Annotation key, const nsACString& data);
 nsresult RemoveCrashReportAnnotation(Annotation key);
 nsresult AppendAppNotesToCrashReport(const nsACString& data);
+
+// Called after the crash reporter client has been created in a content
+// process, allowing annotations to be processed.
+void NotifyCrashReporterClientCreated();
 
 void AnnotateOOMAllocationSize(size_t size);
 void AnnotateTexturesSize(size_t size);
@@ -234,14 +237,11 @@ ThreadId CurrentThreadId();
  *   aIncomingDumpToPair.
  * @return bool indicating success or failure
  */
-void
-CreateMinidumpsAndPair(ProcessHandle aTargetPid,
-                       ThreadId aTargetBlamedThread,
-                       const nsACString& aIncomingPairName,
-                       nsIFile* aIncomingDumpToPair,
-                       nsIFile** aTargetDumpOut,
-                       std::function<void(bool)>&& aCallback,
-                       bool aAsync);
+bool CreateMinidumpsAndPair(ProcessHandle aTargetPid,
+                            ThreadId aTargetBlamedThread,
+                            const nsACString& aIncomingPairName,
+                            nsIFile* aIncomingDumpToPair,
+                            nsIFile** aTargetDumpOut);
 
 // Create an additional minidump for a child of a process which already has
 // a minidump (|parentMinidump|).

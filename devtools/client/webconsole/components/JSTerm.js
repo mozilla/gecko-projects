@@ -193,6 +193,7 @@ class JSTerm extends Component {
         this.editor = new Editor({
           autofocus: true,
           enableCodeFolding: false,
+          autoCloseBrackets: false,
           gutters: [],
           lineWrapping: true,
           mode: Editor.modes.js,
@@ -325,7 +326,7 @@ class JSTerm extends Component {
 
             "Home": () => {
               if (this.autocompletePopup.isOpen) {
-                this.autocompletePopup.selectedIndex = 0;
+                this.autocompletePopup.selectItemAtIndex(0);
                 return null;
               }
 
@@ -339,8 +340,8 @@ class JSTerm extends Component {
 
             "End": () => {
               if (this.autocompletePopup.isOpen) {
-                this.autocompletePopup.selectedIndex =
-                  this.autocompletePopup.itemCount - 1;
+                this.autocompletePopup.selectItemAtIndex(
+                  this.autocompletePopup.itemCount - 1);
                 return null;
               }
 
@@ -359,6 +360,7 @@ class JSTerm extends Component {
         });
 
         this.editor.on("changes", this._inputEventHandler);
+        this.editor.on("beforeChange", this._onBeforeChange);
         this.editor.appendToLocalElement(this.node);
         const cm = this.editor.codeMirror;
         cm.on("paste", (_, event) => this.props.onPaste(event));
@@ -426,13 +428,26 @@ class JSTerm extends Component {
    * The JavaScript evaluation response handler.
    *
    * @private
-   * @param object response
+   * @param {Object} response
    *        The message received from the server.
+   * @param {Object} options
+   *        On options object that can contain the following properties:
+   *          - {Object} mapped: An object indicating if the input was modified by the
+   *                             parser worker.
    */
-  async _executeResultCallback(response) {
+  async _executeResultCallback(response, options = {}) {
     if (!this.hud) {
       return null;
     }
+
+    // If the expression was a top-level await that the parser-worker transformed, we
+    // don't want to show the result returned by the server as it's a Promise that was
+    // created on our end by wrapping the input in an instantly called async function
+    // (e.g. `await 42` -> `(async () => {return await 42})()`).
+    if (options && options.mapped && options.mapped.await) {
+      return null;
+    }
+
     if (response.error) {
       console.error("Evaluation error " + response.error + ": " + response.message);
       return null;
@@ -544,18 +559,28 @@ class JSTerm extends Component {
     });
     this.hud.proxy.dispatchMessageAdd(cmdMessage);
 
+    let mappedExpressionRes = null;
+    try {
+      mappedExpressionRes = await this.hud.owner.getMappedExpression(executeString);
+    } catch (e) {
+      console.warn("Error when calling getMappedExpression", e);
+    }
+
+    executeString = mappedExpressionRes ? mappedExpressionRes.expression : executeString;
+
     const options = {
       frame: this.SELECTED_FRAME,
       selectedNodeActor,
     };
 
-    const mappedString = await this.hud.owner.getMappedExpression(executeString);
     // Even if requestEvaluation rejects (because of webConsoleClient.evaluateJSAsync),
     // we still need to pass the error response to executeResultCallback.
-    const onEvaluated = this.requestEvaluation(mappedString, options)
+    const onEvaluated = this.requestEvaluation(executeString, options)
       .then(res => res, res => res);
     const response = await onEvaluated;
-    return this._executeResultCallback(response);
+    return this._executeResultCallback(response, {
+      mapped: mappedExpressionRes ? mappedExpressionRes.mapped : null
+    });
   }
 
   /**
@@ -682,7 +707,10 @@ class JSTerm extends Component {
    *        The new value to set.
    * @returns void
    */
-  setInputValue(newValue = "") {
+  setInputValue(newValue) {
+    newValue = newValue || "";
+    this.lastInputValue = newValue;
+
     if (this.props.codeMirrorEnabled) {
       if (this.editor) {
         // In order to get the autocomplete popup to work properly, we need to set the
@@ -710,9 +738,7 @@ class JSTerm extends Component {
       this.completeNode.value = "";
     }
 
-    this.lastInputValue = newValue;
     this.resizeInput();
-
     this.emit("set-input-value");
   }
 
@@ -734,6 +760,16 @@ class JSTerm extends Component {
     }
 
     return this.inputNode ? this.inputNode.selectionStart : null;
+  }
+
+  /**
+   * Even handler for the "beforeChange" event fired by codeMirror. This event is fired
+   * when codeMirror is about to make a change to its DOM representation.
+   */
+  _onBeforeChange() {
+    // clear the completionText before the change is done to prevent a visual glitch.
+    // See Bug 1491776.
+    this.setAutoCompletionText("");
   }
 
   /**
@@ -907,7 +943,7 @@ class JSTerm extends Component {
 
       case KeyCodes.DOM_VK_HOME:
         if (this.autocompletePopup.isOpen) {
-          this.autocompletePopup.selectedIndex = 0;
+          this.autocompletePopup.selectItemAtIndex(0);
           event.preventDefault();
         } else if (inputValue.length <= 0) {
           this.hud.outputScroller.scrollTop = 0;
@@ -917,7 +953,7 @@ class JSTerm extends Component {
 
       case KeyCodes.DOM_VK_END:
         if (this.autocompletePopup.isOpen) {
-          this.autocompletePopup.selectedIndex = this.autocompletePopup.itemCount - 1;
+          this.autocompletePopup.selectItemAtIndex(this.autocompletePopup.itemCount - 1);
           event.preventDefault();
         } else if (inputValue.length <= 0) {
           this.hud.outputScroller.scrollTop = this.hud.outputScroller.scrollHeight;
@@ -1071,20 +1107,26 @@ class JSTerm extends Component {
     const {editor, inputNode} = this;
     const frameActor = this.getFrameActor(this.SELECTED_FRAME);
 
-    // Only complete if the selection is empty and the input value is not.
+    const cursor = this.getSelectionStart();
+
+    // Complete if:
+    // - The input is not empty
+    // - AND there is not text selected
+    // - AND the input or frameActor are different from previous completion
+    // - AND there is not an alphanumeric (+ "_" and "$") right after the cursor
     if (
       !inputValue ||
       (inputNode && inputNode.selectionStart != inputNode.selectionEnd) ||
       (editor && editor.getSelection()) ||
-      (this.lastInputValue === inputValue && frameActor === this._lastFrameActorId)
+      (this.lastInputValue === inputValue && frameActor === this._lastFrameActorId) ||
+      /^[a-zA-Z0-9_$]/.test(inputValue.substring(cursor))
     ) {
       this.clearCompletion();
       this.emit("autocomplete-updated");
       return;
     }
 
-    const cursor = this.getSelectionStart();
-    const input = inputValue.substring(0, cursor);
+    const input = this.getInputValueBeforeCursor();
 
     // If the current input starts with the previous input, then we already
     // have a list of suggestions and we just need to filter the cached
@@ -1175,7 +1217,11 @@ class JSTerm extends Component {
     }
 
     const popup = this.autocompletePopup;
-    popup.setItems(items);
+    // We don't want to trigger the onSelect callback since we already set the completion
+    // text a few lines above.
+    popup.setItems(items, 0, {
+      preventSelectCallback: true,
+    });
 
     const minimumAutoCompleteLength = 2;
 
@@ -1214,7 +1260,9 @@ class JSTerm extends Component {
       }
 
       if (popupAlignElement) {
-        popup.openPopup(popupAlignElement, xOffset, yOffset);
+        popup.openPopup(popupAlignElement, xOffset, yOffset, 0, {
+          preventSelectCallback: true,
+        });
       }
     } else if (items.length < minimumAutoCompleteLength && popup.isOpen) {
       popup.hidePopup();
@@ -1465,8 +1513,6 @@ class JSTerm extends Component {
   }
 
   destroy() {
-    this.clearCompletion();
-
     this.webConsoleClient.clearNetworkRequests();
     if (this.hud.outputNode) {
       // We do this because it's much faster than letting React handle the ConsoleOutput

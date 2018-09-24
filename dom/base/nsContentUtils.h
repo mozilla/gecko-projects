@@ -25,6 +25,7 @@
 #include "mozilla/CORSMode.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/GuardObjects.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/TaskCategory.h"
 #include "mozilla/TimeStamp.h"
 #include "nsContentListDeclarations.h"
@@ -203,6 +204,7 @@ class nsContentUtils
   typedef mozilla::dom::Element Element;
   typedef mozilla::Cancelable Cancelable;
   typedef mozilla::CanBubble CanBubble;
+  typedef mozilla::Composed Composed;
   typedef mozilla::ChromeOnlyDispatch ChromeOnlyDispatch;
   typedef mozilla::EventMessage EventMessage;
   typedef mozilla::TimeDuration TimeDuration;
@@ -434,8 +436,14 @@ public:
   /**
    * Returns true if aNode1 is before aNode2 in the same connected
    * tree.
+   * aNode1Index and aNode2Index are in/out arguments. If non-null, and value is
+   * not -1, that value is used instead of calling slow ComputeIndexOf on the
+   * parent node. If value is -1, the value will be set to the return value of
+   * ComputeIndexOf.
    */
-  static bool PositionIsBefore(nsINode* aNode1, nsINode* aNode2);
+  static bool PositionIsBefore(nsINode* aNode1, nsINode* aNode2,
+                               int32_t* aNode1Index = nullptr,
+                               int32_t* aNode2Index = nullptr);
 
   /**
    *  Utility routine to compare two "points", where a point is a
@@ -1157,12 +1165,6 @@ public:
                      nsACString& aSourceSpecOut, uint32_t *aLineOut,
                      uint32_t *aColumnOut, nsString& aMessageOut);
 
-  /**
-   * Helper function to tell if user ever enabled DevTools explicitely.
-   * Allows making DevTools related API no-op until user do so.
-   */
-  static bool DevToolsEnabled(JSContext* aCx);
-
   static nsresult CalculateBufferSizeForImage(const uint32_t& aStride,
                                             const mozilla::gfx::IntSize& aImageSize,
                                             const mozilla::gfx::SurfaceFormat& aFormat,
@@ -1345,6 +1347,7 @@ public:
    * @param aEventName     The name of the event.
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
+   * @param aCopmosed      Is the event composed.
    * @param aDefaultAction Set to true if default action should be taken,
    *                       see EventTarget::DispatchEvent.
    */
@@ -1353,7 +1356,20 @@ public:
                                        const nsAString& aEventName,
                                        CanBubble,
                                        Cancelable,
+                                       Composed aComposed = Composed::eDefault,
                                        bool* aDefaultAction = nullptr);
+
+  static nsresult DispatchTrustedEvent(nsIDocument* aDoc,
+                                       nsISupports* aTarget,
+                                       const nsAString& aEventName,
+                                       CanBubble aCanBubble,
+                                       Cancelable aCancelable,
+                                       bool* aDefaultAction)
+  {
+    return DispatchTrustedEvent(aDoc, aTarget, aEventName,
+                                aCanBubble, aCancelable,
+                                Composed::eDefault, aDefaultAction);
+  }
 
   /**
    * This method creates and dispatches a trusted event using an event message.
@@ -2260,9 +2276,9 @@ public:
   static bool IsFocusedContent(const nsIContent *aContent);
 
   /**
-   * Returns true if the DOM full-screen API is enabled.
+   * Returns true if the DOM fullscreen API is enabled.
    */
-  static bool IsFullScreenApiEnabled();
+  static bool IsFullscreenApiEnabled();
 
   /**
    * Returns true if the unprefixed fullscreen API is enabled.
@@ -2271,12 +2287,12 @@ public:
     { return sIsUnprefixedFullscreenApiEnabled; }
 
   /**
-   * Returns true if requests for full-screen are allowed in the current
+   * Returns true if requests for fullscreen are allowed in the current
    * context. Requests are only allowed if the user initiated them (like with
    * a mouse-click or key press), unless this check has been disabled by
    * setting the pref "full-screen-api.allow-trusted-requests-only" to false.
    */
-  static bool IsRequestFullScreenAllowed(mozilla::dom::CallerType aCallerType);
+  static bool IsRequestFullscreenAllowed(mozilla::dom::CallerType aCallerType);
 
   /**
    * Returns true if calling execCommand with 'cut' or 'copy' arguments
@@ -2880,6 +2896,16 @@ public:
                                                 mozilla::net::ReferrerPolicy aReferrerPolicy);
 
   /*
+   * If there is a Referrer-Policy response header in |aChannel|, parse a
+   * referrer policy from the header.
+   *
+   * @param the channel from which to get the Referrer-Policy header
+   * @return referrer policy from the response header in aChannel
+   */
+  static mozilla::net::ReferrerPolicy
+    GetReferrerPolicyFromChannel(nsIChannel* aChannel);
+
+  /*
    * Parse a referrer policy from a Referrer-Policy header
    * https://www.w3.org/TR/referrer-policy/#parse-referrer-policy-from-header
    *
@@ -3043,6 +3069,9 @@ public:
   static nsresult NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* aNodeInfo,
                                       mozilla::dom::FromParser aFromParser, nsAtom* aIsAtom,
                                       mozilla::dom::CustomElementDefinition* aDefinition);
+
+  static mozilla::dom::CustomElementRegistry*
+    GetCustomElementRegistry(nsIDocument*);
 
   /**
    * Looking up a custom element definition.
@@ -3339,6 +3368,7 @@ private:
                                 const nsAString& aEventName,
                                 CanBubble,
                                 Cancelable,
+                                Composed,
                                 Trusted,
                                 bool* aDefaultAction = nullptr,
                                 ChromeOnlyDispatch = ChromeOnlyDispatch::eNo);
@@ -3433,7 +3463,7 @@ private:
   static RefPtr<mozilla::intl::LineBreaker> sLineBreaker;
   static RefPtr<mozilla::intl::WordBreaker> sWordBreaker;
 
-  static nsIBidiKeyboard* sBidiKeyboard;
+  static mozilla::StaticRefPtr<nsIBidiKeyboard> sBidiKeyboard;
 
   static bool sInitialized;
   static uint32_t sScriptBlockerCount;
@@ -3449,9 +3479,9 @@ private:
   static bool sIsHandlingKeyBoardEvent;
   static bool sAllowXULXBL_for_file;
   static bool sDisablePopups;
-  static bool sIsFullScreenApiEnabled;
+  static bool sIsFullscreenApiEnabled;
   static bool sIsUnprefixedFullscreenApiEnabled;
-  static bool sTrustedFullScreenOnly;
+  static bool sTrustedFullscreenOnly;
   static bool sIsCutCopyAllowed;
   static uint32_t sHandlingInputTimeout;
   static bool sIsPerformanceTimingEnabled;

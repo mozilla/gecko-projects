@@ -88,7 +88,15 @@ private:
   ~AbortSignalMainThread() = default;
 };
 
-NS_IMPL_CYCLE_COLLECTION(AbortSignalMainThread, mFollowingSignal)
+NS_IMPL_CYCLE_COLLECTION_CLASS(AbortSignalMainThread)
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(AbortSignalMainThread)
+  tmp->Unfollow();
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(AbortSignalMainThread)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFollowingSignal)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(AbortSignalMainThread)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
@@ -1243,6 +1251,21 @@ FetchBody<Request>::SetMimeType();
 template
 void
 FetchBody<Response>::SetMimeType();
+
+template <class Derived>
+const nsAString&
+FetchBody<Derived>::BodyLocalPath() const
+{
+  return DerivedClass()->BodyLocalPath();
+}
+
+template
+const nsAString&
+FetchBody<Request>::BodyLocalPath() const;
+
+template
+const nsAString&
+FetchBody<Response>::BodyLocalPath() const;
 
 template <class Derived>
 void

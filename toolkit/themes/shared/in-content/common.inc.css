@@ -23,7 +23,6 @@
   --in-content-border-color: #d7d7db;
   --in-content-category-outline-focus: 1px dotted #0a84ff;
   --in-content-category-text: rgba(12,12,13);
-  --in-content-category-text-active: #0c0c0d;
   --in-content-category-text-selected: #0a84ff;
   --in-content-category-text-selected-active: #0060df;
   --in-content-category-background-hover: rgba(12,12,13,0.1);
@@ -105,7 +104,7 @@ xul|caption xul|label {
 xul|groupbox {
   -moz-appearance: none;
   border: none;
-  margin: 0;
+  margin: 0 0 32px;
   padding: 0;
 }
 
@@ -135,18 +134,17 @@ xul|tabs {
   border-top: 1px solid var(--in-content-box-border-color);
   border-bottom: 1px solid var(--in-content-box-border-color);
   background-color: var(--in-content-page-background);
+  color: var(--in-content-tab-color);
 }
 
 xul|tab {
   -moz-appearance: none;
   margin-top: 0;
-  padding: 4px 20px;
+  padding: 4px 20px 0 !important;
   min-height: 44px;
-  color: var(--in-content-tab-color);
+  color: inherit;
   background-color: var(--in-content-page-background);
-  border-width: 0;
-  /* !important overrides tabbox.css RTL and visuallyselected rules */
-  border-radius: 0 !important;
+  border-bottom: 4px solid transparent;
   transition: background-color 50ms ease 0s;
 }
 
@@ -156,8 +154,7 @@ xul|tab:hover {
 
 xul|tab[selected] {
   background-color: var(--in-content-box-background-hover);
-  padding-bottom: 0; /* compensate the 4px border */
-  border-bottom: 4px solid var(--in-content-border-highlight);
+  border-bottom-color: var(--in-content-border-highlight);
 }
 
 /* html buttons */
@@ -281,78 +278,11 @@ xul|button[type="menu"] > xul|*.button-box > xul|*.button-menu-dropmarker {
   fill: -moz-DialogText;
 }
 
-xul|*.help-button {
-  min-width: 16px;
-  margin-inline-end: 0;
-  border-width: 0;
-  background-image: none;
-  box-shadow: none;
-  list-style-image: url("chrome://global/skin/in-content/help-glyph.svg");
-  -moz-context-properties: fill, stroke, stroke-opacity;
-  fill: #999;
-  stroke: #999;
-  stroke-opacity: 0;
-}
-
-xul|*.help-button:not([disabled="true"]):hover {
-  background-image: none;
-  /* Override default button background */
-  background-color: transparent;
-  fill: white;
-  stroke: #808080;
-  stroke-opacity: 1;
-}
-
-xul|*.help-button:not([disabled="true"]):hover:active {
-  background-image: none;
-  /* Override default button background */
-  background-color: transparent;
-  stroke: #666;
-}
-
-xul|*.close-icon > xul|*.button-box,
-xul|*.help-button > xul|*.button-box {
+xul|*.close-icon > xul|*.button-box {
   padding-top: 0;
   padding-bottom: 0;
   padding-right: 0 !important;
   padding-left: 0 !important;
-}
-
-xul|*.help-button > xul|*.button-box > xul|*.button-icon {
-  width: 16px;
-  height: 16px;
-}
-
-xul|*.help-button > xul|*.button-box > xul|*.button-text {
-  display: none;
-}
-
-html|*.help-button {
-  width: 16px;
-  height: 16px;
-  border: 0;
-  padding: 0;
-  display: inline-block;
-  background-image: url("chrome://global/skin/in-content/help-glyph.svg");
-  -moz-context-properties: fill, stroke, stroke-opacity;
-  fill: #999;
-  stroke: #999;
-  stroke-opacity: 0;
-  background-repeat: no-repeat;
-  background-position: center center;
-  background-size: contain;
-}
-
-html|*.help-button:hover {
-  fill: white;
-  stroke: #808080;
-  stroke-opacity: 1;
-  background-color: var(--in-content-category-background-hover);
-}
-
-html|*.help-button:hover:active {
-  stroke: #666;
-  background-color: var(--in-content-category-background-active);
 }
 
 html|*.numberbox-input::-moz-number-spin-box {
@@ -383,7 +313,7 @@ xul|*.menulist-dropmarker {
   padding: 0;
   border: none;
   background-color: transparent;
-  list-style-image: url("chrome://global/skin/in-content/dropdown.svg") !important; /* override dropmarker.css */
+  list-style-image: url("chrome://global/skin/in-content/dropdown.svg");
   -moz-context-properties: fill;
   fill: -moz-DialogText;
 }
@@ -559,17 +489,16 @@ xul|checkbox {
 xul|*.checkbox-check,
 html|input[type="checkbox"] {
   -moz-appearance: none;
-  width: 23px;
-  height: 23px;
+  width: 20px;
+  height: 20px;
+  padding: 1px;
   border: 1px solid var(--in-content-box-border-color);
   border-radius: 2px;
   margin: 0;
   margin-inline-end: 10px;
-  background-color: #f1f1f1;
-  background-image: linear-gradient(#fff, rgba(255,255,255,0.8));
-  background-position: center center;
+  background-color: var(--in-content-box-background);
+  background-position: center;
   background-repeat: no-repeat;
-  box-shadow: 0 1px 1px 0 #fff, inset 0 2px 0 0 rgba(0,0,0,0.03);
 }
 
 xul|checkbox:not([disabled="true"]):hover > xul|*.checkbox-check,
@@ -578,17 +507,15 @@ html|input[type="checkbox"]:not(:disabled):hover {
 }
 
 xul|*.checkbox-check[checked] {
-  list-style-image: url("chrome://global/skin/in-content/check.svg");
-  -moz-context-properties: fill, stroke;
+  list-style-image: url("chrome://global/skin/icons/check.svg");
+  -moz-context-properties: fill;
   fill: #2292d0;
-  stroke: none;
 }
 
 html|input[type="checkbox"]:checked {
-  background-image: url("chrome://global/skin/in-content/check.svg"), linear-gradient(#fff, rgba(255,255,255,0.8));
-  -moz-context-properties: fill, stroke;
+  background-image: url("chrome://global/skin/icons/check.svg");
+  -moz-context-properties: fill;
   fill: #2292d0;
-  stroke: none;
 }
 
 xul|checkbox[disabled="true"] > xul|*.checkbox-check,
@@ -618,9 +545,7 @@ xul|*.radio-check {
   border-radius: 50%;
   margin: 0;
   margin-inline-end: 10px;
-  background-color: #f1f1f1;
-  background-image: linear-gradient(#fff, rgba(255,255,255,0.80));
-  box-shadow: 0 1px 1px 0 #fff, inset 0 2px 0 0 rgba(0,0,0,0.03);
+  background-color: var(--in-content-box-background);
 }
 
 xul|radio:not([disabled="true"]):hover > xul|*.radio-check {
@@ -775,6 +700,10 @@ xul|treechildren::-moz-tree-row {
   border: none;
   border-radius: 0;
   background-image: none;
+}
+
+xul|treechildren::-moz-tree-row(multicol, odd) {
+  background-color: var(--in-content-box-background-odd);
 }
 
 html|select[size][multiple] > html|option:hover,

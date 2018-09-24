@@ -53,7 +53,6 @@
 #include "nsDataHashtable.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/LinkedList.h"
 #include "CustomElementRegistry.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/Maybe.h"
@@ -67,9 +66,7 @@
 
 class nsDOMStyleSheetSetList;
 class nsDocument;
-class nsIRadioVisitor;
 class nsIFormControl;
-struct nsRadioGroupStruct;
 class nsOnloadBlocker;
 class nsDOMNavigationTiming;
 class nsWindowSizes;
@@ -85,33 +82,6 @@ struct LifecycleCallbacks;
 class CallbackFunction;
 class DOMIntersectionObserver;
 class Performance;
-
-struct FullscreenRequest : public LinkedListElement<FullscreenRequest>
-{
-  explicit FullscreenRequest(Element* aElement);
-  FullscreenRequest(const FullscreenRequest&) = delete;
-  ~FullscreenRequest();
-
-  Element* GetElement() const { return mElement; }
-  nsIDocument* GetDocument() const { return mDocument; }
-
-private:
-  RefPtr<Element> mElement;
-  RefPtr<nsIDocument> mDocument;
-
-public:
-  // This value should be true if the fullscreen request is
-  // originated from chrome code.
-  bool mIsCallerChrome = false;
-  // This value denotes whether we should trigger a NewOrigin event if
-  // requesting fullscreen in its document causes the origin which is
-  // fullscreen to change. We may want *not* to trigger that event if
-  // we're calling RequestFullScreen() as part of a continuation of a
-  // request in a subdocument in different process, whereupon the caller
-  // need to send some notification itself with the real origin.
-  bool mShouldNotifyNewOrigin = true;
-};
-
 } // namespace dom
 } // namespace mozilla
 
@@ -158,6 +128,7 @@ public:
 
   virtual void StopDocumentLoad() override;
 
+  static bool DocumentSupportsL10n(JSContext* aCx, JSObject* aObject);
   static bool IsWebAnimationsEnabled(JSContext* aCx, JSObject* aObject);
   static bool IsWebAnimationsEnabled(mozilla::dom::CallerType aCallerType);
   static bool IsWebAnimationsGetAnimationsEnabled(JSContext* aCx,
@@ -174,30 +145,57 @@ public:
   // nsIRadioGroupContainer
   NS_IMETHOD WalkRadioGroup(const nsAString& aName,
                             nsIRadioVisitor* aVisitor,
-                            bool aFlushContent) override;
+                            bool aFlushContent) override
+  {
+    return DocumentOrShadowRoot::WalkRadioGroup(aName, aVisitor, aFlushContent);
+  }
   virtual void
     SetCurrentRadioButton(const nsAString& aName,
-                          mozilla::dom::HTMLInputElement* aRadio) override;
+                          mozilla::dom::HTMLInputElement* aRadio) override
+  {
+    DocumentOrShadowRoot::SetCurrentRadioButton(aName, aRadio);
+  }
   virtual mozilla::dom::HTMLInputElement*
-    GetCurrentRadioButton(const nsAString& aName) override;
+    GetCurrentRadioButton(const nsAString& aName) override
+  {
+    return DocumentOrShadowRoot::GetCurrentRadioButton(aName);
+  }
   NS_IMETHOD
     GetNextRadioButton(const nsAString& aName,
                        const bool aPrevious,
-                       mozilla::dom::HTMLInputElement*  aFocusedRadio,
-                       mozilla::dom::HTMLInputElement** aRadioOut) override;
+                       mozilla::dom::HTMLInputElement* aFocusedRadio,
+                       mozilla::dom::HTMLInputElement** aRadioOut) override
+  {
+    return DocumentOrShadowRoot::GetNextRadioButton(aName, aPrevious,
+                                                    aFocusedRadio, aRadioOut);
+  }
   virtual void AddToRadioGroup(const nsAString& aName,
-                               mozilla::dom::HTMLInputElement* aRadio) override;
+                               mozilla::dom::HTMLInputElement* aRadio) override
+  {
+    DocumentOrShadowRoot::AddToRadioGroup(aName, aRadio);
+  }
   virtual void RemoveFromRadioGroup(const nsAString& aName,
-                                    mozilla::dom::HTMLInputElement* aRadio) override;
-  virtual uint32_t GetRequiredRadioCount(const nsAString& aName) const override;
+                                    mozilla::dom::HTMLInputElement* aRadio) override
+  {
+    DocumentOrShadowRoot::RemoveFromRadioGroup(aName, aRadio);
+  }
+  virtual uint32_t GetRequiredRadioCount(const nsAString& aName) const override
+  {
+    return DocumentOrShadowRoot::GetRequiredRadioCount(aName);
+  }
   virtual void RadioRequiredWillChange(const nsAString& aName,
-                                       bool aRequiredAdded) override;
-  virtual bool GetValueMissingState(const nsAString& aName) const override;
-  virtual void SetValueMissingState(const nsAString& aName, bool aValue) override;
-
-  // for radio group
-  nsRadioGroupStruct* GetRadioGroup(const nsAString& aName) const;
-  nsRadioGroupStruct* GetOrCreateRadioGroup(const nsAString& aName);
+                                       bool aRequiredAdded) override
+  {
+    DocumentOrShadowRoot::RadioRequiredWillChange(aName, aRequiredAdded);
+  }
+  virtual bool GetValueMissingState(const nsAString& aName) const override
+  {
+    return DocumentOrShadowRoot::GetValueMissingState(aName);
+  }
+  virtual void SetValueMissingState(const nsAString& aName, bool aValue) override
+  {
+    return DocumentOrShadowRoot::SetValueMissingState(aName, aValue);
+  }
 
   // Check whether shadow DOM is enabled for aGlobal.
   static bool IsShadowDOMEnabled(JSContext* aCx, JSObject* aGlobal);
@@ -289,9 +287,7 @@ public:
   // include https://github.com/rust-lang-nursery/rust-bindgen/pull/1271.
   js::ExpandoAndGeneration mExpandoAndGeneration;
 
-  nsClassHashtable<nsStringHashKey, nsRadioGroupStruct> mRadioGroups;
-
-  friend class nsCallRequestFullScreen;
+  friend class nsCallRequestFullscreen;
 
   // The application cache that this document is associated with, if
   // any.  This can change during the lifetime of the document.

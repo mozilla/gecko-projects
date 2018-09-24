@@ -24,8 +24,6 @@ var EventEmitter = require("devtools/shared/event-emitter");
 var Telemetry = require("devtools/client/shared/telemetry");
 const { getUnicodeUrl } = require("devtools/client/shared/unicode-url");
 var { attachThread, detachThread } = require("./attach-thread");
-var Menu = require("devtools/client/framework/menu");
-var MenuItem = require("devtools/client/framework/menu-item");
 var { DOMHelpers } = require("resource://devtools/client/shared/DOMHelpers.jsm");
 const { KeyCodes } = require("devtools/client/shared/keycodes");
 var Startup = Cc["@mozilla.org/devtools/startup-clh;1"].getService(Ci.nsISupports)
@@ -37,6 +35,8 @@ const { BrowserLoader } =
 const {LocalizationHelper} = require("devtools/shared/l10n");
 const L10N = new LocalizationHelper("devtools/client/locales/toolbox.properties");
 
+loader.lazyRequireGetter(this, "AppConstants",
+  "resource://gre/modules/AppConstants.jsm", true);
 loader.lazyRequireGetter(this, "getHighlighterUtils",
   "devtools/client/framework/toolbox-highlighter-utils", true);
 loader.lazyRequireGetter(this, "Selection",
@@ -126,9 +126,6 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId,
   this._onWillNavigate = this._onWillNavigate.bind(this);
   this._refreshHostTitle = this._refreshHostTitle.bind(this);
   this.toggleNoAutohide = this.toggleNoAutohide.bind(this);
-  this.showFramesMenu = this.showFramesMenu.bind(this);
-  this.handleKeyDownOnFramesButton = this.handleKeyDownOnFramesButton.bind(this);
-  this.showFramesMenuOnKeyDown = this.showFramesMenuOnKeyDown.bind(this);
   this._updateFrames = this._updateFrames.bind(this);
   this._splitConsoleOnKeypress = this._splitConsoleOnKeypress.bind(this);
   this.destroy = this.destroy.bind(this);
@@ -684,6 +681,21 @@ Toolbox.prototype = {
   },
 
   /**
+   * A common access point for the client-side parser service that any panel can use.
+   */
+  get parserService() {
+    if (this._parserService) {
+      return this._parserService;
+    }
+
+    this._parserService =
+      this.browserRequire("devtools/client/debugger/new/src/workers/parser/index");
+    this._parserService
+      .start("resource://devtools/client/debugger/new/dist/parser-worker.js", this.win);
+    return this._parserService;
+  },
+
+  /**
    * Clients wishing to use source maps but that want the toolbox to
    * track the source and style sheet actor mapping can use this
    * source map service.  This is a higher-level service than the one
@@ -901,6 +913,7 @@ Toolbox.prototype = {
   },
 
   _addHostListeners: function() {
+    // Add navigation keys
     this.shortcuts.on(L10N.getStr("toolbox.nextTool.key"),
                  event => {
                    this.selectNextTool();
@@ -917,6 +930,24 @@ Toolbox.prototype = {
                    event.preventDefault();
                  });
 
+    // Close toolbox key-shortcut handler
+    const onClose = event => this.destroy();
+    this.shortcuts.on(L10N.getStr("toolbox.toggleToolboxF12.key"), onClose);
+
+    // CmdOrCtrl+W is registered only when the toolbox is running in
+    // detached window. In the other case the entire browser tab
+    // is closed when the user uses this shortcut.
+    if (this.hostType == "window") {
+      this.shortcuts.on(L10N.getStr("toolbox.closeToolbox.key"), onClose);
+    }
+
+    if (AppConstants.platform == "macosx") {
+      this.shortcuts.on(L10N.getStr("toolbox.toggleToolboxOSX.key"), onClose);
+    } else {
+      this.shortcuts.on(L10N.getStr("toolbox.toggleToolbox.key"), onClose);
+    }
+
+    // Add event listeners
     this.doc.addEventListener("keypress", this._splitConsoleOnKeypress);
     this.doc.addEventListener("focus", this._onFocus, true);
     this.win.addEventListener("unload", this.destroy);
@@ -991,48 +1022,22 @@ Toolbox.prototype = {
       return;
     }
 
-    const doc = this.win.parent.document;
-
     for (const item of Startup.KeyShortcuts) {
-      // KeyShortcuts contain tool-specific and global key shortcuts,
-      // here we only need to copy shortcut specific to each tool.
-      if (!item.toolId) {
-        continue;
+      const { id, toolId, shortcut, modifiers } = item;
+      const electronKey = KeyShortcuts.parseXulKey(modifiers, shortcut);
+
+      if (id == "browserConsole") {
+        // Add key for toggling the browser console from the detached window
+        this.shortcuts.on(electronKey, () => {
+          HUDService.toggleBrowserConsole();
+        });
+      } else if (toolId) {
+        // KeyShortcuts contain tool-specific and global key shortcuts,
+        // here we only need to copy shortcut specific to each tool.
+        this.shortcuts.on(electronKey, () => {
+          this.selectTool(toolId, "key_shortcut").then(() => this.fireCustomKey(toolId));
+        });
       }
-      const { toolId, shortcut, modifiers } = item;
-
-      const key = doc.createXULElement("key");
-
-      key.id = "key_" + toolId;
-
-      if (shortcut.startsWith("VK_")) {
-        key.setAttribute("keycode", shortcut);
-      } else {
-        key.setAttribute("key", shortcut);
-      }
-
-      key.setAttribute("modifiers", modifiers);
-      // needed. See bug 371900
-      key.setAttribute("oncommand", "void(0);");
-      key.addEventListener("command", () => {
-        this.selectTool(toolId, "key_shortcut").then(() => this.fireCustomKey(toolId));
-      }, true);
-      doc.getElementById("toolbox-keyset").appendChild(key);
-    }
-
-    // Add key for toggling the browser console from the detached window
-    if (!doc.getElementById("key_browserconsole")) {
-      const key = doc.createXULElement("key");
-      key.id = "key_browserconsole";
-
-      key.setAttribute("key", L10N.getStr("browserConsoleCmd.commandkey"));
-      key.setAttribute("modifiers", "accel,shift");
-      // needed. See bug 371900
-      key.setAttribute("oncommand", "void(0)");
-      key.addEventListener("command", () => {
-        HUDService.toggleBrowserConsole();
-      }, true);
-      doc.getElementById("toolbox-keyset").appendChild(key);
     }
   },
 
@@ -1240,7 +1245,6 @@ Toolbox.prototype = {
     this.frameButton = this._createButtonState({
       id: "command-button-frames",
       description: L10N.getStr("toolbox.frames.tooltip"),
-      onClick: this.showFramesMenu,
       isTargetSupported: target => {
         return target.activeTab && target.activeTab.traits.frames;
       },
@@ -1249,7 +1253,13 @@ Toolbox.prototype = {
         const isOnOptionsPanel = this.currentToolId === "options";
         return hasFrames || isOnOptionsPanel;
       },
-      onKeyDown: this.handleKeyDownOnFramesButton
+    });
+
+    // Listen for the shortcut key to show the frame list
+    this.shortcuts.on(L10N.getStr("toolbox.showFrames.key"), event => {
+      if (event.target.id === "command-button-frames") {
+        event.target.click();
+      }
     });
 
     return this.frameButton;
@@ -1860,7 +1870,7 @@ Toolbox.prototype = {
       Object.defineProperty(doc, "visibilityState", { value: state, configurable: true });
 
       // 2) Fake the 'visibilitychange' event
-      win.dispatchEvent(new win.Event("visibilitychange"));
+      doc.dispatchEvent(new win.Event("visibilitychange"));
     }
   },
 
@@ -2280,101 +2290,14 @@ Toolbox.prototype = {
     return prefFront.getBoolPref(DISABLE_AUTOHIDE_PREF);
   },
 
-  _listFrames: function(event) {
-    if (!this._target.activeTab || !this._target.activeTab.traits.frames) {
+  _listFrames: async function(event) {
+    if (!this.target.activeTab || !this.target.activeTab.traits.frames) {
       // We are not targetting a regular BrowsingContextTargetActor
       // it can be either an addon or browser toolbox actor
       return promise.resolve();
     }
-    const packet = {
-      to: this._target.form.actor,
-      type: "listFrames"
-    };
-    return this._target.client.request(packet, resp => {
-      this._updateFrames({ frames: resp.frames });
-    });
-  },
-
-  /**
-   * Show a drop down menu that allows the user to switch frames.
-   */
-  showFramesMenu: async function(event) {
-    const menu = new Menu();
-    const target = event.target;
-
-    // Need to initInspector to check presence of getNodeActorFromWindowID
-    // and use the highlighter later
-    await this.initInspector();
-    if (!("_supportsFrameHighlight" in this)) {
-    // Only works with FF58+ targets
-      this._supportsFrameHighlight =
-        await this.target.actorHasMethod("domwalker", "getNodeActorFromWindowID");
-    }
-
-    // Generate list of menu items from the list of frames.
-    this.frameMap.forEach(frame => {
-      // A frame is checked if it's the selected one.
-      const checked = frame.id == this.selectedFrameId;
-
-      let label;
-      if (this.target.isWebExtension) {
-        // Show a shorter url for extensions page.
-        label = this.target.getExtensionPathName(frame.url);
-      } else {
-        label = getUnicodeUrl(frame.url);
-      }
-
-      // Create menu item.
-      menu.append(new MenuItem({
-        label,
-        type: "radio",
-        checked,
-        click: () => {
-          this.onSelectFrame(frame.id);
-        },
-        hover: () => {
-          this.onHightlightFrame(frame.id);
-        }
-      }));
-    });
-
-    menu.once("open").then(() => {
-      this.frameButton.isChecked = true;
-    });
-
-    menu.once("close").then(() => {
-      this.frameButton.isChecked = false;
-      this.highlighterUtils.unhighlight();
-    });
-
-    // Show a drop down menu with frames.
-    // XXX Missing menu API for specifying target (anchor)
-    // and relative position to it. See also:
-    // https://developer.mozilla.org/en-US/docs/Mozilla/Tech/XUL/Method/openPopup
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=1274551
-    const rect = target.getBoundingClientRect();
-    const screenX = target.ownerDocument.defaultView.mozInnerScreenX;
-    const screenY = target.ownerDocument.defaultView.mozInnerScreenY;
-    menu.popupWithZoom(rect.left + screenX, rect.bottom + screenY, this);
-
-    return menu;
-  },
-
-  /**
-   * Handle keyDown event on 'frames' button to show available frames
-   */
-  handleKeyDownOnFramesButton: function(event) {
-    this.shortcuts.on(L10N.getStr("toolbox.showFrames.key"),
-      this.showFramesMenuOnKeyDown);
-  },
-
-  /**
-   * Show 'frames' menu on key down
-   */
-  showFramesMenuOnKeyDown: function(event) {
-    if (event.target.id == "command-button-frames") {
-      this.showFramesMenu(event);
-    }
+    const { frames } = await this.target.activeTab.listFrames();
+    this._updateFrames({ frames });
   },
 
   /**
@@ -2383,18 +2306,17 @@ Toolbox.prototype = {
   onSelectFrame: function(frameId) {
     // Send packet to the backend to select specified frame and
     // wait for 'frameUpdate' event packet to update the UI.
-    const packet = {
-      to: this._target.form.actor,
-      type: "switchToFrame",
-      windowId: frameId
-    };
-    this._target.client.request(packet);
+    this.target.activeTab.switchToFrame(frameId);
   },
 
   /**
    * Highlight a frame in the page
    */
-  onHightlightFrame: async function(frameId) {
+  onHighlightFrame: async function(frameId) {
+    // Need to initInspector to check presence of getNodeActorFromWindowID
+    // and use the highlighter later
+    await this.initInspector();
+
     // Only enable frame highlighting when the top level document is targeted
     if (this._supportsFrameHighlight && this.rootFrameSelected) {
       const frameActor = await this.walker.getNodeActorFromWindowID(frameId);
@@ -2747,6 +2669,11 @@ Toolbox.prototype = {
           const autohide = !flags.testing;
           this._highlighter = await this._inspector.getHighlighter(autohide);
         }
+        if (!("_supportsFrameHighlight" in this)) {
+          // Only works with FF58+ targets
+          this._supportsFrameHighlight =
+            await this.target.actorHasMethod("domwalker", "getNodeActorFromWindowID");
+        }
       }.bind(this))();
     }
     return this._initInspector;
@@ -2898,6 +2825,11 @@ Toolbox.prototype = {
     if (this._sourceMapService) {
       this._sourceMapService.stopSourceMapWorker();
       this._sourceMapService = null;
+    }
+
+    if (this._parserService) {
+      this._parserService.stop();
+      this._parserService = null;
     }
 
     if (this.webconsolePanel) {

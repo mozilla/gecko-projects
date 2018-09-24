@@ -98,6 +98,7 @@ payment-dialog > header > .page-error {
 
 .page > footer {
   align-items: center;
+  justify-content: end;
   background-color: #eaeaee;
   display: flex;
   /* from visual spec: */
@@ -144,7 +145,7 @@ payment-dialog #pay::before {
   content: url(chrome://browser/skin/connection-secure.svg);
   fill: currentColor;
   height: 16px;
-  margin-right: 0.5em;
+  margin-inline-end: 0.5em;
   vertical-align: text-bottom;
   width: 16px;
 }
@@ -156,10 +157,6 @@ payment-dialog[changes-prevented][complete-status="success"] #pay {
   /* Show the pay button above #disabled-overlay */
   position: relative;
   z-index: 1;
-}
-
-#cancel {
-  margin-inline-start: auto;
 }
 
 #disabled-overlay {
@@ -175,15 +172,16 @@ payment-dialog[changes-prevented][complete-status="success"] #pay {
   left: 0;
 }
 
-#branding {
+.branding {
   background-image: url(chrome://branding/content/icon32.png);
   background-size: 16px;
   background-repeat: no-repeat;
   background-position: left center;
   padding-inline-start: 20px;
   line-height: 20px;
+  margin-inline-end: auto;
 }
 
-body[dir="rtl"] #branding {
+body[dir="rtl"] .branding {
   background-position: right center;
 }

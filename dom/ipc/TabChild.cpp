@@ -1157,7 +1157,7 @@ TabChild::RecvLoadURL(const nsCString& aURI,
   }
 
   nsresult rv =
-    WebNavigation()->LoadURI(NS_ConvertUTF8toUTF16(aURI).get(),
+    WebNavigation()->LoadURI(NS_ConvertUTF8toUTF16(aURI),
                              nsIWebNavigation::LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP |
                              nsIWebNavigation::LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL,
                              nullptr, nullptr, nullptr, nsContentUtils::GetSystemPrincipal());
@@ -3379,6 +3379,16 @@ TabChild::RecvSetWindowName(const nsString& aName)
   nsCOMPtr<nsIDocShellTreeItem> item = do_QueryInterface(WebNavigation());
   if (item) {
     item->SetName(aName);
+  }
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+TabChild::RecvAllowScriptsToClose()
+{
+  nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(WebNavigation());
+  if (window) {
+    nsGlobalWindowOuter::Cast(window)->AllowScriptsToClose();
   }
   return IPC_OK();
 }

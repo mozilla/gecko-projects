@@ -819,12 +819,7 @@ impl YamlFrameReader {
             .as_vec_f32()
             .expect("borders must have width(s)");
         let widths = broadcast(&widths, 4);
-        let widths = BorderWidths {
-            top: widths[0],
-            left: widths[1],
-            bottom: widths[2],
-            right: widths[3],
-        };
+        let widths = LayoutSideOffsets::new(widths[0], widths[3], widths[2], widths[1]);
         let border_details = if let Some(border_type) = item["border-type"].as_str() {
             match border_type {
                 "normal" => {
@@ -1550,7 +1545,7 @@ impl YamlFrameReader {
 
         let reference_frame_id = dl.push_reference_frame(info, transform.into(), perspective);
 
-        let numeric_id = yaml["reference-frame-id"].as_i64();
+        let numeric_id = yaml["id"].as_i64();
         if let Some(numeric_id) = numeric_id {
             self.add_clip_id_mapping(numeric_id as u64, reference_frame_id);
         }
@@ -1606,9 +1601,9 @@ impl YamlFrameReader {
         let mix_blend_mode = yaml["mix-blend-mode"]
             .as_mix_blend_mode()
             .unwrap_or(MixBlendMode::Normal);
-        let glyph_raster_space = yaml["glyph-raster-space"]
-            .as_glyph_raster_space()
-            .unwrap_or(GlyphRasterSpace::Screen);
+        let raster_space = yaml["raster-space"]
+            .as_raster_space()
+            .unwrap_or(RasterSpace::Screen);
 
         if is_root {
             if let Some(size) = yaml["scroll-offset"].as_point() {
@@ -1629,7 +1624,7 @@ impl YamlFrameReader {
             transform_style,
             mix_blend_mode,
             filters,
-            glyph_raster_space,
+            raster_space,
         );
 
         if !yaml["items"].is_badvalue() {

@@ -45,6 +45,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionPermissions: "resource://gre/modules/ExtensionPermissions.jsm",
   ExtensionStorage: "resource://gre/modules/ExtensionStorage.jsm",
   ExtensionStorageIDB: "resource://gre/modules/ExtensionStorageIDB.jsm",
+  ExtensionTelemetry: "resource://gre/modules/ExtensionTelemetry.jsm",
   ExtensionTestCommon: "resource://testing-common/ExtensionTestCommon.jsm",
   FileSource: "resource://gre/modules/L10nRegistry.jsm",
   L10nRegistry: "resource://gre/modules/L10nRegistry.jsm",
@@ -54,7 +55,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   OS: "resource://gre/modules/osfile.jsm",
   PluralForm: "resource://gre/modules/PluralForm.jsm",
   Schemas: "resource://gre/modules/Schemas.jsm",
-  TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
   XPIProvider: "resource://gre/modules/addons/XPIProvider.jsm",
 });
 
@@ -1205,8 +1205,15 @@ class BootstrapScope {
       }));
   }
 
+  fetchState() {
+    if (this.extension) {
+      return {state: this.extension.state};
+    }
+    return null;
+  }
+
   update(data, reason) {
-    Management.emit("update", {id: data.id, resourceURI: data.resourceURI});
+    return Management.emit("update", {id: data.id, resourceURI: data.resourceURI});
   }
 
   startup(data, reason) {
@@ -1215,8 +1222,8 @@ class BootstrapScope {
     return this.extension.startup();
   }
 
-  shutdown(data, reason) {
-    let result = this.extension.shutdown(this.BOOTSTRAP_REASON_TO_STRING_MAP[reason]);
+  async shutdown(data, reason) {
+    let result = await this.extension.shutdown(this.BOOTSTRAP_REASON_TO_STRING_MAP[reason]);
     this.extension = null;
     return result;
   }
@@ -1279,6 +1286,8 @@ let activeExtensionIDs = new Set();
 class Extension extends ExtensionData {
   constructor(addonData, startupReason) {
     super(addonData.resourceURI);
+
+    this.state = "Not started";
 
     this.sharedDataKeys = new Set();
 
@@ -1482,7 +1491,7 @@ class Extension extends ExtensionData {
   }
 
   get manifestCacheKey() {
-    return [this.id, this.version, Services.locale.getAppLocaleAsLangTag()];
+    return [this.id, this.version, Services.locale.appLocaleAsLangTag];
   }
 
   get isPrivileged() {
@@ -1645,14 +1654,34 @@ class Extension extends ExtensionData {
   }
 
   runManifest(manifest) {
+    let state = new Set();
+    let updateState = () => {
+      this.state = `Startup: Run manifest: ${Array.from(state)}`;
+    };
+
     let promises = [];
+    let addPromise = (name, promise) => {
+      if (promise) {
+        promises.push(promise);
+
+        state.add(name);
+        promise.finally(() => {
+          state.delete(name);
+          updateState();
+        });
+      }
+    };
+
     for (let directive in manifest) {
       if (manifest[directive] !== null) {
-        promises.push(Management.emit(`manifest_${directive}`, directive, this, manifest));
+        addPromise(`manifest_${directive}`,
+                   Management.emit(`manifest_${directive}`, directive, this, manifest));
 
-        promises.push(Management.asyncEmitManifestEntry(this, directive));
+        addPromise(`asyncEmitManifestEntry("${directive}")`,
+                   Management.asyncEmitManifestEntry(this, directive));
       }
     }
+    updateState();
 
     activeExtensionIDs.add(this.id);
     sharedData.set("extensions/activeIDs", activeExtensionIDs);
@@ -1694,7 +1723,7 @@ class Extension extends ExtensionData {
       let locales = await this.promiseLocales();
 
       let matches = Services.locale.negotiateLanguages(
-        Services.locale.getAppLocalesAsLangTags(),
+        Services.locale.appLocalesAsLangTags,
         Array.from(locales.keys()),
         this.defaultLocale);
 
@@ -1746,6 +1775,8 @@ class Extension extends ExtensionData {
   }
 
   async startup() {
+    this.state = "Startup";
+
     // Create a temporary policy object for the devtools and add-on
     // manager callers that depend on it being available early.
     this.policy = new WebExtensionPolicy({
@@ -1765,12 +1796,16 @@ class Extension extends ExtensionData {
 
     this.policy.extension = this;
 
-    TelemetryStopwatch.start("WEBEXT_EXTENSION_STARTUP_MS", this);
+    ExtensionTelemetry.extensionStartup.stopwatchStart(this);
     try {
+      this.state = "Startup: Loading manifest";
       await this.loadManifest();
+      this.state = "Startup: Loaded manifest";
 
       if (!this.hasShutdown) {
+        this.state = "Startup: Init locale";
         await this.initLocale();
+        this.state = "Startup: Initted locale";
       }
 
       if (this.errors.length) {
@@ -1817,15 +1852,28 @@ class Extension extends ExtensionData {
       // any of the "startup" listeners.
       this.emit("startup", this);
 
+      let state = new Set(["Emit startup", "Run manifest"]);
+      this.state = `Startup: ${Array.from(state)}`;
       await Promise.all([
-        Management.emit("startup", this),
-        this.runManifest(this.manifest),
+        Management.emit("startup", this).finally(() => {
+          state.delete("Emit startup");
+          this.state = `Startup: ${Array.from(state)}`;
+        }),
+        this.runManifest(this.manifest).finally(() => {
+          state.delete("Run manifest");
+          this.state = `Startup: ${Array.from(state)}`;
+        }),
       ]);
+      this.state = "Startup: Ran manifest";
 
       Management.emit("ready", this);
       this.emit("ready");
-      TelemetryStopwatch.finish("WEBEXT_EXTENSION_STARTUP_MS", this);
+      ExtensionTelemetry.extensionStartup.stopwatchFinish(this);
+
+      this.state = "Startup: Complete";
     } catch (errors) {
+      this.state = `Startup: Error: ${errors}`;
+
       for (let e of [].concat(errors)) {
         dump(`Extension error: ${e.message || e} ${e.filename || e.fileName}:${e.lineNumber} :: ${e.stack || new Error().stack}\n`);
         Cu.reportError(e);
@@ -1861,6 +1909,8 @@ class Extension extends ExtensionData {
   }
 
   async shutdown(reason) {
+    this.state = "Shutdown";
+
     this.shutdownReason = reason;
     this.hasShutdown = true;
 
@@ -1869,6 +1919,8 @@ class Extension extends ExtensionData {
     }
 
     if (this.hasPermission("storage") && ExtensionStorageIDB.selectedBackendPromises.has(this)) {
+      this.state = "Shutdown: Storage";
+
       // Wait the data migration to complete.
       try {
         await ExtensionStorageIDB.selectedBackendPromises.get(this);
@@ -1877,11 +1929,14 @@ class Extension extends ExtensionData {
           `Error while waiting for extension data migration on shutdown: ${this.policy.debugName} - ` +
           `${err.message}::${err.stack}`);
       }
+      this.state = "Shutdown: Storage complete";
     }
 
     if (this.rootURI instanceof Ci.nsIJARURI) {
+      this.state = "Shutdown: Flush jar cache";
       let file = this.rootURI.JARFile.QueryInterface(Ci.nsIFileURL).file;
       Services.ppmm.broadcastAsyncMessage("Extension:FlushJarCache", {path: file.path});
+      this.state = "Shutdown: Flushed jar cache";
     }
 
     if (this.cleanupFile ||
@@ -1901,6 +1956,7 @@ class Extension extends ExtensionData {
     this.updatePermissions(this.shutdownReason);
 
     if (!this.manifest) {
+      this.state = "Shutdown: Complete: No manifest";
       this.policy.active = false;
 
       return this.cleanupGeneratedFile();
@@ -1919,10 +1975,12 @@ class Extension extends ExtensionData {
 
     const TIMED_OUT = Symbol();
 
+    this.state = "Shutdown: Emit shutdown";
     let result = await Promise.race([
       this.broadcast("Extension:Shutdown", {id: this.id}),
       promiseTimeout(CHILD_SHUTDOWN_TIMEOUT_MS).then(() => TIMED_OUT),
     ]);
+    this.state = `Shutdown: Emitted shutdown: ${result === TIMED_OUT}`;
     if (result === TIMED_OUT) {
       Cu.reportError(`Timeout while waiting for extension child to shutdown: ${this.policy.debugName}`);
     }
@@ -1931,6 +1989,7 @@ class Extension extends ExtensionData {
 
     this.policy.active = false;
 
+    this.state = `Shutdown: Complete (${this.cleanupFile})`;
     return this.cleanupGeneratedFile();
   }
 
@@ -2032,6 +2091,11 @@ class Langpack extends ExtensionData {
   }
 
   async shutdown(reason) {
+    if (reason === "APP_SHUTDOWN") {
+      // If we're shutting down, let's not bother updating the state of each
+      // system.
+      return;
+    }
     for (const sourceName of Object.keys(this.startupData.l10nRegistrySources)) {
       L10nRegistry.removeSource(`${sourceName}-${this.startupData.langpackId}`);
     }

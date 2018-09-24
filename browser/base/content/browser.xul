@@ -142,11 +142,10 @@ xmlns="http://www.w3.org/1999/xhtml"
                 tbattr="tabbrowser-multiple"
                 oncommand="gBrowser.replaceTabsWithWindow(TabContextMenu.contextTab);"/>
       <menuseparator id="context_sendTabToDevice_separator" class="sync-ui-item"/>
-      <menu id="context_sendTabToDevice" label="&sendTabToDevice.label;"
-            class="sync-ui-item"
-            accesskey="&sendTabToDevice.accesskey;">
+      <menu id="context_sendTabToDevice"
+            class="sync-ui-item">
         <menupopup id="context_sendTabToDevicePopupMenu"
-                   onpopupshowing="gSync.populateSendTabToDevicesMenu(event.target, TabContextMenu.contextTab.linkedBrowser.currentURI.spec, TabContextMenu.contextTab.linkedBrowser.contentTitle);"/>
+                   onpopupshowing="gSync.populateSendTabToDevicesMenu(event.target, TabContextMenu.contextTab);"/>
       </menu>
       <menuseparator/>
       <menuitem id="context_reloadAllTabs" label="&reloadAllTabs.label;" accesskey="&reloadAllTabs.accesskey;"
@@ -213,6 +212,22 @@ xmlns="http://www.w3.org/1999/xhtml"
            flip="none"
            level="parent"
            overflowpadding="15" />
+
+    <!-- for url bar autocomplete -->
+    <panel id="urlbar-results"
+           role="group"
+           noautofocus="true"
+           hidden="true"
+           flip="none"
+           level="parent">
+      <html:div class="urlbarView-body-outer">
+        <html:div class="urlbarView-body-inner">
+          <!-- TODO: add search suggestions notification -->
+          <html:div class="urlbarView-results"/>
+          <!-- TODO: add footer -->
+        </html:div>
+      </html:div>
+    </panel>
 
    <!-- for date/time picker. consumeoutsideclicks is set to never, so that
         clicks on the anchored input box are never consumed. -->
@@ -366,8 +381,13 @@ xmlns="http://www.w3.org/1999/xhtml"
     </panel>
 
     <menupopup id="toolbar-context-menu"
-               onpopupshowing="onViewToolbarsPopupShowing(event, document.getElementById('viewToolbarsMenuSeparator')); UpdateDownloadsAutoHide(this); UpdateManageExtension(this)">
-      <menuitem oncommand="openAboutAddonsForContextAction(this.parentElement)"
+               onpopupshowing="onViewToolbarsPopupShowing(event, document.getElementById('viewToolbarsMenuSeparator')); ToolbarContextMenu.updateDownloadsAutoHide(this); ToolbarContextMenu.updateExtension(this)">
+      <menuitem oncommand="ToolbarContextMenu.removeExtensionForContextAction(this.parentElement)"
+                accesskey="&customizeMenu.removeExtension.accesskey;"
+                label="&customizeMenu.removeExtension.label;"
+                contexttype="toolbaritem"
+                class="customize-context-removeExtension"/>
+      <menuitem oncommand="ToolbarContextMenu.openAboutAddonsForContextAction(this.parentElement)"
                 accesskey="&customizeMenu.manageExtension.accesskey;"
                 label="&customizeMenu.manageExtension.label;"
                 contexttype="toolbaritem"
@@ -378,7 +398,7 @@ xmlns="http://www.w3.org/1999/xhtml"
                 label="&customizeMenu.pinToOverflowMenu.label;"
                 contexttype="toolbaritem"
                 class="customize-context-moveToPanel"/>
-      <menuitem oncommand="onDownloadsAutoHideChange(event)"
+      <menuitem oncommand="ToolbarContextMenu.onDownloadsAutoHideChange(event)"
                 type="checkbox"
                 accesskey="&customizeMenu.autoHideDownloadsButton.accesskey;"
                 label="&customizeMenu.autoHideDownloadsButton.label;"
@@ -488,7 +508,7 @@ xmlns="http://www.w3.org/1999/xhtml"
            noautofocus="true"
            copyURL-title="&pageAction.copyLink.label;"
            emailLink-title="&emailPageCmd.label;"
-           sendToDevice-title="&pageAction.sendTabToDevice.label;"
+           sendToDevice-title=""
            sendToDevice-notReadyTitle="&sendToDevice.syncNotReady.label;"
            shareURL-title="&pageAction.shareUrl.label;"
            shareMore-label="&pageAction.shareMore.label;">
@@ -526,10 +546,10 @@ xmlns="http://www.w3.org/1999/xhtml"
                 label="&pageAction.removeFromUrlbar.label;"
                 oncommand="BrowserPageActions.togglePinningForContextAction();"/>
       <menuitem class="pageActionContextMenuItem extensionUnpinned"
-                label="&pageAction.allowInUrlbar.label;"
+                label="&pageAction.addToUrlbar.label;"
                 oncommand="BrowserPageActions.togglePinningForContextAction();"/>
       <menuitem class="pageActionContextMenuItem extensionPinned"
-                label="&pageAction.disallowInUrlbar.label;"
+                label="&pageAction.removeFromUrlbar.label;"
                 oncommand="BrowserPageActions.togglePinningForContextAction();"/>
       <menuseparator class="pageActionContextMenuItem extensionPinned extensionUnpinned"/>
       <menuitem class="pageActionContextMenuItem extensionPinned extensionUnpinned"
@@ -809,7 +829,7 @@ xmlns="http://www.w3.org/1999/xhtml"
                        ondrop="homeButtonObserver.onDrop(event)"
                        ondragexit="homeButtonObserver.onDragExit(event)"
                        key="goHome"
-                       onclick="BrowserGoHome(event);"
+                       onclick="BrowserHome(event);"
                        cui-areatype="toolbar"
                        tooltiptext="&homeButton.defaultPage.tooltip;"/>
         <toolbarspring cui-areatype="toolbar" class="chromeclass-toolbar-additional"/>

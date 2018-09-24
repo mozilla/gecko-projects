@@ -5,9 +5,6 @@
 
 package org.mozilla.gecko;
 
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.Map;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -25,6 +22,11 @@ import java.net.URLDecoder;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.zip.GZIPOutputStream;
 
 import org.mozilla.gecko.AppConstants.Versions;
@@ -45,6 +47,7 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.support.annotation.Nullable;
 import android.support.v7.app.AppCompatActivity;
 import android.text.TextUtils;
 import android.util.Log;
@@ -64,8 +67,12 @@ public class CrashReporterActivity extends AppCompatActivity
     private static final String PASSED_MINI_DUMP_SUCCESS_KEY = "minidumpSuccess";
     private static final String MINI_DUMP_PATH_KEY = "upload_file_minidump";
     private static final String PAGE_URL_KEY = "URL";
-    private static final String NOTES_KEY = "Notes";
     private static final String SERVER_URL_KEY = "ServerURL";
+    private static final String STACK_TRACES_KEY = "StackTraces";
+    private static final List<String> IGNORE_KEYS = Arrays.asList(
+            SERVER_URL_KEY,
+            STACK_TRACES_KEY
+    );
 
     private static final String CRASH_REPORT_SUFFIX = "/mozilla/Crash Reports/";
     private static final String PENDING_SUFFIX = CRASH_REPORT_SUFFIX + "pending";
@@ -321,12 +328,12 @@ public class CrashReporterActivity extends AppCompatActivity
         backgroundSendReport();
     }
 
-    private String getProfileName(File profileDir) throws GeckoProfileDirectories.NoMozillaDirectoryException {
+    private String getProfileName(@Nullable File profileDir) throws GeckoProfileDirectories.NoMozillaDirectoryException {
         final File mozillaDir = GeckoProfileDirectories.getMozillaDirectory(this);
         final INIParser parser = GeckoProfileDirectories.getProfilesINI(mozillaDir);
         String profileName = null;
 
-        if (parser.getSections() != null) {
+        if (parser.getSections() != null && profileDir != null) {
             for (Enumeration<INISection> e = parser.getSections().elements(); e.hasMoreElements(); ) {
                 final INISection section = e.nextElement();
                 final String path = section.getStringProperty("Path");
@@ -498,19 +505,10 @@ public class CrashReporterActivity extends AppCompatActivity
                 if (key.equals(PAGE_URL_KEY)) {
                     if (includeURLCheckbox.isChecked())
                         sendPart(os, boundary, key, extras.get(key));
-                } else if (!key.equals(SERVER_URL_KEY) && !key.equals(NOTES_KEY)) {
+                } else if (!IGNORE_KEYS.contains(key)) {
                     sendPart(os, boundary, key, extras.get(key));
                 }
             }
-
-            // Add some extra information to notes so its displayed by
-            // crash-stats.mozilla.org. Remove this when bug 607942 is fixed.
-            StringBuilder sb = new StringBuilder();
-            sb.append(extras.containsKey(NOTES_KEY) ? extras.get(NOTES_KEY) + "\n" : "");
-            sb.append(Build.MANUFACTURER).append(' ')
-              .append(Build.MODEL).append('\n')
-              .append(Build.FINGERPRINT);
-            sendPart(os, boundary, NOTES_KEY, sb.toString());
 
             sendPart(os, boundary, "Android_Manufacturer", Build.MANUFACTURER);
             sendPart(os, boundary, "Android_Model", Build.MODEL);

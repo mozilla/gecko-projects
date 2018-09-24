@@ -31,6 +31,7 @@
 #include "jsfriendapi.h"
 #include "js/LocaleSensitive.h"
 #include "mozilla/AbstractThread.h"
+#include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Atomics.h"
@@ -912,7 +913,7 @@ InitJSContextForWorker(WorkerPrivate* aWorkerPrivate, JSContext* aWorkerCx)
 }
 
 static bool
-PreserveWrapper(JSContext *cx, JSObject *obj)
+PreserveWrapper(JSContext *cx, JS::HandleObject obj)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(obj);
@@ -2272,7 +2273,7 @@ RuntimeService::PropagateFirstPartyStorageAccessGranted(nsPIDOMWindowInner* aWin
   MOZ_ASSERT(aWindow);
   MOZ_ASSERT(StaticPrefs::network_cookie_cookieBehavior() ==
                nsICookieService::BEHAVIOR_REJECT_TRACKER &&
-             StaticPrefs::browser_contentblocking_enabled());
+             AntiTrackingCommon::ShouldHonorContentBlockingCookieRestrictions());
 
   nsTArray<WorkerPrivate*> workers;
   GetWorkersForWindow(aWindow, workers);
@@ -2756,12 +2757,9 @@ WorkerThreadPrimaryRunnable::Run()
       PROFILER_SET_JS_CONTEXT(cx);
 
       {
-        JSAutoRequest ar(cx);
-
         mWorkerPrivate->DoRunLoop(cx);
         // The AutoJSAPI in DoRunLoop should have reported any exceptions left
-        // on cx.  Note that we still need the JSAutoRequest above because
-        // AutoJSAPI on workers does NOT enter a request!
+        // on cx.
         MOZ_ASSERT(!JS_IsExceptionPending(cx));
       }
 
@@ -2887,7 +2885,7 @@ PropagateFirstPartyStorageAccessGrantedToWorkers(nsPIDOMWindowInner* aWindow)
   AssertIsOnMainThread();
   MOZ_ASSERT(StaticPrefs::network_cookie_cookieBehavior() ==
                nsICookieService::BEHAVIOR_REJECT_TRACKER &&
-             StaticPrefs::browser_contentblocking_enabled());
+             AntiTrackingCommon::ShouldHonorContentBlockingCookieRestrictions());
 
   RuntimeService* runtime = RuntimeService::GetService();
   if (runtime) {

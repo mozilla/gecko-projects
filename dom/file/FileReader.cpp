@@ -64,6 +64,7 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(FileReader,
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(FileReader)
+  NS_INTERFACE_MAP_ENTRY_CONCRETE(FileReader)
   NS_INTERFACE_MAP_ENTRY(nsITimerCallback)
   NS_INTERFACE_MAP_ENTRY(nsIInputStreamCallback)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
@@ -551,6 +552,21 @@ FileReader::ClearProgressEventTimer()
   if (mProgressNotifier) {
     mProgressNotifier->Cancel();
   }
+}
+
+void
+FileReader::FreeFileData()
+{
+  if (mFileData) {
+    if (mDataFormat == FILE_AS_ARRAYBUFFER) {
+      js_free(mFileData);
+    } else {
+      free(mFileData);
+    }
+    mFileData = nullptr;
+  }
+
+  mDataLen = 0;
 }
 
 void

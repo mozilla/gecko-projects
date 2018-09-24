@@ -335,7 +335,7 @@ class nsXULElement : public nsStyledElement
 {
 protected:
     // Use Construct to construct elements instead of this constructor.
-    explicit nsXULElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
+    explicit nsXULElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
 
 public:
     using Element::Blur;
@@ -374,6 +374,9 @@ public:
     {
     }
 #endif
+
+    bool HasMenu();
+    MOZ_CAN_RUN_SCRIPT void OpenMenu(bool aOpenFlag);
 
     virtual bool PerformAccesskey(bool aKeyCausesActivation,
                                   bool aIsTrustedEvent) override;

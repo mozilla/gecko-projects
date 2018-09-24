@@ -36,8 +36,8 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_7
-        targetCompatibility JavaVersion.VERSION_1_7
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
     }
 
     dexOptions {
@@ -71,6 +71,7 @@ android {
             // shrinkResources true
             minifyEnabled true
             proguardFile "${topsrcdir}/mobile/android/config/proguard/proguard.cfg"
+            testProguardFile "${topsrcdir}/mobile/android/config/proguard/proguard-robocop.cfg"
         }
         release configureMinifyClosure
         if (mozconfig.substs.MOZILLA_OFFICIAL) {
@@ -125,6 +126,7 @@ android {
 
                 if (!mozconfig.substs.MOZ_CRASHREPORTER) {
                     exclude 'org/mozilla/gecko/CrashReporterActivity.java'
+                    exclude 'org/mozilla/gecko/CrashHandlerService.java'
                 }
 
                 if (!mozconfig.substs.MOZ_NATIVE_DEVICES) {
@@ -526,4 +528,48 @@ android.applicationVariants.all { variant ->
 apply from: "${topsrcdir}/mobile/android/gradle/jacoco_dependencies.gradle"
 if (project.hasProperty('enable_code_coverage')) {
     apply from: "${topsrcdir}/mobile/android/gradle/jacoco_for_junit.gradle"
+}
+
+
+// Set up code coverage for tests on emulators.
+if (mozconfig.substs.MOZ_JAVA_CODE_COVERAGE) {
+    android {
+        jacoco {
+            version = "$jacoco_version"
+        }
+        buildTypes {
+            debug {
+                testCoverageEnabled true
+            }
+        }
+    }
+
+    dependencies {
+        // This is required both in the instrumented application classes and the test classes,
+        // so `api` has to be used instead of `androidTestImplementation`.
+        api "org.jacoco:org.jacoco.agent:$jacoco_version:runtime"
+    }
+
+    // Generate tasks to archive compiled classfiles for later use with JaCoCo report generation.
+    // One of these tasks is used by `mach android archive-coverage-artifacts`.
+    android.applicationVariants.all { variant ->
+        def name = variant.name
+        def compileTask = tasks.getByName("compile${name.capitalize()}JavaWithJavac")
+        task "archiveClassfiles${name.capitalize()}"(type: Zip, dependsOn: compileTask) {
+            description = "Archive compiled classfiles for $name in order to export them as code coverage artifacts."
+            def fileFilter = ['**/androidTest/**',
+                              '**/test/**',
+                              '**/R.class',
+                              '**/R$*.class',
+                              '**/BuildConfig.*',
+                              '**/Manifest*.*',
+                              '**/*Test*.*',
+                              'android/**/*.*']
+            from fileTree(dir: compileTask.destinationDir, excludes: fileFilter)
+            destinationDir = file("${buildDir}/coverage")
+            // Note: This task assumes only one variant of archiveClassfiles* will be used.
+            // Running multiple variants of this task will overwrite the output archive.
+            archiveName = 'target.app_classfiles.zip'
+        }
+    }
 }

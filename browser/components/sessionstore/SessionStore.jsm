@@ -1624,7 +1624,13 @@ var SessionStoreInternal = {
 
           const observeTopic = topic => {
             let deferred = PromiseUtils.defer();
-            const cleanup = () => Services.obs.removeObserver(deferred.resolve, topic);
+            const cleanup = () => {
+              try {
+                Services.obs.removeObserver(deferred.resolve, topic);
+              } catch (ex) {
+                Cu.reportError("SessionStore: exception whilst flushing all windows: " + ex);
+              }
+            };
             Services.obs.addObserver(subject => {
               // Skip abort on ipc:content-shutdown if not abnormal/crashed
               subject.QueryInterface(Ci.nsIPropertyBag2);
@@ -2954,7 +2960,11 @@ var SessionStoreInternal = {
     // a flash of the about:tabcrashed page after selecting
     // the revived tab.
     aTab.removeAttribute("crashed");
-    browser.loadURI("about:blank");
+    browser.loadURI("about:blank", {
+      triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({
+        userContextId: aTab.userContextId,
+      }),
+    });
 
     let data = TabState.collect(aTab, TAB_CUSTOM_VALUES.get(aTab));
     this.restoreTab(aTab, data, {

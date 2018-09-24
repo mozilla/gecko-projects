@@ -39,13 +39,13 @@ interface nsIObjectInputStream;
 interface nsIObjectOutputStream;
 
 /***************************************************************************/
-[uuid(73e6ff4a-ab99-4d99-ac00-ba39ccb8e4d7)]
+[builtinclass, uuid(73e6ff4a-ab99-4d99-ac00-ba39ccb8e4d7)]
 interface nsIXPConnectJSObjectHolder : nsISupports
 {
     [notxpcom, nostdcall] JSObjectPtr GetJSObject();
 };
 
-[uuid(e787be29-db5d-4a45-a3d6-1de1d6b85c30)]
+[builtinclass, uuid(e787be29-db5d-4a45-a3d6-1de1d6b85c30)]
 interface nsIXPConnectWrappedNative : nsIXPConnectJSObjectHolder
 {
     /* attribute 'JSObject' inherited from nsIXPConnectJSObjectHolder */
@@ -84,7 +84,7 @@ do_QueryWrappedNative(nsIXPConnectWrappedNative *aWrappedNative,
 
 %}
 
-[uuid(3a01b0d6-074b-49ed-bac3-08c76366cae4)]
+[builtinclass, uuid(3a01b0d6-074b-49ed-bac3-08c76366cae4)]
 interface nsIXPConnectWrappedJS : nsIXPConnectJSObjectHolder
 {
     /* attribute 'JSObject' inherited from nsIXPConnectJSObjectHolder */
@@ -182,7 +182,7 @@ interface nsIXPConnectWrappedJSUnmarkGray : nsIXPConnectWrappedJS
  *  the interface id is that of nsIXPCWrappedJSObjectGetter.
  */
 
-[scriptable, uuid(254bb2e0-6439-11d4-8fe0-0010a4e73d9a)]
+[builtinclass, uuid(254bb2e0-6439-11d4-8fe0-0010a4e73d9a)]
 interface nsIXPCWrappedJSObjectGetter : nsISupports
 {
     readonly attribute nsISupports neverCalled;
@@ -191,19 +191,12 @@ interface nsIXPCWrappedJSObjectGetter : nsISupports
 /***************************************************************************/
 
 
-%{ C++
-// For use with the service manager
-// {CB6593E0-F9B2-11d2-BDD6-000064657374}
-#define NS_XPCONNECT_CID \
-{ 0xcb6593e0, 0xf9b2, 0x11d2, \
-    { 0xbd, 0xd6, 0x0, 0x0, 0x64, 0x65, 0x73, 0x74 } }
-%}
-
-[noscript, uuid(768507b5-b981-40c7-8276-f6a1da502a24)]
+[noscript, builtinclass, uuid(768507b5-b981-40c7-8276-f6a1da502a24)]
 interface nsIXPConnect : nsISupports
 {
 %{ C++
-  NS_DEFINE_STATIC_CID_ACCESSOR(NS_XPCONNECT_CID)
+    // This gets a non-addref'd pointer.
+    static nsIXPConnect* XPConnect();
 %}
 
     /**
@@ -376,4 +369,6 @@ interface nsIXPConnect : nsISupports
 
     [noscript] JSObjectPtr readFunction(in nsIObjectInputStream aStream,
                                         in JSContextPtr aJSContext);
+
+    [infallible] readonly attribute boolean isShuttingDown;
 };

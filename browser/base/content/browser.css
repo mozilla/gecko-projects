@@ -506,13 +506,6 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 }
 %endif
 
-:root[lwthemefooter=true] #browser-bottombox:-moz-lwtheme {
-  background-repeat: no-repeat;
-  background-position: bottom left;
-  background-color: var(--lwt-accent-color);
-  background-image: var(--lwt-footer-image);
-}
-
 /* Hide menu elements intended for keyboard access support */
 #main-menubar[openedwithkey=false] .show-only-for-keyboard {
   display: none;
@@ -536,6 +529,10 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 }
 
 #urlbar {
+  -moz-binding: url(chrome://browser/content/urlbarBindings.xml#legacy-urlbar);
+}
+
+#urlbar[quantumbar] {
   -moz-binding: url(chrome://browser/content/urlbarBindings.xml#urlbar);
 }
 
@@ -603,7 +600,7 @@ html|input.urlbar-input[textoverflow="start"]:not([focused]) {
   mask-image: linear-gradient(to right, transparent var(--urlbar-scheme-size), black calc(var(--urlbar-scheme-size) + 3ch));
 }
 
-html|input.urlbar-input:not([focused]) {
+html|input.urlbar-input {
   mask-repeat: no-repeat;
 }
 

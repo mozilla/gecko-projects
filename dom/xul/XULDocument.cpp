@@ -76,6 +76,7 @@
 #include "nsCCUncollectableMarker.h"
 #include "nsURILoader.h"
 #include "mozilla/BasicEvents.h"
+#include "mozilla/dom/DocumentL10n.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/NodeInfoInlines.h"
 #include "mozilla/dom/ProcessingInstruction.h"
@@ -1041,10 +1042,10 @@ XULDocument::AddElementToDocumentPost(Element* aElement)
         ResetDocumentDirection();
     }
 
-    // We need to pay special attention to the keyset tag to set up a listener
-    if (aElement->NodeInfo()->Equals(nsGkAtoms::keyset, kNameSpaceID_XUL)) {
-        // Create our XUL key listener and hook it up.
-        nsXBLService::AttachGlobalKeyHandler(aElement);
+    if (aElement->IsXULElement(nsGkAtoms::link)) {
+        LocalizationLinkAdded(aElement);
+    } else if (aElement->IsXULElement(nsGkAtoms::linkset)) {
+        OnL10nResourceContainerParsed();
     }
 
     return NS_OK;
@@ -1090,10 +1091,6 @@ XULDocument::RemoveSubtreeFromDocument(nsIContent* aContent)
     // Do a bunch of cleanup to remove an element from the XUL
     // document.
     nsresult rv;
-
-    if (aElement->NodeInfo()->Equals(nsGkAtoms::keyset, kNameSpaceID_XUL)) {
-        nsXBLService::DetachGlobalKeyHandler(aElement);
-    }
 
     // Remove any children from the document.
     for (nsIContent* child = aElement->GetLastChild();
@@ -1833,12 +1830,19 @@ XULDocument::DoneWalking()
 
         NotifyPossibleTitleChange(false);
 
+        // For performance reasons, we want to trigger the DocumentL10n's `TriggerInitialDocumentTranslation` within the same
+        // microtask that will be created for a `MozBeforeInitialXULLayout`
+        // event listener.
+        AddEventListener(NS_LITERAL_STRING("MozBeforeInitialXULLayout"), mDocumentL10n, true, false);
+
         nsContentUtils::DispatchTrustedEvent(
             this,
             static_cast<nsIDocument*>(this),
             NS_LITERAL_STRING("MozBeforeInitialXULLayout"),
             CanBubble::eYes,
             Cancelable::eNo);
+
+        RemoveEventListener(NS_LITERAL_STRING("MozBeforeInitialXULLayout"), mDocumentL10n, true);
 
         // Before starting layout, check whether we're a toplevel chrome
         // window.  If we are, setup some state so that we don't have to restyle

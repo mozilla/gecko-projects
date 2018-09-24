@@ -194,7 +194,7 @@ nsGenericHTMLElement::GetAccessKeyLabel(nsString& aLabel)
 }
 
 static bool
-IS_TABLE_CELL(LayoutFrameType frameType)
+IsTableCell(LayoutFrameType frameType)
 {
   return LayoutFrameType::TableCell == frameType ||
          LayoutFrameType::BCTableCell == frameType;
@@ -205,7 +205,7 @@ IsOffsetParent(nsIFrame* aFrame)
 {
   LayoutFrameType frameType = aFrame->Type();
 
-  if (IS_TABLE_CELL(frameType) || frameType == LayoutFrameType::Table) {
+  if (IsTableCell(frameType) || frameType == LayoutFrameType::Table) {
     // Per the IDL for Element, only td, th, and table are acceptable offsetParents
     // apart from body or positioned elements; we need to check the content type as
     // well as the frame type so we ignore anonymous tables created by an element
@@ -550,7 +550,7 @@ nsGenericHTMLElement::CheckHandleEventForAnchorsPreconditions(
          IsHTMLElement(nsGkAtoms::area);
 }
 
-void 
+void
 nsGenericHTMLElement::GetEventTargetParentForAnchors(EventChainPreVisitor& aVisitor)
 {
   nsGenericHTMLElementBase::GetEventTargetParent(aVisitor);
@@ -1620,9 +1620,9 @@ nsGenericHTMLElement::TouchEventsEnabled(JSContext* aCx, JSObject* aGlobal)
 
 //----------------------------------------------------------------------
 
-nsGenericHTMLFormElement::nsGenericHTMLFormElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo,
+nsGenericHTMLFormElement::nsGenericHTMLFormElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                                                    uint8_t aType)
-  : nsGenericHTMLElement(aNodeInfo)
+  : nsGenericHTMLElement(std::move(aNodeInfo))
   , nsIFormControl(aType)
   , mForm(nullptr)
   , mFieldSet(nullptr)
@@ -2700,9 +2700,9 @@ nsGenericHTMLElement::ChangeEditableState(int32_t aChange)
 //----------------------------------------------------------------------
 
 nsGenericHTMLFormElementWithState::nsGenericHTMLFormElementWithState(
-    already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo, uint8_t aType
+    already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo, uint8_t aType
   )
-  : nsGenericHTMLFormElement(aNodeInfo, aType)
+  : nsGenericHTMLFormElement(std::move(aNodeInfo), aType)
 {
   mStateKey.SetIsVoid(true);
 }
@@ -3007,10 +3007,10 @@ nsGenericHTMLElement::SetInnerText(const nsAString& aValue)
         break;
       }
       str.Truncate();
-      already_AddRefed<mozilla::dom::NodeInfo> ni =
+      RefPtr<mozilla::dom::NodeInfo> ni =
         NodeInfo()->NodeInfoManager()->GetNodeInfo(nsGkAtoms::br,
           nullptr, kNameSpaceID_XHTML, ELEMENT_NODE);
-      RefPtr<HTMLBRElement> br = new HTMLBRElement(ni);
+      RefPtr<HTMLBRElement> br = new HTMLBRElement(ni.forget());
       AppendChildTo(br, true);
     } else {
       str.Append(*s);

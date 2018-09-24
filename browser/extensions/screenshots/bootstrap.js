@@ -9,14 +9,14 @@ const HISTORY_ENABLED_PREF = "places.history.enabled";
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "AddonManager",
                                "resource://gre/modules/AddonManager.jsm");
+ChromeUtils.defineModuleGetter(this, "AddonManagerPrivate",
+                               "resource://gre/modules/AddonManager.jsm");
 ChromeUtils.defineModuleGetter(this, "AppConstants",
                                "resource://gre/modules/AppConstants.jsm");
 ChromeUtils.defineModuleGetter(this, "CustomizableUI",
                                "resource:///modules/CustomizableUI.jsm");
 ChromeUtils.defineModuleGetter(this, "LegacyExtensionsUtils",
                                "resource://gre/modules/LegacyExtensionsUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "PageActions",
-                               "resource:///modules/PageActions.jsm");
 ChromeUtils.defineModuleGetter(this, "Services",
                                "resource://gre/modules/Services.jsm");
 
@@ -27,25 +27,6 @@ let appStartupPromise = new Promise((resolve, reject) => {
 });
 
 const prefs = Services.prefs;
-const prefObserver = {
-  register() {
-    prefs.addObserver(PREF_BRANCH, this, false); // eslint-disable-line mozilla/no-useless-parameters
-  },
-
-  unregister() {
-    prefs.removeObserver(PREF_BRANCH, this, false); // eslint-disable-line mozilla/no-useless-parameters
-  },
-
-  observe(aSubject, aTopic, aData) {
-    // aSubject is the nsIPrefBranch we're observing (after appropriate QI)
-    // aData is the name of the pref that's been changed (relative to aSubject)
-    if (aData === USER_DISABLE_PREF) {
-      // eslint-disable-next-line promise/catch-or-return
-      appStartupPromise = appStartupPromise.then(handleStartup);
-    }
-  }
-};
-
 
 const appStartupObserver = {
   register() {
@@ -116,32 +97,39 @@ const LibraryButton = {
   },
 };
 
-const APP_STARTUP = 1;
-const APP_SHUTDOWN = 2;
 let addonData, startupReason;
 
 function startup(data, reason) { // eslint-disable-line no-unused-vars
+  addonResourceURI = data.resourceURI;
+
+  if (Services.prefs.getBoolPref(USER_DISABLE_PREF, false)) {
+    AddonManager.getActiveAddons().then(result => {
+      let addon = result.addons.find(a => a.id == ADDON_ID);
+      if (addon) {
+        addon.disable({allowSystemAddons: true});
+      }
+    });
+    return;
+  }
+
   addonData = data;
   startupReason = reason;
-  if (reason === APP_STARTUP) {
+  if (reason === AddonManagerPrivate.BOOTSTRAP_REASONS.APP_STARTUP) {
     appStartupObserver.register();
   } else {
     appStartupDone();
   }
-  prefObserver.register();
-  addonResourceURI = data.resourceURI;
   // eslint-disable-next-line promise/catch-or-return
   appStartupPromise = appStartupPromise.then(handleStartup);
 }
 
 function shutdown(data, reason) { // eslint-disable-line no-unused-vars
-  prefObserver.unregister();
   const webExtension = LegacyExtensionsUtils.getEmbeddedExtensionFor({
     id: ADDON_ID,
     resourceURI: addonResourceURI
   });
   // Immediately exit if Firefox is exiting, #3323
-  if (reason === APP_SHUTDOWN) {
+  if (reason === AddonManagerPrivate.BOOTSTRAP_REASONS.APP_SHUTDOWN) {
     stop(webExtension, reason);
     return;
   }
@@ -157,28 +145,22 @@ function getBoolPref(pref) {
   return prefs.getPrefType(pref) && prefs.getBoolPref(pref);
 }
 
-function shouldDisable() {
-  return getBoolPref(USER_DISABLE_PREF);
-}
-
 function handleStartup() {
   const webExtension = LegacyExtensionsUtils.getEmbeddedExtensionFor({
     id: ADDON_ID,
     resourceURI: addonResourceURI
   });
 
-  if (!shouldDisable() && !webExtension.started) {
+  if (!webExtension.started) {
     start(webExtension);
-  } else if (shouldDisable()) {
-    stop(webExtension, ADDON_DISABLE);
   }
 }
 
 function start(webExtension) {
-  return webExtension.startup(startupReason, addonData).then((api) => {
+  let reasonStr = stringReasonFromNumericReason(startupReason);
+  return webExtension.startup(reasonStr, addonData).then((api) => {
     api.browser.runtime.onMessage.addListener(handleMessage);
     LibraryButton.init(webExtension);
-    initPhotonPageAction(api, webExtension);
   }).catch((err) => {
     // The startup() promise will be rejected if the webExtension was
     // already started (a harmless error), or if initializing the
@@ -191,14 +173,18 @@ function start(webExtension) {
 }
 
 function stop(webExtension, reason) {
-  if (reason !== APP_SHUTDOWN) {
+  if (reason !== AddonManagerPrivate.BOOTSTRAP_REASONS.APP_SHUTDOWN) {
     LibraryButton.uninit();
-    if (photonPageAction) {
-      photonPageAction.remove();
-      photonPageAction = null;
-    }
   }
-  return Promise.resolve(webExtension.shutdown(reason));
+  let reasonStr = stringReasonFromNumericReason(reason);
+  return Promise.resolve(webExtension.shutdown(reasonStr));
+}
+
+function stringReasonFromNumericReason(numericReason) {
+  let { BOOTSTRAP_REASONS } = AddonManagerPrivate;
+  return Object.keys(BOOTSTRAP_REASONS).find(
+    key => BOOTSTRAP_REASONS[key] == numericReason
+  );
 }
 
 function handleMessage(msg, sender, sendReply) {
@@ -226,58 +212,4 @@ function handleMessage(msg, sender, sendReply) {
       sendReply({type: "success", value: true});
     }
   }
-}
-
-let photonPageAction;
-
-// If the current Firefox version supports Photon (57 and later), this sets up
-// a Photon page action and removes the UI for the WebExtension browser action.
-// Does nothing otherwise.  Ideally, in the future, WebExtension page actions
-// and Photon page actions would be one in the same, but they aren't right now.
-function initPhotonPageAction(api, webExtension) {
-  const id = "screenshots";
-  let port = null;
-
-  const {tabManager} = webExtension.extension;
-
-  // Make the page action.
-  photonPageAction = PageActions.actionForID(id) || PageActions.addAction(new PageActions.Action({
-    id,
-    title: "Take a Screenshot",
-    iconURL: webExtension.extension.getURL("icons/icon-v2.svg"),
-    _insertBeforeActionID: null,
-    onCommand(event, buttonNode) {
-      if (port) {
-        const browserWin = buttonNode.ownerGlobal;
-        const tab = tabManager.getWrapper(browserWin.gBrowser.selectedTab);
-        port.postMessage({
-          type: "click",
-          tab: {id: tab.id, url: tab.url}
-        });
-      }
-    },
-  }));
-
-  // Establish a port to the WebExtension side.
-  api.browser.runtime.onConnect.addListener((listenerPort) => {
-    if (listenerPort.name !== "photonPageActionPort") {
-      return;
-    }
-    port = listenerPort;
-    port.onMessage.addListener((message) => {
-      switch (message.type) {
-      case "setProperties":
-        if (message.title) {
-          photonPageAction.setTitle(message.title);
-        }
-        if (message.iconPath) {
-          photonPageAction.setIconURL(webExtension.extension.getURL(message.iconPath));
-        }
-        break;
-      default:
-        console.error("Unrecognized message:", message);
-        break;
-      }
-    });
-  });
 }

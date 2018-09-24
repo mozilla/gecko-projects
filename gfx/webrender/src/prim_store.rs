@@ -3,16 +3,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{AlphaType, BorderRadius, BuiltDisplayList, ClipMode, ColorF, PictureRect};
-use api::{DeviceIntRect, DeviceIntSize, DevicePixelScale, ExtendMode};
+use api::{DeviceIntRect, DeviceIntSize, DevicePixelScale, ExtendMode, DeviceRect, PictureToRasterTransform};
 use api::{FilterOp, GlyphInstance, GradientStop, ImageKey, ImageRendering, ItemRange, ItemTag, TileOffset};
-use api::{GlyphRasterSpace, LayoutPoint, LayoutRect, LayoutSize, LayoutToWorldTransform, LayoutVector2D};
-use api::{PremultipliedColorF, PropertyBinding, Shadow, YuvColorSpace, YuvFormat, DeviceIntSideOffsets};
-use api::{BorderWidths, BoxShadowClipMode, LayoutToWorldScale, NormalBorder, WorldRect};
+use api::{RasterSpace, LayoutPoint, LayoutRect, LayoutSideOffsets, LayoutSize, LayoutToWorldTransform};
+use api::{LayoutVector2D, PremultipliedColorF, PropertyBinding, Shadow, YuvColorSpace, YuvFormat};
+use api::{DeviceIntSideOffsets, WorldPixel, BoxShadowClipMode, LayoutToWorldScale, NormalBorder, WorldRect};
+use api::{PicturePixel, RasterPixel};
 use app_units::Au;
 use border::{BorderCacheKey, BorderRenderTaskInfo};
 use clip_scroll_tree::{ClipScrollTree, CoordinateSystemId, SpatialNodeIndex};
-use clip::{ClipNodeFlags, ClipChainId, ClipChainInstance, ClipItem};
-use euclid::{TypedVector2D, TypedTransform3D, TypedRect};
+use clip::{ClipNodeFlags, ClipChainId, ClipChainInstance, ClipItem, ClipNodeCollector};
+use euclid::{TypedTransform3D, TypedRect};
 use frame_builder::{FrameBuildingContext, FrameBuildingState, PictureContext, PictureState};
 use frame_builder::PrimitiveContext;
 use glyph_rasterizer::{FontInstance, FontTransform, GlyphKey, FONT_SIZE_LIMIT};
@@ -30,8 +31,7 @@ use resource_cache::{ImageProperties, ImageRequest, ResourceCache};
 use scene::SceneProperties;
 use segment::SegmentBuilder;
 use std::{cmp, fmt, mem, usize};
-use util::{MatrixHelpers, pack_as_float, recycle_vec, project_rect};
-use util::{TransformedRectKind, world_rect_to_device_pixels};
+use util::{ScaleOffset, MatrixHelpers, pack_as_float, project_rect, raster_rect_to_device_pixels};
 
 
 const MIN_BRUSH_SPLIT_AREA: f32 = 256.0 * 256.0;
@@ -53,17 +53,6 @@ impl ScrollNodeAndClipChain {
             clip_chain_id,
         }
     }
-}
-
-// This is CPU-side information about a transform, that is relevant
-// during culling and primitive prep pass. Often it is the same as
-// the information in the clip-scroll tree. However, if we decide
-// to rasterize a picture in local space, then this will be the
-// transform relative to that picture's coordinate system.
-pub struct Transform {
-    pub m: LayoutToWorldTransform,
-    pub backface_is_visible: bool,
-    pub transform_kind: TransformedRectKind,
 }
 
 #[derive(Debug)]
@@ -99,7 +88,7 @@ impl PrimitiveOpacity {
 
     pub fn from_alpha(alpha: f32) -> PrimitiveOpacity {
         PrimitiveOpacity {
-            is_opaque: alpha == 1.0,
+            is_opaque: alpha >= 1.0,
         }
     }
 }
@@ -107,7 +96,7 @@ impl PrimitiveOpacity {
 #[derive(Debug)]
 pub enum CoordinateSpaceMapping<F, T> {
     Local,
-    Offset(TypedVector2D<f32, F>),
+    ScaleOffset(ScaleOffset),
     Transform(TypedTransform3D<f32, F, T>),
 }
 
@@ -115,16 +104,32 @@ pub enum CoordinateSpaceMapping<F, T> {
 pub struct SpaceMapper<F, T> {
     kind: CoordinateSpaceMapping<F, T>,
     pub ref_spatial_node_index: SpatialNodeIndex,
-    current_target_spatial_node_index: SpatialNodeIndex,
+    pub current_target_spatial_node_index: SpatialNodeIndex,
+    pub bounds: TypedRect<f32, T>,
 }
 
 impl<F, T> SpaceMapper<F, T> where F: fmt::Debug {
-    pub fn new(ref_spatial_node_index: SpatialNodeIndex) -> Self {
+    pub fn new(
+        ref_spatial_node_index: SpatialNodeIndex,
+        bounds: TypedRect<f32, T>,
+    ) -> Self {
         SpaceMapper {
             kind: CoordinateSpaceMapping::Local,
             ref_spatial_node_index,
             current_target_spatial_node_index: ref_spatial_node_index,
+            bounds,
         }
+    }
+
+    pub fn new_with_target(
+        ref_spatial_node_index: SpatialNodeIndex,
+        target_node_index: SpatialNodeIndex,
+        bounds: TypedRect<f32, T>,
+        clip_scroll_tree: &ClipScrollTree,
+    ) -> Self {
+        let mut mapper = SpaceMapper::new(ref_spatial_node_index, bounds);
+        mapper.set_target_spatial_node(target_node_index, clip_scroll_tree);
+        mapper
     }
 
     pub fn set_target_spatial_node(
@@ -141,13 +146,12 @@ impl<F, T> SpaceMapper<F, T> where F: fmt::Debug {
             self.kind = if self.ref_spatial_node_index == target_node_index {
                 CoordinateSpaceMapping::Local
             } else if ref_spatial_node.coordinate_system_id == target_spatial_node.coordinate_system_id {
-                let offset = TypedVector2D::new(
-                    target_spatial_node.coordinate_system_relative_offset.x -
-                        ref_spatial_node.coordinate_system_relative_offset.x,
-                    target_spatial_node.coordinate_system_relative_offset.y -
-                        ref_spatial_node.coordinate_system_relative_offset.y,
-                );
-                CoordinateSpaceMapping::Offset(offset)
+                CoordinateSpaceMapping::ScaleOffset(
+                    ref_spatial_node.coordinate_system_relative_scale_offset
+                        .difference(
+                            &target_spatial_node.coordinate_system_relative_scale_offset
+                        )
+                )
             } else {
                 let transform = clip_scroll_tree.get_relative_transform(
                     target_node_index,
@@ -161,16 +165,44 @@ impl<F, T> SpaceMapper<F, T> where F: fmt::Debug {
         }
     }
 
+    pub fn get_transform(&self) -> TypedTransform3D<f32, F, T> {
+        match self.kind {
+            CoordinateSpaceMapping::Local => {
+                TypedTransform3D::identity()
+            }
+            CoordinateSpaceMapping::ScaleOffset(ref scale_offset) => {
+                scale_offset.to_transform()
+            }
+            CoordinateSpaceMapping::Transform(transform) => {
+                transform
+            }
+        }
+    }
+
+    pub fn unmap(&self, rect: &TypedRect<f32, T>) -> Option<TypedRect<f32, F>> {
+        match self.kind {
+            CoordinateSpaceMapping::Local => {
+                Some(TypedRect::from_untyped(&rect.to_untyped()))
+            }
+            CoordinateSpaceMapping::ScaleOffset(ref scale_offset) => {
+                Some(scale_offset.unmap_rect(rect))
+            }
+            CoordinateSpaceMapping::Transform(ref transform) => {
+                transform.inverse_rect_footprint(rect)
+            }
+        }
+    }
+
     pub fn map(&self, rect: &TypedRect<f32, F>) -> Option<TypedRect<f32, T>> {
         match self.kind {
             CoordinateSpaceMapping::Local => {
                 Some(TypedRect::from_untyped(&rect.to_untyped()))
             }
-            CoordinateSpaceMapping::Offset(ref offset) => {
-                Some(TypedRect::from_untyped(&rect.translate(offset).to_untyped()))
+            CoordinateSpaceMapping::ScaleOffset(ref scale_offset) => {
+                Some(scale_offset.map_rect(rect))
             }
             CoordinateSpaceMapping::Transform(ref transform) => {
-                match project_rect(transform, rect) {
+                match project_rect(transform, rect, &self.bounds) {
                     Some(bounds) => {
                         Some(bounds)
                     }
@@ -191,12 +223,15 @@ impl<F, T> SpaceMapper<F, T> where F: fmt::Debug {
 /// images that are visible, a DeferredResolve is created
 /// that is stored in the frame. This allows the render
 /// thread to iterate this list and update any changed
-/// texture data and update the UV rect.
+/// texture data and update the UV rect. Any filtering
+/// is handled externally for NativeTexture external
+/// images.
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct DeferredResolve {
     pub address: GpuCacheAddress,
     pub image_properties: ImageProperties,
+    pub rendering: ImageRendering,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -316,7 +351,7 @@ pub enum BorderSource {
         cache_key: BorderCacheKey,
         task_info: Option<BorderRenderTaskInfo>,
         border: NormalBorder,
-        widths: BorderWidths,
+        widths: LayoutSideOffsets,
     },
 }
 
@@ -367,6 +402,7 @@ pub enum BrushKind {
         stretch_size: LayoutSize,
         tile_spacing: LayoutSize,
         visible_tiles: Vec<VisibleGradientTile>,
+        stops_opacity: PrimitiveOpacity,
     },
     Border {
         source: BorderSource,
@@ -408,7 +444,10 @@ impl BrushKind {
 
     // Construct a brush that is a border with `border` style and `widths`
     // dimensions.
-    pub fn new_border(border: NormalBorder, widths: BorderWidths) -> BrushKind {
+    pub fn new_border(mut border: NormalBorder, widths: LayoutSideOffsets) -> BrushKind {
+        // FIXME(emilio): Is this the best place to do this?
+        border.normalize(&widths);
+
         let cache_key = BorderCacheKey::new(&border, &widths);
         BrushKind::Border {
             source: BorderSource::Border {
@@ -485,14 +524,14 @@ pub struct BrushSegment {
 
 impl BrushSegment {
     pub fn new(
-        rect: LayoutRect,
+        local_rect: LayoutRect,
         may_need_clip_mask: bool,
         edge_flags: EdgeAaSegmentMask,
         extra_data: [f32; 4],
         brush_flags: BrushFlags,
-    ) -> BrushSegment {
-        BrushSegment {
-            local_rect: rect,
+    ) -> Self {
+        Self {
+            local_rect,
             clip_task_id: BrushSegmentTaskId::Opaque,
             may_need_clip_mask,
             edge_flags,
@@ -527,7 +566,7 @@ impl BrushPrimitive {
     pub fn may_need_clip_mask(&self) -> bool {
         match self.kind {
             BrushKind::Picture(ref pic) => {
-                pic.composite_mode.is_some()
+                pic.raster_config.is_some()
             }
             _ => {
                 true
@@ -853,7 +892,6 @@ pub struct TextRunPrimitive {
     pub glyph_keys: Vec<GlyphKey>,
     pub glyph_gpu_blocks: Vec<GpuBlockData>,
     pub shadow: bool,
-    pub glyph_raster_space: GlyphRasterSpace,
 }
 
 impl TextRunPrimitive {
@@ -863,7 +901,6 @@ impl TextRunPrimitive {
         glyph_range: ItemRange<GlyphInstance>,
         glyph_keys: Vec<GlyphKey>,
         shadow: bool,
-        glyph_raster_space: GlyphRasterSpace,
     ) -> Self {
         TextRunPrimitive {
             specified_font: font.clone(),
@@ -873,7 +910,6 @@ impl TextRunPrimitive {
             glyph_keys,
             glyph_gpu_blocks: Vec::new(),
             shadow,
-            glyph_raster_space,
         }
     }
 
@@ -882,6 +918,7 @@ impl TextRunPrimitive {
         device_pixel_scale: DevicePixelScale,
         transform: &LayoutToWorldTransform,
         allow_subpixel_aa: bool,
+        raster_space: RasterSpace,
     ) -> bool {
         // Get the current font size in device pixels
         let device_font_size = self.specified_font.size.scale_by(device_pixel_scale.0);
@@ -893,7 +930,7 @@ impl TextRunPrimitive {
            // Font sizes larger than the limit need to be scaled, thus can't use subpixels.
            transform.exceeds_2d_scale(FONT_SIZE_LIMIT / device_font_size.to_f64_px()) ||
            // Otherwise, ensure the font is rasterized in screen-space.
-           self.glyph_raster_space != GlyphRasterSpace::Screen {
+           raster_space != RasterSpace::Screen {
             false
         } else {
             true
@@ -942,6 +979,7 @@ impl TextRunPrimitive {
         device_pixel_scale: DevicePixelScale,
         transform: &LayoutToWorldTransform,
         allow_subpixel_aa: bool,
+        raster_space: RasterSpace,
         display_list: &BuiltDisplayList,
         frame_building_state: &mut FrameBuildingState,
     ) {
@@ -949,6 +987,7 @@ impl TextRunPrimitive {
             device_pixel_scale,
             transform,
             allow_subpixel_aa,
+            raster_space,
         );
 
         // Cache the glyph positions, if not in the cache already.
@@ -1254,7 +1293,6 @@ impl PrimitiveContainer {
                     info.glyph_range,
                     info.glyph_keys.clone(),
                     true,
-                    info.glyph_raster_space,
                 ))
             }
             PrimitiveContainer::Brush(ref brush) => {
@@ -1349,13 +1387,6 @@ impl PrimitiveStore {
         }
     }
 
-    pub fn recycle(self) -> Self {
-        PrimitiveStore {
-            primitives: recycle_vec(self.primitives),
-            chase_id: self.chase_id,
-        }
-    }
-
     pub fn get_pic(&self, index: PrimitiveIndex) -> &PicturePrimitive {
         self.primitives[index.0].as_pic()
     }
@@ -1400,7 +1431,20 @@ impl PrimitiveStore {
                     BrushKind::Image { .. } => PrimitiveOpacity::translucent(),
                     BrushKind::YuvImage { .. } => PrimitiveOpacity::opaque(),
                     BrushKind::RadialGradient { .. } => PrimitiveOpacity::translucent(),
-                    BrushKind::LinearGradient { .. } => PrimitiveOpacity::translucent(),
+                    BrushKind::LinearGradient { stretch_size, tile_spacing, stops_opacity, .. } => {
+                        // If the coverage of the gradient extends to or beyond
+                        // the primitive rect, then the opacity can be determined
+                        // by the colors of the stops. If we have tiling / spacing
+                        // then we just assume the gradient is translucent for now.
+                        // (In the future we could consider segmenting in some cases).
+                        let stride = stretch_size + tile_spacing;
+                        if stride.width >= local_rect.size.width &&
+                           stride.height >= local_rect.size.height {
+                            stops_opacity
+                        } else {
+                            PrimitiveOpacity::translucent()
+                        }
+                    }
                     BrushKind::Picture { .. } => PrimitiveOpacity::translucent(),
                     BrushKind::Border { .. } => PrimitiveOpacity::translucent(),
                 };
@@ -1465,7 +1509,7 @@ impl PrimitiveStore {
                         // If we encounter a picture that is a pass-through
                         // (i.e. no composite mode), then we can recurse into
                         // that to try and find a primitive to collapse to.
-                        if pic.composite_mode.is_none() {
+                        if pic.requested_composite_mode.is_none() {
                             return self.get_opacity_collapse_prim(run.base_prim_index);
                         }
                     }
@@ -1496,7 +1540,7 @@ impl PrimitiveStore {
         pic_prim_index: PrimitiveIndex,
     ) {
         // Only handle opacity filters for now.
-        let binding = match self.get_pic(pic_prim_index).composite_mode {
+        let binding = match self.get_pic(pic_prim_index).requested_composite_mode {
             Some(PictureCompositeMode::Filter(FilterOp::Opacity(binding, _))) => {
                 binding
             }
@@ -1544,7 +1588,7 @@ impl PrimitiveStore {
         // intermediate surface or incur an extra blend / blit. Instead,
         // the collapsed primitive will be drawn directly into the
         // parent picture.
-        self.get_pic_mut(pic_prim_index).composite_mode = None;
+        self.get_pic_mut(pic_prim_index).requested_composite_mode = None;
     }
 
     pub fn prim_count(&self) -> usize {
@@ -1561,7 +1605,6 @@ impl PrimitiveStore {
         frame_state: &mut FrameBuildingState,
         display_list: &BuiltDisplayList,
         is_chased: bool,
-        root_spatial_node_index: SpatialNodeIndex,
         current_pic_rect: &mut PictureRect,
     ) -> bool {
         // If we have dependencies, we need to prepare them first, in order
@@ -1569,15 +1612,19 @@ impl PrimitiveStore {
         // For example, scrolling may affect the location of an item in
         // local space, which may force us to render this item on a larger
         // picture target, if being composited.
-        let pic_context_for_children = {
+        let pic_info = {
             match self.primitives[prim_index.0].details {
                 PrimitiveDetails::Brush(BrushPrimitive { kind: BrushKind::Picture(ref mut pic), .. }) => {
                     match pic.take_context(
+                        prim_context,
+                        pic_state.surface_spatial_node_index,
+                        pic_state.raster_spatial_node_index,
                         pic_context.allow_subpixel_aa,
-                        frame_context.scene_properties,
+                        frame_state,
+                        frame_context,
                         is_chased,
                     ) {
-                        Some(pic_context_for_children) => Some(pic_context_for_children),
+                        Some(info) => Some(info),
                         None => return false,
                     }
                 }
@@ -1588,22 +1635,10 @@ impl PrimitiveStore {
             }
         };
 
-        let is_passthrough = match pic_context_for_children {
-            Some(pic_context_for_children) => {
-                let has_surface = pic_context_for_children.has_surface;
-
-                let root_spatial_node_index = if has_surface {
-                    prim_context.spatial_node_index
-                } else {
-                    root_spatial_node_index
-                };
-
-                let mut pic_state_for_children = PictureState::new(
-                    root_spatial_node_index,
-                    frame_context.clip_scroll_tree,
-                );
-
+        let (is_passthrough, clip_node_collector) = match pic_info {
+            Some((pic_context_for_children, mut pic_state_for_children)) => {
                 // Mark whether this picture has a complex coordinate system.
+                let is_passthrough = pic_context_for_children.is_passthrough;
                 pic_state_for_children.has_non_root_coord_system |=
                     prim_context.spatial_node.coordinate_system_id != CoordinateSystemId::root();
 
@@ -1613,25 +1648,29 @@ impl PrimitiveStore {
                     &mut pic_state_for_children,
                     frame_context,
                     frame_state,
-                    root_spatial_node_index,
                     &mut pic_rect,
                 );
 
-                let pic_rect = if has_surface {
-                    Some(pic_rect)
-                } else {
+                let pic_rect = if is_passthrough {
                     *current_pic_rect = current_pic_rect.union(&pic_rect);
                     None
+                } else {
+                    Some(pic_rect)
                 };
+
+                if !pic_state_for_children.is_cacheable {
+                  pic_state.is_cacheable = false;
+                }
 
                 // Restore the dependencies (borrow check dance)
                 let prim = &mut self.primitives[prim_index.0];
-                let new_local_rect = prim
+                let (new_local_rect, clip_node_collector) = prim
                     .as_pic_mut()
                     .restore_context(
                         pic_context_for_children,
                         pic_state_for_children,
                         pic_rect,
+                        frame_state,
                     );
 
                 if new_local_rect != prim.metadata.local_rect {
@@ -1640,17 +1679,21 @@ impl PrimitiveStore {
                     pic_state.local_rect_changed = true;
                 }
 
-                !has_surface
+                (is_passthrough, clip_node_collector)
             }
             None => {
-                false
+                (false, None)
             }
         };
 
         let prim = &mut self.primitives[prim_index.0];
 
+        if !prim.is_cacheable(frame_state.resource_cache) {
+            pic_state.is_cacheable = false;
+        }
+
         if is_passthrough {
-            prim.metadata.clipped_world_rect = Some(frame_context.world_rect);
+            prim.metadata.clipped_world_rect = Some(pic_state.map_pic_to_world.bounds);
         } else {
             if prim.metadata.local_rect.size.width <= 0.0 ||
                prim.metadata.local_rect.size.height <= 0.0 {
@@ -1693,6 +1736,9 @@ impl PrimitiveStore {
                     frame_state.gpu_cache,
                     frame_state.resource_cache,
                     frame_context.device_pixel_scale,
+                    &frame_context.world_rect,
+                    &clip_node_collector,
+                    frame_state.clip_data_store,
                 );
 
             let clip_chain = match clip_chain {
@@ -1752,11 +1798,13 @@ impl PrimitiveStore {
             prim.update_clip_task(
                 prim_context,
                 clipped_world_rect,
+                pic_state.raster_spatial_node_index,
                 &clip_chain,
                 pic_state,
                 frame_context,
                 frame_state,
                 is_chased,
+                &clip_node_collector,
             );
 
             if cfg!(debug_assertions) && is_chased {
@@ -1794,7 +1842,6 @@ impl PrimitiveStore {
         pic_state: &mut PictureState,
         frame_context: &FrameBuildingContext,
         frame_state: &mut FrameBuildingState,
-        root_spatial_node_index: SpatialNodeIndex,
         current_pic_rect: &mut PictureRect,
     ) {
         let display_list = &frame_context
@@ -1825,22 +1872,17 @@ impl PrimitiveStore {
                     .clip_scroll_tree
                     .spatial_nodes[spatial_node_index.0];
 
-                let transform = frame_context
-                    .transforms
-                    .get_transform(spatial_node_index);
-
                 // TODO(gw): Although constructing these is cheap, they are often
                 //           the same for many consecutive primitives, so it may
                 //           be worth caching the most recent context.
                 let prim_context = PrimitiveContext::new(
                     spatial_node,
                     spatial_node_index,
-                    transform,
                 );
 
                 // Do some basic checks first, that can early out
                 // without even knowing the local rect.
-                if !is_backface_visible && prim_context.transform.backface_is_visible {
+                if !is_backface_visible && spatial_node.world_content_transform.is_backface_visible() {
                     if cfg!(debug_assertions) && is_chased {
                         println!("\tculled for not having visible back faces");
                     }
@@ -1861,7 +1903,7 @@ impl PrimitiveStore {
 
                 pic_state.map_local_to_pic.set_target_spatial_node(
                     spatial_node_index,
-                    &frame_context.clip_scroll_tree,
+                    frame_context.clip_scroll_tree,
                 );
 
                 if self.prepare_prim_for_render(
@@ -1873,7 +1915,6 @@ impl PrimitiveStore {
                     frame_state,
                     display_list,
                     is_chased,
-                    root_spatial_node_index,
                     current_pic_rect,
                 ) {
                     frame_state.profile_counters.visible_primitives.inc();
@@ -2047,14 +2088,17 @@ fn write_brush_segment_description(
     // Segment the primitive on all the local-space clip sources that we can.
     let mut local_clip_count = 0;
     for i in 0 .. clip_chain.clips_range.count {
-        let (clip_node, flags) = frame_state.clip_store.get_node_from_range(&clip_chain.clips_range, i);
+        let clip_instance = frame_state
+            .clip_store
+            .get_instance_from_range(&clip_chain.clips_range, i);
+        let clip_node = &frame_state.clip_data_store[clip_instance.handle];
 
         // If this clip item is positioned by another positioning node, its relative position
         // could change during scrolling. This means that we would need to resegment. Instead
         // of doing that, only segment with clips that have the same positioning node.
         // TODO(mrobinson, #2858): It may make sense to include these nodes, resegmenting only
         // when necessary while scrolling.
-        if !flags.contains(ClipNodeFlags::SAME_SPATIAL_NODE) {
+        if !clip_instance.flags.contains(ClipNodeFlags::SAME_SPATIAL_NODE) {
             continue;
         }
 
@@ -2169,12 +2213,14 @@ fn write_brush_segment_description(
 impl Primitive {
     fn update_clip_task_for_brush(
         &mut self,
-        clipped_world_rect: &WorldRect,
+        root_spatial_node_index: SpatialNodeIndex,
+        prim_bounding_rect: WorldRect,
         prim_context: &PrimitiveContext,
         prim_clip_chain: &ClipChainInstance,
         pic_state: &mut PictureState,
         frame_context: &FrameBuildingContext,
         frame_state: &mut FrameBuildingState,
+        clip_node_collector: &Option<ClipNodeCollector>,
     ) -> bool {
         let brush = match self.details {
             PrimitiveDetails::Brush(ref mut brush) => brush,
@@ -2210,44 +2256,42 @@ impl Primitive {
                     frame_state.gpu_cache,
                     frame_state.resource_cache,
                     frame_context.device_pixel_scale,
+                    &frame_context.world_rect,
+                    clip_node_collector,
+                    frame_state.clip_data_store,
                 );
 
             match segment_clip_chain {
                 Some(segment_clip_chain) => {
-                    if segment_clip_chain.clips_range.count == 0 ||
+                    if !segment_clip_chain.needs_mask ||
                        (!segment.may_need_clip_mask && !segment_clip_chain.has_non_local_clips) {
                         segment.clip_task_id = BrushSegmentTaskId::Opaque;
                         continue;
                     }
 
-                    let world_clip_rect = match pic_state.map_pic_to_world.map(&segment_clip_chain.pic_clip_rect) {
-                        Some(world_clip_rect) => world_clip_rect,
-                        None => {
-                            segment.clip_task_id = BrushSegmentTaskId::Empty;
-                            continue;
-                        }
-                    };
-
-                    let world_clip_rect = match world_clip_rect.intersection(clipped_world_rect) {
-                        Some(world_clip_rect) => world_clip_rect,
-                        None => {
-                            segment.clip_task_id = BrushSegmentTaskId::Empty;
-                            continue;
-                        }
-                    };
-
-                    let bounds = world_rect_to_device_pixels(
-                        world_clip_rect,
+                    let (device_rect, _, _) = match get_raster_rects(
+                        segment_clip_chain.pic_clip_rect,
+                        &pic_state.map_pic_to_raster,
+                        &pic_state.map_raster_to_world,
+                        prim_bounding_rect,
                         frame_context.device_pixel_scale,
-                    );
+                    ) {
+                        Some(info) => info,
+                        None => {
+                            segment.clip_task_id = BrushSegmentTaskId::Empty;
+                            continue;
+                        }
+                    };
 
                     let clip_task = RenderTask::new_mask(
-                        bounds.to_i32(),
+                        device_rect.to_i32(),
                         segment_clip_chain.clips_range,
+                        root_spatial_node_index,
                         frame_state.clip_store,
                         frame_state.gpu_cache,
                         frame_state.resource_cache,
                         frame_state.render_tasks,
+                        frame_state.clip_data_store,
                     );
 
                     let clip_task_id = frame_state.render_tasks.add(clip_task);
@@ -2309,6 +2353,7 @@ impl Primitive {
                     frame_context.device_pixel_scale,
                     &transform,
                     pic_context.allow_subpixel_aa,
+                    pic_context.raster_space,
                     display_list,
                     frame_state,
                 );
@@ -2667,14 +2712,15 @@ impl Primitive {
                         }
                     }
                     BrushKind::Picture(ref mut pic) => {
-                        pic.prepare_for_render(
+                        if !pic.prepare_for_render(
                             prim_index,
                             metadata,
-                            prim_context,
                             pic_state,
                             frame_context,
                             frame_state,
-                        );
+                        ) {
+                            metadata.clipped_world_rect = None;
+                        }
                     }
                     BrushKind::Solid { ref color, ref mut opacity_binding, .. } => {
                         // If the opacity changed, invalidate the GPU cache so that
@@ -2733,12 +2779,14 @@ impl Primitive {
     fn update_clip_task(
         &mut self,
         prim_context: &PrimitiveContext,
-        clipped_world_rect: WorldRect,
+        prim_bounding_rect: WorldRect,
+        root_spatial_node_index: SpatialNodeIndex,
         clip_chain: &ClipChainInstance,
         pic_state: &mut PictureState,
         frame_context: &FrameBuildingContext,
         frame_state: &mut FrameBuildingState,
         is_chased: bool,
+        clip_node_collector: &Option<ClipNodeCollector>,
     ) {
         if cfg!(debug_assertions) && is_chased {
             println!("\tupdating clip task with pic rect {:?}", clip_chain.pic_clip_rect);
@@ -2751,12 +2799,14 @@ impl Primitive {
 
         // First try to  render this primitive's mask using optimized brush rendering.
         if self.update_clip_task_for_brush(
-            &clipped_world_rect,
+            root_spatial_node_index,
+            prim_bounding_rect,
             prim_context,
             &clip_chain,
             pic_state,
             frame_context,
             frame_state,
+            clip_node_collector,
         ) {
             if cfg!(debug_assertions) && is_chased {
                 println!("\tsegment tasks have been created for clipping");
@@ -2764,28 +2814,33 @@ impl Primitive {
             return;
         }
 
-        if clip_chain.clips_range.count > 0 {
-            let device_rect = world_rect_to_device_pixels(
-                clipped_world_rect,
+        if clip_chain.needs_mask {
+            if let Some((device_rect, _, _)) = get_raster_rects(
+                clip_chain.pic_clip_rect,
+                &pic_state.map_pic_to_raster,
+                &pic_state.map_raster_to_world,
+                prim_bounding_rect,
                 frame_context.device_pixel_scale,
-            );
+            ) {
+                let clip_task = RenderTask::new_mask(
+                    device_rect,
+                    clip_chain.clips_range,
+                    root_spatial_node_index,
+                    frame_state.clip_store,
+                    frame_state.gpu_cache,
+                    frame_state.resource_cache,
+                    frame_state.render_tasks,
+                    frame_state.clip_data_store,
+                );
 
-            let clip_task = RenderTask::new_mask(
-                device_rect.to_i32(),
-                clip_chain.clips_range,
-                frame_state.clip_store,
-                frame_state.gpu_cache,
-                frame_state.resource_cache,
-                frame_state.render_tasks,
-            );
-
-            let clip_task_id = frame_state.render_tasks.add(clip_task);
-            if cfg!(debug_assertions) && is_chased {
-                println!("\tcreated task {:?} with world rect {:?}",
-                    clip_task_id, clipped_world_rect);
+                let clip_task_id = frame_state.render_tasks.add(clip_task);
+                if cfg!(debug_assertions) && is_chased {
+                    println!("\tcreated task {:?} with world rect {:?}",
+                        clip_task_id, self.metadata.clipped_world_rect);
+                }
+                self.metadata.clip_task_id = Some(clip_task_id);
+                pic_state.tasks.push(clip_task_id);
             }
-            self.metadata.clip_task_id = Some(clip_task_id);
-            pic_state.tasks.push(clip_task_id);
         }
     }
 
@@ -2818,14 +2873,21 @@ impl Primitive {
             let max_scale = BorderRenderTaskInfo::get_max_scale(&border.radius, &widths);
             scale.0 = scale.0.min(max_scale.0);
             let scale_au = Au::from_f32_px(scale.0);
+
+            // NOTE(emilio): This `needs_update` relies on the local rect for a
+            // given primitive being immutable. If that changes, this code
+            // should probably handle changes to it as well, retaining the old
+            // size in cache_key.
             let needs_update = scale_au != cache_key.scale;
+
             let mut new_segments = Vec::new();
 
+            let local_rect = &self.metadata.local_rect;
             if needs_update {
                 cache_key.scale = scale_au;
 
                 *task_info = BorderRenderTaskInfo::new(
-                    &self.metadata.local_rect,
+                    local_rect,
                     border,
                     widths,
                     scale,
@@ -2836,7 +2898,7 @@ impl Primitive {
             *handle = task_info.as_ref().map(|task_info| {
                 frame_state.resource_cache.request_render_task(
                     RenderTaskCacheKey {
-                        size: DeviceIntSize::zero(),
+                        size: task_info.cache_key_size(&local_rect.size, scale),
                         kind: RenderTaskCacheKeyKind::Border(cache_key.clone()),
                     },
                     frame_state.gpu_cache,
@@ -2869,4 +2931,36 @@ impl Primitive {
             }
         }
     }
+}
+
+pub fn get_raster_rects(
+    pic_rect: PictureRect,
+    map_to_raster: &SpaceMapper<PicturePixel, RasterPixel>,
+    map_to_world: &SpaceMapper<RasterPixel, WorldPixel>,
+    prim_bounding_rect: WorldRect,
+    device_pixel_scale: DevicePixelScale,
+) -> Option<(DeviceIntRect, DeviceRect, PictureToRasterTransform)> {
+    let unclipped_raster_rect = map_to_raster.map(&pic_rect)?;
+
+    let unclipped = raster_rect_to_device_pixels(
+        unclipped_raster_rect,
+        device_pixel_scale,
+    );
+
+    let unclipped_world_rect = map_to_world.map(&unclipped_raster_rect)?;
+
+    let clipped_world_rect = unclipped_world_rect.intersection(&prim_bounding_rect)?;
+
+    let clipped_raster_rect = map_to_world.unmap(&clipped_world_rect)?;
+
+    let clipped_raster_rect = clipped_raster_rect.intersection(&unclipped_raster_rect)?;
+
+    let clipped = raster_rect_to_device_pixels(
+        clipped_raster_rect,
+        device_pixel_scale,
+    );
+
+    let transform = map_to_raster.get_transform();
+
+    Some((clipped.to_i32(), unclipped, transform))
 }

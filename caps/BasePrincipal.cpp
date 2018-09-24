@@ -59,6 +59,13 @@ BasePrincipal::GetOriginNoSuffix(nsACString& aOrigin)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+BasePrincipal::GetSiteOrigin(nsACString& aSiteOrigin)
+{
+  MOZ_ASSERT(mInitialized);
+  return GetOrigin(aSiteOrigin);
+}
+
 bool
 BasePrincipal::Subsumes(nsIPrincipal* aOther, DocumentDomainConsideration aConsideration)
 {
@@ -525,6 +532,14 @@ BasePrincipal::FinishInit(const nsACString& aOriginNoSuffix,
 
   MOZ_ASSERT(!aOriginNoSuffix.IsEmpty());
   mOriginNoSuffix = NS_Atomize(aOriginNoSuffix);
+}
+
+bool
+SiteIdentifier::Equals(const SiteIdentifier& aOther) const
+{
+  MOZ_ASSERT(IsInitialized());
+  MOZ_ASSERT(aOther.IsInitialized());
+  return mPrincipal->FastEquals(aOther.mPrincipal);
 }
 
 } // namespace mozilla

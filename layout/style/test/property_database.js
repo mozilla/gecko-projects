@@ -4889,8 +4889,234 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "none" ],
-    other_values: [ "url(#myfilt)" ],
-    invalid_values: [ "url(#myfilt) none" ]
+    other_values: [
+      // SVG reference filters
+      "url(#my-filter)",
+      "url(#my-filter-1) url(#my-filter-2)",
+
+      // Filter functions
+      "opacity(50%) saturate(1.0)",
+      "invert(50%) sepia(0.1) brightness(90%)",
+
+      // Mixed SVG reference filters and filter functions
+      "grayscale(1) url(#my-filter-1)",
+      "url(#my-filter-1) brightness(50%) contrast(0.9)",
+
+      // Bad URLs
+      "url('badscheme:badurl')",
+      "blur(3px) url('badscheme:badurl') grayscale(50%)",
+
+      "blur(0)",
+      "blur(0px)",
+      "blur(0.5px)",
+      "blur(3px)",
+      "blur(100px)",
+      "blur(0.1em)",
+      "blur(calc(-1px))", // Parses and becomes blur(0px).
+      "blur(calc(0px))",
+      "blur(calc(5px))",
+      "blur(calc(2 * 5px))",
+
+      "brightness(0)",
+      "brightness(50%)",
+      "brightness(1)",
+      "brightness(1.0)",
+      "brightness(2)",
+      "brightness(350%)",
+      "brightness(4.567)",
+
+      "contrast(0)",
+      "contrast(50%)",
+      "contrast(1)",
+      "contrast(1.0)",
+      "contrast(2)",
+      "contrast(350%)",
+      "contrast(4.567)",
+
+      "drop-shadow(2px 2px)",
+      "drop-shadow(2px 2px 1px)",
+      "drop-shadow(2px 2px green)",
+      "drop-shadow(2px 2px 1px green)",
+      "drop-shadow(green 2px 2px)",
+      "drop-shadow(green 2px 2px 1px)",
+      "drop-shadow(currentColor 3px 3px)",
+      "drop-shadow(2px 2px calc(-5px))", /* clamped */
+      "drop-shadow(calc(3em - 2px) 2px green)",
+      "drop-shadow(green calc(3em - 2px) 2px)",
+      "drop-shadow(2px calc(2px + 0.2em))",
+      "drop-shadow(blue 2px calc(2px + 0.2em))",
+      "drop-shadow(2px calc(2px + 0.2em) blue)",
+      "drop-shadow(calc(-2px) calc(-2px))",
+      "drop-shadow(-2px -2px)",
+      "drop-shadow(calc(2px) calc(2px))",
+      "drop-shadow(calc(2px) calc(2px) calc(2px))",
+
+      "grayscale(0)",
+      "grayscale(50%)",
+      "grayscale(1)",
+      "grayscale(1.0)",
+      "grayscale(2)",
+      "grayscale(350%)",
+      "grayscale(4.567)",
+
+      "hue-rotate(0)",
+      "hue-rotate(0deg)",
+      "hue-rotate(90deg)",
+      "hue-rotate(540deg)",
+      "hue-rotate(-90deg)",
+      "hue-rotate(10grad)",
+      "hue-rotate(1.6rad)",
+      "hue-rotate(-1.6rad)",
+      "hue-rotate(0.5turn)",
+      "hue-rotate(-2turn)",
+
+      "invert(0)",
+      "invert(50%)",
+      "invert(1)",
+      "invert(1.0)",
+      "invert(2)",
+      "invert(350%)",
+      "invert(4.567)",
+
+      "opacity(0)",
+      "opacity(50%)",
+      "opacity(1)",
+      "opacity(1.0)",
+      "opacity(2)",
+      "opacity(350%)",
+      "opacity(4.567)",
+
+      "saturate(0)",
+      "saturate(50%)",
+      "saturate(1)",
+      "saturate(1.0)",
+      "saturate(2)",
+      "saturate(350%)",
+      "saturate(4.567)",
+
+      "sepia(0)",
+      "sepia(50%)",
+      "sepia(1)",
+      "sepia(1.0)",
+      "sepia(2)",
+      "sepia(350%)",
+      "sepia(4.567)",
+    ],
+    invalid_values: [
+      // none
+      "none none",
+      "url(#my-filter) none",
+      "none url(#my-filter)",
+      "blur(2px) none url(#my-filter)",
+
+      // Nested filters
+      "grayscale(invert(1.0))",
+
+      // Comma delimited filters
+      "url(#my-filter),",
+      "invert(50%), url(#my-filter), brightness(90%)",
+
+      // Test the following situations for each filter function:
+      // - Invalid number of arguments
+      // - Comma delimited arguments
+      // - Wrong argument type
+      // - Argument value out of range
+      "blur()",
+      "blur(3px 5px)",
+      "blur(3px,)",
+      "blur(3px, 5px)",
+      "blur(#my-filter)",
+      "blur(0.5)",
+      "blur(50%)",
+      "blur(calc(0))", // Unitless zero in calc is not a valid length.
+      "blur(calc(0.1))",
+      "blur(calc(10%))",
+      "blur(calc(20px - 5%))",
+      "blur(-3px)",
+
+      "brightness()",
+      "brightness(0.5 0.5)",
+      "brightness(0.5,)",
+      "brightness(0.5, 0.5)",
+      "brightness(#my-filter)",
+      "brightness(10px)",
+      "brightness(-1)",
+
+      "contrast()",
+      "contrast(0.5 0.5)",
+      "contrast(0.5,)",
+      "contrast(0.5, 0.5)",
+      "contrast(#my-filter)",
+      "contrast(10px)",
+      "contrast(-1)",
+
+      "drop-shadow()",
+      "drop-shadow(3% 3%)",
+      "drop-shadow(2px 2px -5px)",
+      "drop-shadow(2px 2px 2px 2px)",
+      "drop-shadow(2px 2px, none)",
+      "drop-shadow(none, 2px 2px)",
+      "drop-shadow(inherit, 2px 2px)",
+      "drop-shadow(2px 2px, inherit)",
+      "drop-shadow(2 2px)",
+      "drop-shadow(2px 2)",
+      "drop-shadow(2px 2px 2)",
+      "drop-shadow(2px 2px 2px 2)",
+      "drop-shadow(calc(2px) calc(2px) calc(2px) calc(2px))",
+      "drop-shadow(green 2px 2px, blue 1px 3px 4px)",
+      "drop-shadow(blue 2px 2px, currentColor 1px 2px)",
+      "drop-shadow(unset, 2px 2px)",
+      "drop-shadow(2px 2px, unset)",
+
+      "grayscale()",
+      "grayscale(0.5 0.5)",
+      "grayscale(0.5,)",
+      "grayscale(0.5, 0.5)",
+      "grayscale(#my-filter)",
+      "grayscale(10px)",
+      "grayscale(-1)",
+
+      "hue-rotate()",
+      "hue-rotate(0.5 0.5)",
+      "hue-rotate(0.5,)",
+      "hue-rotate(0.5, 0.5)",
+      "hue-rotate(#my-filter)",
+      "hue-rotate(10px)",
+      "hue-rotate(-1)",
+      "hue-rotate(45deg,)",
+
+      "invert()",
+      "invert(0.5 0.5)",
+      "invert(0.5,)",
+      "invert(0.5, 0.5)",
+      "invert(#my-filter)",
+      "invert(10px)",
+      "invert(-1)",
+
+      "opacity()",
+      "opacity(0.5 0.5)",
+      "opacity(0.5,)",
+      "opacity(0.5, 0.5)",
+      "opacity(#my-filter)",
+      "opacity(10px)",
+      "opacity(-1)",
+
+      "saturate()",
+      "saturate(0.5 0.5)",
+      "saturate(0.5,)",
+      "saturate(0.5, 0.5)",
+      "saturate(#my-filter)",
+      "saturate(10px)",
+      "saturate(-1)",
+
+      "sepia()",
+      "sepia(0.5 0.5)",
+      "sepia(0.5,)",
+      "sepia(0.5, 0.5)",
+      "sepia(#my-filter)",
+      "sepia(10px)",
+      "sepia(-1)",
+    ]
   },
   "flood-color": {
     domProp: "floodColor",
@@ -6261,242 +6487,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.shape-outside.enabled")) {
       basicShapeUnbalancedValues,
       unbalancedGradientAndElementValues
     )
-  };
-}
-
-
-if (IsCSSPropertyPrefEnabled("layout.css.filters.enabled")) {
-  gCSSProperties["filter"] = {
-    domProp: "filter",
-    inherited: false,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "none" ],
-    other_values: [
-      // SVG reference filters
-      "url(#my-filter)",
-      "url(#my-filter-1) url(#my-filter-2)",
-
-      // Filter functions
-      "opacity(50%) saturate(1.0)",
-      "invert(50%) sepia(0.1) brightness(90%)",
-
-      // Mixed SVG reference filters and filter functions
-      "grayscale(1) url(#my-filter-1)",
-      "url(#my-filter-1) brightness(50%) contrast(0.9)",
-
-      // Bad URLs
-      "url('badscheme:badurl')",
-      "blur(3px) url('badscheme:badurl') grayscale(50%)",
-
-      "blur(0)",
-      "blur(0px)",
-      "blur(0.5px)",
-      "blur(3px)",
-      "blur(100px)",
-      "blur(0.1em)",
-      "blur(calc(-1px))", // Parses and becomes blur(0px).
-      "blur(calc(0px))",
-      "blur(calc(5px))",
-      "blur(calc(2 * 5px))",
-
-      "brightness(0)",
-      "brightness(50%)",
-      "brightness(1)",
-      "brightness(1.0)",
-      "brightness(2)",
-      "brightness(350%)",
-      "brightness(4.567)",
-
-      "contrast(0)",
-      "contrast(50%)",
-      "contrast(1)",
-      "contrast(1.0)",
-      "contrast(2)",
-      "contrast(350%)",
-      "contrast(4.567)",
-
-      "drop-shadow(2px 2px)",
-      "drop-shadow(2px 2px 1px)",
-      "drop-shadow(2px 2px green)",
-      "drop-shadow(2px 2px 1px green)",
-      "drop-shadow(green 2px 2px)",
-      "drop-shadow(green 2px 2px 1px)",
-      "drop-shadow(currentColor 3px 3px)",
-      "drop-shadow(2px 2px calc(-5px))", /* clamped */
-      "drop-shadow(calc(3em - 2px) 2px green)",
-      "drop-shadow(green calc(3em - 2px) 2px)",
-      "drop-shadow(2px calc(2px + 0.2em))",
-      "drop-shadow(blue 2px calc(2px + 0.2em))",
-      "drop-shadow(2px calc(2px + 0.2em) blue)",
-      "drop-shadow(calc(-2px) calc(-2px))",
-      "drop-shadow(-2px -2px)",
-      "drop-shadow(calc(2px) calc(2px))",
-      "drop-shadow(calc(2px) calc(2px) calc(2px))",
-
-      "grayscale(0)",
-      "grayscale(50%)",
-      "grayscale(1)",
-      "grayscale(1.0)",
-      "grayscale(2)",
-      "grayscale(350%)",
-      "grayscale(4.567)",
-
-      "hue-rotate(0)",
-      "hue-rotate(0deg)",
-      "hue-rotate(90deg)",
-      "hue-rotate(540deg)",
-      "hue-rotate(-90deg)",
-      "hue-rotate(10grad)",
-      "hue-rotate(1.6rad)",
-      "hue-rotate(-1.6rad)",
-      "hue-rotate(0.5turn)",
-      "hue-rotate(-2turn)",
-
-      "invert(0)",
-      "invert(50%)",
-      "invert(1)",
-      "invert(1.0)",
-      "invert(2)",
-      "invert(350%)",
-      "invert(4.567)",
-
-      "opacity(0)",
-      "opacity(50%)",
-      "opacity(1)",
-      "opacity(1.0)",
-      "opacity(2)",
-      "opacity(350%)",
-      "opacity(4.567)",
-
-      "saturate(0)",
-      "saturate(50%)",
-      "saturate(1)",
-      "saturate(1.0)",
-      "saturate(2)",
-      "saturate(350%)",
-      "saturate(4.567)",
-
-      "sepia(0)",
-      "sepia(50%)",
-      "sepia(1)",
-      "sepia(1.0)",
-      "sepia(2)",
-      "sepia(350%)",
-      "sepia(4.567)",
-    ],
-    invalid_values: [
-      // none
-      "none none",
-      "url(#my-filter) none",
-      "none url(#my-filter)",
-      "blur(2px) none url(#my-filter)",
-
-      // Nested filters
-      "grayscale(invert(1.0))",
-
-      // Comma delimited filters
-      "url(#my-filter),",
-      "invert(50%), url(#my-filter), brightness(90%)",
-
-      // Test the following situations for each filter function:
-      // - Invalid number of arguments
-      // - Comma delimited arguments
-      // - Wrong argument type
-      // - Argument value out of range
-      "blur()",
-      "blur(3px 5px)",
-      "blur(3px,)",
-      "blur(3px, 5px)",
-      "blur(#my-filter)",
-      "blur(0.5)",
-      "blur(50%)",
-      "blur(calc(0))", // Unitless zero in calc is not a valid length.
-      "blur(calc(0.1))",
-      "blur(calc(10%))",
-      "blur(calc(20px - 5%))",
-      "blur(-3px)",
-
-      "brightness()",
-      "brightness(0.5 0.5)",
-      "brightness(0.5,)",
-      "brightness(0.5, 0.5)",
-      "brightness(#my-filter)",
-      "brightness(10px)",
-      "brightness(-1)",
-
-      "contrast()",
-      "contrast(0.5 0.5)",
-      "contrast(0.5,)",
-      "contrast(0.5, 0.5)",
-      "contrast(#my-filter)",
-      "contrast(10px)",
-      "contrast(-1)",
-
-      "drop-shadow()",
-      "drop-shadow(3% 3%)",
-      "drop-shadow(2px 2px -5px)",
-      "drop-shadow(2px 2px 2px 2px)",
-      "drop-shadow(2px 2px, none)",
-      "drop-shadow(none, 2px 2px)",
-      "drop-shadow(inherit, 2px 2px)",
-      "drop-shadow(2px 2px, inherit)",
-      "drop-shadow(2 2px)",
-      "drop-shadow(2px 2)",
-      "drop-shadow(2px 2px 2)",
-      "drop-shadow(2px 2px 2px 2)",
-      "drop-shadow(calc(2px) calc(2px) calc(2px) calc(2px))",
-      "drop-shadow(green 2px 2px, blue 1px 3px 4px)",
-      "drop-shadow(blue 2px 2px, currentColor 1px 2px)",
-
-      "grayscale()",
-      "grayscale(0.5 0.5)",
-      "grayscale(0.5,)",
-      "grayscale(0.5, 0.5)",
-      "grayscale(#my-filter)",
-      "grayscale(10px)",
-      "grayscale(-1)",
-
-      "hue-rotate()",
-      "hue-rotate(0.5 0.5)",
-      "hue-rotate(0.5,)",
-      "hue-rotate(0.5, 0.5)",
-      "hue-rotate(#my-filter)",
-      "hue-rotate(10px)",
-      "hue-rotate(-1)",
-      "hue-rotate(45deg,)",
-
-      "invert()",
-      "invert(0.5 0.5)",
-      "invert(0.5,)",
-      "invert(0.5, 0.5)",
-      "invert(#my-filter)",
-      "invert(10px)",
-      "invert(-1)",
-
-      "opacity()",
-      "opacity(0.5 0.5)",
-      "opacity(0.5,)",
-      "opacity(0.5, 0.5)",
-      "opacity(#my-filter)",
-      "opacity(10px)",
-      "opacity(-1)",
-
-      "saturate()",
-      "saturate(0.5 0.5)",
-      "saturate(0.5,)",
-      "saturate(0.5, 0.5)",
-      "saturate(#my-filter)",
-      "saturate(10px)",
-      "saturate(-1)",
-
-      "sepia()",
-      "sepia(0.5 0.5)",
-      "sepia(0.5,)",
-      "sepia(0.5, 0.5)",
-      "sepia(#my-filter)",
-      "sepia(10px)",
-      "sepia(-1)",
-    ]
   };
 }
 
@@ -8101,23 +8091,6 @@ if (false) {
     other_values: [ "green", "#fc3" ],
     invalid_values: [ "000000", "ff00ff" ]
   };
-
-  // |clip-path: path()| is chrome-only.
-  gCSSProperties["clip-path"].other_values.push(
-    "path(nonzero, 'M 10 10 h 100 v 100 h-100 v-100 z')",
-    "path(evenodd, 'M 10 10 h 100 v 100 h-100 v-100 z')",
-    "path('M10,30A20,20 0,0,1 50,30A20,20 0,0,1 90,30Q90,60 50,90Q10,60 10,30z')",
-  );
-
-  gCSSProperties["clip-path"].invalid_values.push(
-    "path(nonzero)",
-    "path(evenodd, '')",
-    "path(abs, 'M 10 10 L 10 10 z')",
-  );
-}
-
-if (IsCSSPropertyPrefEnabled("layout.css.filters.enabled")) {
-  gCSSProperties["filter"].invalid_values.push("drop-shadow(unset, 2px 2px)", "drop-shadow(2px 2px, unset)");
 }
 
 if (IsCSSPropertyPrefEnabled("layout.css.prefixes.gradients")) {
@@ -8129,21 +8102,13 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.gradients")) {
 }
 
 if (IsCSSPropertyPrefEnabled("layout.css.scrollbar-colors.enabled")) {
-  gCSSProperties["scrollbar-face-color"] = {
-    domProp: "scrollbarFaceColor",
+  gCSSProperties["scrollbar-color"] = {
+    domProp: "scrollbarColor",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "auto" ],
-    other_values: [ "red", "blue", "#ffff00" ],
-    invalid_values: [ "ffff00" ]
-  };
-  gCSSProperties["scrollbar-track-color"] = {
-    domProp: "scrollbarTrackColor",
-    inherited: true,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "auto" ],
-    other_values: [ "red", "blue", "#ffff00" ],
-    invalid_values: [ "ffff00" ]
+    other_values: [ "red green", "blue yellow", "#ffff00 white" ],
+    invalid_values: [ "ffff00 red", "auto red", "red auto", "green" ]
   };
 }
 
@@ -8178,6 +8143,20 @@ if (IsCSSPropertyPrefEnabled("layout.css.motion-path.enabled")) {
     invalid_values: [ "path('')", "path()", "path(a)", "path('M 10 Z')" ,
                       "path('M 10-10 20')", "path('M 10 10 C 20 20 40 20')" ]
   };
+}
+
+if (IsCSSPropertyPrefEnabled("layout.css.clip-path-path.enabled")) {
+  gCSSProperties["clip-path"].other_values.push(
+    "path(nonzero, 'M 10 10 h 100 v 100 h-100 v-100 z')",
+    "path(evenodd, 'M 10 10 h 100 v 100 h-100 v-100 z')",
+    "path('M10,30A20,20 0,0,1 50,30A20,20 0,0,1 90,30Q90,60 50,90Q10,60 10,30z')",
+  );
+
+  gCSSProperties["clip-path"].invalid_values.push(
+    "path(nonzero)",
+    "path(evenodd, '')",
+    "path(abs, 'M 10 10 L 10 10 z')",
+  );
 }
 
 const OVERFLOW_MOZKWS = [

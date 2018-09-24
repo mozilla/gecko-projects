@@ -90,6 +90,9 @@ ProcessCmdLine(int& aArgc, wchar_t* aArgv[])
   if (mozilla::CheckArg(aArgc, aArgv, L"wait-for-browser",
                         static_cast<const wchar_t**>(nullptr),
                         mozilla::CheckArgFlag::RemoveArg) == mozilla::ARG_FOUND ||
+      mozilla::CheckArg(aArgc, aArgv, L"marionette",
+                        static_cast<const wchar_t**>(nullptr),
+                        mozilla::CheckArgFlag::None) == mozilla::ARG_FOUND ||
       mozilla::EnvHasValue("MOZ_AUTOMATION")) {
     result |= mozilla::LauncherFlags::eWaitForBrowser;
   }
@@ -134,9 +137,7 @@ IsSameBinaryAsParentProcess()
     return mozilla::Nothing();
   }
 
-  bool isSame = parentExeLen == ourExeOk &&
-                !_wcsnicmp(ourExe, parentExe, ourExeOk);
-  return mozilla::Some(isSame);
+  return mozilla::DoPathsPointToIdenticalFile(parentExe, ourExe);
 }
 
 #endif // defined(MOZ_LAUNCHER_PROCESS)
@@ -219,7 +220,7 @@ LauncherMain(int argc, wchar_t* argv[])
   }
 
   const Maybe<bool> isSafeMode = IsSafeModeRequested(argc, argv,
-                                                     SafeModeFlag::None);
+                                                     SafeModeFlag::NoKeyPressCheck);
   if (!isSafeMode) {
     ShowError(ERROR_INVALID_PARAMETER);
     return 1;

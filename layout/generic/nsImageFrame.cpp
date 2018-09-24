@@ -408,7 +408,7 @@ ScaleIntrinsicSizeForDensity(nsIContent& aContent, nsSize& aSize)
   }
 
   double density = selector->GetSelectedImageDensity();
-  MOZ_ASSERT(density > 0.0);
+  MOZ_ASSERT(density >= 0.0);
   if (density == 1.0) {
     return;
   }
@@ -1034,26 +1034,28 @@ nsImageFrame::GetContinuationOffset() const
 /* virtual */ nscoord
 nsImageFrame::GetMinISize(gfxContext *aRenderingContext)
 {
-  // XXX The caller doesn't account for constraints of the height,
-  // min-height, and max-height properties.
+  // XXX The caller doesn't account for constraints of the block-size,
+  // min-block-size, and max-block-size properties.
   DebugOnly<nscoord> result;
-  DISPLAY_MIN_WIDTH(this, result);
+  DISPLAY_MIN_INLINE_SIZE(this, result);
   EnsureIntrinsicSizeAndRatio();
-  return mIntrinsicSize.width.GetUnit() == eStyleUnit_Coord ?
-    mIntrinsicSize.width.GetCoordValue() : 0;
+  const nsStyleCoord& iSize = GetWritingMode().IsVertical() ?
+                                mIntrinsicSize.height : mIntrinsicSize.width;
+  return iSize.GetUnit() == eStyleUnit_Coord ? iSize.GetCoordValue() : 0;
 }
 
 /* virtual */ nscoord
 nsImageFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
-  // XXX The caller doesn't account for constraints of the height,
-  // min-height, and max-height properties.
+  // XXX The caller doesn't account for constraints of the block-size,
+  // min-block-size, and max-block-size properties.
   DebugOnly<nscoord> result;
-  DISPLAY_PREF_WIDTH(this, result);
+  DISPLAY_PREF_INLINE_SIZE(this, result);
   EnsureIntrinsicSizeAndRatio();
+  const nsStyleCoord& iSize = GetWritingMode().IsVertical() ?
+                                mIntrinsicSize.height : mIntrinsicSize.width;
   // convert from normal twips to scaled twips (printing...)
-  return mIntrinsicSize.width.GetUnit() == eStyleUnit_Coord ?
-    mIntrinsicSize.width.GetCoordValue() : 0;
+  return iSize.GetUnit() == eStyleUnit_Coord ? iSize.GetCoordValue() : 0;
 }
 
 /* virtual */ IntrinsicSize
@@ -1382,7 +1384,8 @@ struct nsRecessedBorder : public nsStyleBorder {
   }
 };
 
-class nsDisplayAltFeedback : public nsDisplayItem {
+class nsDisplayAltFeedback final : public nsDisplayItem
+{
 public:
   nsDisplayAltFeedback(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
     : nsDisplayItem(aBuilder, aFrame) {}
@@ -1811,16 +1814,60 @@ nsDisplayImage::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilde
   IntSize decodeSize =
     nsLayoutUtils::ComputeImageContainerDrawingParameters(mImage, mFrame, destRect,
                                                           aSc, flags, svgContext);
-  RefPtr<ImageContainer> container =
-    mImage->GetImageContainerAtSize(aManager, decodeSize, svgContext, flags);
-  if (!container) {
-    return false;
+
+  RefPtr<layers::ImageContainer> container;
+  ImgDrawResult drawResult =
+    mImage->GetImageContainerAtSize(aManager, decodeSize, svgContext,
+                                    flags, getter_AddRefs(container));
+
+  // While we got a container, it may not contain a fully decoded surface. If
+  // that is the case, and we have an image we were previously displaying which
+  // has a fully decoded surface, then we should prefer the previous image.
+  bool updatePrevImage = false;
+  switch (drawResult) {
+    case ImgDrawResult::NOT_READY:
+    case ImgDrawResult::INCOMPLETE:
+    case ImgDrawResult::TEMPORARY_ERROR:
+      if (mPrevImage && mPrevImage != mImage) {
+        RefPtr<ImageContainer> prevContainer;
+        drawResult = mPrevImage->GetImageContainerAtSize(aManager, decodeSize,
+                                                         svgContext, flags,
+                                                         getter_AddRefs(prevContainer));
+        if (prevContainer && drawResult == ImgDrawResult::SUCCESS) {
+          container = std::move(prevContainer);
+          break;
+        }
+
+        // Previous image was unusable; we can forget about it.
+        updatePrevImage = true;
+      }
+      break;
+    case ImgDrawResult::NOT_SUPPORTED:
+      return false;
+    default:
+      updatePrevImage = mPrevImage != mImage;
+      break;
+  }
+
+  // The previous image was not used, and is different from the current image.
+  // We should forget about it. We need to update the frame as well because the
+  // display item may get recreated.
+  if (updatePrevImage) {
+    mPrevImage = mImage;
+    if (mFrame->IsImageFrame()) {
+      nsImageFrame* f = static_cast<nsImageFrame*>(mFrame);
+      f->mPrevImage = f->mImage;
+    }
   }
 
   // If the image container is empty, we don't want to fallback. Any other
   // failure will be due to resource constraints and fallback is unlikely to
   // help us. Hence we can ignore the return value from PushImage.
-  aManager->CommandBuilder().PushImage(this, container, aBuilder, aResources, aSc, destRect);
+  if (container) {
+    aManager->CommandBuilder().PushImage(this, container, aBuilder, aResources, aSc, destRect);
+  }
+
+  nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, drawResult);
   return true;
 }
 
@@ -2199,7 +2246,7 @@ nsImageFrame::GetCursor(const nsPoint& aPoint,
       // specified will inherit the style from the image.
       RefPtr<ComputedStyle> areaStyle =
         PresShell()->StyleSet()->
-          ResolveStyleFor(area->AsElement(), Style(),
+          ResolveStyleFor(area->AsElement(),
                           LazyComputeBehavior::Allow);
       FillCursorInformationFromStyle(areaStyle->StyleUI(), aCursor);
       if (NS_STYLE_CURSOR_AUTO == aCursor.mCursor) {

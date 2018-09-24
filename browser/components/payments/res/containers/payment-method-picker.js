@@ -20,6 +20,9 @@ export default class PaymentMethodPicker extends RichPicker {
     this.securityCodeInput.autocomplete = "off";
     this.securityCodeInput.placeholder = this.dataset.cvvPlaceholder;
     this.securityCodeInput.size = 3;
+    this.securityCodeInput.required = true;
+    // 3 or more digits
+    this.securityCodeInput.pattern = "[0-9]{3,}";
     this.securityCodeInput.classList.add("security-code");
     this.securityCodeInput.addEventListener("change", this);
   }
@@ -31,8 +34,6 @@ export default class PaymentMethodPicker extends RichPicker {
 
   get fieldNames() {
     let fieldNames = [...BasicCardOption.recordAttributes];
-    // Type is not a required field though it may be present.
-    fieldNames.splice(fieldNames.indexOf("type"), 1);
     return fieldNames;
   }
 
@@ -74,6 +75,23 @@ export default class PaymentMethodPicker extends RichPicker {
     }
 
     super.render(state);
+  }
+
+  isSelectedOptionValid(state) {
+    let hasMissingFields = this.missingFieldsOfSelectedOption().length;
+    if (hasMissingFields) {
+      return false;
+    }
+    let selectedOption = this.selectedOption;
+    if (!selectedOption) {
+      return true;
+    }
+
+    let acceptedNetworks = paymentRequest.getAcceptedNetworks(state.request);
+    let selectedCard = state.savedBasicCards[selectedOption.value];
+    let isSupported = selectedCard["cc-type"] &&
+                      acceptedNetworks.includes(selectedCard["cc-type"]);
+    return isSupported;
   }
 
   get selectedStateKey() {
