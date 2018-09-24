@@ -52,6 +52,7 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US = [
     "target.awsy.tests.tar.gz",
     "target.test_packages.json",
     "target.txt",
+    "target.updater-dep.tests.tar.gz",
     "target.web-platform.tests.tar.gz",
     "target.xpcshell.tests.tar.gz",
     "target_info.txt",
