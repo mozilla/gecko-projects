@@ -89,11 +89,6 @@ class UpdateVerifyConfigCreator(BaseScript):
             "dest": "to_revision",
             "help": "The revision that the release being updated to was built against",
         }],
-        [["--override-certs"], {
-            "dest": "override_certs",
-            "help": "Certs to override the updater with prior to running update verify."
-                    "Should be one of: dep, nightly, release"
-        }],
         [["--partial-version"], {
             "dest": "partial_versions",
             "default": [],
