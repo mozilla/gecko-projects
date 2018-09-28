@@ -40,8 +40,7 @@ nsresult HttpTransactionChild::InitInternal(
     uint32_t caps, const HttpConnectionInfoCloneArgs& infoArgs,
     nsHttpRequestHead* requestHead, nsIInputStream* requestBody,
     uint64_t requestContentLength, bool requestBodyHasHeaders,
-    nsIEventTarget* target, uint64_t topLevelOuterContentWindowId,
-    int32_t priority) {
+    nsIEventTarget* target, uint64_t topLevelOuterContentWindowId) {
   LOG(("HttpTransactionChild::Init [this=%p caps=%x]\n", this, caps));
 
   RefPtr<nsHttpConnectionInfo> cinfo;
@@ -69,25 +68,20 @@ nsresult HttpTransactionChild::InitInternal(
   cinfo->SetTrrDisabled(infoArgs.trrDisabled());
 
   nsresult rv;
-  nsCOMPtr<nsIAsyncInputStream> responseStream;
+  nsCOMPtr<nsIRequest> request;
   rv = mTransaction->Init(
       caps, cinfo, requestHead, requestBody, requestContentLength,
       requestBodyHasHeaders, target, nullptr,  // TODO: security callback
       this, topLevelOuterContentWindowId, HttpTrafficCategory::eInvalid,
-      getter_AddRefs(responseStream));
+      getter_AddRefs(request));
   if (NS_FAILED(rv)) {
     mTransaction = nullptr;
     return rv;
   }
 
-  rv = nsInputStreamPump::Create(getter_AddRefs(mTransactionPump),
-                                 responseStream);
+  mTransactionPump = static_cast<nsInputStreamPump*>(request.get());
 
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = gHttpHandler->InitiateTransaction(mTransaction, priority);
+  rv = gHttpHandler->InitiateTransaction(mTransaction, 0);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -126,7 +120,7 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
     const uint32_t& aCaps, const HttpConnectionInfoCloneArgs& aArgs,
     const nsHttpRequestHead& aReqHeaders, const Maybe<IPCStream>& aRequestBody,
     const uint64_t& aReqContentLength, const bool& aReqBodyIncludesHeaders,
-    const uint64_t& aTopLevelOuterContentWindowId, const int32_t& aPriority) {
+    const uint64_t& aTopLevelOuterContentWindowId) {
   mRequestHead = aReqHeaders;
   if (aRequestBody) {
     mUploadStream = mozilla::ipc::DeserializeIPCStream(aRequestBody);
@@ -135,7 +129,7 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
   if (NS_FAILED(InitInternal(aCaps, aArgs, &mRequestHead, mUploadStream,
                              aReqContentLength, aReqBodyIncludesHeaders,
                              GetCurrentThreadEventTarget(),
-                             aTopLevelOuterContentWindowId, aPriority))) {
+                             aTopLevelOuterContentWindowId))) {
     LOG(("HttpTransactionChild::RecvInit: [this=%p] InitInternal failed!\n",
          this));
   }

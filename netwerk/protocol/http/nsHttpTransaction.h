@@ -8,6 +8,7 @@
 
 #include "nsHttp.h"
 #include "nsAHttpTransaction.h"
+#include "nsAHttpTransactionShell.h"
 #include "nsAHttpConnection.h"
 #include "EventTokenBucket.h"
 #include "nsCOMPtr.h"
@@ -43,6 +44,7 @@ class SpdyConnectTransaction;
 //-----------------------------------------------------------------------------
 
 class nsHttpTransaction final : public nsAHttpTransaction,
+                                public nsAHttpTransactionShell,
                                 public ATokenBucketEvent,
                                 public nsIInputStreamCallback,
                                 public nsIOutputStreamCallback,
@@ -50,6 +52,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSAHTTPTRANSACTION
+  NS_DECL_NSAHTTPTRANSACTIONSHELL
   NS_DECL_NSIINPUTSTREAMCALLBACK
   NS_DECL_NSIOUTPUTSTREAMCALLBACK
 
@@ -80,13 +83,15 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   //        wait on this input stream for data.  on first notification,
   //        headers should be available (check transaction status).
   //
-  MOZ_MUST_USE nsresult
-  Init(uint32_t caps, nsHttpConnectionInfo* connInfo,
-       nsHttpRequestHead* reqHeaders, nsIInputStream* reqBody,
-       uint64_t reqContentLength, bool reqBodyIncludesHeaders,
-       nsIEventTarget* consumerTarget, nsIInterfaceRequestor* callbacks,
-       nsITransportEventSink* eventsink, uint64_t topLevelOuterContentWindowId,
-       HttpTrafficCategory trafficCategory, nsIAsyncInputStream** responseBody);
+  MOZ_MUST_USE nsresult Init(uint32_t caps, nsHttpConnectionInfo *connInfo,
+                             nsHttpRequestHead *reqHeaders,
+                             nsIInputStream *reqBody, uint64_t reqContentLength,
+                             bool reqBodyIncludesHeaders,
+                             nsIEventTarget *consumerTarget,
+                             nsIInterfaceRequestor *callbacks,
+                             nsITransportEventSink *eventsink,
+                             uint64_t topLevelOuterContentWindowId,
+                             nsIAsyncInputStream **responseBody);
 
   void OnActivated() override;
 
@@ -94,16 +99,11 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   nsHttpResponseHead* ResponseHead() {
     return mHaveAllHeaders ? mResponseHead : nullptr;
   }
-  nsISupports* SecurityInfo() { return mSecurityInfo; }
 
   nsIEventTarget* ConsumerTarget() { return mConsumerTarget; }
   nsISupports* HttpChannel() { return mChannel; }
 
   void SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks);
-
-  // Called to take ownership of the response headers; the transaction
-  // will drop any reference to the response headers after this call.
-  nsHttpResponseHead* TakeResponseHead();
 
   // Called to take ownership of the trailer headers.
   // Returning null if there is no trailer.
@@ -112,10 +112,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   void SetH2WSConnRefTaken();
 
   // Called to set/find out if the transaction generated a complete response.
-  bool ResponseIsComplete() { return mResponseIsComplete; }
   void SetResponseIsComplete() { mResponseIsComplete = true; }
-
-  bool ProxyConnectFailed() { return mProxyConnectFailed; }
 
   void EnableKeepAlive() { mCaps |= NS_HTTP_ALLOW_KEEPALIVE; }
   void MakeSticky() { mCaps |= NS_HTTP_STICKY_CONNECTION; }
@@ -167,19 +164,6 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   void SetRequestStart(mozilla::TimeStamp timeStamp, bool onlyIfNull = false);
   void SetResponseStart(mozilla::TimeStamp timeStamp, bool onlyIfNull = false);
   void SetResponseEnd(mozilla::TimeStamp timeStamp, bool onlyIfNull = false);
-
-  mozilla::TimeStamp GetDomainLookupStart();
-  mozilla::TimeStamp GetDomainLookupEnd();
-  mozilla::TimeStamp GetConnectStart();
-  mozilla::TimeStamp GetTcpConnectEnd();
-  mozilla::TimeStamp GetSecureConnectionStart();
-
-  mozilla::TimeStamp GetConnectEnd();
-  mozilla::TimeStamp GetRequestStart();
-  mozilla::TimeStamp GetResponseStart();
-  mozilla::TimeStamp GetResponseEnd();
-
-  int64_t GetTransferSize() { return mTransferSize; }
 
   MOZ_MUST_USE bool Do0RTT() override;
   MOZ_MUST_USE nsresult Finish0RTT(bool aRestart,
@@ -464,8 +448,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   RefPtr<TransactionObserver> mTransactionObserver;
 
  public:
-  void GetNetworkAddresses(NetAddr& self, NetAddr& peer);
-  bool ResolvedByTRR() { return mResolvedByTRR; }
+   bool ResolvedByTRR() { return mResolvedByTRR; }
 
  private:
   NetAddr mSelfAddr;

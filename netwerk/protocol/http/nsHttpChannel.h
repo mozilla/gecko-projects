@@ -9,7 +9,7 @@
 
 #include "DelayHttpChannelQueue.h"
 #include "HttpBaseChannel.h"
-#include "HttpTransactionParent.h"
+#include "nsAHttpTransactionShell.h"
 #include "nsTArray.h"
 #include "nsICachingChannel.h"
 #include "nsICacheEntry.h"
@@ -598,8 +598,8 @@ class nsHttpChannel final : public HttpBaseChannel,
  private:
   nsCOMPtr<nsICancelable> mProxyRequest;
 
-  RefPtr<nsIRequest> mTransactionPump;
-  RefPtr<HttpTransactionParent> mTransaction;
+  nsCOMPtr<nsIRequest> mTransactionPump;
+  RefPtr<nsAHttpTransactionShell> mTransaction;
 
   uint64_t mLogicalOffset;
 
@@ -713,6 +713,9 @@ class nsHttpChannel final : public HttpBaseChannel,
   // True only when we are between Resume and async fire of mCallOnResume.
   // Used to suspend any newly created pumps in mCallOnResume handler.
   uint32_t mAsyncResumePending : 1;
+
+  // True if we move network operations to socket process.
+  uint32_t mUsingSocketProcess : 1;
 
   // True only when we have checked whether this channel has been isolated for
   // anti-tracking purposes.

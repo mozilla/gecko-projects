@@ -19,7 +19,8 @@
 #include "nsHttpChannel.h"
 #include "nsHttpChannelAuthProvider.h"
 #include "nsHttpHandler.h"
-#include "nsString.h"
+#include "nsHttpTransaction.h"
+#include "HttpTransactionParent.h"
 #include "nsIApplicationCacheService.h"
 #include "nsIApplicationCacheContainer.h"
 #include "nsICacheStorageService.h"
@@ -154,6 +155,22 @@ using namespace dom;
 namespace net {
 
 namespace {
+
+static bool sUseSocketProcess = false;
+static bool sUseSocketProcessChecked = false;
+
+bool UseSocketProcess() {
+  if (sUseSocketProcessChecked) {
+    return sUseSocketProcess;
+  }
+
+  sUseSocketProcessChecked = true;
+  if (gIOService->IsSocketProcessEnabled()) {
+    sUseSocketProcess = Preferences::GetBool(
+        "network.http.network_access_on_socket_process.enabled", true);
+  }
+  return sUseSocketProcess;
+}
 
 static bool sRCWNEnabled = false;
 static uint32_t sRCWNQueueSizeNormal = 50;
@@ -345,6 +362,7 @@ nsHttpChannel::nsHttpChannel()
       mAuthConnectionRestartable(0),
       mChannelClassifierCancellationPending(0),
       mAsyncResumePending(0),
+      mUsingSocketProcess(0),
       mHasBeenIsolatedChecked(0),
       mIsIsolated(0),
       mTopWindowOriginComputed(0),
@@ -1255,14 +1273,28 @@ nsresult nsHttpChannel::SetupTransaction() {
                                          getter_AddRefs(callbacks));
 
   // create the transaction object
-  mTransaction = new HttpTransactionParent();
-  LOG(("nsHttpChannel %p created HttpTransactionParent %p\n", this,
-       mTransaction.get()));
+  if (UseSocketProcess()) {
+    if (!gIOService->SocketProcessReady()) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
 
-  SocketProcessParent *socketProcess = SocketProcessParent::GetSingleton();
-  if (socketProcess) {
-    Unused << socketProcess->SendPHttpTransactionConstructor(mTransaction);
-    mTransaction->AddIPDLReference();
+    RefPtr<HttpTransactionParent> transParent = new HttpTransactionParent();
+    mUsingSocketProcess = true;
+    LOG(("nsHttpChannel %p created HttpTransactionParent %p\n", this,
+         mTransaction.get()));
+
+    SocketProcessParent* socketProcess = SocketProcessParent::GetSingleton();
+    if (socketProcess) {
+      Unused << socketProcess->SendPHttpTransactionConstructor(transParent);
+      transParent->AddIPDLReference();
+    }
+
+    mTransaction = transParent;
+
+  } else {
+    mTransaction = new nsHttpTransaction();
+    LOG(("nsHttpChannel %p created HttpTransaction %p\n", this,
+         mTransaction.get()));
   }
 
   // TODO: make transaction overserver work again
@@ -1306,9 +1338,11 @@ nsresult nsHttpChannel::SetupTransaction() {
   rv = mTransaction->Init(mCaps, mConnectionInfo, &mRequestHead, mUploadStream,
                           mReqContentLength, mUploadStreamHasHeaders,
                           GetCurrentThreadEventTarget(), callbacks, this,
-                          mTopLevelOuterContentWindowId, category, mPriority);
+                          mTopLevelOuterContentWindowId, category,
+                          getter_AddRefs(mTransactionPump));
   if (NS_FAILED(rv)) {
     mTransaction = nullptr;
+    mTransactionPump = nullptr;
     return rv;
   }
 
@@ -1322,10 +1356,7 @@ nsresult nsHttpChannel::SetupTransaction() {
   // if (EnsureRequestContext()) {
   //     mTransaction->SetRequestContext(mRequestContext);
   // }
-
-  mTransactionPump = mTransaction;
-
-  return rv;
+  return NS_OK;
 }
 
 HttpTrafficCategory nsHttpChannel::CreateTrafficCategory() {
@@ -6108,7 +6139,7 @@ NS_IMETHODIMP nsHttpChannel::CloseStickyConnection() {
   }
 
   if (!(mCaps & NS_HTTP_STICKY_CONNECTION ||
-        mTransaction->Caps() & NS_HTTP_STICKY_CONNECTION)) {
+        mTransaction->IsStickyConnection())) {
     LOG(("  not sticky"));
     return NS_OK;
   }
@@ -8516,7 +8547,9 @@ nsHttpChannel::GetDeliveryTarget(nsIEventTarget** aEventTarget) {
     return mCachePump->GetDeliveryTarget(aEventTarget);
   }
   if (mTransactionPump) {
-    return mTransaction->GetDeliveryTarget(aEventTarget);
+    nsCOMPtr<nsIThreadRetargetableRequest> request =
+        do_QueryInterface(mTransactionPump);
+    return request->GetDeliveryTarget(aEventTarget);
   }
   return NS_ERROR_NOT_AVAILABLE;
 }
@@ -9206,8 +9239,12 @@ nsHttpChannel::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
     // We only set the domainLookup timestamps if we're not using a
     // persistent connection.
     if (requestStart.IsNull() && connectStart.IsNull()) {
-      mTransaction->SetDomainLookupStart(mDNSPrefetch->StartTimestamp());
-      mTransaction->SetDomainLookupEnd(mDNSPrefetch->EndTimestamp());
+      if (!mUsingSocketProcess) {
+        RefPtr<nsHttpTransaction> trans =
+            static_cast<nsHttpTransaction*>(mTransaction.get());
+        trans->SetDomainLookupStart(mDNSPrefetch->StartTimestamp());
+        trans->SetDomainLookupEnd(mDNSPrefetch->EndTimestamp());
+      }
     }
   }
   mDNSPrefetch = nullptr;
@@ -9215,9 +9252,10 @@ nsHttpChannel::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
   // Unset DNS cache refresh if it was requested,
   if (mCaps & NS_HTTP_REFRESH_DNS) {
     mCaps &= ~NS_HTTP_REFRESH_DNS;
-    if (mTransaction) {
-      mTransaction->SetDNSWasRefreshed();
-    }
+    // TODO: unmark, might use the weakPtr
+    // if (mTransaction) {
+    //     mTransaction->SetDNSWasRefreshed();
+    // }
   }
 
   return NS_OK;
@@ -9569,7 +9607,7 @@ nsHttpChannel::ResumeInternal() {
       std::swap(callOnResume, mCallOnResume);
 
       RefPtr<nsHttpChannel> self(this);
-      RefPtr<nsIRequest> transactionPump = mTransactionPump;
+      nsCOMPtr<nsIRequest> transactionPump = mTransactionPump;
       RefPtr<nsInputStreamPump> cachePump = mCachePump;
 
       nsresult rv = NS_DispatchToCurrentThread(NS_NewRunnableFunction(
@@ -9617,7 +9655,7 @@ nsHttpChannel::ResumeInternal() {
                    "pump %p, this=%p",
                    self->mTransactionPump.get(), self.get()));
 
-              RefPtr<nsIRequest> pump = self->mTransactionPump;
+              nsCOMPtr<nsIRequest> pump = self->mTransactionPump;
               NS_DispatchToCurrentThread(NS_NewRunnableFunction(
                   "nsHttpChannel::CallOnResume new transaction",
                   [pump{std::move(pump)}]() { pump->Resume(); }));

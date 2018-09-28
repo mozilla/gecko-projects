@@ -40,7 +40,7 @@ class HttpTransactionChild final : public PHttpTransactionChild,
       const nsHttpRequestHead& aReqHeaders,
       const Maybe<IPCStream>& aRequestBody, const uint64_t& aReqContentLength,
       const bool& aReqBodyIncludesHeaders,
-      const uint64_t& aTopLevelOuterContentWindowId, const int32_t& aPriority);
+      const uint64_t& aTopLevelOuterContentWindowId);
   mozilla::ipc::IPCResult RecvCancel(const nsresult& aStatus);
   mozilla::ipc::IPCResult RecvSuspend();
   mozilla::ipc::IPCResult RecvResume();
@@ -52,10 +52,11 @@ class HttpTransactionChild final : public PHttpTransactionChild,
   MOZ_MUST_USE nsresult InitInternal(
       uint32_t caps,
       const HttpConnectionInfoCloneArgs& aArgs,  // remove proxyInfo first
-      nsHttpRequestHead* reqHeaders, nsIInputStream* reqBody,
+      nsHttpRequestHead* reqHeaders,
+      nsIInputStream* reqBody,  // use the trick in bug 1277681
       uint64_t reqContentLength, bool reqBodyIncludesHeaders,
       nsIEventTarget* consumerTarget,  // Will remove
-      uint64_t topLevelOuterContentWindowId, int32_t priority);
+      uint64_t topLevelOuterContentWindowId);
 
   nsHttpRequestHead mRequestHead;
   nsCOMPtr<nsIInputStream> mUploadStream;

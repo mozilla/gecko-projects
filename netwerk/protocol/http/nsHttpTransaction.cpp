@@ -248,7 +248,7 @@ nsresult nsHttpTransaction::Init(
     bool requestBodyHasHeaders, nsIEventTarget* target,
     nsIInterfaceRequestor* callbacks, nsITransportEventSink* eventsink,
     uint64_t topLevelOuterContentWindowId, HttpTrafficCategory trafficCategory,
-    nsIAsyncInputStream** responseBody) {
+    nsIRequest **pump) {
   nsresult rv;
 
   LOG1(("nsHttpTransaction::Init [this=%p caps=%x]\n", this, caps));
@@ -434,8 +434,12 @@ nsresult nsHttpTransaction::Init(
                    nsIOService::gDefaultSegmentCount);
   if (NS_FAILED(rv)) return rv;
 
-  nsCOMPtr<nsIAsyncInputStream> tmp(mPipeIn);
-  tmp.forget(responseBody);
+  RefPtr<nsInputStreamPump> transactionPump;
+  rv = nsInputStreamPump::Create(getter_AddRefs(transactionPump), mPipeIn);
+  NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
+
+  nsCOMPtr<nsIRequest> tmp = static_cast<nsIRequest *>(transactionPump);
+  tmp.forget(pump);
   return NS_OK;
 }
 
@@ -979,6 +983,18 @@ nsresult nsHttpTransaction::WriteSegments(nsAHttpSegmentWriter* writer,
 
   return rv;
 }
+
+bool nsHttpTransaction::IsStickyConnection() {
+  return mCaps & NS_HTTP_STICKY_CONNECTION;
+}
+
+int64_t nsHttpTransaction::GetTransferSize() { return mTransferSize; }
+
+nsISupports *nsHttpTransaction::SecurityInfo() { return mSecurityInfo; }
+
+bool nsHttpTransaction::ProxyConnectFailed() { return mProxyConnectFailed; }
+
+bool nsHttpTransaction::ResponseIsComplete() { return mResponseIsComplete; }
 
 void nsHttpTransaction::Close(nsresult reason) {
   LOG(("nsHttpTransaction::Close [this=%p reason=%" PRIx32 "]\n", this,

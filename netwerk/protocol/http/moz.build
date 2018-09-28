@@ -54,6 +54,7 @@ EXPORTS.mozilla.net += [
     'HttpTrafficAnalyzer.inc',
     'HttpTransactionChild.h',
     'HttpTransactionParent.h',
+    'nsAHttpTransactionShell.h',
     'nsServerTiming.h',
     'NullHttpChannel.h',
     'ParentChannelListener.h',

@@ -1,0 +1,132 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#ifndef nsAHttpTransactionShell_h__
+#define nsAHttpTransactionShell_h__
+
+#include "nsISupports.h"
+
+class nsIEventTraget;
+class nsIInputStream;
+class nsIInterfaceRequestor;
+class nsIRequest;
+class nsITransportEventSink;
+enum HttpTrafficCategory : uint8_t;
+
+namespace mozilla {
+namespace net {
+
+class nsHttpConnectionInfo;
+class nsHttpRequestHead;
+
+//----------------------------------------------------------------------------
+// Abstract base class for a HTTP transaction in the chrome process
+//----------------------------------------------------------------------------
+
+// 95e5a5b7-6aa2-4011-920a-0908b52f95d4
+#define NS_AHTTPTRANSACTIONSHELL_IID                 \
+  {                                                  \
+    0x95e5a5b7, 0x6aa2, 0x4011, {                    \
+      0x92, 0x0a, 0x09, 0x08, 0xb5, 0x2f, 0x95, 0xd4 \
+    }                                                \
+  }
+
+class nsAHttpTransactionShell : public nsISupports {
+ public:
+  NS_DECLARE_STATIC_IID_ACCESSOR(NS_AHTTPTRANSACTIONSHELL_IID)
+
+  //
+  // called to initialize the transaction
+  //
+  // @param caps
+  //        the transaction capabilities (see nsHttp.h)
+  // @param connInfo
+  //        the connection type for this transaction.
+  // @param reqHeaders
+  //        the request header struct
+  // @param reqBody
+  //        the request body (POST or PUT data stream)
+  // @param reqBodyIncludesHeaders
+  //        fun stuff to support NPAPI plugins.
+  // @param target
+  //        the dispatch target were notifications should be sent.
+  // @param callbacks
+  //        the notification callbacks to be given to PSM.
+  // @param topLevelOuterContentWindowId
+  //        indicate the top level outer content window in which
+  //        this transaction is being loaded.
+  // @param pump
+  //        the pump that will contain the response data. The pump might
+  //        implementing nsIInputStreamPump. If so, |AsyncRead| is the necessary
+  //        step to async wait on this input stream for data. On first
+  //        notification, headers should be available (check transaction
+  //        status).
+  //
+  MOZ_MUST_USE virtual nsresult Init(
+      uint32_t caps, nsHttpConnectionInfo *connInfo,
+      nsHttpRequestHead *reqHeaders, nsIInputStream *reqBody,
+      uint64_t reqContentLength, bool reqBodyIncludesHeaders,
+      nsIEventTarget *consumerTarget, nsIInterfaceRequestor *callbacks,
+      nsITransportEventSink *eventsink, uint64_t topLevelOuterContentWindowId,
+      HttpTrafficCategory trafficCategory, nsIRequest **pump) = 0;
+
+  // Called to take ownership of the response headers; the transaction
+  // will drop any reference to the response headers after this call.
+  virtual nsHttpResponseHead *TakeResponseHead() = 0;
+
+  virtual nsISupports *SecurityInfo() = 0;
+  virtual bool ProxyConnectFailed() = 0;
+
+  virtual void GetNetworkAddresses(NetAddr &self, NetAddr &peer) = 0;
+
+  virtual mozilla::TimeStamp GetDomainLookupStart() = 0;
+  virtual mozilla::TimeStamp GetDomainLookupEnd() = 0;
+  virtual mozilla::TimeStamp GetConnectStart() = 0;
+  virtual mozilla::TimeStamp GetTcpConnectEnd() = 0;
+  virtual mozilla::TimeStamp GetSecureConnectionStart() = 0;
+
+  virtual mozilla::TimeStamp GetConnectEnd() = 0;
+  virtual mozilla::TimeStamp GetRequestStart() = 0;
+  virtual mozilla::TimeStamp GetResponseStart() = 0;
+  virtual mozilla::TimeStamp GetResponseEnd() = 0;
+
+  virtual bool IsStickyConnection() = 0;
+
+  // Called to set/find out if the transaction generated a complete response.
+  virtual bool ResponseIsComplete() = 0;
+  virtual int64_t GetTransferSize() = 0;
+};
+
+NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
+                              NS_AHTTPTRANSACTIONSHELL_IID)
+
+#define NS_DECL_NSAHTTPTRANSACTIONSHELL                                        \
+  virtual nsresult Init(                                                       \
+      uint32_t caps, nsHttpConnectionInfo *connInfo,                           \
+      nsHttpRequestHead *reqHeaders, nsIInputStream *reqBody,                  \
+      uint64_t reqContentLength, bool reqBodyIncludesHeaders,                  \
+      nsIEventTarget *consumerTarget, nsIInterfaceRequestor *callbacks,        \
+      nsITransportEventSink *eventsink, uint64_t topLevelOuterContentWindowId, \
+      HttpTrafficCategory trafficCategory, nsIRequest **pump) override;        \
+  virtual nsHttpResponseHead *TakeResponseHead() override;                     \
+  virtual nsISupports *SecurityInfo() override;                                \
+  virtual bool ProxyConnectFailed() override;                                  \
+  virtual void GetNetworkAddresses(NetAddr &self, NetAddr &peer) override;     \
+  virtual mozilla::TimeStamp GetDomainLookupStart() override;                  \
+  virtual mozilla::TimeStamp GetDomainLookupEnd() override;                    \
+  virtual mozilla::TimeStamp GetConnectStart() override;                       \
+  virtual mozilla::TimeStamp GetTcpConnectEnd() override;                      \
+  virtual mozilla::TimeStamp GetSecureConnectionStart() override;              \
+  virtual mozilla::TimeStamp GetConnectEnd() override;                         \
+  virtual mozilla::TimeStamp GetRequestStart() override;                       \
+  virtual mozilla::TimeStamp GetResponseStart() override;                      \
+  virtual mozilla::TimeStamp GetResponseEnd() override;                        \
+  virtual bool IsStickyConnection() override;                                  \
+  virtual bool ResponseIsComplete() override;                                  \
+  virtual int64_t GetTransferSize() override;
+
+}  // namespace net
+}  // namespace mozilla
+
+#endif  // nsAHttpTransactionShell_h__

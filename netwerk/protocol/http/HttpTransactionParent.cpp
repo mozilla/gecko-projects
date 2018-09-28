@@ -61,14 +61,20 @@ void HttpTransactionParent::GetStructFromInfo(
   aArgs.trrDisabled() = aInfo->GetTrrDisabled();
 }
 
+//-----------------------------------------------------------------------------
+// HttpTransactionParent <nsAHttpTransactionShell>
+//-----------------------------------------------------------------------------
+
+// Let socket process init the *real* nsHttpTransaction.
 nsresult HttpTransactionParent::Init(
     uint32_t caps, nsHttpConnectionInfo* cinfo, nsHttpRequestHead* requestHead,
     nsIInputStream* requestBody, uint64_t requestContentLength,
     bool requestBodyHasHeaders, nsIEventTarget* target,
     nsIInterfaceRequestor* callbacks, nsITransportEventSink* eventsink,
     uint64_t topLevelOuterContentWindowId, HttpTrafficCategory trafficCategory,
-    int32_t priority) {
+    nsIRequest** pump) {
   LOG(("HttpTransactionParent::Init [this=%p caps=%x]\n", this, caps));
+  MOZ_ASSERT(pump);
 
   // TODO Bug 1547389: support HttpTrafficAnalyzer for socket process
   Unused << trafficCategory;
@@ -89,12 +95,12 @@ nsresult HttpTransactionParent::Init(
   if (!SendInit(caps, infoArgs, *requestHead,
                 requestBody ? Some(autoStream.TakeValue()) : Nothing(),
                 requestContentLength, requestBodyHasHeaders,
-                topLevelOuterContentWindowId, priority)) {
+                topLevelOuterContentWindowId)) {
     return NS_ERROR_FAILURE;
   }
 
   mTargetThread = GetCurrentThreadEventTarget();
-  mCaps = caps;
+  NS_ADDREF(*pump = this);
   return NS_OK;
 }
 
@@ -118,6 +124,47 @@ void HttpTransactionParent::GetNetworkAddresses(NetAddr& self, NetAddr& peer) {
   self = mSelfAddr;
   peer = mPeerAddr;
 }
+
+// TODO: propogate the sticky information from socket process
+bool HttpTransactionParent::IsStickyConnection() { return false; }
+
+// TODO: serialize the timing. Dummy implementation for compliablity only.
+mozilla::TimeStamp HttpTransactionParent::GetDomainLookupStart() {
+  return TimeStamp();
+}
+mozilla::TimeStamp HttpTransactionParent::GetDomainLookupEnd() {
+  return TimeStamp();
+}
+mozilla::TimeStamp HttpTransactionParent::GetConnectStart() {
+  return TimeStamp();
+}
+mozilla::TimeStamp HttpTransactionParent::GetTcpConnectEnd() {
+  return TimeStamp();
+}
+mozilla::TimeStamp HttpTransactionParent::GetSecureConnectionStart() {
+  return TimeStamp();
+}
+
+mozilla::TimeStamp HttpTransactionParent::GetConnectEnd() {
+  return TimeStamp();
+}
+mozilla::TimeStamp HttpTransactionParent::GetRequestStart() {
+  return TimeStamp();
+}
+mozilla::TimeStamp HttpTransactionParent::GetResponseStart() {
+  return TimeStamp();
+}
+mozilla::TimeStamp HttpTransactionParent::GetResponseEnd() {
+  return TimeStamp();
+}
+
+bool HttpTransactionParent::ResponseIsComplete() { return mResponseIsComplete; }
+
+int64_t HttpTransactionParent::GetTransferSize() { return mTransferSize; }
+
+nsISupports* HttpTransactionParent::SecurityInfo() { return mSecurityInfo; }
+
+bool HttpTransactionParent::ProxyConnectFailed() { return mProxyConnectFailed; }
 
 void HttpTransactionParent::AddIPDLReference() { AddRef(); }
 
