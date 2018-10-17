@@ -1,0 +1,159 @@
+metadata:
+  description: Single-sourcing all the informatin about artifacts into once place
+  name: Beetmover declarative artifacts manifest
+  owner: release@mozilla.com
+s3_bucket_paths:
+  fennec_nightly: pub/mobile/nightly/
+mapping:
+  target.web-platform.tests.tar.gz:
+    fennec:
+      nightly:
+        description: "Web platform test suite <TODO>"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.web-platform.tests.tar.gz
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.xpcshell.tests.tar.gz:
+    fennec:
+      nightly:
+        description: "XPCShell test suite <TODO>"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.xpcshell.tests.zip
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target_info.txt:
+    fennec:
+      nightly:
+        description: "File containing the buildID for the particular release"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}_info.txt
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.jsshell.zip:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: jsshell-{{ filename_platform }}.zip
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  robocop.apk:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: robocop.apk
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  mozharness.zip:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: mozharness.zip
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.txt:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.txt
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.test_packages.json:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.test_packages.json
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.awsy.tests.tar.gz:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.awsy.tests.tar.gz
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.talos.tests.tar.gz:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.talos.tests.tar.gz
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.reftest.tests.tar.gz:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.reftest.tests.tar.gz
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.mozinfo.json:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.mozinfo.json
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.mochitest.tests.tar.gz:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.mochitest.tests.zip
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.json:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.json
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.crashreporter-symbols.zip:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.crashreporter-symbols.zip
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.cppunittest.tests.tar.gz:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.cppunittest.tests.tar.gz
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.common.tests.tar.gz:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.common.tests.tar.gz
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  buildhub.json:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.buildhub.json
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+  target.apk:
+    fennec:
+      nightly:
+        description: "TODO"
+        pretty_name: fennec-{{ version }}.{{ locale }}.{{ filename_platform }}.apk
+        destinations:
+          - latest-{{ branch }}-{{ platform }}/{{ locale_prefix }}
+          - {{ upload_date }}-{{ branch }}-{{ platform }}/{{ locale_prefix }}
