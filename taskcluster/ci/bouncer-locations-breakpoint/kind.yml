@@ -16,7 +16,7 @@ job-defaults:
    worker-type:
       by-project:
          mozilla-central: null-provisioner/human-breakpoint
-         default: invalid/invalid
+         default: null-provisioner/human-breakpoint
    worker:
       implementation: bouncer-locations-breakpoint
    run-on-projects: ['mozilla-central']
