@@ -50,6 +50,18 @@ struct Line {
   wr::LineStyle style;
 };
 
+/// A handler that can be bundled into a transaction and notified at specific
+/// points in the rendering pipeline, such as after scene building or after
+/// frame building.
+///
+/// If for any reason the handler is dropped before reaching the requested
+/// point, it is notified with the value Checkpoint::TransactionDropped.
+/// So it is safe to assume that the handler will be notified "at some point".
+class NotificationHandler {
+public:
+  virtual void Notify(wr::Checkpoint aCheckpoint) = 0;
+  virtual ~NotificationHandler() = default;
+};
 
 class TransactionBuilder {
 public:
@@ -76,6 +88,8 @@ public:
   void ClearDisplayList(Epoch aEpoch, wr::WrPipelineId aPipeline);
 
   void GenerateFrame();
+
+  void InvalidateRenderedFrame();
 
   void UpdateDynamicProperties(const nsTArray<wr::WrOpacityProperty>& aOpacityArray,
                                const nsTArray<wr::WrTransformProperty>& aTransformArray);
@@ -129,7 +143,7 @@ public:
                                         const wr::DeviceUintRect& aDirtyRect,
                                         uint8_t aChannelIndex = 0);
 
-  void SetImageVisibleArea(ImageKey aKey, const wr::NormalizedRect& aArea);
+  void SetImageVisibleArea(ImageKey aKey, const wr::DeviceUintRect& aArea);
 
   void DeleteImage(wr::ImageKey aKey);
 
@@ -147,6 +161,8 @@ public:
                        wr::Vec<uint8_t>& aVariations);
 
   void DeleteFontInstance(wr::FontInstanceKey aKey);
+
+  void Notify(wr::Checkpoint aWhen, UniquePtr<NotificationHandler> aHandler);
 
   void Clear();
 
@@ -166,6 +182,7 @@ public:
   void UpdateScrollPosition(const wr::WrPipelineId& aPipelineId,
                             const layers::FrameMetrics::ViewID& aScrollId,
                             const wr::LayoutPoint& aScrollPosition);
+  void UpdatePinchZoom(float aZoom);
 private:
   Transaction* mTxn;
 };
@@ -198,7 +215,7 @@ public:
 
   void RunOnRenderThread(UniquePtr<RendererEvent> aEvent);
 
-  void Readback(const TimeStamp& aStartTime, gfx::IntSize aSize, uint8_t *aBuffer, uint32_t aBufferSize);
+  void Readback(const TimeStamp& aStartTime, gfx::IntSize aSize, const Range<uint8_t>& aBuffer);
 
   void ClearAllCaches();
 
@@ -394,6 +411,7 @@ public:
                             wr::ImageKey aImageChannel0,
                             wr::ImageKey aImageChannel1,
                             wr::ImageKey aImageChannel2,
+                            wr::WrColorDepth aColorDepth,
                             wr::WrYuvColorSpace aColorSpace,
                             wr::ImageRendering aFilter);
 
@@ -402,6 +420,7 @@ public:
                      bool aIsBackfaceVisible,
                      wr::ImageKey aImageChannel0,
                      wr::ImageKey aImageChannel1,
+                     wr::WrColorDepth aColorDepth,
                      wr::WrYuvColorSpace aColorSpace,
                      wr::ImageRendering aFilter);
 
@@ -409,6 +428,7 @@ public:
                                  const wr::LayoutRect& aClip,
                                  bool aIsBackfaceVisible,
                                  wr::ImageKey aImageChannel0,
+                                 wr::WrColorDepth aColorDepth,
                                  wr::WrYuvColorSpace aColorSpace,
                                  wr::ImageRendering aFilter);
 
@@ -424,7 +444,8 @@ public:
                   bool aIsBackfaceVisible,
                   const wr::LayoutSideOffsets& aWidths,
                   const Range<const wr::BorderSide>& aSides,
-                  const wr::BorderRadius& aRadius);
+                  const wr::BorderRadius& aRadius,
+                  wr::AntialiasBorder = wr::AntialiasBorder::Yes);
 
   void PushBorderImage(const wr::LayoutRect& aBounds,
                        const wr::LayoutRect& aClip,

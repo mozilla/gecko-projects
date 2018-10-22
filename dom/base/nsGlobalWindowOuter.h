@@ -27,6 +27,7 @@
 #include "nsIBrowserDOMWindow.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIDOMChromeWindow.h"
+#include "nsIObserver.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsITimer.h"
@@ -90,7 +91,6 @@ struct IdleObserverHolder;
 namespace mozilla {
 class AbstractThread;
 class DOMEventTargetHelper;
-class ThrottledEventQueue;
 namespace dom {
 class BarProp;
 struct ChannelPixelLayout;
@@ -172,6 +172,7 @@ class nsGlobalWindowOuter final
   , public nsSupportsWeakReference
   , public nsIInterfaceRequestor
   , public PRCListStr
+  , public nsIObserver
 {
 public:
   typedef nsDataHashtable<nsUint64HashKey, nsGlobalWindowOuter*> OuterWindowByIdTable;
@@ -219,7 +220,7 @@ public:
     return (nsGlobalWindowOuter *)(mozilla::dom::EventTarget *)supports;
   }
 
-  static already_AddRefed<nsGlobalWindowOuter> Create(bool aIsChrome);
+  static already_AddRefed<nsGlobalWindowOuter> Create(nsIDocShell* aDocShell, bool aIsChrome);
 
   // public methods
   nsPIDOMWindowOuter* GetPrivateParent();
@@ -320,7 +321,6 @@ public:
   // Outer windows only.
   bool WouldReuseInnerWindow(nsIDocument* aNewDocument);
 
-  void SetDocShell(nsIDocShell* aDocShell);
   void DetachFromDocShell();
 
   virtual nsresult SetNewDocument(nsIDocument *aDocument,
@@ -361,6 +361,9 @@ public:
 
   // nsIInterfaceRequestor
   NS_DECL_NSIINTERFACEREQUESTOR
+
+  // nsIObserver
+  NS_DECL_NSIOBSERVER
 
   already_AddRefed<nsPIDOMWindowOuter> IndexedGetterOuter(uint32_t aIndex);
 
@@ -484,7 +487,9 @@ public:
 
   virtual void
   NotifyContentBlockingState(unsigned aState,
-                             nsIChannel* aChannel) override;
+                             nsIChannel* aChannel,
+                             bool aBlocked,
+                             nsIURI* aURIHint) override;
 
   virtual uint32_t GetSerial() override {
     return mSerial;
@@ -579,7 +584,6 @@ public:
 
   nsresult GetPrompter(nsIPrompt** aPrompt) override;
 protected:
-  explicit nsGlobalWindowOuter();
   nsPIDOMWindowOuter* GetOpenerWindowOuter();
   // Initializes the mWasOffline member variable
   void InitWasOffline();
@@ -732,6 +736,12 @@ public:
     return GetExtantDoc() && GetExtantDoc()->IsInSyncOperation();
   }
 
+  void ParentWindowChanged()
+  {
+    // Reset our storage access flag when we get reparented.
+    mHasStorageAccess = false;
+  }
+
 public:
   int32_t GetInnerWidthOuter(mozilla::ErrorResult& aError);
 protected:
@@ -805,7 +815,8 @@ protected:
 
   inline void MaybeClearInnerWindow(nsGlobalWindowInner* aExpectedInner);
 
-  nsGlobalWindowInner *CallerInnerWindow();
+  // We need a JSContext to get prototypes inside CallerInnerWindow.
+  nsGlobalWindowInner* CallerInnerWindow(JSContext* aCx);
 
   // Get the parent, returns null if this is a toplevel window
   nsPIDOMWindowOuter* GetParentInternal();
@@ -828,6 +839,8 @@ protected:
                  nsPIDOMWindowOuter** _retval) override;
 
 private:
+  explicit nsGlobalWindowOuter(uint64_t aWindowID);
+
   /**
    * @param aUrl the URL we intend to load into the window.  If aNavigate is
    *        true, we'll actually load this URL into the window. Otherwise,
@@ -1044,6 +1057,8 @@ private:
                               SecureContextFlags aFlags =
                                 SecureContextFlags::eDefault);
 
+  void SetDocShell(nsIDocShell* aDocShell);
+
   // nsPIDOMWindow{Inner,Outer} should be able to see these helper methods.
   friend class nsPIDOMWindowInner;
   friend class nsPIDOMWindowOuter;
@@ -1253,13 +1268,6 @@ nsGlobalWindowOuter::MaybeClearInnerWindow(nsGlobalWindowInner* aExpectedInner)
   if(mInnerWindow == aExpectedInner->AsInner()) {
     mInnerWindow = nullptr;
   }
-}
-
-/* factory function */
-inline already_AddRefed<nsGlobalWindowOuter>
-NS_NewScriptGlobalObject(bool aIsChrome)
-{
-  return nsGlobalWindowOuter::Create(aIsChrome);
 }
 
 #endif /* nsGlobalWindowOuter_h___ */

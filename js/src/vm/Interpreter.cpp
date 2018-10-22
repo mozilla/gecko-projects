@@ -305,15 +305,22 @@ js::MakeDefaultConstructor(JSContext* cx, HandleScript script, jsbytecode* pc, H
 
     ctor->setIsConstructor();
     ctor->setIsClassConstructor();
-    MOZ_ASSERT(ctor->infallibleIsDefaultClassConstructor(cx));
 
-    // Create the script now, as the source span needs to be overridden for
-    // toString. Calling toString on a class constructor must not return the
-    // source for just the constructor function.
+    // Create the script now, so we can fix up its source span below.
     JSScript *ctorScript = JSFunction::getOrCreateScript(cx, ctor);
     if (!ctorScript) {
         return nullptr;
     }
+
+    // This function's frames are fine to expose to JS; it should not be treated
+    // as an opaque self-hosted builtin. But the script cloning code naturally
+    // expects to be applied to self-hosted functions, so do the clone first,
+    // and clear this afterwards.
+    ctor->clearIsSelfHosted();
+
+    // Override the source span needs for toString. Calling toString on a class
+    // constructor should return the class declaration, not the source for the
+    // (self-hosted) constructor function.
     uint32_t classStartOffset = GetSrcNoteOffset(classNote, 0);
     uint32_t classEndOffset = GetSrcNoteOffset(classNote, 1);
     unsigned column;
@@ -1236,10 +1243,14 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
             ei.initialFrame().popOffEnvironmentChain<VarEnvironmentObject>();
         }
         break;
+      case ScopeKind::Module:
+        if (MOZ_UNLIKELY(cx->realm()->isDebuggee())) {
+            DebugEnvironments::onPopModule(cx, ei);
+        }
+        break;
       case ScopeKind::Eval:
       case ScopeKind::Global:
       case ScopeKind::NonSyntactic:
-      case ScopeKind::Module:
         break;
       case ScopeKind::WasmInstance:
       case ScopeKind::WasmFunction:
@@ -1303,7 +1314,7 @@ js::UnwindAllEnvironmentsInFrame(JSContext* cx, EnvironmentIter& ei)
 // will have no pc location distinguishing the try block scope from the inner
 // let block scope.
 jsbytecode*
-js::UnwindEnvironmentToTryPc(JSScript* script, JSTryNote* tn)
+js::UnwindEnvironmentToTryPc(JSScript* script, const JSTryNote* tn)
 {
     jsbytecode* pc = script->main() + tn->start;
     if (tn->kind == JSTRY_CATCH || tn->kind == JSTRY_FINALLY) {
@@ -1327,7 +1338,7 @@ ForcedReturn(JSContext* cx, InterpreterRegs& regs)
 }
 
 static void
-SettleOnTryNote(JSContext* cx, JSTryNote* tn, EnvironmentIter& ei, InterpreterRegs& regs)
+SettleOnTryNote(JSContext* cx, const JSTryNote* tn, EnvironmentIter& ei, InterpreterRegs& regs)
 {
     // Unwind the environment to the beginning of the JSOP_TRY.
     UnwindEnvironment(cx, ei, UnwindEnvironmentToTryPc(regs.fp()->script(), tn));
@@ -1363,7 +1374,7 @@ UnwindIteratorsForUncatchableException(JSContext* cx, const InterpreterRegs& reg
     // ProcessTryNotes.
     bool inForOfIterClose = false;
     for (TryNoteIterInterpreter tni(cx, regs); !tni.done(); ++tni) {
-        JSTryNote* tn = *tni;
+        const JSTryNote* tn = *tni;
         switch (tn->kind) {
           case JSTRY_FOR_IN: {
             // See corresponding comment in ProcessTryNotes.
@@ -1403,7 +1414,7 @@ ProcessTryNotes(JSContext* cx, EnvironmentIter& ei, InterpreterRegs& regs)
 {
     bool inForOfIterClose = false;
     for (TryNoteIterInterpreter tni(cx, regs); !tni.done(); ++tni) {
-        JSTryNote* tn = *tni;
+        const JSTryNote* tn = *tni;
 
         switch (tn->kind) {
           case JSTRY_CATCH:
@@ -4706,15 +4717,30 @@ CASE(JSOP_IMPORTMETA)
     ReservedRooted<JSObject*> module(&rootObject0, GetModuleObjectForScript(script));
     MOZ_ASSERT(module);
 
-    ReservedRooted<JSScript*> script(&rootScript0, module->as<ModuleObject>().script());
-    JSObject* metaObject = GetOrCreateModuleMetaObject(cx, script);
+    JSObject* metaObject = GetOrCreateModuleMetaObject(cx, module);
     if (!metaObject) {
         goto error;
     }
 
     PUSH_OBJECT(*metaObject);
 }
-END_CASE(JSOP_NEWTARGET)
+END_CASE(JSOP_IMPORTMETA)
+
+CASE(JSOP_DYNAMIC_IMPORT)
+{
+    ReservedRooted<Value> referencingPrivate(&rootValue0);
+    referencingPrivate = FindScriptOrModulePrivateForScript(script);
+
+    ReservedRooted<Value> specifier(&rootValue1);
+    POP_COPY_TO(specifier);
+
+    JSObject* promise = StartDynamicModuleImport(cx, referencingPrivate, specifier);
+    if (!promise)
+        goto error;
+
+    PUSH_OBJECT(*promise);
+}
+END_CASE(JSOP_DYNAMIC_IMPORT)
 
 CASE(JSOP_SUPERFUN)
 {

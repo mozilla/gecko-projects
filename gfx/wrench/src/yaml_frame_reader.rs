@@ -173,6 +173,7 @@ fn is_image_opaque(format: ImageFormat, bytes: &[u8]) -> bool {
         }
         ImageFormat::RG8 => true,
         ImageFormat::R8 => false,
+        ImageFormat::R16 => false,
         ImageFormat::RGBAF32 |
         ImageFormat::RGBAI32 => unreachable!(),
     }
@@ -870,12 +871,14 @@ impl YamlFrameReader {
                         color: colors[3],
                         style: styles[3],
                     };
+                    let do_aa = item["do_aa"].as_bool().unwrap_or(true);
                     Some(BorderDetails::Normal(NormalBorder {
                         top,
                         left,
                         bottom,
                         right,
                         radius,
+                        do_aa,
                     }))
                 }
                 "image" | "gradient" | "radial-gradient" => {
@@ -1015,7 +1018,8 @@ impl YamlFrameReader {
         item: &Yaml,
         info: &mut LayoutPrimitiveInfo,
     ) {
-        // TODO(gw): Support other YUV color spaces.
+        // TODO(gw): Support other YUV color depth and spaces.
+        let color_depth = ColorDepth::Color8;
         let color_space = YuvColorSpace::Rec709;
 
         let yuv_data = match item["format"].as_str().expect("no format supplied") {
@@ -1060,6 +1064,7 @@ impl YamlFrameReader {
         dl.push_yuv_image(
             &info,
             yuv_data,
+            color_depth,
             color_space,
             ImageRendering::Auto,
         );

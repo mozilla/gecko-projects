@@ -388,7 +388,7 @@ function EnsurePositionHandler(position) {
           offset: position.offset,
           frameIndex: countScriptFrames() - 1,
         });
-      }
+      },
     });
     break;
   case "OnPop":
@@ -523,10 +523,30 @@ function forwardToScript(name) {
 
 const gRequestHandlers = {
 
+  repaint() {
+    if (!RecordReplayControl.maybeDivergeFromRecording()) {
+      return {};
+    }
+    return RecordReplayControl.repaint();
+  },
+
   findScripts(request) {
+    const query = Object.assign({}, request.query);
+    if ("global" in query) {
+      query.global = gPausedObjects.getObject(query.global);
+    }
+    if ("source" in query) {
+      query.source = gScriptSources.getObject(query.source);
+      if (!query.source) {
+        return [];
+      }
+    }
+    const scripts = dbg.findScripts(query);
     const rv = [];
-    gScripts.forEach((id) => {
-      rv.push(getScriptData(id));
+    scripts.forEach(script => {
+      if (considerScript(script)) {
+        rv.push(getScriptData(gScripts.getId(script)));
+      }
     });
     return rv;
   },
@@ -600,7 +620,7 @@ const gRequestHandlers = {
         name: "Unknown properties",
         desc: {
           value: "Recording divergence in getObjectProperties",
-          enumerable: true
+          enumerable: true,
         },
       }];
     }
@@ -707,8 +727,14 @@ function ProcessRequest(request) {
     }
     return { exception: "No handler for " + request.type };
   } catch (e) {
-    RecordReplayControl.dump("ReplayDebugger Record/Replay Error: " + e + "\n");
-    return { exception: "" + e };
+    let msg;
+    try {
+      msg = "" + e;
+    } catch (ee) {
+      msg = "Unknown";
+    }
+    RecordReplayControl.dump("ReplayDebugger Record/Replay Error: " + msg + "\n");
+    return { exception: msg };
   }
 }
 

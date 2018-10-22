@@ -70,10 +70,9 @@ public class LayerSession {
         private void onCompositorDetached() {
             // Clear out any pending calls on the UI thread.
             LayerSession.this.onCompositorDetached();
-            disposeNative();
         }
 
-        @WrapForJNI(calledFrom = "ui", dispatchTo = "gecko")
+        @WrapForJNI(dispatchTo = "gecko")
         @Override protected native void disposeNative();
 
         @WrapForJNI(calledFrom = "ui", dispatchTo = "gecko")
@@ -139,6 +138,11 @@ public class LayerSession {
         @WrapForJNI(calledFrom = "ui")
         private void updateOverscrollOffset(final float x, final float y) {
             LayerSession.this.updateOverscrollOffset(x, y);
+        }
+
+        @Override
+        protected void finalize() throws Throwable {
+            disposeNative();
         }
     }
 

@@ -75,9 +75,9 @@ window.gActivityStreamStrings = {
   "pocket_read_more": "Temas populars:",
   "pocket_read_even_more": "Mussar dapli artitgels",
   "pocket_more_reccommendations": "Dapli propostas",
-  "pocket_learn_more": "Ulteriuras infurmaziuns",
-  "pocket_cta_button": "Get Pocket",
-  "pocket_cta_text": "Save the stories you love in Pocket, and fuel your mind with fascinating reads.",
+  "pocket_how_it_works": "Co ch'i funcziuna",
+  "pocket_cta_button": "Obtegnair Pocket",
+  "pocket_cta_text": "Memorisescha ils artitgels che ta plaschan en Pocket e procura per inspiraziun cuntinuanta cun lectura fascinanta.",
   "highlights_empty_state": "Cumenza a navigar e nus ta mussain qua artitgels, videos ed autras paginas che ti has visità dacurt u che ti has agiuntà dacurt sco segnapagina.",
   "topstories_empty_state": "Ussa has ti legì tut las novitads. Turna pli tard per ulteriuras novitads da {provider}. Na pos betg spetgar? Tscherna in tema popular per chattar ulteriuras istorgias ord il web.",
   "manual_migration_explanation2": "Emprova Firefox cun ils segnapaginas, la cronologia ed ils pleds-clav importads d'in auter navigatur.",
@@ -106,5 +106,7 @@ window.gActivityStreamStrings = {
   "firstrun_terms_of_service": "Cundiziuns d'utilisaziun",
   "firstrun_privacy_notice": "Infurmaziuns davart la protecziun da datas",
   "firstrun_continue_to_login": "Cuntinuar",
-  "firstrun_skip_login": "Sursiglir quest pass"
+  "firstrun_skip_login": "Sursiglir quest pass",
+  "context_menu_title": "Open menu",
+  "pocket_learn_more": "Ulteriuras infurmaziuns"
 };

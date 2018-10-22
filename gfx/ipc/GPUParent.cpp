@@ -22,6 +22,7 @@
 #include "mozilla/dom/VideoDecoderManagerParent.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/gfxVars.h"
+#include "mozilla/image/ImageMemoryReporter.h"
 #include "mozilla/ipc/CrashReporterClient.h"
 #include "mozilla/ipc/ProcessChild.h"
 #include "mozilla/layers/APZInputBridgeParent.h"
@@ -45,7 +46,6 @@
 #include "VRGPUChild.h"
 #include "VRManager.h"
 #include "VRManagerParent.h"
-#include "VRThread.h"
 #include "VsyncBridgeParent.h"
 #if defined(XP_WIN)
 # include "mozilla/gfx/DeviceManagerDx.h"
@@ -133,8 +133,6 @@ GPUParent::Init(base::ProcessId aParentPid,
   }
 
   CompositorThreadHolder::Start();
-  // TODO: Bug 1406327, Start VRListenerThreadHolder when loading VR content.
-  VRListenerThreadHolder::Start();
   APZThreadUtils::SetControllerThread(MessageLoop::current());
   apz::InitializeGlobalState();
   LayerTreeOwnerTracker::Initialize();
@@ -268,6 +266,7 @@ GPUParent::RecvInit(nsTArray<GfxPrefSetting>&& prefs,
   // Make sure to do this *after* we update gfxVars above.
   if (gfxVars::UseWebRender()) {
     wr::RenderThread::Start();
+    image::ImageMemoryReporter::InitForWebRender();
   }
 
   VRManager::ManagerInit();
@@ -531,12 +530,13 @@ GPUParent::ActorDestroy(ActorDestroyReason aWhy)
   }
   dom::VideoDecoderManagerParent::ShutdownVideoBridge();
   CompositorThreadHolder::Shutdown();
-  VRListenerThreadHolder::Shutdown();
   // There is a case that RenderThread exists when gfxVars::UseWebRender() is false.
   // This could happen when WebRender was fallbacked to compositor.
   if (wr::RenderThread::Get()) {
     wr::RenderThread::ShutDown();
   }
+
+  image::ImageMemoryReporter::ShutdownForWebRender();
 
   // Shut down the default GL context provider.
   gl::GLContextProvider::Shutdown();

@@ -61,12 +61,8 @@ WebRenderLayerManager::Initialize(PCompositorBridgeChild* aCBChild,
   MOZ_ASSERT(aTextureFactoryIdentifier);
 
   LayoutDeviceIntSize size = mWidget->GetClientSize();
-  TextureFactoryIdentifier textureFactoryIdentifier;
-  wr::IdNamespace id_namespace;
   PWebRenderBridgeChild* bridge = aCBChild->SendPWebRenderBridgeConstructor(aLayersId,
-                                                                            size,
-                                                                            &textureFactoryIdentifier,
-                                                                            &id_namespace);
+                                                                            size);
   if (!bridge) {
     // This should only fail if we attempt to access a layer we don't have
     // permission for, or more likely, the GPU process crashed again during
@@ -76,11 +72,20 @@ WebRenderLayerManager::Initialize(PCompositorBridgeChild* aCBChild,
     return false;
   }
 
+  TextureFactoryIdentifier textureFactoryIdentifier;
+  wr::MaybeIdNamespace idNamespace;
+  // Sync ipc
+  bridge->SendEnsureConnected(&textureFactoryIdentifier, &idNamespace);
+  if (textureFactoryIdentifier.mParentBackend == LayersBackend::LAYERS_NONE ||
+      idNamespace.isNothing()) {
+    gfxCriticalNote << "Failed to connect WebRenderBridgeChild.";
+    return false;
+  }
+
   mWrChild = static_cast<WebRenderBridgeChild*>(bridge);
   WrBridge()->SetWebRenderLayerManager(this);
-  WrBridge()->SendCreate(size.ToUnknownSize());
   WrBridge()->IdentifyTextureHost(textureFactoryIdentifier);
-  WrBridge()->SetNamespace(id_namespace);
+  WrBridge()->SetNamespace(idNamespace.ref());
   *aTextureFactoryIdentifier = textureFactoryIdentifier;
   return true;
 }
@@ -214,11 +219,15 @@ WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
   // Since we don't do repeat transactions right now, just set the time
   mAnimationReadyTime = TimeStamp::Now();
 
-  if (aFlags & EndTransactionFlags::END_NO_COMPOSITE && 
+  mLatestTransactionId = mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
+
+  if (aFlags & EndTransactionFlags::END_NO_COMPOSITE &&
       !mWebRenderCommandBuilder.NeedsEmptyTransaction() &&
       mPendingScrollUpdates.empty()) {
     MOZ_ASSERT(!mTarget);
     WrBridge()->SendSetFocusTarget(mFocusTarget);
+    // Revoke TransactionId to trigger next paint.
+    mTransactionIdAllocator->RevokeTransactionId(mLatestTransactionId);
     return true;
   }
 
@@ -227,7 +236,6 @@ WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
 
   mWebRenderCommandBuilder.EmptyTransaction();
 
-  mLatestTransactionId = mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
   TimeStamp refreshStart = mTransactionIdAllocator->GetTransactionStart();
 
   // Skip the synchronization for buffer since we also skip the painting during
@@ -562,6 +570,12 @@ WebRenderLayerManager::WrUpdated()
 {
   mWebRenderCommandBuilder.ClearCachedResources();
   DiscardLocalImages();
+
+  if (mWidget) {
+    if (dom::TabChild* tabChild = mWidget->GetOwningTabChild()) {
+      tabChild->SchedulePaint();
+    }
+  }
 }
 
 dom::TabGroup*

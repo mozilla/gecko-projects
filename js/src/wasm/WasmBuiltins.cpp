@@ -462,7 +462,7 @@ SaturatingTruncateDoubleToUint64(double input)
         return UINT64_MAX;
     }
     // Handle in-range values.
-    if (input >= -1.0) {
+    if (input > -1.0) {
         return uint64_t(input);
     }
     // Handle NaN and negative overflow.
@@ -688,11 +688,9 @@ AddressOf(SymbolicAddress imm, ABIFunctionType* abiType)
       case SymbolicAddress::TableInit:
         *abiType = Args_General5;
         return FuncCast(Instance::tableInit, *abiType);
-#ifdef ENABLE_WASM_GC
       case SymbolicAddress::PostBarrier:
         *abiType = Args_General2;
         return FuncCast(Instance::postBarrier, *abiType);
-#endif
       case SymbolicAddress::StructNew:
         *abiType = Args_General2;
         return FuncCast(Instance::structNew, *abiType);
@@ -780,9 +778,7 @@ wasm::NeedsBuiltinThunk(SymbolicAddress sym)
       case SymbolicAddress::TableCopy:
       case SymbolicAddress::TableDrop:
       case SymbolicAddress::TableInit:
-#ifdef ENABLE_WASM_GC
       case SymbolicAddress::PostBarrier:
-#endif
       case SymbolicAddress::StructNew:
       case SymbolicAddress::StructNarrow:
         return true;

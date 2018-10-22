@@ -9,7 +9,11 @@ use std::ops::Not;
 use {ColorF, FontInstanceKey, GlyphOptions, ImageKey, LayoutPixel, LayoutPoint};
 use {LayoutRect, LayoutSize, LayoutTransform, LayoutVector2D, PipelineId, PropertyBinding};
 use LayoutSideOffsets;
+use image::ColorDepth;
 
+// Maximum blur radius.
+// Taken from nsCSSRendering.cpp in Gecko.
+pub const MAX_BLUR_RADIUS: f32 = 300.;
 
 // NOTE: some of these structs have an "IMPLICIT" comment.
 // This indicates that the BuiltDisplayList will have serialized
@@ -262,6 +266,11 @@ pub struct NormalBorder {
     pub top: BorderSide,
     pub bottom: BorderSide,
     pub radius: BorderRadius,
+    /// Whether to apply anti-aliasing on the border corners.
+    ///
+    /// Note that for this to be `false` and work, this requires the borders to
+    /// be solid, and no border-radius.
+    pub do_aa: bool,
 }
 
 impl NormalBorder {
@@ -275,17 +284,32 @@ impl NormalBorder {
         b
     }
 
+    fn can_disable_antialiasing(&self) -> bool {
+        fn is_valid(style: BorderStyle) -> bool {
+            style == BorderStyle::Solid || style == BorderStyle::None
+        }
+
+        self.radius.is_zero() &&
+            is_valid(self.top.style) &&
+            is_valid(self.left.style) &&
+            is_valid(self.bottom.style) &&
+            is_valid(self.right.style)
+    }
+
     /// Normalizes a border so that we don't render disallowed stuff, like inset
     /// borders that are less than two pixels wide.
     #[inline]
     pub fn normalize(&mut self, widths: &LayoutSideOffsets) {
+        debug_assert!(
+            self.do_aa || self.can_disable_antialiasing(),
+            "Unexpected disabled-antialising in a border, likely won't work or will be ignored"
+        );
+
         #[inline]
         fn renders_small_border_solid(style: BorderStyle) -> bool {
             match style {
                 BorderStyle::Groove |
-                BorderStyle::Ridge |
-                BorderStyle::Inset |
-                BorderStyle::Outset => true,
+                BorderStyle::Ridge => true,
                 _ => false,
             }
         }
@@ -410,6 +434,29 @@ pub enum BorderStyle {
 impl BorderStyle {
     pub fn is_hidden(&self) -> bool {
         *self == BorderStyle::Hidden || *self == BorderStyle::None
+    }
+
+    /// Returns true if the border style itself is opaque. Other
+    /// factors (such as color, or border radii) may mean that
+    /// the border segment isn't opaque regardless of this.
+    pub fn is_opaque(&self) -> bool {
+        match *self {
+            BorderStyle::None |
+            BorderStyle::Double |
+            BorderStyle::Dotted |
+            BorderStyle::Dashed |
+            BorderStyle::Hidden => {
+                false
+            }
+
+            BorderStyle::Solid |
+            BorderStyle::Groove |
+            BorderStyle::Ridge |
+            BorderStyle::Inset |
+            BorderStyle::Outset => {
+                true
+            }
+        }
     }
 }
 
@@ -588,6 +635,26 @@ pub enum FilterOp {
     Sepia(f32),
     DropShadow(LayoutVector2D, f32, ColorF),
     ColorMatrix([f32; 20]),
+    SrgbToLinear,
+    LinearToSrgb,
+}
+
+impl FilterOp {
+    /// Ensure that the parameters for a filter operation
+    /// are sensible.
+    pub fn sanitize(self) -> FilterOp {
+        match self {
+            FilterOp::Blur(radius) => {
+                let radius = radius.min(MAX_BLUR_RADIUS);
+                FilterOp::Blur(radius)
+            }
+            FilterOp::DropShadow(offset, radius, color) => {
+                let radius = radius.min(MAX_BLUR_RADIUS);
+                FilterOp::DropShadow(offset, radius, color)
+            }
+            filter => filter,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -624,6 +691,7 @@ pub enum AlphaType {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct YuvImageDisplayItem {
     pub yuv_data: YuvData,
+    pub color_depth: ColorDepth,
     pub color_space: YuvColorSpace,
     pub image_rendering: ImageRendering,
 }
@@ -698,57 +766,6 @@ pub struct ImageMask {
     pub image: ImageKey,
     pub rect: LayoutRect,
     pub repeat: bool,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub enum LocalClip {
-    Rect(LayoutRect),
-    RoundedRect(LayoutRect, ComplexClipRegion),
-}
-
-impl From<LayoutRect> for LocalClip {
-    fn from(rect: LayoutRect) -> Self {
-        LocalClip::Rect(rect)
-    }
-}
-
-impl LocalClip {
-    pub fn clip_rect(&self) -> &LayoutRect {
-        match *self {
-            LocalClip::Rect(ref rect) => rect,
-            LocalClip::RoundedRect(ref rect, _) => rect,
-        }
-    }
-
-    pub fn create_with_offset(&self, offset: &LayoutVector2D) -> LocalClip {
-        match *self {
-            LocalClip::Rect(rect) => LocalClip::from(rect.translate(offset)),
-            LocalClip::RoundedRect(rect, complex) => LocalClip::RoundedRect(
-                rect.translate(offset),
-                ComplexClipRegion {
-                    rect: complex.rect.translate(offset),
-                    radii: complex.radii,
-                    mode: complex.mode,
-                },
-            ),
-        }
-    }
-
-    pub fn clip_by(&self, rect: &LayoutRect) -> LocalClip {
-        match *self {
-            LocalClip::Rect(clip_rect) => {
-                LocalClip::Rect(
-                    clip_rect.intersection(rect).unwrap_or_else(LayoutRect::zero)
-                )
-            }
-            LocalClip::RoundedRect(clip_rect, complex) => {
-                LocalClip::RoundedRect(
-                    clip_rect.intersection(rect).unwrap_or_else(LayoutRect::zero),
-                    complex,
-                )
-            }
-        }
-    }
 }
 
 #[repr(C)]

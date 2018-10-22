@@ -39,9 +39,7 @@ enum class SectionId
     Elem                                 = 9,
     Code                                 = 10,
     Data                                 = 11,
-#ifdef ENABLE_WASM_GC
     GcFeatureOptIn                       = 42 // Arbitrary, but fits in 7 bits
-#endif
 };
 
 enum class TypeCode
@@ -155,7 +153,8 @@ enum class MemoryMasks
 enum class InitializerKind
 {
     Active                               = 0x00,
-    Passive                              = 0x01
+    Passive                              = 0x01,
+    ActiveWithIndex                      = 0x02
 };
 
 enum class Op

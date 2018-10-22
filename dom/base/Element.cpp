@@ -52,6 +52,7 @@
 #include "nsDOMString.h"
 #include "nsIScriptSecurityManager.h"
 #include "mozilla/dom/AnimatableBinding.h"
+#include "mozilla/dom/FeaturePolicyUtils.h"
 #include "mozilla/dom/HTMLDivElement.h"
 #include "mozilla/dom/HTMLSpanElement.h"
 #include "mozilla/dom/KeyframeAnimationOptionsBinding.h"
@@ -621,7 +622,7 @@ Element::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 
     if (bindingURL) {
       nsCOMPtr<nsIURI> uri = bindingURL->GetURI();
-      nsCOMPtr<nsIPrincipal> principal = bindingURL->mExtraData->GetPrincipal();
+      nsCOMPtr<nsIPrincipal> principal = bindingURL->ExtraData()->Principal();
 
       // We have a binding that must be installed.
       bool dummy;
@@ -2228,7 +2229,7 @@ Element::FindAttributeDependence(const nsAtom* aAttribute,
   for (uint32_t mapindex = 0; mapindex < aMapCount; ++mapindex) {
     for (const MappedAttributeEntry* map = aMaps[mapindex];
          map->attribute; ++map) {
-      if (aAttribute == *map->attribute) {
+      if (aAttribute == map->attribute) {
         return true;
       }
     }
@@ -2957,7 +2958,7 @@ Element::FindAttrValueIn(int32_t aNameSpaceID,
   const nsAttrValue* val = mAttrs.GetAttr(aName, aNameSpaceID);
   if (val) {
     for (int32_t i = 0; aValues[i]; ++i) {
-      if (val->Equals(*aValues[i], aCaseSensitive)) {
+      if (val->Equals(aValues[i], aCaseSensitive)) {
         return i;
       }
     }
@@ -3469,16 +3470,16 @@ nsDOMTokenListPropertyDestructor(void *aObject, nsAtom *aProperty,
   NS_RELEASE(list);
 }
 
-static nsStaticAtom** sPropertiesToTraverseAndUnlink[] =
+static nsStaticAtom* const sPropertiesToTraverseAndUnlink[] =
   {
-    &nsGkAtoms::sandbox,
-    &nsGkAtoms::sizes,
-    &nsGkAtoms::dirAutoSetBy,
+    nsGkAtoms::sandbox,
+    nsGkAtoms::sizes,
+    nsGkAtoms::dirAutoSetBy,
     nullptr
   };
 
 // static
-nsStaticAtom***
+nsStaticAtom* const*
 Element::HTMLSVGPropertiesToTraverseAndUnlink()
 {
   return sPropertiesToTraverseAndUnlink;
@@ -3489,10 +3490,10 @@ Element::GetTokenList(nsAtom* aAtom,
                       const DOMTokenListSupportedTokenArray aSupportedTokens)
 {
 #ifdef DEBUG
-  nsStaticAtom*** props = HTMLSVGPropertiesToTraverseAndUnlink();
+  const nsStaticAtom* const* props = HTMLSVGPropertiesToTraverseAndUnlink();
   bool found = false;
   for (uint32_t i = 0; props[i]; ++i) {
-    if (*props[i] == aAtom) {
+    if (props[i] == aAtom) {
       found = true;
       break;
     }
@@ -3590,6 +3591,13 @@ Element::RequestFullscreen(CallerType aCallerType, ErrorResult& aRv)
 {
   auto request = FullscreenRequest::Create(this, aCallerType, aRv);
   RefPtr<Promise> promise = request->GetPromise();
+
+  if (!FeaturePolicyUtils::IsFeatureAllowed(OwnerDoc(),
+                                            NS_LITERAL_STRING("fullscreen"))) {
+    request->Reject("FullscreenDeniedFeaturePolicy");
+    return promise.forget();
+  }
+
   // Only grant fullscreen requests if this is called from inside a trusted
   // event handler (i.e. inside an event handler for a user initiated event).
   // This stops the fullscreen from being abused similar to the popups of old,

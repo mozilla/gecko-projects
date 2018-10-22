@@ -28,6 +28,13 @@ def filter_out_nightly(task, parameters):
     return not task.attributes.get('nightly') or parameters.get('include_nightly')
 
 
+def filter_out_cron(task, parameters):
+    """
+    Filter out tasks that run via cron.
+    """
+    return not task.attributes.get('cron')
+
+
 def filter_for_project(task, parameters):
     """Filter tasks by project.  Optionally enable nightlies."""
     run_on_projects = set(task.attributes.get('run_on_projects', []))
@@ -62,8 +69,6 @@ def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=Fa
             'win64-asan-reporter-nightly',
             ):
         return False
-    if str(platform).startswith('android') and 'nightly' in str(platform):
-        return False
 
     if platform in (
             'linux', 'linux64',
@@ -93,7 +98,7 @@ def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=Fa
 def standard_filter(task, parameters):
     return all(
         filter_func(task, parameters) for filter_func in
-        (filter_out_nightly, filter_for_project)
+        (filter_out_nightly, filter_out_cron, filter_for_project)
     )
 
 
@@ -192,7 +197,7 @@ def target_tasks_ash(full_task_graph, parameters, graph_config):
         for p in ('nightly', 'haz', 'artifact', 'cov', 'add-on'):
             if p in platform:
                 return False
-        for k in ('toolchain', 'l10n', 'static-analysis'):
+        for k in ('toolchain', 'l10n'):
             if k in task.attributes['kind']:
                 return False
         # and none of this linux64-asan/debug stuff
@@ -310,22 +315,9 @@ def target_tasks_promote_desktop(full_task_graph, parameters, graph_config):
     of a desktop product. This should include all non-android
     mozilla_{beta,release} tasks, plus l10n, beetmover, balrog, etc."""
 
-    beta_release_tasks = [l for l, t in full_task_graph.tasks.iteritems() if
-                          filter_beta_release_tasks(t, parameters,
-                                                    ignore_kinds=[],
-                                                    allow_l10n=True)]
-
     def filter(task):
         if task.attributes.get('shipping_product') != parameters['release_product']:
             return False
-
-        # Allow for {beta,release}_tasks; these will get optimized out to point
-        # to the previous graph using ``previous_graph_ids`` and
-        # ``previous_graph_kinds``.
-        # At some point this should filter by shipping_phase == 'build' and
-        # shipping_product matches.
-        if task.label in beta_release_tasks:
-            return True
 
         # 'secondary' balrog/update verify/final verify tasks only run for RCs
         if parameters.get('release_type') != 'release-rc':
@@ -395,17 +387,12 @@ def target_tasks_promote_fennec(full_task_graph, parameters, graph_config):
     """Select the set of tasks required for a candidates build of fennec. The
     nightly build process involves a pipeline of builds, signing,
     and, eventually, uploading the tasks to balrog."""
-    filtered_for_project = target_tasks_nightly_fennec(full_task_graph, parameters, graph_config)
 
     def filter(task):
         attr = task.attributes.get
         # Don't ship single locale fennec anymore - Bug 1408083
         if attr("locale") or attr("chunk_locales"):
             return False
-        if task.label in filtered_for_project:
-            if task.kind not in ('balrog', 'push-apk'):
-                if task.attributes.get('nightly'):
-                    return True
         if task.attributes.get('shipping_product') == 'fennec' and \
                 task.attributes.get('shipping_phase') == 'promote':
             return True
@@ -553,16 +540,6 @@ def target_tasks_nightly_desktop(full_task_graph, parameters, graph_config):
     )
 
 
-# Opt DMD builds should only run nightly
-@_target_task('nightly_dmd')
-def target_tasks_dmd(full_task_graph, parameters, graph_config):
-    """Target DMD that run nightly on the m-c branch."""
-    def filter(task):
-        platform = task.attributes.get('build_platform', '')
-        return platform.endswith('-dmd')
-    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
-
-
 # Run Searchfox analysis once daily.
 @_target_task('searchfox_index')
 def target_tasks_searchfox(full_task_graph, parameters, graph_config):
@@ -603,11 +580,29 @@ def target_tasks_file_update(full_task_graph, parameters, graph_config):
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
-@_target_task('bouncer_check')
+@_target_task('cron_bouncer_check')
 def target_tasks_bouncer_check(full_task_graph, parameters, graph_config):
     """Select the set of tasks required to perform bouncer version verification.
     """
     def filter(task):
+        if not filter_for_project(task, parameters):
+            return False
         # For now any task in the repo-update kind is ok
-        return task.kind in ['bouncer-check']
+        return task.kind in ['cron-bouncer-check']
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
+@_target_task('staging_release_builds')
+def target_tasks_staging_release(full_task_graph, parameters, graph_config):
+    """
+    Select all builds that are part of releases.
+    """
+
+    def filter(task):
+        if not task.attributes.get('shipping_product'):
+            return False
+        if task.attributes.get('shipping_phase') == 'build':
+            return True
+        return False
+
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]

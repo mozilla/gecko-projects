@@ -986,15 +986,11 @@ CompositorOGL::GetShaderConfigFor(Effect *aEffect,
   case EffectTypes::YCBCR:
   {
     config.SetYCbCr(true);
-    EffectYCbCr* effectYCbCr =
-      static_cast<EffectYCbCr*>(aEffect);
-    uint32_t pixelBits = (8 * BytesPerPixel(SurfaceFormatForAlphaBitDepth(effectYCbCr->mBitDepth)));
-    uint32_t paddingBits = pixelBits - effectYCbCr->mBitDepth;
-    // OpenGL expects values between [0,255], this range needs to be adjusted
-    // according to the bit depth.
-    // So we will scale the YUV values by this amount.
-    config.SetColorMultiplier(pow(2, paddingBits));
-    config.SetTextureTarget(effectYCbCr->mTexture->AsSourceOGL()->GetTextureTarget());
+    EffectYCbCr* effectYCbCr = static_cast<EffectYCbCr*>(aEffect);
+    config.SetColorMultiplier(
+      RescalingFactorForColorDepth(effectYCbCr->mColorDepth));
+    config.SetTextureTarget(
+      effectYCbCr->mTexture->AsSourceOGL()->GetTextureTarget());
     break;
   }
   case EffectTypes::NV12:
@@ -1490,6 +1486,7 @@ CompositorOGL::DrawGeometry(const Geometry& aGeometry,
 
       BindAndDrawGeometryWithTextureRect(program, aGeometry,
                                          texturedEffect->mTextureCoords, source);
+      source->AsSourceOGL()->MaybeFenceTexture();
     }
     break;
   case EffectTypes::YCBCR: {
@@ -1530,6 +1527,9 @@ CompositorOGL::DrawGeometry(const Geometry& aGeometry,
                                          aGeometry,
                                          effectYCbCr->mTextureCoords,
                                          sourceYCbCr->GetSubSource(Y));
+      sourceY->MaybeFenceTexture();
+      sourceCb->MaybeFenceTexture();
+      sourceCr->MaybeFenceTexture();
     }
     break;
   case EffectTypes::NV12: {
@@ -1567,6 +1567,8 @@ CompositorOGL::DrawGeometry(const Geometry& aGeometry,
                                          aGeometry,
                                          effectNV12->mTextureCoords,
                                          sourceNV12->GetSubSource(Y));
+      sourceY->MaybeFenceTexture();
+      sourceCbCr->MaybeFenceTexture();
     }
     break;
   case EffectTypes::RENDER_TARGET: {
@@ -1649,6 +1651,9 @@ CompositorOGL::DrawGeometry(const Geometry& aGeometry,
 
       mGLContext->fBlendFuncSeparate(LOCAL_GL_ONE, LOCAL_GL_ONE_MINUS_SRC_ALPHA,
                                      LOCAL_GL_ONE, LOCAL_GL_ONE_MINUS_SRC_ALPHA);
+
+      sourceOnBlack->MaybeFenceTexture();
+      sourceOnWhite->MaybeFenceTexture();
     }
     break;
   default:
@@ -1941,7 +1946,7 @@ CompositorOGL::CreateDataTextureSourceAroundYCbCr(TextureHost* aTexture)
     gfx::Factory::CreateWrappingDataSourceSurface(ImageDataSerializer::GetYChannel(buf, desc),
                                                   desc.yStride(),
                                                   desc.ySize(),
-                                                  SurfaceFormatForAlphaBitDepth(desc.bitDepth()));
+                                                  SurfaceFormatForColorDepth(desc.colorDepth()));
   if (!tempY) {
     return nullptr;
   }
@@ -1949,7 +1954,7 @@ CompositorOGL::CreateDataTextureSourceAroundYCbCr(TextureHost* aTexture)
     gfx::Factory::CreateWrappingDataSourceSurface(ImageDataSerializer::GetCbChannel(buf, desc),
                                                   desc.cbCrStride(),
                                                   desc.cbCrSize(),
-                                                  SurfaceFormatForAlphaBitDepth(desc.bitDepth()));
+                                                  SurfaceFormatForColorDepth(desc.colorDepth()));
   if (!tempCb) {
     return nullptr;
   }
@@ -1957,7 +1962,7 @@ CompositorOGL::CreateDataTextureSourceAroundYCbCr(TextureHost* aTexture)
     gfx::Factory::CreateWrappingDataSourceSurface(ImageDataSerializer::GetCrChannel(buf, desc),
                                                   desc.cbCrStride(),
                                                   desc.cbCrSize(),
-                                                  SurfaceFormatForAlphaBitDepth(desc.bitDepth()));
+                                                  SurfaceFormatForColorDepth(desc.colorDepth()));
   if (!tempCr) {
     return nullptr;
   }

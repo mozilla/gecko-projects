@@ -109,12 +109,10 @@ NS_IMPL_ISUPPORTS(PaymentItem,
 
 PaymentItem::PaymentItem(const nsAString& aLabel,
                          nsIPaymentCurrencyAmount* aAmount,
-                         const bool aPending,
-                         const nsAString& aType)
+                         const bool aPending)
   : mLabel(aLabel)
   , mAmount(aAmount)
   , mPending(aPending)
-  , mType(aType)
 {
 }
 
@@ -129,7 +127,7 @@ PaymentItem::Create(const IPCPaymentItem& aIPCItem, nsIPaymentItem** aItem)
     return rv;
   }
   nsCOMPtr<nsIPaymentItem> item =
-    new PaymentItem(aIPCItem.label(), amount, aIPCItem.pending(), aIPCItem.type());
+    new PaymentItem(aIPCItem.label(), amount, aIPCItem.pending());
   item.forget(aItem);
   return NS_OK;
 }
@@ -156,13 +154,6 @@ PaymentItem::GetPending(bool* aPending)
 {
   NS_ENSURE_ARG_POINTER(aPending);
   *aPending = mPending;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-PaymentItem::GetType(nsAString& aType)
-{
-  aType = mType;
   return NS_OK;
 }
 
@@ -492,7 +483,7 @@ PaymentDetails::GetShippingAddressErrors(JSContext* aCx, JS::MutableHandleValue 
 NS_IMETHODIMP
 PaymentDetails::GetPayer(JSContext* aCx, JS::MutableHandleValue aErrors)
 {
-  PayerErrorFields errors;
+  PayerErrors errors;
   errors.Init(mPayerErrors);
   if (!ToJSValue(aCx, errors, aErrors)) {
     return NS_ERROR_FAILURE;
@@ -815,6 +806,7 @@ NS_IMETHODIMP
 PaymentAddress::Init(const nsAString& aCountry,
                      nsIArray* aAddressLine,
                      const nsAString& aRegion,
+                     const nsAString& aRegionCode,
                      const nsAString& aCity,
                      const nsAString& aDependentLocality,
                      const nsAString& aPostalCode,
@@ -826,6 +818,7 @@ PaymentAddress::Init(const nsAString& aCountry,
   mCountry = aCountry;
   mAddressLine = aAddressLine;
   mRegion = aRegion;
+  mRegionCode = aRegionCode;
   mCity = aCity;
   mDependentLocality = aDependentLocality;
   mPostalCode = aPostalCode;
@@ -856,6 +849,13 @@ NS_IMETHODIMP
 PaymentAddress::GetRegion(nsAString& aRegion)
 {
   aRegion = mRegion;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+PaymentAddress::GetRegionCode(nsAString& aRegionCode)
+{
+  aRegionCode = mRegionCode;
   return NS_OK;
 }
 

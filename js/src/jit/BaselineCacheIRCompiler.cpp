@@ -38,6 +38,7 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler
 
     bool inStubFrame_;
     bool makesGCCalls_;
+    BaselineCacheIRStubKind kind_;
 
     MOZ_MUST_USE bool callVM(MacroAssembler& masm, const VMFunction& fun);
     MOZ_MUST_USE bool tailCallVM(MacroAssembler& masm, const VMFunction& fun);
@@ -52,10 +53,11 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler
     friend class AutoStubFrame;
 
     BaselineCacheIRCompiler(JSContext* cx, const CacheIRWriter& writer,
-                            uint32_t stubDataOffset)
+                            uint32_t stubDataOffset, BaselineCacheIRStubKind stubKind)
       : CacheIRCompiler(cx, writer, stubDataOffset, Mode::Baseline, StubFieldPolicy::Address),
         inStubFrame_(false),
-        makesGCCalls_(false)
+        makesGCCalls_(false),
+        kind_(stubKind)
     {}
 
     MOZ_MUST_USE bool init(CacheKind kind);
@@ -173,6 +175,12 @@ BaselineCacheIRCompiler::compile()
 #ifdef JS_CODEGEN_ARM
     masm.setSecondScratchReg(BaselineSecondScratchReg);
 #endif
+    // Count stub entries: We count entries rather than successes as it much easier to
+    // ensure ICStubReg is valid at entry than at exit.
+    if (kind_ == BaselineCacheIRStubKind::Regular) {
+        Address enteredCount(ICStubReg, ICCacheIR_Regular::offsetOfEnteredCount());
+        masm.add32(Imm32(1), enteredCount);
+    }
 
     do {
         switch (reader.readOp()) {
@@ -411,7 +419,7 @@ BaselineCacheIRCompiler::emitGuardSpecificAtom()
     masm.loadPtr(atomAddr, scratch);
     masm.passABIArg(scratch);
     masm.passABIArg(str);
-    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, EqualStringsHelper));
+    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, EqualStringsHelperPure));
     masm.mov(ReturnReg, scratch);
 
     LiveRegisterSet ignore;
@@ -497,7 +505,7 @@ BaselineCacheIRCompiler::emitGuardHasGetterSetter()
     masm.passABIArg(obj);
     masm.loadPtr(shapeAddr, scratch2);
     masm.passABIArg(scratch2);
-    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, ObjectHasGetterSetter));
+    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, ObjectHasGetterSetterPure));
     masm.mov(ReturnReg, scratch1);
     masm.PopRegsInMask(volatileRegs);
 
@@ -680,6 +688,31 @@ BaselineCacheIRCompiler::emitCallProxyHasPropResult()
         if (!callVM(masm, ProxyHasInfo)) {
             return false;
         }
+    }
+
+    stubFrame.leave(masm);
+    return true;
+}
+
+bool
+BaselineCacheIRCompiler::emitCallNativeGetElementResult()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    Register index = allocator.useRegister(masm, reader.int32OperandId());
+
+    AutoScratchRegister scratch(allocator, masm);
+
+    allocator.discardStack(masm);
+
+    AutoStubFrame stubFrame(*this);
+    stubFrame.enter(masm, scratch);
+
+    masm.Push(index);
+    masm.Push(TypedOrValueRegister(MIRType::Object, AnyRegister(obj)));
+    masm.Push(obj);
+
+    if (!callVM(masm, NativeGetElementInfo)) {
+        return false;
     }
 
     stubFrame.leave(masm);
@@ -1052,7 +1085,7 @@ BaselineCacheIRCompiler::emitAddAndStoreSlotShared(CacheOp op)
         // We have to (re)allocate dynamic slots. Do this first, as it's the
         // only fallible operation here. This simplifies the callTypeUpdateIC
         // call below: it does not have to worry about saving registers used by
-        // failure paths. Note that growSlotsDontReportOOM is fallible but does
+        // failure paths. Note that growSlotsPure is fallible but does
         // not GC.
         Address numNewSlotsAddr = stubAddress(reader.stubOffset());
 
@@ -1070,7 +1103,7 @@ BaselineCacheIRCompiler::emitAddAndStoreSlotShared(CacheOp op)
         masm.passABIArg(obj);
         masm.load32(numNewSlotsAddr, scratch2);
         masm.passABIArg(scratch2);
-        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, NativeObject::growSlotsDontReportOOM));
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, NativeObject::growSlotsPure));
         masm.mov(ReturnReg, scratch1);
 
         LiveRegisterSet ignore;
@@ -1401,7 +1434,7 @@ BaselineCacheIRCompiler::emitStoreDenseElementHole()
         masm.loadJSContext(scratch);
         masm.passABIArg(scratch);
         masm.passABIArg(obj);
-        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, NativeObject::addDenseElementDontReportOOM));
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, NativeObject::addDenseElementPure));
         masm.mov(ReturnReg, scratch);
 
         masm.PopRegsInMask(save);
@@ -1541,7 +1574,7 @@ BaselineCacheIRCompiler::emitArrayPush()
     masm.loadJSContext(scratch);
     masm.passABIArg(scratch);
     masm.passABIArg(obj);
-    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, NativeObject::addDenseElementDontReportOOM));
+    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, NativeObject::addDenseElementPure));
     masm.mov(ReturnReg, scratch);
 
     masm.PopRegsInMask(save);
@@ -2154,7 +2187,7 @@ js::jit::AttachBaselineCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
     if (!code) {
         // We have to generate stub code.
         JitContext jctx(cx, nullptr);
-        BaselineCacheIRCompiler comp(cx, writer, stubDataOffset);
+        BaselineCacheIRCompiler comp(cx, writer, stubDataOffset, stubKind);
         if (!comp.init(kind)) {
             return nullptr;
         }

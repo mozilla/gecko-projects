@@ -84,6 +84,7 @@ UNIFIED_SOURCES += [
     'testProfileStrings.cpp',
     'testPromise.cpp',
     'testPropCache.cpp',
+    'testReadableStream.cpp',
     'testRegExp.cpp',
     'testResolveRecursion.cpp',
     'tests.cpp',
@@ -96,6 +97,7 @@ UNIFIED_SOURCES += [
     'testSharedImmutableStringsCache.cpp',
     'testSourcePolicy.cpp',
     'testStringBuffer.cpp',
+    'testStringIsArrayIndex.cpp',
     'testStructuredClone.cpp',
     'testSymbol.cpp',
     'testThreadingConditionVariable.cpp',
@@ -135,12 +137,6 @@ if CONFIG['ENABLE_ION']:
         'testJitRValueAlloc.cpp',
     ]
 
-if CONFIG['ENABLE_STREAMS']:
-    UNIFIED_SOURCES += [
-        'testReadableStream.cpp',
-    ]
-
-
 if CONFIG['NIGHTLY_BUILD']:
     # The Error interceptor only exists on Nightly.
     UNIFIED_SOURCES += [
@@ -170,6 +166,11 @@ LOCAL_INCLUDES += [
 USE_LIBS += [
     'static:js',
 ]
+
+if CONFIG['ENABLE_WASM_CRANELIFT']:
+    USE_LIBS += [
+        'jsrust'
+    ]
 
 if CONFIG['MOZ_NEEDS_LIBATOMIC']:
     OS_LIBS += ['atomic']

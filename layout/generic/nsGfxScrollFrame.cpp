@@ -1841,17 +1841,12 @@ public:
   /*
    * Set a refresh observer for smooth scroll iterations (and start observing).
    * Should be used at most once during the lifetime of this object.
-   * Return value: true on success, false otherwise.
    */
-  bool SetRefreshObserver(ScrollFrameHelper *aCallee) {
+  void SetRefreshObserver(ScrollFrameHelper* aCallee) {
     NS_ASSERTION(aCallee && !mCallee, "AsyncSmoothMSDScroll::SetRefreshObserver - Invalid usage.");
 
-    if (!RefreshDriver(aCallee)->AddRefreshObserver(this, FlushType::Style)) {
-      return false;
-    }
-
+    RefreshDriver(aCallee)->AddRefreshObserver(this, FlushType::Style);
     mCallee = aCallee;
-    return true;
   }
 
   /**
@@ -1954,20 +1949,15 @@ public:
   /*
    * Set a refresh observer for smooth scroll iterations (and start observing).
    * Should be used at most once during the lifetime of this object.
-   * Return value: true on success, false otherwise.
    */
-  bool SetRefreshObserver(ScrollFrameHelper *aCallee) {
+  void SetRefreshObserver(ScrollFrameHelper* aCallee) {
     NS_ASSERTION(aCallee && !mCallee, "AsyncScroll::SetRefreshObserver - Invalid usage.");
 
-    if (!RefreshDriver(aCallee)->AddRefreshObserver(this, FlushType::Style)) {
-      return false;
-    }
-
+    RefreshDriver(aCallee)->AddRefreshObserver(this, FlushType::Style);
     mCallee = aCallee;
     nsIPresShell* shell = mCallee->mOuter->PresShell();
     MOZ_ASSERT(shell);
     shell->SuppressDisplayport(true);
-    return true;
   }
 
   virtual void WillRefresh(mozilla::TimeStamp aTime) override {
@@ -2270,8 +2260,7 @@ void
 ScrollFrameHelper::CompleteAsyncScroll(const nsRect &aRange, nsAtom* aOrigin)
 {
   // Apply desired destination range since this is the last step of scrolling.
-  mAsyncSmoothMSDScroll = nullptr;
-  mAsyncScroll = nullptr;
+  RemoveObservers();
   AutoWeakFrame weakFrame(mOuter);
   ScrollToImpl(mDestination, aRange, aOrigin);
   if (!weakFrame.IsAlive()) {
@@ -2471,11 +2460,7 @@ ScrollFrameHelper::ScrollToWithOrigin(nsPoint aScrollPosition,
                                    currentVelocity, GetScrollRangeForClamping(),
                                    now, presContext);
 
-        if (!mAsyncSmoothMSDScroll->SetRefreshObserver(this)) {
-          // Observer setup failed. Scroll the normal way.
-          CompleteAsyncScroll(range, aOrigin);
-          return;
-        }
+        mAsyncSmoothMSDScroll->SetRefreshObserver(this);
       } else {
         // A previous smooth MSD scroll is still in progress, so we just need to
         // update its range and destination.
@@ -2494,11 +2479,7 @@ ScrollFrameHelper::ScrollToWithOrigin(nsPoint aScrollPosition,
 
   if (!mAsyncScroll) {
     mAsyncScroll = new AsyncScroll();
-    if (!mAsyncScroll->SetRefreshObserver(this)) {
-      // Observer setup failed. Scroll the normal way.
-      CompleteAsyncScroll(range, aOrigin);
-      return;
-    }
+    mAsyncScroll->SetRefreshObserver(this);
   }
 
   if (isSmoothScroll) {
@@ -2940,6 +2921,18 @@ ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange, nsAtom* aOrig
   }
   mLastSmoothScrollOrigin = nullptr;
   mScrollGeneration = ++sScrollGenerationCounter;
+
+  // If the new scroll offset is going to clobber APZ's scroll offset, for
+  // the RCD-RSF this will have the effect of resetting the visual viewport
+  // offset to be the same as the new scroll (= layout viewport) offset.
+  // The APZ callback transform, which reflects the difference between these
+  // offsets, will subsequently be cleared. However, it we wait for APZ to
+  // clear it, the main thread could end up using the old value and get
+  // incorrect results, so just clear it now.
+  if (mIsRoot && nsLayoutUtils::CanScrollOriginClobberApz(mLastScrollOrigin)) {
+    content->SetProperty(nsGkAtoms::apzCallbackTransform, new CSSPoint(),
+                         nsINode::DeleteProperty<CSSPoint>);
+  }
 
   ScrollVisual();
 
@@ -3460,6 +3453,9 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   nsIScrollableFrame* sf = do_QueryFrame(mOuter);
   MOZ_ASSERT(sf);
 
+  // Are we the root content document's root scroll frame?
+  bool isRcdRsf = mIsRoot && mOuter->PresContext()->IsRootContentDocument();
+
   if (ignoringThisScrollFrame) {
     // Root scrollframes have FrameMetrics and clipping on their container
     // layers, so don't apply clipping again.
@@ -3480,7 +3476,9 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       if (aBuilder->IsPaintingToWindow() &&
           gfxPrefs::LayoutUseContainersForRootFrames() && mIsRoot) {
         asrSetter.EnterScrollFrame(sf);
-        aBuilder->SetActiveScrolledRootForRootScrollframe(aBuilder->CurrentActiveScrolledRoot());
+        if (isRcdRsf) {
+          aBuilder->SetActiveScrolledRootForRootScrollframe(aBuilder->CurrentActiveScrolledRoot());
+        }
       }
 
       nsDisplayListBuilder::AutoBuildingDisplayList
@@ -3646,7 +3644,7 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       asrSetter.EnterScrollFrame(sf);
     }
 
-    if (mIsScrollableLayerInRootContainer) {
+    if (mIsScrollableLayerInRootContainer && isRcdRsf) {
       aBuilder->SetActiveScrolledRootForRootScrollframe(aBuilder->CurrentActiveScrolledRoot());
     }
 
@@ -3657,7 +3655,7 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       // if we are checkerboarding.
       if (aBuilder->BuildCompositorHitTestInfo()) {
         CompositorHitTestInfo info = mScrolledFrame->GetCompositorHitTestInfo(aBuilder);
-        if (info != CompositorHitTestInfo::eInvisibleToHitTest) {
+        if (info != CompositorHitTestInvisibleToHit) {
           nsDisplayCompositorHitTestInfo* hitInfo =
               MakeDisplayItem<nsDisplayCompositorHitTestInfo>(aBuilder, mScrolledFrame, info, 1);
           aBuilder->SetCompositorHitTestInfo(hitInfo);
@@ -3765,8 +3763,8 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // a displayport for this frame. We'll add the item later on.
     if (!mWillBuildScrollableLayer) {
       if (aBuilder->BuildCompositorHitTestInfo()) {
-        CompositorHitTestInfo info = CompositorHitTestInfo::eVisibleToHitTest
-                                   | CompositorHitTestInfo::eDispatchToContent;
+        CompositorHitTestInfo info(CompositorHitTestFlags::eVisibleToHitTest,
+                                   CompositorHitTestFlags::eDispatchToContent);
         // If the scroll frame has non-default overscroll-behavior, instruct
         // APZ to require a target confirmation before processing events that
         // hit this scroll frame (that is, to drop the events if a confirmation
@@ -3776,7 +3774,7 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
         ScrollStyles scrollStyles = GetScrollStylesFromFrame();
         if (scrollStyles.mOverscrollBehaviorX != StyleOverscrollBehavior::Auto ||
             scrollStyles.mOverscrollBehaviorY != StyleOverscrollBehavior::Auto) {
-          info |= CompositorHitTestInfo::eRequiresTargetConfirmation;
+          info += CompositorHitTestFlags::eRequiresTargetConfirmation;
         }
         nsDisplayCompositorHitTestInfo* hitInfo =
             MakeDisplayItem<nsDisplayCompositorHitTestInfo>(aBuilder, mScrolledFrame, info, 1,
@@ -3960,7 +3958,7 @@ ScrollFrameHelper::DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
 Maybe<ScrollMetadata>
 ScrollFrameHelper::ComputeScrollMetadata(LayerManager* aLayerManager,
                                          const nsIFrame* aContainerReferenceFrame,
-                                         const ContainerLayerParameters& aParameters,
+                                         const Maybe<ContainerLayerParameters>& aParameters,
                                          const DisplayItemClip* aClip) const
 {
   if (!mWillBuildScrollableLayer || mIsScrollableLayerInRootContainer) {
@@ -4115,6 +4113,16 @@ ScrollFrameHelper::GetVisualViewportSize() const
     return presShell->GetVisualViewportSize();
   }
   return mScrollPort.Size();
+}
+
+nsPoint
+ScrollFrameHelper::GetVisualViewportOffset() const
+{
+  nsIPresShell* presShell = mOuter->PresShell();
+  if (mIsRoot && presShell->IsVisualViewportSizeSet()) {
+    return presShell->GetVisualViewportOffset();
+  }
+  return GetScrollPosition();
 }
 
 static void
@@ -4907,13 +4915,22 @@ ScrollFrameHelper::Destroy(PostDestroyData& aPostDestroyData)
     mScrollActivityTimer->Cancel();
     mScrollActivityTimer = nullptr;
   }
+  RemoveObservers();
+}
+
+void
+ScrollFrameHelper::RemoveObservers()
+{
   if (mAsyncScroll) {
     mAsyncScroll->RemoveObserver();
+    mAsyncScroll = nullptr;
   }
   if (mAsyncSmoothMSDScroll) {
     mAsyncSmoothMSDScroll->RemoveObserver();
+    mAsyncSmoothMSDScroll = nullptr;
   }
 }
+
 
 /**
  * Called when we want to update the scrollbar position, either because scrolling happened

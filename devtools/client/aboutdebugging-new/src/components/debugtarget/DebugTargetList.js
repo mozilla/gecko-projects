@@ -54,10 +54,12 @@ class DebugTargetList extends PureComponent {
   renderEmptyList() {
     return Localized(
       {
-        id: "about-debugging-debug-target-list-empty"
+        id: "about-debugging-debug-target-list-empty",
       },
       dom.span(
-        {},
+        {
+          className: "js-debug-target-list-empty",
+        },
         "Nothing yet."
       )
     );

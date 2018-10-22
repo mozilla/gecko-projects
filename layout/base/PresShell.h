@@ -173,8 +173,6 @@ public:
                                  nsIContent** aTargetContent = nullptr,
                                  nsIContent* aOverrideClickTarget = nullptr)
                                  override;
-  already_AddRefed<nsIContent>
-    GetEventTargetContent(WidgetEvent* aEvent) override;
 
   void NotifyCounterStylesAreDirty() override;
 
@@ -273,6 +271,7 @@ public:
   NS_IMETHOD WordExtendForDelete(bool aForward) override;
   NS_IMETHOD LineMove(bool aForward, bool aExtend) override;
   NS_IMETHOD IntraLineMove(bool aForward, bool aExtend) override;
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD PageMove(bool aForward, bool aExtend) override;
   NS_IMETHOD ScrollPage(bool aForward) override;
   NS_IMETHOD ScrollLine(bool aForward) override;
@@ -344,6 +343,8 @@ public:
   bool GetIsViewportOverridden() override {
     return (mMobileViewportManager != nullptr);
   }
+
+  void UpdateViewportOverridden(bool aAfterInitialization) override;
 
   bool IsLayoutFlushObserver() override
   {
@@ -655,12 +656,9 @@ private:
 
   bool InZombieDocument(nsIContent *aContent);
   already_AddRefed<nsIPresShell> GetParentPresShellForEventHandling();
-  nsIContent* GetCurrentEventContent();
-  nsIFrame* GetCurrentEventFrame() override;
   MOZ_CAN_RUN_SCRIPT nsresult
   RetargetEventToParent(WidgetGUIEvent* aEvent, nsEventStatus* aEventStatus);
-  void PushCurrentEventInfo(nsIFrame* aFrame, nsIContent* aContent);
-  void PopCurrentEventInfo();
+
   /**
    * @param aIsHandlingNativeEvent      true when the caller (perhaps) handles
    *                                    an event which is caused by native
@@ -785,10 +783,6 @@ private:
 
   nsTArray<nsAutoPtr<DelayedEvent> > mDelayedEvents;
 private:
-  nsIFrame* mCurrentEventFrame;
-  nsCOMPtr<nsIContent> mCurrentEventContent;
-  nsTArray<nsIFrame*> mCurrentEventFrameStack;
-  nsCOMArray<nsIContent> mCurrentEventContentStack;
   nsRevocableEventPtr<nsSynthMouseMoveEvent> mSynthMouseMoveEvent;
   nsCOMPtr<nsIContent> mLastAnchorScrolledTo;
   RefPtr<nsCaret> mCaret;

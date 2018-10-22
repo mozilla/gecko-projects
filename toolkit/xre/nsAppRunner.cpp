@@ -180,7 +180,7 @@
 #endif
 
 // for X remote support
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
 #include "XRemoteClient.h"
 #include "nsIRemoteService.h"
 #include "nsProfileLock.h"
@@ -1117,7 +1117,7 @@ nsXULAppInfo::SetEnabled(bool aEnabled)
       return NS_ERROR_FAILURE;
     }
 
-    nsCOMPtr<nsIFile> xreBinDirectory = do_QueryInterface(greBinDir);
+    nsCOMPtr<nsIFile> xreBinDirectory = greBinDir;
     if (!xreBinDirectory) {
       return NS_ERROR_FAILURE;
     }
@@ -1648,48 +1648,6 @@ DumpHelp()
   DumpArbitraryHelp();
 }
 
-#if defined(DEBUG) && defined(XP_WIN)
-#ifdef DEBUG_warren
-#define _CRTDBG_MAP_ALLOC
-#endif
-// Set a CRT ReportHook function to capture and format MSCRT
-// warnings, errors and assertions.
-// See http://msdn.microsoft.com/en-US/library/74kabxyx(v=VS.80).aspx
-#include <stdio.h>
-#include <crtdbg.h>
-#include "mozilla/mozalloc_abort.h"
-static int MSCRTReportHook( int aReportType, char *aMessage, int *oReturnValue)
-{
-  *oReturnValue = 0; // continue execution
-
-  // Do not use fprintf or other functions which may allocate
-  // memory from the heap which may be corrupted. Instead,
-  // use fputs to output the leading portion of the message
-  // and use mozalloc_abort to emit the remainder of the
-  // message.
-
-  switch(aReportType) {
-  case 0:
-    fputs("\nWARNING: CRT WARNING", stderr);
-    fputs(aMessage, stderr);
-    fputs("\n", stderr);
-    break;
-  case 1:
-    fputs("\n###!!! ABORT: CRT ERROR ", stderr);
-    mozalloc_abort(aMessage);
-    break;
-  case 2:
-    fputs("\n###!!! ABORT: CRT ASSERT ", stderr);
-    mozalloc_abort(aMessage);
-    break;
-  }
-
-  // do not invoke the debugger
-  return 1;
-}
-
-#endif
-
 static inline void
 DumpVersion()
 {
@@ -1701,7 +1659,7 @@ DumpVersion()
   printf("\n");
 }
 
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
 static RemoteResult
 ParseRemoteCommandLine(nsCString& program,
                        const char** profile,
@@ -1771,7 +1729,7 @@ StartRemoteClient(const char* aDesktopStartupID,
 
   return REMOTE_FOUND;
 }
-#endif // MOZ_ENABLE_XREMOTE
+#endif // MOZ_WIDGET_GTK
 
 void
 XRE_InitOmnijar(nsIFile* greOmni, nsIFile* appOmni)
@@ -1806,7 +1764,7 @@ RegisterApplicationRestartChanged(const char* aPref, void* aData) {
     // Excludes argv[0] because RegisterApplicationRestart adds the
     // executable name, replace that temporarily with -os-restarted
     char* exeName = gRestartArgv[0];
-    gRestartArgv[0] = "-os-restarted";
+    gRestartArgv[0] = const_cast<char*>("-os-restarted");
     wchar_t** restartArgvConverted =
       AllocConvertUTF8toUTF16Strings(gRestartArgc, gRestartArgv);
     gRestartArgv[0] = exeName;
@@ -3061,10 +3019,8 @@ public:
   XREMain() :
     mStartOffline(false)
     , mShuttingDown(false)
-#ifdef MOZ_ENABLE_XREMOTE
-    , mDisableRemote(false)
-#endif
 #if defined(MOZ_WIDGET_GTK)
+    , mDisableRemote(false)
     , mGdkDisplay(nullptr)
 #endif
   {};
@@ -3086,7 +3042,7 @@ public:
   nsCOMPtr<nsIFile> mProfD;
   nsCOMPtr<nsIFile> mProfLD;
   nsCOMPtr<nsIProfileLock> mProfileLock;
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
   nsCOMPtr<nsIRemoteService> mRemoteService;
   nsProfileLock mRemoteLock;
   nsCOMPtr<nsIFile> mRemoteLockDir;
@@ -3101,7 +3057,7 @@ public:
 
   bool mStartOffline;
   bool mShuttingDown;
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
   bool mDisableRemote;
 #endif
 
@@ -3238,9 +3194,7 @@ XREMain::XRE_mainInit(bool* aExitFlag)
     ChaosMode::SetChaosFeature(static_cast<ChaosFeature>(
                                ChaosFeature::ThreadScheduling
                                | ChaosFeature::NetworkScheduling
-                               | ChaosFeature::TimerScheduling
-                               | ChaosFeature::TaskDispatching
-                               | ChaosFeature::TaskRunning));
+                               | ChaosFeature::TimerScheduling));
   }
 #endif
 
@@ -3955,7 +3909,7 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
   HeapSetInformation(NULL, HeapEnableTerminationOnCorruption, NULL, 0);
 #endif /* XP_WIN */
 
-#if defined(MOZ_WIDGET_GTK) || defined(MOZ_ENABLE_XREMOTE)
+#if defined(MOZ_WIDGET_GTK)
   // Stash DESKTOP_STARTUP_ID in malloc'ed memory because gtk_init will clear it.
 #define HAVE_DESKTOP_STARTUP_ID
   const char* desktopStartupIDEnv = PR_GetEnv("DESKTOP_STARTUP_ID");
@@ -4085,7 +4039,7 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
     mDisableRemote = true;
   }
 #endif
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
   // handle --remote now that xpcom is fired up
   bool newInstance;
   {
@@ -4768,7 +4722,7 @@ XREMain::XRE_mainRun()
   }
 
   if (!mShuttingDown) {
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
     // if we have X remote support, start listening for requests on the
     // proxy window.
     if (!mDisableRemote)
@@ -4780,7 +4734,7 @@ XREMain::XRE_mainRun()
       mRemoteLock.Cleanup();
       mRemoteLockDir->Remove(false);
     }
-#endif /* MOZ_ENABLE_XREMOTE */
+#endif /* MOZ_WIDGET_GTK */
 
     mNativeApp->Enable();
   }
@@ -4985,12 +4939,12 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
   }
 
   if (!mShuttingDown) {
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
     // shut down the x remote proxy window
     if (mRemoteService) {
       mRemoteService->Shutdown();
     }
-#endif /* MOZ_ENABLE_XREMOTE */
+#endif /* MOZ_WIDGET_GTK */
   }
 
   mScopedXPCOM = nullptr;
@@ -5330,21 +5284,6 @@ SetupErrorHandling(const char* progname)
 
   SetErrorMode(realMode);
 
-#endif
-
-#if defined (DEBUG) && defined(XP_WIN)
-  // Send MSCRT Warnings, Errors and Assertions to stderr.
-  // See http://msdn.microsoft.com/en-us/library/1y71x448(v=VS.80).aspx
-  // and http://msdn.microsoft.com/en-us/library/a68f826y(v=VS.80).aspx.
-
-  _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE);
-  _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDERR);
-  _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
-  _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
-  _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
-  _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
-
-  _CrtSetReportHook(MSCRTReportHook);
 #endif
 
   InstallSignalHandlers(progname);

@@ -80,7 +80,16 @@ pub struct BlurInstance {
     pub blur_direction: BlurDirection,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug)]
+#[repr(C)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct ScalingInstance {
+    pub task_address: RenderTaskAddress,
+    pub src_task_address: RenderTaskAddress,
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 #[repr(C)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
@@ -140,7 +149,7 @@ pub struct ClipMaskBorderCornerDotDash {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct PrimitiveInstance {
+pub struct PrimitiveInstanceData {
     data: [i32; 4],
 }
 
@@ -251,8 +260,8 @@ impl GlyphInstance {
     // TODO(gw): Some of these fields can be moved to the primitive
     //           header since they are constant, and some can be
     //           compressed to a smaller size.
-    pub fn build(&self, data0: i32, data1: i32, data2: i32) -> PrimitiveInstance {
-        PrimitiveInstance {
+    pub fn build(&self, data0: i32, data1: i32, data2: i32) -> PrimitiveInstanceData {
+        PrimitiveInstanceData {
             data: [
                 self.prim_header_index.0 as i32,
                 data0,
@@ -283,9 +292,9 @@ impl SplitCompositeInstance {
     }
 }
 
-impl From<SplitCompositeInstance> for PrimitiveInstance {
+impl From<SplitCompositeInstance> for PrimitiveInstanceData {
     fn from(instance: SplitCompositeInstance) -> Self {
-        PrimitiveInstance {
+        PrimitiveInstanceData {
             data: [
                 instance.prim_header_index.0,
                 instance.polygons_address.as_int(),
@@ -309,6 +318,8 @@ bitflags! {
         const SEGMENT_REPEAT_X = 0x4;
         /// Repeat UVs vertically.
         const SEGMENT_REPEAT_Y = 0x8;
+        /// The extra segment data is a texel rect.
+        const SEGMENT_TEXEL_RECT = 0x10;
     }
 }
 
@@ -322,18 +333,19 @@ pub struct BrushInstance {
     pub segment_index: i32,
     pub edge_flags: EdgeAaSegmentMask,
     pub brush_flags: BrushFlags,
+    pub user_data: i32,
 }
 
-impl From<BrushInstance> for PrimitiveInstance {
+impl From<BrushInstance> for PrimitiveInstanceData {
     fn from(instance: BrushInstance) -> Self {
-        PrimitiveInstance {
+        PrimitiveInstanceData {
             data: [
                 instance.prim_header_index.0,
                 instance.clip_task_address.0 as i32,
                 instance.segment_index |
                 ((instance.edge_flags.bits() as i32) << 16) |
                 ((instance.brush_flags.bits() as i32) << 24),
-                0,
+                instance.user_data,
             ]
         }
     }
@@ -418,12 +430,17 @@ pub struct TransformPalette {
 }
 
 impl TransformPalette {
-    pub fn new(spatial_node_count: usize) -> Self {
+    pub fn new() -> Self {
         TransformPalette {
-            transforms: vec![TransformData::invalid(); spatial_node_count],
-            metadata: vec![TransformMetadata::invalid(); spatial_node_count],
+            transforms: Vec::new(),
+            metadata: Vec::new(),
             map: FastHashMap::default(),
         }
+    }
+
+    pub fn allocate(&mut self, count: usize) {
+        self.transforms = vec![TransformData::invalid(); count];
+        self.metadata = vec![TransformMetadata::invalid(); count];
     }
 
     pub fn set_world_transform(

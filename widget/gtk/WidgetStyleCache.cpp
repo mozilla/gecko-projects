@@ -741,6 +741,9 @@ CreateHeaderBarButtons()
 
   GtkWidget *buttonBox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, buttonSpacing);
   gtk_container_add(GTK_CONTAINER(GetWidget(MOZ_GTK_HEADER_BAR)), buttonBox);
+  // We support only LTR headerbar layout for now.
+  gtk_style_context_add_class(gtk_widget_get_style_context(buttonBox),
+                              GTK_STYLE_CLASS_LEFT);
 
   WidgetNodeType buttonLayout[TOOLBAR_BUTTONS];
   int activeButtons =
@@ -775,6 +778,9 @@ CreateHeaderBar()
 static GtkWidget*
 CreateWidget(WidgetNodeType aWidgetType)
 {
+  MOZ_ASSERT(aWidgetType != MOZ_GTK_DROPDOWN_ENTRY,
+             "Callers should be passing MOZ_GTK_ENTRY");
+
   switch (aWidgetType) {
     case MOZ_GTK_WINDOW:
       return CreateWindowWidget();
@@ -1506,6 +1512,10 @@ GtkStyleContext*
 GetStyleContext(WidgetNodeType aNodeType, GtkTextDirection aDirection,
                 GtkStateFlags aStateFlags, StyleFlags aFlags)
 {
+  if (aNodeType == MOZ_GTK_DROPDOWN_ENTRY) {
+    aNodeType = MOZ_GTK_ENTRY;
+  }
+
   GtkStyleContext* style;
   if (gtk_check_version(3, 20, 0) != nullptr) {
     style = GetWidgetStyleInternal(aNodeType);

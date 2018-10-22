@@ -303,6 +303,8 @@ public:
 
   // Accessors:
   // XXXdholbert [BEGIN DEPRECATED]
+  // These should not be used in layout, but they are useful for devtools API
+  // which reports physical axis direction.
   AxisOrientationType GetMainAxis() const  { return mMainAxis;  }
   AxisOrientationType GetCrossAxis() const { return mCrossAxis; }
   // XXXdholbert [END DEPRECATED]
@@ -1077,7 +1079,8 @@ public:
 
 private:
   // Helpers for ResolveFlexibleLengths():
-  void FreezeItemsEarly(bool aIsUsingFlexGrow);
+  void FreezeItemsEarly(bool aIsUsingFlexGrow,
+                        ComputedFlexLineInfo* aLineInfo);
 
   void FreezeOrRestoreEachFlexibleSize(const nscoord aTotalViolation,
                                        bool aIsFinalIteration);
@@ -1720,61 +1723,67 @@ nsFlexContainerFrame::
 }
 
 /**
- * A cached result for a measuring reflow.
+ * A cached result for a measuring reflow. This cache prevents us from doing
+ * exponential reflows in cases of deeply nested flex and scroll frames.
  *
- * Right now we only need to cache the available size and the computed height
- * for checking that the reflow input is valid, and the height and the ascent
- * to be used. This can be extended later if needed.
+ * We store the cached value in the flex item's frame property table, for
+ * simplicity.
  *
- * The assumption here is that a given flex item measurement won't change until
- * either the available size or computed height changes, or the flex item's
- * intrinsic size is marked as dirty (due to a style or DOM change).
+ * Right now, we cache the following as a "key", from the item's ReflowInput:
+ *   - its ComputedSize
+ *   - its min/max block size (in case its ComputedBSize is unconstrained)
+ *   - its AvailableBSize
+ * ...and we cache the following as the "value", from the item's ReflowOutput:
+ *   - its final BSize
+ *   - its ascent
  *
- * Note that the components of "Key" (mComputed{Min,Max,}BSize and
- * mAvailableSize) are sufficient to catch any changes to the flex container's
- * size that the item may care about for its cached measuring reflow. If
- * the item cares about the container's BSize -- e.g. if it has a percent
- * height and the container's height changes, in a horizontal-WM container --
- * then that'll be detectable via the item's resolved "mComputedBSize"
- * differing from the value in our Key.  And if the item cares about the
- * container's ISize -- e.g. if it has a percent width and the container's
- * width changes, in a horizontal-WM container -- then that'll be detectable
- * via mAvailableSize changing, because we always use the flex container's
- * ComputedISize as the Available ISize for its flex items.
+ * The assumption here is that a given flex item measurement from our "value"
+ * won't change unless one of the pieces of the "key" change, or the flex
+ * item's intrinsic size is marked as dirty (due to a style or DOM change).
+ * (The latter will cause the cached value to be discarded, in
+ * nsFrame::MarkIntrinsicISizesDirty.)
+ *
+ * Note that the components of "Key" (mComputed{MinB,MaxB,}Size and
+ * mAvailableBSize) are sufficient to catch any changes to the flex container's
+ * size that the item may care about for its measuring reflow. Specifically:
+ *  - If the item cares about the container's size (e.g. if it has a percent
+ *    height and the container's height changes, in a horizontal-WM container)
+ *    then that'll be detectable via the item's ReflowInput's "ComputedSize()"
+ *    differing from the value in our Key.  And the same applies for the
+ *    inline axis.
+ *  - If the item is fragmentable (pending bug 939897) and its measured BSize
+ *    depends on where it gets fragmented, then that sort of change can be
+ *    detected due to the item's ReflowInput's "AvailableBSize()" differing
+ *    from the value in our Key.
  *
  * One particular case to consider (& need to be sure not to break when
  * changing this class): the flex item's computed BSize may change between
  * measuring reflows due to how the mIsFlexContainerMeasuringBSize flag affects
  * size computation (see bug 1336708). This is one reason we need to use the
  * computed BSize as part of the key.
- *
- * Caching it prevents us from doing exponential reflows in cases of deeply
- * nested flex and scroll frames.
- *
- * We store them in the frame property table for simplicity.
  */
 class nsFlexContainerFrame::CachedMeasuringReflowResult
 {
   struct Key
   {
-    const LogicalSize mAvailableSize;
-    const nscoord mComputedBSize;
+    const LogicalSize mComputedSize;
     const nscoord mComputedMinBSize;
     const nscoord mComputedMaxBSize;
+    const nscoord mAvailableBSize;
 
     explicit Key(const ReflowInput& aRI)
-      : mAvailableSize(aRI.AvailableSize())
-      , mComputedBSize(aRI.ComputedBSize())
+      : mComputedSize(aRI.ComputedSize())
       , mComputedMinBSize(aRI.ComputedMinBSize())
       , mComputedMaxBSize(aRI.ComputedMaxBSize())
+      , mAvailableBSize(aRI.AvailableBSize())
     { }
 
     bool operator==(const Key& aOther) const
     {
-      return mAvailableSize == aOther.mAvailableSize &&
-        mComputedBSize == aOther.mComputedBSize &&
+      return mComputedSize == aOther.mComputedSize &&
         mComputedMinBSize == aOther.mComputedMinBSize &&
-        mComputedMaxBSize == aOther.mComputedMaxBSize;
+        mComputedMaxBSize == aOther.mComputedMaxBSize &&
+        mAvailableBSize == aOther.mAvailableBSize;
     }
   };
 
@@ -1808,6 +1817,12 @@ public:
 
 NS_DECLARE_FRAME_PROPERTY_DELETABLE(CachedFlexMeasuringReflow,
                                     CachedMeasuringReflowResult);
+
+void
+nsFlexContainerFrame::MarkCachedFlexMeasurementsDirty(nsIFrame* aItemFrame)
+{
+  aItemFrame->DeleteProperty(CachedFlexMeasuringReflow());
+}
 
 const CachedMeasuringReflowResult&
 nsFlexContainerFrame::MeasureAscentAndBSizeForFlexItem(
@@ -2495,7 +2510,8 @@ nsFlexContainerFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 }
 
 void
-FlexLine::FreezeItemsEarly(bool aIsUsingFlexGrow)
+FlexLine::FreezeItemsEarly(bool aIsUsingFlexGrow,
+                           ComputedFlexLineInfo* aLineInfo)
 {
   // After we've established the type of flexing we're doing (growing vs.
   // shrinking), and before we try to flex any items, we freeze items that
@@ -2610,13 +2626,26 @@ FlexLine::ResolveFlexibleLengths(nscoord aFlexContainerMainSize,
 {
   MOZ_LOG(gFlexContainerLog, LogLevel::Debug, ("ResolveFlexibleLengths\n"));
 
+  // Before we start resolving sizes: if we have an aLineInfo structure to fill
+  // out, we inform it of each item's base size, and we initialize the "delta"
+  // for each item to 0. (And if the flex algorithm wants to grow or shrink the
+  // item, we'll update this delta further down.)
+  if (aLineInfo) {
+    uint32_t itemIndex = 0;
+    for (FlexItem* item = mItems.getFirst(); item; item = item->getNext(),
+                                                   ++itemIndex) {
+      aLineInfo->mItems[itemIndex].mMainBaseSize = item->GetFlexBaseSize();
+      aLineInfo->mItems[itemIndex].mMainDeltaSize = 0;
+    }
+  }
+
   // Determine whether we're going to be growing or shrinking items.
   const bool isUsingFlexGrow =
     (mTotalOuterHypotheticalMainSize < aFlexContainerMainSize);
 
   // Do an "early freeze" for flex items that obviously can't flex in the
   // direction we've chosen:
-  FreezeItemsEarly(isUsingFlexGrow);
+  FreezeItemsEarly(isUsingFlexGrow, aLineInfo);
 
   if ((mNumFrozenItems == mNumItems) && !aLineInfo) {
     // All our items are frozen, so we have no flexible lengths to resolve,
@@ -2653,21 +2682,6 @@ FlexLine::ResolveFlexibleLengths(nscoord aFlexContainerMainSize,
         item->SetMainSize(item->GetFlexBaseSize());
       }
       availableFreeSpace -= item->GetMainSize();
-    }
-
-    // If we have an aLineInfo structure to fill out, and this is the
-    // first time through the loop, capture these sizes as mainBaseSizes.
-    // We only care about the first iteration, because additional
-    // iterations will only reset item base sizes to these values.
-    // We also set a 0 mainDeltaSize. This will be modified later if
-    // the item is stretched or shrunk.
-    if (aLineInfo && (iterationCounter == 0)) {
-      uint32_t itemIndex = 0;
-      for (FlexItem* item = mItems.getFirst(); item; item = item->getNext(),
-                                                     ++itemIndex) {
-        aLineInfo->mItems[itemIndex].mMainBaseSize = item->GetMainSize();
-        aLineInfo->mItems[itemIndex].mMainDeltaSize = 0;
-      }
     }
 
     MOZ_LOG(gFlexContainerLog, LogLevel::Debug,
@@ -2844,37 +2858,44 @@ FlexLine::ResolveFlexibleLengths(nscoord aFlexContainerMainSize,
           uint32_t itemIndex = 0;
           for (FlexItem* item = mItems.getFirst(); item; item = item->getNext(),
                                                          ++itemIndex) {
-            // Calculate a deltaSize that represents how much the
-            // flex sizing algorithm "wants" to stretch or shrink this
-            // item during this pass through the algorithm. Later
-            // passes through the algorithm may overwrite this value.
-            // Also, this value may not reflect how much the size of
-            // the item is actually changed, since the size of the
-            // item will be clamped to min and max values later in
-            // this pass. That's intentional, since we want to report
-            // the value that the sizing algorithm tried to stretch
-            // or shrink the item.
-            nscoord deltaSize = item->GetMainSize() -
-              aLineInfo->mItems[itemIndex].mMainBaseSize;
+            if (!item->IsFrozen()) {
+              // Calculate a deltaSize that represents how much the flex sizing
+              // algorithm "wants" to stretch or shrink this item during this
+              // pass through the algorithm. Later passes through the algorithm
+              // may overwrite this, until this item is frozen. Note that this
+              // value may not reflect how much the size of the item is
+              // actually changed, since the size of the item will be clamped
+              // to min and max values later in this pass. That's intentional,
+              // since we want to report the value that the sizing algorithm
+              // tried to stretch or shrink the item.
+              nscoord deltaSize = item->GetMainSize() -
+                aLineInfo->mItems[itemIndex].mMainBaseSize;
 
-            aLineInfo->mItems[itemIndex].mMainDeltaSize = deltaSize;
-            // If any item on the line is growing, mark the aLineInfo
-            // structure; likewise if any item is shrinking. Items in
-            // a line can't be both growing and shrinking.
-            if (deltaSize > 0) {
-              MOZ_ASSERT(item->IsFrozen() || isUsingFlexGrow,
-                "Unfrozen items shouldn't grow without isUsingFlexGrow.");
-              MOZ_ASSERT(aLineInfo->mGrowthState !=
-                         ComputedFlexLineInfo::GrowthState::SHRINKING);
-              aLineInfo->mGrowthState =
-                ComputedFlexLineInfo::GrowthState::GROWING;
-            } else if (deltaSize < 0) {
-              MOZ_ASSERT(item->IsFrozen() || !isUsingFlexGrow,
-               "Unfrozen items shouldn't shrink with isUsingFlexGrow.");
-              MOZ_ASSERT(aLineInfo->mGrowthState !=
-                         ComputedFlexLineInfo::GrowthState::GROWING);
-              aLineInfo->mGrowthState =
-                ComputedFlexLineInfo::GrowthState::SHRINKING;
+              aLineInfo->mItems[itemIndex].mMainDeltaSize = deltaSize;
+              // If any (unfrozen) item on the line is growing, we mark the
+              // aLineInfo structure; likewise if any item is shrinking.
+              // (Note: a line can't contain a mix of items that are growing
+              // and shrinking. Also, the sign of any delta should match the
+              // type of flex factor we're using [grow vs shrink].)
+              if (deltaSize > 0) {
+                MOZ_ASSERT(isUsingFlexGrow,
+                           "Unfrozen items can only grow if we're "
+                           "distributing (positive) space with flex-grow");
+                MOZ_ASSERT(aLineInfo->mGrowthState !=
+                           ComputedFlexLineInfo::GrowthState::SHRINKING,
+                           "shouldn't flip flop from shrinking to growing");
+                aLineInfo->mGrowthState =
+                  ComputedFlexLineInfo::GrowthState::GROWING;
+              } else if (deltaSize < 0) {
+                MOZ_ASSERT(!isUsingFlexGrow,
+                           "Unfrozen items can only shrink if we're "
+                           "distributing (negative) space with flex-shrink");
+                MOZ_ASSERT(aLineInfo->mGrowthState !=
+                           ComputedFlexLineInfo::GrowthState::GROWING,
+                           "shouldn't flip flop from growing to shrinking");
+                aLineInfo->mGrowthState =
+                  ComputedFlexLineInfo::GrowthState::SHRINKING;
+              }
             }
           }
         }
@@ -4319,6 +4340,24 @@ FlexLine::PositionItemsInCrossAxis(nscoord aLineStartPosition,
 }
 
 void
+nsFlexContainerFrame::DidReflow(nsPresContext* aPresContext,
+                                const ReflowInput* aReflowInput)
+{
+  // Remove the cached values if we got an interrupt because the values will be
+  // the wrong ones for following reflows.
+  //
+  // TODO(emilio): Can we do this only for the kids that are interrupted? We
+  // probably want to figure out what the right thing to do here is regarding
+  // interrupts, see bug 1495532.
+  if (aPresContext->HasPendingInterrupt()) {
+    for (nsIFrame* frame : mFrames) {
+      frame->DeleteProperty(CachedFlexMeasuringReflow());
+    }
+  }
+  nsContainerFrame::DidReflow(aPresContext, aReflowInput);
+}
+
+void
 nsFlexContainerFrame::Reflow(nsPresContext* aPresContext,
                              ReflowOutput& aDesiredSize,
                              const ReflowInput& aReflowInput,
@@ -4645,6 +4684,21 @@ nsFlexContainerFrame::IsUsedFlexBasisContent(const nsStyleCoord* aFlexBasis,
      aMainSize->GetUnit() == eStyleUnit_Auto);
 }
 
+static mozilla::dom::FlexPhysicalDirection
+ConvertAxisOrientationTypeToAPIEnum(AxisOrientationType aAxisOrientation)
+{
+  switch (aAxisOrientation) {
+    case eAxis_LR:
+      return mozilla::dom::FlexPhysicalDirection::Horizontal_lr;
+    case eAxis_RL:
+      return mozilla::dom::FlexPhysicalDirection::Horizontal_rl;
+    case eAxis_TB:
+      return mozilla::dom::FlexPhysicalDirection::Vertical_tb;
+    default:
+      return mozilla::dom::FlexPhysicalDirection::Vertical_bt;
+  }
+}
+
 void
 nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
                                    ReflowOutput&     aDesiredSize,
@@ -4671,8 +4725,8 @@ nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
                     placeholderKids, lines);
 
   if ((lines.getFirst()->IsEmpty() && !lines.getFirst()->getNext()) ||
-      aReflowInput.mStyleDisplay->IsContainSize()) {
-    // If have no flex items, or if we  are size contained and
+      aReflowInput.mStyleDisplay->IsContainLayout()) {
+    // If have no flex items, or if we  are layout contained and
     // want to behave as if we have none, our parent
     // should synthesize a baseline if needed.
     AddStateBits(NS_STATE_FLEX_SYNTHESIZE_BASELINE);
@@ -4698,6 +4752,19 @@ nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
       MOZ_ASSERT(containerInfo->mLines.IsEmpty(),
                  "Shouldn't have lines yet.");
     }
+
+    // Set the axis physical directions.
+    AxisOrientationType mainAxis = aAxisTracker.GetMainAxis();
+    AxisOrientationType crossAxis = aAxisTracker.GetCrossAxis();
+    if (aAxisTracker.AreAxesInternallyReversed()) {
+      mainAxis = GetReverseAxis(mainAxis);
+      crossAxis = GetReverseAxis(crossAxis);
+    }
+
+    containerInfo->mMainAxisDirection =
+      ConvertAxisOrientationTypeToAPIEnum(mainAxis);
+    containerInfo->mCrossAxisDirection =
+      ConvertAxisOrientationTypeToAPIEnum(crossAxis);
 
     for (const FlexLine* line = lines.getFirst(); line;
          line = line->getNext()) {

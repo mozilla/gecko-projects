@@ -52,7 +52,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
 
     JSScript* compileGlobalScript(ScopeKind scopeKind);
     JSScript* compileEvalScript(HandleObject environment, HandleScope enclosingScope);
-    JSScript* compileModule();
+    ModuleObject* compileModule();
     bool compileStandaloneFunction(MutableHandleFunction fun, GeneratorKind generatorKind,
                                    FunctionAsyncKind asyncKind,
                                    const Maybe<uint32_t>& parameterListEnd);
@@ -411,7 +411,7 @@ BytecodeCompiler::compileEvalScript(HandleObject environment, HandleScope enclos
     return compileScript(environment, &evalsc);
 }
 
-JSScript*
+ModuleObject*
 BytecodeCompiler::compileModule()
 {
     if (!createSourceAndParser(ParseGoal::Module)) {
@@ -462,7 +462,7 @@ BytecodeCompiler::compileModule()
     }
 
     MOZ_ASSERT_IF(!cx->helperThread(), !cx->isExceptionPending());
-    return script;
+    return module;
 }
 
 // Compile a standalone JS function, which might appear as the value of an
@@ -676,6 +676,10 @@ frontend::CompileGlobalBinASTScript(JSContext* cx, LifoAlloc& alloc, const ReadO
         return nullptr;
     }
 
+    if (!sourceObj->source()->setBinASTSourceCopy(cx, src, len)) {
+        return nullptr;
+    }
+
     RootedScript script(cx, JSScript::Create(cx, options, sourceObj, 0, len, 0, len));
 
     if (!script) {
@@ -685,13 +689,18 @@ frontend::CompileGlobalBinASTScript(JSContext* cx, LifoAlloc& alloc, const ReadO
     Directives directives(options.strictOption);
     GlobalSharedContext globalsc(cx, ScopeKind::Global, directives, options.extraWarningsOption);
 
-    frontend::BinASTParser<BinTokenReaderMultipart> parser(cx, alloc, usedNames, options);
+    frontend::BinASTParser<BinTokenReaderMultipart> parser(cx, alloc, usedNames, options, sourceObj);
 
-    auto parsed = parser.parse(&globalsc, src, len);
+    // Metadata stores internal pointers, so we must use the same buffer every time, including for lazy parses
+    ScriptSource* ss = sourceObj->source();
+    BinASTSourceMetadata* metadata = nullptr;
+    auto parsed = parser.parse(&globalsc, ss->binASTSource(), ss->length(), &metadata);
 
     if (parsed.isErr()) {
         return nullptr;
     }
+
+    sourceObj->source()->setBinASTSourceMetadata(metadata);
 
     BytecodeEmitter bce(nullptr, &parser, &globalsc, script, nullptr, 0);
 
@@ -733,7 +742,7 @@ frontend::CompileEvalScript(JSContext* cx, LifoAlloc& alloc,
 
 }
 
-JSScript*
+ModuleObject*
 frontend::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& optionsInput,
                         SourceBufferHolder& srcBuf, LifoAlloc& alloc,
                         ScriptSourceObject** sourceObjectOut)
@@ -751,16 +760,16 @@ frontend::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& optionsInpu
     RootedScope emptyGlobalScope(cx, &cx->global()->emptyGlobalScope());
     BytecodeCompiler compiler(cx, alloc, options, srcBuf, emptyGlobalScope);
     AutoInitializeSourceObject autoSSO(compiler, sourceObjectOut);
-    JSScript* script = compiler.compileModule();
-    if (!script) {
+    ModuleObject* module = compiler.compileModule();
+    if (!module) {
         return nullptr;
     }
 
     assertException.reset();
-    return script;
+    return module;
 }
 
-JSScript*
+ModuleObject*
 frontend::CompileModule(JSContext* cx, const JS::ReadOnlyCompileOptions& options,
                         SourceBufferHolder& srcBuf)
 {
@@ -771,20 +780,19 @@ frontend::CompileModule(JSContext* cx, const JS::ReadOnlyCompileOptions& options
     }
 
     LifoAlloc& alloc = cx->tempLifoAlloc();
-    RootedScript script(cx, CompileModule(cx, options, srcBuf, alloc));
-    if (!script) {
+    RootedModuleObject module(cx, CompileModule(cx, options, srcBuf, alloc));
+    if (!module) {
         return nullptr;
     }
 
     // This happens in GlobalHelperThreadState::finishModuleParseTask() when a
     // module is compiled off thread.
-    RootedModuleObject module(cx, script->module());
     if (!ModuleObject::Freeze(cx, module)) {
         return nullptr;
     }
 
     assertException.reset();
-    return script;
+    return module;
 }
 
 // When leaving this scope, the given function should either:
@@ -834,10 +842,13 @@ bool
 frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const char16_t* chars, size_t length)
 {
     MOZ_ASSERT(cx->compartment() == lazy->functionNonDelazifying()->compartment());
+
     // We can only compile functions whose parents have previously been
     // compiled, because compilation requires full information about the
     // function's immediately enclosing scope.
     MOZ_ASSERT(lazy->enclosingScriptHasEverBeenCompiled());
+
+    MOZ_ASSERT(!lazy->isBinAST());
 
     AutoAssertReportedException assertException(cx);
     Rooted<JSFunction*> fun(cx, lazy->functionNonDelazifying());
@@ -914,6 +925,75 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
     assertException.reset();
     return true;
 }
+
+#ifdef JS_BUILD_BINAST
+
+bool
+frontend::CompileLazyBinASTFunction(JSContext* cx, Handle<LazyScript*> lazy, const uint8_t* buf, size_t length)
+{
+    MOZ_ASSERT(cx->compartment() == lazy->functionNonDelazifying()->compartment());
+
+    // We can only compile functions whose parents have previously been
+    // compiled, because compilation requires full information about the
+    // function's immediately enclosing scope.
+    MOZ_ASSERT(lazy->enclosingScriptHasEverBeenCompiled());
+    MOZ_ASSERT(lazy->isBinAST());
+
+    CompileOptions options(cx);
+    options.setMutedErrors(lazy->mutedErrors())
+           .setFileAndLine(lazy->filename(), lazy->lineno())
+           .setColumn(lazy->column())
+           .setScriptSourceOffset(lazy->sourceStart())
+           .setNoScriptRval(false)
+           .setSelfHostingMode(false);
+
+    UsedNameTracker usedNames(cx);
+
+    RootedScriptSourceObject sourceObj(cx, &lazy->sourceObject());
+    MOZ_ASSERT(sourceObj);
+
+    RootedScript script(cx, JSScript::Create(cx, options, sourceObj, lazy->sourceStart(), lazy->sourceEnd(),
+                                             lazy->sourceStart(), lazy->sourceEnd()));
+
+    if (!script) {
+        return false;
+    }
+
+    if (lazy->hasBeenCloned()) {
+        script->setHasBeenCloned();
+    }
+
+    frontend::BinASTParser<BinTokenReaderMultipart> parser(cx, cx->tempLifoAlloc(),
+                                                           usedNames, options, sourceObj,
+                                                           lazy);
+
+    auto parsed = parser.parseLazyFunction(lazy->scriptSource(), lazy->sourceStart());
+
+    if (parsed.isErr()) {
+        return false;
+    }
+
+    ParseNode *pn = parsed.unwrap();
+
+    BytecodeEmitter bce(nullptr, &parser, pn->as<CodeNode>().funbox(), script,
+                        lazy, pn->pn_pos, BytecodeEmitter::LazyFunction);
+
+    if (!bce.init()) {
+        return false;
+    }
+
+    if (!bce.emitFunctionScript(&pn->as<CodeNode>(), BytecodeEmitter::TopLevelFunction::Yes)) {
+        return false;
+    }
+
+    if (!NameFunctions(cx, pn)) {
+        return false;
+    }
+
+    return script;
+}
+
+#endif // JS_BUILD_BINAST
 
 bool
 frontend::CompileStandaloneFunction(JSContext* cx, MutableHandleFunction fun,

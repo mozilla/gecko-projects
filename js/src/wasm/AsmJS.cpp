@@ -22,6 +22,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/Compression.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/Unused.h"
 
 #include <new>
@@ -30,6 +31,7 @@
 #include "jsutil.h"
 
 #include "builtin/String.h"
+#include "frontend/ParseNode.h"
 #include "frontend/Parser.h"
 #include "gc/Policy.h"
 #include "js/MemoryMetrics.h"
@@ -51,7 +53,6 @@
 #include "wasm/WasmSerialize.h"
 #include "wasm/WasmValidate.h"
 
-#include "frontend/ParseNode-inl.h"
 #include "vm/ArrayBufferObject-inl.h"
 #include "vm/JSObject-inl.h"
 
@@ -702,7 +703,7 @@ MaybeInitializer(ParseNode* pn)
 static inline bool
 IsUseOfName(ParseNode* pn, PropertyName* name)
 {
-    return pn->isKind(ParseNodeKind::Name) && pn->name() == name;
+    return pn->isName(name);
 }
 
 static inline bool
@@ -1521,7 +1522,8 @@ class MOZ_STACK_CLASS JS_HAZ_ROOTED ModuleValidator
         sigSet_(cx),
         funcImportMap_(cx),
         arrayViews_(cx),
-        compilerEnv_(CompileMode::Once, Tier::Ion, DebugEnabled::False, HasGcTypes::False),
+        compilerEnv_(CompileMode::Once, Tier::Optimized, OptimizedBackend::Ion, DebugEnabled::False,
+                     HasGcTypes::False),
         env_(HasGcTypes::False, &compilerEnv_, Shareable::False, ModuleKind::AsmJS),
         errorString_(nullptr),
         errorOffset_(UINT32_MAX),
@@ -2248,7 +2250,7 @@ IsCallToGlobal(ModuleValidator& m, ParseNode* pn, const ModuleValidator::Global*
         return false;
     }
 
-    *global = m.lookupGlobal(callee->name());
+    *global = m.lookupGlobal(callee->as<NameNode>().name());
     return !!*global;
 }
 
@@ -2769,11 +2771,12 @@ CheckArgument(ModuleValidator& m, ParseNode* arg, PropertyName** name)
         return m.fail(arg, "argument is not a plain name");
     }
 
-    if (!CheckIdentifier(m, arg, arg->name())) {
+    PropertyName* argName = arg->as<NameNode>().name();;
+    if (!CheckIdentifier(m, arg, argName)) {
         return false;
     }
 
-    *name = arg->name();
+    *name = argName;
     return true;
 }
 
@@ -3006,7 +3009,7 @@ CheckNewArrayView(ModuleValidator& m, PropertyName* varName, ParseNode* newExpr)
             return m.fail(ctorExpr, "expecting name of imported array view constructor");
         }
 
-        PropertyName* globalName = ctorExpr->name();
+        PropertyName* globalName = ctorExpr->as<NameNode>().name();
         const ModuleValidator::Global* global = m.lookupGlobal(globalName);
         if (!global) {
             return m.failName(ctorExpr, "%s not found in module global scope", globalName);
@@ -3081,7 +3084,8 @@ CheckGlobalDotImport(ModuleValidator& m, PropertyName* varName, ParseNode* initN
         return m.fail(base, "expected name of variable or parameter");
     }
 
-    if (base->name() == m.globalArgumentName()) {
+    auto baseName = base->as<NameNode>().name();
+    if (baseName == m.globalArgumentName()) {
         if (field == m.cx()->names().NaN) {
             return m.addGlobalConstant(varName, GenericNaN(), field);
         }
@@ -3097,7 +3101,7 @@ CheckGlobalDotImport(ModuleValidator& m, PropertyName* varName, ParseNode* initN
         return m.failName(initNode, "'%s' is not a standard constant or typed array name", field);
     }
 
-    if (base->name() != m.importArgumentName()) {
+    if (baseName != m.importArgumentName()) {
         return m.fail(base, "expected global or import name");
     }
 
@@ -3111,7 +3115,8 @@ CheckModuleGlobal(ModuleValidator& m, ParseNode* var, bool isConst)
         return m.fail(var, "import variable is not a plain name");
     }
 
-    if (!CheckModuleLevelName(m, var, var->name())) {
+    PropertyName* varName = var->as<NameNode>().name();
+    if (!CheckModuleLevelName(m, var, varName)) {
         return false;
     }
 
@@ -3121,22 +3126,22 @@ CheckModuleGlobal(ModuleValidator& m, ParseNode* var, bool isConst)
     }
 
     if (IsNumericLiteral(m, initNode)) {
-        return CheckGlobalVariableInitConstant(m, var->name(), initNode, isConst);
+        return CheckGlobalVariableInitConstant(m, varName, initNode, isConst);
     }
 
     if (initNode->isKind(ParseNodeKind::BitOr) ||
         initNode->isKind(ParseNodeKind::Pos) ||
         initNode->isKind(ParseNodeKind::Call))
     {
-        return CheckGlobalVariableInitImport(m, var->name(), initNode, isConst);
+        return CheckGlobalVariableInitImport(m, varName, initNode, isConst);
     }
 
     if (initNode->isKind(ParseNodeKind::New)) {
-        return CheckNewArrayView(m, var->name(), initNode);
+        return CheckNewArrayView(m, varName, initNode);
     }
 
     if (initNode->isKind(ParseNodeKind::Dot)) {
-        return CheckGlobalDotImport(m, var->name(), initNode);
+        return CheckGlobalDotImport(m, varName, initNode);
     }
 
     return m.fail(initNode, "unsupported import expression");
@@ -3281,7 +3286,7 @@ static bool
 IsLiteralOrConst(FunctionValidator& f, ParseNode* pn, NumLit* lit)
 {
     if (pn->isKind(ParseNodeKind::Name)) {
-        const ModuleValidator::Global* global = f.lookupGlobal(pn->name());
+        const ModuleValidator::Global* global = f.lookupGlobal(pn->as<NameNode>().name());
         if (!global || global->which() != ModuleValidator::Global::ConstantLiteral) {
             return false;
         }
@@ -3324,7 +3329,7 @@ CheckVariable(FunctionValidator& f, ParseNode* var, ValTypeVector* types, Vector
         return f.fail(var, "local variable is not a plain name");
     }
 
-    PropertyName* name = var->name();
+    PropertyName* name = var->as<NameNode>().name();
 
     if (!CheckIdentifier(f.m(), var, name)) {
         return false;
@@ -3412,7 +3417,7 @@ CheckNumericLiteral(FunctionValidator& f, ParseNode* num, Type* type)
 static bool
 CheckVarRef(FunctionValidator& f, ParseNode* varRef, Type* type)
 {
-    PropertyName* name = varRef->name();
+    PropertyName* name = varRef->as<NameNode>().name();
 
     if (const FunctionValidator::Local* local = f.lookupLocal(name)) {
         if (!f.encoder().writeOp(Op::GetLocal)) {
@@ -3471,7 +3476,7 @@ CheckArrayAccess(FunctionValidator& f, ParseNode* viewName, ParseNode* indexExpr
         return f.fail(viewName, "base of array access must be a typed array view name");
     }
 
-    const ModuleValidator::Global* global = f.lookupGlobal(viewName->name());
+    const ModuleValidator::Global* global = f.lookupGlobal(viewName->as<NameNode>().name());
     if (!global || !global->isAnyArrayView()) {
         return f.fail(viewName, "base of array access must be a typed array view name");
     }
@@ -3704,7 +3709,7 @@ CheckStoreArray(FunctionValidator& f, ParseNode* lhs, ParseNode* rhs, Type* type
 static bool
 CheckAssignName(FunctionValidator& f, ParseNode* lhs, ParseNode* rhs, Type* type)
 {
-    RootedPropertyName name(f.cx(), lhs->name());
+    RootedPropertyName name(f.cx(), lhs->as<NameNode>().name());
 
     if (const FunctionValidator::Local* lhsVar = f.lookupLocal(name)) {
         Type rhsType;
@@ -4104,7 +4109,7 @@ CheckFuncPtrCall(FunctionValidator& f, ParseNode* callNode, Type ret, Type* type
         return f.fail(tableNode, "expecting name of function-pointer array");
     }
 
-    PropertyName* name = tableNode->name();
+    PropertyName* name = tableNode->as<NameNode>().name();
     if (const ModuleValidator::Global* existing = f.lookupGlobal(name)) {
         if (existing->which() != ModuleValidator::Global::Table) {
             return f.failName(tableNode, "'%s' is not the name of a function-pointer array", name);
@@ -4171,7 +4176,7 @@ CheckFFICall(FunctionValidator& f, ParseNode* callNode, unsigned ffiIndex, Type 
 {
     MOZ_ASSERT(ret.isCanonical());
 
-    PropertyName* calleeName = CallCallee(callNode)->name();
+    PropertyName* calleeName = CallCallee(callNode)->as<NameNode>().name();
 
     if (ret.isFloat()) {
         return f.fail(callNode, "FFI calls can't return float");
@@ -4464,7 +4469,7 @@ CheckCoercedCall(FunctionValidator& f, ParseNode* call, Type ret, Type* type)
         return f.fail(callee, "unexpected callee expression type");
     }
 
-    PropertyName* calleeName = callee->name();
+    PropertyName* calleeName = callee->as<NameNode>().name();
 
     if (const ModuleValidator::Global* global = f.lookupGlobal(calleeName)) {
         switch (global->which()) {
@@ -4478,7 +4483,7 @@ CheckCoercedCall(FunctionValidator& f, ParseNode* call, Type ret, Type* type)
           case ModuleValidator::Global::Table:
           case ModuleValidator::Global::ArrayView:
           case ModuleValidator::Global::ArrayViewCtor:
-            return f.failName(callee, "'%s' is not callable function", callee->name());
+            return f.failName(callee, "'%s' is not callable function", calleeName);
           case ModuleValidator::Global::Function:
             break;
         }
@@ -5889,8 +5894,12 @@ static bool
 CheckFunction(ModuleValidator& m)
 {
     // asm.js modules can be quite large when represented as parse trees so pop
-    // the backing LifoAlloc after parsing/compiling each function.
+    // the backing LifoAlloc after parsing/compiling each function. Release the
+    // parser's lifo memory after the last use of a parse node.
     AsmJSParser::Mark mark = m.parser().mark();
+    auto releaseMark = mozilla::MakeScopeExit([&] {
+        m.parser().release(mark);
+    });
 
     CodeNode* funNode = nullptr;
     unsigned line = 0;
@@ -5944,8 +5953,6 @@ CheckFunction(ModuleValidator& m)
 
     f.define(func, line);
 
-    // Release the parser's lifo memory only after the last use of a parse node.
-    m.parser().release(mark);
     return true;
 }
 
@@ -6010,7 +6017,7 @@ CheckFuncPtrTable(ModuleValidator& m, ParseNode* var)
             return m.fail(elem, "function-pointer table's elements must be names of functions");
         }
 
-        PropertyName* funcName = elem->name();
+        PropertyName* funcName = elem->as<NameNode>().name();
         const ModuleValidator::Func* func = m.lookupFuncDef(funcName);
         if (!func) {
             return m.fail(elem, "function-pointer table's elements must be names of functions");
@@ -6036,7 +6043,7 @@ CheckFuncPtrTable(ModuleValidator& m, ParseNode* var)
     }
 
     uint32_t tableIndex;
-    if (!CheckFuncPtrTableAgainstExisting(m, var, var->name(), std::move(copy), mask, &tableIndex)) {
+    if (!CheckFuncPtrTableAgainstExisting(m, var, var->as<NameNode>().name(), std::move(copy), mask, &tableIndex)) {
         return false;
     }
 
@@ -6084,7 +6091,7 @@ CheckModuleExportFunction(ModuleValidator& m, ParseNode* pn, PropertyName* maybe
         return m.fail(pn, "expected name of exported function");
     }
 
-    PropertyName* funcName = pn->name();
+    PropertyName* funcName = pn->as<NameNode>().name();
     const ModuleValidator::Func* func = m.lookupFuncDef(funcName);
     if (!func) {
         return m.failName(pn, "function '%s' not found", funcName);
@@ -6551,17 +6558,8 @@ CheckBuffer(JSContext* cx, const AsmJSMetadata& metadata, HandleValue bufferVal,
     }
 
     if (buffer->is<ArrayBufferObject>()) {
-        // On 64-bit, bounds checks are statically removed so the huge guard
-        // region is always necessary. On 32-bit, allocating a guard page
-        // requires reallocating the incoming ArrayBuffer which could trigger
-        // OOM. Thus, don't ask for a guard page in this case;
-#ifdef WASM_HUGE_MEMORY
-        bool needGuard = true;
-#else
-        bool needGuard = false;
-#endif
         Rooted<ArrayBufferObject*> arrayBuffer(cx, &buffer->as<ArrayBufferObject>());
-        if (!ArrayBufferObject::prepareForAsmJS(cx, arrayBuffer, needGuard)) {
+        if (!ArrayBufferObject::prepareForAsmJS(cx, arrayBuffer)) {
             return LinkFail(cx, "Unable to prepare ArrayBuffer for asm.js use");
         }
     } else {
@@ -6678,7 +6676,7 @@ HandleInstantiationFailure(JSContext* cx, CallArgs args, const AsmJSMetadata& me
 
     // Source discarding is allowed to affect JS semantics because it is never
     // enabled for normal JS content.
-    bool haveSource = source->hasSourceData();
+    bool haveSource = source->hasSourceText();
     if (!haveSource && !JSScript::loadSource(cx, source, &haveSource)) {
         return false;
     }
@@ -7007,7 +7005,7 @@ class ModuleCharsForStore : ModuleChars
             CodeNode* functionNode = parser.pc->functionBox()->functionNode;
             ParseNode* arg = FunctionFormalParametersList(functionNode, &numArgs);
             for (unsigned i = 0; i < numArgs; i++, arg = arg->pn_next) {
-                UniqueChars name = StringToNewUTF8CharsZ(nullptr, *arg->name());
+                UniqueChars name = StringToNewUTF8CharsZ(nullptr, *arg->as<NameNode>().name());
                 if (!name || !funCtorArgs_.append(std::move(name))) {
                     return false;
                 }
@@ -7100,7 +7098,7 @@ class ModuleCharsForLookup : ModuleChars
                 return false;
             }
             for (unsigned i = 0; i < funCtorArgs_.length(); i++, arg = arg->pn_next) {
-                UniqueChars name = StringToNewUTF8CharsZ(nullptr, *arg->name());
+                UniqueChars name = StringToNewUTF8CharsZ(nullptr, *arg->as<NameNode>().name());
                 if (!name || strcmp(funCtorArgs_[i].get(), name.get())) {
                     return false;
                 }
@@ -7614,7 +7612,7 @@ js::AsmJSModuleToString(JSContext* cx, HandleFunction fun, bool isToSource)
         return nullptr;
     }
 
-    bool haveSource = source->hasSourceData();
+    bool haveSource = source->hasSourceText();
     if (!haveSource && !JSScript::loadSource(cx, source, &haveSource)) {
         return nullptr;
     }
@@ -7623,10 +7621,10 @@ js::AsmJSModuleToString(JSContext* cx, HandleFunction fun, bool isToSource)
         if (!out.append("function ")) {
             return nullptr;
         }
-         if (fun->explicitName() && !out.append(fun->explicitName())) {
-             return nullptr;
-         }
-        if (!out.append("() {\n    [sourceless code]\n}")) {
+        if (fun->explicitName() && !out.append(fun->explicitName())) {
+            return nullptr;
+        }
+        if (!out.append("() {\n    [native code]\n}")) {
             return nullptr;
         }
     } else {
@@ -7665,7 +7663,7 @@ js::AsmJSFunctionToString(JSContext* cx, HandleFunction fun)
         return nullptr;
     }
 
-    bool haveSource = source->hasSourceData();
+    bool haveSource = source->hasSourceText();
     if (!haveSource && !JSScript::loadSource(cx, source, &haveSource)) {
         return nullptr;
     }
@@ -7676,7 +7674,7 @@ js::AsmJSFunctionToString(JSContext* cx, HandleFunction fun)
         if (!out.append(fun->explicitName())) {
             return nullptr;
         }
-        if (!out.append("() {\n    [sourceless code]\n}")) {
+        if (!out.append("() {\n    [native code]\n}")) {
             return nullptr;
         }
     } else {

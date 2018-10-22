@@ -4,6 +4,7 @@
 
 /* import-globals-from ../../../../../browser/extensions/formautofill/content/autofillEditForms.js*/
 import AcceptedCards from "../components/accepted-cards.js";
+import CscInput from "../components/csc-input.js";
 import LabelledCheckbox from "../components/labelled-checkbox.js";
 import PaymentDialog from "./payment-dialog.js";
 import PaymentRequestPage from "../components/payment-request-page.js";
@@ -36,7 +37,15 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
     this.addressEditLink.href = "javascript:void(0)";
     this.addressEditLink.addEventListener("click", this);
 
+    this.cscInput = new CscInput({
+      useAlwaysVisiblePlaceholder: true,
+      inputId: "cc-csc",
+    });
+
     this.persistCheckbox = new LabelledCheckbox();
+    // The persist checkbox shouldn't be part of the record which gets saved so
+    // exclude it from the form.
+    this.persistCheckbox.form = "";
     this.persistCheckbox.className = "persist-checkbox";
 
     this.acceptedCardsList = new AcceptedCards();
@@ -104,16 +113,26 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
         field.addEventListener("invalid", this);
       }
 
+      // Replace the form-autofill cc-csc fields with our csc-input.
+      let cscContainer = this.form.querySelector("#cc-csc-container");
+      cscContainer.textContent = "";
+      cscContainer.appendChild(this.cscInput);
+
       let fragment = document.createDocumentFragment();
-      fragment.append(this.addressAddLink);
       fragment.append(" ");
       fragment.append(this.addressEditLink);
+      fragment.append(this.addressAddLink);
       let billingAddressRow = this.form.querySelector(".billingAddressRow");
+
+      // XXX: Bug 1482689 - Remove the label-text class from the billing field
+      // which will be removed when switching to <rich-select>.
+      billingAddressRow.querySelector(".label-text").classList.remove("label-text");
+
       billingAddressRow.appendChild(fragment);
 
-      this.body.appendChild(this.persistCheckbox);
+      form.insertBefore(this.persistCheckbox, billingAddressRow);
+      form.insertBefore(this.acceptedCardsList, billingAddressRow);
       this.body.appendChild(this.genericErrorText);
-      this.body.appendChild(this.acceptedCardsList);
       // Only call the connected super callback(s) once our markup is fully
       // connected, including the shared form fetched asynchronously.
       super.connectedCallback();
@@ -132,16 +151,25 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
       return;
     }
 
+    if (!basicCardPage.selectedStateKey) {
+      throw new Error("A `selectedStateKey` is required");
+    }
+
     let editing = !!basicCardPage.guid;
     this.cancelButton.textContent = this.dataset.cancelButtonLabel;
     this.backButton.textContent = this.dataset.backButtonLabel;
-    if (page.onboardingWizard) {
-      this.saveButton.textContent = this.dataset.nextButtonLabel;
+    if (editing) {
+      this.saveButton.textContent = this.dataset.updateButtonLabel;
     } else {
-      this.saveButton.textContent = editing ? this.dataset.updateButtonLabel :
-                                              this.dataset.addButtonLabel;
+      this.saveButton.textContent = this.dataset.nextButtonLabel;
     }
+
+    this.cscInput.placeholder = this.dataset.cscPlaceholder;
+    this.cscInput.frontTooltip = this.dataset.cscFrontInfoTooltip;
+    this.cscInput.backTooltip = this.dataset.cscBackInfoTooltip;
+
     this.persistCheckbox.label = this.dataset.persistCheckboxLabel;
+    this.persistCheckbox.infoTooltip = this.dataset.persistCheckboxInfoTooltip;
     this.addressAddLink.textContent = this.dataset.addressAddLinkLabel;
     this.addressEditLink.textContent = this.dataset.addressEditLinkLabel;
     this.acceptedCardsList.label = this.dataset.acceptedCardsLabel;
@@ -158,6 +186,10 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
     this.genericErrorText.textContent = page.error;
 
     this.form.querySelector("#cc-number").disabled = editing;
+
+    // The CVV fields should be hidden and disabled when editing.
+    this.form.querySelector("#cc-csc-container").hidden = editing;
+    this.cscInput.disabled = editing;
 
     // If a card is selected we want to edit it.
     if (editing) {
@@ -203,7 +235,12 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
       if (paymentRequest.getAddresses(state)[selectedShippingAddress]) {
         billingAddressSelect.value = selectedShippingAddress;
       } else {
-        billingAddressSelect.value = Object.keys(addresses)[0];
+        let firstAddressGUID = Object.keys(addresses)[0];
+        if (firstAddressGUID) {
+          // Only set the value if we have a saved address to not mark the field
+          // dirty and invalid on an add form with no saved addresses.
+          billingAddressSelect.value = firstAddressGUID;
+        }
       }
     }
     // Need to recalculate the populated state since
@@ -241,6 +278,9 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
   }
 
   onChange(evt) {
+    let ccType = this.form.querySelector("#cc-type");
+    this.cscInput.setAttribute("card-type", ccType.value);
+
     this.updateSaveButtonState();
   }
 
@@ -269,6 +309,7 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
             preserveFieldValues: true,
             guid: basicCardPage.guid,
             persistCheckboxValue: this.persistCheckbox.checked,
+            selectedStateKey: basicCardPage.selectedStateKey,
           },
         };
         let billingAddressGUID = this.form.querySelector("#billingAddressGUID");
@@ -358,6 +399,10 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
     for (let field of this.form.elements) {
       let container = field.closest(".container");
       let span = container.querySelector(".label-text");
+      if (!span) {
+        // The billing address field doesn't use a label inside the field.
+        continue;
+      }
       span.setAttribute("fieldRequiredSymbol", this.dataset.fieldRequiredSymbol);
       let required = field.required && !field.disabled;
       if (required) {
@@ -381,7 +426,7 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
       record.isTemporary = true;
     }
 
-    for (let editableFieldName of ["cc-name", "cc-exp-month", "cc-exp-year"]) {
+    for (let editableFieldName of ["cc-name", "cc-exp-month", "cc-exp-year", "cc-type"]) {
       record[editableFieldName] = record[editableFieldName] || "";
     }
 
@@ -391,14 +436,23 @@ export default class BasicCardForm extends PaymentStateSubscriberMixin(PaymentRe
       record["cc-number"] = record["cc-number"] || "";
     }
 
+    // Never save the CSC in storage. Storage will throw and not save the record
+    // if it is passed.
+    delete record["cc-csc"];
+
     try {
       let {guid} = await paymentRequest.updateAutofillRecord("creditCards", record,
                                                              basicCardPage.guid);
+      let {selectedStateKey} = currentState["basic-card-page"];
+      if (!selectedStateKey) {
+        throw new Error(`state["basic-card-page"].selectedStateKey is required`);
+      }
       this.requestStore.setState({
         page: {
           id: "payment-summary",
         },
-        selectedPaymentCard: guid,
+        [selectedStateKey]: guid,
+        [selectedStateKey + "SecurityCode"]: this.cscInput.value,
       });
     } catch (ex) {
       log.warn("saveRecord: error:", ex);

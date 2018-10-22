@@ -102,6 +102,7 @@
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/StaticPrefs.h"
+#include "PaintWorkletImpl.h"
 
 // Interfaces Needed
 #include "nsIFrame.h"
@@ -1149,7 +1150,7 @@ nsGlobalWindowInner::CleanupCachedXBLHandlers()
 }
 
 void
-nsGlobalWindowInner::FreeInnerObjects()
+nsGlobalWindowInner::FreeInnerObjects(bool aForDocumentOpen)
 {
   if (IsDying()) {
     return;
@@ -1207,8 +1208,10 @@ nsGlobalWindowInner::FreeInnerObjects()
     mDocumentURI = mDoc->GetDocumentURI();
     mDocBaseURI = mDoc->GetDocBaseURI();
 
-    while (mDoc->EventHandlingSuppressed()) {
-      mDoc->UnsuppressEventHandlingAndFireEvents(false);
+    if (!aForDocumentOpen) {
+      while (mDoc->EventHandlingSuppressed()) {
+        mDoc->UnsuppressEventHandlingAndFireEvents(false);
+      }
     }
 
     if (mObservingDidRefresh) {
@@ -7519,6 +7522,10 @@ nsGlobalWindowInner::GetSidebar(OwningExternalOrWindowProxy& aResult,
 void
 nsGlobalWindowInner::ClearDocumentDependentSlots(JSContext* aCx)
 {
+  if (js::GetContextCompartment(aCx) != js::GetObjectCompartment(GetWrapperPreserveColor())) {
+    MOZ_CRASH("Looks like bug 1488480/1405521, with ClearDocumentDependentSlots in a bogus compartment");
+  }
+
   // If JSAPI OOMs here, there is basically nothing we can do to recover safely.
   if (!Window_Binding::ClearCachedDocumentValue(aCx, this) ||
       !Window_Binding::ClearCachedPerformanceValue(aCx, this)) {
@@ -7819,7 +7826,7 @@ nsGlobalWindowInner::GetPaintWorklet(ErrorResult& aRv)
       return nullptr;
     }
 
-    mPaintWorklet = new Worklet(this, principal, Worklet::ePaintWorklet);
+    mPaintWorklet = PaintWorkletImpl::CreateWorklet(this, principal);
   }
 
   return mPaintWorklet;

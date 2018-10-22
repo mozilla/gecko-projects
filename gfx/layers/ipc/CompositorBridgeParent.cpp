@@ -467,7 +467,11 @@ CompositorBridgeParent::~CompositorBridgeParent()
 void
 CompositorBridgeParent::ForceIsFirstPaint()
 {
-  mCompositionManager->ForceIsFirstPaint();
+  if (mWrBridge) {
+    mWrBridge->ForceIsFirstPaint();
+  } else {
+    mCompositionManager->ForceIsFirstPaint();
+  }
 }
 
 void
@@ -523,10 +527,19 @@ CompositorBridgeParent::StopAndClearResources()
     }
     indirectBridgeParents.clear();
 
+    RefPtr<wr::WebRenderAPI> api = mWrBridge->GetWebRenderAPI();
     // Ensure we are not holding the sIndirectLayerTreesLock here because we
     // are going to block on WR threads in order to shut it down properly.
     mWrBridge->Destroy();
     mWrBridge = nullptr;
+
+    if (api) {
+      // Make extra sure we are done cleaning WebRender up before continuing.
+      // After that we wont have a way to talk to a lot of the webrender parts.
+      api->FlushSceneBuilder();
+      api = nullptr;
+    }
+
     if (mAsyncImageManager) {
       mAsyncImageManager->Destroy();
       // WebRenderAPI should be already destructed
@@ -636,7 +649,7 @@ mozilla::ipc::IPCResult
 CompositorBridgeParent::RecvForcePresent()
 {
   if (mWrBridge) {
-    mWrBridge->ScheduleGenerateFrame();
+    mWrBridge->ScheduleForcedGenerateFrame();
   }
   // During the shutdown sequence mLayerManager may be null
   if (mLayerManager) {
@@ -1854,9 +1867,7 @@ CompositorBridgeParent::RecvAdoptChild(const LayersId& child)
 
 PWebRenderBridgeParent*
 CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipelineId,
-                                                    const LayoutDeviceIntSize& aSize,
-                                                    TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                                    wr::IdNamespace* aIdNamespace)
+                                                    const LayoutDeviceIntSize& aSize)
 {
 #ifndef MOZ_BUILD_WEBRENDER
   // Extra guard since this in the parent process and we don't want a malicious
@@ -1885,8 +1896,6 @@ CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipel
   if (!api) {
     mWrBridge = WebRenderBridgeParent::CreateDestroyed(aPipelineId);
     mWrBridge.get()->AddRef(); // IPDL reference
-    *aIdNamespace = mWrBridge->GetIdNamespace();
-    *aTextureFactoryIdentifier = TextureFactoryIdentifier(LayersBackend::LAYERS_NONE);
     return mWrBridge;
   }
   mAsyncImageManager = new AsyncImagePipelineManager(api->Clone());
@@ -1898,7 +1907,6 @@ CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipel
   mWrBridge = new WebRenderBridgeParent(this, aPipelineId, mWidget, nullptr, std::move(api), std::move(asyncMgr), std::move(animStorage), mVsyncRate);
   mWrBridge.get()->AddRef(); // IPDL reference
 
-  *aIdNamespace = mWrBridge->GetIdNamespace();
   mCompositorScheduler = mWrBridge->CompositorScheduler();
   MOZ_ASSERT(mCompositorScheduler);
   { // scope lock
@@ -1906,7 +1914,6 @@ CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipel
     MOZ_ASSERT(sIndirectLayerTrees[mRootLayerTreeID].mWrBridge == nullptr);
     sIndirectLayerTrees[mRootLayerTreeID].mWrBridge = mWrBridge;
   }
-  *aTextureFactoryIdentifier = mWrBridge->GetTextureFactoryIdentifier();
   return mWrBridge;
 }
 
@@ -2202,11 +2209,14 @@ CompositorBridgeParent::NotifyPipelineRendered(const wr::PipelineId& aPipelineId
     return;
   }
 
+  RefPtr<UiCompositorControllerParent> uiController =
+    UiCompositorControllerParent::GetFromRootLayerTreeId(mRootLayerTreeID);
+
   if (mWrBridge->PipelineId() == aPipelineId) {
     mWrBridge->RemoveEpochDataPriorTo(aEpoch);
 
     if (!mPaused) {
-      TransactionId transactionId = mWrBridge->FlushTransactionIdsForEpoch(aEpoch, aCompositeEnd);
+      TransactionId transactionId = mWrBridge->FlushTransactionIdsForEpoch(aEpoch, aCompositeEnd, uiController);
       Unused << SendDidComposite(LayersId{0}, transactionId, aCompositeStart, aCompositeEnd);
 
       nsTArray<ImageCompositeNotificationInfo> notifications;
@@ -2228,7 +2238,7 @@ CompositorBridgeParent::NotifyPipelineRendered(const wr::PipelineId& aPipelineId
 
       if (!mPaused) {
         CrossProcessCompositorBridgeParent* cpcp = lts->mCrossProcessParent;
-        TransactionId transactionId = lts->mWrBridge->FlushTransactionIdsForEpoch(aEpoch, aCompositeEnd);
+        TransactionId transactionId = lts->mWrBridge->FlushTransactionIdsForEpoch(aEpoch, aCompositeEnd, uiController);
         Unused << cpcp->SendDidComposite(aLayersId, transactionId, aCompositeStart, aCompositeEnd);
       }
     }

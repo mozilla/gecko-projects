@@ -130,6 +130,12 @@ var validGradientAndElementValues = [
   "linear-gradient(to right bottom, red, 50%, green 50%, 50%, blue)",
   "linear-gradient(to right bottom, red, 0%, green 50%, 100%, blue)",
 
+  "linear-gradient(red 0% 100%)",
+  "linear-gradient(red 0% 50%, blue 50%)",
+  "linear-gradient(red 0% 50%, blue 50% 100%)",
+  "linear-gradient(red 0% 50%, 0%, blue 50%)",
+  "linear-gradient(red 0% 50%, 0%, blue 50% 100%)",
+
   /* Unitless 0 is valid as an <angle> */
   "linear-gradient(0, red, blue)",
 
@@ -182,6 +188,12 @@ var validGradientAndElementValues = [
   "radial-gradient(7em 8em at 45px, red, blue)",
 
   "radial-gradient(circle at 15% 20%, red, blue)",
+
+  "radial-gradient(red 0% 100%)",
+  "radial-gradient(red 0% 50%, blue 50%)",
+  "radial-gradient(red 0% 50%, blue 50% 100%)",
+  "radial-gradient(red 0% 50%, 0%, blue 50%)",
+  "radial-gradient(red 0% 50%, 0%, blue 50% 100%)",
 
   "repeating-radial-gradient(red, blue)",
   "repeating-radial-gradient(red, yellow, blue)",
@@ -328,6 +340,16 @@ var invalidGradientAndElementValues = [
   "radial-gradient(45px 399grad, ellipse closest-corner, red, blue)",
   "radial-gradient(45px 399grad, farthest-side circle, red, blue)",
   "radial-gradient(circle red, blue)",
+
+  /* don't allow more than two positions with multi-position syntax */
+  "linear-gradient(red 0% 50% 100%)",
+  "linear-gradient(red 0% 50% 75%, blue 75%)",
+  "linear-gradient(to bottom, red 0% 50% 100%)",
+  "linear-gradient(to bottom, red 0% 50% 75%, blue 75%)",
+  "radial-gradient(red 0% 50% 100%)",
+  "radial-gradient(red 0% 50% 75%, blue 75%)",
+  "radial-gradient(center, red 0% 50% 100%)",
+  "radial-gradient(center, red 0% 50% 75%, blue 75%)",
 ];
 var unbalancedGradientAndElementValues = [
   "-moz-element(#a()",
@@ -3709,14 +3731,11 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     /* FIXME: test zero, and test calc clamping */
-    initial_values: [ " auto",
-      // these four keywords compute to the initial value when the
-      // writing mode is horizontal, and that's the context we're testing in
-      "-moz-max-content", "-moz-min-content", "-moz-fit-content", "-moz-available",
-    ],
+    initial_values: [ " auto" ],
     /* computed value tests for height test more with display:block */
     prerequisites: { "display": "block" },
     other_values: [ "15px", "3em", "15%",
+      "-moz-max-content", "-moz-min-content", "-moz-fit-content", "-moz-available",
       "calc(2px)",
       "calc(50%)",
       "calc(3*25px)",
@@ -3967,12 +3986,9 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     prerequisites: { "display": "block" },
-    initial_values: [ "none",
-      // these four keywords compute to the initial value when the
-      // writing mode is horizontal, and that's the context we're testing in
-      "-moz-max-content", "-moz-min-content", "-moz-fit-content", "-moz-available",
-    ],
+    initial_values: [ "none" ],
     other_values: [ "30px", "50%", "0",
+      "-moz-max-content", "-moz-min-content", "-moz-fit-content", "-moz-available",
       "calc(2px)",
       "calc(-2px)",
       "calc(0px)",
@@ -4011,12 +4027,9 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     prerequisites: { "display": "block" },
-    initial_values: [ "auto", "0", "calc(0em)", "calc(-2px)",
-      // these four keywords compute to the initial value when the
-      // writing mode is horizontal, and that's the context we're testing in
-      "-moz-max-content", "-moz-min-content", "-moz-fit-content", "-moz-available",
-    ],
+    initial_values: [ "auto", "0", "calc(0em)", "calc(-2px)" ],
     other_values: [ "30px", "50%",
+      "-moz-max-content", "-moz-min-content", "-moz-fit-content", "-moz-available",
       "calc(-1%)",
       "calc(2px)",
       "calc(50%)",
@@ -4563,7 +4576,7 @@ var gCSSProperties = {
     applies_to_first_line: true,
     applies_to_placeholder: true,
     initial_values: [ "none" ],
-    other_values: [ "capitalize", "uppercase", "lowercase", "full-width" ],
+    other_values: [ "capitalize", "uppercase", "lowercase", "full-width", "full-size-kana" ],
     invalid_values: []
   },
   "top": {
@@ -8101,7 +8114,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.gradients")) {
   );
 }
 
-if (IsCSSPropertyPrefEnabled("layout.css.scrollbar-colors.enabled")) {
+if (IsCSSPropertyPrefEnabled("layout.css.scrollbar-color.enabled")) {
   gCSSProperties["scrollbar-color"] = {
     domProp: "scrollbarColor",
     inherited: true,

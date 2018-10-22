@@ -22,11 +22,6 @@ toolbarbutton {
   text-shadow: none;
 }
 
-.toolbarbutton-icon[label]:not([label=""]),
-.toolbarbutton-icon[type="menu"] {
-  margin-inline-end: 2px;
-}
-
 .toolbarbutton-text {
   margin: 0;
   text-align: center;
@@ -34,6 +29,10 @@ toolbarbutton {
 
 toolbarbutton.tabbable {
   -moz-user-focus: normal !important;
+}
+
+toolbarbutton[checked="true"] {
+  color: ButtonText;
 }
 
 toolbarbutton:hover {
@@ -47,10 +46,6 @@ toolbarbutton[open="true"] {
 
 toolbarbutton[disabled="true"] {
   color: GrayText;
-}
-
-toolbarbutton[checked="true"]:not(:hover) {
-  color: ButtonText;
 }
 
 toolbarbutton:-moz-lwtheme:not(:hover):not([checked="true"]):not([open="true"]):not([disabled="true"]) {

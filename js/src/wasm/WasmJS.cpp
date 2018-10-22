@@ -400,7 +400,7 @@ wasm::Eval(JSContext* cx, Handle<TypedArrayObject*> code, HandleObject importObj
         return false;
     }
 
-    if (!bytecode->append((uint8_t*)code->viewDataEither().unwrap(), code->byteLength())) {
+    if (!bytecode->append((uint8_t*)code->dataPointerEither().unwrap(), code->byteLength())) {
         ReportOutOfMemory(cx);
         return false;
     }
@@ -1419,7 +1419,7 @@ EnsureLazyEntryStub(const Instance& instance, size_t funcExportIndex, const Func
         return stubs->createOne(funcExportIndex, codeTier);
     }
 
-    MOZ_ASSERT(prevTier == Tier::Baseline && tier == Tier::Ion);
+    MOZ_ASSERT(prevTier == Tier::Baseline && tier == Tier::Optimized);
 
     auto stubs2 = instance.code(tier).lazyStubs().lock();
 

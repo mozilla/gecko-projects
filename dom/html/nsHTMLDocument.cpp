@@ -202,7 +202,11 @@ NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(nsHTMLDocument,
 JSObject*
 nsHTMLDocument::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLDocument_Binding::Wrap(aCx, this, aGivenProto);
+  JSObject* obj = HTMLDocument_Binding::Wrap(aCx, this, aGivenProto);
+  if (!obj) {
+      MOZ_CRASH("Looks like bug 1488480/1405521, with nsHTMLDocument::WrapNode failing");
+  }
+  return obj;
 }
 
 nsresult
@@ -2681,6 +2685,7 @@ struct MidasCommand {
 };
 
 static const struct MidasCommand gMidasCommandTable[] = {
+  // clang-format off
   { "bold",          "cmd_bold",            "", true,  false },
   { "italic",        "cmd_italic",          "", true,  false },
   { "underline",     "cmd_underline",       "", true,  false },
@@ -2738,11 +2743,13 @@ static const struct MidasCommand gMidasCommandTable[] = {
   { "print",         "cmd_print",           "", true,  false },
 #endif
   { nullptr, nullptr, nullptr, false, false }
+  // clang-format on
 };
 
 #define MidasCommandCount ((sizeof(gMidasCommandTable) / sizeof(struct MidasCommand)) - 1)
 
 static const char* const gBlocks[] = {
+  // clang-format off
   "ADDRESS",
   "BLOCKQUOTE",
   "DD",
@@ -2757,6 +2764,7 @@ static const char* const gBlocks[] = {
   "H6",
   "P",
   "PRE"
+  // clang-format on
 };
 
 static bool
@@ -3290,7 +3298,8 @@ nsHTMLDocument::Clone(dom::NodeInfo* aNodeInfo, nsINode** aResult) const
   // State from nsHTMLDocument
   clone->mLoadFlags = mLoadFlags;
 
-  return CallQueryInterface(clone.get(), aResult);
+  clone.forget(aResult);
+  return NS_OK;
 }
 
 bool

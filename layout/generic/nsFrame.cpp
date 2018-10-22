@@ -251,6 +251,7 @@ nsIFrame::DestroyAnonymousContent(nsPresContext* aPresContext,
 {
   if (nsCOMPtr<nsIContent> content = aContent) {
     aPresContext->EventStateManager()->NativeAnonymousContentRemoved(content);
+    aPresContext->PresShell()->NativeAnonymousContentRemoved(content);
     content->UnbindFromTree();
   }
 }
@@ -1173,9 +1174,8 @@ nsFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
   // correctness because text nodes themselves shouldn't have effects applied.
   if (!IsTextFrame() && !GetPrevContinuation()) {
     // Kick off loading of external SVG resources referenced from properties if
-    // any. This currently includes filter, clip-path, and mask. We don't care
-    // about the return value. We only want its side effect.
-    Unused << SVGObserverUtils::GetEffectProperties(this);
+    // any. This currently includes filter, clip-path, and mask.
+    SVGObserverUtils::InitiateResourceDocLoads(this);
   }
 
   // If the page contains markup that overrides text direction, and
@@ -2624,15 +2624,20 @@ static bool
 FrameParticipatesIn3DContext(nsIFrame* aAncestor, nsIFrame* aDescendant) {
   MOZ_ASSERT(aAncestor != aDescendant);
   MOZ_ASSERT(aAncestor->Extend3DContext());
+
+  nsIFrame* ancestor = aAncestor->FirstContinuation();
+  MOZ_ASSERT(ancestor->IsPrimaryFrame());
+
   nsIFrame* frame;
   for (frame = aDescendant->GetClosestFlattenedTreeAncestorPrimaryFrame();
-       frame && aAncestor != frame;
+       frame && ancestor != frame;
        frame = frame->GetClosestFlattenedTreeAncestorPrimaryFrame()) {
     if (!frame->Extend3DContext()) {
       return false;
     }
   }
-  MOZ_ASSERT(frame == aAncestor);
+
+  MOZ_ASSERT(frame == ancestor);
   return true;
 }
 
@@ -2670,13 +2675,12 @@ WrapSeparatorTransform(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
 // one, return an empty Maybe.
 // The returned clip rect, if there is one, is relative to |aMaskedFrame|.
 static Maybe<nsRect>
-ComputeClipForMaskItem(nsDisplayListBuilder* aBuilder, nsIFrame* aMaskedFrame,
-                       bool aHandleOpacity)
+ComputeClipForMaskItem(nsDisplayListBuilder* aBuilder, nsIFrame* aMaskedFrame)
 {
   const nsStyleSVGReset* svgReset = aMaskedFrame->StyleSVGReset();
 
   nsSVGUtils::MaskUsage maskUsage;
-  nsSVGUtils::DetermineMaskUsage(aMaskedFrame, aHandleOpacity, maskUsage);
+  nsSVGUtils::DetermineMaskUsage(aMaskedFrame, false, maskUsage);
 
   nsPoint offsetToUserSpace = nsLayoutUtils::ComputeOffsetToUserSpace(aBuilder, aMaskedFrame);
   int32_t devPixelRatio = aMaskedFrame->PresContext()->AppUnitsPerDevPixel();
@@ -2713,10 +2717,11 @@ ComputeClipForMaskItem(nsDisplayListBuilder* aBuilder, nsIFrame* aMaskedFrame,
     // case, and we handle that specially.
     nsRect dirtyRect(nscoord_MIN/2, nscoord_MIN/2, nscoord_MAX, nscoord_MAX);
 
-    nsIFrame* firstFrame = nsLayoutUtils::FirstContinuationOrIBSplitSibling(aMaskedFrame);
-    SVGObserverUtils::EffectProperties effectProperties =
-        SVGObserverUtils::GetEffectProperties(firstFrame);
-    nsTArray<nsSVGMaskFrame*> maskFrames = effectProperties.GetMaskFrames();
+    nsIFrame* firstFrame =
+      nsLayoutUtils::FirstContinuationOrIBSplitSibling(aMaskedFrame);
+    nsTArray<nsSVGMaskFrame*> maskFrames;
+    // XXX check return value?
+    SVGObserverUtils::GetAndObserveMasks(firstFrame, &maskFrames);
 
     for (uint32_t i = 0; i < maskFrames.Length(); ++i) {
       gfxRect clipArea;
@@ -2929,16 +2934,18 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     aBuilder->EnterSVGEffectsContents(&hoistedScrollInfoItemsStorage);
   }
 
+  // We build an opacity item if it's not going to be drawn by SVG content.
+  // We could in principle skip creating an nsDisplayOpacity item if
+  // nsDisplayOpacity::NeedsActiveLayer returns false and usingSVGEffects is
+  // true (the nsDisplayFilter/nsDisplayMasksAndClipPaths could handle the
+  // opacity). Since SVG has perf issues where we sometimes spend a lot of
+  // time creating display list items that might be helpful.  We'd need to
+  // restore our mechanism to do that (changed in bug 1482403), and we'd
+  // need to invalidate the frame if the value that would be return from
+  // NeedsActiveLayer was to change, which we don't currently do.
+  bool useOpacity =
+    HasVisualOpacity(effectSet) && !nsSVGUtils::CanOptimizeOpacity(this);
 
-  bool needsActiveOpacityLayer = false;
-  // We build an opacity item if it's not going to be drawn by SVG content, or
-  // SVG effects. SVG effects won't handle the opacity if we want an active
-  // layer (for async animations), see
-  // nsSVGIntegrationsUtils::PaintMaskAndClipPath or
-  // nsSVGIntegrationsUtils::PaintFilter.
-  bool useOpacity = HasVisualOpacity(effectSet) &&
-                    !nsSVGUtils::CanOptimizeOpacity(this) &&
-                    ((needsActiveOpacityLayer = nsDisplayOpacity::NeedsActiveLayer(aBuilder, this)) || !usingSVGEffects);
   bool useBlendMode = effects->mMixBlendMode != NS_STYLE_BLEND_NORMAL;
   bool useStickyPosition = disp->mPosition == NS_STYLE_POSITION_STICKY &&
     IsScrollFrameActive(aBuilder,
@@ -3010,7 +3017,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
 
   Maybe<nsRect> clipForMask;
   if (usingMask) {
-    clipForMask = ComputeClipForMaskItem(aBuilder, this, !useOpacity);
+    clipForMask = ComputeClipForMaskItem(aBuilder, this);
   }
 
   nsDisplayListCollection set(aBuilder);
@@ -3189,15 +3196,9 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
 
     // Skip all filter effects while generating glyph mask.
     if (usingFilter && !aBuilder->IsForGenerateGlyphMask()) {
-      // If we are going to create a mask display item, handle opacity effect
-      // in that mask display item; Otherwise, take care of opacity in this
-      // filter display item.
-      bool handleOpacity = !usingMask && !useOpacity;
-
       /* List now emptied, so add the new list to the top. */
-      resultList.AppendToTop(
-        MakeDisplayItem<nsDisplayFilter>(aBuilder, this, &resultList,
-                                       handleOpacity));
+      resultList.AppendToTop(MakeDisplayItem<nsDisplayFilters>(
+        aBuilder, this, &resultList));
     }
 
     if (usingMask) {
@@ -3215,13 +3216,12 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
                                         ? aBuilder->CurrentActiveScrolledRoot()
                                         : containerItemASR;
       /* List now emptied, so add the new list to the top. */
-      resultList.AppendToTop(
-          MakeDisplayItem<nsDisplayMask>(aBuilder, this, &resultList, !useOpacity,
-                                       maskASR));
+      resultList.AppendToTop(MakeDisplayItem<nsDisplayMasksAndClipPaths>(
+        aBuilder, this, &resultList, maskASR));
     }
 
     // Also add the hoisted scroll info items. We need those for APZ scrolling
-    // because nsDisplayMask items can't build active layers.
+    // because nsDisplayMasksAndClipPaths items can't build active layers.
     aBuilder->ExitSVGEffectsContents();
     resultList.AppendToTop(&hoistedScrollInfoItemsStorage);
     if (aCreatedContainerItem) {
@@ -3237,6 +3237,9 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     // The clip we would set on an element with opacity would clip
     // all descendant content, but some should not be clipped.
     DisplayListClipState::AutoSaveRestore opacityClipState(aBuilder);
+    const bool needsActiveOpacityLayer =
+      nsDisplayOpacity::NeedsActiveLayer(aBuilder, this);
+
     resultList.AppendToTop(
       MakeDisplayItem<nsDisplayOpacity>(aBuilder, this, &resultList,
                                         containerItemASR,
@@ -5217,7 +5220,7 @@ nsFrame::MarkIntrinsicISizesDirty()
   // (which likely depended on our now-stale intrinsic isize).
   auto* parentFrame = GetParent();
   if (parentFrame && parentFrame->IsFlexContainerFrame()) {
-    DeleteProperty(CachedFlexMeasuringReflow());
+    nsFlexContainerFrame::MarkCachedFlexMeasurementsDirty(this);
   }
 
   if (GetStateBits() & NS_FRAME_FONT_INFLATION_FLOW_ROOT) {
@@ -5705,7 +5708,7 @@ nsFrame::ComputeSize(gfxContext*         aRenderingContext,
                                          boxSizingAdjust.BSize(aWM),
                                          *blockStyleCoord);
     } else if (MOZ_UNLIKELY(isGridItem) &&
-               blockStyleCoord->GetUnit() == eStyleUnit_Auto &&
+               blockStyleCoord->IsAutoOrEnum() &&
                !IS_TRUE_OVERFLOW_CONTAINER(this)) {
       auto cbSize = aCBSize.BSize(aWM);
       if (cbSize != NS_AUTOHEIGHT) {
@@ -7341,7 +7344,7 @@ ComputeEffectsRect(nsIFrame* aFrame, const nsRect& aOverflowRect,
   // only one heap-allocated rect per frame and it will be cleaned up when
   // the frame dies.
 
-  if (nsSVGIntegrationUtils::UsingEffectsForFrame(aFrame)) {
+  if (nsSVGIntegrationUtils::UsingOverflowAffectingEffects(aFrame)) {
     aFrame->SetProperty
       (nsIFrame::PreEffectsBBoxProperty(), new nsRect(r));
     r = nsSVGIntegrationUtils::ComputePostEffectsVisualOverflowRect(aFrame, r);
@@ -10961,8 +10964,9 @@ nsIFrame::IsStackingContext(EffectSet* aEffectSet,
 {
   return HasOpacity(aEffectSet) ||
          IsTransformed(aStyleDisplay) ||
-         aStyleDisplay->IsContainPaint() ||
-         aStyleDisplay->IsContainLayout() ||
+         (IsFrameOfType(eSupportsContainLayoutAndPaint) &&
+          (aStyleDisplay->IsContainPaint() ||
+           aStyleDisplay->IsContainLayout())) ||
          // strictly speaking, 'perspective' doesn't require visual atomicity,
          // but the spec says it acts like the rest of these
          ChildrenHavePerspective(aStyleDisplay) ||
@@ -11236,7 +11240,7 @@ nsIFrame::AddSizeOfExcludingThisForTree(nsWindowSizes& aSizes) const
 CompositorHitTestInfo
 nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
 {
-  CompositorHitTestInfo result = CompositorHitTestInfo::eInvisibleToHitTest;
+  CompositorHitTestInfo result = CompositorHitTestInvisibleToHit;
 
   if (aBuilder->IsInsidePointerEventsNoneDoc()) {
     // Somewhere up the parent document chain is a subdocument with pointer-
@@ -11258,7 +11262,7 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
   }
 
   // Anything that didn't match the above conditions is visible to hit-testing.
-  result |= CompositorHitTestInfo::eVisibleToHitTest;
+  result = CompositorHitTestFlags::eVisibleToHitTest;
 
   if (aBuilder->IsBuildingNonLayerizedScrollbar() ||
       aBuilder->GetAncestorHasApzAwareEventHandler()) {
@@ -11267,13 +11271,13 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
     // instead of the intended scrollframe. To address this, we force a d-t-c
     // region on scrollbar frames that won't be placed in their own layer. See
     // bug 1213324 for details.
-    result |= CompositorHitTestInfo::eDispatchToContent;
+    result += CompositorHitTestFlags::eDispatchToContent;
   } else if (IsObjectFrame()) {
     // If the frame is a plugin frame and wants to handle wheel events as
     // default action, we should add the frame to dispatch-to-content region.
     nsPluginFrame* pluginFrame = do_QueryFrame(this);
     if (pluginFrame && pluginFrame->WantsToHandleWheelEventAsDefaultAction()) {
-      result |= CompositorHitTestInfo::eDispatchToContent;
+      result += CompositorHitTestFlags::eDispatchToContent;
     }
   }
 
@@ -11287,9 +11291,9 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
     // ancestor DOM elements. Refer to the documentation in TouchActionHelper.cpp
     // for details; this code is meant to be equivalent to that code, but woven
     // into the top-down recursive display list building process.
-    CompositorHitTestInfo inheritedTouchAction = CompositorHitTestInfo::eInvisibleToHitTest;
+    CompositorHitTestInfo inheritedTouchAction = CompositorHitTestInvisibleToHit;
     if (nsDisplayCompositorHitTestInfo* parentInfo = aBuilder->GetCompositorHitTestInfo()) {
-      inheritedTouchAction = (parentInfo->HitTestInfo() & CompositorHitTestInfo::eTouchActionMask);
+      inheritedTouchAction = parentInfo->HitTestInfo() & CompositorHitTestTouchActionMask;
     }
 
     nsIFrame* touchActionFrame = this;
@@ -11300,12 +11304,12 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
       // encounter an element that disables it that's inside the scrollframe.
       // This is equivalent to the |considerPanning| variable in
       // TouchActionHelper.cpp, but for a top-down traversal.
-      CompositorHitTestInfo panMask = CompositorHitTestInfo::eTouchActionPanXDisabled
-                                    | CompositorHitTestInfo::eTouchActionPanYDisabled;
-      inheritedTouchAction &= ~panMask;
+      CompositorHitTestInfo panMask(CompositorHitTestFlags::eTouchActionPanXDisabled,
+                                    CompositorHitTestFlags::eTouchActionPanYDisabled);
+      inheritedTouchAction -= panMask;
     }
 
-    result |= inheritedTouchAction;
+    result += inheritedTouchAction;
 
     const uint32_t touchAction = nsLayoutUtils::GetTouchActionFromFrame(touchActionFrame);
     // The CSS allows the syntax auto | none | [pan-x || pan-y] | manipulation
@@ -11313,23 +11317,22 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
     if (touchAction == NS_STYLE_TOUCH_ACTION_AUTO) {
       // nothing to do
     } else if (touchAction & NS_STYLE_TOUCH_ACTION_MANIPULATION) {
-      result |= CompositorHitTestInfo::eTouchActionDoubleTapZoomDisabled;
+      result += CompositorHitTestFlags::eTouchActionDoubleTapZoomDisabled;
     } else {
       // This path handles the cases none | [pan-x || pan-y] and so both
       // double-tap and pinch zoom are disabled in here.
-      result |= CompositorHitTestInfo::eTouchActionPinchZoomDisabled
-              | CompositorHitTestInfo::eTouchActionDoubleTapZoomDisabled;
+      result += CompositorHitTestFlags::eTouchActionPinchZoomDisabled;
+      result += CompositorHitTestFlags::eTouchActionDoubleTapZoomDisabled;
 
       if (!(touchAction & NS_STYLE_TOUCH_ACTION_PAN_X)) {
-        result |= CompositorHitTestInfo::eTouchActionPanXDisabled;
+        result += CompositorHitTestFlags::eTouchActionPanXDisabled;
       }
       if (!(touchAction & NS_STYLE_TOUCH_ACTION_PAN_Y)) {
-        result |= CompositorHitTestInfo::eTouchActionPanYDisabled;
+        result += CompositorHitTestFlags::eTouchActionPanYDisabled;
       }
       if (touchAction & NS_STYLE_TOUCH_ACTION_NONE) {
         // all the touch-action disabling flags will already have been set above
-        MOZ_ASSERT((result & CompositorHitTestInfo::eTouchActionMask)
-                 == CompositorHitTestInfo::eTouchActionMask);
+        MOZ_ASSERT(result.contains(CompositorHitTestTouchActionMask));
       }
     }
   }
@@ -11340,19 +11343,19 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
       const bool thumbGetsLayer = aBuilder->GetCurrentScrollbarTarget() !=
           layers::FrameMetrics::NULL_SCROLL_ID;
       if (thumbGetsLayer) {
-        result |= CompositorHitTestInfo::eScrollbarThumb;
+        result += CompositorHitTestFlags::eScrollbarThumb;
       } else {
-        result |= CompositorHitTestInfo::eDispatchToContent;
+        result += CompositorHitTestFlags::eDispatchToContent;
       }
     }
 
     if (*scrollDirection == ScrollDirection::eVertical) {
-      result |= CompositorHitTestInfo::eScrollbarVertical;
+      result += CompositorHitTestFlags::eScrollbarVertical;
     }
 
     // includes the ScrollbarFrame, SliderFrame, anything else that
     // might be inside the xul:scrollbar
-    result |= CompositorHitTestInfo::eScrollbar;
+    result += CompositorHitTestFlags::eScrollbar;
   }
 
   return result;

@@ -18,18 +18,12 @@ dictionary PaymentMethodData {
 dictionary PaymentCurrencyAmount {
   required DOMString currency;
   required DOMString value;
-           DOMString currencySystem = "urn:iso:std:iso:4217";
-};
-
-enum PaymentItemType {
-  "tax"
 };
 
 dictionary PaymentItem {
   required DOMString             label;
   required PaymentCurrencyAmount amount;
            boolean               pending = false;
-           PaymentItemType       type;
 };
 
 dictionary PaymentShippingOption {
@@ -41,7 +35,8 @@ dictionary PaymentShippingOption {
 
 dictionary PaymentDetailsModifier {
   required DOMString             supportedMethods;
-           PaymentItem           total;
+  // FIXME: bug 1493860: should this "= null" be here?
+           PaymentItem           total = null;
            sequence<PaymentItem> additionalDisplayItems;
            object                data;
 };
@@ -72,13 +67,15 @@ dictionary AddressErrors {
 };
 
 dictionary PaymentValidationErrors {
-  PayerErrorFields payer;
-  AddressErrors shippingAddress;
+  // FIXME: bug 1493860: should this "= null" be here?
+  PayerErrors payer = null;
+  // FIXME: bug 1493860: should this "= null" be here?
+  AddressErrors shippingAddress = null;
   DOMString error;
   object paymentMethod;
 };
 
-dictionary PayerErrorFields {
+dictionary PayerErrors {
   DOMString email;
   DOMString name;
   DOMString phone;
@@ -86,10 +83,13 @@ dictionary PayerErrorFields {
 
 dictionary PaymentDetailsUpdate : PaymentDetailsBase {
   DOMString     error;
-  AddressErrors shippingAddressErrors;
-  PayerErrorFields payerErrors;
+  // FIXME: bug 1493860: should this "= null" be here?
+  AddressErrors shippingAddressErrors = null;
+  // FIXME: bug 1493860: should this "= null" be here?
+  PayerErrors payerErrors = null;
   object paymentMethodErrors;
-  PaymentItem   total;
+  // FIXME: bug 1493860: should this "= null" be here?
+  PaymentItem   total = null;
 };
 
 enum PaymentShippingType {

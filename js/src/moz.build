@@ -43,7 +43,6 @@ for stlfile in ['jsdate.*', 'jsnum.*']:
 with Files('builtin/intl/*'):
     BUG_COMPONENT = component_intl
 
-
 if CONFIG['JS_BUNDLED_EDITLINE']:
     DIRS += ['editline']
 
@@ -171,6 +170,7 @@ EXPORTS.js += [
     '../public/StructuredClone.h',
     '../public/SweepingAPI.h',
     '../public/TraceKind.h',
+    '../public/TraceLoggerAPI.h',
     '../public/TracingAPI.h',
     '../public/TrackedOptimizationInfo.h',
     '../public/Transcoding.h',
@@ -226,9 +226,12 @@ UNIFIED_SOURCES += [
     'frontend/BytecodeCompiler.cpp',
     'frontend/BytecodeControlStructures.cpp',
     'frontend/BytecodeEmitter.cpp',
+    'frontend/CallOrNewEmitter.cpp',
     'frontend/CForEmitter.cpp',
     'frontend/DoWhileEmitter.cpp',
+    'frontend/ElemOpEmitter.cpp',
     'frontend/EmitterScope.cpp',
+    'frontend/ExpressionStatementEmitter.cpp',
     'frontend/FoldConstants.cpp',
     'frontend/ForInEmitter.cpp',
     'frontend/ForOfEmitter.cpp',
@@ -236,7 +239,9 @@ UNIFIED_SOURCES += [
     'frontend/IfEmitter.cpp',
     'frontend/JumpList.cpp',
     'frontend/NameFunctions.cpp',
+    'frontend/NameOpEmitter.cpp',
     'frontend/ParseNode.cpp',
+    'frontend/PropOpEmitter.cpp',
     'frontend/SwitchEmitter.cpp',
     'frontend/TDZCheckCache.cpp',
     'frontend/TokenStream.cpp',
@@ -287,7 +292,6 @@ UNIFIED_SOURCES += [
     'jit/CacheIRSpewer.cpp',
     'jit/CodeGenerator.cpp',
     'jit/CompileWrappers.cpp',
-    'jit/Disassembler.cpp',
     'jit/EdgeCaseAnalysis.cpp',
     'jit/EffectiveAddressAnalysis.cpp',
     'jit/ExecutableAllocator.cpp',
@@ -327,7 +331,6 @@ UNIFIED_SOURCES += [
     'jit/Safepoints.cpp',
     'jit/ScalarReplacement.cpp',
     'jit/shared/Assembler-shared.cpp',
-    'jit/shared/BaselineCompiler-shared.cpp',
     'jit/shared/CodeGenerator-shared.cpp',
     'jit/shared/Disassembler-shared.cpp',
     'jit/shared/Lowering-shared.cpp',
@@ -364,6 +367,7 @@ UNIFIED_SOURCES += [
     'util/Unicode.cpp',
     'vm/ArgumentsObject.cpp',
     'vm/ArrayBufferObject.cpp',
+    'vm/ArrayBufferViewObject.cpp',
     'vm/AsyncFunction.cpp',
     'vm/AsyncIteration.cpp',
     'vm/BytecodeUtil.cpp',
@@ -514,22 +518,17 @@ elif CONFIG['JS_CODEGEN_X86'] or CONFIG['JS_CODEGEN_X64']:
         'jit/x86-shared/Architecture-x86-shared.cpp',
         'jit/x86-shared/Assembler-x86-shared.cpp',
         'jit/x86-shared/AssemblerBuffer-x86-shared.cpp',
-        'jit/x86-shared/BaselineCompiler-x86-shared.cpp',
         'jit/x86-shared/CodeGenerator-x86-shared.cpp',
         'jit/x86-shared/Lowering-x86-shared.cpp',
         'jit/x86-shared/MacroAssembler-x86-shared-SIMD.cpp',
         'jit/x86-shared/MacroAssembler-x86-shared.cpp',
         'jit/x86-shared/MoveEmitter-x86-shared.cpp',
     ]
-    SOURCES += [
-        'jit/x86-shared/Disassembler-x86-shared.cpp',  # using namespace js::jit::X86Encoding;
-    ]
     if CONFIG['JS_CODEGEN_X64']:
         LOpcodesGenerated.inputs += ['jit/x64/LIR-x64.h']
         UNIFIED_SOURCES += [
             'jit/x64/Assembler-x64.cpp',
             'jit/x64/Bailouts-x64.cpp',
-            'jit/x64/BaselineCompiler-x64.cpp',
             'jit/x64/CodeGenerator-x64.cpp',
             'jit/x64/Lowering-x64.cpp',
             'jit/x64/MacroAssembler-x64.cpp',
@@ -540,7 +539,6 @@ elif CONFIG['JS_CODEGEN_X86'] or CONFIG['JS_CODEGEN_X64']:
         UNIFIED_SOURCES += [
             'jit/x86/Assembler-x86.cpp',
             'jit/x86/Bailouts-x86.cpp',
-            'jit/x86/BaselineCompiler-x86.cpp',
             'jit/x86/CodeGenerator-x86.cpp',
             'jit/x86/Lowering-x86.cpp',
             'jit/x86/MacroAssembler-x86.cpp',
@@ -552,7 +550,6 @@ elif CONFIG['JS_CODEGEN_ARM']:
         'jit/arm/Architecture-arm.cpp',
         'jit/arm/Assembler-arm.cpp',
         'jit/arm/Bailouts-arm.cpp',
-        'jit/arm/BaselineCompiler-arm.cpp',
         'jit/arm/CodeGenerator-arm.cpp',
         'jit/arm/disasm/Constants-arm.cpp',
         'jit/arm/disasm/Disasm-arm.cpp',
@@ -577,7 +574,6 @@ elif CONFIG['JS_CODEGEN_ARM64']:
         'jit/arm64/Assembler-arm64.cpp',
         'jit/arm64/Bailouts-arm64.cpp',
         'jit/arm64/CodeGenerator-arm64.cpp',
-        'jit/arm64/Disassembler-arm64.cpp',
         'jit/arm64/Lowering-arm64.cpp',
         'jit/arm64/MacroAssembler-arm64.cpp',
         'jit/arm64/MoveEmitter-arm64.cpp',
@@ -606,7 +602,6 @@ elif CONFIG['JS_CODEGEN_MIPS32'] or CONFIG['JS_CODEGEN_MIPS64']:
         'jit/mips-shared/Architecture-mips-shared.cpp',
         'jit/mips-shared/Assembler-mips-shared.cpp',
         'jit/mips-shared/Bailouts-mips-shared.cpp',
-        'jit/mips-shared/BaselineCompiler-mips-shared.cpp',
         'jit/mips-shared/CodeGenerator-mips-shared.cpp',
         'jit/mips-shared/Lowering-mips-shared.cpp',
         'jit/mips-shared/MacroAssembler-mips-shared.cpp',
@@ -618,7 +613,6 @@ elif CONFIG['JS_CODEGEN_MIPS32'] or CONFIG['JS_CODEGEN_MIPS64']:
             'jit/mips32/Architecture-mips32.cpp',
             'jit/mips32/Assembler-mips32.cpp',
             'jit/mips32/Bailouts-mips32.cpp',
-            'jit/mips32/BaselineCompiler-mips32.cpp',
             'jit/mips32/CodeGenerator-mips32.cpp',
             'jit/mips32/Lowering-mips32.cpp',
             'jit/mips32/MacroAssembler-mips32.cpp',
@@ -635,7 +629,6 @@ elif CONFIG['JS_CODEGEN_MIPS32'] or CONFIG['JS_CODEGEN_MIPS64']:
             'jit/mips64/Architecture-mips64.cpp',
             'jit/mips64/Assembler-mips64.cpp',
             'jit/mips64/Bailouts-mips64.cpp',
-            'jit/mips64/BaselineCompiler-mips64.cpp',
             'jit/mips64/CodeGenerator-mips64.cpp',
             'jit/mips64/Lowering-mips64.cpp',
             'jit/mips64/MacroAssembler-mips64.cpp',
@@ -702,6 +695,12 @@ DIRS += [
 
 FINAL_LIBRARY = 'js'
 
+if CONFIG['ENABLE_WASM_CRANELIFT']:
+    DIRS += ['rust']
+    UNIFIED_SOURCES += [
+        'wasm/WasmCraneliftCompile.cpp',
+    ]
+
 if CONFIG['JS_BUILD_BINAST']:
     # Using SOURCES, as UNIFIED_SOURCES causes mysterious bugs on 32-bit platforms.
     # These parts of BinAST are designed only to test evolutions of the
@@ -711,6 +710,7 @@ if CONFIG['JS_BUILD_BINAST']:
     SOURCES += [
         'frontend/BinSource-auto.cpp',
         'frontend/BinSource.cpp',
+        'frontend/BinSourceRuntimeSupport.cpp',
         'frontend/BinToken.cpp',
         'frontend/BinTokenReaderBase.cpp',
         'frontend/BinTokenReaderMultipart.cpp',

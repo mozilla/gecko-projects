@@ -230,7 +230,8 @@ public:
   NS_IMETHOD SetPrivateBrowsing(bool) override;
   NS_IMETHOD GetUseRemoteTabs(bool*) override;
   NS_IMETHOD SetRemoteTabs(bool) override;
-  NS_IMETHOD GetScriptableOriginAttributes(JS::MutableHandle<JS::Value>) override;
+  NS_IMETHOD GetScriptableOriginAttributes(JSContext*,
+                                           JS::MutableHandle<JS::Value>) override;
   NS_IMETHOD_(void) GetOriginAttributes(mozilla::OriginAttributes& aAttrs) override;
 
   // Restores a cached presentation from history (mLSHE).
@@ -935,6 +936,7 @@ private: // data members
   nsCOMPtr<nsIMutableArray> mRefreshURIList;
   nsCOMPtr<nsIMutableArray> mSavedRefreshURIList;
   nsCOMPtr<nsIDOMStorageManager> mSessionStorageManager;
+  uint64_t mContentWindowID;
   nsCOMPtr<nsIContentViewer> mContentViewer;
   nsCOMPtr<nsIWidget> mParentWidget;
   RefPtr<mozilla::dom::ChildSHistory> mSessionHistory;
@@ -1079,6 +1081,10 @@ private: // data members
   // as constants in the nsIDocShell.idl file.
   uint32_t mTouchEventsOverride;
 
+  // Whether or not handling of the <meta name="viewport"> tag is overridden.
+  // Possible values are defined as constants in nsIDocShell.idl.
+  uint32_t mMetaViewportOverride;
+
   // mFullscreenAllowed stores how we determine whether fullscreen is allowed
   // when GetFullscreenAllowed() is called. Fullscreen is allowed in a
   // docshell when all containing iframes have the allowfullscreen
@@ -1173,6 +1179,9 @@ private: // data members
   // We will check the innerWin's timing before creating a new one
   // in MaybeInitTiming()
   bool mBlankTiming : 1;
+
+  // This flag indicates when the title is valid for the current URI.
+  bool mTitleValidForCurrentURI : 1;
 };
 
 #endif /* nsDocShell_h__ */

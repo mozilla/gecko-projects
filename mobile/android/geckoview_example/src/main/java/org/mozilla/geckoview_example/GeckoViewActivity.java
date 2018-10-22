@@ -5,6 +5,7 @@
 
 package org.mozilla.geckoview_example;
 
+import org.mozilla.geckoview.AllowOrDeny;
 import org.mozilla.geckoview.BasicSelectionActionDelegate;
 import org.mozilla.geckoview.GeckoResult;
 import org.mozilla.geckoview.GeckoRuntime;
@@ -326,6 +327,24 @@ public class GeckoViewActivity extends AppCompatActivity {
     }
 
     private void downloadFile(GeckoSession.WebResponseInfo response) {
+        mGeckoSession
+                .getUserAgent()
+                .then(new GeckoResult.OnValueListener<String, Void>() {
+            @Override
+            public GeckoResult<Void> onValue(String userAgent) throws Throwable {
+                downloadFile(response, userAgent);
+                return null;
+            }
+        }, new GeckoResult.OnExceptionListener<Void>() {
+            @Override
+            public GeckoResult<Void> onException(Throwable exception) throws Throwable {
+                // getUserAgent() cannot fail.
+                throw new IllegalStateException("Could not get UserAgent string.");
+            }
+        });
+    }
+
+    private void downloadFile(GeckoSession.WebResponseInfo response, String userAgent) {
         if (ContextCompat.checkSelfPermission(GeckoViewActivity.this,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             mPendingDownloads.add(response);
@@ -343,6 +362,7 @@ public class GeckoViewActivity extends AppCompatActivity {
         req.setMimeType(response.contentType);
         req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
         req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE);
+        req.addRequestHeader("User-Agent", userAgent);
         manager.enqueue(req);
     }
 
@@ -612,11 +632,14 @@ public class GeckoViewActivity extends AppCompatActivity {
         }
 
         @Override
-        public GeckoResult<Boolean> onLoadRequest(final GeckoSession session, final String uri,
-                                                  final int target, final int flags) {
-            Log.d(LOGTAG, "onLoadRequest=" + uri + " where=" + target +
-                  " flags=" + flags);
-            return GeckoResult.fromValue(false);
+        public GeckoResult<AllowOrDeny> onLoadRequest(final GeckoSession session,
+                                                      final LoadRequest request) {
+            Log.d(LOGTAG, "onLoadRequest=" + request.uri +
+                  " triggerUri=" + request.triggerUri +
+                  " where=" + request.target +
+                  " isUserTriggered=" + request.isUserTriggered);
+
+            return GeckoResult.fromValue(AllowOrDeny.ALLOW);
         }
 
         @Override

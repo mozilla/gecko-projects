@@ -151,27 +151,18 @@ InvokeFromInterpreterStub(JSContext* cx, InterpreterStubExitFrameLayout* frame)
     return true;
 }
 
-#ifdef JS_SIMULATOR
-static bool
-CheckSimulatorRecursionLimitWithExtra(JSContext* cx, uint32_t extra)
-{
-    if (cx->simulator()->overRecursedWithExtra(extra)) {
-        ReportOverRecursed(cx);
-        return false;
-    }
-    return true;
-}
-#endif
-
 bool
 CheckOverRecursed(JSContext* cx)
 {
     // We just failed the jitStackLimit check. There are two possible reasons:
-    //  - jitStackLimit was the real stack limit and we're over-recursed
-    //  - jitStackLimit was set to UINTPTR_MAX by JSRuntime::requestInterrupt
-    //    and we need to call JSRuntime::handleInterrupt.
+    //  1) jitStackLimit was the real stack limit and we're over-recursed
+    //  2) jitStackLimit was set to UINTPTR_MAX by JSContext::requestInterrupt
+    //     and we need to call JSContext::handleInterrupt.
+
+    // This handles 1).
 #ifdef JS_SIMULATOR
-    if (!CheckSimulatorRecursionLimitWithExtra(cx, 0)) {
+    if (cx->simulator()->overRecursedWithExtra(0)) {
+        ReportOverRecursed(cx);
         return false;
     }
 #else
@@ -179,62 +170,27 @@ CheckOverRecursed(JSContext* cx)
         return false;
     }
 #endif
+
+    // This handles 2).
     gc::MaybeVerifyBarriers(cx);
     return cx->handleInterrupt();
 }
 
-// This function can get called in two contexts.  In the usual context, it's
-// called with earlyCheck=false, after the env chain has been initialized on
-// a baseline frame.  In this case, it's ok to throw an exception, so a failed
-// stack check returns false, and a successful stack check promps a check for
-// an interrupt from the runtime, which may also cause a false return.
-//
-// In the second case, it's called with earlyCheck=true, prior to frame
-// initialization.  An exception cannot be thrown in this instance, so instead
-// an error flag is set on the frame and true returned.
+// This function gets called when the overrecursion check fails for a Baseline
+// frame. This is just like CheckOverRecursed, with an extra check to handle
+// early stack check failures.
 bool
-CheckOverRecursedWithExtra(JSContext* cx, BaselineFrame* frame,
-                           uint32_t extra, uint32_t earlyCheck)
+CheckOverRecursedBaseline(JSContext* cx, BaselineFrame* frame)
 {
-    MOZ_ASSERT_IF(earlyCheck, !frame->overRecursed());
-
-    // See |CheckOverRecursed| above.  This is a variant of that function which
-    // accepts an argument holding the extra stack space needed for the Baseline
-    // frame that's about to be pushed.
-    uint8_t spDummy;
-    uint8_t* checkSp = (&spDummy) - extra;
-    if (earlyCheck) {
-#ifdef JS_SIMULATOR
-        (void)checkSp;
-        if (!CheckSimulatorRecursionLimitWithExtra(cx, extra)) {
-            frame->setOverRecursed();
-        }
-#else
-        if (!CheckRecursionLimitWithStackPointer(cx, checkSp)) {
-            frame->setOverRecursed();
-        }
-#endif
-        return true;
-    }
-
     // The OVERRECURSED flag may have already been set on the frame by an
-    // early over-recursed check.  If so, throw immediately.
+    // early over-recursed check (before pushing the locals).  If so, throw
+    // immediately.
     if (frame->overRecursed()) {
+        ReportOverRecursed(cx);
         return false;
     }
 
-#ifdef JS_SIMULATOR
-    if (!CheckSimulatorRecursionLimitWithExtra(cx, extra)) {
-        return false;
-    }
-#else
-    if (!CheckRecursionLimitWithStackPointer(cx, checkSp)) {
-        return false;
-    }
-#endif
-
-    gc::MaybeVerifyBarriers(cx);
-    return cx->handleInterrupt();
+    return CheckOverRecursed(cx);
 }
 
 JSObject*
@@ -710,12 +666,12 @@ CreateThis(JSContext* cx, HandleObject callee, HandleObject newTarget, MutableHa
     return true;
 }
 
-void
-GetDynamicName(JSContext* cx, JSObject* envChain, JSString* str, Value* vp)
+bool
+GetDynamicNamePure(JSContext* cx, JSObject* envChain, JSString* str, Value* vp)
 {
-    // Lookup a string on the env chain, returning either the value found or
-    // undefined through rval. This function is infallible, and cannot GC or
-    // invalidate.
+    // Lookup a string on the env chain, returning the value found through rval.
+    // This function is infallible, and cannot GC or invalidate.
+    // Returns false if the lookup could not be completed without GC.
 
     AutoUnsafeCallWithABI unsafe;
 
@@ -725,26 +681,22 @@ GetDynamicName(JSContext* cx, JSObject* envChain, JSString* str, Value* vp)
     } else {
         atom = AtomizeString(cx, str);
         if (!atom) {
-            vp->setUndefined();
-            return;
+            cx->recoverFromOutOfMemory();
+            return false;
         }
     }
 
     if (!frontend::IsIdentifier(atom) || frontend::IsKeyword(atom)) {
-        vp->setUndefined();
-        return;
+        return false;
     }
 
     PropertyResult prop;
     JSObject* scope = nullptr;
     JSObject* pobj = nullptr;
     if (LookupNameNoGC(cx, atom->asPropertyName(), envChain, &scope, &pobj, &prop)) {
-        if (FetchNameNoGC(pobj, prop, MutableHandleValue::fromMarkedLocation(vp))) {
-            return;
-        }
+        return FetchNameNoGC(pobj, prop, vp);
     }
-
-    vp->setUndefined();
+    return false;
 }
 
 void
@@ -1649,7 +1601,7 @@ CallNativeSetter(JSContext* cx, HandleFunction callee, HandleObject obj, HandleV
 }
 
 bool
-EqualStringsHelper(JSString* str1, JSString* str2)
+EqualStringsHelperPure(JSString* str1, JSString* str2)
 {
     // IC code calls this directly so we shouldn't GC.
     AutoUnsafeCallWithABI unsafe;
@@ -1680,7 +1632,7 @@ CheckIsCallable(JSContext* cx, HandleValue v, CheckIsCallableKind kind)
 
 template <bool HandleMissing>
 static MOZ_ALWAYS_INLINE bool
-GetNativeDataProperty(JSContext* cx, NativeObject* obj, jsid id, Value* vp)
+GetNativeDataPropertyPure(JSContext* cx, NativeObject* obj, jsid id, Value* vp)
 {
     // Fast path used by megamorphic IC stubs. Unlike our other property
     // lookup paths, this is optimized to be as fast as possible for simple
@@ -1725,18 +1677,18 @@ GetNativeDataProperty(JSContext* cx, NativeObject* obj, jsid id, Value* vp)
 
 template <bool HandleMissing>
 bool
-GetNativeDataProperty(JSContext* cx, JSObject* obj, PropertyName* name, Value* vp)
+GetNativeDataPropertyPure(JSContext* cx, JSObject* obj, PropertyName* name, Value* vp)
 {
     // Condition checked by caller.
     MOZ_ASSERT(obj->isNative());
-    return GetNativeDataProperty<HandleMissing>(cx, &obj->as<NativeObject>(), NameToId(name), vp);
+    return GetNativeDataPropertyPure<HandleMissing>(cx, &obj->as<NativeObject>(), NameToId(name), vp);
 }
 
 template bool
-GetNativeDataProperty<true>(JSContext* cx, JSObject* obj, PropertyName* name, Value* vp);
+GetNativeDataPropertyPure<true>(JSContext* cx, JSObject* obj, PropertyName* name, Value* vp);
 
 template bool
-GetNativeDataProperty<false>(JSContext* cx, JSObject* obj, PropertyName* name, Value* vp);
+GetNativeDataPropertyPure<false>(JSContext* cx, JSObject* obj, PropertyName* name, Value* vp);
 
 static MOZ_ALWAYS_INLINE bool
 ValueToAtomOrSymbolPure(JSContext* cx, Value& idVal, jsid* id)
@@ -1789,7 +1741,7 @@ GetNativeDataPropertyByValuePure(JSContext* cx, JSObject* obj, Value* vp)
     }
 
     Value* res = vp + 1;
-    return GetNativeDataProperty<HandleMissing>(cx, &obj->as<NativeObject>(), id, res);
+    return GetNativeDataPropertyPure<HandleMissing>(cx, &obj->as<NativeObject>(), id, res);
 }
 
 template bool
@@ -1800,7 +1752,7 @@ GetNativeDataPropertyByValuePure<false>(JSContext* cx, JSObject* obj, Value* vp)
 
 template <bool NeedsTypeBarrier>
 bool
-SetNativeDataProperty(JSContext* cx, JSObject* obj, PropertyName* name, Value* val)
+SetNativeDataPropertyPure(JSContext* cx, JSObject* obj, PropertyName* name, Value* val)
 {
     AutoUnsafeCallWithABI unsafe;
 
@@ -1826,13 +1778,13 @@ SetNativeDataProperty(JSContext* cx, JSObject* obj, PropertyName* name, Value* v
 }
 
 template bool
-SetNativeDataProperty<true>(JSContext* cx, JSObject* obj, PropertyName* name, Value* val);
+SetNativeDataPropertyPure<true>(JSContext* cx, JSObject* obj, PropertyName* name, Value* val);
 
 template bool
-SetNativeDataProperty<false>(JSContext* cx, JSObject* obj, PropertyName* name, Value* val);
+SetNativeDataPropertyPure<false>(JSContext* cx, JSObject* obj, PropertyName* name, Value* val);
 
 bool
-ObjectHasGetterSetter(JSContext* cx, JSObject* objArg, Shape* propShape)
+ObjectHasGetterSetterPure(JSContext* cx, JSObject* objArg, Shape* propShape)
 {
     AutoUnsafeCallWithABI unsafe;
 
@@ -1941,7 +1893,7 @@ HasNativeDataPropertyPure<false>(JSContext* cx, JSObject* obj, Value* vp);
 
 
 bool
-HasNativeElement(JSContext* cx, NativeObject* obj, int32_t index, Value* vp)
+HasNativeElementPure(JSContext* cx, NativeObject* obj, int32_t index, Value* vp)
 {
     AutoUnsafeCallWithABI unsafe;
 
@@ -2114,6 +2066,11 @@ const VMFunction ProxyHasInfo = FunctionInfo<ProxyHasFn>(ProxyHas, "ProxyHas");
 
 typedef bool (*ProxyHasOwnFn)(JSContext*, HandleObject, HandleValue, MutableHandleValue);
 const VMFunction ProxyHasOwnInfo = FunctionInfo<ProxyHasOwnFn>(ProxyHasOwn, "ProxyHasOwn");
+
+typedef bool (*NativeGetElementFn)(JSContext*, HandleNativeObject, HandleValue, int32_t,
+                                   MutableHandleValue);
+const VMFunction NativeGetElementInfo =
+    FunctionInfo<NativeGetElementFn>(NativeGetElement, "NativeGetProperty");
 
 } // namespace jit
 } // namespace js

@@ -411,6 +411,8 @@ public:
         IDX_LASTINDEX               ,
         IDX_THEN                    ,
         IDX_ISINSTANCE              ,
+        IDX_INFINITY                ,
+        IDX_NAN                     ,
         IDX_TOTAL_COUNT // just a count of the above
     };
 
@@ -3121,13 +3123,6 @@ public:
         return Get(realm);
     }
 
-    // Get the RealmPrivate for a given script.
-    static RealmPrivate* Get(JSScript* script)
-    {
-        JS::Realm* realm = JS::GetScriptRealm(script);
-        return Get(realm);
-    }
-
     // The scriptability of this realm.
     Scriptability scriptability;
 
@@ -3210,7 +3205,7 @@ nsIPrincipal* GetObjectPrincipal(JSObject* obj);
 // This method expects a value of the following types:
 //   TD_PNSIID
 //     value : nsID* (free)
-//   TD_DOMSTRING, TD_ASTRING, TD_CSTRING, TD_UTF8STRING
+//   TD_ASTRING, TD_CSTRING, TD_UTF8STRING
 //     value : ns[C]String* (truncate)
 //   TD_PSTRING, TD_PWSTRING, TD_PSTRING_SIZE_IS, TD_PWSTRING_SIZE_IS
 //     value : char[16_t]** (free)

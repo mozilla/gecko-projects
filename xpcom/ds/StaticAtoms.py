@@ -17,8 +17,13 @@ import sys
 # The first argument is the atom's identifier.
 # The second argument is the atom's string value.
 #
+# Please keep the Atom() definitions on one line as this is parsed by the
+#   htmlparser: parser/html/java/htmlparser
+# Please keep "START ATOMS" and "END ATOMS" comments as the parser uses them.
+#
 # It is not possible to conditionally define static atoms with #ifdef etc.
 STATIC_ATOMS = [
+    # START ATOMS
     # --------------------------------------------------------------------------
     # Generic atoms
     # --------------------------------------------------------------------------
@@ -63,6 +68,7 @@ STATIC_ATOMS = [
     Atom("after", "after"),
     Atom("align", "align"),
     Atom("alink", "alink"),
+    Atom("allow", "allow"),
     Atom("allowdirs", "allowdirs"),
     Atom("allowevents", "allowevents"),
     Atom("allowforms", "allow-forms"),
@@ -74,8 +80,7 @@ STATIC_ATOMS = [
     Atom("allowpopupstoescapesandbox", "allow-popups-to-escape-sandbox"),
     Atom("allowpopups", "allow-popups"),
     Atom("allowpresentation", "allow-presentation"),
-    Atom("allowstorageaccessbyuseractivatetion",
-         "allow-storage-access-by-user-activation"),
+    Atom("allowstorageaccessbyuseractivatetion", "allow-storage-access-by-user-activation"),
     Atom("allowsameorigin", "allow-same-origin"),
     Atom("allowscripts", "allow-scripts"),
     Atom("allowscriptstoclose", "allowscriptstoclose"),
@@ -164,6 +169,7 @@ STATIC_ATOMS = [
     Atom("bindToUntrustedContent", "bindToUntrustedContent"),
     Atom("block", "block"),
     Atom("blockquote", "blockquote"),
+    Atom("blur", "blur"),
     Atom("body", "body"),
     Atom("boolean", "boolean"),
     Atom("border", "border"),
@@ -950,7 +956,7 @@ STATIC_ATOMS = [
     Atom("rem", "rem"),
     Atom("remote", "remote"),
     Atom("removeelement", "removeelement"),
-    Atom("renderingobserverlist", "renderingobserverlist"),
+    Atom("renderingobserverset", "renderingobserverset"),
     Atom("repeat", "repeat"),
     Atom("replace", "replace"),
     Atom("requestcontextid", "requestcontextid"),
@@ -1239,7 +1245,6 @@ STATIC_ATOMS = [
     Atom("colorDodge", "color-dodge"),
     Atom("colorInterpolation", "color-interpolation"),
     Atom("colorInterpolationFilters", "color-interpolation-filters"),
-    Atom("colorpicker", "colorpicker"),
     Atom("colorProfile", "color-profile"),
     Atom("cursor", "cursor"),
     Atom("cx", "cx"),
@@ -2022,6 +2027,7 @@ STATIC_ATOMS = [
     Atom("_moz_is_resource_document", "-moz-is-resource-document"),
     Atom("_moz_swipe_animation_enabled", "-moz-swipe-animation-enabled"),
     Atom("_moz_gtk_csd_available", "-moz-gtk-csd-available"),
+    Atom("_moz_gtk_csd_transparent_background", "-moz-gtk-csd-transparent-background"),
     Atom("_moz_gtk_csd_minimize_button", "-moz-gtk-csd-minimize-button"),
     Atom("_moz_gtk_csd_maximize_button", "-moz-gtk-csd-maximize-button"),
     Atom("_moz_gtk_csd_close_button", "-moz-gtk-csd-close-button"),
@@ -2187,7 +2193,7 @@ STATIC_ATOMS = [
     Atom("onaddsourcebuffer", "onaddsourcebuffer"),
     Atom("onremovesourcebuffer", "onremovesourcebuffer"),
 
-    # RDF
+    # RDF (not used by mozilla-central, but still used by comm-central)
     Atom("about", "about"),
     Atom("ID", "ID"),
     Atom("nodeID", "nodeID"),
@@ -2314,6 +2320,7 @@ STATIC_ATOMS = [
     InheritingAnonBoxAtom("AnonBox_mozSVGOuterSVGAnonChild", ":-moz-svg-outer-svg-anon-child"),
     InheritingAnonBoxAtom("AnonBox_mozSVGForeignContent", ":-moz-svg-foreign-content"),
     InheritingAnonBoxAtom("AnonBox_mozSVGText", ":-moz-svg-text"),
+    # END ATOMS
 ] + HTML_PARSER_ATOMS
 
 

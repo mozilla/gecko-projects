@@ -42,6 +42,7 @@
 #include "nsMargin.h"
 #include "nsFrameState.h"
 #include "nsStubDocumentObserver.h"
+#include "nsCOMArray.h"
 #include "Units.h"
 
 class gfxContext;
@@ -366,9 +367,15 @@ public:
                        ResizeReflowOptions::eBSizeExact) = 0;
 
   /**
-   * Returns true if ResizeReflowOverride has been called.
+   * Returns true if the platform/pref or docshell require a meta viewport.
    */
   virtual bool GetIsViewportOverridden() = 0;
+
+  /**
+   * Note that the assumptions that determine the need for a meta viewport
+   * may have changed.
+   */
+  virtual void UpdateViewportOverridden(bool aAfterInitialization) = 0;
 
   /**
    * Return true if the presshell expects layout flush.
@@ -948,13 +955,12 @@ public:
   /**
     * Gets the current target event frame from the PresShell
     */
-  virtual nsIFrame* GetCurrentEventFrame() = 0;
+  nsIFrame* GetCurrentEventFrame();
 
   /**
     * Gets the current target event frame from the PresShell
     */
-  virtual already_AddRefed<nsIContent> GetEventTargetContent(
-                                                     mozilla::WidgetEvent* aEvent) = 0;
+  already_AddRefed<nsIContent> GetEventTargetContent(mozilla::WidgetEvent* aEvent);
 
   /**
    * Get and set the history state for the current document
@@ -1620,6 +1626,8 @@ public:
 
   virtual void FireResizeEvent() = 0;
 
+  void NativeAnonymousContentRemoved(nsIContent* aAnonContent);
+
 protected:
   /**
    * Refresh observer management.
@@ -1646,6 +1654,10 @@ protected:
     mAllocatedPointers.RemoveEntry(aPtr);
 #endif
   }
+
+  void PushCurrentEventInfo(nsIFrame* aFrame, nsIContent* aContent);
+  void PopCurrentEventInfo();
+  nsIContent* GetCurrentEventContent();
 
 public:
   bool AddRefreshObserver(nsARefreshObserver* aObserver,
@@ -1676,6 +1688,8 @@ public:
   nsPoint GetVisualViewportOffset() const {
     return mVisualViewportOffset;
   }
+
+  nsPoint GetVisualViewportOffsetRelativeToLayoutViewport() const;
 
   virtual void WindowSizeMoveDone() = 0;
   virtual void SysColorChanged() = 0;
@@ -1859,6 +1873,11 @@ protected:
   // Whether we're currently under a FlushPendingNotifications.
   // This is used to handle flush reentry correctly.
   bool mInFlush;
+
+  nsIFrame* mCurrentEventFrame;
+  nsCOMPtr<nsIContent> mCurrentEventContent;
+  nsTArray<nsIFrame*> mCurrentEventFrameStack;
+  nsCOMArray<nsIContent> mCurrentEventContentStack;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIPresShell, NS_IPRESSHELL_IID)

@@ -35,6 +35,7 @@
 #include "nsPresContext.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 
+using mozilla::dom::ContentBlockingLog;
 using mozilla::DebugOnly;
 using mozilla::LogLevel;
 
@@ -642,11 +643,8 @@ nsresult nsDocLoader::RemoveChildLoader(nsDocLoader* aChild)
 
 nsresult nsDocLoader::AddChildLoader(nsDocLoader* aChild)
 {
-  nsresult rv = mChildList.AppendElement(aChild) ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
-  if (NS_SUCCEEDED(rv)) {
-    rv = aChild->SetDocLoaderParent(this);
-  }
-  return rv;
+  mChildList.AppendElement(aChild);
+  return aChild->SetDocLoaderParent(this);
 }
 
 NS_IMETHODIMP nsDocLoader::GetDocumentChannel(nsIChannel ** aChannel)
@@ -882,8 +880,8 @@ nsDocLoader::AddProgressListener(nsIWebProgressListener *aListener,
     return NS_ERROR_INVALID_ARG;
   }
 
-  return mListenerInfoList.AppendElement(nsListenerInfo(listener, aNotifyMask)) ?
-         NS_OK : NS_ERROR_OUT_OF_MEMORY;
+  mListenerInfoList.AppendElement(nsListenerInfo(listener, aNotifyMask));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1443,7 +1441,7 @@ NS_IMETHODIMP nsDocLoader::AsyncOnChannelRedirect(nsIChannel *aOldChannel,
       // We only set mDocumentRequest in OnStartRequest(), but its possible
       // to get a redirect before that for service worker interception.
       if (mDocumentRequest) {
-        nsCOMPtr<nsIRequest> request(do_QueryInterface(aOldChannel));
+        nsCOMPtr<nsIRequest> request(aOldChannel);
         NS_ASSERTION(request == mDocumentRequest, "Wrong Document Channel");
       }
 #endif /* DEBUG */
@@ -1462,7 +1460,9 @@ NS_IMETHODIMP nsDocLoader::AsyncOnChannelRedirect(nsIChannel *aOldChannel,
  */
 
 NS_IMETHODIMP nsDocLoader::OnSecurityChange(nsISupports * aContext,
-                                            uint32_t aState)
+                                            uint32_t aOldState,
+                                            uint32_t aState,
+                                            ContentBlockingLog* aContentBlockingLog)
 {
   //
   // Fire progress notifications out to any registered nsIWebProgressListeners.
@@ -1470,14 +1470,17 @@ NS_IMETHODIMP nsDocLoader::OnSecurityChange(nsISupports * aContext,
 
   nsCOMPtr<nsIRequest> request = do_QueryInterface(aContext);
   nsIWebProgress* webProgress = static_cast<nsIWebProgress*>(this);
+  nsAutoString contentBlockingLogJSON(
+    aContentBlockingLog ? aContentBlockingLog->Stringify() : EmptyString());
 
   NOTIFY_LISTENERS(nsIWebProgress::NOTIFY_SECURITY,
-    listener->OnSecurityChange(webProgress, request, aState);
+    listener->OnSecurityChange(webProgress, request, aOldState, aState,
+                               contentBlockingLogJSON);
   );
 
   // Pass the notification up to the parent...
   if (mParent) {
-    mParent->OnSecurityChange(aContext, aState);
+    mParent->OnSecurityChange(aContext, aOldState, aState, aContentBlockingLog);
   }
   return NS_OK;
 }

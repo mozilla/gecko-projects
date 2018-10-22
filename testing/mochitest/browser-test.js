@@ -19,16 +19,7 @@ ChromeUtils.defineModuleGetter(this, "ContentSearch",
 const SIMPLETEST_OVERRIDES =
   ["ok", "is", "isnot", "todo", "todo_is", "todo_isnot", "info", "expectAssertions", "requestCompleteLog"];
 
-// non-android is bootstrapped by marionette
-if (Services.appinfo.OS == "Android") {
-  window.addEventListener("load", function() {
-    window.addEventListener("MozAfterPaint", function() {
-      setTimeout(testInit, 0);
-    }, {once: true});
-  }, {once: true});
-} else {
-  setTimeout(testInit, 0);
-}
+setTimeout(testInit, 0);
 
 var TabDestroyObserver = {
   outstanding: new Set(),
@@ -135,7 +126,7 @@ function testInit() {
 function takeInstrumentation() {
 
   let instrumentData = {
-    elements: {}
+    elements: {},
   };
 
   function pad(str, length) {
@@ -1201,7 +1192,7 @@ Tester.prototype = {
     }
   },
 
-  QueryInterface: ChromeUtils.generateQI(["nsIConsoleListener"])
+  QueryInterface: ChromeUtils.generateQI(["nsIConsoleListener"]),
 };
 
 /**
@@ -1331,7 +1322,7 @@ function testScope(aTester, aTest, expected) {
     Services.tm.dispatchToMainThread({
       run() {
         func();
-      }
+      },
     });
   };
 
@@ -1460,7 +1451,7 @@ testScope.prototype = {
           },
           set: (value) => {
             this[prop] = value;
-          }
+          },
         });
       }
     }
@@ -1512,5 +1503,5 @@ testScope.prototype = {
   destroy: function test_destroy() {
     for (let prop in this)
       delete this[prop];
-  }
+  },
 };

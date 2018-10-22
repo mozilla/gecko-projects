@@ -1058,6 +1058,7 @@ Http2Session::CreatePriorityFrame(uint32_t streamID,
                                   uint32_t dependsOn,
                                   uint8_t weight)
 {
+  MOZ_ASSERT(streamID, "Priority on stream 0");
   char *packet = EnsureOutputBuffer(kFrameHeaderBytes + 5);
   CreateFrameHeader(packet, 5, FRAME_TYPE_PRIORITY, 0, streamID);
   mOutputQueueUsed += kFrameHeaderBytes + 5;
@@ -1532,11 +1533,11 @@ Http2Session::RecvPriority(Http2Session *self)
   bool exclusive = !!(newPriorityDependency & 0x80000000);
   newPriorityDependency &= 0x7fffffff;
   uint8_t newPriorityWeight = *(self->mInputFrameBuffer.get() + kFrameHeaderBytes + 4);
-  if (self->mInputFrameDataStream) {
-    self->mInputFrameDataStream->SetPriorityDependency(newPriorityDependency,
-                                                       newPriorityWeight,
-                                                       exclusive);
-  }
+
+  // undefined what it means when the server sends a priority frame. ignore it.
+  LOG3(("Http2Session::RecvPriority %p 0x%X received dependency=0x%X "
+        "weight=%u exclusive=%d", self->mInputFrameDataStream, self->mInputFrameID,
+        newPriorityDependency, newPriorityWeight, exclusive));
 
   self->ResetDownstreamState();
   return NS_OK;
@@ -1981,10 +1982,9 @@ Http2Session::RecvPushPromise(Http2Session *self)
   pushedStream->SetHTTPState(Http2Stream::RESERVED_BY_REMOTE);
   static_assert(Http2Stream::kWorstPriority >= 0,
                 "kWorstPriority out of range");
-  uint8_t priorityWeight = (nsISupportsPriority::PRIORITY_LOWEST + 1) -
-    (Http2Stream::kWorstPriority - Http2Stream::kNormalPriority);
-  pushedStream->SetPriority(Http2Stream::kWorstPriority);
-  self->GeneratePriority(promisedID, priorityWeight);
+  uint32_t priorityDependency = pushedStream->PriorityDependency();
+  uint8_t priorityWeight = pushedStream->PriorityWeight();
+  self->SendPriorityFrame(promisedID, priorityDependency, priorityWeight);
   self->ResetDownstreamState();
   return NS_OK;
 }
@@ -3376,6 +3376,21 @@ Http2Session::WriteSegmentsAgain(nsAHttpSegmentWriter *writer,
           // Pushed streams are special on padding-only final data frames.
           // See bug 1409570 comments 6-8 for details.
           streamToCleanup->SetPushComplete();
+          Http2Stream *pushSink = streamToCleanup->GetConsumerStream();
+          if (pushSink) {
+            bool enqueueSink = true;
+            for (auto s : mPushesReadyForRead) {
+              if (s == pushSink) {
+                enqueueSink = false;
+                break;
+              }
+            }
+            if (enqueueSink) {
+              mPushesReadyForRead.Push(pushSink);
+              // No use trying to clean up, it won't do anything, anyway
+              streamToCleanup = nullptr;
+            }
+          }
         }
         CleanupStream(streamToCleanup, NS_OK, CANCEL_ERROR);
       }

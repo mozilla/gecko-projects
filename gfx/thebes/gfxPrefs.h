@@ -377,6 +377,8 @@ private:
   DECL_GFX_PREF(Live, "dom.vr.autoactivate.enabled",           VRAutoActivateEnabled, bool, false);
   DECL_GFX_PREF(Live, "dom.vr.controller_trigger_threshold",   VRControllerTriggerThreshold, float, 0.1f);
   DECL_GFX_PREF(Once, "dom.vr.external.enabled",               VRExternalEnabled, bool, true);
+  DECL_GFX_PREF(Live, "dom.vr.external.notdetected.timeout",   VRExternalNotDetectedTimeout, int32_t, 60000);
+  DECL_GFX_PREF(Live, "dom.vr.external.quit.timeout",          VRExternalQuitTimeout, int32_t, 10000);
   DECL_GFX_PREF(Live, "dom.vr.navigation.timeout",             VRNavigationTimeout, int32_t, 1000);
   DECL_GFX_PREF(Once, "dom.vr.oculus.enabled",                 VROculusEnabled, bool, true);
   DECL_GFX_PREF(Live, "dom.vr.oculus.invisible.enabled",       VROculusInvisibleEnabled, bool, true);
@@ -393,7 +395,7 @@ private:
   DECL_GFX_PREF(Live, "dom.vr.puppet.submitframe",             VRPuppetSubmitFrame, uint32_t, 0);
   DECL_GFX_PREF(Live, "dom.vr.display.rafMaxDuration",         VRDisplayRafMaxDuration, uint32_t, 50);
   DECL_GFX_PREF(Once, "dom.vr.process.enabled",                VRProcessEnabled, bool, false);
-  DECL_GFX_PREF(Once, "dom.vr.service.enabled",                VRServiceEnabled, bool, false);
+  DECL_GFX_PREF(Once, "dom.vr.service.enabled",                VRServiceEnabled, bool, true);
   DECL_GFX_PREF(Live, "dom.w3c_pointer_events.enabled",        PointerEventsEnabled, bool, false);
 
   DECL_GFX_PREF(Live, "general.smoothScroll",                  SmoothScrollEnabled, bool, true);
@@ -557,6 +559,7 @@ private:
   DECL_GFX_PREF(Live, "image.mem.discardable",                 ImageMemDiscardable, bool, false);
   DECL_GFX_PREF(Once, "image.mem.animated.discardable",        ImageMemAnimatedDiscardable, bool, false);
   DECL_GFX_PREF(Live, "image.mem.animated.use_heap",           ImageMemAnimatedUseHeap, bool, false);
+  DECL_GFX_PREF(Live, "image.mem.debug-reporting",             ImageMemDebugReporting, bool, false);
   DECL_GFX_PREF(Live, "image.mem.shared",                      ImageMemShared, bool, true);
   DECL_GFX_PREF(Once, "image.mem.surfacecache.discard_factor", ImageMemSurfaceCacheDiscardFactor, uint32_t, 1);
   DECL_GFX_PREF(Once, "image.mem.surfacecache.max_size_kb",    ImageMemSurfaceCacheMaxSizeKB, uint32_t, 100 * 1024);
@@ -574,7 +577,6 @@ private:
   DECL_GFX_PREF(Live, "layers.advanced.basic-layer.enabled",          LayersAdvancedBasicLayerEnabled, bool, false);
   DECL_GFX_PREF(Once, "layers.amd-switchable-gfx.enabled",     LayersAMDSwitchableGfxEnabled, bool, false);
   DECL_GFX_PREF(Once, "layers.async-pan-zoom.enabled",         AsyncPanZoomEnabledDoNotUseDirectly, bool, true);
-  DECL_GFX_PREF(Once, "layers.async-pan-zoom.separate-event-thread", AsyncPanZoomSeparateEventThread, bool, false);
   DECL_GFX_PREF(Live, "layers.bench.enabled",                  LayersBenchEnabled, bool, false);
   DECL_GFX_PREF(Once, "layers.bufferrotation.enabled",         BufferRotationEnabled, bool, true);
   DECL_GFX_PREF(Live, "layers.child-process-shutdown",         ChildProcessShutdown, bool, true);
@@ -700,7 +702,7 @@ private:
   DECL_GFX_PREF(Once, "layout.paint_rects_separately",         LayoutPaintRectsSeparately, bool, true);
 
   // This and code dependent on it should be removed once containerless scrolling looks stable.
-  DECL_GFX_PREF(Once, "layout.scroll.root-frame-containers",   LayoutUseContainersForRootFrames, bool, true);
+  DECL_OVERRIDE_PREF(Live, "layout.scroll.root-frame-containers",   LayoutUseContainersForRootFrames, !OverrideBase_WebRender());
   // This pref is to be set by test code only.
   DECL_GFX_PREF(Live, "layout.scrollbars.always-layerize-track", AlwaysLayerizeScrollbarTrackTestOnly, bool, false);
   DECL_GFX_PREF(Live, "layout.smaller-painted-layers",         LayoutSmallerPaintedLayers, bool, false);
@@ -711,6 +713,7 @@ private:
   DECL_GFX_PREF(Live, "media.wmf.dxva.d3d11.enabled", PDMWMFAllowD3D11, bool, true);
   DECL_GFX_PREF(Live, "media.wmf.dxva.max-videos", PDMWMFMaxDXVAVideos, uint32_t, 8);
   DECL_GFX_PREF(Live, "media.wmf.use-nv12-format", PDMWMFUseNV12Format, bool, true);
+  DECL_GFX_PREF(Live, "media.wmf.force.allow-p010-format", PDMWMFForceAllowP010Format, bool, false);
   DECL_GFX_PREF(Once, "media.wmf.use-sync-texture", PDMWMFUseSyncTexture, bool, true);
   DECL_GFX_PREF(Live, "media.wmf.low-latency.enabled", PDMWMFLowLatencyEnabled, bool, false);
   DECL_GFX_PREF(Live, "media.wmf.skip-blacklist", PDMWMFSkipBlacklist, bool, false);

@@ -481,15 +481,13 @@ public:
     return mOptions;
   }
 
-  TimeDuration GetVsyncInterval() const {
+  TimeDuration GetVsyncInterval() const override {
     // the variable is called "rate" but really it's an interval
     return mVsyncRate;
   }
 
   PWebRenderBridgeParent* AllocPWebRenderBridgeParent(const wr::PipelineId& aPipelineId,
-                                                      const LayoutDeviceIntSize& aSize,
-                                                      TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                                      wr::IdNamespace* aIdNamespace) override;
+                                                      const LayoutDeviceIntSize& aSize) override;
   bool DeallocPWebRenderBridgeParent(PWebRenderBridgeParent* aActor) override;
   RefPtr<WebRenderBridgeParent> GetWebRenderBridgeParent() const;
   Maybe<TimeStamp> GetTestingTimeStamp() const;

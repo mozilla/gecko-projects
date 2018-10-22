@@ -18,12 +18,10 @@
 #include "nsContentCreatorFunctions.h"
 #include "nsError.h"
 #include "nsGkAtoms.h"
-#include "nsIComboboxControlFrame.h"
 #include "nsIDocument.h"
 #include "nsIFormControlFrame.h"
 #include "nsIForm.h"
 #include "nsIFormProcessor.h"
-#include "nsIListControlFrame.h"
 #include "nsLayoutUtils.h"
 #include "nsMappedAttributes.h"
 #include "nsServiceManagerUtils.h"
@@ -287,11 +285,6 @@ HTMLOptionsCollection::Remove(int32_t aIndex, ErrorResult& aError)
     aError.Throw(NS_ERROR_UNEXPECTED);
     return;
   }
-
-  uint32_t len = mSelect->Length();
-  if (aIndex < 0 || (uint32_t)aIndex >= len)
-    aIndex = 0;
-
   mSelect->Remove(aIndex);
 }
 

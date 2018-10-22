@@ -15,6 +15,8 @@ ChromeUtils.defineModuleGetter(this, "TelemetryEnvironment",
   "resource://gre/modules/TelemetryEnvironment.jsm");
 ChromeUtils.defineModuleGetter(this, "AppConstants",
   "resource://gre/modules/AppConstants.jsm");
+ChromeUtils.defineModuleGetter(this, "NewTabUtils",
+  "resource://gre/modules/NewTabUtils.jsm");
 
 const FXA_USERNAME_PREF = "services.sync.username";
 const SEARCH_REGION_PREF = "browser.search.region";
@@ -23,12 +25,18 @@ const MOZ_JEXL_FILEPATH = "mozjexl";
 const {activityStreamProvider: asProvider} = NewTabUtils;
 
 const FRECENT_SITES_UPDATE_INTERVAL = 6 * 60 * 60 * 1000; // Six hours
-const FRECENT_SITES_IGNORE_BLOCKED = true;
+const FRECENT_SITES_IGNORE_BLOCKED = false;
 const FRECENT_SITES_NUM_ITEMS = 25;
 const FRECENT_SITES_MIN_FRECENCY = 100;
 
+/**
+ * CachedTargetingGetter
+ * @param property {string} Name of the method called on ActivityStreamProvider
+ * @param options {{}?} Options object passsed to ActivityStreamProvider method
+ * @param updateInterval {number?} Update interval for query. Defaults to FRECENT_SITES_UPDATE_INTERVAL
+ */
 function CachedTargetingGetter(property, options = null, updateInterval = FRECENT_SITES_UPDATE_INTERVAL) {
-  const targetingGetter = {
+  return {
     _lastUpdated: 0,
     _value: null,
     // For testing
@@ -36,51 +44,121 @@ function CachedTargetingGetter(property, options = null, updateInterval = FRECEN
       this._lastUpdated = 0;
       this._value = null;
     },
-  };
-
-  Object.defineProperty(targetingGetter, property, {
-    get: () => new Promise(async (resolve, reject) => {
-      const now = Date.now();
-      if (now - targetingGetter._lastUpdated >= updateInterval) {
-        try {
-          targetingGetter._value = await asProvider[property](options);
-          targetingGetter._lastUpdated = now;
-        } catch (e) {
-          Cu.reportError(e);
-          reject(e);
+    get() {
+      return new Promise(async (resolve, reject) => {
+        const now = Date.now();
+        if (now - this._lastUpdated >= updateInterval) {
+          try {
+            this._value = await asProvider[property](options);
+            this._lastUpdated = now;
+          } catch (e) {
+            Cu.reportError(e);
+            reject(e);
+          }
         }
-      }
-      resolve(targetingGetter._value);
-    }),
-  });
-
-  return targetingGetter;
+        resolve(this._value);
+      });
+    },
+  };
 }
 
-const TopFrecentSitesCache = new CachedTargetingGetter(
-  "getTopFrecentSites",
-  {
-    ignoreBlocked: FRECENT_SITES_IGNORE_BLOCKED,
-    numItems: FRECENT_SITES_NUM_ITEMS,
-    topsiteFrecency: FRECENT_SITES_MIN_FRECENCY,
-    onePerDomain: true,
-    includeFavicon: false,
-  }
-);
+function CheckBrowserNeedsUpdate(updateInterval = FRECENT_SITES_UPDATE_INTERVAL) {
+  const UpdateChecker = Cc["@mozilla.org/updates/update-checker;1"].createInstance(Ci.nsIUpdateChecker);
+  const checker = {
+    _lastUpdated: 0,
+    _value: null,
+    // For testing. Avoid update check network call.
+    setUp(value) {
+      this._lastUpdated = Date.now();
+      this._value = value;
+    },
+    expire() {
+      this._lastUpdated = 0;
+      this._value = null;
+    },
+    get() {
+      return new Promise((resolve, reject) => {
+        const now = Date.now();
+        const updateServiceListener = {
+          onCheckComplete(request, updates, updateCount) {
+            checker._value = updateCount > 0;
+            resolve(checker._value);
+          },
+          onError(request, update) {
+            reject(request);
+          },
 
-const TotalBookmarksCountCache = new CachedTargetingGetter("getTotalBookmarksCount");
+          QueryInterface: ChromeUtils.generateQI(["nsIUpdateCheckListener"]),
+        };
+
+        if (now - this._lastUpdated >= updateInterval) {
+          UpdateChecker.checkForUpdates(updateServiceListener, true);
+          this._lastUpdated = now;
+        } else {
+          resolve(this._value);
+        }
+      });
+    },
+  };
+
+  return checker;
+}
+
+const QueryCache = {
+  expireAll() {
+    Object.keys(this.queries).forEach(query => {
+      this.queries[query].expire();
+    });
+  },
+  queries: {
+    TopFrecentSites: new CachedTargetingGetter(
+      "getTopFrecentSites",
+      {
+        ignoreBlocked: FRECENT_SITES_IGNORE_BLOCKED,
+        numItems: FRECENT_SITES_NUM_ITEMS,
+        topsiteFrecency: FRECENT_SITES_MIN_FRECENCY,
+        onePerDomain: true,
+        includeFavicon: false,
+      }
+    ),
+    TotalBookmarksCount: new CachedTargetingGetter("getTotalBookmarksCount"),
+    CheckBrowserNeedsUpdate: new CheckBrowserNeedsUpdate(),
+  },
+};
 
 /**
- * removeRandomItemFromArray - Removes a random item from the array and returns it.
+ * sortMessagesByWeightedRank
  *
- * @param {Array} arr An array of items
- * @returns one of the items in the array
+ * Each message has an associated weight, which is guaranteed to be strictly
+ * positive. Sort the messages so that higher weighted messages are more likely
+ * to come first.
+ *
+ * Specifically, sort them so that the probability of message x_1 with weight
+ * w_1 appearing before message x_2 with weight w_2 is (w_1 / (w_1 + w_2)).
+ *
+ * This is equivalent to requiring that x_1 appearing before x_2 is (w_1 / w_2)
+ * "times" as likely as x_2 appearing before x_1.
+ *
+ * See Bug 1484996, Comment 2 for a justification of the method.
+ *
+ * @param {Array} messages - A non-empty array of messages to sort, all with
+ *                           strictly positive weights
+ * @returns the sorted array
  */
-function removeRandomItemFromArray(arr) {
-  return arr.splice(Math.floor(Math.random() * arr.length), 1)[0];
+function sortMessagesByWeightedRank(messages) {
+  return messages
+    .map(message => ({message, rank: Math.pow(Math.random(), 1 / message.weight)}))
+    .sort((a, b) => b.rank - a.rank)
+    .map(({message}) => message);
 }
 
 const TargetingGetters = {
+  get locale() {
+    return Services.locale.appLocaleAsLangTag;
+  },
+  get localeLanguageCode() {
+    return Services.locale.appLocaleAsLangTag && Services.locale.appLocaleAsLangTag.substr(0, 2);
+  },
   get browserSettings() {
     const {settings} = TelemetryEnvironment.currentEnvironment;
     return {
@@ -92,10 +170,10 @@ const TargetingGetters = {
     return new Date();
   },
   get profileAgeCreated() {
-    return new ProfileAge(null, null).created;
+    return ProfileAge().then(times => times.created);
   },
   get profileAgeReset() {
-    return new ProfileAge(null, null).reset;
+    return ProfileAge().then(times => times.reset);
   },
   get usesFirefoxSync() {
     return Services.prefs.prefHasUserValue(FXA_USERNAME_PREF);
@@ -106,6 +184,10 @@ const TargetingGetters = {
       mobileDevices: Services.prefs.getIntPref("services.sync.clients.devices.mobile", 0),
       totalDevices: Services.prefs.getIntPref("services.sync.numClients", 0),
     };
+  },
+  get xpinstallEnabled() {
+    // This is needed for all add-on recommendations, to know if we allow xpi installs in the first place
+    return Services.prefs.getBoolPref("xpinstall.enabled", true);
   },
   get addonsInfo() {
     return AddonManager.getActiveAddons(["extension", "service"])
@@ -157,7 +239,7 @@ const TargetingGetters = {
     return Services.prefs.getIntPref("devtools.selfxss.count");
   },
   get topFrecentSites() {
-    return TopFrecentSitesCache.getTopFrecentSites.then(sites => sites.map(site => (
+    return QueryCache.queries.TopFrecentSites.get().then(sites => sites.map(site => (
       {
         url: site.url,
         host: (new URL(site.url)).hostname,
@@ -166,10 +248,12 @@ const TargetingGetters = {
       }
     )));
   },
-  // Temporary targeting function for the purposes of running the simplified onboarding experience
-  get isInExperimentCohort() {
-    const {cohort} = ASRouterPreferences.providers.find(i => i.id === "onboarding") || {};
-    return (typeof cohort === "number" ? cohort : 0);
+  get pinnedSites() {
+    return NewTabUtils.pinnedLinks.links.map(site => ({
+      url: site.url,
+      host: (new URL(site.url)).hostname,
+      searchTopSite: site.searchTopSite,
+    }));
   },
   get providerCohorts() {
     return ASRouterPreferences.providers.reduce((prev, current) => {
@@ -178,13 +262,16 @@ const TargetingGetters = {
     }, {});
   },
   get totalBookmarksCount() {
-    return TotalBookmarksCountCache.getTotalBookmarksCount;
+    return QueryCache.queries.TotalBookmarksCount.get();
   },
   get firefoxVersion() {
     return parseInt(AppConstants.MOZ_APP_VERSION.match(/\d+/), 10);
   },
   get region() {
     return Services.prefs.getStringPref(SEARCH_REGION_PREF, "");
+  },
+  get needsUpdate() {
+    return QueryCache.queries.CheckBrowserNeedsUpdate.get();
   },
 };
 
@@ -254,13 +341,9 @@ this.ASRouterTargeting = {
    * @returns {obj} an AS router message
    */
   async findMatchingMessage({messages, trigger, context, onError}) {
-    const arrayOfItems = [...messages];
-    let match;
-    let candidate;
+    const sortedMessages = sortMessagesByWeightedRank([...messages]);
 
-    while (!match && arrayOfItems.length) {
-      candidate = removeRandomItemFromArray(arrayOfItems);
-
+    for (const candidate of sortedMessages) {
       if (
         candidate &&
         (trigger ? this.isTriggerMatch(trigger, candidate.trigger) : !candidate.trigger) &&
@@ -268,15 +351,15 @@ this.ASRouterTargeting = {
         // Otherwise, we should choose a message with no trigger property (i.e. a message that can show up at any time)
         await this.checkMessageTargeting(candidate, context, onError)
       ) {
-        match = candidate;
+        return candidate;
       }
     }
-    return match;
+
+    return null;
   },
 };
 
 // Export for testing
-this.TopFrecentSitesCache = TopFrecentSitesCache;
-this.TotalBookmarksCountCache = TotalBookmarksCountCache;
+this.QueryCache = QueryCache;
 this.CachedTargetingGetter = CachedTargetingGetter;
-this.EXPORTED_SYMBOLS = ["ASRouterTargeting", "TopFrecentSitesCache", "TotalBookmarksCountCache", "CachedTargetingGetter"];
+this.EXPORTED_SYMBOLS = ["ASRouterTargeting", "QueryCache", "CachedTargetingGetter"];

@@ -288,16 +288,16 @@ namespace TuningDefaults {
     static const size_t MaxMallocBytes = 128 * 1024 * 1024;
 
     /* JSGC_ALLOCATION_THRESHOLD_FACTOR */
-    static const double AllocThresholdFactor = 0.9;
+    static const float AllocThresholdFactor = 0.9f;
 
     /* JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT */
-    static const double AllocThresholdFactorAvoidInterrupt = 0.9;
+    static const float AllocThresholdFactorAvoidInterrupt = 0.9f;
 
     /* no parameter */
-    static const double MallocThresholdGrowFactor = 1.5;
+    static const float MallocThresholdGrowFactor = 1.5f;
 
     /* no parameter */
-    static const double MallocThresholdShrinkFactor = 0.9;
+    static const float MallocThresholdShrinkFactor = 0.9f;
 
     /* no parameter */
     static const size_t MallocThresholdLimit = 1024 * 1024 * 1024;
@@ -312,19 +312,19 @@ namespace TuningDefaults {
     static const auto HighFrequencyThreshold = 1; // in seconds
 
     /* JSGC_HIGH_FREQUENCY_LOW_LIMIT */
-    static const uint64_t HighFrequencyLowLimitBytes = 100 * 1024 * 1024;
+    static const size_t HighFrequencyLowLimitBytes = 100 * 1024 * 1024;
 
     /* JSGC_HIGH_FREQUENCY_HIGH_LIMIT */
-    static const uint64_t HighFrequencyHighLimitBytes = 500 * 1024 * 1024;
+    static const size_t HighFrequencyHighLimitBytes = 500 * 1024 * 1024;
 
     /* JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MAX */
-    static const double HighFrequencyHeapGrowthMax = 3.0;
+    static const float HighFrequencyHeapGrowthMax = 3.0f;
 
     /* JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MIN */
-    static const double HighFrequencyHeapGrowthMin = 1.5;
+    static const float HighFrequencyHeapGrowthMin = 1.5f;
 
     /* JSGC_LOW_FREQUENCY_HEAP_GROWTH */
-    static const double LowFrequencyHeapGrowth = 1.5;
+    static const float LowFrequencyHeapGrowth = 1.5f;
 
     /* JSGC_DYNAMIC_MARK_SLICE */
     static const bool DynamicMarkSliceEnabled = false;
@@ -356,34 +356,36 @@ namespace TuningDefaults {
  * JSGC_ALLOCATION_THRESHOLD_FACTOR and
  * JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT parameters.
  */
-static const double MinAllocationThresholdFactor = 0.9;
+static const float MinAllocationThresholdFactor = 0.9f;
 
 /*
  * We may start to collect a zone before its trigger threshold is reached if
  * GCRuntime::maybeGC() is called for that zone or we start collecting other
  * zones. These eager threshold factors are not configurable.
  */
-static const double HighFrequencyEagerAllocTriggerFactor = 0.85;
-static const double LowFrequencyEagerAllocTriggerFactor = 0.9;
+static const float HighFrequencyEagerAllocTriggerFactor = 0.85f;
+static const float LowFrequencyEagerAllocTriggerFactor = 0.9f;
 
 /*
  * Don't allow heap growth factors to be set so low that collections could
  * reduce the trigger threshold.
  */
-static const double MinHighFrequencyHeapGrowthFactor =
-    1.0 / Min(HighFrequencyEagerAllocTriggerFactor, MinAllocationThresholdFactor);
-static const double MinLowFrequencyHeapGrowthFactor =
-    1.0 / Min(LowFrequencyEagerAllocTriggerFactor, MinAllocationThresholdFactor);
+static const float MinHighFrequencyHeapGrowthFactor =
+    1.0f / Min(HighFrequencyEagerAllocTriggerFactor, MinAllocationThresholdFactor);
+static const float MinLowFrequencyHeapGrowthFactor =
+    1.0f / Min(LowFrequencyEagerAllocTriggerFactor, MinAllocationThresholdFactor);
 
 /* Increase the IGC marking slice time if we are in highFrequencyGC mode. */
 static const int IGC_MARK_SLICE_MULTIPLIER = 2;
 
 const AllocKind gc::slotsToThingKind[] = {
+    // clang-format off
     /*  0 */ AllocKind::OBJECT0,  AllocKind::OBJECT2,  AllocKind::OBJECT2,  AllocKind::OBJECT4,
     /*  4 */ AllocKind::OBJECT4,  AllocKind::OBJECT8,  AllocKind::OBJECT8,  AllocKind::OBJECT8,
     /*  8 */ AllocKind::OBJECT8,  AllocKind::OBJECT12, AllocKind::OBJECT12, AllocKind::OBJECT12,
     /* 12 */ AllocKind::OBJECT12, AllocKind::OBJECT16, AllocKind::OBJECT16, AllocKind::OBJECT16,
     /* 16 */ AllocKind::OBJECT16
+    // clang-format on
 };
 
 // Check that reserved bits of a Cell are compatible with our typical allocators
@@ -1343,7 +1345,7 @@ js::gc::DumpArenaInfo()
  * Lifetime in number of major GCs for type sets attached to scripts containing
  * observed types.
  */
-static const uint64_t JIT_SCRIPT_RELEASE_TYPES_PERIOD = 20;
+static const unsigned JIT_SCRIPT_RELEASE_TYPES_PERIOD = 20;
 
 bool
 GCRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes)
@@ -1487,7 +1489,7 @@ bool
 GCSchedulingTunables::setParameter(JSGCParamKey key, uint32_t value, const AutoLockGC& lock)
 {
     // Limit heap growth factor to one hundred times size of current heap.
-    const double MaxHeapGrowthFactor = 100;
+    const float MaxHeapGrowthFactor = 100;
 
     switch(key) {
       case JSGC_MAX_BYTES:
@@ -1500,15 +1502,15 @@ GCSchedulingTunables::setParameter(JSGCParamKey key, uint32_t value, const AutoL
         highFrequencyThreshold_ = TimeDuration::FromMilliseconds(value);
         break;
       case JSGC_HIGH_FREQUENCY_LOW_LIMIT: {
-        uint64_t newLimit = (uint64_t)value * 1024 * 1024;
-        if (newLimit == UINT64_MAX) {
+        CheckedInt<size_t> newLimit = CheckedInt<size_t>(value) * 1024 * 1024;
+        if (!newLimit.isValid()) {
             return false;
         }
-        setHighFrequencyLowLimit(newLimit);
+        setHighFrequencyLowLimit(newLimit.value());
         break;
       }
       case JSGC_HIGH_FREQUENCY_HIGH_LIMIT: {
-        uint64_t newLimit = (uint64_t)value * 1024 * 1024;
+        size_t newLimit = (size_t)value * 1024 * 1024;
         if (newLimit == 0) {
             return false;
         }
@@ -1516,7 +1518,7 @@ GCSchedulingTunables::setParameter(JSGCParamKey key, uint32_t value, const AutoL
         break;
       }
       case JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MAX: {
-        double newGrowth = value / 100.0;
+        float newGrowth = value / 100.0f;
         if (newGrowth < MinHighFrequencyHeapGrowthFactor || newGrowth > MaxHeapGrowthFactor) {
             return false;
         }
@@ -1524,7 +1526,7 @@ GCSchedulingTunables::setParameter(JSGCParamKey key, uint32_t value, const AutoL
         break;
       }
       case JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MIN: {
-        double newGrowth = value / 100.0;
+        float newGrowth = value / 100.0f;
         if (newGrowth < MinHighFrequencyHeapGrowthFactor || newGrowth > MaxHeapGrowthFactor) {
             return false;
         }
@@ -1532,7 +1534,7 @@ GCSchedulingTunables::setParameter(JSGCParamKey key, uint32_t value, const AutoL
         break;
       }
       case JSGC_LOW_FREQUENCY_HEAP_GROWTH: {
-        double newGrowth = value / 100.0;
+        float newGrowth = value / 100.0f;
         if (newGrowth < MinLowFrequencyHeapGrowthFactor || newGrowth > MaxHeapGrowthFactor) {
             return false;
         }
@@ -1549,16 +1551,16 @@ GCSchedulingTunables::setParameter(JSGCParamKey key, uint32_t value, const AutoL
         gcZoneAllocThresholdBase_ = value * 1024 * 1024;
         break;
       case JSGC_ALLOCATION_THRESHOLD_FACTOR: {
-        double newFactor = value / 100.0;
-        if (newFactor < MinAllocationThresholdFactor || newFactor > 1.0) {
+        float newFactor = value / 100.0f;
+        if (newFactor < MinAllocationThresholdFactor || newFactor > 1.0f) {
             return false;
         }
         allocThresholdFactor_ = newFactor;
         break;
       }
       case JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT: {
-        double newFactor = value / 100.0;
-        if (newFactor < MinAllocationThresholdFactor || newFactor > 1.0) {
+        float newFactor = value / 100.0f;
+        if (newFactor < MinAllocationThresholdFactor || newFactor > 1.0f) {
             return false;
         }
         allocThresholdFactorAvoidInterrupt_ = newFactor;
@@ -1590,7 +1592,7 @@ GCSchedulingTunables::setMaxMallocBytes(size_t value)
 }
 
 void
-GCSchedulingTunables::setHighFrequencyLowLimit(uint64_t newLimit)
+GCSchedulingTunables::setHighFrequencyLowLimit(size_t newLimit)
 {
     highFrequencyLowLimitBytes_ = newLimit;
     if (highFrequencyLowLimitBytes_ >= highFrequencyHighLimitBytes_) {
@@ -1600,7 +1602,7 @@ GCSchedulingTunables::setHighFrequencyLowLimit(uint64_t newLimit)
 }
 
 void
-GCSchedulingTunables::setHighFrequencyHighLimit(uint64_t newLimit)
+GCSchedulingTunables::setHighFrequencyHighLimit(size_t newLimit)
 {
     highFrequencyHighLimitBytes_ = newLimit;
     if (highFrequencyHighLimitBytes_ <= highFrequencyLowLimitBytes_) {
@@ -1610,7 +1612,7 @@ GCSchedulingTunables::setHighFrequencyHighLimit(uint64_t newLimit)
 }
 
 void
-GCSchedulingTunables::setHighFrequencyHeapGrowthMin(double value)
+GCSchedulingTunables::setHighFrequencyHeapGrowthMin(float value)
 {
     highFrequencyHeapGrowthMin_ = value;
     if (highFrequencyHeapGrowthMin_ > highFrequencyHeapGrowthMax_) {
@@ -1621,7 +1623,7 @@ GCSchedulingTunables::setHighFrequencyHeapGrowthMin(double value)
 }
 
 void
-GCSchedulingTunables::setHighFrequencyHeapGrowthMax(double value)
+GCSchedulingTunables::setHighFrequencyHeapGrowthMax(float value)
 {
     highFrequencyHeapGrowthMax_ = value;
     if (highFrequencyHeapGrowthMax_ < highFrequencyHeapGrowthMin_) {
@@ -1632,7 +1634,7 @@ GCSchedulingTunables::setHighFrequencyHeapGrowthMax(double value)
 }
 
 void
-GCSchedulingTunables::setLowFrequencyHeapGrowth(double value)
+GCSchedulingTunables::setLowFrequencyHeapGrowth(float value)
 {
     lowFrequencyHeapGrowth_ = value;
     MOZ_ASSERT(lowFrequencyHeapGrowth_ >= MinLowFrequencyHeapGrowthFactor);
@@ -1889,6 +1891,7 @@ GCRuntime::setObjectsTenuredCallback(JSObjectsTenuredCallback callback,
 void
 GCRuntime::callObjectsTenuredCallback()
 {
+    JS::AutoSuppressGCAnalysis nogc;
     if (tenuredCallback.op) {
         tenuredCallback.op(rt->mainContextFromOwnThread(), tenuredCallback.data);
     }
@@ -2052,21 +2055,21 @@ GCRuntime::setMaxMallocBytes(size_t value, const AutoLockGC& lock)
     }
 }
 
-double
+float
 ZoneHeapThreshold::eagerAllocTrigger(bool highFrequencyGC) const
 {
-    double eagerTriggerFactor = highFrequencyGC ? HighFrequencyEagerAllocTriggerFactor
-                                                : LowFrequencyEagerAllocTriggerFactor;
+    float eagerTriggerFactor = highFrequencyGC ? HighFrequencyEagerAllocTriggerFactor
+                                               : LowFrequencyEagerAllocTriggerFactor;
     return eagerTriggerFactor * gcTriggerBytes();
 }
 
-/* static */ double
+/* static */ float
 ZoneHeapThreshold::computeZoneHeapGrowthFactorForHeapSize(size_t lastBytes,
                                                           const GCSchedulingTunables& tunables,
                                                           const GCSchedulingState& state)
 {
     if (!tunables.isDynamicHeapGrowthEnabled()) {
-        return 3.0;
+        return 3.0f;
     }
 
     // For small zones, our collection heuristics do not matter much: favor
@@ -2089,10 +2092,10 @@ ZoneHeapThreshold::computeZoneHeapGrowthFactorForHeapSize(size_t lastBytes,
     //   lastBytes > highFrequencyHighLimit: 150%
     //   otherwise: linear interpolation between 300% and 150% based on lastBytes
 
-    double minRatio = tunables.highFrequencyHeapGrowthMin();
-    double maxRatio = tunables.highFrequencyHeapGrowthMax();
-    double lowLimit = tunables.highFrequencyLowLimitBytes();
-    double highLimit = tunables.highFrequencyHighLimitBytes();
+    float minRatio = tunables.highFrequencyHeapGrowthMin();
+    float maxRatio = tunables.highFrequencyHeapGrowthMax();
+    size_t lowLimit = tunables.highFrequencyLowLimitBytes();
+    size_t highLimit = tunables.highFrequencyHighLimitBytes();
 
     MOZ_ASSERT(minRatio <= maxRatio);
     MOZ_ASSERT(lowLimit < highLimit);
@@ -2105,7 +2108,7 @@ ZoneHeapThreshold::computeZoneHeapGrowthFactorForHeapSize(size_t lastBytes,
         return minRatio;
     }
 
-    double factor = maxRatio - ((maxRatio - minRatio) * ((lastBytes - lowLimit) /
+    float factor = maxRatio - ((maxRatio - minRatio) * ((lastBytes - lowLimit) /
                                                          (highLimit - lowLimit)));
 
     MOZ_ASSERT(factor >= minRatio);
@@ -2114,7 +2117,7 @@ ZoneHeapThreshold::computeZoneHeapGrowthFactorForHeapSize(size_t lastBytes,
 }
 
 /* static */ size_t
-ZoneHeapThreshold::computeZoneTriggerBytes(double growthFactor, size_t lastBytes,
+ZoneHeapThreshold::computeZoneTriggerBytes(float growthFactor, size_t lastBytes,
                                            JSGCInvocationKind gckind,
                                            const GCSchedulingTunables& tunables,
                                            const AutoLockGC& lock)
@@ -2122,8 +2125,8 @@ ZoneHeapThreshold::computeZoneTriggerBytes(double growthFactor, size_t lastBytes
     size_t base = gckind == GC_SHRINK
                 ? Max(lastBytes, tunables.minEmptyChunkCount(lock) * ChunkSize)
                 : Max(lastBytes, tunables.gcZoneAllocThresholdBase());
-    double trigger = double(base) * growthFactor;
-    return size_t(Min(double(tunables.gcMaxBytes()), trigger));
+    float trigger = float(base) * growthFactor;
+    return size_t(Min(float(tunables.gcMaxBytes()), trigger));
 }
 
 void
@@ -2508,7 +2511,7 @@ ArenaList::relocateArenas(Arena* toRelocate, Arena* relocated, SliceBudget& slic
 
 // Skip compacting zones unless we can free a certain proportion of their GC
 // heap memory.
-static const double MIN_ZONE_RECLAIM_PERCENT = 2.0;
+static const float MIN_ZONE_RECLAIM_PERCENT = 2.0;
 
 static bool
 ShouldRelocateZone(size_t arenaCount, size_t relocCount, JS::gcreason::Reason reason)
@@ -2521,7 +2524,7 @@ ShouldRelocateZone(size_t arenaCount, size_t relocCount, JS::gcreason::Reason re
         return true;
     }
 
-    return (relocCount * 100.0) / arenaCount >= MIN_ZONE_RECLAIM_PERCENT;
+    return (relocCount * 100.0f) / arenaCount >= MIN_ZONE_RECLAIM_PERCENT;
 }
 
 static AllocKinds
@@ -3555,7 +3558,7 @@ GCRuntime::maybeAllocTriggerZoneGC(Zone* zone, const AutoLockGC& lock)
     }
 
     bool wouldInterruptCollection = isIncrementalGCInProgress() && !zone->isCollecting();
-    double zoneGCThresholdFactor =
+    float zoneGCThresholdFactor =
         wouldInterruptCollection ? tunables.allocThresholdFactorAvoidInterrupt()
                                  : tunables.allocThresholdFactor();
 
@@ -3641,8 +3644,8 @@ GCRuntime::maybeGC(Zone* zone)
         return;
     }
 
-    double threshold = zone->threshold.eagerAllocTrigger(schedulingState.inHighFrequencyGCMode());
-    double usedBytes = zone->usage.gcBytes();
+    float threshold = zone->threshold.eagerAllocTrigger(schedulingState.inHighFrequencyGCMode());
+    float usedBytes = zone->usage.gcBytes();
     if (usedBytes > 1024 * 1024 && usedBytes >= threshold &&
         !isIncrementalGCInProgress() && !isBackgroundSweeping())
     {
@@ -4286,8 +4289,9 @@ GCRuntime::purgeRuntime()
 
     // If we're the main runtime, tell helper threads to free their unused
     // memory when they are next idle.
-    if (!rt->parentRuntime)
+    if (!rt->parentRuntime) {
         HelperThreadState().triggerFreeUnusedMemory();
+    }
 }
 
 bool
@@ -8030,7 +8034,7 @@ GCRuntime::scanZonesBeforeGC()
 void
 GCRuntime::maybeDoCycleCollection()
 {
-    const static double ExcessiveGrayRealms = 0.8;
+    const static float ExcessiveGrayRealms = 0.8f;
     const static size_t LimitGrayRealms = 200;
 
     size_t realmsTotal = 0;
@@ -8042,7 +8046,7 @@ GCRuntime::maybeDoCycleCollection()
             ++realmsGray;
         }
     }
-    double grayFraction = double(realmsGray) / double(realmsTotal);
+    float grayFraction = float(realmsGray) / float(realmsTotal);
     if (grayFraction > ExcessiveGrayRealms || realmsGray > LimitGrayRealms) {
         callDoCycleCollectionCallback(rt->mainContextFromOwnThread());
     }
@@ -8817,6 +8821,12 @@ js::ReleaseAllJITCode(FreeOp* fop)
     for (ZonesIter zone(fop->runtime(), SkipAtoms); !zone.done(); zone.next()) {
         zone->setPreservingCode(false);
         zone->discardJitCode(fop);
+    }
+
+    for (RealmsIter realm(fop->runtime()); !realm.done(); realm.next()) {
+        if (jit::JitRealm* jitRealm = realm->jitRealm()) {
+            jitRealm->discardStubs();
+        }
     }
 }
 

@@ -35,7 +35,8 @@ function debug(s) {
 
 function _updateCurrentContentOuterWindowID(browser) {
   if (!browser.outerWindowID ||
-      browser.outerWindowID === _lastTopLevelWindowID) {
+      browser.outerWindowID === _lastTopLevelWindowID ||
+      browser.ownerGlobal != _trackedWindows[0]) {
     return;
   }
 
@@ -126,7 +127,7 @@ var WindowHelper = {
     messageManager.removeMessageListener("Browser:Init", _handleMessage);
   },
 
-  onActivate(window, hasFocus) {
+  onActivate(window) {
     // If this window was the last focused window, we don't need to do anything
     if (window == _trackedWindows[0])
       return;

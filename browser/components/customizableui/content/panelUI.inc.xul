@@ -147,6 +147,19 @@
       <description id="update-restart-description">&updateRestart.message2;</description>
     </popupnotificationcontent>
   </popupnotification>
+
+  <popupnotification id="appMenu-addon-installed-notification"
+                     popupid="addon-installed"
+                     closebuttonhidden="true"
+                     secondarybuttonhidden="true"
+                     dropmarkerhidden="true"
+                     checkboxhidden="true"
+                     buttonhighlight="true"
+                     hidden="true">
+    <popupnotificationcontent class="addon-installed-notification-content" orient="vertical">
+      <description>&addonPostInstallMessage.label;</description>
+    </popupnotificationcontent>
+  </popupnotification>
 </panel>
 
 <menupopup id="customizationPaletteItemContextMenu"
@@ -558,9 +571,6 @@
                      onclick="PanelUI.hide();"/>
     </panelview>
 
-    <panelview id="PanelUI-feeds" flex="1" oncommand="FeedHandler.subscribeToFeed(null, event);">
-    </panelview>
-
     <panelview id="PanelUI-containers" flex="1">
       <vbox id="PanelUI-containersItems"/>
     </panelview>
@@ -623,6 +633,10 @@
 
     <panelview id="appMenu-moreView" title="&moreMenu.label;" class="PanelUI-subView">
       <vbox class="panel-subview-body">
+        <toolbarbutton id="appMenu-taskmanager-button"
+                       class="subviewbutton subviewbutton-iconic"
+                       label="&taskManagerCmd.label;"
+                       oncommand="switchToTabHavingURI('about:performance', true)"/>
         <toolbarbutton id="appMenu-characterencoding-button"
                        class="subviewbutton subviewbutton-nav"
                        label="&charsetMenu2.label;"

@@ -45,18 +45,18 @@ class ExtensionDetail extends PureComponent {
       uuid,
       Localized(
         {
-          id: "about-debugging-extension-manifest-link"
+          id: "about-debugging-extension-manifest-link",
+          key: "manifest",
         },
         dom.a(
           {
             className: "extension-detail__manifest",
-            key: "manifest",
             href: manifestURL,
             target: "_blank",
           },
           "Manifest URL",
         )
-      )
+      ),
     ];
 
     const uuidName = this.props.getString("about-debugging-extension-uuid");

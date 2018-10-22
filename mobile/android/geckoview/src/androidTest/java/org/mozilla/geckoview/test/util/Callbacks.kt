@@ -5,9 +5,11 @@
 
 package org.mozilla.geckoview.test.util
 
+import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResponse
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoSession.NavigationDelegate.LoadRequest
 
 import android.view.inputmethod.CursorAnchorInfo
 import android.view.inputmethod.ExtractedText
@@ -53,8 +55,8 @@ class Callbacks private constructor() {
         override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) {
         }
 
-        override fun onLoadRequest(session: GeckoSession, uri: String, where: Int,
-                                   flags: Int): GeckoResult<Boolean>? {
+        override fun onLoadRequest(session: GeckoSession,
+                                   request: LoadRequest): GeckoResult<AllowOrDeny>? {
             return null
         }
 
@@ -127,6 +129,10 @@ class Callbacks private constructor() {
 
         override fun onFilePrompt(session: GeckoSession, title: String, type: Int, mimeTypes: Array<out String>, callback: GeckoSession.PromptDelegate.FileCallback) {
             callback.dismiss()
+        }
+
+        override fun onPopupRequest(session: GeckoSession, targetUri: String): GeckoResult<AllowOrDeny>? {
+            return null
         }
     }
 

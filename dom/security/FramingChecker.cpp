@@ -67,8 +67,7 @@ FramingChecker::CheckOneFrameOptionsPolicy(nsIHttpChannel* aHttpChannel,
   // principal and use it for the principal comparison.  Finding the top
   // content-type docshell doesn't work because some chrome documents are
   // loaded in content docshells (see bug 593387).
-  nsCOMPtr<nsIDocShellTreeItem> thisDocShellItem(
-    do_QueryInterface(static_cast<nsIDocShell*>(aDocShell)));
+  nsCOMPtr<nsIDocShellTreeItem> thisDocShellItem(aDocShell);
   nsCOMPtr<nsIDocShellTreeItem> parentDocShellItem;
   nsCOMPtr<nsIDocShellTreeItem> curDocShellItem = thisDocShellItem;
   nsCOMPtr<nsIDocument> topDoc;
@@ -107,7 +106,9 @@ FramingChecker::CheckOneFrameOptionsPolicy(nsIHttpChannel* aHttpChannel,
 
       if (checkSameOrigin) {
         topDoc->NodePrincipal()->GetURI(getter_AddRefs(topUri));
-        rv = ssm->CheckSameOriginURI(uri, topUri, true);
+        bool isPrivateWin =
+          topDoc->NodePrincipal()->OriginAttributesRef().mPrivateBrowsingId > 0;
+        rv = ssm->CheckSameOriginURI(uri, topUri, true, isPrivateWin);
 
         // one of the ancestors is not same origin as this document
         if (NS_FAILED(rv)) {
@@ -151,8 +152,9 @@ FramingChecker::CheckOneFrameOptionsPolicy(nsIHttpChannel* aHttpChannel,
     if (NS_FAILED(rv)) {
       return false;
     }
-
-    rv = ssm->CheckSameOriginURI(uri, topUri, true);
+    bool isPrivateWin =
+      topDoc->NodePrincipal()->OriginAttributesRef().mPrivateBrowsingId > 0;
+    rv = ssm->CheckSameOriginURI(uri, topUri, true, isPrivateWin);
     if (NS_FAILED(rv)) {
       ReportXFOViolation(curDocShellItem, uri, eALLOWFROM);
       return false;

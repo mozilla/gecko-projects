@@ -49,6 +49,12 @@ public:
   bool IsTRRBlacklisted(const nsACString &host, bool privateBrowsing, bool fullhost);
 
   bool MaybeBootstrap(const nsACString &possible, nsACString &result);
+  enum TrrOkay {
+    OKAY_NORMAL = 0,
+    OKAY_TIMEOUT = 1,
+    OKAY_BAD = 2
+  };
+  void TRRIsOkay(enum TrrOkay aReason);
 
 private:
   virtual  ~TRRService();
@@ -74,6 +80,7 @@ private:
   Atomic<bool, Relaxed> mEarlyAAAA; // allow use of AAAA results before A is in
   Atomic<bool, Relaxed> mDisableIPv6; // don't even try
   Atomic<bool, Relaxed> mDisableECS;  // disable EDNS Client Subnet in requests
+  Atomic<uint32_t, Relaxed> mDisableAfterFails;  // this many fails in a row means failed TRR service
 
   // TRR Blacklist storage
   RefPtr<DataStorage> mTRRBLStorage;
@@ -89,6 +96,7 @@ private:
   RefPtr<TRR> mConfirmer;
   nsCOMPtr<nsITimer> mRetryConfirmTimer;
   uint32_t mRetryConfirmInterval; // milliseconds until retry
+  Atomic<uint32_t, Relaxed> mTRRFailures;
 };
 
 extern TRRService *gTRRService;

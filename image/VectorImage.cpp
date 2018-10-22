@@ -66,7 +66,7 @@ public:
     MOZ_ASSERT(mVectorImage, "Need a non-null VectorImage");
 
     StartObserving();
-    Element* elem = GetTarget();
+    Element* elem = GetReferencedElementWithoutObserving();
     MOZ_ASSERT(elem, "no root SVG node for us to observe");
 
     SVGObserverUtils::AddRenderingObserver(elem, this);
@@ -82,17 +82,19 @@ public:
 protected:
   virtual ~SVGRootRenderingObserver()
   {
+    // This needs to call our GetReferencedElementWithoutObserving override,
+    // so must be called here rather than in our base class's dtor.
     StopObserving();
   }
 
-  virtual Element* GetTarget() override
+  Element* GetReferencedElementWithoutObserving() final
   {
     return mDocWrapper->GetRootSVGElem();
   }
 
   virtual void OnRenderingChange() override
   {
-    Element* elem = GetTarget();
+    Element* elem = GetReferencedElementWithoutObserving();
     MOZ_ASSERT(elem, "missing root SVG node");
 
     if (mHonoringInvalidations && !mDocWrapper->ShouldIgnoreInvalidation()) {
@@ -1129,9 +1131,9 @@ VectorImage::LookupCachedSurface(const IntSize& aSize,
   LookupResult result(MatchType::NOT_FOUND);
   SurfaceKey surfaceKey = VectorSurfaceKey(aSize, aSVGContext);
   if ((aFlags & FLAG_SYNC_DECODE) || !(aFlags & FLAG_HIGH_QUALITY_SCALING)) {
-    result = SurfaceCache::Lookup(ImageKey(this), surfaceKey);
+    result = SurfaceCache::Lookup(ImageKey(this), surfaceKey, /* aMarkUsed = */ true);
   } else {
-    result = SurfaceCache::LookupBestMatch(ImageKey(this), surfaceKey);
+    result = SurfaceCache::LookupBestMatch(ImageKey(this), surfaceKey, /* aMarkUsed = */ true);
   }
 
   IntSize rasterSize = result.SuggestedSize().IsEmpty()

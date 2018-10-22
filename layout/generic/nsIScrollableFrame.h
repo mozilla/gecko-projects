@@ -153,6 +153,15 @@ public:
    */
   virtual nsSize GetVisualViewportSize() const = 0;
   /**
+   * Returns the offset of the visual viewport relative to
+   * the origin of the scrolled content. Note that only the RCD-RSF
+   * has a distinct visual viewport; for other scroll frames, the
+   * visual viewport always coincides with the layout viewport, and
+   * consequently the offset this function returns is equal to
+   * GetScrollPosition().
+   */
+  virtual nsPoint GetVisualViewportOffset() const = 0;
+  /**
    * Return how much we would try to scroll by in each direction if
    * asked to scroll by one "line" vertically and horizontally.
    */
@@ -416,7 +425,7 @@ public:
   virtual mozilla::Maybe<mozilla::layers::ScrollMetadata> ComputeScrollMetadata(
     mozilla::layers::LayerManager* aLayerManager,
     const nsIFrame* aContainerReferenceFrame,
-    const ContainerLayerParameters& aParameters,
+    const mozilla::Maybe<ContainerLayerParameters>& aParameters,
     const mozilla::DisplayItemClip* aClip) const = 0;
   /**
    * Ensure's aLayer is clipped to the display port.

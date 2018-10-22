@@ -66,6 +66,10 @@ const {
 
 XPCOMUtils.defineLazyGetter(this, "console", ExtensionCommon.getConsole);
 
+XPCOMUtils.defineLazyGetter(this, "isContentScriptProcess", () => {
+  return Services.appinfo.processType === Services.appinfo.PROCESS_TYPE_CONTENT ||
+         !WebExtensionPolicy.useRemoteWebExtensions;
+});
 
 var DocumentManager;
 
@@ -378,6 +382,10 @@ class Script {
   }
 
   async injectInto(window) {
+    if (!isContentScriptProcess) {
+      return;
+    }
+
     let context = this.extension.getContext(window);
     try {
       if (this.runAt === "document_end") {
@@ -650,8 +658,7 @@ class UserScript extends Script {
       return;
     }
 
-    const clonedMetadata = scriptMetadata ?
-            Cu.cloneInto(scriptMetadata, apiScope) : undefined;
+    let clonedMetadata;
 
     const UserScriptError = userScriptScope.Error;
     const UserScriptPromise = userScriptScope.Promise;
@@ -687,6 +694,10 @@ class UserScript extends Script {
         } catch (err) {
           Cu.reportError(`Error cloning userScriptAPIMethod parameters in ${fnName}: ${err}`);
           throw new UserScriptError("Only serializable parameters are supported");
+        }
+
+        if (clonedMetadata === undefined) {
+          clonedMetadata = Cu.cloneInto(scriptMetadata, apiScope);
         }
 
         const res = runSafeSyncWithoutClone(fn, fnArgs, clonedMetadata, userScriptScope);

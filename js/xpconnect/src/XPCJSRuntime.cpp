@@ -114,6 +114,8 @@ const char* const XPCJSRuntime::mStrings[] = {
     "lastIndex",            // IDX_LASTINDEX
     "then",                 // IDX_THEN
     "isInstance",           // IDX_ISINSTANCE
+    "Infinity",             // IDX_INFINITY
+    "NaN",                  // IDX_NAN
 };
 
 /***************************************************************************/
@@ -453,13 +455,6 @@ Scriptability&
 Scriptability::Get(JSObject* aScope)
 {
     return RealmPrivate::Get(aScope)->scriptability;
-}
-
-/* static */
-Scriptability&
-Scriptability::Get(JSScript* aScript)
-{
-    return RealmPrivate::Get(aScript)->scriptability;
 }
 
 bool

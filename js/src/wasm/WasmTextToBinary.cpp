@@ -91,9 +91,7 @@ class WasmToken
         Equal,
         Error,
         Export,
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
         ExtraConversionOpcode,
-#endif
         Field,
         Float,
         Func,
@@ -249,7 +247,6 @@ class WasmToken
                    kind_ == Load || kind_ == Store);
         u.op_ = op;
     }
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
     explicit WasmToken(Kind kind, MiscOp op, const char16_t* begin, const char16_t* end)
       : kind_(kind),
         begin_(begin),
@@ -259,7 +256,6 @@ class WasmToken
         MOZ_ASSERT(kind_ == ExtraConversionOpcode);
         u.miscOp_ = op;
     }
-#endif
     explicit WasmToken(Kind kind, ThreadOp op, const char16_t* begin, const char16_t* end)
       : kind_(kind),
         begin_(begin),
@@ -322,12 +318,10 @@ class WasmToken
                    kind_ == Load || kind_ == Store);
         return u.op_;
     }
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
     MiscOp miscOp() const {
         MOZ_ASSERT(kind_ == ExtraConversionOpcode);
         return u.miscOp_;
     }
-#endif
     ThreadOp threadOp() const {
         MOZ_ASSERT(kind_ == AtomicCmpXchg || kind_ == AtomicLoad || kind_ == AtomicRMW ||
                    kind_ == AtomicStore || kind_ == Wait || kind_ == Wake);
@@ -349,9 +343,7 @@ class WasmToken
           case ComparisonOpcode:
           case Const:
           case ConversionOpcode:
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
           case ExtraConversionOpcode:
-#endif
           case CurrentMemory:
           case Drop:
           case GetGlobal:
@@ -1606,7 +1598,6 @@ WasmTokenStream::next()
                     return WasmToken(WasmToken::ConversionOpcode, Op::I32TruncUF64,
                                      begin, cur_);
                 }
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
                 if (consume(u"trunc_s:sat/f32")) {
                     return WasmToken(WasmToken::ExtraConversionOpcode, MiscOp::I32TruncSSatF32,
                                      begin, cur_);
@@ -1623,7 +1614,6 @@ WasmTokenStream::next()
                     return WasmToken(WasmToken::ExtraConversionOpcode, MiscOp::I32TruncUSatF64,
                                      begin, cur_);
                 }
-#endif
                 break;
               case 'w':
                 if (consume(u"wrap/i64")) {
@@ -1948,7 +1938,6 @@ WasmTokenStream::next()
                     return WasmToken(WasmToken::ConversionOpcode, Op::I64TruncUF64,
                                      begin, cur_);
                 }
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
                 if (consume(u"trunc_s:sat/f32")) {
                     return WasmToken(WasmToken::ExtraConversionOpcode, MiscOp::I64TruncSSatF32,
                                      begin, cur_);
@@ -1965,7 +1954,6 @@ WasmTokenStream::next()
                     return WasmToken(WasmToken::ExtraConversionOpcode, MiscOp::I64TruncUSatF64,
                                      begin, cur_);
                 }
-#endif
                 break;
               case 'w':
                 break;
@@ -2986,7 +2974,6 @@ ParseConversionOperator(WasmParseContext& c, Op op, bool inParens)
     return new(c.lifo) AstConversionOperator(op, operand);
 }
 
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
 static AstExtraConversionOperator*
 ParseExtraConversionOperator(WasmParseContext& c, MiscOp op, bool inParens)
 {
@@ -2997,7 +2984,6 @@ ParseExtraConversionOperator(WasmParseContext& c, MiscOp op, bool inParens)
 
     return new(c.lifo) AstExtraConversionOperator(op, operand);
 }
-#endif
 
 static AstDrop*
 ParseDrop(WasmParseContext& c, bool inParens)
@@ -3562,8 +3548,9 @@ static AstMemOrTableDrop*
 ParseMemOrTableDrop(WasmParseContext& c, bool isMem)
 {
     WasmToken segIndexTok;
-    if (!c.ts.getIf(WasmToken::Index, &segIndexTok))
+    if (!c.ts.getIf(WasmToken::Index, &segIndexTok)) {
         return nullptr;
+    }
 
     return new(c.lifo) AstMemOrTableDrop(isMem, segIndexTok.index());
 }
@@ -3593,20 +3580,24 @@ static AstMemOrTableInit*
 ParseMemOrTableInit(WasmParseContext& c, bool inParens, bool isMem)
 {
     WasmToken segIndexTok;
-    if (!c.ts.getIf(WasmToken::Index, &segIndexTok))
+    if (!c.ts.getIf(WasmToken::Index, &segIndexTok)) {
         return nullptr;
+    }
 
     AstExpr* dst = ParseExpr(c, inParens);
-    if (!dst)
+    if (!dst) {
         return nullptr;
+    }
 
     AstExpr* src = ParseExpr(c, inParens);
-    if (!src)
+    if (!src) {
         return nullptr;
+    }
 
     AstExpr* len = ParseExpr(c, inParens);
-    if (!len)
+    if (!len) {
         return nullptr;
+    }
 
     return new(c.lifo) AstMemOrTableInit(isMem, segIndexTok.index(), dst, src, len);
 }
@@ -3649,11 +3640,6 @@ ParseStructGet(WasmParseContext& c, bool inParens)
         return nullptr;
     }
 
-    if (!fieldDef.name().empty()) {
-        c.ts.generateError(c.ts.peek(), "constant field index required at this time", c.error);
-        return nullptr;
-    }
-
     AstExpr* ptr = ParseExpr(c, inParens);
     if (!ptr) {
         return nullptr;
@@ -3662,7 +3648,7 @@ ParseStructGet(WasmParseContext& c, bool inParens)
     // The field type is not available here, we must first resolve the type.
     // Fortunately, we don't need to inspect the result type of this operation.
 
-    return new(c.lifo) AstStructGet(typeDef, fieldDef.index(), ExprType(), ptr);
+    return new(c.lifo) AstStructGet(typeDef, fieldDef, ExprType(), ptr);
 }
 
 static AstExpr*
@@ -3678,11 +3664,6 @@ ParseStructSet(WasmParseContext& c, bool inParens)
         return nullptr;
     }
 
-    if (!fieldDef.name().empty()) {
-        c.ts.generateError(c.ts.peek(), "constant field index required at this time", c.error);
-        return nullptr;
-    }
-
     AstExpr* ptr = ParseExpr(c, inParens);
     if (!ptr) {
         return nullptr;
@@ -3693,7 +3674,7 @@ ParseStructSet(WasmParseContext& c, bool inParens)
         return nullptr;
     }
 
-    return new(c.lifo) AstStructSet(typeDef, fieldDef.index(), ptr, value);
+    return new(c.lifo) AstStructSet(typeDef, fieldDef, ptr, value);
 }
 
 static AstExpr*
@@ -3787,10 +3768,8 @@ ParseExprBody(WasmParseContext& c, WasmToken token, bool inParens)
         return ParseConst(c, token);
       case WasmToken::ConversionOpcode:
         return ParseConversionOperator(c, token.op(), inParens);
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
       case WasmToken::ExtraConversionOpcode:
         return ParseExtraConversionOperator(c, token.miscOp(), inParens);
-#endif
       case WasmToken::Drop:
         return ParseDrop(c, inParens);
       case WasmToken::If:
@@ -4238,8 +4217,9 @@ ParseInitializerExpressionOrPassive(WasmParseContext& c, AstExpr** maybeInitExpr
 #endif
 
     AstExpr* initExpr = ParseInitializerExpression(c);
-    if (!initExpr)
+    if (!initExpr) {
         return false;
+    }
 
     *maybeInitExpr = initExpr;
     return true;
@@ -5001,6 +4981,7 @@ class Resolver
     AstNameMap tableMap_;
     AstNameMap memoryMap_;
     AstNameMap typeMap_;
+    AstNameMap fieldMap_;
     AstNameVector targetStack_;
 
     bool registerName(AstNameMap& map, AstName name, size_t index) {
@@ -5040,6 +5021,7 @@ class Resolver
         tableMap_(lifo),
         memoryMap_(lifo),
         typeMap_(lifo),
+        fieldMap_(lifo),
         targetStack_(lifo)
     {}
     void beginFunc() {
@@ -5059,6 +5041,7 @@ class Resolver
     REGISTER(Table, tableMap_)
     REGISTER(Memory, memoryMap_)
     REGISTER(Type, typeMap_)
+    REGISTER(Field, fieldMap_)
 
 #undef REGISTER
 
@@ -5085,6 +5068,7 @@ class Resolver
     RESOLVE(tableMap_, Table)
     RESOLVE(memoryMap_, Memory)
     RESOLVE(typeMap_, Type)
+    RESOLVE(fieldMap_, Field)
 
 #undef RESOLVE
 
@@ -5340,13 +5324,11 @@ ResolveConversionOperator(Resolver& r, AstConversionOperator& b)
     return ResolveExpr(r, *b.operand());
 }
 
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
 static bool
 ResolveExtraConversionOperator(Resolver& r, AstExtraConversionOperator& b)
 {
     return ResolveExpr(r, *b.operand());
 }
-#endif
 
 static bool
 ResolveIfElse(Resolver& r, AstIf& i)
@@ -5508,6 +5490,10 @@ ResolveStructGet(Resolver& r, AstStructGet& s)
         return false;
     }
 
+    if (!r.resolveField(s.fieldName())) {
+        return false;
+    }
+
     return ResolveExpr(r, s.ptr());
 }
 
@@ -5515,6 +5501,10 @@ static bool
 ResolveStructSet(Resolver& r, AstStructSet& s)
 {
     if (!r.resolveType(s.structType())) {
+        return false;
+    }
+
+    if (!r.resolveField(s.fieldName())) {
         return false;
     }
 
@@ -5571,10 +5561,8 @@ ResolveExpr(Resolver& r, AstExpr& expr)
         return true;
       case AstExprKind::ConversionOperator:
         return ResolveConversionOperator(r, expr.as<AstConversionOperator>());
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
       case AstExprKind::ExtraConversionOperator:
         return ResolveExtraConversionOperator(r, expr.as<AstExtraConversionOperator>());
-#endif
       case AstExprKind::First:
         return ResolveFirst(r, expr.as<AstFirst>());
       case AstExprKind::GetGlobal:
@@ -5703,6 +5691,14 @@ ResolveModule(LifoAlloc& lifo, AstModule* module, UniqueChars* error)
             AstStructType* structType = &td->asStructType();
             if (!r.registerTypeName(structType->name(), i)) {
                 return r.fail("duplicate type name");
+            }
+
+            size_t numFields = structType->fieldNames().length();
+            for (size_t j = 0; j < numFields; j++) {
+                const AstName& fieldName = structType->fieldNames()[j];
+                if (!r.registerFieldName(fieldName, j)) {
+                    return r.fail("duplicate field name (must be unique in module)");
+                }
             }
         } else {
             MOZ_CRASH("Bad type");
@@ -6092,14 +6088,12 @@ EncodeConversionOperator(Encoder& e, AstConversionOperator& b)
            e.writeOp(b.op());
 }
 
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
 static bool
 EncodeExtraConversionOperator(Encoder& e, AstExtraConversionOperator& b)
 {
     return EncodeExpr(e, *b.operand()) &&
            e.writeOp(b.op());
 }
-#endif
 
 static bool
 EncodeIf(Encoder& e, AstIf& i)
@@ -6296,13 +6290,16 @@ EncodeWake(Encoder& e, AstWake& s)
 }
 
 #ifdef ENABLE_WASM_BULKMEM_OPS
+static const uint8_t DEFAULT_MEM_TABLE_FLAGS = 0;
+
 static bool
 EncodeMemOrTableCopy(Encoder& e, AstMemOrTableCopy& s)
 {
     return EncodeExpr(e, s.dest()) &&
            EncodeExpr(e, s.src()) &&
            EncodeExpr(e, s.len()) &&
-           e.writeOp(s.isMem() ? MiscOp::MemCopy : MiscOp::TableCopy);
+           e.writeOp(s.isMem() ? MiscOp::MemCopy : MiscOp::TableCopy) &&
+           e.writeFixedU8(DEFAULT_MEM_TABLE_FLAGS);
 }
 
 static bool
@@ -6318,7 +6315,8 @@ EncodeMemFill(Encoder& e, AstMemFill& s)
     return EncodeExpr(e, s.start()) &&
            EncodeExpr(e, s.val()) &&
            EncodeExpr(e, s.len()) &&
-           e.writeOp(MiscOp::MemFill);
+           e.writeOp(MiscOp::MemFill) &&
+           e.writeFixedU8(DEFAULT_MEM_TABLE_FLAGS);
 }
 
 static bool
@@ -6328,6 +6326,7 @@ EncodeMemOrTableInit(Encoder& e, AstMemOrTableInit& s)
            EncodeExpr(e, s.src()) &&
            EncodeExpr(e, s.len()) &&
            e.writeOp(s.isMem() ? MiscOp::MemInit : MiscOp::TableInit) &&
+           e.writeFixedU8(DEFAULT_MEM_TABLE_FLAGS) &&
            e.writeVarU32(s.segIndex());
 }
 #endif
@@ -6363,7 +6362,7 @@ EncodeStructGet(Encoder& e, AstStructGet& s)
     if (!e.writeVarU32(s.structType().index())) {
         return false;
     }
-    if (!e.writeVarU32(s.index())) {
+    if (!e.writeVarU32(s.fieldName().index())) {
         return false;
     }
     return true;
@@ -6384,7 +6383,7 @@ EncodeStructSet(Encoder& e, AstStructSet& s)
     if (!e.writeVarU32(s.structType().index())) {
         return false;
     }
-    if (!e.writeVarU32(s.index())) {
+    if (!e.writeVarU32(s.fieldName().index())) {
         return false;
     }
     return true;
@@ -6446,10 +6445,8 @@ EncodeExpr(Encoder& e, AstExpr& expr)
         return EncodeConversionOperator(e, expr.as<AstConversionOperator>());
       case AstExprKind::Drop:
         return EncodeDrop(e, expr.as<AstDrop>());
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
       case AstExprKind::ExtraConversionOperator:
         return EncodeExtraConversionOperator(e, expr.as<AstExtraConversionOperator>());
-#endif
       case AstExprKind::First:
         return EncodeFirst(e, expr.as<AstFirst>());
       case AstExprKind::GetLocal:
@@ -7000,15 +6997,19 @@ EncodeDestinationOffsetOrFlags(Encoder& e, AstExpr* offsetIfActive)
         // In the MVP, the following VarU32 is the table or linear memory
         // index and it must be zero.  In the bulk-mem-ops proposal, it is
         // repurposed as a flag field.
-        if (!e.writeVarU32(uint32_t(InitializerKind::Active)))
+        if (!e.writeVarU32(uint32_t(InitializerKind::Active))) {
             return false;
-        if (!EncodeExpr(e, *offsetIfActive))
+        }
+        if (!EncodeExpr(e, *offsetIfActive)) {
             return false;
-        if (!e.writeOp(Op::End))
+        }
+        if (!e.writeOp(Op::End)) {
             return false;
+        }
     } else {
-        if (!e.writeVarU32(uint32_t(InitializerKind::Passive)))
+        if (!e.writeVarU32(uint32_t(InitializerKind::Passive))) {
             return false;
+        }
     }
 
     return true;

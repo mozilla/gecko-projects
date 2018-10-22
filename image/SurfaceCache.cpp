@@ -188,11 +188,6 @@ public:
 
     void Add(NotNull<CachedSurface*> aCachedSurface, bool aIsFactor2)
     {
-      SurfaceMemoryCounter counter(aCachedSurface->GetSurfaceKey(),
-                                   aCachedSurface->IsLocked(),
-                                   aCachedSurface->CannotSubstitute(),
-                                   aIsFactor2);
-
       if (aCachedSurface->IsPlaceholder()) {
         return;
       }
@@ -201,16 +196,22 @@ public:
       // straightforward relationship to the size of the surface that
       // DrawableRef() returns if the surface is generated dynamically. (i.e.,
       // for surfaces with PlaybackType::eAnimated.)
-      size_t heap = 0;
-      size_t nonHeap = 0;
-      size_t handles = 0;
-      aCachedSurface->mProvider
-        ->AddSizeOfExcludingThis(mMallocSizeOf, heap, nonHeap, handles);
-      counter.Values().SetDecodedHeap(heap);
-      counter.Values().SetDecodedNonHeap(nonHeap);
-      counter.Values().SetExternalHandles(handles);
+      aCachedSurface->mProvider->AddSizeOfExcludingThis(mMallocSizeOf,
+        [&](ISurfaceProvider::AddSizeOfCbData& aMetadata) {
+          SurfaceMemoryCounter counter(aCachedSurface->GetSurfaceKey(),
+                                       aCachedSurface->IsLocked(),
+                                       aCachedSurface->CannotSubstitute(),
+                                       aIsFactor2);
 
-      mCounters.AppendElement(counter);
+          counter.Values().SetDecodedHeap(aMetadata.heap);
+          counter.Values().SetDecodedNonHeap(aMetadata.nonHeap);
+          counter.Values().SetExternalHandles(aMetadata.handles);
+          counter.Values().SetFrameIndex(aMetadata.index);
+          counter.Values().SetExternalId(aMetadata.externalId);
+
+          mCounters.AppendElement(counter);
+        }
+      );
     }
 
   private:
@@ -959,7 +960,7 @@ public:
   LookupResult Lookup(const ImageKey    aImageKey,
                       const SurfaceKey& aSurfaceKey,
                       const StaticMutexAutoLock& aAutoLock,
-                      bool aMarkUsed = true)
+                      bool aMarkUsed)
   {
     RefPtr<ImageSurfaceCache> cache = GetImageCache(aImageKey);
     if (!cache) {
@@ -998,7 +999,8 @@ public:
 
   LookupResult LookupBestMatch(const ImageKey         aImageKey,
                                const SurfaceKey&      aSurfaceKey,
-                               const StaticMutexAutoLock& aAutoLock)
+                               const StaticMutexAutoLock& aAutoLock,
+                               bool aMarkUsed)
   {
     RefPtr<ImageSurfaceCache> cache = GetImageCache(aImageKey);
     if (!cache) {
@@ -1044,7 +1046,8 @@ public:
 
     if (matchType == MatchType::EXACT ||
         matchType == MatchType::SUBSTITUTE_BECAUSE_BEST) {
-      if (!MarkUsed(WrapNotNull(surface), WrapNotNull(cache), aAutoLock)) {
+      if (aMarkUsed &&
+          !MarkUsed(WrapNotNull(surface), WrapNotNull(cache), aAutoLock)) {
         Remove(WrapNotNull(surface), /* aStopTracking */ false, aAutoLock);
       }
     }
@@ -1515,7 +1518,8 @@ SurfaceCache::Shutdown()
 
 /* static */ LookupResult
 SurfaceCache::Lookup(const ImageKey         aImageKey,
-                     const SurfaceKey&      aSurfaceKey)
+                     const SurfaceKey&      aSurfaceKey,
+                     bool aMarkUsed)
 {
   nsTArray<RefPtr<CachedSurface>> discard;
   LookupResult rv(MatchType::NOT_FOUND);
@@ -1526,7 +1530,7 @@ SurfaceCache::Lookup(const ImageKey         aImageKey,
       return rv;
     }
 
-    rv = sInstance->Lookup(aImageKey, aSurfaceKey, lock);
+    rv = sInstance->Lookup(aImageKey, aSurfaceKey, lock, aMarkUsed);
     sInstance->TakeDiscard(discard, lock);
   }
 
@@ -1535,7 +1539,8 @@ SurfaceCache::Lookup(const ImageKey         aImageKey,
 
 /* static */ LookupResult
 SurfaceCache::LookupBestMatch(const ImageKey         aImageKey,
-                              const SurfaceKey&      aSurfaceKey)
+                              const SurfaceKey&      aSurfaceKey,
+                              bool aMarkUsed)
 {
   nsTArray<RefPtr<CachedSurface>> discard;
   LookupResult rv(MatchType::NOT_FOUND);
@@ -1546,7 +1551,7 @@ SurfaceCache::LookupBestMatch(const ImageKey         aImageKey,
       return rv;
     }
 
-    rv = sInstance->LookupBestMatch(aImageKey, aSurfaceKey, lock);
+    rv = sInstance->LookupBestMatch(aImageKey, aSurfaceKey, lock, aMarkUsed);
     sInstance->TakeDiscard(discard, lock);
   }
 

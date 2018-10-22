@@ -183,7 +183,7 @@ def is_windows():
 
 
 def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
-                    src_dir, stage_dir, build_libcxx,
+                    src_dir, stage_dir, package_name, build_libcxx,
                     osx_cross_compile, build_type, assertions,
                     python_path, gcc_dir, libcxx_include_dir,
                     is_final_stage=False):
@@ -191,7 +191,7 @@ def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
         os.mkdir(stage_dir)
 
     build_dir = stage_dir + "/build"
-    inst_dir = stage_dir + "/clang"
+    inst_dir = stage_dir + "/" + package_name
 
     # cmake doesn't deal well with backslashes in paths.
     def slashify_path(path):
@@ -351,7 +351,7 @@ def get_tool(config, key):
 #       clang-format-diff.py
 #       clang-tidy-diff.py
 #       run-clang-tidy.py
-def prune_final_dir_for_clang_tidy(final_dir):
+def prune_final_dir_for_clang_tidy(final_dir, osx_cross_compile):
     # Make sure we only have what we expect.
     dirs = ("bin", "include", "lib", "lib32", "libexec", "msbuild-bin", "share", "tools")
     for f in glob.glob("%s/*" % final_dir):
@@ -376,7 +376,7 @@ def prune_final_dir_for_clang_tidy(final_dir):
         name = os.path.basename(f)
         if name == "clang":
             continue
-        if is_darwin() and name == 'libLLVM.dylib':
+        if osx_cross_compile and name == 'libLLVM.dylib':
             continue
         if is_linux() and fnmatch.fnmatch(name, 'libLLVM*.so'):
             continue
@@ -588,7 +588,9 @@ if __name__ == "__main__":
         if os.path.exists(l[0]):
             symlink(l[0], l[1])
 
+    package_name = "clang"
     if build_clang_tidy:
+        package_name = "clang-tidy"
         import_clang_tidy(llvm_source_dir)
 
     if not os.path.exists(build_dir):
@@ -598,7 +600,7 @@ if __name__ == "__main__":
                                       "libcxx", "include")
 
     stage1_dir = build_dir + '/stage1'
-    stage1_inst_dir = stage1_dir + '/clang'
+    stage1_inst_dir = stage1_dir + '/' + package_name
 
     final_stage_dir = stage1_dir
 
@@ -616,7 +618,8 @@ if __name__ == "__main__":
         # Silence clang's warnings about arguments not being used in compilation.
         extra_cxxflags2 = ["-fPIC", '-Qunused-arguments']
         extra_asmflags = []
-        extra_ldflags = []
+        # Avoid libLLVM internal function calls going through the PLT.
+        extra_ldflags = ['-Wl,-Bsymbolic-functions']
 
         if 'LD_LIBRARY_PATH' in os.environ:
             os.environ['LD_LIBRARY_PATH'] = ('%s/lib64/:%s' %
@@ -662,12 +665,12 @@ if __name__ == "__main__":
         [asm] + extra_asmflags,
         [ld] + extra_ldflags,
         ar, ranlib, libtool,
-        llvm_source_dir, stage1_dir, build_libcxx, osx_cross_compile,
+        llvm_source_dir, stage1_dir, package_name, build_libcxx, osx_cross_compile,
         build_type, assertions, python_path, gcc_dir, libcxx_include_dir)
 
     if stages > 1:
         stage2_dir = build_dir + '/stage2'
-        stage2_inst_dir = stage2_dir + '/clang'
+        stage2_inst_dir = stage2_dir + '/' + package_name
         final_stage_dir = stage2_dir
         build_one_stage(
             [stage1_inst_dir + "/bin/%s%s" %
@@ -678,7 +681,7 @@ if __name__ == "__main__":
                 (cc_name, exe_ext)] + extra_asmflags,
             [ld] + extra_ldflags,
             ar, ranlib, libtool,
-            llvm_source_dir, stage2_dir, build_libcxx, osx_cross_compile,
+            llvm_source_dir, stage2_dir, package_name, build_libcxx, osx_cross_compile,
             build_type, assertions, python_path, gcc_dir, libcxx_include_dir,
             stages == 2)
 
@@ -694,15 +697,14 @@ if __name__ == "__main__":
                 (cc_name, exe_ext)] + extra_asmflags,
             [ld] + extra_ldflags,
             ar, ranlib, libtool,
-            llvm_source_dir, stage3_dir, build_libcxx, osx_cross_compile,
+            llvm_source_dir, stage3_dir, package_name, build_libcxx, osx_cross_compile,
             build_type, assertions, python_path, gcc_dir, libcxx_include_dir,
             stages == 3)
 
-    package_name = "clang"
     if build_clang_tidy:
-        prune_final_dir_for_clang_tidy(os.path.join(final_stage_dir, "clang"))
-        package_name = "clang-tidy"
+        prune_final_dir_for_clang_tidy(os.path.join(final_stage_dir, package_name),
+                                       osx_cross_compile)
 
     if not args.skip_tar:
         ext = "bz2" if is_darwin() or is_windows() else "xz"
-        build_tar_package("tar", "%s.tar.%s" % (package_name, ext), final_stage_dir, "clang")
+        build_tar_package("tar", "%s.tar.%s" % (package_name, ext), final_stage_dir, package_name)

@@ -175,8 +175,8 @@ GetFile(nsIFile* dir, const nsACString& name, nsCOMPtr<nsIFile>& result)
   if (NS_FAILED(rv))
     return false;
 
-  result = do_QueryInterface(file, &rv);
-  return NS_SUCCEEDED(rv);
+  result = file;
+  return true;
 }
 
 static bool
@@ -297,6 +297,7 @@ IsOlderVersion(nsIFile *versionFile, const char *appVersion)
   return false;
 }
 
+#if !defined(XP_WIN)
 static bool
 CopyFileIntoUpdateDir(nsIFile *parentDir, const nsACString& leaf, nsIFile *updateDir)
 {
@@ -363,6 +364,7 @@ CopyUpdaterIntoUpdateDir(nsIFile *greDir, nsIFile *appDir, nsIFile *updateDir,
   rv = updater->AppendNative(NS_LITERAL_CSTRING(UPDATER_BIN));
   return NS_SUCCEEDED(rv);
 }
+#endif
 
 /**
  * Appends the specified path to the library path.

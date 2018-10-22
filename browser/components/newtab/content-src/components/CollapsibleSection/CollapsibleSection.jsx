@@ -69,7 +69,7 @@ export class _CollapsibleSection extends React.PureComponent {
     // Get the current height of the body so max-height transitions can work
     this.setState({
       isAnimating: true,
-      maxHeight: `${this.sectionBody.scrollHeight}px`,
+      maxHeight: `${this._getSectionBodyHeight()}px`,
     });
     const {action, userEvent} = SectionMenuOptions.CheckCollapsed(this.props);
     this.props.dispatch(action);
@@ -77,6 +77,17 @@ export class _CollapsibleSection extends React.PureComponent {
       event: userEvent,
       source: this.props.source,
     }));
+  }
+
+  _getSectionBodyHeight() {
+    const div = this.sectionBody;
+    if (div.style.display === "none") {
+      // If the div isn't displayed, we can't get it's height. So we display it
+      // to get the height (it doesn't show up because max-height is set to 0px
+      // in CSS). We don't undo this because we are about to expand the section.
+      div.style.display = "block";
+    }
+    return div.scrollHeight;
   }
 
   onTransitionEnd(event) {
@@ -116,6 +127,12 @@ export class _CollapsibleSection extends React.PureComponent {
     const {enableAnimation, isAnimating, maxHeight, menuButtonHover, showContextMenu} = this.state;
     const {id, eventSource, collapsed, learnMore, title, extraMenuOptions, showPrefName, privacyNoticeURL, dispatch, isFirst, isLast, isWebExtension} = this.props;
     const active = menuButtonHover || showContextMenu;
+    let bodyStyle;
+    if (isAnimating && !collapsed) {
+      bodyStyle = {maxHeight};
+    } else if (!isAnimating && collapsed) {
+      bodyStyle = {display: "none"};
+    }
     return (
       <section
         className={`collapsible-section ${this.props.className}${enableAnimation ? " animation-enabled" : ""}${collapsed ? " collapsed" : ""}${active ? " active" : ""}`}
@@ -128,6 +145,9 @@ export class _CollapsibleSection extends React.PureComponent {
                 {this.renderIcon()}
                 {getFormattedMessage(title)}
               </span>
+              <span className="click-target" onClick={this.onHeaderClick}>
+                {isCollapsible && <span className={`collapsible-arrow icon ${collapsed ? "icon-arrowhead-forward-small" : "icon-arrowhead-down-small"}`} />}
+              </span>
               <span>
                 {learnMore &&
                   <span className="learn-more-link">
@@ -137,14 +157,12 @@ export class _CollapsibleSection extends React.PureComponent {
                   </span>
                 }
               </span>
-              <span className="click-target" onClick={this.onHeaderClick}>
-                {isCollapsible && <span className={`collapsible-arrow icon ${collapsed ? "icon-arrowhead-forward-small" : "icon-arrowhead-down-small"}`} />}
-              </span>
             </span>
           </h3>
           <div>
             <button
               className="context-menu-button icon"
+              title={this.props.intl.formatMessage({id: "context_menu_title"})}
               onClick={this.onMenuButtonClick}
               onMouseEnter={this.onMenuButtonMouseEnter}
               onMouseLeave={this.onMenuButtonMouseLeave}>
@@ -173,7 +191,7 @@ export class _CollapsibleSection extends React.PureComponent {
             className={`section-body${isAnimating ? " animating" : ""}`}
             onTransitionEnd={this.onTransitionEnd}
             ref={this.onBodyMount}
-            style={isAnimating && !collapsed ? {maxHeight} : null}>
+            style={bodyStyle}>
             {this.props.children}
           </div>
         </ErrorBoundary>

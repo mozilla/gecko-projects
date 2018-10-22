@@ -153,9 +153,7 @@ var UITour = {
     ["searchIcon", {
       query: (aDocument) => {
         let searchbar = aDocument.getElementById("searchbar");
-        return aDocument.getAnonymousElementByAttribute(searchbar,
-                                                        "anonid",
-                                                        "searchbar-search-button");
+        return searchbar.querySelector(".searchbar-search-button");
       },
       widgetName: "search-container",
     }],
@@ -1552,7 +1550,7 @@ var UITour = {
 
       // Expose Profile creation and last reset dates in weeks.
       const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
-      let profileAge = new ProfileAge(null, null);
+      let profileAge = await ProfileAge();
       let createdDate = await profileAge.created;
       let resetDate = await profileAge.reset;
       let createdWeeksAgo = Math.floor((Date.now() - createdDate) / ONE_WEEK);

@@ -52,11 +52,13 @@ XPCOMUtils.defineLazyServiceGetter(this, "Telemetry",
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   ClientID: "resource://gre/modules/ClientID.jsm",
+  CoveragePing: "resource://gre/modules/CoveragePing.jsm",
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
   TelemetryStorage: "resource://gre/modules/TelemetryStorage.jsm",
   TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.jsm",
   TelemetryArchive: "resource://gre/modules/TelemetryArchive.jsm",
   TelemetrySession: "resource://gre/modules/TelemetrySession.jsm",
+  MemoryTelemetry: "resource://gre/modules/MemoryTelemetry.jsm",
   TelemetrySend: "resource://gre/modules/TelemetrySend.jsm",
   TelemetryReportingPolicy: "resource://gre/modules/TelemetryReportingPolicy.jsm",
   TelemetryModules: "resource://gre/modules/ModulesPing.jsm",
@@ -631,6 +633,7 @@ var Impl = {
     // Perform a lightweight, early initialization for the component, just registering
     // a few observers and initializing the session.
     TelemetrySession.earlyInit(this._testMode);
+    MemoryTelemetry.earlyInit(this._testMode);
 
     // Annotate crash reports so that we get pings for startup crashes
     TelemetrySend.earlyInit();
@@ -672,6 +675,7 @@ var Impl = {
 
         // Perform TelemetrySession delayed init.
         await TelemetrySession.delayedInit();
+        await MemoryTelemetry.delayedInit();
 
         if (Services.prefs.getBoolPref(TelemetryUtils.Preferences.NewProfilePingEnabled, false) &&
             !TelemetrySession.newProfilePingSent) {
@@ -694,6 +698,9 @@ var Impl = {
         if (!this._shuttingDown) {
           // Report the modules loaded in the Firefox process.
           TelemetryModules.start();
+
+          // Send coverage ping.
+          await CoveragePing.startup();
         }
 
         TelemetryEventPing.startup();
@@ -728,7 +735,7 @@ var Impl = {
       this._log.trace("setupContentTelemetry - Content process recording disabled.");
       return;
     }
-    TelemetrySession.setupContent(testing);
+    MemoryTelemetry.setupContent(testing);
   },
 
   // Do proper shutdown waiting and cleanup.
@@ -761,6 +768,7 @@ var Impl = {
       await TelemetryHealthPing.shutdown();
 
       await TelemetrySession.shutdown();
+      await MemoryTelemetry.shutdown();
 
       // First wait for clients processing shutdown.
       await this._shutdownBarrier.wait();

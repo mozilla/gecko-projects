@@ -98,7 +98,7 @@ Module::startTier2(const CompileArgs& args,
 bool
 Module::finishTier2(const LinkData& linkData2, UniqueCodeTier code2) const
 {
-    MOZ_ASSERT(code().bestTier() == Tier::Baseline && code2->tier() == Tier::Ion);
+    MOZ_ASSERT(code().bestTier() == Tier::Baseline && code2->tier() == Tier::Optimized);
 
     // Install the data in the data structures. They will not be visible
     // until commitTier2().
@@ -119,7 +119,7 @@ Module::finishTier2(const LinkData& linkData2, UniqueCodeTier code2) const
         const MetadataTier& metadataTier1 = metadata(Tier::Baseline);
 
         auto stubs1 = code().codeTier(Tier::Baseline).lazyStubs().lock();
-        auto stubs2 = code().codeTier(Tier::Ion).lazyStubs().lock();
+        auto stubs2 = code().codeTier(Tier::Optimized).lazyStubs().lock();
 
         MOZ_ASSERT(stubs2->empty());
 
@@ -138,7 +138,7 @@ Module::finishTier2(const LinkData& linkData2, UniqueCodeTier code2) const
         }
 
         HasGcTypes gcTypesConfigured = code().metadata().temporaryGcTypesConfigured;
-        const CodeTier& tier2 = code().codeTier(Tier::Ion);
+        const CodeTier& tier2 = code().codeTier(Tier::Optimized);
 
         Maybe<size_t> stub2Index;
         if (!stubs2->createTier2(gcTypesConfigured, funcExportIndices, tier2, &stub2Index)) {
@@ -155,8 +155,8 @@ Module::finishTier2(const LinkData& linkData2, UniqueCodeTier code2) const
 
     // And we update the jump vector.
 
-    uint8_t* base = code().segment(Tier::Ion).base();
-    for (const CodeRange& cr : metadata(Tier::Ion).codeRanges) {
+    uint8_t* base = code().segment(Tier::Optimized).base();
+    for (const CodeRange& cr : metadata(Tier::Optimized).codeRanges) {
         // These are racy writes that we just want to be visible, atomically,
         // eventually.  All hardware we care about will do this right.  But
         // we depend on the compiler not splitting the stores hidden inside the
@@ -168,13 +168,15 @@ Module::finishTier2(const LinkData& linkData2, UniqueCodeTier code2) const
         }
     }
 
-    // Tier-2 is done; let everyone know.
+    // Tier-2 is done; let everyone know. Mark tier-2 active for testing
+    // purposes so that wasmHasTier2CompilationCompleted() only returns true
+    // after tier-2 has been fully cached.
 
-    testingTier2Active_ = false;
     if (tier2Listener_) {
         serialize(linkData2, *tier2Listener_);
         tier2Listener_ = nullptr;
     }
+    testingTier2Active_ = false;
 
     return true;
 }
@@ -191,7 +193,12 @@ Module::testingBlockOnTier2Complete() const
 Module::serializedSize(const LinkData& linkData) const
 {
     JS::BuildIdCharVector buildId;
-    JS::GetOptimizedEncodingBuildId(&buildId);
+    {
+        AutoEnterOOMUnsafeRegion oom;
+        if (!GetOptimizedEncodingBuildId(&buildId)) {
+            oom.crash("getting build id");
+        }
+    }
 
     return SerializedPodVectorSize(buildId) +
            linkData.serializedSize() +
@@ -206,12 +213,16 @@ Module::serializedSize(const LinkData& linkData) const
 /* virtual */ void
 Module::serialize(const LinkData& linkData, uint8_t* begin, size_t size) const
 {
-    MOZ_RELEASE_ASSERT(!testingTier2Active_);
     MOZ_RELEASE_ASSERT(!metadata().debugEnabled);
     MOZ_RELEASE_ASSERT(code_->hasTier(Tier::Serialized));
 
     JS::BuildIdCharVector buildId;
-    JS::GetOptimizedEncodingBuildId(&buildId);
+    {
+        AutoEnterOOMUnsafeRegion oom;
+        if (!GetOptimizedEncodingBuildId(&buildId)) {
+            oom.crash("getting build id");
+        }
+    }
 
     uint8_t* cursor = begin;
     cursor = SerializePodVector(cursor, buildId);
@@ -239,7 +250,9 @@ Module::deserialize(const uint8_t* begin, size_t size, Metadata* maybeMetadata)
     const uint8_t* cursor = begin;
 
     JS::BuildIdCharVector currentBuildId;
-    JS::GetOptimizedEncodingBuildId(&currentBuildId);
+    if (!GetOptimizedEncodingBuildId(&currentBuildId)) {
+        return nullptr;
+    }
 
     JS::BuildIdCharVector deserializedBuildId;
     cursor = DeserializePodVector(cursor, &deserializedBuildId);
@@ -487,7 +500,8 @@ Module::extractCode(JSContext* cx, Tier tier, MutableHandleValue vp) const
         return false;
     }
 
-    memcpy(code->as<TypedArrayObject>().viewDataUnshared(), moduleSegment.base(), moduleSegment.length());
+    memcpy(code->as<TypedArrayObject>().dataPointerUnshared(), moduleSegment.base(),
+           moduleSegment.length());
 
     RootedValue value(cx, ObjectValue(*code));
     if (!JS_DefineProperty(cx, result, "code", value, JSPROP_ENUMERATE)) {
@@ -578,8 +592,9 @@ Module::initSegments(JSContext* cx,
     // partial initialization if an error is reported.
 
     for (const ElemSegment* seg : elemSegments_) {
-        if (!seg->active())
+        if (!seg->active()) {
             continue;
+        }
 
         uint32_t tableLength = tables[seg->tableIndex]->length();
         uint32_t offset = EvaluateInitExpr(globalImportValues, seg->offset());
@@ -594,8 +609,9 @@ Module::initSegments(JSContext* cx,
     if (memoryObj) {
         uint32_t memoryLength = memoryObj->volatileMemoryLength();
         for (const DataSegment* seg : dataSegments_) {
-            if (!seg->active())
+            if (!seg->active()) {
                 continue;
+            }
 
             uint32_t offset = EvaluateInitExpr(globalImportValues, seg->offset());
 
@@ -623,8 +639,9 @@ Module::initSegments(JSContext* cx,
         uint8_t* memoryBase = memoryObj->buffer().dataPointerEither().unwrap(/* memcpy */);
 
         for (const DataSegment* seg : dataSegments_) {
-            if (!seg->active())
+            if (!seg->active()) {
                 continue;
+            }
 
             // But apply active segments right now.
             uint32_t offset = EvaluateInitExpr(globalImportValues, seg->offset());

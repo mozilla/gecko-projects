@@ -5,6 +5,7 @@
 
 const TRACKING_PAGE = "http://tracking.example.org/browser/browser/base/content/test/trackingUI/trackingPage.html";
 const BENIGN_PAGE = "http://tracking.example.org/browser/browser/base/content/test/trackingUI/benignPage.html";
+const COOKIE_PAGE = "http://not-tracking.example.com/browser/browser/base/content/test/trackingUI/cookiePage.html";
 
 const CB_PREF = "browser.contentblocking.enabled";
 const CB_UI_PREF = "browser.contentblocking.ui.enabled";
@@ -21,6 +22,13 @@ add_task(async function setup() {
     [CB_UI_PREF, true],
   ]});
   await UrlClassifierTestUtils.addTestTrackers();
+
+  let oldCanRecord = Services.telemetry.canRecordExtended;
+  Services.telemetry.canRecordExtended = true;
+
+  registerCleanupFunction(() => {
+    Services.telemetry.canRecordExtended = oldCanRecord;
+  });
 });
 
 function openIdentityPopup() {
@@ -78,11 +86,23 @@ add_task(async function testReportBreakageVisibility() {
       },
       buttonVisible: false,
     },
+    {
+      url: COOKIE_PAGE,
+      prefs: {
+        "browser.contentblocking.enabled": true,
+        "browser.fastblock.enabled": false,
+        "privacy.trackingprotection.enabled": false,
+        "network.cookie.cookieBehavior": Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER,
+        "browser.contentblocking.reportBreakage.enabled": false,
+        "browser.contentblocking.rejecttrackers.reportBreakage.enabled": true,
+      },
+      buttonVisible: true,
+    },
   ];
 
   for (let scenario of scenarios) {
     for (let pref in scenario.prefs) {
-      Services.prefs.setBoolPref(pref, scenario.prefs[pref]);
+      Preferences.set(pref, scenario.prefs[pref]);
     }
 
     let uri = Services.io.newURI(scenario.url);
@@ -113,12 +133,19 @@ add_task(async function testReportBreakageCancel() {
   await BrowserTestUtils.withNewTab(TRACKING_PAGE, async function() {
     await openIdentityPopup();
 
+    Services.telemetry.clearEvents();
+
     let reportBreakageButton = document.getElementById("identity-popup-content-blocking-report-breakage");
     ok(BrowserTestUtils.is_visible(reportBreakageButton), "report breakage button is visible");
     let reportBreakageView = document.getElementById("identity-popup-breakageReportView");
     let viewShown = BrowserTestUtils.waitForEvent(reportBreakageView, "ViewShown");
     reportBreakageButton.click();
     await viewShown;
+
+    let events = Services.telemetry.snapshotEvents(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN).parent;
+    let clickEvents = events.filter(
+      e => e[1] == "security.ui.identitypopup" && e[2] == "click" && e[3] == "report_breakage");
+    is(clickEvents.length, 1, "recorded telemetry for the click");
 
     ok(true, "Report breakage view was shown");
 

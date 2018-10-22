@@ -3,7 +3,7 @@ const { XPCOMUtils } = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm
 const { AddonManager } = ChromeUtils.import("resource://gre/modules/AddonManager.jsm", {});
 const env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
 let scope = {};
-Services.scriptloader.loadSubScript("chrome://talos-powers-content/content/TalosParentProfiler.js", scope);
+Services.scriptloader.loadSubScript("resource://talos-powers/TalosParentProfiler.js", scope);
 const { TalosParentProfiler } = scope;
 
 XPCOMUtils.defineLazyGetter(this, "require", function() {
@@ -138,7 +138,7 @@ Damp.prototype = {
         if (record) {
           this._results.push({
             name: label,
-            value: duration
+            value: duration,
           });
         } else {
           dump(`'${label}' took ${duration}ms.\n`);
@@ -147,12 +147,12 @@ Damp.prototype = {
         if (DEBUG_ALLOCATIONS == "normal" && record) {
           this._results.push({
             name: label + ".allocations",
-            value: this.allocationTracker.countAllocations()
+            value: this.allocationTracker.countAllocations(),
           });
         } else if (DEBUG_ALLOCATIONS == "verbose") {
           this.allocationTracker.logAllocationSites();
         }
-      }
+      },
     };
   },
 
@@ -435,5 +435,5 @@ Damp.prototype = {
     } catch (e) {
       this.exception(e);
     }
-  }
+  },
 };

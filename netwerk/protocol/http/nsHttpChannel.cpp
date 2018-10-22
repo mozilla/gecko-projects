@@ -109,6 +109,7 @@
 #include "nsMixedContentBlocker.h"
 #include "CacheStorageService.h"
 #include "HttpChannelParent.h"
+#include "HttpChannelParentListener.h"
 #include "InterceptedHttpChannel.h"
 #include "nsIBufferedStreams.h"
 #include "nsIFileStreams.h"
@@ -116,8 +117,10 @@
 #include "nsIMultiplexInputStream.h"
 #include "../../cache2/CacheFileUtils.h"
 #include "nsINetworkLinkService.h"
+#include "nsIRedirectProcessChooser.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/ServiceWorkerUtils.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -127,7 +130,11 @@
 #include "ProfilerMarkerPayload.h"
 #endif
 
-namespace mozilla { namespace net {
+namespace mozilla {
+
+using namespace dom;
+
+namespace net {
 
 namespace {
 
@@ -168,6 +175,7 @@ static const struct {
   LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED mTelemetryLabel;
   const char* mHostName;
 } gFastBlockAnalyticsProviders[] = {
+  // clang-format off
   { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::googleanalytics, "google-analytics.com" },
   { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::scorecardresearch, "scorecardresearch.com" },
   { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::hotjar, "hotjar.com" },
@@ -178,6 +186,7 @@ static const struct {
   { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::yahooanalytics, "analytics.yahoo.com" },
   { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::statcounter, "statcounter.com" },
   { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::v12group, "v12group.com" }
+  // clang-format on
 };
 
 void
@@ -702,7 +711,8 @@ IsContentPolicyTypeWhitelistedForFastBlock(nsILoadInfo* aLoadInfo)
 bool
 nsHttpChannel::CheckFastBlocked()
 {
-    LOG(("nsHttpChannel::CheckFastBlocked [this=%p]\n", this));
+    LOG(("nsHttpChannel::CheckFastBlocked [this=%p, url=%s]",
+         this, mSpec.get()));
     MOZ_ASSERT(mIsThirdPartyTrackingResource);
 
     static bool sFastBlockInited = false;
@@ -731,14 +741,19 @@ nsHttpChannel::CheckFastBlocked()
 
     bool engageFastBlock = false;
 
-    if (IsContentPolicyTypeWhitelistedForFastBlock(mLoadInfo) ||
-        // If the user has interacted with the document, we disable fastblock.
-        (mLoadInfo && mLoadInfo->GetDocumentHasUserInteracted())) {
-
-        LOG(("FastBlock passed (invalid) [this=%p]\n", this));
+    TimeDuration duration = TimeStamp::NowLoRes() - timestamp;
+    if (IsContentPolicyTypeWhitelistedForFastBlock(mLoadInfo)) {
+        LOG(("FastBlock passed (whitelisted content type %u) (%lf) [this=%p]\n",
+             mLoadInfo ? mLoadInfo->GetExternalContentPolicyType() : nsIContentPolicy::TYPE_OTHER,
+             duration.ToMilliseconds(), this));
+    } else if (mLoadInfo && mLoadInfo->GetDocumentHasUserInteracted()) {
+        LOG(("FastBlock passed (user interaction) (%lf) [this=%p]\n",
+             duration.ToMilliseconds(), this));
+    } else if (mLoadInfo && mLoadInfo->GetDocumentHasLoaded()) {
+        LOG(("FastBlock passed (document loaded) (%lf) [this=%p]\n",
+             duration.ToMilliseconds(), this));
     } else {
-        TimeDuration duration = TimeStamp::NowLoRes() - timestamp;
-        bool hasFastBlockStarted = duration.ToMilliseconds() >= sFastBlockTimeout;
+            bool hasFastBlockStarted = duration.ToMilliseconds() >= sFastBlockTimeout;
         bool hasFastBlockStopped = false;
         if ((sFastBlockLimit != 0) && (sFastBlockLimit > sFastBlockTimeout)) {
             hasFastBlockStopped = duration.ToMilliseconds() > sFastBlockLimit;
@@ -1524,7 +1539,8 @@ EnsureMIMEOfScript(nsIURI* aURI, nsHttpResponseHead* aResponseHead, nsILoadInfo*
     aLoadInfo->LoadingPrincipal()->GetURI(getter_AddRefs(requestURI));
 
     nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-    nsresult rv = ssm->CheckSameOriginURI(requestURI, aURI, false);
+    bool isPrivateWin = aLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+    nsresult rv = ssm->CheckSameOriginURI(requestURI, aURI, false, isPrivateWin);
     if (NS_SUCCEEDED(rv)) {
         //same origin
         AccumulateCategorical(Telemetry::LABELS_SCRIPT_BLOCK_INCORRECT_MIME_2::same_origin);
@@ -1539,7 +1555,8 @@ EnsureMIMEOfScript(nsIURI* aURI, nsHttpResponseHead* aResponseHead, nsILoadInfo*
                 nsCOMPtr<nsIURI> corsOriginURI;
                 rv = NS_NewURI(getter_AddRefs(corsOriginURI), corsOrigin);
                 if (NS_SUCCEEDED(rv)) {
-                    rv = ssm->CheckSameOriginURI(requestURI, corsOriginURI, false);
+                    bool isPrivateWin = aLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+                    rv = ssm->CheckSameOriginURI(requestURI, corsOriginURI, false, isPrivateWin);
                     if (NS_SUCCEEDED(rv)) {
                         cors = true;
                     }
@@ -4986,12 +5003,31 @@ nsHttpChannel::OpenCacheInputStream(nsICacheEntry* cacheEntry, bool startBufferi
         altDataFromChild = !value.IsEmpty();
     }
 
-    if (!mPreferredCachedAltDataType.IsEmpty() && (altDataFromChild == mAltDataForChild)) {
-        rv = cacheEntry->OpenAlternativeInputStream(mPreferredCachedAltDataType,
+    nsAutoCString altDataType;
+    Unused << cacheEntry->GetAltDataType(altDataType);
+
+    nsAutoCString contentType;
+    mCachedResponseHead->ContentType(contentType);
+
+    bool foundAltData = false;
+    if (!altDataType.IsEmpty() &&
+        !mPreferredCachedAltDataTypes.IsEmpty() &&
+        altDataFromChild == mAltDataForChild) {
+        for (auto& pref : mPreferredCachedAltDataTypes) {
+            if (mozilla::Get<0>(pref) == altDataType &&
+                (mozilla::Get<1>(pref).IsEmpty() || mozilla::Get<1>(pref) == contentType)) {
+                foundAltData = true;
+                break;
+            }
+        }
+    }
+    if (foundAltData) {
+        rv = cacheEntry->OpenAlternativeInputStream(altDataType,
                                                     getter_AddRefs(stream));
         if (NS_SUCCEEDED(rv)) {
+            LOG(("Opened alt-data input stream type=%s", altDataType.get()));
             // We have succeeded.
-            mAvailableCachedAltDataType = mPreferredCachedAltDataType;
+            mAvailableCachedAltDataType = altDataType;
             // Set the correct data size on the channel.
             int64_t altDataSize;
             if (NS_SUCCEEDED(cacheEntry->GetAltDataSize(&altDataSize))) {
@@ -4999,6 +5035,7 @@ nsHttpChannel::OpenCacheInputStream(nsICacheEntry* cacheEntry, bool startBufferi
             }
         }
     }
+
 
     if (!stream) {
         rv = cacheEntry->OpenInputStream(0, getter_AddRefs(stream));
@@ -6767,7 +6804,7 @@ nsHttpChannel::ProcessId()
 }
 
 bool
-nsHttpChannel::AttachStreamFilter(ipc::Endpoint<extensions::PStreamFilterParent>&& aEndpoint)
+nsHttpChannel::AttachStreamFilter(mozilla::ipc::Endpoint<extensions::PStreamFilterParent>&& aEndpoint)
 
 {
   nsCOMPtr<nsIParentChannel> parentChannel;
@@ -7847,7 +7884,7 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
     // interested in reading and/or writing the alt-data representation.
     // We need to hold a reference to the cache entry in case the listener calls
     // openAlternativeOutputStream() after CloseCacheEntry() clears mCacheEntry.
-    if (!mPreferredCachedAltDataType.IsEmpty()) {
+    if (!mPreferredCachedAltDataTypes.IsEmpty()) {
         mAltDataCacheEntry = mCacheEntry;
     }
 
@@ -8269,18 +8306,18 @@ nsHttpChannel::GetAllowStaleCacheContent(bool *aAllowStaleCacheContent)
 }
 
 NS_IMETHODIMP
-nsHttpChannel::PreferAlternativeDataType(const nsACString & aType)
+nsHttpChannel::PreferAlternativeDataType(const nsACString& aType,
+                                         const nsACString& aContentType)
 {
     ENSURE_CALLED_BEFORE_ASYNC_OPEN();
-    mPreferredCachedAltDataType = aType;
+    mPreferredCachedAltDataTypes.AppendElement(MakePair(nsCString(aType), nsCString(aContentType)));
     return NS_OK;
 }
 
-NS_IMETHODIMP
-nsHttpChannel::GetPreferredAlternativeDataType(nsACString & aType)
+const nsTArray<mozilla::Tuple<nsCString, nsCString>>&
+nsHttpChannel::PreferredAlternativeDataTypes()
 {
-  aType = mPreferredCachedAltDataType;
-  return NS_OK;
+    return mPreferredCachedAltDataTypes;
 }
 
 NS_IMETHODIMP
@@ -8310,6 +8347,23 @@ nsHttpChannel::OpenAlternativeOutputStream(const nsACString & type, int64_t pred
         cacheEntry->SetMetaDataElement("alt-data-from-child", nullptr);
     }
     return rv;
+}
+
+NS_IMETHODIMP
+nsHttpChannel::GetOriginalInputStream(nsIInputStreamReceiver *aReceiver)
+{
+    if (aReceiver == nullptr) {
+        return NS_ERROR_INVALID_ARG;
+    }
+    nsCOMPtr<nsIInputStream> inputStream;
+
+    nsCOMPtr<nsICacheEntry> cacheEntry = mCacheEntry ? mCacheEntry
+                                                     : mAltDataCacheEntry;
+    if (cacheEntry) {
+        cacheEntry->OpenInputStream(0, getter_AddRefs(inputStream));
+    }
+    aReceiver->OnInputStreamReady(inputStream);
+    return NS_OK;
 }
 
 //-----------------------------------------------------------------------------

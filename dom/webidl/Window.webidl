@@ -53,7 +53,7 @@ typedef OfflineResourceList ApplicationCache;
   [Throws] void stop();
   [Throws, CrossOriginCallable] void focus();
   [Throws, CrossOriginCallable] void blur();
-  [Replaceable] readonly attribute any event;
+  [Replaceable, Pref="dom.window.event.enabled"] readonly attribute any event;
 
   // other browsing contexts
   [Replaceable, Throws, CrossOriginReadable] readonly attribute WindowProxy frames;
@@ -187,6 +187,10 @@ partial interface Window {
   [Replaceable, Throws] readonly attribute double pageXOffset;
   [Replaceable, Throws] readonly attribute double scrollY;
   [Replaceable, Throws] readonly attribute double pageYOffset;
+
+  // Aliases for screenX / screenY.
+  [Replaceable, Throws, NeedsCallerType] readonly attribute double screenLeft;
+  [Replaceable, Throws, NeedsCallerType] readonly attribute double screenTop;
 
   // client
   // These are writable because we allow chrome to write them.  And they need

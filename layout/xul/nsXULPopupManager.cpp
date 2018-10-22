@@ -632,7 +632,7 @@ nsXULPopupManager::InitTriggerEvent(Event* aEvent, nsIContent* aPopup,
 
   mCachedModifiers = 0;
 
-  UIEvent* uiEvent = aEvent ? aEvent->AsUIEvent() : nullptr;
+  RefPtr<UIEvent> uiEvent = aEvent ? aEvent->AsUIEvent() : nullptr;
   if (uiEvent) {
     mRangeParent = uiEvent->GetRangeParent();
     mRangeOffset = uiEvent->RangeOffset();
@@ -1347,7 +1347,7 @@ nsXULPopupManager::ExecuteMenu(nsIContent* aMenu, nsXULMenuCommandEvent* aEvent)
   CloseMenuMode cmm = CloseMenuMode_Auto;
 
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::none, &nsGkAtoms::single, nullptr};
+    {nsGkAtoms::none, nsGkAtoms::single, nullptr};
 
   if (aMenu->IsElement()) {
     switch (aMenu->AsElement()->FindAttrValueIn(kNameSpaceID_None,

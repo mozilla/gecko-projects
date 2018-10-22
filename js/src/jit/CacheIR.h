@@ -222,6 +222,7 @@ extern const char* const CacheKindNames[];
     _(GuardHasGetterSetter)               \
     _(GuardGroupHasUnanalyzedNewScript)   \
     _(GuardIndexIsNonNegative)            \
+    _(GuardIndexGreaterThanDenseInitLength) \
     _(GuardTagNotEqual)                   \
     _(GuardXrayExpandoShapeAndDefaultProto) \
     _(GuardFunctionPrototype)             \
@@ -298,6 +299,7 @@ extern const char* const CacheKindNames[];
     _(CallProxyGetByValueResult)          \
     _(CallProxyHasPropResult)             \
     _(CallObjectHasSparseElementResult)   \
+    _(CallNativeGetElementResult)        \
     _(LoadUndefinedResult)                \
     _(LoadBooleanResult)                  \
     _(LoadStringResult)                   \
@@ -805,6 +807,10 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     void guardIndexIsNonNegative(Int32OperandId index) {
         writeOpWithOperandId(CacheOp::GuardIndexIsNonNegative, index);
     }
+    void guardIndexGreaterThanDenseInitLength(ObjOperandId obj, Int32OperandId index) {
+        writeOpWithOperandId(CacheOp::GuardIndexGreaterThanDenseInitLength, obj);
+        writeOperandId(index);
+    }
     void guardTagNotEqual(ValueTagOperandId lhs, ValueTagOperandId rhs) {
         writeOpWithOperandId(CacheOp::GuardTagNotEqual, lhs);
         writeOperandId(rhs);
@@ -1259,6 +1265,10 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         writeOpWithOperandId(CacheOp::CallObjectHasSparseElementResult, obj);
         writeOperandId(index);
     }
+    void callNativeGetElementResult(ObjOperandId obj, Int32OperandId index) {
+        writeOpWithOperandId(CacheOp::CallNativeGetElementResult, obj);
+        writeOperandId(index);
+    }
     void loadEnvironmentFixedSlotResult(ObjOperandId obj, size_t offset) {
         writeOpWithOperandId(CacheOp::LoadEnvironmentFixedSlotResult, obj);
         addStubField(offset, StubField::Type::RawWord);
@@ -1569,6 +1579,9 @@ class MOZ_RAII GetPropIRGenerator : public IRGenerator
     bool tryAttachUnboxedElementHole(HandleObject obj, ObjOperandId objId,
                                      uint32_t index, Int32OperandId indexId);
 
+    bool tryAttachGenericElement(HandleObject obj, ObjOperandId objId,
+                                 uint32_t index, Int32OperandId indexId);
+
     bool tryAttachProxyElement(HandleObject obj, ObjOperandId objId);
 
     void attachMegamorphicNativeSlot(ObjOperandId objId, jsid id, bool handleMissing);
@@ -1816,8 +1829,8 @@ class MOZ_RAII HasPropIRGenerator : public IRGenerator
 
   public:
     // NOTE: Argument order is PROPERTY, OBJECT
-    HasPropIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc, CacheKind cacheKind,
-                       ICState::Mode mode, HandleValue idVal, HandleValue val);
+    HasPropIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc, ICState::Mode mode,
+                       CacheKind cacheKind, HandleValue idVal, HandleValue val);
 
     bool tryAttachStub();
 };

@@ -59,16 +59,16 @@ static constexpr size_t kStyleStructSizeLimit = 504;
 #undef STYLE_STRUCT
 
 static bool
-DefinitelyEqualURIs(css::URLValueData* aURI1,
-                    css::URLValueData* aURI2)
+DefinitelyEqualURIs(css::URLValue* aURI1,
+                    css::URLValue* aURI2)
 {
   return aURI1 == aURI2 ||
          (aURI1 && aURI2 && aURI1->DefinitelyEqualURIs(*aURI2));
 }
 
 static bool
-DefinitelyEqualURIsAndPrincipal(css::URLValueData* aURI1,
-                                css::URLValueData* aURI2)
+DefinitelyEqualURIsAndPrincipal(css::URLValue* aURI1,
+                                css::URLValue* aURI2)
 {
   return aURI1 == aURI2 ||
          (aURI1 && aURI2 && aURI1->DefinitelyEqualURIsAndPrincipal(*aURI2));
@@ -1251,7 +1251,7 @@ nsStyleSVGReset::FinishStyle(nsPresContext* aPresContext, const nsStyleSVGReset*
   NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, mMask) {
     nsStyleImage& image = mMask.mLayers[i].mImage;
     if (image.GetType() == eStyleImageType_Image) {
-      css::URLValueData* url = image.GetURLValue();
+      css::URLValue* url = image.GetURLValue();
       // If the url is a local ref, it must be a <mask-resource>, so we don't
       // need to resolve the style image.
       if (url->IsLocalRef()) {
@@ -1287,9 +1287,6 @@ nsStyleSVGReset::CalcDifference(const nsStyleSVGReset& aNewData) const
   if (mClipPath != aNewData.mClipPath) {
     hint |= nsChangeHint_UpdateEffects |
             nsChangeHint_RepaintFrame;
-    // clip-path changes require that we update the PreEffectsBBoxProperty,
-    // which is done during overflow computation.
-    hint |= nsChangeHint_UpdateOverflow;
   }
 
   if (mDominantBaseline != aNewData.mDominantBaseline) {
@@ -2027,8 +2024,8 @@ nsStyleGradient::HasCalc()
 // nsStyleImageRequest
 
 /**
- * Runnable to release the nsStyleImageRequest's mRequestProxy,
- * mImageValue and mImageTracker on the main thread, and to perform
+ * Runnable to release the nsStyleImageRequest's mRequestProxy
+ * and mImageTracker on the main thread, and to perform
  * any necessary unlocking and untracking of the image.
  */
 class StyleImageRequestCleanupTask : public mozilla::Runnable
@@ -2038,12 +2035,10 @@ public:
 
   StyleImageRequestCleanupTask(Mode aModeFlags,
                                already_AddRefed<imgRequestProxy> aRequestProxy,
-                               already_AddRefed<css::ImageValue> aImageValue,
                                already_AddRefed<ImageTracker> aImageTracker)
     : mozilla::Runnable("StyleImageRequestCleanupTask")
     , mModeFlags(aModeFlags)
     , mRequestProxy(aRequestProxy)
-    , mImageValue(aImageValue)
     , mImageTracker(aImageTracker)
   {
   }
@@ -2074,9 +2069,6 @@ public:
 protected:
   virtual ~StyleImageRequestCleanupTask()
   {
-    MOZ_ASSERT(mImageValue->mRequests.Count() == 0 || NS_IsMainThread(),
-               "If mImageValue has any mRequests, we need to run on main "
-               "thread to release ImageValues!");
     MOZ_ASSERT((!mRequestProxy && !mImageTracker) || NS_IsMainThread(),
                "mRequestProxy and mImageTracker's destructor need to run "
                "on the main thread!");
@@ -2087,12 +2079,11 @@ private:
   // Since we always dispatch this runnable to the main thread, these will be
   // released on the main thread when the runnable itself is released.
   RefPtr<imgRequestProxy> mRequestProxy;
-  RefPtr<css::ImageValue> mImageValue;
   RefPtr<ImageTracker> mImageTracker;
 };
 
 nsStyleImageRequest::nsStyleImageRequest(Mode aModeFlags,
-                                         css::ImageValue* aImageValue)
+                                         css::URLValue* aImageValue)
   : mImageValue(aImageValue)
   , mModeFlags(aModeFlags)
   , mResolved(false)
@@ -2103,12 +2094,11 @@ nsStyleImageRequest::~nsStyleImageRequest()
 {
   // We may or may not be being destroyed on the main thread.  To clean
   // up, we must untrack and unlock the image (depending on mModeFlags),
-  // and release mRequestProxy and mImageValue, all on the main thread.
+  // and release mRequestProxy and mImageTracker, all on the main thread.
   {
     RefPtr<StyleImageRequestCleanupTask> task =
         new StyleImageRequestCleanupTask(mModeFlags,
                                          mRequestProxy.forget(),
-                                         mImageValue.forget(),
                                          mImageTracker.forget());
     if (NS_IsMainThread()) {
       task->Run();
@@ -2123,7 +2113,6 @@ nsStyleImageRequest::~nsStyleImageRequest()
   }
 
   MOZ_ASSERT(!mRequestProxy);
-  MOZ_ASSERT(!mImageValue);
   MOZ_ASSERT(!mImageTracker);
 }
 
@@ -2170,8 +2159,7 @@ nsStyleImageRequest::Resolve(
     mRequestProxy = aOldImageRequest->mRequestProxy;
   } else {
     mDocGroup = doc->GetDocGroup();
-    mImageValue->Initialize(doc);
-    imgRequestProxy* request = mImageValue->mRequests.GetWeak(doc);
+    imgRequestProxy* request = mImageValue->LoadImage(doc);
     if (aPresContext->IsDynamic()) {
       mRequestProxy = request;
     } else if (request) {
@@ -2677,7 +2665,7 @@ nsStyleImage::GetImageURI() const
   return uri.forget();
 }
 
-css::URLValueData*
+css::URLValue*
 nsStyleImage::GetURLValue() const
 {
   if (mType == eStyleImageType_Image) {
@@ -3225,35 +3213,6 @@ nsStyleImageLayers::Layer::CalcDifference(const nsStyleImageLayers::Layer& aNewL
   if (!DefinitelyEqualURIs(mImage.GetURLValue(),
                            aNewLayer.mImage.GetURLValue())) {
     hint |= nsChangeHint_RepaintFrame | nsChangeHint_UpdateEffects;
-
-    // If mImage links to an SVG mask, the URL in mImage must have a fragment.
-    // Not vice versa.
-    // Here are examples of URI contains a fragment, two of them link to an
-    // SVG mask:
-    //   mask:url(a.svg#maskID); // The fragment of this URI is an ID of a mask
-    //                           // element in a.svg.
-    //   mask:url(#localMaskID); // The fragment of this URI is an ID of a mask
-    //                           // element in local document.
-    //   mask:url(b.svg#viewBoxID); // The fragment of this URI is an ID of a
-    //                              // viewbox defined in b.svg.
-    // That is, if the URL in mImage has a fragment, it may link to an SVG
-    // mask; If not, it "must" not link to an SVG mask.
-    bool maybeSVGMask = false;
-    if (mImage.GetURLValue()) {
-      maybeSVGMask = mImage.GetURLValue()->MightHaveRef();
-    }
-
-    if (!maybeSVGMask && aNewLayer.mImage.GetURLValue()) {
-      maybeSVGMask = aNewLayer.mImage.GetURLValue()->MightHaveRef();
-    }
-
-    // Return nsChangeHint_UpdateOverflow if either URI might link to an SVG
-    // mask.
-    if (maybeSVGMask) {
-      // Mask changes require that we update the PreEffectsBBoxProperty,
-      // which is done during overflow computation.
-      hint |= nsChangeHint_UpdateOverflow;
-    }
   } else if (mAttachment != aNewLayer.mAttachment ||
              mClip != aNewLayer.mClip ||
              mOrigin != aNewLayer.mOrigin ||
@@ -3778,17 +3737,7 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
       // If we are floating, and our shape-outside, shape-margin, or
       // shape-image-threshold are changed, our descendants are not impacted,
       // but our ancestor and siblings are.
-      //
-      // This is similar to a float-only change, but since the ISize of the
-      // float area changes arbitrarily along its block axis, more is required
-      // to get the siblings to adjust properly. Hinting overflow change is
-      // sufficient to trigger the correct calculation, but may be too
-      // heavyweight.
-
-      // XXX What is the minimum hint to ensure mShapeInfo is regenerated in
-      // the next reflow?
-      hint |= nsChangeHint_ReflowHintsForFloatAreaChange |
-              nsChangeHint_ScrollbarChange;
+      hint |= nsChangeHint_ReflowHintsForFloatAreaChange;
     } else {
       // shape-outside or shape-margin or shape-image-threshold changed,
       // but we don't need to reflow because we're not floating.
@@ -3906,7 +3855,8 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
     hint |= nsChangeHint_RepaintFrame;
   }
 
-  if (willChangeBitsChanged & NS_STYLE_WILL_CHANGE_FIXPOS_CB) {
+  if (willChangeBitsChanged & (NS_STYLE_WILL_CHANGE_FIXPOS_CB |
+                               NS_STYLE_WILL_CHANGE_ABSPOS_CB)) {
     hint |= nsChangeHint_UpdateContainingBlock;
   }
 
@@ -3958,7 +3908,8 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
        mAnimationFillModeCount != aNewData.mAnimationFillModeCount ||
        mAnimationPlayStateCount != aNewData.mAnimationPlayStateCount ||
        mAnimationIterationCountCount != aNewData.mAnimationIterationCountCount ||
-       mScrollSnapCoordinate != aNewData.mScrollSnapCoordinate)) {
+       mScrollSnapCoordinate != aNewData.mScrollSnapCoordinate ||
+       mWillChange != aNewData.mWillChange)) {
     hint |= nsChangeHint_NeutralChange;
   }
 

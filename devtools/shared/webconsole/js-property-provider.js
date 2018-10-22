@@ -32,6 +32,8 @@ const OPEN_CLOSE_BODY = {
   "(": ")",
 };
 
+const NO_AUTOCOMPLETE_PREFIXES = ["var", "const", "let", "function", "class"];
+
 function hasArrayIndex(str) {
   return /\[\d+\]$/.test(str);
 }
@@ -52,10 +54,12 @@ function hasArrayIndex(str) {
  *
  *            {
  *              state: STATE_NORMAL|STATE_QUOTE|STATE_DQUOTE,
- *              lastStatement: the last statement in the string
+ *              lastStatement: the last statement in the string,
+ *              isElementAccess: boolean that indicates if the lastStatement has an open
+ *                               element access (e.g. `x["match`).
  *            }
  */
-function findCompletionBeginning(str) {
+function analyzeInputString(str) {
   const bodyStack = [];
 
   let state = STATE_NORMAL;
@@ -64,6 +68,24 @@ function findCompletionBeginning(str) {
 
   // Use an array in order to handle character with a length > 2 (e.g. 😎).
   const characters = Array.from(str);
+
+  const buildReturnObject = () => {
+    let isElementAccess = false;
+    if (bodyStack.length === 1 && bodyStack[0].token === "[") {
+      start = bodyStack[0].start;
+      isElementAccess = true;
+      if ([STATE_DQUOTE, STATE_QUOTE, STATE_TEMPLATE_LITERAL].includes(state)) {
+        state = STATE_NORMAL;
+      }
+    }
+
+    return {
+      state,
+      lastStatement: characters.slice(start).join(""),
+      isElementAccess,
+    };
+  };
+
   for (let i = 0; i < characters.length; i++) {
     c = characters[i];
 
@@ -76,9 +98,11 @@ function findCompletionBeginning(str) {
           state = STATE_QUOTE;
         } else if (c == "`") {
           state = STATE_TEMPLATE_LITERAL;
-        } else if (c == ";") {
+        } else if (";,:=<>+-*/%|&^~?!".split("").includes(c)) {
+          // If the character is an operator, we need to update the start position.
           start = i + 1;
         } else if (c == " ") {
+          const currentLastStatement = characters.slice(start, i).join("");
           const before = characters.slice(0, i);
           const after = characters.slice(i + 1);
           const trimmedBefore = Array.from(before.join("").trimRight());
@@ -88,35 +112,34 @@ function findCompletionBeginning(str) {
           const nextNonSpaceCharIndex = after.indexOf(nextNonSpaceChar);
           const previousNonSpaceChar = trimmedBefore[trimmedBefore.length - 1];
 
-          // If the previous meaningful char was a dot and there is no meaningful char
-          // after, we can break out of the loop.
-          if (previousNonSpaceChar === "." && !nextNonSpaceChar) {
-            break;
+          // There's only spaces after that, so we can return.
+          if (!nextNonSpaceChar) {
+            return buildReturnObject();
           }
 
-          if (nextNonSpaceChar) {
-            // If the previous char wasn't a dot, and the next one isn't a dot either,
-            // update the start pos.
-            if (previousNonSpaceChar !== "." && nextNonSpaceChar !== ".") {
-              start = i + nextNonSpaceCharIndex;
-            }
-            // Let's jump to handle the next non-space char.
-            i = i + nextNonSpaceCharIndex;
-          } else {
-            // There's only spaces after that, so we can break out of the loop.
-            break;
+          // If the previous char in't a dot, and the next one isn't a dot either,
+          // and the current computed statement is not a variable/function/class
+          // declaration, update the start position.
+          if (
+            previousNonSpaceChar !== "." && nextNonSpaceChar !== "."
+            && !NO_AUTOCOMPLETE_PREFIXES.includes(currentLastStatement)
+          ) {
+            start = i + nextNonSpaceCharIndex;
           }
+
+          // Let's jump to handle the next non-space char.
+          i = i + nextNonSpaceCharIndex;
         } else if (OPEN_BODY.includes(c)) {
           bodyStack.push({
             token: c,
-            start: start
+            start,
           });
           start = i + 1;
         } else if (CLOSE_BODY.includes(c)) {
           const last = bodyStack.pop();
           if (!last || OPEN_CLOSE_BODY[last.token] != c) {
             return {
-              err: "syntax error"
+              err: "syntax error",
             };
           }
           if (c == "}") {
@@ -133,7 +156,7 @@ function findCompletionBeginning(str) {
           i++;
         } else if (c == "\n") {
           return {
-            err: "unterminated string literal"
+            err: "unterminated string literal",
           };
         } else if (c == '"') {
           state = STATE_NORMAL;
@@ -155,7 +178,7 @@ function findCompletionBeginning(str) {
           i++;
         } else if (c == "\n") {
           return {
-            err: "unterminated string literal"
+            err: "unterminated string literal",
           };
         } else if (c == "'") {
           state = STATE_NORMAL;
@@ -164,10 +187,7 @@ function findCompletionBeginning(str) {
     }
   }
 
-  return {
-    state: state,
-    lastStatement: characters.slice(start).join("")
-  };
+  return buildReturnObject();
 }
 
 /**
@@ -195,6 +215,8 @@ function findCompletionBeginning(str) {
  *              matches: Set<string>
  *              matchProp: Last part of the inputValue that was used to find
  *                         the matches-strings.
+ *              isElementAccess: Boolean set to true if the evaluation is an element
+ *                               access (e.g. `window["addEvent`).
  *            }
  */
 function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
@@ -206,7 +228,12 @@ function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
 
   // Analyse the inputValue and find the beginning of the last part that
   // should be completed.
-  const {err, state, lastStatement} = findCompletionBeginning(inputValue);
+  const {
+    err,
+    state,
+    lastStatement,
+    isElementAccess,
+  } = analyzeInputString(inputValue);
 
   // There was an error analysing the string.
   if (err) {
@@ -219,22 +246,29 @@ function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
     return null;
   }
 
-  const completionPart = lastStatement;
-  const lastDot = completionPart.lastIndexOf(".");
-
   // Don't complete on just an empty string.
-  if (completionPart.trim() == "") {
+  if (lastStatement.trim() == "") {
     return null;
   }
+
+  if (NO_AUTOCOMPLETE_PREFIXES.some(prefix => lastStatement.startsWith(prefix + " "))) {
+    return null;
+  }
+
+  const completionPart = lastStatement;
+  const lastDotIndex = completionPart.lastIndexOf(".");
+  const lastOpeningBracketIndex = isElementAccess ? completionPart.lastIndexOf("[") : -1;
+  const lastCompletionCharIndex = Math.max(lastDotIndex, lastOpeningBracketIndex);
+  const startQuoteRegex = /^('|"|`)/;
 
   // Catch literals like [1,2,3] or "foo" and return the matches from
   // their prototypes.
   // Don't run this is a worker, migrating to acorn should allow this
   // to run in a worker - Bug 1217198.
-  if (!isWorker && lastDot > 0) {
+  if (!isWorker && lastCompletionCharIndex > 0) {
     const parser = new Parser();
     parser.logExceptions = false;
-    const syntaxTree = parser.get(completionPart.slice(0, lastDot));
+    const syntaxTree = parser.get(completionPart.slice(0, lastCompletionCharIndex));
     const lastTree = syntaxTree.getLastSyntaxTree();
     const lastBody = lastTree && lastTree.AST.body[lastTree.AST.body.length - 1];
 
@@ -242,19 +276,62 @@ function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
     // If there were parse errors this won't exist.
     if (lastBody) {
       const expression = lastBody.expression;
-      const matchProp = completionPart.slice(lastDot + 1).trimLeft();
+      const matchProp = completionPart.slice(lastCompletionCharIndex + 1).trimLeft();
+      let search = matchProp;
+
+      let elementAccessQuote;
+      if (isElementAccess && startQuoteRegex.test(matchProp)) {
+        elementAccessQuote = matchProp[0];
+        search = matchProp.replace(startQuoteRegex, "");
+      }
+
       if (expression.type === "ArrayExpression") {
-        return getMatchedProps(Array.prototype, matchProp);
-      } else if (expression.type === "Literal" &&
-                 (typeof expression.value === "string")) {
-        return getMatchedProps(String.prototype, matchProp);
+        let arrayProtoProps = getMatchedProps(Array.prototype, search);
+        if (isElementAccess) {
+          arrayProtoProps = wrapMatchesInQuotes(arrayProtoProps, elementAccessQuote);
+        }
+
+        return {
+          isElementAccess,
+          matchProp,
+          matches: arrayProtoProps,
+        };
+      }
+
+      if (expression.type === "Literal" && typeof expression.value === "string") {
+        let stringProtoProps = getMatchedProps(String.prototype, search);
+        if (isElementAccess) {
+          stringProtoProps = wrapMatchesInQuotes(stringProtoProps, elementAccessQuote);
+        }
+
+        return {
+          isElementAccess,
+          matchProp,
+          matches: stringProtoProps,
+        };
       }
     }
   }
 
   // We are completing a variable / a property lookup.
   const properties = completionPart.split(".");
-  const matchProp = properties.pop().trimLeft();
+  let matchProp;
+  if (isElementAccess) {
+    const lastPart = properties[properties.length - 1];
+    const openBracketIndex = lastPart.lastIndexOf("[");
+    matchProp = lastPart.substr(openBracketIndex + 1);
+    properties[properties.length - 1] = lastPart.substring(0, openBracketIndex);
+  } else {
+    matchProp = properties.pop().trimLeft();
+  }
+
+  let search = matchProp;
+  let elementAccessQuote;
+  if (isElementAccess && startQuoteRegex.test(search)) {
+    elementAccessQuote = search[0];
+    search = search.replace(startQuoteRegex, "");
+  }
+
   let obj = dbgObject;
 
   // The first property must be found in the environment of the paused debugger
@@ -262,7 +339,11 @@ function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
   const env = anEnvironment || obj.asEnvironment();
 
   if (properties.length === 0) {
-    return getMatchedPropsInEnvironment(env, matchProp);
+    return {
+      isElementAccess,
+      matchProp,
+      matches: getMatchedPropsInEnvironment(env, search),
+    };
   }
 
   const firstProp = properties.shift().trim();
@@ -286,8 +367,8 @@ function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
 
   // We get the rest of the properties recursively starting from the
   // Debugger.Object that wraps the first property
-  for (let i = 0; i < properties.length; i++) {
-    const prop = properties[i].trim();
+  for (let prop of properties) {
+    prop = prop.trim();
     if (!prop) {
       return null;
     }
@@ -307,10 +388,25 @@ function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
 
   // If the final property is a primitive
   if (typeof obj != "object") {
-    return getMatchedProps(obj, matchProp);
+    return {
+      isElementAccess,
+      matchProp,
+      matches: getMatchedProps(obj, search),
+    };
   }
 
-  return getMatchedPropsInDbgObject(obj, matchProp);
+  let matches = getMatchedPropsInDbgObject(obj, search);
+  if (isElementAccess) {
+    // If it's an element access, we need to wrap properties in quotes (either the one
+    // the user already typed, or `"`).
+    matches = wrapMatchesInQuotes(matches, elementAccessQuote);
+  }
+  return {isElementAccess, matchProp, matches};
+}
+
+function wrapMatchesInQuotes(matches, quote = `"`) {
+  return new Set([...matches].map(p =>
+    `${quote}${p.replace(new RegExp(`${quote}`, "g"), `\\${quote}`)}${quote}`));
 }
 
 /**
@@ -423,9 +519,7 @@ function getMatchedProps(obj, match) {
  *        Object whose properties we want to filter.
  * @param {string} match
  *        Filter for properties that match this string.
- * @returns {object} which holds the following properties:
- *            - {string} matchProp.
- *            - {Set} matches: List of matched properties.
+ * @returns {Set} List of matched properties.
  */
 function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
   const matches = new Set();
@@ -460,9 +554,7 @@ function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
       if (!propertyMatches(prop)) {
         continue;
       }
-      if (prop.indexOf("-") > -1) {
-        continue;
-      }
+
       // If it is an array index, we can't take it.
       // This uses a trick: converting a string to a number yields NaN if
       // the operation failed, and NaN is not equal to itself.
@@ -477,10 +569,7 @@ function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
     }
   }
 
-  return {
-    matchProp: match,
-    matches,
-  };
+  return matches;
 }
 
 /**

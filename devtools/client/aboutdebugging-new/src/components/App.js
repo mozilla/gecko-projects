@@ -13,6 +13,7 @@ const FluentReact = require("devtools/client/shared/vendor/fluent-react");
 const LocalizationProvider = createFactory(FluentReact.LocalizationProvider);
 
 const { PAGES } = require("../constants");
+const Types = require("../types");
 
 const ConnectPage = createFactory(require("./connect/ConnectPage"));
 const RuntimePage = createFactory(require("./RuntimePage"));
@@ -21,19 +22,26 @@ const Sidebar = createFactory(require("./sidebar/Sidebar"));
 class App extends PureComponent {
   static get propTypes() {
     return {
+      adbAddonStatus: PropTypes.string,
       // The "dispatch" helper is forwarded to the App component via connect.
       // From that point, components are responsible for forwarding the dispatch
       // property to all components who need to dispatch actions.
       dispatch: PropTypes.func.isRequired,
-      messageContexts: PropTypes.arrayOf(PropTypes.object).isRequired,
+      fluentBundles: PropTypes.arrayOf(PropTypes.object).isRequired,
       networkLocations: PropTypes.arrayOf(PropTypes.string).isRequired,
-      runtimes: PropTypes.array.isRequired,
-      selectedPage: PropTypes.string.isRequired,
+      networkRuntimes: PropTypes.arrayOf(Types.runtime).isRequired,
+      selectedPage: PropTypes.string,
+      usbRuntimes: PropTypes.arrayOf(Types.runtime).isRequired,
     };
   }
 
   getSelectedPageComponent() {
-    const { dispatch, networkLocations, selectedPage } = this.props;
+    const {
+      adbAddonStatus,
+      dispatch,
+      networkLocations,
+      selectedPage,
+    } = this.props;
 
     if (!selectedPage) {
       // No page selected.
@@ -42,7 +50,11 @@ class App extends PureComponent {
 
     switch (selectedPage) {
       case PAGES.CONNECT:
-        return ConnectPage({ dispatch, networkLocations });
+        return ConnectPage({
+          adbAddonStatus,
+          dispatch,
+          networkLocations,
+        });
       default:
         // All pages except for the CONNECT page are RUNTIME pages.
         return RuntimePage({ dispatch });
@@ -51,18 +63,32 @@ class App extends PureComponent {
 
   render() {
     const {
+      adbAddonStatus,
       dispatch,
-      messageContexts,
-      runtimes,
+      fluentBundles,
+      networkRuntimes,
       selectedPage,
+      usbRuntimes,
     } = this.props;
 
     return LocalizationProvider(
-      { messages: messageContexts },
+      { messages: fluentBundles },
       dom.div(
         { className: "app" },
-        Sidebar({ dispatch, runtimes, selectedPage }),
-        this.getSelectedPageComponent()
+        Sidebar(
+          {
+            adbAddonStatus,
+            className: "app__sidebar",
+            dispatch,
+            networkRuntimes,
+            selectedPage,
+            usbRuntimes,
+          }
+        ),
+        dom.main(
+          { className: "app__content" },
+          this.getSelectedPageComponent()
+        )
       )
     );
   }
@@ -70,9 +96,11 @@ class App extends PureComponent {
 
 const mapStateToProps = state => {
   return {
-    runtimes: state.runtimes,
+    adbAddonStatus: state.ui.adbAddonStatus,
     networkLocations: state.ui.networkLocations,
+    networkRuntimes: state.runtimes.networkRuntimes,
     selectedPage: state.ui.selectedPage,
+    usbRuntimes: state.runtimes.usbRuntimes,
   };
 };
 

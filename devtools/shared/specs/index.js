@@ -182,6 +182,11 @@ const Types = exports.__TypesForTests = [
     spec: "devtools/shared/specs/reflow",
     front: "devtools/shared/fronts/reflow",
   },
+  {
+    types: ["screenshot"],
+    spec: "devtools/shared/specs/screenshot",
+    front: "devtools/shared/fronts/screenshot",
+  },
   /* Script and source have old fashion client and no front */
   {
     types: ["context"],
@@ -202,7 +207,7 @@ const Types = exports.__TypesForTests = [
   {
     types: ["longstring"],
     spec: "devtools/shared/specs/string",
-    front: null
+    front: null,
   },
   {
     types: ["longstractor"],
@@ -336,7 +341,8 @@ function lazyLoadFront(type) {
       require(modulePath);
     } catch (e) {
       throw new Error(
-        `Unable to load lazy front module '${modulePath}' for type '${type}'`);
+        `Unable to load lazy front module '${modulePath}' for type '${type}'.
+        Error: ${e}`);
     }
     lazyFronts.delete(type);
     return true;

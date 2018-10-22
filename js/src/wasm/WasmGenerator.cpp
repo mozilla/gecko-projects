@@ -29,6 +29,7 @@
 #include "util/Text.h"
 #include "wasm/WasmBaselineCompile.h"
 #include "wasm/WasmCompile.h"
+#include "wasm/WasmCraneliftCompile.h"
 #include "wasm/WasmIonCompile.h"
 #include "wasm/WasmStubs.h"
 
@@ -659,7 +660,18 @@ ExecuteCompileTask(CompileTask* task, UniqueChars* error)
     MOZ_ASSERT(task->output.empty());
 
     switch (task->env.tier()) {
-      case Tier::Ion:
+      case Tier::Optimized:
+#ifdef ENABLE_WASM_CRANELIFT
+        if (task->env.optimizedBackend() == OptimizedBackend::Cranelift) {
+            if (!CraneliftCompileFunctions(task->env, task->lifo, task->inputs, &task->output,
+                                           error))
+            {
+                return false;
+            }
+            break;
+        }
+#endif
+        MOZ_ASSERT(task->env.optimizedBackend() == OptimizedBackend::Ion);
         if (!IonCompileFunctions(task->env, task->lifo, task->inputs,
                                  &task->output, task->dvs, error)) {
             return false;
@@ -808,9 +820,9 @@ ModuleGenerator::compileFuncDef(uint32_t funcIndex, uint32_t lineOrBytecode,
 
     uint32_t threshold;
     switch (tier()) {
-      case Tier::Baseline: threshold = JitOptions.wasmBatchBaselineThreshold; break;
-      case Tier::Ion:      threshold = JitOptions.wasmBatchIonThreshold;      break;
-      default:             MOZ_CRASH("Invalid tier value");                   break;
+      case Tier::Baseline:  threshold = JitOptions.wasmBatchBaselineThreshold; break;
+      case Tier::Optimized: threshold = JitOptions.wasmBatchIonThreshold;      break;
+      default:              MOZ_CRASH("Invalid tier value");                   break;
     }
 
     batchedBytecode_ += funcBytecodeLength;
@@ -944,8 +956,9 @@ ModuleGenerator::finishCodeTier()
     // All functions and stubs have been compiled.  Perform module-end
     // validation.
 
-    if (!deferredValidationState_.lock()->performDeferredValidation(*env_, error_))
+    if (!deferredValidationState_.lock()->performDeferredValidation(*env_, error_)) {
         return nullptr;
+    }
 
     // Finish linking and metadata.
 
@@ -1148,7 +1161,7 @@ bool
 ModuleGenerator::finishTier2(const Module& module)
 {
     MOZ_ASSERT(mode() == CompileMode::Tier2);
-    MOZ_ASSERT(tier() == Tier::Ion);
+    MOZ_ASSERT(tier() == Tier::Optimized);
     MOZ_ASSERT(!env_->debugEnabled());
 
     if (cancelled_ && *cancelled_) {

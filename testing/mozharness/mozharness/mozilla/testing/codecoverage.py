@@ -39,12 +39,6 @@ code_coverage_config_options = [
       "default": False,
       "help": "Whether test run should package and upload code coverage data."
       }],
-    [["--jsd-code-coverage"],
-     {"action": "store_true",
-      "dest": "jsd_code_coverage",
-      "default": False,
-      "help": "Whether JSDebugger code coverage should be run."
-      }],
     [["--java-code-coverage"],
      {"action": "store_true",
       "dest": "java_code_coverage",
@@ -60,11 +54,20 @@ class CodeCoverageMixin(SingleTestMixin):
     the resulting .gcda files and uploading them to blobber.
     """
     gcov_dir = None
+    grcov_dir = None
+    grcov_bin = None
     jsvm_dir = None
     prefix = None
     per_test_reports = {}
 
     def __init__(self, **kwargs):
+        if mozinfo.os == 'linux' or mozinfo.os == 'mac':
+            self.grcov_bin = 'grcov'
+        elif mozinfo.os == 'win':
+            self.grcov_bin = 'grcov.exe'
+        else:
+            raise Exception('Unexpected OS: {}'.format(mozinfo.os))
+
         super(CodeCoverageMixin, self).__init__(**kwargs)
 
     @property
@@ -149,7 +152,7 @@ class CodeCoverageMixin(SingleTestMixin):
             return
 
         self.grcov_dir = os.environ['MOZ_FETCHES_DIR']
-        if not os.path.isfile(os.path.join(self.grcov_dir, 'grcov')):
+        if not os.path.isfile(os.path.join(self.grcov_dir, self.grcov_bin)):
             self.fetch_content()
 
         if self.code_coverage_enabled:
@@ -290,7 +293,7 @@ class CodeCoverageMixin(SingleTestMixin):
 
         # Run grcov on the zipped .gcno and .gcda files.
         grcov_command = [
-            os.path.join(self.grcov_dir, 'grcov'),
+            os.path.join(self.grcov_dir, self.grcov_bin),
             '-t', output_format,
             '-p', self.prefix,
             '--ignore-dir', 'gcc*',
@@ -379,23 +382,6 @@ class CodeCoverageMixin(SingleTestMixin):
     @PostScriptAction('run-tests')
     def _package_coverage_data(self, action, success=None):
         dirs = self.query_abs_dirs()
-
-        if self.jsd_code_coverage_enabled:
-            # Setup the command for compression
-            jsdcov_dir = dirs['abs_blob_upload_dir']
-            zipFile = os.path.join(jsdcov_dir, "jsdcov_artifacts.zip")
-
-            self.info("Beginning compression of JSDCov artifacts...")
-            with zipfile.ZipFile(zipFile, 'w', zipfile.ZIP_DEFLATED) as z:
-                for filename in os.listdir(jsdcov_dir):
-                    if filename.startswith("jscov") and filename.endswith(".json"):
-                        path = os.path.join(jsdcov_dir, filename)
-                        z.write(path, filename)
-                        # Delete already compressed JSCov artifacts.
-                        os.remove(path)
-
-            self.info("Completed compression of JSDCov artifacts!")
-            self.info("Path to JSDCov compressed artifacts: " + zipFile)
 
         if not self.code_coverage_enabled:
             return
@@ -522,7 +508,7 @@ class CodeCoverageMixin(SingleTestMixin):
         self.run_command(jacoco_command, halt_on_failure=True)
 
         grcov_command = [
-            os.path.join(self.grcov_dir, 'grcov'),
+            os.path.join(self.grcov_dir, self.grcov_bin),
             '-t', 'lcov',
             xml_path,
         ]

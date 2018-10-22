@@ -46,7 +46,7 @@ async function add_link(aOptions = {}) {
       is(title.textContent, "Add Credit Card", "Add title should be set");
 
       let saveButton = content.document.querySelector("basic-card-form .save-button");
-      is(saveButton.textContent, "Add", "Save button has the correct label");
+      is(saveButton.textContent, "Next", "Save button has the correct label");
 
       is(state.isPrivate, testArgs.isPrivate,
          "isPrivate flag has expected value when shown from a private/non-private session");
@@ -61,7 +61,10 @@ async function add_link(aOptions = {}) {
     if (aOptions.hasOwnProperty("setCardPersistCheckedValue")) {
       cardOptions.setPersistCheckedValue = aOptions.setCardPersistCheckedValue;
     }
-    await fillInCardForm(frame, PTU.BasicCards.JaneMasterCard, cardOptions);
+    await fillInCardForm(frame, {
+      ["cc-csc"]: 123,
+      ...PTU.BasicCards.JaneMasterCard,
+    }, cardOptions);
 
     await verifyCardNetwork(frame, cardOptions);
     await verifyPersistCheckbox(frame, cardOptions);
@@ -587,25 +590,32 @@ add_task(async function test_invalid_network_card_edit() {
     }, "Check card and address present at beginning of test");
 
     let networkSelector = content.document.querySelector("basic-card-form #cc-type");
-    todo_is(Cu.waiveXrays(networkSelector).selectedIndex, 0,
-            "An invalid cc-type should result in the first option being selected");
+    is(Cu.waiveXrays(networkSelector).selectedIndex, -1,
+       "An invalid cc-type should result in no selection");
     is(Cu.waiveXrays(networkSelector).value, "",
        "An invalid cc-type should result in an empty string as value");
 
+    ok(content.document.querySelector("basic-card-form button.save-button").disabled,
+       "Save button should be disabled due to a missing cc-type");
+
+    content.fillField(Cu.waiveXrays(networkSelector), "visa");
+
+    ok(!content.document.querySelector("basic-card-form button.save-button").disabled,
+       "Save button should be enabled after fixing cc-type");
     content.document.querySelector("basic-card-form button.save-button").click();
 
-    // we expect that saving a card with an invalid network will result in the
-    // cc-type property being changed to undefined
+    // We expect that saving a card with a fixed network will result in the
+    // cc-type property being changed to the new value.
     state = await PTU.DialogContentUtils.waitForState(content, (state) => {
       let cards = Object.entries(state.savedBasicCards);
       return cards.length == 1 &&
-             cards[0][1]["cc-type"] == undefined;
+             cards[0][1]["cc-type"] == "visa";
     }, "Check card was edited");
 
     let cardGUIDs = Object.keys(state.savedBasicCards);
     is(cardGUIDs.length, 1, "Check there is still one card");
     let savedCard = state.savedBasicCards[cardGUIDs[0]];
-    ok(!savedCard["cc-type"], "We expect the cc-type value to be updated");
+    is(savedCard["cc-type"], "visa", "We expect the cc-type value to be updated");
 
     state = await PTU.DialogContentUtils.waitForState(content, (state) => {
       return state.page.id == "payment-summary";
@@ -643,7 +653,10 @@ add_task(async function test_private_card_adding() {
                                                 "Check card page state");
     });
 
-    await fillInCardForm(frame, PTU.BasicCards.JohnDoe);
+    await fillInCardForm(frame, {
+      ["cc-csc"]: "999",
+      ...PTU.BasicCards.JohnDoe,
+    });
 
     await spawnPaymentDialogTask(frame, async function() {
       let {

@@ -119,6 +119,7 @@ using JS::ToNumber;
 using JS::GenericNaN;
 
 static const JSConstDoubleSpec math_constants[] = {
+    // clang-format off
     {"E"      ,  M_E       },
     {"LOG2E"  ,  M_LOG2E   },
     {"LOG10E" ,  M_LOG10E  },
@@ -128,6 +129,7 @@ static const JSConstDoubleSpec math_constants[] = {
     {"SQRT2"  ,  M_SQRT2   },
     {"SQRT1_2",  M_SQRT1_2 },
     {nullptr  ,  0         }
+    // clang-format on
 };
 
 typedef double (*UnaryMathFunctionType)(double);
@@ -235,7 +237,7 @@ js::math_atan(JSContext* cx, unsigned argc, Value* vp)
 double
 js::ecmaAtan2(double y, double x)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
     return fdlibm::atan2(y, x);
 }
 
@@ -268,7 +270,7 @@ js::math_atan2(JSContext* cx, unsigned argc, Value* vp)
 double
 js::math_ceil_impl(double x)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
     return fdlibm::ceil(x);
 }
 
@@ -350,7 +352,7 @@ js::math_exp(JSContext* cx, unsigned argc, Value* vp)
 double
 js::math_floor_impl(double x)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
     return fdlibm::floor(x);
 }
 
@@ -443,7 +445,7 @@ js::math_fround(JSContext* cx, unsigned argc, Value* vp)
 double
 js::math_log_impl(double x)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
     return fdlibm::log(x);
 }
 
@@ -462,7 +464,7 @@ js::math_log(JSContext* cx, unsigned argc, Value* vp)
 double
 js::math_max_impl(double x, double y)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
 
     // Math.max(num, NaN) => NaN, Math.max(-0, +0) => +0
     if (x > y || IsNaN(x) || (x == y && IsNegative(y))) {
@@ -491,7 +493,7 @@ js::math_max(JSContext* cx, unsigned argc, Value* vp)
 double
 js::math_min_impl(double x, double y)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
 
     // Math.min(num, NaN) => NaN, Math.min(-0, +0) => -0
     if (x < y || IsNaN(x) || (x == y && IsNegativeZero(x))) {
@@ -541,7 +543,7 @@ js::minmax_impl(JSContext* cx, bool max, HandleValue a, HandleValue b, MutableHa
 double
 js::powi(double x, int32_t y)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
     uint32_t n = Abs(y);
     double m = x;
     double p = 1;
@@ -570,7 +572,7 @@ js::powi(double x, int32_t y)
 double
 js::ecmaPow(double x, double y)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
 
     /*
      * Use powi if the exponent is an integer-valued double. We don't have to
@@ -730,7 +732,7 @@ template float js::GetBiggestNumberLessThan<>(float x);
 double
 js::math_round_impl(double x)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
 
     int32_t ignored;
     if (NumberEqualsInt32(x, &ignored)) {
@@ -781,7 +783,7 @@ js::math_round(JSContext* cx, unsigned argc, Value* vp)
 double
 js::math_sin_impl(double x)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
     return sin(x);
 }
 
@@ -814,7 +816,7 @@ js::math_sincos_impl(double x, double *sin, double *cos)
 double
 js::math_sqrt_impl(double x)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
     return sqrt(x);
 }
 
@@ -977,7 +979,7 @@ js::math_atanh(JSContext* cx, unsigned argc, Value* vp)
 double
 js::ecmaHypot(double x, double y)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
     return fdlibm::hypot(x, y);
 }
 
@@ -1085,7 +1087,7 @@ js::math_hypot_handle(JSContext* cx, HandleValueArray args, MutableHandleValue r
 double
 js::math_trunc_impl(double x)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
     return fdlibm::trunc(x);
 }
 
@@ -1123,7 +1125,7 @@ js::math_trunc(JSContext* cx, unsigned argc, Value* vp)
 double
 js::math_sign_impl(double x)
 {
-    AutoUnsafeCallWithABI unsafe;
+    AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
 
     if (mozilla::IsNaN(x)) {
         return GenericNaN();
@@ -1178,6 +1180,7 @@ math_toSource(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static const JSFunctionSpec math_static_methods[] = {
+    // clang-format off
     JS_FN(js_toSource_str,  math_toSource,        0, 0),
     JS_INLINABLE_FN("abs",    math_abs,             1, 0, MathAbs),
     JS_INLINABLE_FN("acos",   math_acos,            1, 0, MathACos),
@@ -1215,6 +1218,7 @@ static const JSFunctionSpec math_static_methods[] = {
     JS_INLINABLE_FN("sign",   math_sign,            1, 0, MathSign),
     JS_INLINABLE_FN("cbrt",   math_cbrt,            1, 0, MathCbrt),
     JS_FS_END
+    // clang-format on
 };
 
 JSObject*

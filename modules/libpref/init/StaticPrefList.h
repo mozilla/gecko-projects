@@ -88,6 +88,20 @@ VARCACHE_PREF(
 )
 
 //---------------------------------------------------------------------------
+// Fuzzing prefs. It's important that these can only be checked in fuzzing
+// builds (when FUZZING is defined), otherwise you could enable the fuzzing
+// stuff on your regular build which would be bad :)
+//---------------------------------------------------------------------------
+
+#ifdef FUZZING
+VARCACHE_PREF(
+  "fuzzing.enabled",
+   fuzzing_enabled,
+  bool, false
+)
+#endif
+
+//---------------------------------------------------------------------------
 // Clipboard prefs
 //---------------------------------------------------------------------------
 
@@ -165,6 +179,14 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+// If this is true, "keypress" event's keyCode value and charCode value always
+// become same if the event is not created/initialized by JS.
+VARCACHE_PREF(
+  "dom.keyboardevent.keypress.set_keycode_and_charcode_to_same_value",
+   dom_keyboardevent_keypress_set_keycode_and_charcode_to_same_value,
+  bool, false
+)
+
 // NOTE: This preference is used in unit tests. If it is removed or its default
 // value changes, please update test_sharedMap_var_caches.js accordingly.
 VARCACHE_PREF(
@@ -186,13 +208,32 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "dom.performance.enable_scheduler_timing",
   dom_performance_enable_scheduler_timing,
-  RelaxedAtomicBool, false
+  RelaxedAtomicBool, true
+)
+
+VARCACHE_PREF(
+  "dom.performance.children_results_ipc_timeout",
+  dom_performance_children_results_ipc_timeout,
+  uint32_t, 1000
 )
 
 // If true. then the service worker interception and the ServiceWorkerManager
 // will live in the parent process.  This only takes effect on browser start.
 // Note, this is not currently safe to use for normal browsing yet.
 PREF("dom.serviceWorkers.parent_intercept", bool, false)
+
+// Enable PaymentRequest API
+#if defined(NIGHTLY_BUILD) && (defined(XP_WIN) || defined(XP_MACOSX))
+# define PREF_VALUE  true
+#else
+# define PREF_VALUE  false
+#endif
+VARCACHE_PREF(
+  "dom.payments.request.enabled",
+   dom_payments_request_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
 
 // Whether a user gesture is required to call PaymentRequest.prototype.show().
 VARCACHE_PREF(
@@ -272,6 +313,12 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+VARCACHE_PREF(
+  "dom.testing.structuredclonetester.enabled",
+  dom_testing_structuredclonetester_enabled,
+  RelaxedAtomicBool, false
+)
+
 // Enable Storage API for all platforms except Android.
 #if !defined(MOZ_WIDGET_ANDROID)
 # define PREF_VALUE true
@@ -298,13 +345,6 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "dom.push.enabled",
    dom_push_enabled,
-  RelaxedAtomicBool, false
-)
-
-// Streams API
-VARCACHE_PREF(
-  "dom.streams.enabled",
-   dom_streams_enabled,
   RelaxedAtomicBool, false
 )
 
@@ -383,10 +423,11 @@ VARCACHE_PREF(
 )
 
 // Enable content type normalization of XHR uploads via MIME Sniffing standard
+// Disabled for now in bz1499136
 VARCACHE_PREF(
   "dom.xhr.standard_content_type_normalization",
    dom_xhr_standard_content_type_normalization,
-  RelaxedAtomicBool, true
+  RelaxedAtomicBool, false
 )
 
 //---------------------------------------------------------------------------
@@ -422,6 +463,12 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "gfx.offscreencanvas.enabled",
    gfx_offscreencanvas_enabled,
+  RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  "gfx.font_ahem_antialias_none",
+   gfx_font_ahem_antialias_none,
   RelaxedAtomicBool, false
 )
 
@@ -659,17 +706,11 @@ VARCACHE_PREF(
 )
 
 // Is the '-webkit-appearance' alias for '-moz-appearance' enabled?
-#ifdef EARLY_BETA_OR_EARLIER
-#define PREF_VALUE true
-#else
-#define PREF_VALUE false
-#endif
 VARCACHE_PREF(
   "layout.css.webkit-appearance.enabled",
    layout_css_webkit_appearance_enabled,
-  bool, PREF_VALUE
+  bool, true
 )
-#undef PREF_VALUE
 
 // Pref to control whether @-moz-document rules are enabled in content pages.
 VARCACHE_PREF(
@@ -677,6 +718,18 @@ VARCACHE_PREF(
    layout_css_moz_document_content_enabled,
   bool, false
 )
+
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "layout.css.supports-selector.enabled",
+   layout_css_supports_selector_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
 
 // Pref to control whether @-moz-document url-prefix() is parsed in content
 // pages. Only effective when layout.css.moz-document.content.enabled is false.
@@ -700,31 +753,19 @@ VARCACHE_PREF(
 
 // Pref to control whether display: -moz-box and display: -moz-inline-box are
 // parsed in content pages.
-#ifdef EARLY_BETA_OR_EARLIER
-#define PREF_VALUE false
-#else
-#define PREF_VALUE true
-#endif
 VARCACHE_PREF(
   "layout.css.xul-box-display-values.content.enabled",
    layout_css_xul_box_display_values_content_enabled,
-  bool, PREF_VALUE
+  bool, false
 )
-#undef PREF_VALUE
 
 // Pref to control whether ::xul-tree-* pseudo-elements are parsed in content
 // pages.
-#ifdef EARLY_BETA_OR_EARLIER
-#define PREF_VALUE false
-#else
-#define PREF_VALUE true
-#endif
 VARCACHE_PREF(
   "layout.css.xul-tree-pseudos.content.enabled",
    layout_css_xul_tree_pseudos_content_enabled,
-  bool, PREF_VALUE
+  bool, false
 )
-#undef PREF_VALUE
 
 // Is support for CSS "grid-template-{columns,rows}: subgrid X" enabled?
 VARCACHE_PREF(
@@ -836,6 +877,14 @@ VARCACHE_PREF(
    javascript_options_mem_notify,
   bool, false
 )
+
+// Streams API
+VARCACHE_PREF(
+  "javascript.options.streams",
+   javascript_options_streams,
+  RelaxedAtomicBool, false
+)
+
 
 //---------------------------------------------------------------------------
 // Media prefs
@@ -1042,6 +1091,13 @@ VARCACHE_PREF(
    MediaNavigatorMediadatadecoderEnabled,
   bool, false
 )
+// Use MediaDataDecoder API for WebRTC. This includes hardware acceleration for
+// decoding.
+VARCACHE_PREF(
+  "media.navigator.mediadatadecoder_h264_enabled",
+   MediaNavigatorMediadatadecoderH264Enabled,
+  bool, false
+)
 #endif // MOZ_WEBRTC
 
 #ifdef MOZ_OMX
@@ -1086,7 +1142,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.ffmpeg.low-latency.enabled",
    MediaFfmpegLowLatencyEnabled,
-  bool, false
+  RelaxedAtomicBool, false
 )
 #endif
 
@@ -1580,32 +1636,40 @@ PREF("preferences.allow.omt-write", bool, true)
 // Privacy prefs
 //---------------------------------------------------------------------------
 
-#include "ContentBlockingDefaultPrefValues.h"
-
 // Whether Content Blocking has been enabled.
 VARCACHE_PREF(
   "browser.contentblocking.enabled",
    browser_contentblocking_enabled,
-  bool, CONTENTBLOCKING_ENABLED
+  bool, true
 )
 
 // Whether Content Blocking UI has been enabled.
 VARCACHE_PREF(
   "browser.contentblocking.ui.enabled",
    browser_contentblocking_ui_enabled,
-  bool, CONTENTBLOCKING_UI_ENABLED
+  bool, true
 )
 
 // Whether Content Blocking Third-Party Cookies UI has been enabled.
 VARCACHE_PREF(
-  "browser.contentblocking.rejecttrackers.ui.enabled",
-   browser_contentblocking_rejecttrackers_ui_enabled,
-  bool, CONTENTBLOCKING_REJECTTRACKERS_UI_ENABLED
+  "browser.contentblocking.allowlist.storage.enabled",
+   browser_contentblocking_allowlist_storage_enabled,
+  bool, false
 )
 
-#undef CONTENTBLOCKING_ENABLED
-#undef CONTENTBLOCKING_UI_ENABLED
-#undef CONTENTBLOCKING_REJECTTRACKERS_UI_ENABLED
+VARCACHE_PREF(
+  "browser.contentblocking.allowlist.annotations.enabled",
+   browser_contentblocking_allowlist_annotations_enabled,
+  bool, true
+)
+
+// How many recent block/unblock actions per origins we remember in the
+// Content Blocking log for each top-level window.
+VARCACHE_PREF(
+  "browser.contentblocking.originlog.length",
+   browser_contentblocking_originlog_length,
+  uint32_t, 32
+)
 
 // Whether FastBlock has been enabled.
 VARCACHE_PREF(
@@ -1695,6 +1759,22 @@ VARCACHE_PREF(
    devtools_enabled,
   RelaxedAtomicBool, false
 )
+
+//---------------------------------------------------------------------------
+// Feature-Policy prefs
+//---------------------------------------------------------------------------
+
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "dom.security.featurePolicy.enabled",
+   dom_security_featurePolicy_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
 
 //---------------------------------------------------------------------------
 // End of prefs

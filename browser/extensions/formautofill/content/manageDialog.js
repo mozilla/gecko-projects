@@ -11,6 +11,7 @@ const EDIT_CREDIT_CARD_URL = "chrome://formautofill/content/editCreditCard.xhtml
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 ChromeUtils.defineModuleGetter(this, "CreditCard",
                                "resource://gre/modules/CreditCard.jsm");
@@ -103,8 +104,12 @@ class ManageRecords {
   async _loadRecords() {
     let storage = await this.getStorage();
     let records = await storage.getAll();
-    // Sort by last modified time starting with most recent
-    records.sort((a, b) => b.timeLastModified - a.timeLastModified);
+    // Sort by last used time starting with most recent
+    records.sort((a, b) => {
+      let aLastUsed = a.timeLastUsed || a.timeLastModified;
+      let bLastUsed = b.timeLastUsed || b.timeLastModified;
+      return bLastUsed - aLastUsed;
+    });
     await this.renderRecordElements(records);
     this.updateButtonsStates(this._selectedOptions.length);
   }
@@ -293,7 +298,12 @@ class ManageAddresses extends ManageRecords {
    * @param  {object} address [optional]
    */
   openEditDialog(address) {
-    this.prefWin.gSubDialog.open(EDIT_ADDRESS_URL, null, address, "novalidate");
+    this.prefWin.gSubDialog.open(EDIT_ADDRESS_URL, null, {
+      record: address,
+      // Don't validate in preferences since it's fine for fields to be missing
+      // for autofill purposes. For PaymentRequest addresses get more validation.
+      noValidate: true,
+    });
   }
 
   getLabel(address) {
@@ -328,7 +338,9 @@ class ManageCreditCards extends ManageRecords {
         decryptedCCNumObj["cc-number"] = await MasterPassword.decrypt(creditCard["cc-number-encrypted"]);
       }
       let decryptedCreditCard = Object.assign({}, creditCard, decryptedCCNumObj);
-      this.prefWin.gSubDialog.open(EDIT_CREDIT_CARD_URL, "resizable=no", decryptedCreditCard);
+      this.prefWin.gSubDialog.open(EDIT_CREDIT_CARD_URL, "resizable=no", {
+        record: decryptedCreditCard,
+      });
     }
   }
 
@@ -368,7 +380,19 @@ class ManageCreditCards extends ManageRecords {
   async renderRecordElements(records) {
     // Revert back to encrypted form when re-rendering happens
     this._isDecrypted = false;
+    // Display third-party card icons when possible
+    this._elements.records.classList.toggle("branded", AppConstants.MOZILLA_OFFICIAL);
     await super.renderRecordElements(records);
+
+    let options = this._elements.records.options;
+    for (let option of options) {
+      let record = option.record;
+      if (record && record["cc-type"]) {
+        option.setAttribute("cc-type", record["cc-type"]);
+      } else {
+        option.removeAttribute("cc-type");
+      }
+    }
   }
 
   updateButtonsStates(selectedCount) {

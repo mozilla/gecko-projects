@@ -58,10 +58,16 @@ describe("CFRPageActions", () => {
             label: {string_id: "primary_button_id"},
             action: {id: "primary_action"},
           },
-          secondary: {
+          secondary: [{
             label: {string_id: "secondary_button_id"},
             action: {id: "secondary_action"},
-          },
+          }, {
+            label: {string_id: "secondary_button_id_2"},
+            action: {id: "secondary_action"},
+          }, {
+            label: {string_id: "secondary_button_id_3"},
+            action: {id: "secondary_action"},
+          }],
         },
       },
     };
@@ -399,6 +405,10 @@ describe("CFRPageActions", () => {
           .resolves({value: "Primary Button", attributes: {accesskey: "p"}})
           .withArgs({string_id: "secondary_button_id"})
           .resolves({value: "Secondary Button", attributes: {accesskey: "s"}})
+          .withArgs({string_id: "secondary_button_id_2"})
+          .resolves({value: "Secondary Button 2", attributes: {accesskey: "a"}})
+          .withArgs({string_id: "secondary_button_id_3"})
+          .resolves({value: "Secondary Button 3", attributes: {accesskey: "g"}})
           .withArgs(sinon.match({string_id: "cfr-doorhanger-extension-learn-more-link"}))
           .resolves("Learn more")
           .withArgs(sinon.match({string_id: "cfr-doorhanger-extension-total-users"}))
@@ -639,6 +649,23 @@ describe("CFRPageActions", () => {
         assert.equal(win, pageAction.window);
         assert.equal(dispatchStub, pageAction._dispatchToASRouter);
         assert.calledOnce(PageAction.prototype.show);
+      });
+      it("should add the right url if we fetched and addon install URL", async () => {
+        sinon.stub(CFRPageActions, "_fetchLatestAddonVersion").returns(Promise.resolve("latest-addon.xpi"));
+        fakeRecommendation.template = "cfr_doorhanger";
+        await CFRPageActions.addRecommendation(fakeBrowser, fakeHost, fakeRecommendation, dispatchStub);
+        const recommendation = CFRPageActions.RecommendationMap.get(fakeBrowser);
+        assert.equal(recommendation.content.buttons.primary.action.data.url, "latest-addon.xpi");
+
+        // sanity check - just go through some of the rest of the attributes to make sure they were untouched
+        assert.equal(recommendation.id, fakeRecommendation.id);
+        assert.equal(recommendation.content.heading_text, fakeRecommendation.content.heading_text);
+        assert.equal(recommendation.content.addon, fakeRecommendation.content.addon);
+        assert.equal(recommendation.content.text, fakeRecommendation.content.text);
+        assert.equal(recommendation.content.buttons.secondary, fakeRecommendation.content.buttons.secondary);
+        assert.equal(recommendation.content.buttons.primary.action.id, fakeRecommendation.content.buttons.primary.action.id);
+
+        delete fakeRecommendation.template;
       });
     });
 

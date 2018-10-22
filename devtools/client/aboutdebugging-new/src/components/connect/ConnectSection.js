@@ -21,16 +21,16 @@ class ConnectSection extends PureComponent {
   render() {
     return dom.section(
       {
-        className: this.props.className,
+        className: `page__section ${this.props.className || ""}`,
       },
       dom.h2(
         {
-          className: "connect-page__section__title"
+          className: "alt-subheading",
         },
         dom.img(
           {
-            className: "connect-page__section__icon",
-            src: this.props.icon
+            className: "alt-subheading__icon",
+            src: this.props.icon,
           }
         ),
         this.props.title

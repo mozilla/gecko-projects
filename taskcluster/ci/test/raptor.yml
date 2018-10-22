@@ -36,8 +36,8 @@ raptor-tp6-firefox:
     description: "Raptor tp6 on Firefox"
     try-name: raptor-tp6-firefox
     treeherder-symbol: Rap(tp6)
-    run-on-projects: ['try', 'mozilla-central']
-    max-run-time: 1200
+    run-on-projects: ['try', 'mozilla-central', 'mozilla-beta']
+    max-run-time: 1800
     mozharness:
         extra-options:
             - --test=raptor-tp6
@@ -46,7 +46,11 @@ raptor-tp6-chrome:
     description: "Raptor tp6 on Chrome"
     try-name: raptor-tp6-chrome
     treeherder-symbol: Rap-C(tp6)
-    run-on-projects: ['try']
+    run-on-projects: ['try', 'mozilla-central']
+    tier:
+        by-test-platform:
+            linux64.*: 3
+            default: 2
     max-run-time: 1200
     mozharness:
         extra-options:
@@ -224,6 +228,24 @@ raptor-unity-webgl-firefox:
     mozharness:
         extra-options:
             - --test=raptor-unity-webgl
+    fetches:
+        fetch:
+            - unity-webgl
+
+raptor-unity-webgl-geckoview:
+    description: "Raptor Unity WebGL on Geckoview"
+    try-name: raptor-unity-webgl-geckoview
+    treeherder-symbol: Rap(ugl)
+    target: geckoview_example.apk
+    run-on-projects:
+        by-test-platform:
+            android-hw-.*arm7.*: ['try', 'mozilla-central']
+    max-run-time: 900
+    mozharness:
+        extra-options:
+            - --test=raptor-unity-webgl
+            - --app=geckoview
+            - --binary=org.mozilla.geckoview_example
     fetches:
         fetch:
             - unity-webgl

@@ -2807,10 +2807,11 @@ DebugEnvironments::takeFrameSnapshot(JSContext* cx, Handle<DebugEnvironmentProxy
      * invariants since DebugEnvironmentProxy::maybeSnapshot can already be nullptr.
      */
 
+    JSScript* script = frame.script();
+
     // Act like no snapshot was taken if we run OOM while taking the snapshot.
     Rooted<GCVector<Value>> vec(cx, GCVector<Value>(cx));
     if (debugEnv->environment().is<CallObject>()) {
-        JSScript* script = frame.script();
 
         FunctionScope* scope = &script->bodyScope()->as<FunctionScope>();
         uint32_t frameSlotCount = scope->nextFrameSlot();
@@ -2848,7 +2849,7 @@ DebugEnvironments::takeFrameSnapshot(JSContext* cx, Handle<DebugEnvironmentProxy
             LexicalScope* scope = &debugEnv->environment().as<LexicalEnvironmentObject>().scope();
             frameSlotStart = scope->firstFrameSlot();
             frameSlotEnd = scope->nextFrameSlot();
-        } else {
+        } else if (debugEnv->environment().is<VarEnvironmentObject>()) {
             VarEnvironmentObject* env = &debugEnv->environment().as<VarEnvironmentObject>();
             if (frame.isFunctionFrame()) {
                 VarScope* scope = &env->scope().as<VarScope>();
@@ -2856,14 +2857,20 @@ DebugEnvironments::takeFrameSnapshot(JSContext* cx, Handle<DebugEnvironmentProxy
                 frameSlotEnd = scope->nextFrameSlot();
             } else {
                 EvalScope* scope = &env->scope().as<EvalScope>();
-                MOZ_ASSERT(scope == frame.script()->bodyScope());
+                MOZ_ASSERT(scope == script->bodyScope());
                 frameSlotStart = 0;
                 frameSlotEnd = scope->nextFrameSlot();
             }
+        } else {
+            MOZ_ASSERT(&debugEnv->environment().as<ModuleEnvironmentObject>() ==
+                       script->module()->environment());
+            ModuleScope* scope = &script->bodyScope()->as<ModuleScope>();
+            frameSlotStart = 0;
+            frameSlotEnd = scope->nextFrameSlot();
         }
 
         uint32_t frameSlotCount = frameSlotEnd - frameSlotStart;
-        MOZ_ASSERT(frameSlotCount <= frame.script()->nfixed());
+        MOZ_ASSERT(frameSlotCount <= script->nfixed());
 
         if (!vec.resize(frameSlotCount)) {
             cx->recoverFromOutOfMemory();
@@ -3020,6 +3027,12 @@ DebugEnvironments::onPopWith(AbstractFramePtr frame)
     if (DebugEnvironments* envs = realm->debugEnvs()) {
         envs->liveEnvs.remove(&frame.environmentChain()->as<WithEnvironmentObject>());
     }
+}
+
+void
+DebugEnvironments::onPopModule(JSContext* cx, const EnvironmentIter& ei)
+{
+    onPopGeneric<ModuleEnvironmentObject, ModuleScope>(cx, ei);
 }
 
 void
@@ -3462,6 +3475,23 @@ js::GetModuleObjectForScript(JSScript* script)
         }
     }
     return nullptr;
+}
+
+Value
+js::FindScriptOrModulePrivateForScript(JSScript* script)
+{
+    while (script) {
+        ScriptSourceObject* sso = &script->scriptSourceUnwrap();
+        Value value = sso->getPrivate();
+        if (!value.isUndefined()) {
+            return value;
+        }
+
+        MOZ_ASSERT(sso->introductionScript() != script);
+        script = sso->introductionScript();
+    }
+
+    return UndefinedValue();
 }
 
 bool
@@ -3912,11 +3942,9 @@ RemoveReferencedNames(JSContext* cx, HandleScript script, PropertyNameSet& remai
     }
 
     if (script->hasObjects()) {
-        ObjectArray* objects = script->objects();
         RootedFunction fun(cx);
         RootedScript innerScript(cx);
-        for (size_t i = 0; i < objects->length; i++) {
-            JSObject* obj = objects->vector[i];
+        for (JSObject* obj : script->objects()) {
             if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpreted()) {
                 fun = &obj->as<JSFunction>();
                 innerScript = JSFunction::getOrCreateScript(cx, fun);
@@ -3984,11 +4012,9 @@ AnalyzeEntrainedVariablesInScript(JSContext* cx, HandleScript script, HandleScri
     }
 
     if (innerScript->hasObjects()) {
-        ObjectArray* objects = innerScript->objects();
         RootedFunction fun(cx);
         RootedScript innerInnerScript(cx);
-        for (size_t i = 0; i < objects->length; i++) {
-            JSObject* obj = objects->vector[i];
+        for (JSObject* obj : script->objects()) {
             if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpreted()) {
                 fun = &obj->as<JSFunction>();
                 innerInnerScript = JSFunction::getOrCreateScript(cx, fun);
@@ -4022,11 +4048,9 @@ js::AnalyzeEntrainedVariables(JSContext* cx, HandleScript script)
         return true;
     }
 
-    ObjectArray* objects = script->objects();
     RootedFunction fun(cx);
     RootedScript innerScript(cx);
-    for (size_t i = 0; i < objects->length; i++) {
-        JSObject* obj = objects->vector[i];
+    for (JSObject* obj : script->objects()) {
         if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpreted()) {
             fun = &obj->as<JSFunction>();
             innerScript = JSFunction::getOrCreateScript(cx, fun);

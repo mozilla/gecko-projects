@@ -711,6 +711,7 @@ MakeTime(double hour, double min, double sec, double ms)
 /* for use by date_parse */
 
 static const char* const wtb[] = {
+    // clang-format off
     "am", "pm",
     "monday", "tuesday", "wednesday", "thursday", "friday",
     "saturday", "sunday",
@@ -722,9 +723,11 @@ static const char* const wtb[] = {
     "mst", "mdt",
     "pst", "pdt"
     /* time zone table needs to be expanded */
+    // clang-format on
 };
 
 static const int ttb[] = {
+    // clang-format off
     -1, -2, 0, 0, 0, 0, 0, 0, 0,       /* AM/PM */
     2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
     10000 + 0, 10000 + 0, 10000 + 0,   /* GMT/UT/UTC */
@@ -732,6 +735,7 @@ static const int ttb[] = {
     10000 + 6 * 60, 10000 + 5 * 60,    /* CST/CDT */
     10000 + 7 * 60, 10000 + 6 * 60,    /* MST/MDT */
     10000 + 8 * 60, 10000 + 7 * 60     /* PST/PDT */
+    // clang-format on
 };
 
 template <typename CharT>
@@ -1150,10 +1154,13 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
     int sec = -1;
     int tzOffset = -1;
 
+    // One of '+', '-', ':', '/', or 0 (the default value).
     int prevc = 0;
 
     bool seenPlusMinus = false;
     bool seenMonthName = false;
+    bool seenFullYear = false;
+    bool negativeYear = false;
 
     size_t i = 0;
     while (i < length) {
@@ -1181,11 +1188,15 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
             continue;
         }
         if ('0' <= c && c <= '9') {
-            int n = c - '0';
+            size_t partStart = i - 1;
+            uint32_t u = c - '0';
             while (i < length && '0' <= (c = s[i]) && c <= '9') {
-                n = n * 10 + c - '0';
+                u = u * 10 + (c - '0');
                 i++;
             }
+            size_t partLength = i - partStart;
+
+            int n = int(u);
 
             /*
              * Allow TZA before the year, so 'Wed Nov 05 21:49:11 GMT-0800 1997'
@@ -1195,7 +1206,17 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
              * of GMT+4:30 works.
              */
 
-            if ((prevc == '+' || prevc == '-')/*  && year>=0 */) {
+            if (prevc == '-' && (tzOffset != 0 || seenPlusMinus) && partLength >= 4 && year < 0) {
+                // Parse as a negative, possibly zero-padded year if
+                // 1. the preceding character is '-',
+                // 2. the TZA is not 'GMT' (tested by |tzOffset != 0|),
+                // 3. or a TZA was already parsed |seenPlusMinus == true|,
+                // 4. the part length is at least 4 (to parse '-08' as a TZA),
+                // 5. and we did not already parse a year |year < 0|.
+                year = n;
+                seenFullYear = true;
+                negativeYear = true;
+            } else if ((prevc == '+' || prevc == '-')/*  && year>=0 */) {
                 /* Make ':' case below change tzOffset. */
                 seenPlusMinus = true;
 
@@ -1209,6 +1230,8 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
                 if (prevc == '+')       /* plus means east of GMT */
                     n = -n;
 
+                // Reject if not preceded by 'GMT' or if a time zone offset
+                // was already parsed.
                 if (tzOffset != 0 && tzOffset != -1) {
                     return false;
                 }
@@ -1258,6 +1281,7 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
                 mday = /*byte*/ n;
             } else if (mon >= 0 && mday >= 0 && year < 0) {
                 year = n;
+                seenFullYear = partLength >= 4;
             } else {
                 return false;
             }
@@ -1348,11 +1372,7 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
      *         is invalid.
      *
      *         The year is taken to be either the greater of the values f, l or
-     *         whichever is set to zero. If the year is greater than or equal to
-     *         50 and less than 100, it is considered to be the number of years
-     *         after 1900. If the year is less than 50 it is considered to be the
-     *         number of years after 2000, otherwise it is considered to be the
-     *         number of years after 0.
+     *         whichever is set to zero.
      *
      * Case 2. The input string is of the form "f/m/l" where f, m and l are
      *         integers, e.g. 7/16/45. mon, mday and year values are adjusted
@@ -1360,21 +1380,15 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
      *
      *         a. If 0 < f <= 12 and 0 < l <= 31, f/m/l is interpreted as
      *         month/day/year.
-     *            i.  If year < 50, it is the number of years after 2000
-     *            ii. If year >= 50, it is the number of years after 1900.
-     *           iii. If year >= 100, it is the number of years after 0.
      *         b. If 31 < f and 0 < m <= 12 and 0 < l <= 31 f/m/l is
      *         interpreted as year/month/day
-     *            i.  If year < 50, it is the number of years after 2000
-     *            ii. If year >= 50, it is the number of years after 1900.
-     *           iii. If year >= 100, it is the number of years after 0.
      */
     if (seenMonthName) {
         if (mday >= 100 && mon >= 100) {
             return false;
         }
 
-        if (year > 0 && (mday == 0 || mday > year)) {
+        if (year > 0 && (mday == 0 || mday > year) && !seenFullYear) {
             int temp = year;
             year = mday;
             mday = temp;
@@ -1388,7 +1402,7 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
         /* (a) month/day/year */
     } else {
         /* (b) year/month/day */
-        if (mon > 31 && mday <= 12 && year <= 31) {
+        if (mon > 31 && mday <= 12 && year <= 31 && !seenFullYear) {
             int temp = year;
             year = mon;
             mon = mday;
@@ -1398,10 +1412,20 @@ ParseDate(const CharT* s, size_t length, ClippedTime* result)
         }
     }
 
-    if (year < 50) {
-        year += 2000;
-    } else if (year >= 50 && year < 100) {
-        year += 1900;
+    // If the year is greater than or equal to 50 and less than 100, it is
+    // considered to be the number of years after 1900. If the year is less
+    // than 50 it is considered to be the number of years after 2000,
+    // otherwise it is considered to be the number of years after 0.
+    if (!seenFullYear) {
+        if (year < 50) {
+            year += 2000;
+        } else if (year >= 50 && year < 100) {
+            year += 1900;
+        }
+    }
+
+    if (negativeYear) {
+        year = -year;
     }
 
     mon -= 1; /* convert month to 0-based */
@@ -3326,13 +3350,16 @@ date_toPrimitive(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static const JSFunctionSpec date_static_methods[] = {
+    // clang-format off
     JS_FN("UTC",                 date_UTC,                7,0),
     JS_FN("parse",               date_parse,              1,0),
     JS_FN("now",                 date_now,                0,0),
     JS_FS_END
+    // clang-format on
 };
 
 static const JSFunctionSpec date_methods[] = {
+    // clang-format off
     JS_FN("getTime",             date_getTime,            0,0),
     JS_FN("getTimezoneOffset",   date_getTimezoneOffset,  0,0),
     JS_FN("getYear",             date_getYear,            0,0),
@@ -3387,6 +3414,7 @@ static const JSFunctionSpec date_methods[] = {
     JS_FN(js_valueOf_str,        date_valueOf,            0,0),
     JS_SYM_FN(toPrimitive,       date_toPrimitive,        1,JSPROP_READONLY),
     JS_FS_END
+    // clang-format on
 };
 
 static bool
@@ -3584,13 +3612,6 @@ DateConstructor(JSContext* cx, unsigned argc, Value* vp)
     return DateMultipleArguments(cx, args);
 }
 
-// ES6 final draft 20.3.4.
-static JSObject*
-CreateDatePrototype(JSContext* cx, JSProtoKey key)
-{
-    return GlobalObject::createBlankPrototype(cx, cx->global(), &DateObject::protoClass_);
-}
-
 static bool
 FinishDateClassInit(JSContext* cx, HandleObject ctor, HandleObject proto)
 {
@@ -3608,7 +3629,7 @@ FinishDateClassInit(JSContext* cx, HandleObject ctor, HandleObject proto)
 
 static const ClassSpec DateObjectClassSpec = {
     GenericCreateConstructor<DateConstructor, 7, gc::AllocKind::FUNCTION>,
-    CreateDatePrototype,
+    GenericCreatePrototype<DateObject>,
     date_static_methods,
     nullptr,
     date_methods,

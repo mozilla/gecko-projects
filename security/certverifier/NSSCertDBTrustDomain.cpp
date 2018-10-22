@@ -28,9 +28,9 @@
 #include "nsThreadUtils.h"
 #include "nss.h"
 #include "pk11pub.h"
-#include "pkix/Result.h"
-#include "pkix/pkix.h"
-#include "pkix/pkixnss.h"
+#include "mozpkix/Result.h"
+#include "mozpkix/pkix.h"
+#include "mozpkix/pkixnss.h"
 #include "prerror.h"
 #include "secerr.h"
 
@@ -206,16 +206,20 @@ NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
   // certificates.
   if (mCertDBTrustType == trustSSL) {
     bool isCertRevoked;
-    nsresult nsrv = mCertBlocklist->IsCertRevoked(
-                      candidateCert->derIssuer.data,
-                      candidateCert->derIssuer.len,
-                      candidateCert->serialNumber.data,
-                      candidateCert->serialNumber.len,
-                      candidateCert->derSubject.data,
-                      candidateCert->derSubject.len,
-                      candidateCert->derPublicKey.data,
-                      candidateCert->derPublicKey.len,
-                      &isCertRevoked);
+
+    nsAutoCString encIssuer;
+    nsAutoCString encSerial;
+    nsAutoCString encSubject;
+    nsAutoCString encPubKey;
+
+    nsresult nsrv = BuildRevocationCheckStrings(candidateCert.get(), encIssuer, encSerial, encSubject, encPubKey);
+
+    if (NS_FAILED(nsrv))  {
+      return Result::FATAL_ERROR_LIBRARY_FAILURE;
+    }
+
+    nsrv = mCertBlocklist->IsCertRevoked(
+      encIssuer, encSerial, encSubject, encPubKey, &isCertRevoked);
     if (NS_FAILED(nsrv)) {
       return Result::FATAL_ERROR_LIBRARY_FAILURE;
     }
@@ -578,7 +582,6 @@ NSSCertDBTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
     Result tempRV = DoOCSPRequest(aiaLocation, mOriginAttributes,
                                   std::move(ocspRequest), GetOCSPTimeout(),
                                   ocspResponse);
-    MOZ_ASSERT((tempRV != Success) || ocspResponse.length() > 0);
     if (tempRV != Success) {
       rv = tempRV;
     } else if (response.Init(ocspResponse.begin(), ocspResponse.length())
@@ -1283,6 +1286,47 @@ DefaultServerNicknameForCert(const CERTCertificate* cert,
   }
 
   return NS_ERROR_FAILURE;
+}
+
+nsresult
+BuildRevocationCheckStrings(const CERTCertificate* cert,
+                    /*out*/ nsCString& encIssuer,
+                    /*out*/ nsCString& encSerial,
+                    /*out*/ nsCString& encSubject,
+                    /*out*/ nsCString& encPubKey)
+{
+  // Convert issuer, serial, subject and pubKey data to Base64 encoded DER
+  nsDependentCSubstring issuerString(
+    BitwiseCast<char*, uint8_t*>(cert->derIssuer.data),
+    cert->derIssuer.len);
+  nsDependentCSubstring serialString(
+    BitwiseCast<char*, uint8_t*>(cert->serialNumber.data),
+    cert->serialNumber.len);
+  nsDependentCSubstring subjectString(
+    BitwiseCast<char*, uint8_t*>(cert->derSubject.data),
+    cert->derSubject.len);
+  nsDependentCSubstring pubKeyString(
+    BitwiseCast<char*, uint8_t*>(cert->derPublicKey.data),
+    cert->derPublicKey.len);
+
+  nsresult rv = Base64Encode(issuerString, encIssuer);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = Base64Encode(serialString, encSerial);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = Base64Encode(subjectString, encSubject);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = Base64Encode(pubKeyString, encPubKey);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  return NS_OK;
 }
 
 /**

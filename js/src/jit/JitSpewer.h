@@ -106,7 +106,9 @@ namespace jit {
     /* Debug info about snapshots */        \
     _(IonSnapshots)                         \
     /* Generated inline cache stubs */      \
-    _(IonIC)
+    _(IonIC)                                \
+    /* Baseline IC Statistic information */ \
+    _(BaselineIC_Statistics)
 
 enum JitSpewChannel {
 #define JITSPEW_CHANNEL(name) JitSpew_##name,
@@ -269,28 +271,6 @@ static inline void EnableIonDebugAsyncLogging()
 { }
 
 #endif /* JS_JITSPEW */
-
-template <JitSpewChannel Channel>
-class AutoDisableSpew
-{
-    mozilla::DebugOnly<bool> enabled_;
-
-  public:
-    AutoDisableSpew()
-      : enabled_(JitSpewEnabled(Channel))
-    {
-        DisableChannel(Channel);
-    }
-
-    ~AutoDisableSpew()
-    {
-#ifdef JS_JITSPEW
-        if (enabled_) {
-            EnableChannel(Channel);
-        }
-#endif
-    }
-};
 
 } // namespace jit
 } // namespace js

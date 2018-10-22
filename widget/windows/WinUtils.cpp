@@ -13,6 +13,7 @@
 #include "gfxUtils.h"
 #include "nsWindow.h"
 #include "nsWindowDefs.h"
+#include "InputDeviceUtils.h"
 #include "KeyboardLayout.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BackgroundHangMonitor.h"
@@ -433,6 +434,7 @@ struct CoTaskMemFreePolicy
 
 SetThreadDpiAwarenessContextProc WinUtils::sSetThreadDpiAwarenessContext = NULL;
 EnableNonClientDpiScalingProc WinUtils::sEnableNonClientDpiScaling = NULL;
+GetSystemMetricsForDpiProc WinUtils::sGetSystemMetricsForDpi = NULL;
 
 /* static */
 void
@@ -454,6 +456,9 @@ WinUtils::Initialize()
         sSetThreadDpiAwarenessContext = (SetThreadDpiAwarenessContextProc)
           ::GetProcAddress(user32Dll, "SetThreadDpiAwarenessContext");
       }
+
+      sGetSystemMetricsForDpi = (GetSystemMetricsForDpiProc)
+        ::GetProcAddress(user32Dll, "GetSystemMetricsForDpi");
     }
   }
 }
@@ -669,6 +674,27 @@ WinUtils::MonitorFromRect(const gfx::Rect& rect)
   };
 
   return ::MonitorFromRect(&globalWindowBounds, MONITOR_DEFAULTTONEAREST);
+}
+
+/* static */
+bool
+WinUtils::HasSystemMetricsForDpi()
+{
+  return (sGetSystemMetricsForDpi != NULL);
+}
+
+/* static */
+int
+WinUtils::GetSystemMetricsForDpi(int nIndex, UINT dpi)
+{
+  if (HasSystemMetricsForDpi()) {
+    return sGetSystemMetricsForDpi(nIndex, dpi);
+  } else {
+    double scale = IsPerMonitorDPIAware()
+      ? dpi / SystemDPI()
+      : 1.0;
+    return NSToIntRound(::GetSystemMetrics(nIndex) * scale);
+  }
 }
 
 #ifdef ACCESSIBILITY
@@ -1765,6 +1791,103 @@ WinUtils::SetupKeyModifiersSequence(nsTArray<KeyPair>* aArray,
   }
 }
 
+/* static */
+nsresult
+WinUtils::WriteBitmap(nsIFile* aFile, imgIContainer* aImage)
+{
+  RefPtr<SourceSurface> surface =
+    aImage->GetFrame(imgIContainer::FRAME_FIRST,
+                     imgIContainer::FLAG_SYNC_DECODE);
+  NS_ENSURE_TRUE(surface, NS_ERROR_FAILURE);
+
+  return WriteBitmap(aFile, surface);
+}
+
+/* static */
+nsresult
+WinUtils::WriteBitmap(nsIFile* aFile, SourceSurface* surface)
+{
+  nsresult rv;
+
+  // For either of the following formats we want to set the biBitCount member
+  // of the BITMAPINFOHEADER struct to 32, below. For that value the bitmap
+  // format defines that the A8/X8 WORDs in the bitmap byte stream be ignored
+  // for the BI_RGB value we use for the biCompression member.
+  MOZ_ASSERT(surface->GetFormat() == SurfaceFormat::B8G8R8A8 ||
+             surface->GetFormat() == SurfaceFormat::B8G8R8X8);
+
+  RefPtr<DataSourceSurface> dataSurface = surface->GetDataSurface();
+  NS_ENSURE_TRUE(dataSurface, NS_ERROR_FAILURE);
+
+  int32_t width = dataSurface->GetSize().width;
+  int32_t height = dataSurface->GetSize().height;
+  int32_t bytesPerPixel = 4 * sizeof(uint8_t);
+  uint32_t bytesPerRow = bytesPerPixel * width;
+
+  // initialize these bitmap structs which we will later
+  // serialize directly to the head of the bitmap file
+  BITMAPINFOHEADER bmi;
+  bmi.biSize = sizeof(BITMAPINFOHEADER);
+  bmi.biWidth = width;
+  bmi.biHeight = height;
+  bmi.biPlanes = 1;
+  bmi.biBitCount = (WORD)bytesPerPixel*8;
+  bmi.biCompression = BI_RGB;
+  bmi.biSizeImage = bytesPerRow * height;
+  bmi.biXPelsPerMeter = 0;
+  bmi.biYPelsPerMeter = 0;
+  bmi.biClrUsed = 0;
+  bmi.biClrImportant = 0;
+
+  BITMAPFILEHEADER bf;
+  bf.bfType = 0x4D42; // 'BM'
+  bf.bfReserved1 = 0;
+  bf.bfReserved2 = 0;
+  bf.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+  bf.bfSize = bf.bfOffBits + bmi.biSizeImage;
+
+  // get a file output stream
+  nsCOMPtr<nsIOutputStream> stream;
+  rv = NS_NewLocalFileOutputStream(getter_AddRefs(stream), aFile);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  DataSourceSurface::MappedSurface map;
+  if (!dataSurface->Map(DataSourceSurface::MapType::READ, &map)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // write the bitmap headers and rgb pixel data to the file
+  rv = NS_ERROR_FAILURE;
+  if (stream) {
+    uint32_t written;
+    stream->Write((const char*)&bf, sizeof(BITMAPFILEHEADER), &written);
+    if (written == sizeof(BITMAPFILEHEADER)) {
+      stream->Write((const char*)&bmi, sizeof(BITMAPINFOHEADER), &written);
+      if (written == sizeof(BITMAPINFOHEADER)) {
+        // write out the image data backwards because the desktop won't
+        // show bitmaps with negative heights for top-to-bottom
+        uint32_t i = map.mStride * height;
+        do {
+          i -= map.mStride;
+          stream->Write(((const char*)map.mData) + i, bytesPerRow, &written);
+          if (written == bytesPerRow) {
+            rv = NS_OK;
+          } else {
+            rv = NS_ERROR_FAILURE;
+            break;
+          }
+        } while (i != 0);
+      }
+    }
+
+    stream->Close();
+  }
+
+  dataSurface->Unmap();
+
+  return rv;
+}
+
 // This is in use here and in dom/events/TouchEvent.cpp
 /* static */
 uint32_t
@@ -1875,7 +1998,26 @@ IsTabletDevice()
 static bool
 IsMousePresent()
 {
-  return ::GetSystemMetrics(SM_MOUSEPRESENT);
+  if (!::GetSystemMetrics(SM_MOUSEPRESENT)) {
+    return false;
+  }
+
+  DWORD count = InputDeviceUtils::CountMouseDevices();
+  if (!count) {
+    return false;
+  }
+
+  // If there is a mouse device and if this machine is a tablet or has a
+  // digitizer, that's counted as the mouse device.
+  // FIXME: Bug 1495938:  We should drop this heuristic way once we find out a
+  // reliable way to tell there is no mouse or not.
+  if (count == 1 &&
+      (WinUtils::IsTouchDeviceSupportPresent() ||
+       IsTabletDevice())) {
+    return false;
+  }
+
+  return true;
 }
 
 /* static */
@@ -1887,7 +2029,7 @@ WinUtils::GetPrimaryPointerCapabilities()
   }
 
   if (IsMousePresent()) {
-    return PointerCapabilities::Fine|
+    return PointerCapabilities::Fine |
            PointerCapabilities::Hover;
   }
 

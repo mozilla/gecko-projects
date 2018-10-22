@@ -5,7 +5,8 @@
 
 "use strict";
 
-// Wrap to prevent accidentally leaking to window scope:
+// This is loaded into chrome windows with the subscript loader. Wrap in
+// a block to prevent accidentally leaking globals onto `window`.
 {
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -47,9 +48,12 @@ class MozFindbar extends XULElement {
   }
 
   connectedCallback() {
-    this.appendChild(document.importNode(this.content, true));
-
+    // Hide the findbar immediately without animation. This prevents a flicker in the case where
+    // we'll never be shown (i.e. adopting a tab that has a previously-opened-but-now-closed
+    // findbar into a new window).
+    this.setAttribute("noanim", "true");
     this.hidden = true;
+    this.appendChild(document.importNode(this.content, true));
 
     /**
      * Please keep in sync with toolkit/modules/FindBarChild.jsm

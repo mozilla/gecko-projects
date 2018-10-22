@@ -25,6 +25,11 @@ ChromeUtils.import("resource://testing-common/httpd.js");
 
 // Put any other stuff relative to this test folder below.
 
+XPCOMUtils.defineLazyModuleGetters(this, {
+  UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarProviderOpenTabs: "resource:///modules/UrlbarProviderOpenTabs.jsm",
+});
+
 const TITLE_SEARCH_ENGINE_SEPARATOR = " \u00B7\u2013\u00B7 ";
 
 async function cleanup() {
@@ -313,18 +318,14 @@ var addBookmark = async function(aBookmarkObj) {
 };
 
 function addOpenPages(aUri, aCount = 1, aUserContextId = 0) {
-  let ac = Cc["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
-             .getService(Ci.mozIPlacesAutoComplete);
   for (let i = 0; i < aCount; i++) {
-    ac.registerOpenPage(aUri, aUserContextId);
+    UrlbarProviderOpenTabs.registerOpenTab(aUri.spec, aUserContextId);
   }
 }
 
 function removeOpenPages(aUri, aCount = 1, aUserContextId = 0) {
-  let ac = Cc["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
-             .getService(Ci.mozIPlacesAutoComplete);
   for (let i = 0; i < aCount; i++) {
-    ac.unregisterOpenPage(aUri, aUserContextId);
+    UrlbarProviderOpenTabs.unregisterOpenTab(aUri.spec, aUserContextId);
   }
 }
 
@@ -381,6 +382,10 @@ function makeSearchMatch(input, extra = {}) {
   }
   if (extra.heuristic) {
     style.push("heuristic");
+  }
+  if ("searchSuggestion" in extra) {
+    params.searchSuggestion = extra.searchSuggestion;
+    style.push("suggestion");
   }
   return {
     uri: makeActionURI("searchengine", params),
@@ -462,8 +467,35 @@ function addTestEngine(basename, httpServer = undefined) {
     }, "browser-search-engine-modified");
 
     info("Adding engine from URL: " + dataUrl + basename);
-    Services.search.addEngine(dataUrl + basename, null, null, false);
+    Services.search.addEngine(dataUrl + basename, null, false);
   });
+}
+
+/**
+ * Sets up a search engine that provides some suggestions by appending strings
+ * onto the search query.
+ *
+ * @param   {function} suggestionsFn
+ *          A function that returns an array of suggestion strings given a
+ *          search string.  If not given, a default function is used.
+ * @returns {nsISearchEngine} The new engine.
+ */
+async function addTestSuggestionsEngine(suggestionsFn = null) {
+  // This port number should match the number in engine-suggestions.xml.
+  let server = makeTestServer(9000);
+  server.registerPathHandler("/suggest", (req, resp) => {
+    // URL query params are x-www-form-urlencoded, which converts spaces into
+    // plus signs, so un-convert any plus signs back to spaces.
+    let searchStr = decodeURIComponent(req.queryString.replace(/\+/g, " "));
+    let suggestions =
+      suggestionsFn ? suggestionsFn(searchStr) :
+      ["foo", "bar"].map(s => searchStr + " " + s);
+    let data = [searchStr, suggestions];
+    resp.setHeader("Content-Type", "application/json", false);
+    resp.write(JSON.stringify(data));
+  });
+  let engine = await addTestEngine("engine-suggestions.xml", server);
+  return engine;
 }
 
 // Ensure we have a default search engine and the keyword.enabled preference

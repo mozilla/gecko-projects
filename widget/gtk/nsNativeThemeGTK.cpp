@@ -325,8 +325,8 @@ nsNativeThemeGTK::GetGtkWidgetAndState(StyleAppearance aWidgetType, nsIFrame* aF
       if (treeBodyFrame) {
         const mozilla::AtomArray& atoms =
           treeBodyFrame->GetPropertyArrayForCurrentDrawingItem();
-        aState->selected = atoms.Contains(nsGkAtoms::selected);
-        aState->inHover = atoms.Contains(nsGkAtoms::hover);
+        aState->selected = atoms.Contains((nsStaticAtom*)nsGkAtoms::selected);
+        aState->inHover = atoms.Contains((nsStaticAtom*)nsGkAtoms::hover);
       }
     }
 
@@ -458,6 +458,20 @@ nsNativeThemeGTK::GetGtkWidgetAndState(StyleAppearance aWidgetType, nsIFrame* aF
         aWidgetType == StyleAppearance::MozWindowButtonMaximize ||
         aWidgetType == StyleAppearance::MozWindowButtonRestore) {
       aState->backdrop = !nsWindow::GetTopLevelWindowActiveState(aFrame);
+    }
+
+    if (aWidgetType ==  StyleAppearance::ScrollbarbuttonUp ||
+        aWidgetType ==  StyleAppearance::ScrollbarbuttonDown ||
+        aWidgetType ==  StyleAppearance::ScrollbarbuttonLeft ||
+        aWidgetType ==  StyleAppearance::ScrollbarbuttonRight ||
+        aWidgetType == StyleAppearance::ScrollbarVertical ||
+        aWidgetType == StyleAppearance::ScrollbarHorizontal ||
+        aWidgetType == StyleAppearance::ScrollbartrackHorizontal ||
+        aWidgetType == StyleAppearance::ScrollbartrackVertical ||
+        aWidgetType == StyleAppearance::ScrollbarthumbVertical||
+        aWidgetType == StyleAppearance::ScrollbarthumbHorizontal) {
+      EventStates docState = aFrame->GetContent()->OwnerDoc()->GetDocumentState();
+      aState->backdrop = docState.HasState(NS_DOCUMENT_STATE_WINDOW_INACTIVE);
     }
   }
 
@@ -785,6 +799,9 @@ nsNativeThemeGTK::GetGtkWidgetAndState(StyleAppearance aWidgetType, nsIFrame* aF
     break;
   case StyleAppearance::MozWindowTitlebarMaximized:
     aGtkWidgetType = MOZ_GTK_HEADER_BAR_MAXIMIZED;
+    break;
+  case StyleAppearance::MozWindowButtonBox:
+    aGtkWidgetType = MOZ_GTK_HEADER_BAR_BUTTON_BOX;
     break;
   case StyleAppearance::MozWindowButtonClose:
     aGtkWidgetType = MOZ_GTK_HEADER_BAR_BUTTON_CLOSE;
@@ -1421,6 +1438,7 @@ nsNativeThemeGTK::GetWidgetPadding(nsDeviceContext* aContext,
   switch (aWidgetType) {
     case StyleAppearance::ButtonFocus:
     case StyleAppearance::Toolbarbutton:
+    case StyleAppearance::MozWindowButtonBox:
     case StyleAppearance::MozWindowButtonClose:
     case StyleAppearance::MozWindowButtonMinimize:
     case StyleAppearance::MozWindowButtonMaximize:
@@ -1723,6 +1741,7 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
     }
     break;
 #ifdef MOZ_WIDGET_GTK
+  case StyleAppearance::MenulistTextfield:
   case StyleAppearance::NumberInput:
   case StyleAppearance::Textfield:
     {
@@ -1909,7 +1928,6 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
   // Combobox dropdowns don't support native theming in vertical mode.
   case StyleAppearance::Menulist:
   case StyleAppearance::MenulistText:
-  case StyleAppearance::MenulistTextfield:
     if (aFrame && aFrame->GetWritingMode().IsVertical()) {
       return false;
     }
@@ -1971,6 +1989,7 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
   case StyleAppearance::ScrollbartrackVertical:
   case StyleAppearance::ScrollbarthumbHorizontal:
   case StyleAppearance::ScrollbarthumbVertical:
+  case StyleAppearance::MenulistTextfield:
   case StyleAppearance::NumberInput:
   case StyleAppearance::Textfield:
   case StyleAppearance::TextfieldMultiline:
@@ -2002,6 +2021,7 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
 #endif
     return !IsWidgetStyled(aPresContext, aFrame, aWidgetType);
 
+  case StyleAppearance::MozWindowButtonBox:
   case StyleAppearance::MozWindowButtonClose:
   case StyleAppearance::MozWindowButtonMinimize:
   case StyleAppearance::MozWindowButtonMaximize:
@@ -2119,6 +2139,16 @@ nsNativeThemeGTK::WidgetAppearanceDependsOnWindowFocus(StyleAppearance aWidgetTy
     case StyleAppearance::MozWindowButtonMinimize:
     case StyleAppearance::MozWindowButtonMaximize:
     case StyleAppearance::MozWindowButtonRestore:
+    case StyleAppearance::ScrollbarbuttonUp:
+    case StyleAppearance::ScrollbarbuttonDown:
+    case StyleAppearance::ScrollbarbuttonLeft:
+    case StyleAppearance::ScrollbarbuttonRight:
+    case StyleAppearance::ScrollbarVertical:
+    case StyleAppearance::ScrollbarHorizontal:
+    case StyleAppearance::ScrollbartrackHorizontal:
+    case StyleAppearance::ScrollbartrackVertical:
+    case StyleAppearance::ScrollbarthumbVertical:
+    case StyleAppearance::ScrollbarthumbHorizontal:
       return true;
     default:
       return false;

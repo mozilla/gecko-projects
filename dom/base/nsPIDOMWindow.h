@@ -45,7 +45,6 @@ class nsXBLPrototypeHandler;
 typedef uint32_t SuspendTypes;
 
 namespace mozilla {
-class ThrottledEventQueue;
 class AutoplayPermissionManager;
 namespace dom {
 class AudioContext;
@@ -716,7 +715,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsPIDOMWindowInner, NS_PIDOMWINDOWINNER_IID)
 class nsPIDOMWindowOuter : public mozIDOMWindowProxy
 {
 protected:
-  explicit nsPIDOMWindowOuter();
+  explicit nsPIDOMWindowOuter(uint64_t aWindowID);
 
   ~nsPIDOMWindowOuter();
 
@@ -1094,7 +1093,9 @@ public:
 
   virtual void
   NotifyContentBlockingState(unsigned aState,
-                             nsIChannel* aChannel) = 0;
+                             nsIChannel* aChannel,
+                             bool aBlocked = true,
+                             nsIURI* aURIHint = nullptr) = 0;
 
   // WebIDL-ish APIs
   void MarkUncollectableForCCGeneration(uint32_t aGeneration)

@@ -29,7 +29,6 @@ VARIANTS = [
     'stylo-sequential',
     'qr',
     'ccov',
-    'jsdcov',
 ]
 
 
@@ -448,8 +447,13 @@ def mozharness_test_on_script_engine_autophone(config, job, taskdesc):
         'MOZ_AUTOMATION': '1',
         'WORKSPACE': '/builds/worker/workspace',
         'TASKCLUSTER_WORKER_TYPE': job['worker-type'],
-
     }
+
+    # for fetch tasks on mobile
+    if 'env' in job['worker'] and 'MOZ_FETCHES' in job['worker']['env']:
+        env['MOZ_FETCHES'] = job['worker']['env']['MOZ_FETCHES']
+        env['MOZ_FETCHES_DIR'] = job['worker']['env']['MOZ_FETCHES_DIR']
+
     # talos tests don't need Xvfb
     if is_talos:
         env['NEED_XVFB'] = 'false'

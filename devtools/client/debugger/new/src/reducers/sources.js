@@ -9,12 +9,19 @@ exports.createSource = createSource;
 exports.getBlackBoxList = getBlackBoxList;
 exports.getSource = getSource;
 exports.getSourceFromId = getSourceFromId;
+exports.getOriginalSourceByURL = getOriginalSourceByURL;
+exports.getGeneratedSourceByURL = getGeneratedSourceByURL;
+exports.getSpecificSourceByURL = getSpecificSourceByURL;
 exports.getSourceByURL = getSourceByURL;
+exports.getSourcesByURLs = getSourcesByURLs;
 exports.getSourcesByURL = getSourcesByURL;
 exports.getGeneratedSource = getGeneratedSource;
 exports.getPendingSelectedLocation = getPendingSelectedLocation;
 exports.getPrettySource = getPrettySource;
 exports.hasPrettySource = hasPrettySource;
+exports.getOriginalSourceByUrlInSources = getOriginalSourceByUrlInSources;
+exports.getGeneratedSourceByUrlInSources = getGeneratedSourceByUrlInSources;
+exports.getSpecificSourceByUrlInSources = getSpecificSourceByUrlInSources;
 exports.getSourceByUrlInSources = getSourceByUrlInSources;
 exports.getSourceInSources = getSourceInSources;
 exports.getSources = getSources;
@@ -290,8 +297,24 @@ function getSourceFromId(state, id) {
   return getSourcesState(state).sources[id];
 }
 
+function getOriginalSourceByURL(state, url) {
+  return getOriginalSourceByUrlInSources(getSources(state), getUrls(state), url);
+}
+
+function getGeneratedSourceByURL(state, url) {
+  return getGeneratedSourceByUrlInSources(getSources(state), getUrls(state), url);
+}
+
+function getSpecificSourceByURL(state, url, isOriginal) {
+  return isOriginal ? getOriginalSourceByUrlInSources(getSources(state), getUrls(state), url) : getGeneratedSourceByUrlInSources(getSources(state), getUrls(state), url);
+}
+
 function getSourceByURL(state, url) {
   return getSourceByUrlInSources(getSources(state), getUrls(state), url);
+}
+
+function getSourcesByURLs(state, urls) {
+  return urls.map(url => getSourceByURL(state, url)).filter(Boolean);
 }
 
 function getSourcesByURL(state, url) {
@@ -299,7 +322,7 @@ function getSourcesByURL(state, url) {
 }
 
 function getGeneratedSource(state, source) {
-  if (!(0, _devtoolsSourceMap.isOriginalId)(source.id)) {
+  if ((0, _source.isGenerated)(source)) {
     return source;
   }
 
@@ -317,11 +340,35 @@ function getPrettySource(state, id) {
     return;
   }
 
-  return getSourceByURL(state, (0, _source.getPrettySourceURL)(source.url));
+  return getSpecificSourceByURL(state, (0, _source.getPrettySourceURL)(source.url), true);
 }
 
 function hasPrettySource(state, id) {
   return !!getPrettySource(state, id);
+}
+
+function getOriginalSourceByUrlInSources(sources, urls, url) {
+  const foundSources = getSourcesByUrlInSources(sources, urls, url);
+
+  if (!foundSources) {
+    return null;
+  }
+
+  return foundSources.find(source => (0, _source.isOriginal)(source) == true);
+}
+
+function getGeneratedSourceByUrlInSources(sources, urls, url) {
+  const foundSources = getSourcesByUrlInSources(sources, urls, url);
+
+  if (!foundSources) {
+    return null;
+  }
+
+  return foundSources.find(source => (0, _source.isOriginal)(source) == false);
+}
+
+function getSpecificSourceByUrlInSources(sources, urls, url, isOriginal) {
+  return isOriginal ? getOriginalSourceByUrlInSources(sources, urls, url) : getGeneratedSourceByUrlInSources(sources, urls, url);
 }
 
 function getSourceByUrlInSources(sources, urls, url) {

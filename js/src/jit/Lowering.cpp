@@ -2554,14 +2554,24 @@ LIRGenerator::visitBinaryCache(MBinaryCache* ins)
     MDefinition* lhs = ins->getOperand(0);
     MDefinition* rhs = ins->getOperand(1);
 
-    MOZ_ASSERT(ins->type() == MIRType::Value);
-    MOZ_ASSERT(ins->type() == MIRType::Value);
-
-    LBinaryCache* lir = new(alloc()) LBinaryCache(useBox(lhs),
-                                                  useBox(rhs),
-                                                  tempFixed(FloatReg0),
-                                                  tempFixed(FloatReg1));
-    defineBox(lir, ins);
+    MOZ_ASSERT(ins->type() == MIRType::Value || ins->type() == MIRType::Boolean);
+    LInstruction* lir;
+    if (ins->type() == MIRType::Value) {
+        LBinaryValueCache* valueLir = new (alloc()) LBinaryValueCache(useBox(lhs),
+                                                                      useBox(rhs),
+                                                                      tempFixed(FloatReg0),
+                                                                      tempFixed(FloatReg1));
+        defineBox(valueLir, ins);
+        lir = valueLir;
+    } else {
+        MOZ_ASSERT(ins->type() == MIRType::Boolean);
+        LBinaryBoolCache* boolLir = new (alloc()) LBinaryBoolCache(useBox(lhs),
+                                                                   useBox(rhs),
+                                                                   tempFixed(FloatReg0),
+                                                                   tempFixed(FloatReg1));
+        define(boolLir, ins);
+        lir = boolLir;
+    }
     assignSafepoint(lir, ins);
 }
 
@@ -2580,6 +2590,23 @@ void
 LIRGenerator::visitClassConstructor(MClassConstructor* ins)
 {
     LClassConstructor* lir = new(alloc()) LClassConstructor();
+    defineReturn(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+void
+LIRGenerator::visitModuleMetadata(MModuleMetadata* ins)
+{
+    LModuleMetadata* lir = new(alloc()) LModuleMetadata();
+    defineReturn(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+void
+LIRGenerator::visitDynamicImport(MDynamicImport* ins)
+{
+    LDynamicImport* lir = new(alloc()) LDynamicImport(useBoxAtStart(ins->referencingPrivate()),
+                                                      useBoxAtStart(ins->specifier()));
     defineReturn(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -4626,11 +4653,6 @@ LIRGenerator::visitWasmAddOffset(MWasmAddOffset* ins)
 void
 LIRGenerator::visitWasmLoadTls(MWasmLoadTls* ins)
 {
-#ifdef WASM_HUGE_MEMORY
-    // This will disappear once we remove HeapReg and replace it with a load
-    // from Tls, but in the mean time it keeps us sane.
-    MOZ_CRASH("No WasmLoadTls here at the moment");
-#endif
     auto* lir = new(alloc()) LWasmLoadTls(useRegisterAtStart(ins->tlsPtr()));
     define(lir, ins);
 }
@@ -4825,7 +4847,7 @@ LIRGenerator::lowerWasmCall(MWasmCall* ins, bool needsBoundsCheck)
 {
     auto* lir = allocateVariadic<LClass>(ins->numOperands(), needsBoundsCheck);
     if (!lir) {
-        abort(AbortReason::Alloc, "Couldn't allocate for MWasmCall");
+        abort(AbortReason::Alloc, "OOM: LIRGenerator::lowerWasmCall");
         return nullptr;
     }
 
@@ -5199,6 +5221,8 @@ LIRGeneratorShared::visitEmittedAtUses(MInstruction* ins)
 bool
 LIRGenerator::visitInstruction(MInstruction* ins)
 {
+    MOZ_ASSERT(!errored());
+
     if (ins->isRecoveredOnBailout()) {
         MOZ_ASSERT(!JitOptions.disableRecoverIns);
         return true;
@@ -5446,7 +5470,7 @@ LIRGenerator::visitIonToWasmCall(MIonToWasmCall* ins)
         lir = allocateVariadic<LIonToWasmCall>(ins->numOperands(), scratch, fp);
     }
     if (!lir) {
-        abort(AbortReason::Alloc, "Couldn't allocate for LIonToWasmCallBase");
+        abort(AbortReason::Alloc, "OOM: LIRGenerator::visitIonToWasmCall");
         return;
     }
 

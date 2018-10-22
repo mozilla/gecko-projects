@@ -216,6 +216,15 @@ GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
+#ifdef JS_CODEGEN_ARM64
+    value = BooleanValue(true);
+#else
+    value = BooleanValue(false);
+#endif
+    if (!JS_SetProperty(cx, info, "arm64", value)) {
+        return false;
+    }
+
 #ifdef JS_SIMULATOR_ARM64
     value = BooleanValue(true);
 #else
@@ -657,22 +666,10 @@ WasmThreadsSupported(JSContext* cx, unsigned argc, Value* vp)
 #ifdef ENABLE_WASM_THREAD_OPS
     bool isSupported = wasm::HasSupport(cx);
 # ifdef ENABLE_WASM_CRANELIFT
-    if (cx->options().wasmForceCranelift())
+    if (cx->options().wasmForceCranelift()) {
         isSupported = false;
+    }
 # endif
-#else
-    bool isSupported = false;
-#endif
-    args.rval().setBoolean(isSupported);
-    return true;
-}
-
-static bool
-WasmSaturatingTruncationSupported(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
-    bool isSupported = true;
 #else
     bool isSupported = false;
 #endif
@@ -687,8 +684,9 @@ WasmBulkMemSupported(JSContext* cx, unsigned argc, Value* vp)
 #ifdef ENABLE_WASM_BULKMEM_OPS
     bool isSupported = true;
 # ifdef ENABLE_WASM_CRANELIFT
-    if (cx->options().wasmForceCranelift())
+    if (cx->options().wasmForceCranelift()) {
         isSupported = false;
+    }
 # endif
 #else
     bool isSupported = false;
@@ -704,8 +702,9 @@ WasmGcEnabled(JSContext* cx, unsigned argc, Value* vp)
 #ifdef ENABLE_WASM_GC
     bool isSupported = cx->options().wasmBaseline() && cx->options().wasmGc();
 # ifdef ENABLE_WASM_CRANELIFT
-    if (cx->options().wasmForceCranelift())
+    if (cx->options().wasmForceCranelift()) {
         isSupported = false;
+    }
 # endif
 #else
     bool isSupported = false;
@@ -784,7 +783,7 @@ WasmTextToBinary(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    memcpy(binary->as<TypedArrayObject>().viewDataUnshared(), bytes.begin(), bytes.length());
+    memcpy(binary->as<TypedArrayObject>().dataPointerUnshared(), bytes.begin(), bytes.length());
 
     if (!withOffsets) {
         args.rval().setObject(*binary);
@@ -876,7 +875,7 @@ WasmExtractCode(JSContext* cx, unsigned argc, Value* vp)
     } else if (baselineTier) {
         tier = wasm::Tier::Baseline;
     } else {
-        tier = wasm::Tier::Ion;
+        tier = wasm::Tier::Optimized;
     }
 
     RootedValue result(cx);
@@ -1696,6 +1695,7 @@ NewRope(JSContext* cx, unsigned argc, Value* vp)
 
     Rooted<JSRope*> str(cx, JSRope::new_<NoGC>(cx, left, right, length, heap));
     if (!str) {
+        JS_ReportOutOfMemory(cx);
         return false;
     }
 
@@ -1903,7 +1903,7 @@ RunIterativeFailureTest(JSContext* cx, const IterativeFailureTestParams& params,
 
     simulator.setup(cx);
 
-    for (unsigned thread = params.threadStart; thread < params.threadEnd; thread++) {
+    for (unsigned thread = params.threadStart; thread <= params.threadEnd; thread++) {
         if (params.verbose) {
             fprintf(stderr, "thread %d\n", thread);
         }
@@ -1943,8 +1943,9 @@ RunIterativeFailureTest(JSContext* cx, const IterativeFailureTestParams& params,
             // exception specification and to check the exception against it.
 
             if (!failureWasSimulated && cx->isExceptionPending()) {
-                if (!cx->getPendingException(&exception))
+                if (!cx->getPendingException(&exception)) {
                     return false;
+                }
             }
             cx->clearPendingException();
             simulator.cleanup(cx);
@@ -1964,7 +1965,7 @@ RunIterativeFailureTest(JSContext* cx, const IterativeFailureTestParams& params,
 #ifdef JS_TRACE_LOGGING
             // Reset the TraceLogger state if enabled.
             TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx);
-            if (logger->enabled()) {
+            if (logger && logger->enabled()) {
                 while (logger->enabled()) {
                     logger->disable();
                 }
@@ -2011,11 +2012,6 @@ ParseIterativeFailureTestParams(JSContext* cx, const CallArgs& args,
     }
     params->testFunction = &args[0].toObject().as<JSFunction>();
 
-    // There are some places where we do fail without raising an exception, so
-    // we can't expose this to the fuzzers by default.
-    if (fuzzingSafe)
-        params->expectExceptionOnFailure = false;
-
     if (args.length() == 2) {
         if (args[1].isBoolean()) {
             params->expectExceptionOnFailure = args[1].toBoolean();
@@ -2042,20 +2038,35 @@ ParseIterativeFailureTestParams(JSContext* cx, const CallArgs& args,
         }
     }
 
-    // Test all threads by default.
-    params->threadStart = oom::FirstThreadTypeToTest;
-    params->threadEnd = oom::LastThreadTypeToTest;
+    // There are some places where we do fail without raising an exception, so
+    // we can't expose this to the fuzzers by default.
+    if (fuzzingSafe) {
+        params->expectExceptionOnFailure = false;
+    }
+
+    // Test all threads by default except worker threads, except if we are
+    // running in a worker thread in which case only the worker thread which
+    // requested the simulation is tested.
+    if (js::oom::GetThreadType() == js::THREAD_TYPE_WORKER) {
+        params->threadStart = oom::WorkerFirstThreadTypeToTest;
+        params->threadEnd = oom::WorkerLastThreadTypeToTest;
+    } else {
+        params->threadStart = oom::FirstThreadTypeToTest;
+        params->threadEnd = oom::LastThreadTypeToTest;
+    }
 
     // Test a single thread type if specified by the OOM_THREAD environment variable.
     int threadOption = 0;
     if (EnvVarAsInt("OOM_THREAD", &threadOption)) {
-        if (threadOption < oom::FirstThreadTypeToTest || threadOption > oom::LastThreadTypeToTest) {
+        if (threadOption < oom::FirstThreadTypeToTest || threadOption > oom::LastThreadTypeToTest ||
+            threadOption != js::THREAD_TYPE_CURRENT)
+        {
             JS_ReportErrorASCII(cx, "OOM_THREAD value out of range.");
             return false;
         }
 
         params->threadStart = threadOption;
-        params->threadEnd = threadOption + 1;
+        params->threadEnd = threadOption;
     }
 
     params->verbose = EnvVarIsDefined("OOM_VERBOSE");
@@ -2323,7 +2334,7 @@ static bool
 StreamsAreEnabled(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    args.rval().setBoolean(cx->options().streams());
+    args.rval().setBoolean(cx->realm()->creationOptions().getStreamsEnabled());
     return true;
 }
 
@@ -4570,6 +4581,101 @@ SetRNGState(JSContext* cx, unsigned argc, Value* vp)
 }
 #endif
 
+static ModuleEnvironmentObject*
+GetModuleEnvironment(JSContext* cx, HandleModuleObject module)
+{
+    // Use the initial environment so that tests can check bindings exists
+    // before they have been instantiated.
+    RootedModuleEnvironmentObject env(cx, &module->initialEnvironment());
+    MOZ_ASSERT(env);
+    return env;
+}
+
+static bool
+GetModuleEnvironmentNames(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (args.length() != 1) {
+        JS_ReportErrorASCII(cx, "Wrong number of arguments");
+        return false;
+    }
+
+    if (!args[0].isObject() || !args[0].toObject().is<ModuleObject>()) {
+        JS_ReportErrorASCII(cx, "First argument should be a ModuleObject");
+        return false;
+    }
+
+    RootedModuleObject module(cx, &args[0].toObject().as<ModuleObject>());
+    if (module->hadEvaluationError()) {
+        JS_ReportErrorASCII(cx, "Module environment unavailable");
+        return false;
+    }
+
+    RootedModuleEnvironmentObject env(cx, GetModuleEnvironment(cx, module));
+    Rooted<IdVector> ids(cx, IdVector(cx));
+    if (!JS_Enumerate(cx, env, &ids)) {
+        return false;
+    }
+
+    uint32_t length = ids.length();
+    RootedArrayObject array(cx, NewDenseFullyAllocatedArray(cx, length));
+    if (!array) {
+        return false;
+    }
+
+    array->setDenseInitializedLength(length);
+    for (uint32_t i = 0; i < length; i++) {
+        array->initDenseElement(i, StringValue(JSID_TO_STRING(ids[i])));
+    }
+
+    args.rval().setObject(*array);
+    return true;
+}
+
+static bool
+GetModuleEnvironmentValue(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (args.length() != 2) {
+        JS_ReportErrorASCII(cx, "Wrong number of arguments");
+        return false;
+    }
+
+    if (!args[0].isObject() || !args[0].toObject().is<ModuleObject>()) {
+        JS_ReportErrorASCII(cx, "First argument should be a ModuleObject");
+        return false;
+    }
+
+    if (!args[1].isString()) {
+        JS_ReportErrorASCII(cx, "Second argument should be a string");
+        return false;
+    }
+
+    RootedModuleObject module(cx, &args[0].toObject().as<ModuleObject>());
+    if (module->hadEvaluationError()) {
+        JS_ReportErrorASCII(cx, "Module environment unavailable");
+        return false;
+    }
+
+    RootedModuleEnvironmentObject env(cx, GetModuleEnvironment(cx, module));
+    RootedString name(cx, args[1].toString());
+    RootedId id(cx);
+    if (!JS_StringToId(cx, name, &id)) {
+        return false;
+    }
+
+    if (!GetProperty(cx, env, env, id, args.rval())) {
+        return false;
+    }
+
+    if (args.rval().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+        ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, id);
+        return false;
+    }
+
+    return true;
+}
+
 #ifdef DEBUG
 static const char*
 AssertionTypeToString(irregexp::RegExpAssertion::AssertionType type)
@@ -5707,7 +5813,7 @@ JS_FN_HELP("rejectPromise", RejectPromise, 2, 0,
 
 JS_FN_HELP("streamsAreEnabled", StreamsAreEnabled, 0, 0,
 "streamsAreEnabled()",
-"  Returns a boolean indicating whether WHATWG Streams are enabled for the current compartment."),
+"  Returns a boolean indicating whether WHATWG Streams are enabled for the current realm."),
 
     JS_FN_HELP("makeFinalizeObserver", MakeFinalizeObserver, 0, 0,
 "makeFinalizeObserver()",
@@ -5880,11 +5986,6 @@ gc::ZealModeHelpText),
     JS_FN_HELP("wasmThreadsSupported", WasmThreadsSupported, 0, 0,
 "wasmThreadsSupported()",
 "  Returns a boolean indicating whether the WebAssembly threads proposal is\n"
-"  supported on the current device."),
-
-    JS_FN_HELP("wasmSaturatingTruncationSupported", WasmSaturatingTruncationSupported, 0, 0,
-"wasmSaturatingTruncationSupported()",
-"  Returns a boolean indicating whether the WebAssembly saturating truncates opcodes are\n"
 "  supported on the current device."),
 
     JS_FN_HELP("wasmBulkMemSupported", WasmBulkMemSupported, 0, 0,
@@ -6161,6 +6262,14 @@ gc::ZealModeHelpText),
 "setRNGState(seed0, seed1)",
 "  Set this compartment's RNG state.\n"),
 #endif
+
+    JS_FN_HELP("getModuleEnvironmentNames", GetModuleEnvironmentNames, 1, 0,
+"getModuleEnvironmentNames(module)",
+"  Get the list of a module environment's bound names for a specified module.\n"),
+
+    JS_FN_HELP("getModuleEnvironmentValue", GetModuleEnvironmentValue, 2, 0,
+"getModuleEnvironmentValue(module, name)",
+"  Get the value of a bound name in a module environment.\n"),
 
 #if defined(FUZZING) && defined(__AFL_COMPILER)
     JS_FN_HELP("aflloop", AflLoop, 1, 0,

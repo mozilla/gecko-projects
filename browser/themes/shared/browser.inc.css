@@ -162,8 +162,18 @@
   --arrowpanel-border-color: var(--default-arrowpanel-border-color);
 }
 
+#DateTimePickerPanel[side="top"],
+#DateTimePickerPanel[side="bottom"] {
+  margin-left: 0;
+  margin-right: 0;
+}
+
 #widget-overflow .webextension-popup-browser {
   background: #fff;
+}
+
+#addon-progress-notification-progressmeter {
+  margin: 2px 4px;
 }
 
 /* Contextual Feature Recommendation popup-notification */

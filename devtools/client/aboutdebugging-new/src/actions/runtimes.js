@@ -4,6 +4,7 @@
 
 "use strict";
 
+const { ADB } = require("devtools/shared/adb/adb");
 const { DebuggerClient } = require("devtools/shared/client/debugger-client");
 const { DebuggerServer } = require("devtools/server/main");
 
@@ -12,11 +13,13 @@ const Actions = require("./index");
 const {
   findRuntimeById,
 } = require("../modules/runtimes-state-helper");
+const { isSupportedDebugTarget } = require("../modules/debug-target-support");
 
 const {
   CONNECT_RUNTIME_FAILURE,
   CONNECT_RUNTIME_START,
   CONNECT_RUNTIME_SUCCESS,
+  DEBUG_TARGETS,
   DISCONNECT_RUNTIME_FAILURE,
   DISCONNECT_RUNTIME_START,
   DISCONNECT_RUNTIME_SUCCESS,
@@ -35,25 +38,54 @@ async function createLocalClient() {
   DebuggerServer.registerAllActors();
   const client = new DebuggerClient(DebuggerServer.connectPipe());
   await client.connect();
-  return client;
+  return { client };
 }
 
 async function createNetworkClient(host, port) {
-  const transport = await DebuggerClient.socketConnect({ host, port });
+  const transportDetails = { host, port };
+  const transport = await DebuggerClient.socketConnect(transportDetails);
   const client = new DebuggerClient(transport);
   await client.connect();
-  return client;
+  return { client, transportDetails };
 }
 
-async function createClientForRuntime(id, type) {
+async function createUSBClient(socketPath) {
+  const port = await ADB.prepareTCPConnection(socketPath);
+  return createNetworkClient("localhost", port);
+}
+
+async function createClientForRuntime(runtime) {
+  const { extra, type } = runtime;
+
   if (type === RUNTIMES.THIS_FIREFOX) {
     return createLocalClient();
   } else if (type === RUNTIMES.NETWORK) {
-    const [host, port] = id.split(":");
+    const { host, port } = extra.connectionParameters;
     return createNetworkClient(host, port);
+  } else if (type === RUNTIMES.USB) {
+    const { socketPath } = extra.connectionParameters;
+    return createUSBClient(socketPath);
   }
 
   return null;
+}
+
+async function getRuntimeInfo(runtime, client) {
+  const { extra, type } = runtime;
+  const deviceFront = await client.mainRoot.getFront("device");
+  const { brandName: name, channel, version } = await deviceFront.getDescription();
+  const icon =
+    (channel === "release" || channel === "beta" || channel === "aurora")
+      ? `chrome://devtools/skin/images/aboutdebugging-firefox-${ channel }.svg`
+      : "chrome://devtools/skin/images/aboutdebugging-firefox-nightly.svg";
+
+  return {
+    icon,
+    deviceName: extra ? extra.deviceName : undefined,
+    name,
+    type,
+    version,
+  };
 }
 
 function connectRuntime(id) {
@@ -61,15 +93,17 @@ function connectRuntime(id) {
     dispatch({ type: CONNECT_RUNTIME_START });
     try {
       const runtime = findRuntimeById(id, getState().runtimes);
-      const client = await createClientForRuntime(id, runtime.type);
+      const { client, transportDetails } = await createClientForRuntime(runtime);
+      const info = await getRuntimeInfo(runtime, client);
+      const connection = { client, info, transportDetails };
 
       dispatch({
         type: CONNECT_RUNTIME_SUCCESS,
         runtime: {
           id,
-          client,
+          connection,
           type: runtime.type,
-        }
+        },
       });
     } catch (e) {
       dispatch({ type: CONNECT_RUNTIME_FAILURE, error: e.message });
@@ -82,7 +116,7 @@ function disconnectRuntime(id) {
     dispatch({ type: DISCONNECT_RUNTIME_START });
     try {
       const runtime = findRuntimeById(id, getState().runtimes);
-      const client = runtime.client;
+      const client = runtime.connection.client;
 
       await client.close();
       DebuggerServer.destroy();
@@ -92,7 +126,7 @@ function disconnectRuntime(id) {
         runtime: {
           id,
           type: runtime.type,
-        }
+        },
       });
     } catch (e) {
       dispatch({ type: DISCONNECT_RUNTIME_FAILURE, error: e.message });
@@ -114,9 +148,17 @@ function watchRuntime(id) {
       const runtime = findRuntimeById(id, getState().runtimes);
       await dispatch({ type: WATCH_RUNTIME_SUCCESS, runtime });
 
-      dispatch(Actions.requestExtensions());
-      dispatch(Actions.requestTabs());
-      dispatch(Actions.requestWorkers());
+      if (isSupportedDebugTarget(runtime.type, DEBUG_TARGETS.EXTENSION)) {
+        dispatch(Actions.requestExtensions());
+      }
+
+      if (isSupportedDebugTarget(runtime.type, DEBUG_TARGETS.TAB)) {
+        dispatch(Actions.requestTabs());
+      }
+
+      if (isSupportedDebugTarget(runtime.type, DEBUG_TARGETS.WORKER)) {
+        dispatch(Actions.requestWorkers());
+      }
     } catch (e) {
       dispatch({ type: WATCH_RUNTIME_FAILURE, error: e.message });
     }

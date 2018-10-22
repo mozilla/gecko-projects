@@ -3,14 +3,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Localization.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
+XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
   "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 const POPUP_NOTIFICATION_ID = "contextual-feature-recommendation";
 const SUMO_BASE_URL = Services.urlFormatter.formatURLPref("app.support.baseURL");
+const ADDONS_API_URL = "https://services.addons.mozilla.org/api/v3/addons/addon";
 
 const DELAY_BEFORE_EXPAND_MS = 1000;
 
@@ -315,7 +318,13 @@ class PageAction {
 
     const {primary, secondary} = content.buttons;
     const primaryBtnStrings = await this.getStrings(primary.label);
-    const secondaryBtnStrings = await this.getStrings(secondary.label);
+
+    // For each secondary action, get the strings and attributes
+    const secondaryBtnStrings = [];
+    for (let button of secondary) {
+      let label = await this.getStrings(button.label);
+      secondaryBtnStrings.push({label, attributes: label.attributes});
+    }
 
     const mainAction = {
       label: primaryBtnStrings,
@@ -330,11 +339,28 @@ class PageAction {
     };
 
     const secondaryActions = [{
-      label: secondaryBtnStrings,
-      accessKey: secondaryBtnStrings.attributes.accesskey,
+      label: secondaryBtnStrings[0].label,
+      accessKey: secondaryBtnStrings[0].attributes.accesskey,
       callback: () => {
+        this.dispatchUserAction(secondary[0].action);
         this.hide();
         this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "DISMISS"});
+        RecommendationMap.delete(browser);
+      },
+    }, {
+      label: secondaryBtnStrings[1].label,
+      accessKey: secondaryBtnStrings[1].attributes.accesskey,
+      callback: () => {
+        this._blockMessage(id);
+        this.hide();
+        RecommendationMap.delete(browser);
+      },
+    }, {
+      label: secondaryBtnStrings[2].label,
+      accessKey: secondaryBtnStrings[2].attributes.accesskey,
+      callback: () => {
+        this.dispatchUserAction(secondary[2].action);
+        this.hide();
         RecommendationMap.delete(browser);
       },
     }];
@@ -397,15 +423,69 @@ const CFRPageActions = {
   },
 
   /**
-   * Force a recommendation to be shown. Should only happen via the Admin page.
-   * @param browser             The browser for the recommendation
-   * @param recommendation      The recommendation to show
-   * @param dispatchToASRouter  A function to dispatch resulting actions to
-   * @return                    Did adding the recommendation succeed?
+   * Fetch the URL to the latest add-on xpi so the recommendation can download it.
+   * @param addon          The add-on provided by the CFRMessageProvider
+   * @return               A string for the URL that was fetched
    */
-  async forceRecommendation(browser, recommendation, dispatchToASRouter) {
+  async _fetchLatestAddonVersion({id}) {
+    let url = null;
+    try {
+      const response = await fetch(`${ADDONS_API_URL}/${id}`);
+      if (response.status !== 204 && response.ok) {
+        const json = await response.json();
+        url = json.current_version.files[0].url;
+      }
+    } catch (e) {
+      Cu.reportError("Failed to get the latest add-on version for this recommendation");
+    }
+    return url;
+  },
+
+  async _maybeAddAddonInstallURL(recommendation) {
+    const {content, template} = recommendation;
+    // If this is CFR is not for an add-on, return the original recommendation
+    if (template !== "cfr_doorhanger") {
+      return recommendation;
+    }
+
+    const url = await this._fetchLatestAddonVersion(content.addon);
+    // If we failed to get a url to the latest xpi, return false so we know not to show
+    // a recommendation
+    if (!url) {
+      return false;
+    }
+
+    // Update the action's data with the url to the latest xpi, leave the rest
+    // of the recommendation properties intact
+    return {
+      ...recommendation,
+      content: {
+        ...content,
+        buttons: {
+          ...content.buttons,
+          primary: {
+            ...content.buttons.primary,
+            action: {...content.buttons.primary.action, data: {url}},
+          },
+        },
+      },
+    };
+  },
+
+  /**
+   * Force a recommendation to be shown. Should only happen via the Admin page.
+   * @param browser                 The browser for the recommendation
+   * @param originalRecommendation  The recommendation to show
+   * @param dispatchToASRouter      A function to dispatch resulting actions to
+   * @return                        Did adding the recommendation succeed?
+   */
+  async forceRecommendation(browser, originalRecommendation, dispatchToASRouter) {
     // If we are forcing via the Admin page, the browser comes in a different format
     const win = browser.browser.ownerGlobal;
+    const recommendation = await this._maybeAddAddonInstallURL(originalRecommendation);
+    if (!recommendation) {
+      return false;
+    }
     const {id, content} = recommendation;
     RecommendationMap.set(browser.browser, {id, content});
     if (!PageActionMap.has(win)) {
@@ -417,18 +497,22 @@ const CFRPageActions = {
 
   /**
    * Add a recommendation specific to the given browser and host.
-   * @param browser             The browser for the recommendation
-   * @param host                The host for the recommendation
-   * @param recommendation      The recommendation to show
-   * @param dispatchToASRouter  A function to dispatch resulting actions to
-   * @return                    Did adding the recommendation succeed?
+   * @param browser                 The browser for the recommendation
+   * @param host                    The host for the recommendation
+   * @param originalRecommendation  The recommendation to show
+   * @param dispatchToASRouter      A function to dispatch resulting actions to
+   * @return                        Did adding the recommendation succeed?
    */
-  async addRecommendation(browser, host, recommendation, dispatchToASRouter) {
+  async addRecommendation(browser, host, originalRecommendation, dispatchToASRouter) {
     const win = browser.ownerGlobal;
     if (PrivateBrowsingUtils.isWindowPrivate(win)) {
       return false;
     }
     if (browser !== win.gBrowser.selectedBrowser || !isHostMatch(browser, host)) {
+      return false;
+    }
+    const recommendation = await this._maybeAddAddonInstallURL(originalRecommendation);
+    if (!recommendation) {
       return false;
     }
     const {id, content} = recommendation;

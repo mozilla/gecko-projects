@@ -18,7 +18,7 @@ extern "C" {
 }
 
 #include "gtest_utils.h"
-#include "scoped_ptrs.h"
+#include "nss_scoped_ptrs.h"
 #include "tls_connect.h"
 #include "tls_filter.h"
 #include "tls_parser.h"
@@ -317,6 +317,53 @@ TEST_F(TlsConnectStreamTls13, DropRecordClient) {
   Connect();
   client_->SendData(26, 26);  // This should be dropped, so it won't be counted.
   client_->ResetSentBytes();
+  SendReceive();
+}
+
+// Check that a server can use 0.5 RTT if client authentication isn't enabled.
+TEST_P(TlsConnectTls13, WriteBeforeClientFinished) {
+  EnsureTlsSetup();
+  StartConnect();
+  client_->Handshake();  // ClientHello
+  server_->Handshake();  // ServerHello
+
+  server_->SendData(10);
+  client_->ReadBytes(10);  // Client should emit the Finished as a side-effect.
+  server_->Handshake();    // Server consumes the Finished.
+  CheckConnected();
+}
+
+// We don't allow 0.5 RTT if client authentication is requested.
+TEST_P(TlsConnectTls13, WriteBeforeClientFinishedClientAuth) {
+  client_->SetupClientAuth();
+  server_->RequestClientAuth(false);
+  StartConnect();
+  client_->Handshake();  // ClientHello
+  server_->Handshake();  // ServerHello
+
+  static const uint8_t data[] = {1, 2, 3};
+  EXPECT_GT(0, PR_Write(server_->ssl_fd(), data, sizeof(data)));
+  EXPECT_EQ(PR_WOULD_BLOCK_ERROR, PORT_GetError());
+
+  Handshake();
+  CheckConnected();
+  SendReceive();
+}
+
+// 0.5 RTT should fail with client authentication required.
+TEST_P(TlsConnectTls13, WriteBeforeClientFinishedClientAuthRequired) {
+  client_->SetupClientAuth();
+  server_->RequestClientAuth(true);
+  StartConnect();
+  client_->Handshake();  // ClientHello
+  server_->Handshake();  // ServerHello
+
+  static const uint8_t data[] = {1, 2, 3};
+  EXPECT_GT(0, PR_Write(server_->ssl_fd(), data, sizeof(data)));
+  EXPECT_EQ(PR_WOULD_BLOCK_ERROR, PORT_GetError());
+
+  Handshake();
+  CheckConnected();
   SendReceive();
 }
 

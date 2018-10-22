@@ -596,14 +596,16 @@ class FunctionCompiler
     }
 
     MWasmLoadTls* maybeLoadBoundsCheckLimit() {
-        MWasmLoadTls* load = nullptr;
-#ifndef WASM_HUGE_MEMORY
+#ifdef WASM_HUGE_MEMORY
+        if (!env_.isAsmJS()) {
+            return nullptr;
+        }
+#endif
         AliasSet aliases = env_.maxMemoryLength.isSome() ? AliasSet::None()
                                                          : AliasSet::Load(AliasSet::WasmHeapMeta);
-        load = MWasmLoadTls::New(alloc(), tlsPointer_, offsetof(wasm::TlsData, boundsCheckLimit),
-                                 MIRType::Int32, aliases);
+        auto load = MWasmLoadTls::New(alloc(), tlsPointer_, offsetof(wasm::TlsData, boundsCheckLimit),
+                                      MIRType::Int32, aliases);
         curBlock_->add(load);
-#endif
         return load;
     }
 
@@ -3131,43 +3133,54 @@ EmitMemOrTableInit(FunctionCompiler& f, bool isMem)
 {
     uint32_t segIndexVal = 0;
     MDefinition* dstOff, *srcOff, *len;
-    if (!f.iter().readMemOrTableInit(isMem, &segIndexVal, &dstOff, &srcOff, &len))
+    if (!f.iter().readMemOrTableInit(isMem, &segIndexVal, &dstOff, &srcOff, &len)) {
         return false;
+    }
 
-    if (f.inDeadCode())
+    if (f.inDeadCode()) {
         return false;
+    }
 
     uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode();
 
     CallCompileState args(f, lineOrBytecode);
-    if (!f.startCall(&args))
+    if (!f.startCall(&args)) {
         return false;
+    }
 
-    if (!f.passInstance(&args))
+    if (!f.passInstance(&args)) {
         return false;
+    }
 
-    if (!f.passArg(dstOff, ValType::I32, &args))
+    if (!f.passArg(dstOff, ValType::I32, &args)) {
         return false;
-    if (!f.passArg(srcOff, ValType::I32, &args))
+    }
+    if (!f.passArg(srcOff, ValType::I32, &args)) {
         return false;
-    if (!f.passArg(len, ValType::I32, &args))
+    }
+    if (!f.passArg(len, ValType::I32, &args)) {
         return false;
+    }
 
     MDefinition* segIndex = f.constant(Int32Value(int32_t(segIndexVal)), MIRType::Int32);
-    if (!f.passArg(segIndex, ValType::I32, &args))
+    if (!f.passArg(segIndex, ValType::I32, &args)) {
         return false;
+    }
 
-    if (!f.finishCall(&args))
+    if (!f.finishCall(&args)) {
         return false;
+    }
 
     SymbolicAddress callee = isMem ? SymbolicAddress::MemInit
                                    : SymbolicAddress::TableInit;
     MDefinition* ret;
-    if (!f.builtinInstanceMethodCall(callee, args, ValType::I32, &ret))
+    if (!f.builtinInstanceMethodCall(callee, args, ValType::I32, &ret)) {
         return false;
+    }
 
-    if (!f.checkI32NegativeMeansFailedResult(ret))
+    if (!f.checkI32NegativeMeansFailedResult(ret)) {
         return false;
+    }
 
     return true;
 }
@@ -3558,11 +3571,13 @@ EmitBodyExprs(FunctionCompiler& f)
           case uint16_t(Op::F64ReinterpretI64):
             CHECK(EmitReinterpret(f, ValType::F64, ValType::I64, MIRType::Double));
 
-          // GC types are NYI in Ion.
+#ifdef ENABLE_WASM_GC
           case uint16_t(Op::RefEq):
           case uint16_t(Op::RefNull):
           case uint16_t(Op::RefIsNull):
+            // Not yet supported
             return f.iter().unrecognizedOpcode(&op);
+#endif
 
           // Sign extensions
           case uint16_t(Op::I32Extend8S):
@@ -3579,7 +3594,6 @@ EmitBodyExprs(FunctionCompiler& f)
           // Miscellaneous operations
           case uint16_t(Op::MiscPrefix): {
             switch (op.b1) {
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
               case uint16_t(MiscOp::I32TruncSSatF32):
               case uint16_t(MiscOp::I32TruncUSatF32):
                 CHECK(EmitTruncate(f, ValType::F32, ValType::I32,
@@ -3596,7 +3610,6 @@ EmitBodyExprs(FunctionCompiler& f)
               case uint16_t(MiscOp::I64TruncUSatF64):
                 CHECK(EmitTruncate(f, ValType::F64, ValType::I64,
                                    MiscOp(op.b1) == MiscOp::I64TruncUSatF64, true));
-#endif
 #ifdef ENABLE_WASM_BULKMEM_OPS
               case uint16_t(MiscOp::MemCopy):
                 CHECK(EmitMemOrTableCopy(f, /*isMem=*/true));
@@ -3871,7 +3884,8 @@ wasm::IonCompileFunctions(const ModuleEnvironment& env, LifoAlloc& lifo,
                           ExclusiveDeferredValidationState& dvs,
                           UniqueChars* error)
 {
-    MOZ_ASSERT(env.tier() == Tier::Ion);
+    MOZ_ASSERT(env.tier() == Tier::Optimized);
+    MOZ_ASSERT(env.optimizedBackend() == OptimizedBackend::Ion);
 
     TempAllocator alloc(&lifo);
     JitContext jitContext(&alloc);

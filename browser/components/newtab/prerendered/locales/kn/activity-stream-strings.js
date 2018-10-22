@@ -75,7 +75,7 @@ window.gActivityStreamStrings = {
   "pocket_read_more": "ಜನಪ್ರಿಯವಾದ ವಿಷಯಗಳು:",
   "pocket_read_even_more": "ಹೆಚ್ಚು ಕತೆಗಳನ್ನು ನೋಡಿರಿ",
   "pocket_more_reccommendations": "More Recommendations",
-  "pocket_learn_more": "Learn More",
+  "pocket_how_it_works": "How it works",
   "pocket_cta_button": "Get Pocket",
   "pocket_cta_text": "Save the stories you love in Pocket, and fuel your mind with fascinating reads.",
   "highlights_empty_state": "ವೀಕ್ಷಣೆ ಮಾಡಲು ಶುರುಮಾಡಿ, ಮತ್ತು ನಾವು ಇತ್ತೀಚೆಗೆ ಭೇಟಿ ನೀಡಿದ ಅಥವಾ ಬುಕ್‌ಮಾರ್ಕ್ ಮಾಡಲಾದ ಕೆಲವು ಶ್ರೇಷ್ಠ ಲೇಖನಗಳು, ವೀಡಿಯೊಗಳು ಮತ್ತು ಇತರ ಪುಟಗಳನ್ನು ನಾವು ತೋರಿಸುತ್ತೇವೆ.",
@@ -106,5 +106,6 @@ window.gActivityStreamStrings = {
   "firstrun_terms_of_service": "ಸೇವೆಯ ನಿಯಮಗಳು",
   "firstrun_privacy_notice": "ಗೌಪ್ಯತಾ ಸೂಚನೆ",
   "firstrun_continue_to_login": "ಮುಂದುವರೆ",
-  "firstrun_skip_login": "ಈ ಹಂತವನ್ನು ಹಾರಿಸಿ"
+  "firstrun_skip_login": "ಈ ಹಂತವನ್ನು ಹಾರಿಸಿ",
+  "context_menu_title": "Open menu"
 };

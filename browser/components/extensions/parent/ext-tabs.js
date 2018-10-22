@@ -1201,7 +1201,8 @@ this.tabs = class extends ExtensionAPI {
                 let printProgressListener = {
                   onLocationChange(webProgress, request, location, flags) { },
                   onProgressChange(webProgress, request, curSelfProgress, maxSelfProgress, curTotalProgress, maxTotalProgress) { },
-                  onSecurityChange(webProgress, request, state) { },
+                  onSecurityChange(webProgress, request, oldState, state,
+                                   contentBlockingLogJSON) { },
                   onStateChange(webProgress, request, flags, status) {
                     if ((flags & Ci.nsIWebProgressListener.STATE_STOP) && (flags & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT)) {
                       resolve(retval == 0 ? "saved" : "replaced");
@@ -1281,7 +1282,7 @@ this.tabs = class extends ExtensionAPI {
           if (!gMultiSelectEnabled) {
             throw new ExtensionError(`tabs.highlight is currently experimental and must be enabled with the ${MULTISELECT_PREFNAME} preference.`);
           }
-          let {windowId, tabs} = highlightInfo;
+          let {windowId, tabs, populate} = highlightInfo;
           if (windowId == null) {
             windowId = Window.WINDOW_ID_CURRENT;
           }
@@ -1298,7 +1299,7 @@ this.tabs = class extends ExtensionAPI {
             }
             return tab;
           });
-          return windowManager.convert(window, {populate: true});
+          return windowManager.convert(window, {populate});
         },
       },
     };

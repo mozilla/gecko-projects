@@ -31,7 +31,7 @@ ifdef REBUILD_CHECK
 REPORT_BUILD = $(info $(shell $(PYTHON) $(MOZILLA_DIR)/config/rebuild_check.py $@ $^))
 REPORT_BUILD_VERBOSE = $(REPORT_BUILD)
 else
-REPORT_BUILD = $(info $(notdir $@))
+REPORT_BUILD = $(info $(relativesrcdir)/$(notdir $@))
 
 ifdef BUILD_VERBOSE_LOG
 REPORT_BUILD_VERBOSE = $(REPORT_BUILD)
@@ -126,6 +126,9 @@ endif # MKSHLIB
 endif # FORCE_SHARED_LIB
 
 ifeq ($(OS_ARCH),WINNT)
+
+LINK_PDBFILE ?= $(basename $(@F)).pdb
+
 ifndef GNU_CC
 
 #
@@ -147,7 +150,6 @@ endif
 COMPILE_CFLAGS += $(COMPILE_PDB_FLAG)
 COMPILE_CXXFLAGS += $(COMPILE_PDB_FLAG)
 
-LINK_PDBFILE ?= $(basename $(@F)).pdb
 ifdef MOZ_DEBUG
 CODFILE=$(basename $(@F)).cod
 endif
@@ -158,6 +160,12 @@ endif # WINNT
 ifeq (arm-Darwin,$(CPU_ARCH)-$(OS_TARGET))
 ifdef PROGRAM
 MOZ_PROGRAM_LDFLAGS += -Wl,-rpath -Wl,@executable_path/Frameworks
+endif
+endif
+
+ifeq ($(OS_ARCH),WINNT)
+ifeq ($(CC_TYPE),clang)
+MOZ_PROGRAM_LDFLAGS += -Wl,-pdb,$(dir $@)/$(LINK_PDBFILE)
 endif
 endif
 
@@ -375,12 +383,6 @@ OUTOPTION = -Fo# eol
 else
 OUTOPTION = -o # eol
 endif # WINNT && !GNU_CC
-
-ifneq (,$(filter ml%,$(AS)))
-ASOUTOPTION = -Fo# eol
-else
-ASOUTOPTION = -o # eol
-endif
 
 ifeq (,$(CROSS_COMPILE))
 HOST_OUTOPTION = $(OUTOPTION)
@@ -825,13 +827,13 @@ DUMP_SYMS_TARGETS :=
 endif
 endif
 
-ifdef MOZ_CRASHREPORTER
-$(foreach file,$(DUMP_SYMS_TARGETS),$(eval $(call syms_template,$(file),$(notdir $(file))_syms.track)))
-else ifneq (,$(and $(LLVM_SYMBOLIZER),$(filter WINNT,$(OS_ARCH)),$(MOZ_AUTOMATION)))
+ifdef MOZ_COPY_PDBS
 PDB_FILES = $(addsuffix .pdb,$(basename $(DUMP_SYMS_TARGETS)))
 PDB_DEST ?= $(FINAL_TARGET)
 PDB_TARGET = syms
 INSTALL_TARGETS += PDB
+else ifdef MOZ_CRASHREPORTER
+$(foreach file,$(DUMP_SYMS_TARGETS),$(eval $(call syms_template,$(file),$(notdir $(file))_syms.track)))
 endif
 
 cargo_host_flag := --target=$(RUST_HOST_TARGET)
@@ -842,7 +844,14 @@ cargo_build_flags = $(CARGOFLAGS)
 ifndef MOZ_DEBUG_RUST
 cargo_build_flags += --release
 endif
+
+# The Spidermonkey library can be built from a package tarball outside the
+# tree, so we want to let Cargo create lock files in this case. When built
+# within a tree, the Rust dependencies have been vendored in so Cargo won't
+# touch the lock file.
+ifndef JS_STANDALONE
 cargo_build_flags += --frozen
+endif
 
 cargo_build_flags += --manifest-path $(CARGO_FILE)
 ifdef BUILD_VERBOSE_LOG
@@ -899,11 +908,6 @@ else
 environment_cleaner =
 endif
 
-rust_unlock_unstable =
-ifdef MOZ_RUST_SIMD
-rust_unlock_unstable += RUSTC_BOOTSTRAP=1
-endif
-
 ifdef MOZ_USING_SCCACHE
 sccache_wrap := RUSTC_WRAPPER='$(CCACHE)'
 endif
@@ -954,7 +958,7 @@ endif # MOZ_ASAN
 # don't use the prefix when make -n is used, so that cargo doesn't run
 # in that case)
 define RUN_CARGO
-$(if $(findstring n,$(filter-out --%, $(MAKEFLAGS))),,+)env $(environment_cleaner) $(rust_unlock_unstable) $(sccache_wrap) \
+$(if $(findstring n,$(filter-out --%, $(MAKEFLAGS))),,+)env $(environment_cleaner) $(sccache_wrap) \
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) \
 	RUSTFLAGS='$(2)' \
 	RUSTC=$(RUSTC) \

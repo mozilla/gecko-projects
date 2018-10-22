@@ -155,8 +155,8 @@ AssertScopeMatchesEnvironment(Scope* scope, JSObject* originalEnv)
                 break;
 
               case ScopeKind::Module:
-                MOZ_ASSERT(env->as<ModuleEnvironmentObject>().module().script() ==
-                           si.scope()->as<ModuleScope>().script());
+                MOZ_ASSERT(&env->as<ModuleEnvironmentObject>().module() ==
+                           si.scope()->as<ModuleScope>().module());
                 env = &env->as<ModuleEnvironmentObject>().enclosingEnvironment();
                 break;
 
@@ -1420,10 +1420,30 @@ FrameIter::environmentChain(JSContext* cx) const
     MOZ_CRASH("Unexpected state");
 }
 
+bool
+FrameIter::hasInitialEnvironment(JSContext *cx) const {
+    if (hasUsableAbstractFramePtr()) {
+        return abstractFramePtr().hasInitialEnvironment();
+    }
+
+    if (isWasm()) {
+        // See JSFunction::needsFunctionEnvironmentObjects().
+        return false;
+    }
+
+    MOZ_ASSERT(isJSJit() && isIonScripted());
+    bool hasInitialEnv = false;
+    jit::MaybeReadFallback recover(cx, activation()->asJit(), &jsJitFrame());
+    ionInlineFrames_.environmentChain(recover, &hasInitialEnv);
+
+    return hasInitialEnv;
+}
+
 CallObject&
 FrameIter::callObj(JSContext* cx) const
 {
     MOZ_ASSERT(calleeTemplate()->needsCallObject());
+    MOZ_ASSERT(hasInitialEnvironment(cx));
 
     JSObject* pobj = environmentChain(cx);
     while (!pobj->is<CallObject>()) {
@@ -1860,7 +1880,7 @@ jit::JitActivation::startWasmTrap(wasm::Trap trap, uint32_t bytecodeOffset,
 
     bool unwound;
     wasm::UnwindState unwindState;
-    MOZ_ALWAYS_TRUE(wasm::StartUnwinding(state, &unwindState, &unwound));
+    MOZ_RELEASE_ASSERT(wasm::StartUnwinding(state, &unwindState, &unwound));
     MOZ_ASSERT(unwound == (trap == wasm::Trap::IndirectCallBadSig));
 
     void* pc = unwindState.pc;

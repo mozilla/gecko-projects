@@ -571,6 +571,9 @@ UniquePtr<SandboxBrokerPolicyFactory> ContentParent::sSandboxBrokerPolicyFactory
 uint64_t ContentParent::sNextTabParentId = 0;
 nsDataHashtable<nsUint64HashKey, TabParent*> ContentParent::sNextTabParents;
 
+// Whether a private docshell has been seen before.
+static bool sHasSeenPrivateDocShell = false;
+
 // This is true when subprocess launching is enabled.  This is the
 // case between StartUp() and ShutDown().
 static bool sCanLaunchSubprocesses;
@@ -1589,7 +1592,7 @@ ContentParent::MarkAsDead()
 void
 ContentParent::OnChannelError()
 {
-  RefPtr<ContentParent> content(this);
+  RefPtr<ContentParent> kungFuDeathGrip(this);
   PContentParent::OnChannelError();
 }
 
@@ -1728,28 +1731,14 @@ DelayedDeleteSubprocess(GeckoChildProcessHost* aSubprocess)
   XRE_GetIOMessageLoop()->PostTask(task.forget());
 }
 
-// This runnable only exists to delegate ownership of the
-// ContentParent to this runnable, until it's deleted by the event
-// system.
-struct DelayedDeleteContentParentTask : public Runnable
-{
-  explicit DelayedDeleteContentParentTask(ContentParent* aObj)
-    : Runnable("dom::DelayedDeleteContentParentTask")
-    , mObj(aObj)
-  {
-  }
-
-  // No-op
-  NS_IMETHOD Run() override { return NS_OK; }
-
-  RefPtr<ContentParent> mObj;
-};
-
 } // namespace
 
 void
 ContentParent::ActorDestroy(ActorDestroyReason why)
 {
+  RefPtr<ContentParent> kungFuDeathGrip(mSelfRef.forget());
+  MOZ_RELEASE_ASSERT(kungFuDeathGrip);
+
   if (mForceKillTimer) {
     mForceKillTimer->Cancel();
     mForceKillTimer = nullptr;
@@ -1780,7 +1769,6 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
   ShutDownProcess(why == NormalShutdown ? CLOSE_CHANNEL
                                         : CLOSE_CHANNEL_WITH_ERROR);
 
-  RefPtr<ContentParent> kungFuDeathGrip(this);
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
     size_t length = ArrayLength(sObserverTopics);
@@ -1867,7 +1855,9 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
   //
   // This runnable ensures that a reference to |this| lives on at
   // least until after the current task finishes running.
-  NS_DispatchToCurrentThread(new DelayedDeleteContentParentTask(this));
+  NS_DispatchToCurrentThread(
+    NS_NewRunnableFunction("DelayedReleaseContentParent",
+                           [kungFuDeathGrip] { }));
 
   ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
   nsTArray<ContentParentId> childIDArray =
@@ -2099,21 +2089,6 @@ ContentParent::RecvCreateReplayingProcess(const uint32_t& aChannelId)
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult
-ContentParent::RecvTerminateReplayingProcess(const uint32_t& aChannelId)
-{
-  // We should only get this message from the child if it is recording or replaying.
-  if (!this->IsRecordingOrReplaying()) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-
-  if (aChannelId < mReplayingChildren.length() && mReplayingChildren[aChannelId]) {
-    DelayedDeleteSubprocess(mReplayingChildren[aChannelId]);
-    mReplayingChildren[aChannelId] = nullptr;
-  }
-  return IPC_OK();
-}
-
 jsipc::CPOWManager*
 ContentParent::GetCPOWManager()
 {
@@ -2257,6 +2232,9 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
     return false;
   }
 
+  // See also ActorDestroy.
+  mSelfRef = this;
+
 #ifdef ASYNC_CONTENTPROC_LAUNCH
   OpenWithAsyncPid(mSubprocess->GetChannel());
 #else
@@ -2303,6 +2281,7 @@ ContentParent::ContentParent(ContentParent* aOpener,
                              const nsAString& aRecordingFile,
                              int32_t aJSPluginID)
   : nsIContentParent()
+  , mSelfRef(nullptr)
   , mSubprocess(nullptr)
   , mLaunchTS(TimeStamp::Now())
   , mActivateTS(TimeStamp::Now())
@@ -3357,11 +3336,6 @@ ContentParent::KillHard(const char* aReason)
   mCalledKillHard = true;
   mForceKillTimer = nullptr;
 
-  MessageChannel* channel = GetIPCChannel();
-  if (channel) {
-    channel->SetInKillHardShutdown();
-  }
-
   // We're about to kill the child process associated with this content.
   // Something has gone wrong to get us here, so we generate a minidump
   // of the parent and child for submission to the crash server.
@@ -4209,8 +4183,13 @@ ContentParent::RecvScriptErrorInternal(const nsString& aMessage,
 mozilla::ipc::IPCResult
 ContentParent::RecvPrivateDocShellsExist(const bool& aExist)
 {
-  if (!sPrivateContent)
+  if (!sPrivateContent) {
     sPrivateContent = new nsTArray<ContentParent*>();
+    if (!sHasSeenPrivateDocShell) {
+      sHasSeenPrivateDocShell = true;
+      Telemetry::ScalarSet(Telemetry::ScalarID::DOM_PARENTPROCESS_PRIVATE_WINDOW_USED, true);
+    }
+  }
   if (aExist) {
     sPrivateContent->AppendElement(this);
   } else {
@@ -4874,7 +4853,7 @@ ContentParent::CommonCreateWindow(PBrowserParent* aThisTab,
   TabParent* thisTabParent = TabParent::GetFrom(aThisTab);
   nsCOMPtr<nsIContent> frame;
   if (thisTabParent) {
-    frame = do_QueryInterface(thisTabParent->GetOwnerElement());
+    frame = thisTabParent->GetOwnerElement();
 
     if (NS_WARN_IF(thisTabParent->IsMozBrowser())) {
       return IPC_FAIL(this, "aThisTab is not a MozBrowser");

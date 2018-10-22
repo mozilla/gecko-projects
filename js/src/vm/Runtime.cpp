@@ -176,7 +176,8 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
                                : js::StackFormat::SpiderMonkey),
     wasmInstances(mutexid::WasmRuntimeInstances),
     moduleResolveHook(),
-    moduleMetadataHook()
+    moduleMetadataHook(),
+    moduleDynamicImportHook()
 {
     JS_COUNT_CTOR(JSRuntime);
     liveRuntimesCount++;
@@ -648,6 +649,10 @@ JSRuntime::enqueuePromiseJob(JSContext* cx, HandleFunction job, HandleObject pro
     void* data = cx->enqueuePromiseJobCallbackData;
     RootedObject allocationSite(cx);
     if (promise) {
+#ifdef DEBUG
+        AssertSameCompartment(job, promise);
+#endif
+
         RootedObject unwrappedPromise(cx, promise);
         // While the job object is guaranteed to be unwrapped, the promise
         // might be wrapped. See the comments in EnqueuePromiseReactionJob in
@@ -659,7 +664,8 @@ JSRuntime::enqueuePromiseJob(JSContext* cx, HandleFunction job, HandleObject pro
             allocationSite = JS::GetPromiseAllocationSite(unwrappedPromise);
         }
     }
-    return cx->enqueuePromiseJobCallback(cx, job, allocationSite, incumbentGlobal, data);
+    return cx->enqueuePromiseJobCallback(cx, promise, job, allocationSite,
+                                         incumbentGlobal, data);
 }
 
 void

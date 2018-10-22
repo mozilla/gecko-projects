@@ -75,7 +75,7 @@ window.gActivityStreamStrings = {
   "pocket_read_more": "Cuspairean fèillmhor:",
   "pocket_read_even_more": "Seall barrachd sgeul",
   "pocket_more_reccommendations": "More Recommendations",
-  "pocket_learn_more": "Learn More",
+  "pocket_how_it_works": "How it works",
   "pocket_cta_button": "Get Pocket",
   "pocket_cta_text": "Save the stories you love in Pocket, and fuel your mind with fascinating reads.",
   "highlights_empty_state": "Tòisich air brabhsadh is seallaidh sinn dhut an-seo cuid dhe na h-artaigilean, videothan is duilleagan eile air an do thadhail thu no a chuir thu ris na comharran-lìn o chionn ghoirid.",
@@ -106,5 +106,6 @@ window.gActivityStreamStrings = {
   "firstrun_terms_of_service": "teirmichean na seirbheise",
   "firstrun_privacy_notice": "aithris na prìobhaideachd",
   "firstrun_continue_to_login": "Lean air adhart",
-  "firstrun_skip_login": "Leum seachad air seo"
+  "firstrun_skip_login": "Leum seachad air seo",
+  "context_menu_title": "Open menu"
 };

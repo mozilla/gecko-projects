@@ -41,7 +41,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AddonSettings: "resource://gre/modules/addons/AddonSettings.jsm",
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
-  ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
   ExtensionPermissions: "resource://gre/modules/ExtensionPermissions.jsm",
   ExtensionStorage: "resource://gre/modules/ExtensionStorage.jsm",
   ExtensionStorageIDB: "resource://gre/modules/ExtensionStorageIDB.jsm",
@@ -112,11 +111,9 @@ XPCOMUtils.defineLazyGetter(this, "LocaleData", () => ExtensionCommon.LocaleData
 const {sharedData} = Services.ppmm;
 
 // The userContextID reserved for the extension storage (its purpose is ensuring that the IndexedDB
-// storage used by the browser.storage.local API is not directly accessible from the extension code).
-XPCOMUtils.defineLazyGetter(this, "WEBEXT_STORAGE_USER_CONTEXT_ID", () => {
-  return ContextualIdentityService.getDefaultPrivateIdentity(
-    "userContextIdInternal.webextStorageLocal").userContextId;
-});
+// storage used by the browser.storage.local API is not directly accessible from the extension code,
+// it is defined and reserved as "userContextIdInternal.webextStorageLocal" in ContextualIdentityService.jsm).
+const WEBEXT_STORAGE_USER_CONTEXT_ID = -1 >>> 0;
 
 // The maximum time to wait for extension child shutdown blockers to complete.
 const CHILD_SHUTDOWN_TIMEOUT_MS = 8000;
@@ -126,6 +123,7 @@ const CHILD_SHUTDOWN_TIMEOUT_MS = 8000;
  * as a host/origin permission, an api permission, or a regular permission.
  *
  * @param {string} perm  The permission string to classify
+ * @param {boolean} restrictSchemes
  *
  * @returns {object}
  *          An object with exactly one of the following properties:
@@ -134,10 +132,15 @@ const CHILD_SHUTDOWN_TIMEOUT_MS = 8000;
  *                (as used for webextensions experiments).
  *          "permission" to indicate this is a regular permission.
  */
-function classifyPermission(perm) {
+function classifyPermission(perm, restrictSchemes) {
   let match = /^(\w+)(?:\.(\w+)(?:\.\w+)*)?$/.exec(perm);
   if (!match) {
-    return {origin: perm};
+    try {
+      let {pattern} = new MatchPattern(perm, {restrictSchemes, ignorePath: true});
+      return {origin: pattern};
+    } catch (e) {
+      return {originInvalid: perm};
+    }
   } else if (match[1] == "experiments" && match[2]) {
     return {api: match[2]};
   }
@@ -473,11 +476,12 @@ class ExtensionData {
 
     let permissions = new Set();
     let origins = new Set();
+    let restrictSchemes = !this.hasPermission("mozillaAddons");
     for (let perm of this.manifest.permissions || []) {
-      let type = classifyPermission(perm);
+      let type = classifyPermission(perm, restrictSchemes);
       if (type.origin) {
         origins.add(perm);
-      } else if (!type.api) {
+      } else if (type.permission) {
         permissions.add(perm);
       }
     }
@@ -509,7 +513,10 @@ class ExtensionData {
     }
 
     let result = {
-      origins: this.whiteListedHosts.patterns.map(matcher => matcher.pattern),
+      origins: this.whiteListedHosts.patterns.map(matcher => matcher.pattern)
+        // moz-extension://id/* is always added to whiteListedHosts, but it
+        // is not a valid host permission in the API. So, remove it.
+        .filter(pattern => !pattern.startsWith("moz-extension:")),
       apis: [...this.apiNames],
     };
 
@@ -631,19 +638,15 @@ class ExtensionData {
           }
         }
 
-        let type = classifyPermission(perm);
+        let type = classifyPermission(perm, restrictSchemes);
         if (type.origin) {
-          try {
-            let matcher = new MatchPattern(perm, {restrictSchemes, ignorePath: true});
-
-            perm = matcher.pattern;
-            originPermissions.add(perm);
-          } catch (e) {
-            this.manifestWarning(`Invalid host permission: ${perm}`);
-            continue;
-          }
+          perm = type.origin;
+          originPermissions.add(perm);
         } else if (type.api) {
           apiNames.add(type.api);
+        } else if (type.originInvalid) {
+          this.manifestWarning(`Invalid host permission: ${perm}`);
+          continue;
         }
 
         permissions.add(perm);
@@ -856,9 +859,20 @@ class ExtensionData {
   }
 
   hasPermission(perm, includeOptional = false) {
+    // If the permission is a "manifest property" permission, we check if the extension
+    // does have the required property in its manifest.
     let manifest_ = "manifest:";
     if (perm.startsWith(manifest_)) {
-      return this.manifest[perm.substr(manifest_.length)] != null;
+      // Handle nested "manifest property" permission (e.g. as in "manifest:property.nested").
+      let value = this.manifest;
+      for (let prop of perm.substr(manifest_.length).split(".")) {
+        if (!value) {
+          break;
+        }
+        value = value[prop];
+      }
+
+      return value != null;
     }
 
     if (this.permissions.has(perm)) {
@@ -1072,15 +1086,11 @@ class ExtensionData {
         allUrls = true;
         break;
       }
-      if (permission.startsWith("moz-extension:")) {
-        continue;
-      }
-      let match = /^[a-z*]+:\/\/([^/]+)\//.exec(permission);
+      let match = /^[a-z*]+:\/\/([^/]*)\//.exec(permission);
       if (!match) {
-        Cu.reportError(`Unparseable host permission ${permission}`);
-        continue;
+        throw new Error(`Unparseable host permission ${permission}`);
       }
-      if (match[1] == "*") {
+      if (!match[1] || match[1] == "*") {
         allUrls = true;
       } else if (match[1].startsWith("*.")) {
         wildcards.add(match[1].slice(2));
@@ -1834,15 +1844,6 @@ class Extension extends ExtensionData {
         } else if (ExtensionStorageIDB.isMigratedExtension(this)) {
           this.setSharedData("storageIDBBackend", true);
           this.setSharedData("storageIDBPrincipal", ExtensionStorageIDB.getStoragePrincipal(this));
-        } else {
-          // If the extension has to migrate backend, ensure that the data migration
-          // starts once Firefox is idle after the extension has been started.
-          this.once("ready", () => ChromeUtils.idleDispatch(() => {
-            if (this.hasShutdown) {
-              return;
-            }
-            ExtensionStorageIDB.selectBackend({extension: this});
-          }));
         }
       }
 
@@ -2005,8 +2006,9 @@ class Extension extends ExtensionData {
 
   get optionalOrigins() {
     if (this._optionalOrigins == null) {
-      let origins = this.manifest.optional_permissions.filter(perm => classifyPermission(perm).origin);
-      this._optionalOrigins = new MatchPatternSet(origins, {restrictSchemes: !this.hasPermission("mozillaAddons"), ignorePath: true});
+      let restrictSchemes = !this.hasPermission("mozillaAddons");
+      let origins = this.manifest.optional_permissions.filter(perm => classifyPermission(perm, restrictSchemes).origin);
+      this._optionalOrigins = new MatchPatternSet(origins, {restrictSchemes, ignorePath: true});
     }
     return this._optionalOrigins;
   }

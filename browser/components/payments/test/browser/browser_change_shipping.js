@@ -103,6 +103,10 @@ add_task(async function test_change_shipping() {
       btn.click();
     });
 
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.setSecurityCode, {
+      securityCode: "123",
+    });
+
     info("clicking pay");
     spawnPaymentDialogTask(frame, PTU.DialogContentTasks.completePayment);
 
@@ -263,6 +267,10 @@ add_task(async function test_no_shippingchange_without_shipping() {
     }, PTU.ContentTasks.ensureNoPaymentRequestEvent);
     info("added shipping change handler");
 
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.setSecurityCode, {
+      securityCode: "456",
+    });
+
     info("clicking pay");
     spawnPaymentDialogTask(frame, PTU.DialogContentTasks.completePayment);
 
@@ -323,7 +331,9 @@ add_task(async function test_address_edit() {
     let selectedAddressGuid = addressOptions.options[selectedIndex].guid;
     let selectedAddress = await formAutofillStorage.addresses.get(selectedAddressGuid);
 
-    is(selectedIndex, 0, "First address should be selected");
+    // US address is inserted first, then German address, so German address
+    // has more recent timeLastModified and will appear at the top of the list.
+    is(selectedIndex, 1, "Second address should be selected");
     ok(selectedAddress, "Selected address does exist in the address collection");
     is(selectedAddress.country, "US", "Expected initial country value");
 
@@ -341,7 +351,7 @@ add_task(async function test_address_edit() {
     is(newSelectedAddressGuid, selectedAddressGuid, "Selected guid hasnt changed");
     selectedAddress = await formAutofillStorage.addresses.get(selectedAddressGuid);
 
-    is(selectedIndex, 0, "First address should be selected");
+    is(selectedIndex, 1, "Second address should be selected");
     is(selectedAddress.country, "CA", "Expected changed country value");
 
     spawnPaymentDialogTask(frame, PTU.DialogContentTasks.manuallyClickCancel);
@@ -375,7 +385,9 @@ add_task(async function test_address_removal() {
     let selectedIndex = addressOptions.selectedOptionIndex;
     let selectedAddressGuid = addressOptions.options[selectedIndex].guid;
 
-    is(selectedIndex, 0, "First address should be selected");
+    // US address is inserted first, then German address, so German address
+    // has more recent timeLastModified and will appear at the top of the list.
+    is(selectedIndex, 1, "Second address should be selected");
     is(addressOptions.options.length, 2, "Should be 2 address options initially");
 
     info("Remove the selected address from the store");

@@ -16,6 +16,7 @@
 #include "nsLayoutUtils.h"
 #include "nsSVGUtils.h"
 #include "nsNetUtil.h"
+#include "SVGObserverUtils.h"
 #include "imgIContainer.h"
 #include "gfx2DGlue.h"
 
@@ -34,9 +35,9 @@ SVGFEImageElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 
 nsSVGElement::StringInfo SVGFEImageElement::sStringInfo[3] =
 {
-  { &nsGkAtoms::result, kNameSpaceID_None, true },
-  { &nsGkAtoms::href, kNameSpaceID_None, true },
-  { &nsGkAtoms::href, kNameSpaceID_XLink, true }
+  { nsGkAtoms::result, kNameSpaceID_None, true },
+  { nsGkAtoms::href, kNameSpaceID_None, true },
+  { nsGkAtoms::href, kNameSpaceID_XLink, true }
 };
 
 //----------------------------------------------------------------------
@@ -50,6 +51,7 @@ NS_IMPL_ISUPPORTS_INHERITED(SVGFEImageElement, SVGFEImageElementBase,
 
 SVGFEImageElement::SVGFEImageElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
   : SVGFEImageElementBase(std::move(aNodeInfo))
+  , mImageAnimationMode(0)
 {
   // We start out broken
   AddStatesSilently(NS_EVENT_STATE_BROKEN);
@@ -338,6 +340,37 @@ SVGFEImageElement::GetStringInfo()
 }
 
 //----------------------------------------------------------------------
+// nsIImageLoadingContent methods
+NS_IMETHODIMP_(void)
+SVGFEImageElement::FrameCreated(nsIFrame* aFrame)
+{
+  nsImageLoadingContent::FrameCreated(aFrame);
+
+  uint64_t mode = aFrame->PresContext()->ImageAnimationMode();
+  if (mode == mImageAnimationMode) {
+    return;
+  }
+
+  mImageAnimationMode = mode;
+
+  if (mPendingRequest) {
+    nsCOMPtr<imgIContainer> container;
+    mPendingRequest->GetImage(getter_AddRefs(container));
+    if (container) {
+      container->SetAnimationMode(mode);
+    }
+  }
+
+  if (mCurrentRequest) {
+    nsCOMPtr<imgIContainer> container;
+    mCurrentRequest->GetImage(getter_AddRefs(container));
+    if (container) {
+      container->SetAnimationMode(mode);
+    }
+  }
+}
+
+//----------------------------------------------------------------------
 // imgINotificationObserver methods
 
 NS_IMETHODIMP
@@ -351,26 +384,19 @@ SVGFEImageElement::Notify(imgIRequest* aRequest, int32_t aType, const nsIntRect*
     aRequest->GetImage(getter_AddRefs(container));
     MOZ_ASSERT(container, "who sent the notification then?");
     container->StartDecoding(imgIContainer::FLAG_NONE);
+    container->SetAnimationMode(mImageAnimationMode);
   }
 
   if (aType == imgINotificationObserver::LOAD_COMPLETE ||
       aType == imgINotificationObserver::FRAME_UPDATE ||
       aType == imgINotificationObserver::SIZE_AVAILABLE) {
-    Invalidate();
+    if (GetParent() && GetParent()->IsSVGElement(nsGkAtoms::filter)) {
+      SVGObserverUtils::InvalidateDirectRenderingObservers(
+        static_cast<SVGFilterElement*>(GetParent()));
+    }
   }
 
   return rv;
-}
-
-//----------------------------------------------------------------------
-// helper methods
-
-void
-SVGFEImageElement::Invalidate()
-{
-  if (GetParent() && GetParent()->IsSVGElement(nsGkAtoms::filter)) {
-    static_cast<SVGFilterElement*>(GetParent())->Invalidate();
-  }
 }
 
 } // namespace dom

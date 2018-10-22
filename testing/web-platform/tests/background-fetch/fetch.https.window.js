@@ -70,6 +70,56 @@ backgroundFetchTest(async (test, backgroundFetch) => {
 backgroundFetchTest(async (test, backgroundFetch) => {
   const registrationId = uniqueId();
   const registration =
+    await backgroundFetch.fetch(registrationId, '');
+
+  assert_equals(registration.id, registrationId);
+
+  const {type, eventRegistration, results} = await getMessageFromServiceWorker();
+
+  assert_equals('backgroundfetchsuccess', type);
+  assert_equals(eventRegistration.result, 'success');
+  assert_equals(eventRegistration.failureReason, '');
+
+}, 'Empty URL is OK.');
+
+backgroundFetchTest(async (test, backgroundFetch) => {
+  const registrationId = uniqueId();
+  const registration =
+    await backgroundFetch.fetch(registrationId,
+        new Request('https://example/com', {
+        method: 'PUT',
+      }));
+
+  assert_equals(registration.id, registrationId);
+
+  const {type, eventRegistration, results} = await getMessageFromServiceWorker();
+
+  assert_equals(type, 'backgroundfetchsuccess');
+  assert_equals(eventRegistration.result, 'success');
+  assert_equals(eventRegistration.failureReason, '');
+}, 'Requests with PUT method require CORS Preflight and succeed.');
+
+backgroundFetchTest(async (test, backgroundFetch) => {
+  const registrationId = uniqueId();
+  const registration =
+    await backgroundFetch.fetch(registrationId,
+        new Request('https://example/com', {
+        method: 'POST',
+        headers: {'Content-Type': 'text/json'}
+      }));
+
+  assert_equals(registration.id, registrationId);
+
+  const {type, eventRegistration, results} = await getMessageFromServiceWorker();
+
+  assert_equals(type, 'backgroundfetchsuccess');
+  assert_equals(eventRegistration.result, 'success');
+  assert_equals(eventRegistration.failureReason, '');
+}, 'Requests with text/json content type require CORS Preflight and succeed.');
+
+backgroundFetchTest(async (test, backgroundFetch) => {
+  const registrationId = uniqueId();
+  const registration =
     await backgroundFetch.fetch(registrationId, 'resources/feature-name.txt');
 
   assert_equals(registration.id, registrationId);
@@ -94,6 +144,24 @@ backgroundFetchTest(async (test, backgroundFetch) => {
   assert_equals(results[0].text, 'Background Fetch');
 
 }, 'Using Background Fetch to successfully fetch a single resource');
+
+backgroundFetchTest(async (test, backgroundFetch) => {
+  const registrationId = uniqueId();
+  const registration =
+    await backgroundFetch.fetch(registrationId, 'resources/feature-name.txt');
+
+  assert_equals(registration.result, '');
+  assert_equals(registration.failureReason, '');
+
+  const {type, eventRegistration, results} =
+    await getMessageFromServiceWorker();
+  assert_equals('backgroundfetchsuccess', type);
+
+  assert_equals(eventRegistration.id, registration.id);
+  assert_equals(registration.result, 'success');
+  assert_equals(registration.failureReason, '');
+
+}, 'Registration object gets updated values when a background fetch completes.');
 
 backgroundFetchTest(async (test, backgroundFetch) => {
   const registrationId = uniqueId();
@@ -139,14 +207,12 @@ backgroundFetchTest(async (test, backgroundFetch) => {
   assert_equals(results.length, 1);
 
   assert_equals(eventRegistration.id, registration.id);
-  assert_equals(eventRegistration.state, 'success');
   assert_equals(eventRegistration.failureReason, '');
 
-  for (const result of results) {
-    assert_true(result.url.includes('resources/feature-name.txt'));
-    assert_equals(result.status, 200);
-    assert_equals(result.text, 'Background Fetch');
-  }
+  assert_true(results[0].url.includes('resources/feature-name.txt'));
+  assert_equals(results[0].status, 200);
+  assert_equals(results[0].text, 'Background Fetch');
+
 
 }, 'Fetches can have requests with a body');
 
@@ -171,3 +237,44 @@ backgroundFetchTest(async (test, backgroundFetch) => {
 
   assert_false(registration.recordsAvailable);
 }, 'recordsAvailable is false after onbackgroundfetchsuccess finishes execution.');
+
+backgroundFetchTest(async (test, backgroundFetch) => {
+  const registrationId = uniqueId();
+  const registration =
+    await backgroundFetch.fetch(registrationId, 'resources/missing-cat.txt');
+
+  assert_equals(registration.id, registrationId);
+  assert_equals(registration.result, '');
+  assert_equals(registration.failureReason, '');
+
+  const {type, eventRegistration, results} = await getMessageFromServiceWorker();
+  assert_equals(type, 'backgroundfetchfail');
+  assert_equals(results.length, 1);
+  assert_true(results[0].url.includes('resources/missing-cat.txt'));
+  assert_equals(results[0].status, 404);
+  assert_equals(results[0].text, '');
+
+  assert_equals(eventRegistration.id, registration.id);
+  assert_equals(eventRegistration.result, 'failure');
+  assert_equals(eventRegistration.failureReason, 'bad-status');
+
+  assert_equals(registration.result, 'failure');
+  assert_equals(registration.failureReason, 'bad-status');
+
+}, 'Using Background Fetch to fetch a non-existent resource should fail.');
+
+backgroundFetchTest(async (test, backgroundFetch) => {
+  const registration = await backgroundFetch.fetch(
+                         'my-id',
+                         ['https://example.com', 'http://example.com']);
+
+  const {type, eventRegistration, results} = await getMessageFromServiceWorker();
+
+  assert_equals('backgroundfetchfail', type);
+  assert_equals(eventRegistration.failureReason, 'fetch-error');
+
+  assert_equals(results.length, 2);
+  assert_true(results[0].url.includes('https://example.com'));
+  assert_equals(results[1].url, '');
+
+}, 'Fetches with mixed content should fail.');

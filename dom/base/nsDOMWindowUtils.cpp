@@ -1625,6 +1625,26 @@ nsDOMWindowUtils::GetScrollXYFloat(bool aFlushLayout, float* aScrollX, float* aS
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::GetVisualViewportOffsetRelativeToLayoutViewport(float* aOffsetX, float* aOffsetY)
+{
+  *aOffsetX = 0;
+  *aOffsetY = 0;
+
+  nsCOMPtr<nsIDocument> doc = GetDocument();
+  NS_ENSURE_STATE(doc);
+
+  nsIPresShell* presShell = doc->GetShell();
+  NS_ENSURE_TRUE(presShell, NS_ERROR_NOT_AVAILABLE);
+
+  nsPoint offset = presShell->GetVisualViewportOffsetRelativeToLayoutViewport();
+  *aOffsetX = nsPresContext::AppUnitsToFloatCSSPixels(offset.x);
+  *aOffsetY = nsPresContext::AppUnitsToFloatCSSPixels(offset.y);
+
+  return NS_OK;
+}
+
+
+NS_IMETHODIMP
 nsDOMWindowUtils::GetScrollbarSize(bool aFlushLayout, int32_t* aWidth,
                                                       int32_t* aHeight)
 {
@@ -4230,21 +4250,6 @@ nsDOMWindowUtils::GetGpuProcessPid(int32_t* aPid)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsDOMWindowUtils::IsTimeoutTracking(uint32_t aTimeoutId, bool* aResult)
-{
-  NS_ENSURE_ARG_POINTER(aResult);
-  *aResult = false;
-
-  nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
-  NS_ENSURE_STATE(window);
-  nsCOMPtr<nsPIDOMWindowInner> innerWindow = window->GetCurrentInnerWindow();
-  NS_ENSURE_STATE(innerWindow);
-
-  *aResult = innerWindow->TimeoutManager().IsTimeoutTracking(aTimeoutId);
-  return NS_OK;
-}
-
 struct StateTableEntry
 {
   const char* mStateString;
@@ -4473,4 +4478,3 @@ nsDOMWindowUtils::IsCssPropertyRecordedInUseCounter(const nsACString& aPropName,
                                             &knownProp);
   return knownProp ? NS_OK : NS_ERROR_FAILURE;
 }
-

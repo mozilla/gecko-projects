@@ -53,11 +53,20 @@ function quickOpen(dbg, query, shortcut = "quickOpen") {
   query !== "" && type(dbg, query);
 }
 
+function findResultEl(dbg, index = 1) {
+  return waitForElementWithSelector(dbg, `.result-item:nth-child(${index})`);
+}
+
+async function assertResultIsTab(dbg, index)  {
+  const el = await findResultEl(dbg, index);
+  ok(el && !!el.querySelector('.tab.result-item-icon'), 'Result should be a tab');
+}
+
 // Testing quick open
 add_task(async function() {
   const dbg = await initDebugger("doc-script-switching.html");
 
-  info("Testing opening and closing");
+  info("test opening and closing");
   quickOpen(dbg, "");
   pressKey(dbg, "Escape");
   assertDisabled(dbg);
@@ -74,6 +83,11 @@ add_task(async function() {
   pressKey(dbg, "Enter");
   await waitForSelectedSource(dbg, "switching-01");
 
+  info("Test that results show tab icons");
+  quickOpen(dbg, "sw1");
+  await assertResultIsTab(dbg, 1);
+  pressKey(dbg, "Tab");
+
   info("Testing arrow keys in source search and check to see if source is selected");
   quickOpen(dbg, "sw2");
   is(resultCount(dbg), 1, "one file results");
@@ -81,7 +95,7 @@ add_task(async function() {
   pressKey(dbg, "Enter");
   await waitForSelectedSource(dbg, "switching-02");
 
-  info("Testing hitting tab closes the search");
+  info("Testing tab closes the search");
   quickOpen(dbg, "sw");
   pressKey(dbg, "Tab");
   assertDisabled(dbg);

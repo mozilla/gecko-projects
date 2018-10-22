@@ -250,6 +250,12 @@ fn write_stacking_context(
             FilterOp::ColorMatrix(matrix) => {
                 filters.push(Yaml::String(format!("color-matrix({:?})", matrix)))
             }
+            FilterOp::SrgbToLinear => {
+                filters.push(Yaml::String("srgb-to-linear".to_string()))
+            }
+            FilterOp::LinearToSrgb => {
+                filters.push(Yaml::String("linear-to-srgb".to_string()))
+            }
         }
     }
 
@@ -869,6 +875,7 @@ impl YamlFrameWriter {
                             str_node(&mut v, "border-type", "normal");
                             yaml_node(&mut v, "color", string_vec_yaml(&colors, true));
                             yaml_node(&mut v, "style", string_vec_yaml(&styles, true));
+                            bool_node(&mut v, "do_aa", details.do_aa);
                             if let Some(radius_node) = maybe_radius_yaml(&details.radius) {
                                 yaml_node(&mut v, "radius", radius_node);
                             }

@@ -290,6 +290,9 @@ GetPropIRGenerator::tryAttachStub()
             if (tryAttachArgumentsObjectArg(obj, objId, indexId)) {
                 return true;
             }
+            if (tryAttachGenericElement(obj, objId, index, indexId)) {
+                return true;
+            }
 
             trackAttached(IRGenerator::NotAttached);
             return false;
@@ -2343,6 +2346,32 @@ GetPropIRGenerator::tryAttachUnboxedElementHole(HandleObject obj, ObjOperandId o
 }
 
 bool
+GetPropIRGenerator::tryAttachGenericElement(HandleObject obj, ObjOperandId objId,
+                                            uint32_t index, Int32OperandId indexId)
+{
+    if (!obj->isNative()) {
+        return false;
+    }
+
+    // To allow other types to attach in the non-megamorphic case we test the specific
+    // matching native reciever; however, once megamorphic we can attach for any native
+    if (mode_ == ICState::Mode::Megamorphic) {
+        writer.guardIsNativeObject(objId);
+    } else {
+        NativeObject* nobj = &obj->as<NativeObject>();
+        TestMatchingNativeReceiver(writer, nobj, objId);
+    }
+    writer.guardIndexGreaterThanDenseInitLength(objId, indexId);
+    writer.callNativeGetElementResult(objId, indexId);
+    writer.typeMonitorResult();
+
+    trackAttached(mode_ == ICState::Mode::Megamorphic
+                  ? "GenericElementMegamorphic": "GenericElement");
+    return true;
+}
+
+
+bool
 GetPropIRGenerator::tryAttachProxyElement(HandleObject obj, ObjOperandId objId)
 {
     if (!obj->is<ProxyObject>()) {
@@ -2854,7 +2883,7 @@ BindNameIRGenerator::trackAttached(const char* name)
 }
 
 HasPropIRGenerator::HasPropIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc,
-                                       CacheKind cacheKind, ICState::Mode mode,
+                                       ICState::Mode mode, CacheKind cacheKind,
                                        HandleValue idVal, HandleValue val)
   : IRGenerator(cx, script, pc, cacheKind, mode),
     val_(val),
@@ -3680,6 +3709,7 @@ SetPropIRGenerator::trackAttached(const char* name)
 {
 #ifdef JS_CACHEIR_SPEW
     if (const CacheIRSpewer::Guard& sp = CacheIRSpewer::Guard(*this, name)) {
+        sp.opcodeProperty("op", JSOp(*pc_));
         sp.valueProperty("base", lhsVal_);
         sp.valueProperty("property", idVal_);
         sp.valueProperty("value", rhsVal_);
@@ -3993,8 +4023,9 @@ SetPropIRGenerator::tryAttachSetDenseElementHole(HandleObject obj, ObjOperandId 
     uint32_t initLength = nobj->getDenseInitializedLength();
 
     // Optimize if we're adding an element at initLength or writing to a hole.
-    // Don't handle the adding case if the current accesss is in bounds, to
-    // ensure we always call noteArrayWriteHole.
+    //
+    // In the case where index > initLength, we need noteHasDenseAdd to be called
+    // to ensure Ion is aware that writes have occurred to-out-of-bound indexes before.
     bool isAdd = index == initLength;
     bool isHoleInBounds = index < initLength && !nobj->containsDenseElement(index);
     if (!isAdd && !isHoleInBounds) {
@@ -5825,8 +5856,9 @@ BinaryArithIRGenerator::tryAttachStub()
         return true;
     }
 
-    if (tryAttachStringNumberConcat())
+    if (tryAttachStringNumberConcat()) {
         return true;
+    }
 
 
     trackAttached(IRGenerator::NotAttached);
@@ -6029,8 +6061,9 @@ bool
 BinaryArithIRGenerator::tryAttachStringNumberConcat()
 {
     // Only Addition
-    if (op_ != JSOP_ADD)
+    if (op_ != JSOP_ADD) {
         return false;
+    }
 
     if (!(lhs_.isString() && rhs_.isNumber()) &&
         !(lhs_.isNumber() && rhs_.isString()))

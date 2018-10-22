@@ -27,7 +27,6 @@ struct IPCPaymentItem
   nsString label;
   IPCPaymentCurrencyAmount amount;
   bool pending;
-  nsString type;
 };
 
 struct IPCPaymentDetailsModifier
@@ -175,6 +174,7 @@ struct IPCPaymentAddress
   nsString country;
   nsString[] addressLine;
   nsString region;
+  nsString regionCode;
   nsString city;
   nsString dependentLocality;
   nsString postalCode;

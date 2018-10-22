@@ -32,10 +32,10 @@ window.gActivityStreamStrings = {
   "menu_action_copy_download_link": "डाउनलोड लिंक कॉपी करें",
   "menu_action_go_to_download_page": "डाउनलोड पृष्ठ पर जाएं",
   "menu_action_remove_download": "इतिहास से हटाएँ",
-  "search_button": "खोज",
+  "search_button": "खोजें",
   "search_header": "{search_engine_name} खोज",
   "search_web_placeholder": "वेब पर खोजें",
-  "section_disclaimer_topstories": "वेब पर सबसे दिलचस्प कहानियाँ, आपके पठन के आधार पर चयनित. Pocket के द्वारा, जो अब है Mozilla का हिस्सा.",
+  "section_disclaimer_topstories": "वेब पर सबसे दिलचस्प कहानियाँ, आपके पढने के आधार पर चयनित। Pocket के द्वारा, जो अब Mozilla का हिस्सा है।",
   "section_disclaimer_topstories_linktext": "जाने यह कैसे काम करता है.",
   "section_disclaimer_topstories_buttontext": "ठीक है, समझ गए",
   "prefs_home_header": "Firefox होम सामग्री",
@@ -75,7 +75,7 @@ window.gActivityStreamStrings = {
   "pocket_read_more": "लोकप्रिय विषय:",
   "pocket_read_even_more": "और कहानियाँ देखें",
   "pocket_more_reccommendations": "More Recommendations",
-  "pocket_learn_more": "Learn More",
+  "pocket_how_it_works": "How it works",
   "pocket_cta_button": "Get Pocket",
   "pocket_cta_text": "Save the stories you love in Pocket, and fuel your mind with fascinating reads.",
   "highlights_empty_state": "ब्राउज़िंग प्रारंभ करें, और हम कुछ प्रमुख आलेख, विडियो, तथा अन्य पृष्ठों को प्रदर्शित करेंगे जिन्हें आपने हाल ही में देखा या पुस्तचिन्हित किया है.",
@@ -106,5 +106,7 @@ window.gActivityStreamStrings = {
   "firstrun_terms_of_service": "सेवा की शर्तें",
   "firstrun_privacy_notice": "गोपनीयता नीति",
   "firstrun_continue_to_login": "जारी रखें",
-  "firstrun_skip_login": "इस चरण को छोड़ दें"
+  "firstrun_skip_login": "इस चरण को छोड़ दें",
+  "context_menu_title": "Open menu",
+  "pocket_learn_more": "अधिक जानें"
 };

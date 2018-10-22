@@ -1146,19 +1146,23 @@ JSFlatString::isIndexSlow(const char16_t* s, size_t length, uint32_t* indexp);
  * This is used when we generate our table of short strings, so the compiler is
  * happier if we use |c| as few times as possible.
  */
+// clang-format off
 #define FROM_SMALL_CHAR(c) Latin1Char((c) + ((c) < 10 ? '0' :      \
                                              (c) < 36 ? 'a' - 10 : \
                                              'A' - 36))
+// clang-format on
 
 /*
  * Declare length-2 strings. We only store strings where both characters are
  * alphanumeric. The lower 10 short chars are the numerals, the next 26 are
  * the lowercase letters, and the next 26 are the uppercase letters.
  */
+// clang-format off
 #define TO_SMALL_CHAR(c) ((c) >= '0' && (c) <= '9' ? (c) - '0' :              \
                           (c) >= 'a' && (c) <= 'z' ? (c) - 'a' + 10 :         \
                           (c) >= 'A' && (c) <= 'Z' ? (c) - 'A' + 36 :         \
                           StaticStrings::INVALID_SMALL_CHAR)
+// clang-format on
 
 #define R TO_SMALL_CHAR
 const StaticStrings::SmallChar StaticStrings::toSmallChar[] = { R7(0) };
@@ -1583,26 +1587,6 @@ NewInlineStringDeflated(JSContext* cx, mozilla::Range<const char16_t> chars)
     }
     storage[len] = '\0';
     return str;
-}
-
-template <typename CharT>
-static MOZ_ALWAYS_INLINE JSFlatString*
-TryEmptyOrStaticString(JSContext* cx, const CharT* chars, size_t n)
-{
-    // Measurements on popular websites indicate empty strings are pretty common
-    // and most strings with length 1 or 2 are in the StaticStrings table. For
-    // length 3 strings that's only about 1%, so we check n <= 2.
-    if (n <= 2) {
-        if (n == 0) {
-            return cx->emptyString();
-        }
-
-        if (JSFlatString* str = cx->staticStrings().lookup(chars, n)) {
-            return str;
-        }
-    }
-
-    return nullptr;
 }
 
 template <AllowGC allowGC>

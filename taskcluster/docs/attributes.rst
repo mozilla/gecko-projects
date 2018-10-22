@@ -118,6 +118,12 @@ test_chunk
 This is the chunk number of a chunked test suite (talos or unittest).  Note
 that this is a string!
 
+serviceworker_e10s
+==================
+
+For test suites which distinguish whether or not they run with the serviceworker
+e10s redesign enabled.
+
 e10s
 ====
 
@@ -232,3 +238,8 @@ In automation, full crashsymbol package generation is normally disabled.  For
 build kinds where the full crashsymbols should be enabled, set this attribute
 to True. The full symbol packages will then be generated and uploaded on
 release branches and on try.
+
+cron
+====
+Indicates that a task is meant to be run via cron tasks, and should not be run
+on push.

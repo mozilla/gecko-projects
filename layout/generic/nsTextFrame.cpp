@@ -4796,6 +4796,28 @@ nsTextFrame::DisconnectTextRuns()
   }
 }
 
+void
+nsTextFrame::NotifyNativeAnonymousTextnodeChange(uint32_t aOldLength)
+{
+  MOZ_ASSERT(mContent->IsInNativeAnonymousSubtree());
+
+  MarkIntrinsicISizesDirty();
+
+  // This is to avoid making a new Reflow request in CharacterDataChanged:
+  for (nsTextFrame* f = this; f; f = f->GetNextContinuation()) {
+    f->AddStateBits(NS_FRAME_IS_DIRTY);
+    f->mReflowRequestedForCharDataChange = true;
+  }
+
+  // Pretend that all the text changed.
+  CharacterDataChangeInfo info;
+  info.mAppend = false;
+  info.mChangeStart = 0;
+  info.mChangeEnd = aOldLength;
+  info.mReplaceLength = mContent->TextLength();
+  CharacterDataChanged(info);
+}
+
 nsresult
 nsTextFrame::CharacterDataChanged(const CharacterDataChangeInfo& aInfo)
 {
@@ -6651,6 +6673,17 @@ nsTextFrame::DrawEmphasisMarks(gfxContext* aContext,
   }
 
   bool isTextCombined = Style()->IsTextCombined();
+  if (isTextCombined && !aWM.IsVertical()) {
+    // XXX This only happens when the parent is display:contents with an
+    // orthogonal writing mode. This should be rare, and don't have use
+    // cases, so we don't care. It is non-trivial to implement a sane
+    // behavior for that case: if you treat the text as not combined,
+    // the marks would spread wider than the text (which is rendered as
+    // combined); if you try to draw a single mark, selecting part of
+    // the text could dynamically create multiple new marks.
+    NS_WARNING("Give up on combined text with horizontal wm");
+    return;
+  }
   nscolor color = aDecorationOverrideColor ? *aDecorationOverrideColor :
     nsLayoutUtils::GetColor(this, &nsStyleText::mTextEmphasisColor);
   aContext->SetColor(Color::FromABGR(color));

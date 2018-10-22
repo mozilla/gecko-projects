@@ -1604,7 +1604,16 @@ function extractSymbol(path, symbols) {
   if (t.isCallExpression(path)) {
     const callee = path.node.callee;
     const args = path.node.arguments;
-    if (!t.isMemberExpression(callee)) {
+    if (t.isMemberExpression(callee)) {
+      const {
+        property: { name, loc }
+      } = callee;
+      symbols.callExpressions.push({
+        name: name,
+        values: args.filter(arg => arg.value).map(arg => arg.value),
+        location: loc
+      });
+    } else {
       const { start, end, identifierName } = callee.loc;
       symbols.callExpressions.push({
         name: identifierName,
@@ -2595,16 +2604,8 @@ function extendsReactComponent(classes) {
 // Angular
 
 const isAngularComponent = sourceSymbols => {
-  const { memberExpressions, identifiers } = sourceSymbols;
-  return identifiesAngular(identifiers) && hasAngularExpressions(memberExpressions);
-};
-
-const identifiesAngular = identifiers => {
-  return identifiers.some(item => item.name == "angular");
-};
-
-const hasAngularExpressions = memberExpressions => {
-  return memberExpressions.some(item => item.name == "controller" || item.name == "module");
+  const { memberExpressions } = sourceSymbols;
+  return memberExpressions.some(item => item.expression == "angular.controller" || item.expression == "angular.module");
 };
 
 // Vue
@@ -25458,9 +25459,9 @@ function locationKey(start) {
 function mapOriginalExpression(expression, mappings) {
   const ast = (0, _ast.parseScript)(expression, { allowAwaitOutsideFunction: true });
   const scopes = (0, _getScopes.buildScopeList)(ast, "");
+  let shouldUpdate = false;
 
   const nodes = new Map();
-
   const replacements = new Map();
 
   // The ref-only global bindings are the ones that are accessed, but not
@@ -25471,6 +25472,7 @@ function mapOriginalExpression(expression, mappings) {
   for (const name of Object.keys(scopes[0].bindings)) {
     const { refs } = scopes[0].bindings[name];
     const mapping = mappings[name];
+
     if (!refs.every(ref => ref.type === "ref") || !mapping || mapping === name) {
       continue;
     }
@@ -25507,10 +25509,15 @@ function mapOriginalExpression(expression, mappings) {
     const replacement = replacements.get(locationKey(node.loc.start));
     if (replacement) {
       replaceNode(ancestors, t.cloneNode(replacement));
+      shouldUpdate = true;
     }
   });
 
-  return (0, _generator2.default)(ast).code;
+  if (shouldUpdate) {
+    return (0, _generator2.default)(ast).code;
+  }
+
+  return expression;
 }
 
 /***/ }),
@@ -25538,6 +25545,7 @@ const {
 
 const dispatcher = new WorkerDispatcher();
 
+const setAssetRootURL = dispatcher.task("setAssetRootURL");
 const getOriginalURLs = dispatcher.task("getOriginalURLs");
 const getOriginalRanges = dispatcher.task("getOriginalRanges");
 const getGeneratedRanges = dispatcher.task("getGeneratedRanges", {
@@ -25574,7 +25582,10 @@ module.exports = {
   applySourceMap,
   clearSourceMaps,
   getOriginalStackFrames,
-  startSourceMapWorker: dispatcher.start.bind(dispatcher),
+  startSourceMapWorker(url, assetRoot) {
+    dispatcher.start(url);
+    setAssetRootURL(assetRoot);
+  },
   stopSourceMapWorker: dispatcher.stop.bind(dispatcher)
 };
 
@@ -25797,6 +25808,10 @@ WorkerDispatcher.prototype = {
     };
 
     return (...args) => push(args);
+  },
+
+  invoke(method, ...args) {
+    return this.task(method)(...args);
   }
 };
 
@@ -25912,9 +25927,9 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 function mapExpression(expression, mappings, bindings, shouldMapBindings = true, shouldMapAwait = true) {
   const mapped = {
-    originalExpression: false,
-    bindings: false,
     await: false,
+    bindings: false,
+    originalExpression: false
   };
 
   try {
@@ -25936,12 +25951,12 @@ function mapExpression(expression, mappings, bindings, shouldMapBindings = true,
       mapped.await = beforeAwait !== expression;
     }
   } catch (e) {
-    console.log(e);
+    console.warn(`Error when mapping ${expression} expression:`, e);
   }
 
   return {
     expression,
-    mapped,
+    mapped
   };
 } /* This Source Code Form is subject to the terms of the Mozilla Public
    * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -26021,7 +26036,9 @@ function hasDestructuring(node) {
 
 function mapExpressionBindings(expression, bindings = []) {
   const ast = (0, _ast.parseScript)(expression, { allowAwaitOutsideFunction: true });
+  let isMapped = false;
   let shouldUpdate = true;
+
   t.traverse(ast, (node, ancestors) => {
     const parent = ancestors[ancestors.length - 1];
 
@@ -26037,6 +26054,7 @@ function mapExpressionBindings(expression, bindings = []) {
     if (t.isAssignmentExpression(node)) {
       if (t.isIdentifier(node.left)) {
         const newNode = globalizeAssignment(node, bindings);
+        isMapped = true;
         return replaceNode(ancestors, newNode);
       }
 
@@ -26057,11 +26075,12 @@ function mapExpressionBindings(expression, bindings = []) {
 
     if (!t.isForStatement(parent.node)) {
       const newNodes = globalizeDeclaration(node, bindings);
+      isMapped = true;
       replaceNode(ancestors, newNodes);
     }
   });
 
-  if (!shouldUpdate) {
+  if (!shouldUpdate || !isMapped) {
     return expression;
   }
 
@@ -46723,7 +46742,7 @@ exports.tokTypes = types;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.default = handleTopLevelAwait;
+exports.default = mapTopLevelAwait;
 
 var _template = __webpack_require__(2397);
 
@@ -46763,11 +46782,11 @@ function wrapExpression(ast) {
   return (0, _generator2.default)(newAst).code;
 }
 
-function handleTopLevelAwait(expression) {
+function mapTopLevelAwait(expression) {
   const ast = hasTopLevelAwait(expression);
   if (ast) {
     const func = wrapExpression(ast);
-    return (0, _generator2.default)(_template2.default.ast(`(${func})().then(console.log).catch(console.error)`)).code;
+    return (0, _generator2.default)(_template2.default.ast(`(${func})();`)).code;
   }
 
   return expression;

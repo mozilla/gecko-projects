@@ -13,6 +13,7 @@
 #include "mozilla/GuardObjects.h"
 #include "mozilla/TemplateLib.h"
 #include "mozilla/Types.h"
+#include "mozilla/Utf8.h"
 
 #include <functional>
 #include <stdarg.h>
@@ -257,12 +258,16 @@ static inline bool HasDivergedFromRecording();
 // The callback passed to NotifyUnrecordedWait will be invoked at most once
 // by the main thread whenever the main thread is waiting for other threads to
 // become idle, and at most once after the call to NotifyUnrecordedWait if the
-// main thread is already waiting for other threads to become idle.
+// main thread is already waiting for other threads to become idle. If
+// aOnlyWhenDiverged is specified, the callback will only be invoked if the
+// thread has diverged from the recording (causing all resources to be treated
+// as unrecorded).
 //
 // The callback should poke the thread so that it is no longer blocked on the
 // resource. The thread must call MaybeWaitForCheckpointSave before blocking
 // again.
-MFBT_API void NotifyUnrecordedWait(const std::function<void()>& aCallback);
+MFBT_API void NotifyUnrecordedWait(const std::function<void()>& aCallback,
+                                   bool aOnlyWhenDiverged);
 MFBT_API void MaybeWaitForCheckpointSave();
 
 // API for debugging inconsistent behavior between recording and replay.
@@ -353,21 +358,36 @@ MFBT_API bool DefineRecordReplayControlObject(JSContext* aCx, JSObject* aObj);
 MFBT_API void BeginContentParse(const void* aToken,
                                 const char* aURL, const char* aContentType);
 
-// Add some parse data to an existing content parse.
-MFBT_API void AddContentParseData(const void* aToken,
-                                  const char16_t* aBuffer, size_t aLength);
+// Add some UTF-8 parse data to an existing content parse.
+MFBT_API void AddContentParseData8(const void* aToken,
+                                   const Utf8Unit* aUtf8Buffer, size_t aLength);
+
+// Add some UTF-16 parse data to an existing content parse.
+MFBT_API void AddContentParseData16(const void* aToken,
+                                    const char16_t* aBuffer, size_t aLength);
 
 // Mark a content parse as having completed.
 MFBT_API void EndContentParse(const void* aToken);
 
 // Perform an entire content parse, when the entire URL is available at once.
 static inline void
-NoteContentParse(const void* aToken,
-                 const char* aURL, const char* aContentType,
-                 const char16_t* aBuffer, size_t aLength)
+NoteContentParse8(const void* aToken,
+                  const char* aURL, const char* aContentType,
+                  const mozilla::Utf8Unit* aUtf8Buffer, size_t aLength)
 {
   BeginContentParse(aToken, aURL, aContentType);
-  AddContentParseData(aToken, aBuffer, aLength);
+  AddContentParseData8(aToken, aUtf8Buffer, aLength);
+  EndContentParse(aToken);
+}
+
+// Perform an entire content parse, when the entire URL is available at once.
+static inline void
+NoteContentParse16(const void* aToken,
+                   const char* aURL, const char* aContentType,
+                   const char16_t* aBuffer, size_t aLength)
+{
+  BeginContentParse(aToken, aURL, aContentType);
+  AddContentParseData16(aToken, aBuffer, aLength);
   EndContentParse(aToken);
 }
 

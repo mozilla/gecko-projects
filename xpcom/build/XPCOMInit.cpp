@@ -93,6 +93,7 @@ extern nsresult nsStringInputStreamConstructor(nsISupports*, REFNSIID, void**);
 
 #ifdef MOZ_WIDGET_COCOA
 #include "nsMacUtilsImpl.h"
+#include "nsMacPreferencesReader.h"
 #endif
 
 #include "nsSystemInfo.h"
@@ -198,7 +199,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsSupportsDouble)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsSupportsInterfacePointer)
 
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsConsoleService, Init)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsTimer)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsBinaryOutputStream)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsBinaryInputStream)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsStorageStream)
@@ -213,6 +213,7 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsUUIDGenerator, Init)
 
 #ifdef MOZ_WIDGET_COCOA
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsMacUtilsImpl)
+NS_GENERIC_FACTORY_CONSTRUCTOR(nsMacPreferencesReader)
 #endif
 
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsSystemInfo, Init)
@@ -251,6 +252,10 @@ NS_DEFINE_NAMED_CID(NS_CHROMEPROTOCOLHANDLER_CID);
 
 NS_DEFINE_NAMED_CID(NS_SECURITY_CONSOLE_MESSAGE_CID);
 
+#ifdef MOZ_WIDGET_COCOA
+NS_DEFINE_NAMED_CID(NS_MACPREFERENCESREADER_CID);
+#endif
+
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsChromeRegistry,
                                          nsChromeRegistry::GetSingleton)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsChromeProtocolHandler)
@@ -278,6 +283,9 @@ const mozilla::Module::CIDEntry kXPCOMCIDEntries[] = {
   { &kNS_CHROMEREGISTRY_CID, false, nullptr, nsChromeRegistryConstructor },
   { &kNS_CHROMEPROTOCOLHANDLER_CID, false, nullptr, nsChromeProtocolHandlerConstructor },
   { &kNS_SECURITY_CONSOLE_MESSAGE_CID, false, nullptr, nsSecurityConsoleMessageConstructor },
+#ifdef MOZ_WIDGET_COCOA
+  { &kNS_MACPREFERENCESREADER_CID, false, nullptr, nsMacPreferencesReaderConstructor },
+#endif
   { nullptr }
 };
 #undef COMPONENT
@@ -291,6 +299,9 @@ const mozilla::Module::ContractIDEntry kXPCOMContracts[] = {
   { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "chrome", &kNS_CHROMEPROTOCOLHANDLER_CID },
   { NS_INIPARSERFACTORY_CONTRACTID, &kINIParserFactoryCID },
   { NS_SECURITY_CONSOLE_MESSAGE_CONTRACTID, &kNS_SECURITY_CONSOLE_MESSAGE_CID },
+#ifdef MOZ_WIDGET_COCOA
+  { NS_MACPREFERENCESREADER_CONTRACTID, &kNS_MACPREFERENCESREADER_CID },
+#endif
   { nullptr }
 };
 #undef COMPONENT
@@ -700,9 +711,7 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
   SharedThreadPool::InitStatics();
 
   // Force layout to spin up so that nsContentUtils is available for cx stack
-  // munging.  Note that layout registers a number of static atoms, and also
-  // seals the static atom table, so NS_RegisterStaticAtom may not be called
-  // beyond this point.
+  // munging.
   nsCOMPtr<nsISupports> componentLoader =
     do_GetService("@mozilla.org/moz/jsloader;1");
 

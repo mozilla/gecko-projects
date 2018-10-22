@@ -148,9 +148,16 @@ nsSVGUtils::GetPostFilterVisualOverflowRect(nsIFrame *aFrame,
   MOZ_ASSERT(aFrame->GetStateBits() & NS_FRAME_SVG_LAYOUT,
              "Called on invalid frame type");
 
-  SVGFilterObserverListForCSSProp* observers =
-    SVGObserverUtils::GetFilterObserverList(aFrame);
-  if (!observers || !observers->ReferencesValidResources()) {
+  // Note: we do not return here for eHasNoRefs since we must still handle any
+  // CSS filter functions.
+  // TODO: We currently pass nullptr instead of an nsTArray* here, but we
+  // actually should get the filter frames and then pass them into
+  // GetPostFilterBounds below!  See bug 1494263.
+  // TODO: we should really return an empty rect for eHasRefsSomeInvalid since
+  // in that case we disable painting of the element.
+  if (!aFrame->StyleEffects()->HasFilters() ||
+      SVGObserverUtils::GetAndObserveFilters(aFrame, nullptr) ==
+        SVGObserverUtils::eHasRefsSomeInvalid) {
     return aPreFilterRect;
   }
 
@@ -254,27 +261,6 @@ nsSVGUtils::NeedsReflowSVG(nsIFrame *aFrame)
   // The flags we test here may change, hence why we have this separate
   // function.
   return NS_SUBTREE_DIRTY(aFrame);
-}
-
-void
-nsSVGUtils::NotifyAncestorsOfFilterRegionChange(nsIFrame *aFrame)
-{
-  MOZ_ASSERT(!(aFrame->GetStateBits() & NS_STATE_IS_OUTER_SVG),
-             "Not expecting to be called on the outer SVG Frame");
-
-  aFrame = aFrame->GetParent();
-
-  while (aFrame) {
-    if (aFrame->GetStateBits() & NS_STATE_IS_OUTER_SVG)
-      return;
-
-    SVGFilterObserverListForCSSProp* observers =
-      SVGObserverUtils::GetFilterObserverList(aFrame);
-    if (observers) {
-      observers->Invalidate();
-    }
-    aFrame = aFrame->GetParent();
-  }
 }
 
 Size
@@ -501,15 +487,16 @@ nsSVGUtils::DetermineMaskUsage(nsIFrame* aFrame, bool aHandleOpacity,
   nsIFrame* firstFrame =
     nsLayoutUtils::FirstContinuationOrIBSplitSibling(aFrame);
 
-  SVGObserverUtils::EffectProperties effectProperties =
-    SVGObserverUtils::GetEffectProperties(firstFrame);
   const nsStyleSVGReset *svgReset = firstFrame->StyleSVGReset();
 
-  nsTArray<nsSVGMaskFrame*> maskFrames = effectProperties.GetMaskFrames();
-
+  nsTArray<nsSVGMaskFrame*> maskFrames;
+  // XXX check return value?
+  SVGObserverUtils::GetAndObserveMasks(firstFrame, &maskFrames);
   aUsage.shouldGenerateMaskLayer = (maskFrames.Length() > 0);
 
-  nsSVGClipPathFrame *clipPathFrame = effectProperties.GetClipPathFrame();
+  nsSVGClipPathFrame* clipPathFrame;
+  // XXX check return value?
+  SVGObserverUtils::GetAndObserveClipPath(firstFrame, &clipPathFrame);
   MOZ_ASSERT(!clipPathFrame ||
              svgReset->mClipPath.GetType() == StyleShapeSourceType::URL);
 
@@ -725,16 +712,22 @@ nsSVGUtils::PaintFrameWithEffects(nsIFrame *aFrame,
 
   /* Properties are added lazily and may have been removed by a restyle,
      so make sure all applicable ones are set again. */
-  SVGObserverUtils::EffectProperties effectProperties =
-    SVGObserverUtils::GetEffectProperties(aFrame);
-  if (effectProperties.HasInvalidEffects()) {
+  nsSVGClipPathFrame* clipPathFrame;
+  nsTArray<nsSVGMaskFrame*> maskFrames;
+  // TODO: We currently pass nullptr instead of an nsTArray* here, but we
+  // actually should get the filter frames and then pass them into
+  // PaintFilteredFrame below!  See bug 1494263.
+  if (SVGObserverUtils::GetAndObserveFilters(aFrame, nullptr) ==
+        SVGObserverUtils::eHasRefsSomeInvalid ||
+      SVGObserverUtils::GetAndObserveClipPath(aFrame, &clipPathFrame) ==
+        SVGObserverUtils::eHasRefsSomeInvalid ||
+      SVGObserverUtils::GetAndObserveMasks(aFrame, &maskFrames) ==
+        SVGObserverUtils::eHasRefsSomeInvalid) {
     // Some resource is invalid. We shouldn't paint anything.
     return;
   }
 
-  nsSVGClipPathFrame *clipPathFrame = effectProperties.GetClipPathFrame();
-  nsTArray<nsSVGMaskFrame*> masks = effectProperties.GetMaskFrames();
-  nsSVGMaskFrame *maskFrame = masks.IsEmpty() ? nullptr : masks[0];
+  nsSVGMaskFrame* maskFrame = maskFrames.IsEmpty() ? nullptr : maskFrames[0];
 
   MixModeBlender blender(aFrame, &aContext);
   gfxContext* target = blender.ShouldCreateDrawTargetForBlend()
@@ -820,7 +813,11 @@ nsSVGUtils::PaintFrameWithEffects(nsIFrame *aFrame,
   }
 
   /* Paint the child */
-  if (effectProperties.HasValidFilter()) {
+
+  // We know we don't have eHasRefsSomeInvalid due to the check above.  We
+  // don't test for eHasNoRefs here though since even if we have that we may
+  // still have CSS filter functions to handle.  We have to check the style.
+  if (aFrame->StyleEffects()->HasFilters()) {
     nsRegion* dirtyRegion = nullptr;
     nsRegion tmpDirtyRegion;
     if (aDirtyRect) {
@@ -877,29 +874,18 @@ nsSVGUtils::PaintFrameWithEffects(nsIFrame *aFrame,
 bool
 nsSVGUtils::HitTestClip(nsIFrame *aFrame, const gfxPoint &aPoint)
 {
-  SVGObserverUtils::EffectProperties props =
-    SVGObserverUtils::GetEffectProperties(aFrame);
-  if (!props.mClipPath) {
-    const nsStyleSVGReset *style = aFrame->StyleSVGReset();
-    if (style->HasClipPath()) {
-      return nsCSSClipPathInstance::HitTestBasicShapeOrPathClip(aFrame, aPoint);
-    }
-    return true;
+  nsSVGClipPathFrame* clipPathFrame;
+  if (SVGObserverUtils::GetAndObserveClipPath(aFrame, &clipPathFrame) ==
+        SVGObserverUtils::eHasRefsSomeInvalid) {
+    return false; // everything clipped away if clip path is invalid
   }
-
-  if (props.HasInvalidClipPath()) {
-    // clipPath is not a valid resource, so nothing gets painted, so
-    // hit-testing must fail.
-    return false;
+  if (clipPathFrame) {
+    return clipPathFrame->PointIsInsideClipPath(aFrame, aPoint);
   }
-  nsSVGClipPathFrame *clipPathFrame = props.GetClipPathFrame();
-
-  if (!clipPathFrame) {
-    // clipPath doesn't exist, ignore it.
-    return true;
+  if (aFrame->StyleSVGReset()->HasClipPath()) {
+    return nsCSSClipPathInstance::HitTestBasicShapeOrPathClip(aFrame, aPoint);
   }
-
-  return clipPathFrame->PointIsInsideClipPath(aFrame, aPoint);
+  return true;
 }
 
 nsIFrame *
@@ -1167,13 +1153,11 @@ nsSVGUtils::GetBBox(nsIFrame* aFrame, uint32_t aFlags,
         clipRect = matrix.TransformBounds(clipRect);
       }
     }
-    SVGObserverUtils::EffectProperties effectProperties =
-      SVGObserverUtils::GetEffectProperties(aFrame);
-    if (effectProperties.HasInvalidClipPath()) {
+    nsSVGClipPathFrame* clipPathFrame;
+    if (SVGObserverUtils::GetAndObserveClipPath(aFrame, &clipPathFrame) ==
+          SVGObserverUtils::eHasRefsSomeInvalid) {
       bbox = gfxRect(0, 0, 0, 0);
     } else {
-      nsSVGClipPathFrame *clipPathFrame =
-        effectProperties.GetClipPathFrame();
       if (clipPathFrame) {
         SVGClipPathElement *clipContent =
           static_cast<SVGClipPathElement*>(clipPathFrame->GetContent());
@@ -1500,7 +1484,7 @@ nsSVGUtils::MakeFillPatternFor(nsIFrame* aFrame,
   const DrawTarget* dt = aContext->GetDrawTarget();
 
   nsSVGPaintServerFrame *ps =
-    SVGObserverUtils::GetPaintServer(aFrame, &nsStyleSVG::mFill);
+    SVGObserverUtils::GetAndObservePaintServer(aFrame, &nsStyleSVG::mFill);
 
   if (ps) {
     RefPtr<gfxPattern> pattern =
@@ -1575,7 +1559,7 @@ nsSVGUtils::MakeStrokePatternFor(nsIFrame* aFrame,
   const DrawTarget* dt = aContext->GetDrawTarget();
 
   nsSVGPaintServerFrame *ps =
-    SVGObserverUtils::GetPaintServer(aFrame, &nsStyleSVG::mStroke);
+    SVGObserverUtils::GetAndObservePaintServer(aFrame, &nsStyleSVG::mStroke);
 
   if (ps) {
     RefPtr<gfxPattern> pattern =

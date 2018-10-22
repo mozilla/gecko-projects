@@ -146,14 +146,22 @@ class GlobalObject : public NativeObject
                                        JSProtoKey key, HandleObject ctor, HandleObject proto);
 
   private:
-    static bool resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JSProtoKey key);
+    enum class IfClassIsDisabled {
+        DoNothing,
+        Throw
+    };
+
+    static bool resolveConstructor(JSContext* cx,
+                                   Handle<GlobalObject*> global,
+                                   JSProtoKey key,
+                                   IfClassIsDisabled mode);
 
   public:
     static bool ensureConstructor(JSContext* cx, Handle<GlobalObject*> global, JSProtoKey key) {
         if (global->isStandardClassResolved(key)) {
             return true;
         }
-        return resolveConstructor(cx, global, key);
+        return resolveConstructor(cx, global, key, IfClassIsDisabled::Throw);
     }
 
     static JSObject* getOrCreateConstructor(JSContext* cx, JSProtoKey key) {
@@ -901,18 +909,17 @@ GenericCreateConstructor(JSContext* cx, JSProtoKey key)
     return GlobalObject::createConstructor(cx, ctor, name, length, kind, jitInfo);
 }
 
-inline JSObject*
+template<typename T>
+JSObject*
 GenericCreatePrototype(JSContext* cx, JSProtoKey key)
 {
-    MOZ_ASSERT(key != JSProto_Object);
-    const Class* clasp = ProtoKeyToClass(key);
-    MOZ_ASSERT(clasp);
-    JSProtoKey protoKey = InheritanceProtoKeyForStandardClass(key);
-    if (!GlobalObject::ensureConstructor(cx, cx->global(), protoKey)) {
-        return nullptr;
-    }
-    RootedObject parentProto(cx, &cx->global()->getPrototype(protoKey).toObject());
-    return GlobalObject::createBlankPrototypeInheriting(cx, clasp, parentProto);
+    static_assert(!std::is_same<T, PlainObject>::value,
+                  "creating Object.prototype is very special and isn't handled here");
+    MOZ_ASSERT(&T::class_ == ProtoKeyToClass(key),
+               "type mismatch--probably too much copy/paste in your ClassSpec");
+    MOZ_ASSERT(InheritanceProtoKeyForStandardClass(key) == JSProto_Object,
+               "subclasses (of anything but Object) can't use GenericCreatePrototype");
+    return GlobalObject::createBlankPrototype(cx, cx->global(), &T::protoClass_);
 }
 
 inline JSProtoKey

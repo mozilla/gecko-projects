@@ -8214,6 +8214,43 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "scrollbar-color": {
+    "isInherited": true,
+    "subproperties": [
+      "scrollbar-color"
+    ],
+    "supports": [
+      2
+    ],
+    "values": [
+      "COLOR",
+      "auto",
+      "currentColor",
+      "hsl",
+      "hsla",
+      "inherit",
+      "initial",
+      "rgb",
+      "rgba",
+      "transparent",
+      "unset"
+    ]
+  },
+  "scrollbar-width": {
+    "isInherited": false,
+    "subproperties": [
+      "scrollbar-width"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "none",
+      "thin",
+      "unset"
+    ]
+  },
   "shape-image-threshold": {
     "isInherited": false,
     "subproperties": [
@@ -8814,6 +8851,7 @@ exports.CSS_PROPERTIES = {
     "supports": [],
     "values": [
       "capitalize",
+      "full-size-kana",
       "full-width",
       "inherit",
       "initial",
@@ -9365,7 +9403,7 @@ exports.PREFERENCES = [
   ],
   [
     "scrollbar-color",
-    "layout.css.scrollbar-colors.enabled"
+    "layout.css.scrollbar-color.enabled"
   ],
   [
     "shape-outside",

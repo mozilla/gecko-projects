@@ -26,6 +26,7 @@
 #include "jit/JitFrames-inl.h"
 #include "jit/MacroAssembler-inl.h"
 #include "vm/BytecodeUtil-inl.h"
+#include "vm/GeckoProfiler-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/Stack-inl.h"
@@ -252,6 +253,7 @@ jit::BaselineCompile(JSContext* cx, JSScript* script, bool forceDebugInstrumenta
     MOZ_ASSERT(!script->hasBaselineScript());
     MOZ_ASSERT(script->canBaselineCompile());
     MOZ_ASSERT(IsBaselineEnabled(cx));
+    AutoGeckoProfilerEntry pseudoFrame(cx, "Baseline script compilation");
 
     script->ensureNonLazyCanonicalFunction();
 
@@ -740,15 +742,14 @@ BaselineScript::callVMEntryFromPCOffset(uint32_t pcOffset)
 }
 
 ICEntry&
-BaselineScript::stackCheckICEntry(bool earlyCheck)
+BaselineScript::stackCheckICEntry()
 {
     // The stack check will always be at offset 0, so just do a linear search
     // from the beginning. This is only needed for debug mode OSR, when
     // patching a frame that has invoked a Debugger hook via the interrupt
     // handler via the stack check, which is part of the prologue.
-    ICEntry::Kind kind = earlyCheck ? ICEntry::Kind_EarlyStackCheck : ICEntry::Kind_StackCheck;
     for (size_t i = 0; i < numICEntries() && icEntry(i).pcOffset() == 0; i++) {
-        if (icEntry(i).kind() == kind) {
+        if (icEntry(i).kind() == ICEntry::Kind_StackCheck) {
             return icEntry(i);
         }
     }
@@ -1166,12 +1167,72 @@ BaselineScript::purgeOptimizedStubs(Zone* zone)
 #endif
 }
 
+#ifdef JS_JITSPEW
+static bool
+GetStubEnteredCount(ICStub* stub, uint32_t* count)
+{
+    if (stub->isCacheIR_Regular()) {
+        *count = stub->toCacheIR_Regular()->enteredCount();
+        return true;
+    }
+    return false;
+}
+
+static void
+DumpICInfo(JSScript* script)
+{
+    MOZ_ASSERT(script->hasBaselineScript());
+    BaselineScript* blScript = script->baselineScript();
+
+    if (!JitSpewEnabled(JitSpew_BaselineIC_Statistics)) {
+        return;
+    }
+
+    Fprinter& out = JitSpewPrinter();
+
+    const char* filename = script->filename() ? script->filename() : "unknown";
+    out.printf("Dumping IC info for %s:%d\n", filename,
+            PCToLineNumber(script, script->code()));
+
+    for (size_t i = 0; i < blScript->numICEntries(); i++) {
+        ICEntry& entry = blScript->icEntry(i);
+        if (!entry.hasStub()) {
+            continue;
+        }
+
+        unsigned column;
+        jsbytecode* pc = entry.pc(script);
+        unsigned int line = PCToLineNumber(script, pc, &column);
+        out.printf("\t%s:%u:%u (%s) \t", filename, line, column, CodeName[*pc]);
+
+        ICStub* stub = entry.firstStub();
+        while (stub) {
+            uint32_t count;
+            if (GetStubEnteredCount(stub, &count)) {
+                out.printf("%u -> ", count);
+            } else if (stub->isFallback()) {
+                out.printf("(fb) %u", stub->toFallbackStub()->enteredCount());
+            } else {
+                out.printf(" <unknown> -> ");
+            }
+            stub = stub->next();
+        }
+        out.printf("\n");
+    }
+}
+#endif
+
+
 void
 jit::FinishDiscardBaselineScript(FreeOp* fop, JSScript* script)
 {
     if (!script->hasBaselineScript()) {
         return;
     }
+
+#ifdef JS_JITSPEW
+    DumpICInfo(script);
+#endif
 
     if (script->baselineScript()->active()) {
         // Script is live on the stack. Keep the BaselineScript, but destroy

@@ -113,7 +113,6 @@ MOZBUILD_VARIABLES = [
     b'NO_DIST_INSTALL',
     b'NO_EXPAND_LIBS',
     b'NO_INTERFACES_MANIFEST',
-    b'NO_JS_MANIFEST',
     b'OS_LIBS',
     b'PARALLEL_DIRS',
     b'PREF_JS_EXPORTS',
@@ -1471,6 +1470,9 @@ class RecursiveMakeBackend(CommonBackend):
         direct_linked = direct_linked[0]
         backend_file.write('RUST_STATIC_LIB := %s\n' %
                            pretty_relpath(direct_linked, direct_linked.import_name))
+
+        for lib in direct_linked.linked_system_libs:
+            backend_file.write_once('OS_LIBS += %s\n' % lib)
 
     def _process_final_target_files(self, obj, files, backend_file):
         target = obj.install_target

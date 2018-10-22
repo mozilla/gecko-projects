@@ -70,8 +70,7 @@ function promiseSetEngine() {
         case "engine-current":
           ok(ss.currentEngine.name == "Bug 426329", "currentEngine set");
           searchBar = BrowserSearch.searchBar;
-          searchButton = document.getAnonymousElementByAttribute(searchBar,
-                             "anonid", "search-go-button");
+          searchButton = searchBar.querySelector(".search-go-button");
           ok(searchButton, "got search-go-button");
           searchBar.value = "test";
 
@@ -83,7 +82,7 @@ function promiseSetEngine() {
 
     Services.obs.addObserver(observer, "browser-search-engine-modified");
     ss.addEngine("http://mochi.test:8888/browser/browser/components/search/test/426329.xml",
-                 null, "data:image/x-icon,%00", false);
+                 "data:image/x-icon,%00", false);
   });
 }
 
@@ -117,7 +116,7 @@ async function prepareTest() {
   if (document.activeElement == searchBar)
     return;
 
-  let focusPromise = BrowserTestUtils.waitForEvent(searchBar, "focus");
+  let focusPromise = BrowserTestUtils.waitForEvent(searchBar.textbox, "focus");
   gURLBar.focus();
   searchBar.focus();
   await focusPromise;

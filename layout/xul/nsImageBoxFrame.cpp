@@ -301,7 +301,7 @@ void
 nsImageBoxFrame::UpdateLoadFlags()
 {
   static Element::AttrValuesArray strings[] =
-    {&nsGkAtoms::always, &nsGkAtoms::never, nullptr};
+    {nsGkAtoms::always, nsGkAtoms::never, nullptr};
   switch (mContent->AsElement()->FindAttrValueIn(kNameSpaceID_None,
                                                  nsGkAtoms::validate, strings,
                                                  eCaseMatters)) {
@@ -850,6 +850,8 @@ nsImageBoxFrame::OnSizeAvailable(imgIRequest* aRequest, imgIContainer* aImage)
   // corresponding call to Decrement for this. This Increment will be
   // 'cleaned up' by the Request when it is destroyed, but only then.
   aRequest->IncrementAnimationConsumers();
+
+  aImage->SetAnimationMode(PresContext()->ImageAnimationMode());
 
   nscoord w, h;
   aImage->GetWidth(&w);
