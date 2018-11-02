@@ -7,9 +7,14 @@ Transform the beetmover task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import itertools
+from copy import deepcopy
+import yaml
+import jsone
+
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, Schema
+from taskgraph.util.schema import validate_schema, Schema, resolve_keyed_by
 from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
                                          get_beetmover_action_scope,
                                          get_phase,
@@ -17,7 +22,6 @@ from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
 from taskgraph.util.taskcluster import get_artifact_prefix
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
-
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
 # need to be transfered to S3, please be aware you also need to follow-up
@@ -215,6 +219,56 @@ def make_task_description(config, jobs):
         yield task
 
 
+def load_mapping_file():
+    # TODO: Use the file from kind.yml instead.
+    MAGIC = "./taskcluster/taskgraph/manifests/fennec_nightly.yml"
+    return yaml.safe_load(open(MAGIC))
+
+
+def generate_upstream_artifacts_mapped(job, dependencies, platform, locale=None):
+    base_artifact_prefix = get_artifact_prefix(job)
+    map_config = load_mapping_file()
+    upstream_artifacts = list()
+
+    if not locale:
+        locales = map_config['empty_locale_means']
+    else:
+        locales = [locale]
+
+    for locale, dep in itertools.product(locales, dependencies):
+        paths = list()
+
+        for filename in map_config['mapping']:
+            if dep not in map_config['mapping'][filename]['from']:
+                continue
+            if locale != 'en-US' and not map_config['mapping'][filename]['all_locales']:
+                continue
+
+            # The next time we look at this file it might be a different locale.
+            file_config = deepcopy(map_config['mapping'][filename])
+            resolve_keyed_by(file_config, "source_path_modifier",
+                             'source path modifier', locale=locale)
+            paths.append("{}{}/{}".format(
+                base_artifact_prefix,
+                jsone.render(file_config['source_path_modifier'], {'locale': locale}),
+                filename,
+            ))
+
+        if not paths:
+            continue
+
+        upstream_artifacts.append({
+            "taskId": {
+                "task-reference": "<{}>".format(dep)
+            },
+            "taskType": map_config['tasktype_map'].get(dep),
+            "paths": sorted(paths),
+            "locale": locale,
+        })
+
+    return upstream_artifacts
+
+
 def generate_upstream_artifacts(job, signing_task_ref, build_task_ref, platform,
                                 locale=None):
     build_mapping = UPSTREAM_ARTIFACT_UNSIGNED_PATHS
@@ -265,7 +319,7 @@ def generate_upstream_artifacts(job, signing_task_ref, build_task_ref, platform,
             "paths": ["{}/{}".format(artifact_prefix, p)
                       for p in build_mapping[multi_platform]],
             "locale": "multi",
-            }, {
+        }, {
             "taskId": {"task-reference": signing_task_ref},
             "taskType": "signing",
             "paths": ["{}/{}".format(artifact_prefix, p)
@@ -323,12 +377,18 @@ def make_task_worker(config, jobs):
         signing_task_ref = "<" + str(signing_task) + ">"
         build_task_ref = "<" + str(build_task) + ">"
 
+        if 'android' in platform:
+            upstream_artifacts = generate_upstream_artifacts_mapped(
+                job, [str(signing_task), str(build_task)], platform, locale
+            )
+        else:
+            upstream_artifacts = generate_upstream_artifacts(
+                job, signing_task_ref, build_task_ref, platform, locale
+            )
         worker = {
             'implementation': 'beetmover',
             'release-properties': craft_release_properties(config, job),
-            'upstream-artifacts': generate_upstream_artifacts(
-                job, signing_task_ref, build_task_ref, platform, locale
-            )
+            'upstream-artifacts': upstream_artifacts,
         }
 
         if locale:
