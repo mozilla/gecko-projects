@@ -10,6 +10,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 import itertools
 from copy import deepcopy
 import yaml
+from datetime import datetime
 import jsone
 
 from taskgraph.transforms.base import TransformSequence
@@ -219,6 +220,94 @@ def make_task_description(config, jobs):
         yield task
 
 
+def generate_artifact_map_for_task(config, job, platform, dependencies, locale=None):
+    base_artifact_prefix = get_artifact_prefix(job)
+    map_config = load_mapping_file()
+    artifacts = dict()
+
+    if not locale:
+        locales = map_config['empty_locale_means']
+    else:
+        locales = [locale]
+
+    for locale, dep in itertools.product(locales, dependencies):
+        paths = dict()
+        for filename in map_config['mapping']:
+            # Relevancy checks
+            if dep not in map_config['mapping'][filename]['from']:
+                # We don't get this file from this dependency.
+                continue
+            if locale != 'en-US' and not map_config['mapping'][filename]['all_locales']:
+                # This locale either doesn't produce or shouldn't upload this file.
+                continue
+
+            # Filling in destinations
+
+            # deepcopy because the next time we look at this file the locale will differ.
+            file_config = deepcopy(map_config['mapping'][filename])
+            for field in ['locale_prefix', 'source_path_modifier', 'update_balrog_manifest']:
+                resolve_keyed_by(file_config, field, field, locale=locale)
+
+            # This format string should ideally be in the configuration file,
+            # but this would mean keeping variable names in sync between code + config.
+            destinations = [
+                "{s3_bucket_path}/{dest_path}/{locale_prefix}{filename}".format(
+                    s3_bucket_path=bucket_path,
+                    dest_path=dest_path,
+                    locale_prefix=file_config['locale_prefix'],
+                    filename=file_config['pretty_name']
+                )
+                for dest_path, bucket_path
+                in itertools.product(file_config['destinations'], map_config['s3_bucket_paths'])
+            ]
+
+            # Creating map entries
+
+            # Key must be artifact path, to avoid trampling duplicates, such
+            # as public/build/target.apk and public/build/en-US/target.apk
+            key = "{}{}/{}".format(
+                base_artifact_prefix,
+                jsone.render(file_config['source_path_modifier'], {'locale': locale}),
+                filename,
+            )
+            paths[key] = {
+                'destinations': destinations,
+                'checksums_path': file_config['checksums_path'],
+            }
+
+            # Optional flags.
+            if file_config.get('update_balrog_manifest'):
+                paths[key]['update_balrog_manifest'] = True
+                if file_config.get('balrog_format'):
+                    paths[key]['balrog_format'] = file_config['balrog_format']
+
+        if not paths:
+            # No files for this dependency/locale combination.
+            continue
+
+        # Render all variables for the artifact map
+
+        # path_platform is keyed by locale as well, as we sometimes append '-l10n'
+        platforms = deepcopy(map_config['platform_names'])
+        for key in ['path_platform', 'filename_platform']:
+            resolve_keyed_by(platforms, key, key, platform=platform, locale=locale)
+
+        upload_date = datetime.fromtimestamp(config.params['build_date'])
+        paths = jsone.render(paths, {
+            'locale': locale,
+            'version': config.params['app_version'],
+            'branch': config.params['project'],
+            'filename_platform': platforms['filename_platform'],
+            'path_platform': platforms['path_platform'],
+            'year': upload_date.year,
+            'month': upload_date.strftime("%m"),  # zero-pad the month
+            'upload_date': upload_date.strftime("%Y-%m-%d-%H-%M-%S")
+        })
+        artifacts.setdefault("<{}>".format(dep), dict()).update(paths)
+
+    return {'task-reference': artifacts}
+
+
 def load_mapping_file():
     # TODO: Use the file from kind.yml instead.
     MAGIC = "./taskcluster/taskgraph/manifests/fennec_nightly.yml"
@@ -390,6 +479,10 @@ def make_task_worker(config, jobs):
             'release-properties': craft_release_properties(config, job),
             'upstream-artifacts': upstream_artifacts,
         }
+
+        if 'android' in platform:
+            worker['artifact-map'] = generate_artifact_map_for_task(
+                config, job, platform, [str(signing_task), str(build_task)], locale)
 
         if locale:
             worker["locale"] = locale

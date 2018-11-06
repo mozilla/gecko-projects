@@ -511,6 +511,8 @@ task_description_schema = Schema({
             # locale is used to map upload path and allow for duplicate simple names
             Required('locale'): basestring,
         }],
+
+        Optional('artifact-map'): object,
     }, {
         Required('implementation'): 'beetmover-push-to-release',
 
@@ -1115,6 +1117,8 @@ def build_beetmover_payload(config, task, task_def):
     }
     if worker.get('locale'):
         task_def['payload']['locale'] = worker['locale']
+    if worker.get('artifact-map'):
+        task_def['payload']['artifactMap'] = worker['artifact-map']
     if worker.get('partner-public'):
         task_def['payload']['is_partner_repack_public'] = worker['partner-public']
     if release_config:
