@@ -223,10 +223,10 @@ def make_task_description(config, jobs):
 def generate_artifact_map_for_task(config, job, platform, dependencies, locale=None):
     base_artifact_prefix = get_artifact_prefix(job)
     map_config = load_mapping_file()
-    artifacts = dict()
+    artifacts = list()
 
     if not locale:
-        locales = map_config['empty_locale_means']
+        locales = map_config['default_locales']
     else:
         locales = [locale]
 
@@ -245,7 +245,12 @@ def generate_artifact_map_for_task(config, job, platform, dependencies, locale=N
 
             # deepcopy because the next time we look at this file the locale will differ.
             file_config = deepcopy(map_config['mapping'][filename])
-            for field in ['locale_prefix', 'source_path_modifier', 'update_balrog_manifest']:
+            for field in [
+                'destinations',
+                'locale_prefix',
+                'source_path_modifier',
+                'update_balrog_manifest'
+            ]:
                 resolve_keyed_by(file_config, field, field, locale=locale)
 
             # This format string should ideally be in the configuration file,
@@ -287,10 +292,9 @@ def generate_artifact_map_for_task(config, job, platform, dependencies, locale=N
 
         # Render all variables for the artifact map
 
-        # path_platform is keyed by locale as well, as we sometimes append '-l10n'
         platforms = deepcopy(map_config['platform_names'])
         for key in ['path_platform', 'filename_platform']:
-            resolve_keyed_by(platforms, key, key, platform=platform, locale=locale)
+            resolve_keyed_by(platforms, key, key, platform=platform)
 
         upload_date = datetime.fromtimestamp(config.params['build_date'])
         paths = jsone.render(paths, {
@@ -303,9 +307,14 @@ def generate_artifact_map_for_task(config, job, platform, dependencies, locale=N
             'month': upload_date.strftime("%m"),  # zero-pad the month
             'upload_date': upload_date.strftime("%Y-%m-%d-%H-%M-%S")
         })
-        artifacts.setdefault("<{}>".format(dep), dict()).update(paths)
 
-    return {'task-reference': artifacts}
+        artifacts.append({
+            'taskId': {'task-reference': "<{}>".format(dep)},
+            'locale': locale,
+            'paths': paths,
+        })
+
+    return artifacts
 
 
 def load_mapping_file():
@@ -320,7 +329,7 @@ def generate_upstream_artifacts_mapped(job, dependencies, platform, locale=None)
     upstream_artifacts = list()
 
     if not locale:
-        locales = map_config['empty_locale_means']
+        locales = map_config['default_locales']
     else:
         locales = [locale]
 

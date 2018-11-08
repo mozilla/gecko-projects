@@ -5,7 +5,7 @@ metadata:
   owner: release@mozilla.com
 s3_bucket_paths:
   - pub/mobile/nightly
-empty_locale_means:  # if given an empty locale, use these locales
+default_locales:  # if given an empty locale, use these locales
   - en-US
   - multi
 tasktype_map:  # Map task reference to task type.
@@ -15,26 +15,10 @@ tasktype_map:  # Map task reference to task type.
 platform_names:
   path_platform:
     by-platform:
-      android-x86-nightly:
-        by-locale:
-          multi: 'android-x86'
-          en-US: 'android-x86'
-          default: 'android-x86-l10n'
-      android-x86_64-nightly:
-        by-locale:
-          multi: 'android-x86_64'
-          en-US: 'android-x86_64'
-          default: 'android-x86_64-l10n'
-      android-api-16-nightly:
-        by-locale:
-          multi: 'android-api-16'
-          en-US: 'android-api-16'
-          default: 'android-api-16-l10n'
-      android-aarch64-nightly:
-        by-locale:
-          multi: 'android-aarch64'
-          en-US: 'android-aarch64'
-          default: 'android-aarch64-l10n'
+      android-x86-nightly: 'android-x86'
+      android-x86_64-nightly: 'android-x86_64'
+      android-api-16-nightly: 'android-api-16'
+      android-aarch64-nightly: 'android-aarch64'
   filename_platform:
     by-platform:
       android-x86-nightly: 'android-i386'
@@ -56,11 +40,19 @@ default: &default
       en-US: '${locale}/'
   source_path_modifier:  # Anything between artifact prefix and filename
     by-locale:
-      default: '/${locale}'  # json-e rendering in transform
+      default: '/${locale}'
       multi: ''
   destinations:  # locale_prefix is appended
-    - latest-${branch}-${path_platform}
-    - "${year}/${month}/${upload_date}-${branch}-${path_platform}"
+    by-locale:
+      multi:
+        - latest-${branch}-${path_platform}
+        - ${year}/${month}/${upload_date}-${branch}-${path_platform}
+      en-US:
+        - latest-${branch}-${path_platform}
+        - ${year}/${month}/${upload_date}-${branch}-${path_platform}
+      default:
+        - latest-${branch}-${path_platform}-l10n
+        - ${year}/${month}/${upload_date}-${branch}-${path_platform}-l10n
 
 # Configuration for individual files. Extends 'default', above.
 mapping:
