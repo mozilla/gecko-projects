@@ -83,7 +83,6 @@
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/ImageBridgeParent.h"
 #include "mozilla/layers/LayerTreeOwnerTracker.h"
-#include "mozilla/layout/RenderFrameParent.h"
 #include "mozilla/loader/ScriptCacheActors.h"
 #include "mozilla/LoginReputationIPC.h"
 #include "mozilla/LookAndFeel.h"
@@ -110,6 +109,7 @@
 #include "mozilla/Unused.h"
 #include "mozilla/HangDetails.h"
 #include "nsAnonymousTemporaryFile.h"
+#include "nsAppDirectoryServiceDefs.h"
 #include "nsAppRunner.h"
 #include "nsCDefaultURIFixup.h"
 #include "nsCExternalHandlerService.h"
@@ -119,6 +119,7 @@
 #include "nsConsoleService.h"
 #include "nsContentUtils.h"
 #include "nsDebugImpl.h"
+#include "nsDirectoryService.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsEmbedCID.h"
 #include "nsFrameLoader.h"
@@ -212,6 +213,10 @@
 
 #ifdef MOZ_WEBRTC
 #include "signaling/src/peerconnection/WebrtcGlobalParent.h"
+#endif
+
+#if defined(XP_MACOSX)
+#include "nsMacUtilsImpl.h"
 #endif
 
 #if defined(ANDROID) || defined(LINUX)
@@ -608,6 +613,10 @@ static const char* sObserverTopics[] = {
   "private-cookie-changed",
   "clear-site-data-reload-needed",
 };
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+bool ContentParent::sEarlySandboxInit = false;
+#endif
 
 // PreallocateProcess is called by the PreallocatedProcessManager.
 // ContentParent then takes this process back within GetNewOrUsedBrowserProcess.
@@ -1251,7 +1260,6 @@ ContentParent::CreateBrowser(const TabContext& aContext,
     }
     RefPtr<TabParent> tp(new TabParent(constructorSender, tabId,
                                        aContext, chromeFlags));
-    tp->SetInitedByParent();
 
     PBrowserParent* browser =
     constructorSender->SendPBrowserConstructor(
@@ -1647,81 +1655,6 @@ ContentParent::ProcessingError(Result aCode, const char* aReason)
 #endif
 }
 
-/* static */
-bool
-ContentParent::AllocateLayerTreeId(TabParent* aTabParent, layers::LayersId* aId)
-{
-  return AllocateLayerTreeId(aTabParent->Manager()->AsContentParent(),
-                             aTabParent, aTabParent->GetTabId(), aId);
-}
-
-/* static */
-bool
-ContentParent::AllocateLayerTreeId(ContentParent* aContent,
-                                   TabParent* aTopLevel, const TabId& aTabId,
-                                   layers::LayersId* aId)
-{
-  GPUProcessManager* gpu = GPUProcessManager::Get();
-
-  *aId = gpu->AllocateLayerTreeId();
-
-  if (!aContent || !aTopLevel) {
-    return false;
-  }
-
-  gpu->MapLayerTreeId(*aId, aContent->OtherPid());
-
-  return true;
-}
-
-mozilla::ipc::IPCResult
-ContentParent::RecvAllocateLayerTreeId(const ContentParentId& aCpId,
-                                       const TabId& aTabId, layers::LayersId* aId)
-{
-  // Protect against spoofing by a compromised child. aCpId must either
-  // correspond to the process that this ContentParent represents or be a
-  // child of it.
-  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
-  RefPtr<ContentParent> contentParent = cpm->GetContentProcessById(aCpId);
-  if (!contentParent ||
-      (ChildID() != aCpId && !contentParent->CanCommunicateWith(ChildID()))) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-
-  // GetTopLevelTabParentByProcessAndTabId will make sure that aTabId
-  // lives in the process for aCpId.
-  RefPtr<TabParent> browserParent =
-    cpm->GetTopLevelTabParentByProcessAndTabId(aCpId, aTabId);
-  MOZ_ASSERT(contentParent && browserParent);
-
-  if (!AllocateLayerTreeId(contentParent, browserParent, aTabId, aId)) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-ContentParent::RecvDeallocateLayerTreeId(const ContentParentId& aCpId,
-                                         const layers::LayersId& aId)
-{
-  GPUProcessManager* gpu = GPUProcessManager::Get();
-
-  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
-  RefPtr<ContentParent> contentParent = cpm->GetContentProcessById(aCpId);
-  if (!contentParent || !contentParent->CanCommunicateWith(ChildID())) {
-    return IPC_FAIL(this, "Spoofed DeallocateLayerTreeId call");
-  }
-
-  if (!gpu->IsLayerTreeIdMapped(aId, contentParent->OtherPid())) {
-    // You can't deallocate layer tree ids that you didn't allocate
-    KillHard("DeallocateLayerTreeId");
-  }
-
-  gpu->UnmapLayerTreeId(aId, contentParent->OtherPid());
-
-  return IPC_OK();
-}
-
 namespace {
 
 void
@@ -2000,7 +1933,7 @@ ContentParent::StartForceKillTimer()
     return;
   }
 
-  int32_t timeoutSecs = Preferences::GetInt("dom.ipc.tabs.shutdownTimeoutSecs", 5);
+  int32_t timeoutSecs = StaticPrefs::dom_ipc_tabs_shutdownTimeoutSecs();
   if (timeoutSecs > 0) {
     NS_NewTimerWithFuncCallback(getter_AddRefs(mForceKillTimer),
                                 ContentParent::ForceKillTimerCallback,
@@ -2117,6 +2050,120 @@ ContentParent::GetTestShellSingleton()
   return static_cast<TestShellParent*>(p);
 }
 
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+void
+ContentParent::AppendSandboxParams(std::vector<std::string> &aArgs)
+{
+  nsCOMPtr<nsIProperties>
+    directoryService(do_GetService(NS_DIRECTORY_SERVICE_CONTRACTID));
+  if (!directoryService) {
+    MOZ_CRASH("Failed to get the directory service");
+  }
+
+  // Indicates the child should startup the sandbox
+  aArgs.push_back("-sbStartup");
+
+  // The content sandbox level
+  int contentSandboxLevel =
+    Preferences::GetInt("security.sandbox.content.level");
+  std::ostringstream os;
+  os << contentSandboxLevel;
+  std::string contentSandboxLevelString = os.str();
+  aArgs.push_back("-sbLevel");
+  aArgs.push_back(contentSandboxLevelString);
+
+  // Sandbox logging
+  if (Preferences::GetBool("security.sandbox.logging.enabled") ||
+      PR_GetEnv("MOZ_SANDBOX_LOGGING")) {
+    aArgs.push_back("-sbLogging");
+  }
+
+  // For file content processes
+  if (GetRemoteType().EqualsLiteral(FILE_REMOTE_TYPE)) {
+    aArgs.push_back("-sbAllowFileAccess");
+  }
+
+  // Audio access
+  if (!Preferences::GetBool("media.cubeb.sandbox")) {
+    aArgs.push_back("-sbAllowAudio");
+  }
+
+  // Windowserver access
+  if (!Preferences::GetBool("security.sandbox.content.mac.disconnect-windowserver")) {
+    aArgs.push_back("-sbAllowWindowServer");
+  }
+
+  // .app path (normalized)
+  nsAutoCString appPath;
+  if (!nsMacUtilsImpl::GetAppPath(appPath)) {
+    MOZ_CRASH("Failed to get app dir paths");
+  }
+  aArgs.push_back("-sbAppPath");
+  aArgs.push_back(appPath.get());
+
+  // TESTING_READ_PATH1
+  nsAutoCString testingReadPath1;
+  Preferences::GetCString("security.sandbox.content.mac.testing_read_path1",
+                          testingReadPath1);
+  if (!testingReadPath1.IsEmpty()) {
+    aArgs.push_back("-sbTestingReadPath");
+    aArgs.push_back(testingReadPath1.get());
+  }
+
+  // TESTING_READ_PATH2
+  nsAutoCString testingReadPath2;
+  Preferences::GetCString("security.sandbox.content.mac.testing_read_path2",
+                          testingReadPath2);
+  if (!testingReadPath2.IsEmpty()) {
+    aArgs.push_back("-sbTestingReadPath");
+    aArgs.push_back(testingReadPath2.get());
+  }
+
+  // TESTING_READ_PATH3, TESTING_READ_PATH4. In development builds,
+  // these are used to whitelist the repo dir and object dir respectively.
+  nsresult rv;
+  if (mozilla::IsDevelopmentBuild()) {
+    // Repo dir
+    nsCOMPtr<nsIFile> repoDir;
+    rv = mozilla::GetRepoDir(getter_AddRefs(repoDir));
+    if (NS_FAILED(rv)) {
+      MOZ_CRASH("Failed to get path to repo dir");
+    }
+    nsCString repoDirPath;
+    Unused << repoDir->GetNativePath(repoDirPath);
+    aArgs.push_back("-sbTestingReadPath");
+    aArgs.push_back(repoDirPath.get());
+
+    // Object dir
+    nsCOMPtr<nsIFile> objDir;
+    rv = mozilla::GetObjDir(getter_AddRefs(objDir));
+    if (NS_FAILED(rv)) {
+      MOZ_CRASH("Failed to get path to build object dir");
+    }
+    nsCString objDirPath;
+    Unused << objDir->GetNativePath(objDirPath);
+    aArgs.push_back("-sbTestingReadPath");
+    aArgs.push_back(objDirPath.get());
+  }
+
+  // DEBUG_WRITE_DIR
+#ifdef DEBUG
+  // When a content process dies intentionally (|NoteIntentionalCrash|), for
+  // tests it wants to log that it did this. Allow writing to this location
+  // that the testrunner wants.
+  char *bloatLog = PR_GetEnv("XPCOM_MEM_BLOAT_LOG");
+  if (bloatLog != nullptr) {
+    // |bloatLog| points to a specific file, but we actually write to a sibling
+    // of that path.
+    nsAutoCString bloatDirectoryPath =
+      nsMacUtilsImpl::GetDirectoryPath(bloatLog);
+    aArgs.push_back("-sbDebugWriteDir");
+    aArgs.push_back(bloatDirectoryPath.get());
+  }
+#endif // DEBUG
+}
+#endif // XP_MACOSX && MOZ_CONTENT_SANDBOX
+
 bool
 ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PRIORITY_FOREGROUND */)
 {
@@ -2204,6 +2251,15 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
   if (gSafeMode) {
     extraArgs.push_back("-safeMode");
   }
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+  // If we're launching a middleman process for a
+  // recording or replay, start the sandbox later.
+  if (sEarlySandboxInit && IsContentSandboxEnabled() &&
+      !IsRecordingOrReplaying()) {
+    AppendSandboxParams(extraArgs);
+  }
+#endif
 
   nsCString parentBuildID(mozilla::PlatformBuildID());
   extraArgs.push_back("-parentBuildID");
@@ -2328,6 +2384,17 @@ ContentParent::ContentParent(ContentParent* aOpener,
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   bool isFile = mRemoteType.EqualsLiteral(FILE_REMOTE_TYPE);
   mSubprocess = new ContentProcessHost(this, isFile);
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+  // sEarlySandboxInit is statically initialized to false.
+  // Once we've set it to true due to the pref, avoid checking the
+  // pref on subsequent calls. As a result, changing the earlyinit
+  // pref requires restarting the browser to take effect.
+  if (!ContentParent::sEarlySandboxInit) {
+    ContentParent::sEarlySandboxInit =
+      Preferences::GetBool("security.sandbox.content.mac.earlyinit");
+  }
+#endif
 }
 
 ContentParent::~ContentParent()
@@ -2382,7 +2449,7 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority)
     bidi->GetHaveBidiKeyboards(&xpcomInit.haveBidiKeyboards());
   }
 
-  nsCOMPtr<nsISpellChecker> spellChecker(mozSpellChecker::Create());
+  RefPtr<mozSpellChecker> spellChecker(mozSpellChecker::Create());
   MOZ_ASSERT(spellChecker, "No spell checker?");
 
   spellChecker->GetDictionaryList(&xpcomInit.dictionaries());
@@ -2930,26 +2997,6 @@ ContentParent::RecvPlayEventSound(const uint32_t& aEventId)
 
   sound->PlayEventSound(aEventId);
 
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-ContentParent::RecvGetSystemColors(const uint32_t& colorsCount,
-                                   InfallibleTArray<uint32_t>* colors)
-{
-#ifdef MOZ_WIDGET_ANDROID
-  NS_ASSERTION(AndroidBridge::Bridge() != nullptr, "AndroidBridge is not available");
-  if (AndroidBridge::Bridge() == nullptr) {
-    // Do not fail - the colors won't be right, but it's not critical
-    return IPC_OK();
-  }
-
-  colors->AppendElements(colorsCount);
-
-  // The array elements correspond to the members of AndroidSystemColors structure,
-  // so just pass the pointer to the elements buffer
-  AndroidBridge::Bridge()->GetSystemColors((AndroidSystemColors*)colors->Elements());
-#endif
   return IPC_OK();
 }
 
@@ -4575,7 +4622,7 @@ ContentParent::IgnoreIPCPrincipal()
 void
 ContentParent::NotifyUpdatedDictionaries()
 {
-  nsCOMPtr<nsISpellChecker> spellChecker(mozSpellChecker::Create());
+  RefPtr<mozSpellChecker> spellChecker(mozSpellChecker::Create());
   MOZ_ASSERT(spellChecker, "No spell checker?");
 
   InfallibleTArray<nsString> dictionaries;
@@ -5037,7 +5084,6 @@ ContentParent::CommonCreateWindow(PBrowserParent* aThisTab,
 mozilla::ipc::IPCResult
 ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
                                 PBrowserParent* aNewTab,
-                                PRenderFrameParent* aRenderFrame,
                                 const uint32_t& aChromeFlags,
                                 const bool& aCalledFromJS,
                                 const bool& aPositionSpecified,
@@ -5055,7 +5101,6 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
 
   // We always expect to open a new window here. If we don't, it's an error.
   cwi.windowOpened() = true;
-  cwi.layersId() = LayersId{0};
   cwi.maxTouchPoints() = 0;
   cwi.hasSiblings() = false;
 
@@ -5113,13 +5158,7 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
   MOZ_ASSERT(TabParent::GetFrom(newRemoteTab) == newTab);
 
   newTab->SwapFrameScriptsFrom(cwi.frameScripts());
-
-  RenderFrameParent* rfp = static_cast<RenderFrameParent*>(aRenderFrame);
-  if (!newTab->SetRenderFrame(rfp) ||
-      !newTab->GetRenderFrameInfo(&cwi.textureFactoryIdentifier(), &cwi.layersId())) {
-    rv = NS_ERROR_FAILURE;
-  }
-  cwi.compositorOptions() = rfp->GetCompositorOptions();
+  newTab->MaybeShowFrame();
 
   nsCOMPtr<nsIWidget> widget = newTab->GetWidget();
   if (widget) {
@@ -5998,9 +6037,8 @@ ContentParent::RecvAttachBrowsingContext(
   }
 
   if (!child) {
-    child = ChromeBrowsingContext::Create(aChildId, aName, ChildID());
+    child = BrowsingContext::CreateFromIPC(parent, aName, (uint64_t)aChildId, this);
   }
-  child->Attach(parent);
 
   return IPC_OK();
 }

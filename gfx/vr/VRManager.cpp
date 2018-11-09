@@ -21,12 +21,6 @@
 #include "gfxPrefs.h"
 #include "gfxVR.h"
 #include "gfxVRExternal.h"
-#if defined(XP_WIN)
-#include "gfxVROculus.h"
-#endif
-#if defined(XP_WIN) || defined(XP_MACOSX) || (defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID))
-#include "gfxVROpenVR.h"
-#endif
 
 #include "gfxVRPuppet.h"
 #include "ipc/VRLayerParent.h"
@@ -76,6 +70,7 @@ VRManager::VRManager()
   : mInitialized(false)
   , mAccumulator100ms(0.0f)
   , mVRDisplaysRequested(false)
+  , mVRDisplaysRequestedNonFocus(false)
   , mVRControllersRequested(false)
   , mVRServiceStarted(false)
   , mTaskInterval(0)
@@ -84,20 +79,6 @@ VRManager::VRManager()
   MOZ_ASSERT(sVRManagerSingleton == nullptr);
 
   RefPtr<VRSystemManager> mgr;
-
-  /**
-   * We must add the VRDisplayManager's to mManagers in a careful order to
-   * ensure that we don't detect the same VRDisplay from multiple API's.
-   *
-   * Oculus comes first, as it will only enumerate Oculus HMD's and is the
-   * native interface for Oculus HMD's.
-   *
-   * OpenvR comes second, as it is the native interface for HTC Vive
-   * which is the most common HMD at this time.
-   *
-   * OSVR will be used if Oculus SDK and OpenVR don't detect any HMDS,
-   * to support everyone else.
-   */
 
 #if !defined(MOZ_WIDGET_ANDROID)
   // The VR Service accesses all hardware from a separate process
@@ -123,26 +104,6 @@ VRManager::VRManager()
       mManagers.AppendElement(mExternalManager);
     }
   }
-
-#if defined(XP_WIN)
-  if (!mVRService) {
-    // The Oculus runtime is supported only on Windows
-    mgr = VRSystemManagerOculus::Create();
-    if (mgr) {
-      mManagers.AppendElement(mgr);
-    }
-  }
-#endif
-
-#if defined(XP_WIN) || defined(XP_MACOSX) || (defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID))
-  if (!mVRService) {
-    // OpenVR is cross platform compatible
-    mgr = VRSystemManagerOpenVR::Create();
-    if (mgr) {
-      mManagers.AppendElement(mgr);
-    }
-  } // !mVRService
-#endif
 
   // Enable gamepad extensions while VR is enabled.
   // Preference only can be set at the Parent process.
@@ -206,7 +167,6 @@ VRManager::Shutdown()
 void
 VRManager::Init()
 {
-  StartTasks();
   mInitialized = true;
 }
 
@@ -240,15 +200,18 @@ void
 VRManager::UpdateRequestedDevices()
 {
   bool bHaveEventListener = false;
+  bool bHaveEventListenerNonFocus = false;
   bool bHaveControllerListener = false;
 
   for (auto iter = mVRManagerParents.Iter(); !iter.Done(); iter.Next()) {
     VRManagerParent *vmp = iter.Get()->GetKey();
-    bHaveEventListener |= vmp->HaveEventListener();
+    bHaveEventListener |= vmp->HaveEventListener() && vmp->GetVRActiveStatus();
+    bHaveEventListenerNonFocus |= vmp->HaveEventListener() && !vmp->GetVRActiveStatus();
     bHaveControllerListener |= vmp->HaveControllerListener();
   }
 
   mVRDisplaysRequested = bHaveEventListener;
+  mVRDisplaysRequestedNonFocus = bHaveEventListenerNonFocus;
   // We only currently allow controllers to be used when
   // also activating a VR display
   mVRControllersRequested = mVRDisplaysRequested && bHaveControllerListener;
@@ -446,7 +409,8 @@ void
 VRManager::CheckForInactiveTimeout()
 {
   // Shut down the VR devices when not in use
-  if (mVRDisplaysRequested || mVRControllersRequested) {
+  if (mVRDisplaysRequested || mVRDisplaysRequestedNonFocus ||
+      mVRControllersRequested) {
     // We are using a VR device, keep it alive
     mLastActiveTime = TimeStamp::Now();
   }
@@ -487,6 +451,7 @@ VRManager::NotifyVRVsync(const uint32_t& aDisplayID)
 void
 VRManager::EnumerateVRDisplays()
 {
+  StartTasks();
   /**
    * Throttle the rate of enumeration to the interval set in
    * VRDisplayEnumerateInterval

@@ -1330,16 +1330,11 @@ BaselineCacheIRCompiler::emitStoreDenseElement()
                             ObjectElements::FROZEN),
                       failure->label());
 
-    // We need to convert int32 values being stored into doubles. Note that
-    // double arrays are only created by IonMonkey, so if we have no FP support
-    // Ion is disabled and there should be no double arrays.
-    if (cx_->runtime()->jitSupportsFloatingPoint) {
-        // It's fine to convert the value in place in Baseline. We can't do
-        // this in Ion.
-        masm.convertInt32ValueToDouble(val);
-    } else {
-        masm.assumeUnreachable("There shouldn't be double arrays when there is no FP support.");
-    }
+    // We need to convert int32 values being stored into doubles. Note
+    // that double arrays are only created by IonMonkey. It's fine to
+    // convert the value in place in Baseline. We can't do this in
+    // Ion.
+    masm.convertInt32ValueToDouble(val);
 
     masm.bind(&noSpecialHandling);
 
@@ -1458,16 +1453,11 @@ BaselineCacheIRCompiler::emitStoreDenseElementHole()
                       Imm32(ObjectElements::CONVERT_DOUBLE_ELEMENTS),
                       &noConversion);
 
-    // We need to convert int32 values being stored into doubles. Note that
-    // double arrays are only created by IonMonkey, so if we have no FP support
-    // Ion is disabled and there should be no double arrays.
-    if (cx_->runtime()->jitSupportsFloatingPoint) {
-        // It's fine to convert the value in place in Baseline. We can't do
-        // this in Ion.
-        masm.convertInt32ValueToDouble(val);
-    } else {
-        masm.assumeUnreachable("There shouldn't be double arrays when there is no FP support.");
-    }
+    // We need to convert int32 values being stored into doubles. Note
+    // that double arrays are only created by IonMonkey. It's fine to
+    // convert the value in place in Baseline. We can't do this in
+    // Ion.
+    masm.convertInt32ValueToDouble(val);
 
     masm.bind(&noConversion);
 
@@ -1591,16 +1581,11 @@ BaselineCacheIRCompiler::emitArrayPush()
                       Imm32(ObjectElements::CONVERT_DOUBLE_ELEMENTS),
                       &noConversion);
 
-    // We need to convert int32 values being stored into doubles. Note that
-    // double arrays are only created by IonMonkey, so if we have no FP support
-    // Ion is disabled and there should be no double arrays.
-    if (cx_->runtime()->jitSupportsFloatingPoint) {
-        // It's fine to convert the value in place in Baseline. We can't do
-        // this in Ion.
-        masm.convertInt32ValueToDouble(val);
-    } else {
-        masm.assumeUnreachable("There shouldn't be double arrays when there is no FP support.");
-    }
+    // We need to convert int32 values being stored into doubles. Note
+    // that double arrays are only created by IonMonkey. It's fine to
+    // convert the value in place in Baseline. We can't do this in
+    // Ion.
+    masm.convertInt32ValueToDouble(val);
 
     masm.bind(&noConversion);
 
@@ -1883,6 +1868,54 @@ BaselineCacheIRCompiler::emitCallProxySetByValue()
         return false;
     }
 
+    stubFrame.leave(masm);
+    return true;
+}
+
+bool
+BaselineCacheIRCompiler::emitCallAddOrUpdateSparseElementHelper()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    Register id = allocator.useRegister(masm, reader.int32OperandId());
+    ValueOperand val = allocator.useValueRegister(masm, reader.valOperandId());
+    bool strict = reader.readBool();
+    AutoScratchRegister scratch(allocator, masm);
+
+    allocator.discardStack(masm);
+
+    AutoStubFrame stubFrame(*this);
+    stubFrame.enter(masm, scratch);
+
+    masm.Push(Imm32(strict));
+    masm.Push(val);
+    masm.Push(id);
+    masm.Push(obj);
+
+    if (!callVM(masm, AddOrUpdateSparseElementHelperInfo)) {
+        return false;
+    }
+    stubFrame.leave(masm);
+    return true;
+}
+
+bool
+BaselineCacheIRCompiler::emitCallGetSparseElementResult()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    Register id = allocator.useRegister(masm, reader.int32OperandId());
+    AutoScratchRegister scratch(allocator, masm);
+
+    allocator.discardStack(masm);
+
+    AutoStubFrame stubFrame(*this);
+    stubFrame.enter(masm, scratch);
+
+    masm.Push(id);
+    masm.Push(obj);
+
+    if (!callVM(masm, GetSparseElementHelperInfo)) {
+        return false;
+    }
     stubFrame.leave(masm);
     return true;
 }

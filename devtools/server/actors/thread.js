@@ -545,10 +545,14 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       if (steppingType == "finish") {
         const parentFrame = thread._getNextStepFrame(this);
         if (parentFrame && parentFrame.script) {
-          const { onStep } = thread._makeSteppingHooks(
+          const { onStep, onPop } = thread._makeSteppingHooks(
             originalLocation, "next", false, completion
           );
           parentFrame.onStep = onStep;
+          // We need the onPop alongside the onStep because it is possible that
+          // the parent frame won't have any steppable offsets, and we want to
+          // make sure that we always pause in the parent _somewhere_.
+          parentFrame.onPop = onPop;
           return undefined;
         }
       }
@@ -1480,10 +1484,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     }
 
     if (this.dbg.replaying) {
-      const message = this.dbg.getNewConsoleMessage();
-      if (message) {
-        packet.executionPoint = message.executionPoint;
-      }
+      packet.executionPoint = this.dbg.replayCurrentExecutionPoint();
+      packet.recordingEndpoint = this.dbg.replayRecordingEndpoint();
     }
 
     if (poppedFrames) {

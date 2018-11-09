@@ -1805,7 +1805,8 @@ SetupOOMFailure(JSContext* cx, bool failAlways, unsigned argc, Value* vp)
         return false;
     }
 
-    js::oom::SimulateOOMAfter(count, targetThread, failAlways);
+    js::oom::simulator.simulateFailureAfter(js::oom::FailureSimulator::Kind::OOM,
+                                            count, targetThread, failAlways);
     args.rval().setUndefined();
     return true;
 }
@@ -1832,7 +1833,7 @@ ResetOOMFailure(JSContext* cx, unsigned argc, Value* vp)
     }
 
     args.rval().setBoolean(js::oom::HadSimulatedOOM());
-    js::oom::ResetSimulatedOOM();
+    js::oom::simulator.reset();
     return true;
 }
 
@@ -1882,6 +1883,10 @@ RunIterativeFailureTest(JSContext* cx, const IterativeFailureTestParams& params,
 {
     if (disableOOMFunctions) {
         return true;
+    }
+
+    if (!CheckCanSimulateOOM(cx)) {
+        return false;
     }
 
     // Disallow nested tests.
@@ -2044,22 +2049,15 @@ ParseIterativeFailureTestParams(JSContext* cx, const CallArgs& args,
         params->expectExceptionOnFailure = false;
     }
 
-    // Test all threads by default except worker threads, except if we are
-    // running in a worker thread in which case only the worker thread which
-    // requested the simulation is tested.
-    if (js::oom::GetThreadType() == js::THREAD_TYPE_WORKER) {
-        params->threadStart = oom::WorkerFirstThreadTypeToTest;
-        params->threadEnd = oom::WorkerLastThreadTypeToTest;
-    } else {
-        params->threadStart = oom::FirstThreadTypeToTest;
-        params->threadEnd = oom::LastThreadTypeToTest;
-    }
+    // Test all threads by default except worker threads.
+    params->threadStart = oom::FirstThreadTypeToTest;
+    params->threadEnd = oom::LastThreadTypeToTest;
 
     // Test a single thread type if specified by the OOM_THREAD environment variable.
     int threadOption = 0;
     if (EnvVarAsInt("OOM_THREAD", &threadOption)) {
-        if (threadOption < oom::FirstThreadTypeToTest || threadOption > oom::LastThreadTypeToTest ||
-            threadOption != js::THREAD_TYPE_CURRENT)
+        if (threadOption < oom::FirstThreadTypeToTest ||
+            threadOption > oom::LastThreadTypeToTest)
         {
             JS_ReportErrorASCII(cx, "OOM_THREAD value out of range.");
             return false;
@@ -2082,12 +2080,13 @@ struct OOMSimulator : public IterativeFailureSimulator
 
     void startSimulating(JSContext* cx, unsigned i, unsigned thread, bool keepFailing) override {
         MOZ_ASSERT(!cx->runtime()->hadOutOfMemory);
-        js::oom::SimulateOOMAfter(i, thread, keepFailing);
+        js::oom::simulator.simulateFailureAfter(js::oom::FailureSimulator::Kind::OOM,
+                                                i, thread, keepFailing);
     }
 
     bool stopSimulating() override {
         bool handledOOM = js::oom::HadSimulatedOOM();
-        js::oom::ResetSimulatedOOM();
+        js::oom::simulator.reset();
         return handledOOM;
     }
 
@@ -2118,12 +2117,13 @@ OOMTest(JSContext* cx, unsigned argc, Value* vp)
 struct StackOOMSimulator : public IterativeFailureSimulator
 {
     void startSimulating(JSContext* cx, unsigned i, unsigned thread, bool keepFailing) override {
-        js::oom::SimulateStackOOMAfter(i, thread, keepFailing);
+        js::oom::simulator.simulateFailureAfter(js::oom::FailureSimulator::Kind::StackOOM,
+                                                i, thread, keepFailing);
     }
 
     bool stopSimulating() override {
         bool handledOOM = js::oom::HadSimulatedStackOOM();
-        js::oom::ResetSimulatedStackOOM();
+        js::oom::simulator.reset();
         return handledOOM;
     }
 };
@@ -2166,12 +2166,13 @@ struct FailingIterruptSimulator : public IterativeFailureSimulator
     }
 
     void startSimulating(JSContext* cx, unsigned i, unsigned thread, bool keepFailing) override {
-        js::oom::SimulateInterruptAfter(i, thread, keepFailing);
+        js::oom::simulator.simulateFailureAfter(js::oom::FailureSimulator::Kind::Interrupt,
+                                                i, thread, keepFailing);
     }
 
     bool stopSimulating() override {
         bool handledInterrupt = js::oom::HadSimulatedInterrupt();
-        js::oom::ResetSimulatedInterrupt();
+        js::oom::simulator.reset();
         return handledInterrupt;
     }
 };
@@ -4702,7 +4703,7 @@ AssertionTypeToString(irregexp::RegExpAssertion::AssertionType type)
 }
 
 static JSObject*
-ConvertRegExpTreeToObject(JSContext* cx, irregexp::RegExpTree* tree)
+ConvertRegExpTreeToObject(JSContext* cx, LifoAlloc& alloc, irregexp::RegExpTree* tree)
 {
     RootedObject obj(cx, JS_NewPlainObject(cx));
     if (!obj) {
@@ -4749,18 +4750,18 @@ ConvertRegExpTreeToObject(JSContext* cx, irregexp::RegExpTree* tree)
         return JS_SetProperty(cx, obj, name, val);
     };
 
-    auto TreeProp = [&ObjectProp](JSContext* cx, HandleObject obj,
-                                  const char* name, irregexp::RegExpTree* tree) {
-        RootedObject treeObj(cx, ConvertRegExpTreeToObject(cx, tree));
+    auto TreeProp = [&ObjectProp, &alloc](JSContext* cx, HandleObject obj,
+                                          const char* name, irregexp::RegExpTree* tree) {
+        RootedObject treeObj(cx, ConvertRegExpTreeToObject(cx, alloc, tree));
         if (!treeObj) {
             return false;
         }
         return ObjectProp(cx, obj, name, treeObj);
     };
 
-    auto TreeVectorProp = [&ObjectProp](JSContext* cx, HandleObject obj,
-                                        const char* name,
-                                        const irregexp::RegExpTreeVector& nodes) {
+    auto TreeVectorProp = [&ObjectProp, &alloc](JSContext* cx, HandleObject obj,
+                                                const char* name,
+                                                const irregexp::RegExpTreeVector& nodes) {
         size_t len = nodes.length();
         RootedObject array(cx, JS_NewArrayObject(cx, len));
         if (!array) {
@@ -4768,7 +4769,7 @@ ConvertRegExpTreeToObject(JSContext* cx, irregexp::RegExpTree* tree)
         }
 
         for (size_t i = 0; i < len; i++) {
-            RootedObject child(cx, ConvertRegExpTreeToObject(cx, nodes[i]));
+            RootedObject child(cx, ConvertRegExpTreeToObject(cx, alloc, nodes[i]));
             if (!child) {
                 return false;
             }
@@ -4822,8 +4823,8 @@ ConvertRegExpTreeToObject(JSContext* cx, irregexp::RegExpTree* tree)
         return ObjectProp(cx, obj, name, array);
     };
 
-    auto ElemProp = [&ObjectProp](JSContext* cx, HandleObject obj,
-                                  const char* name, const irregexp::TextElementVector& elements) {
+    auto ElemProp = [&ObjectProp, &alloc](JSContext* cx, HandleObject obj, const char* name,
+                                          const irregexp::TextElementVector& elements) {
         size_t len = elements.length();
         RootedObject array(cx, JS_NewArrayObject(cx, len));
         if (!array) {
@@ -4832,7 +4833,7 @@ ConvertRegExpTreeToObject(JSContext* cx, irregexp::RegExpTree* tree)
 
         for (size_t i = 0; i < len; i++) {
             const irregexp::TextElement& element = elements[i];
-            RootedObject elemTree(cx, ConvertRegExpTreeToObject(cx, element.tree()));
+            RootedObject elemTree(cx, ConvertRegExpTreeToObject(cx, alloc, element.tree()));
             if (!elemTree) {
                 return false;
             }
@@ -4883,8 +4884,7 @@ ConvertRegExpTreeToObject(JSContext* cx, irregexp::RegExpTree* tree)
         if (!BooleanProp(cx, obj, "is_negated", t->is_negated())) {
             return nullptr;
         }
-        LifoAlloc* alloc = &cx->tempLifoAlloc();
-        if (!CharRangesProp(cx, obj, "ranges", t->ranges(alloc))) {
+        if (!CharRangesProp(cx, obj, "ranges", t->ranges(&alloc))) {
             return nullptr;
         }
         return obj;
@@ -5021,8 +5021,10 @@ ParseRegExp(JSContext* cx, unsigned argc, Value* vp)
     CompileOptions options(cx);
     frontend::TokenStream dummyTokenStream(cx, options, nullptr, 0, nullptr);
 
+    // Data lifetime is controlled by LifoAllocScope.
+    LifoAllocScope allocScope(&cx->tempLifoAlloc());
     irregexp::RegExpCompileData data;
-    if (!irregexp::ParsePattern(dummyTokenStream, cx->tempLifoAlloc(), pattern,
+    if (!irregexp::ParsePattern(dummyTokenStream, allocScope.alloc(), pattern,
                                 flags & MultilineFlag, match_only,
                                 flags & UnicodeFlag, flags & IgnoreCaseFlag,
                                 flags & GlobalFlag, flags & StickyFlag,
@@ -5031,7 +5033,7 @@ ParseRegExp(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    RootedObject obj(cx, ConvertRegExpTreeToObject(cx, data.tree));
+    RootedObject obj(cx, ConvertRegExpTreeToObject(cx, allocScope.alloc(), data.tree));
     if (!obj) {
         return false;
     }
@@ -5481,6 +5483,41 @@ AssertCorrectRealm(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+static bool
+GlobalLexicals(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    Rooted<LexicalEnvironmentObject*> globalLexical(cx, &cx->global()->lexicalEnvironment());
+
+    AutoIdVector props(cx);
+    if (!GetPropertyKeys(cx, globalLexical, JSITER_HIDDEN, &props)) {
+        return false;
+    }
+
+    RootedObject res(cx, JS_NewPlainObject(cx));
+    if (!res) {
+        return false;
+    }
+
+    RootedValue val(cx);
+    for (size_t i = 0; i < props.length(); i++) {
+        HandleId id = props[i];
+        if (!JS_GetPropertyById(cx, globalLexical, id, &val)) {
+            return false;
+        }
+        if (val.isMagic(JS_UNINITIALIZED_LEXICAL)) {
+            continue;
+        }
+        if (!JS_DefinePropertyById(cx, res, id, val, JSPROP_ENUMERATE)) {
+            return false;
+        }
+    }
+
+    args.rval().setObject(*res);
+    return true;
+}
+
 JSScript*
 js::TestingFunctionArgumentToScript(JSContext* cx,
                                     HandleValue v,
@@ -5638,6 +5675,94 @@ BaselineCompile(JSContext* cx, unsigned argc, Value* vp)
         return ReturnStringCopy(cx, args, returnedStr);
     }
 
+    return true;
+}
+
+static bool
+PCCountProfiling_Start(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    js::StartPCCountProfiling(cx);
+
+    args.rval().setUndefined();
+    return true;
+}
+
+static bool
+PCCountProfiling_Stop(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    js::StopPCCountProfiling(cx);
+
+    args.rval().setUndefined();
+    return true;
+}
+
+static bool
+PCCountProfiling_Purge(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    js::PurgePCCounts(cx);
+
+    args.rval().setUndefined();
+    return true;
+}
+
+static bool
+PCCountProfiling_ScriptCount(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    size_t length = js::GetPCCountScriptCount(cx);
+
+    args.rval().setNumber(double(length));
+    return true;
+}
+
+static bool
+PCCountProfiling_ScriptSummary(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (!args.requireAtLeast(cx, "summary", 1)) {
+        return false;
+    }
+
+    uint32_t index;
+    if (!JS::ToUint32(cx, args[0], &index)) {
+        return false;
+    }
+
+    JSString* str = js::GetPCCountScriptSummary(cx, index);
+    if (!str) {
+        return false;
+    }
+
+    args.rval().setString(str);
+    return true;
+}
+
+static bool
+PCCountProfiling_ScriptContents(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (!args.requireAtLeast(cx, "contents", 1)) {
+        return false;
+    }
+
+    uint32_t index;
+    if (!JS::ToUint32(cx, args[0], &index)) {
+        return false;
+    }
+
+    JSString* str = js::GetPCCountScriptContents(cx, index);
+    if (!str) {
+        return false;
+    }
+
+    args.rval().setString(str);
     return true;
 }
 
@@ -6316,6 +6441,11 @@ gc::ZealModeHelpText),
 "assertCorrectRealm()",
 "  Asserts cx->realm matches callee->realm.\n"),
 
+    JS_FN_HELP("globalLexicals", GlobalLexicals, 0, 0,
+"globalLexicals()",
+"  Returns an object containing a copy of all global lexical bindings.\n"
+"  Example use: let x = 1; assertEq(globalLexicals().x, 1);\n"),
+
     JS_FN_HELP("baselineCompile", BaselineCompile, 2, 0,
 "baselineCompile([fun/code], forceDebugInstrumentation=false)",
 "  Baseline-compiles the given JS function or script.\n"
@@ -6359,6 +6489,36 @@ JS_FN_HELP("setDefaultLocale", SetDefaultLocale, 1, 0,
     JS_FS_HELP_END
 };
 
+static const JSFunctionSpecWithHelp PCCountProfilingTestingFunctions[] = {
+    JS_FN_HELP("start", PCCountProfiling_Start, 0, 0,
+    "start()",
+    "  Start PC count profiling."),
+
+    JS_FN_HELP("stop", PCCountProfiling_Stop, 0, 0,
+    "stop()",
+    "  Stop PC count profiling."),
+
+    JS_FN_HELP("purge", PCCountProfiling_Purge, 0, 0,
+    "purge()",
+    "  Purge the collected PC count profiling data."),
+
+    JS_FN_HELP("count", PCCountProfiling_ScriptCount, 0, 0,
+    "count()",
+    "  Return the number of profiled scripts."),
+
+    JS_FN_HELP("summary", PCCountProfiling_ScriptSummary, 1, 0,
+    "summary(index)",
+    "  Return the PC count profiling summary for the given script index.\n"
+    "  The script index must be in the range [0, pc.count())."),
+
+    JS_FN_HELP("contents", PCCountProfiling_ScriptContents, 1, 0,
+    "contents(index)",
+    "  Return the complete profiling contents for the given script index.\n"
+    "  The script index must be in the range [0, pc.count())."),
+
+    JS_FS_HELP_END
+};
+
 bool
 js::DefineTestingFunctions(JSContext* cx, HandleObject obj, bool fuzzingSafe_,
                            bool disableOOMFunctions_)
@@ -6372,6 +6532,19 @@ js::DefineTestingFunctions(JSContext* cx, HandleObject obj, bool fuzzingSafe_,
 
     if (!fuzzingSafe) {
         if (!JS_DefineFunctionsWithHelp(cx, obj, FuzzingUnsafeTestingFunctions)) {
+            return false;
+        }
+
+        RootedObject pccount(cx, JS_NewPlainObject(cx));
+        if (!pccount) {
+            return false;
+        }
+
+        if (!JS_DefineProperty(cx, obj, "pccount", pccount, 0)) {
+            return false;
+        }
+
+        if (!JS_DefineFunctionsWithHelp(cx, pccount, PCCountProfilingTestingFunctions)) {
             return false;
         }
     }

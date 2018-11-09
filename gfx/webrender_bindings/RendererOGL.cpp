@@ -106,7 +106,7 @@ DoNotifyWebRenderContextPurge(layers::CompositorBridgeParent* aBridge)
 }
 
 bool
-RendererOGL::UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize, const Maybe<Range<uint8_t>>& aReadbackBuffer)
+RendererOGL::UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize, const Maybe<Range<uint8_t>>& aReadbackBuffer, bool aHadSlowFrame)
 {
   uint32_t flags = gfx::gfxVars::WebRenderDebugFlags();
   // Disable debug flags during readback
@@ -143,7 +143,7 @@ RendererOGL::UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize, const May
 
   auto size = mCompositor->GetBufferSize();
 
-  if (!wr_renderer_render(mRenderer, size.width, size.height)) {
+  if (!wr_renderer_render(mRenderer, size.width, size.height, aHadSlowFrame)) {
     NotifyWebRenderError(WebRenderError::RENDER);
   }
 
@@ -168,6 +168,19 @@ RendererOGL::UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize, const May
   mFrameStartTime = TimeStamp();
 #endif
 
+  // TODO: Flush pending actions such as texture deletions/unlocks and
+  //       textureHosts recycling.
+
+  return true;
+}
+
+void
+RendererOGL::CheckGraphicsResetStatus()
+{
+  if (!mCompositor || !mCompositor->gl()) {
+    return;
+  }
+
   gl::GLContext* gl = mCompositor->gl();
   if (gl->IsSupported(gl::GLFeature::robustness)) {
     GLenum resetStatus = gl->fGetGraphicsResetStatus();
@@ -179,11 +192,6 @@ RendererOGL::UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize, const May
       ));
     }
   }
-
-  // TODO: Flush pending actions such as texture deletions/unlocks and
-  //       textureHosts recycling.
-
-  return true;
 }
 
 void

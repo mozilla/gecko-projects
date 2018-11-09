@@ -460,7 +460,7 @@
           if (this.isRemoteBrowser) {
             return this._outerWindowID;
           }
-          return this.contentWindow.windowUtils.outerWindowID;
+          return this.docShell.outerWindowID;
         ]]></getter>
       </property>
 
@@ -1940,6 +1940,17 @@
           }
           this.droppedLinkHandler(null, links, aTriggeringPrincipal);
           return true;
+        ]]></body>
+      </method>
+
+      <method name="getContentBlockingLog">
+        <body><![CDATA[
+          if (this.isRemoteBrowser) {
+            return this.frameLoader.tabParent.getContentBlockingLog();
+          }
+          return this.docShell ?
+                   this.docShell.getContentBlockingLog() :
+                   Promise.reject("docshell isn't available");
         ]]></body>
       </method>
     </implementation>

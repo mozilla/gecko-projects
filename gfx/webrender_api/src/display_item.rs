@@ -435,29 +435,6 @@ impl BorderStyle {
     pub fn is_hidden(&self) -> bool {
         *self == BorderStyle::Hidden || *self == BorderStyle::None
     }
-
-    /// Returns true if the border style itself is opaque. Other
-    /// factors (such as color, or border radii) may mean that
-    /// the border segment isn't opaque regardless of this.
-    pub fn is_opaque(&self) -> bool {
-        match *self {
-            BorderStyle::None |
-            BorderStyle::Double |
-            BorderStyle::Dotted |
-            BorderStyle::Dashed |
-            BorderStyle::Hidden => {
-                false
-            }
-
-            BorderStyle::Solid |
-            BorderStyle::Groove |
-            BorderStyle::Ridge |
-            BorderStyle::Inset |
-            BorderStyle::Outset => {
-                true
-            }
-        }
-    }
 }
 
 #[repr(u32)]
@@ -768,6 +745,17 @@ pub struct ImageMask {
     pub repeat: bool,
 }
 
+impl ImageMask {
+    /// Get a local clipping rect contributed by this mask.
+    pub fn get_local_clip_rect(&self) -> Option<LayoutRect> {
+        if self.repeat {
+            None
+        } else {
+            Some(self.rect)
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize, Eq, Hash)]
 pub enum ClipMode {
@@ -864,6 +852,19 @@ impl ComplexClipRegion {
     }
 }
 
+impl ComplexClipRegion {
+    /// Get a local clipping rect contributed by this clip region.
+    pub fn get_local_clip_rect(&self) -> Option<LayoutRect> {
+        match self.mode {
+            ClipMode::Clip => {
+                Some(self.rect)
+            }
+            ClipMode::ClipOut => {
+                None
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct ClipChainId(pub u64, pub PipelineId);

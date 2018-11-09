@@ -4814,8 +4814,7 @@ GCRuntime::markWeakReferences(gcstats::PhaseKind phase)
     marker.enterWeakMarkingMode();
 
     // TODO bug 1167452: Make weak marking incremental
-    auto unlimited = SliceBudget::unlimited();
-    MOZ_RELEASE_ASSERT(marker.drainMarkStack(unlimited));
+    drainMarkStack();
 
     for (;;) {
         bool markedAny = false;
@@ -4831,8 +4830,7 @@ GCRuntime::markWeakReferences(gcstats::PhaseKind phase)
             break;
         }
 
-        auto unlimited = SliceBudget::unlimited();
-        MOZ_RELEASE_ASSERT(marker.drainMarkStack(unlimited));
+        drainMarkStack();
     }
     MOZ_ASSERT(marker.isDrained());
 
@@ -4845,7 +4843,7 @@ GCRuntime::markWeakReferencesInCurrentGroup(gcstats::PhaseKind phase)
     markWeakReferences<SweepGroupZonesIter>(phase);
 }
 
-template <class ZoneIterT, class CompartmentIterT>
+template <class ZoneIterT>
 void
 GCRuntime::markGrayReferences(gcstats::PhaseKind phase)
 {
@@ -4860,14 +4858,13 @@ GCRuntime::markGrayReferences(gcstats::PhaseKind phase)
             (*op)(&marker, grayRootTracer.data);
         }
     }
-    auto unlimited = SliceBudget::unlimited();
-    MOZ_RELEASE_ASSERT(marker.drainMarkStack(unlimited));
+    drainMarkStack();
 }
 
 void
 GCRuntime::markGrayReferencesInCurrentGroup(gcstats::PhaseKind phase)
 {
-    markGrayReferences<SweepGroupZonesIter, SweepGroupCompartmentsIter>(phase);
+    markGrayReferences<SweepGroupZonesIter>(phase);
 }
 
 void
@@ -4879,7 +4876,7 @@ GCRuntime::markAllWeakReferences(gcstats::PhaseKind phase)
 void
 GCRuntime::markAllGrayReferences(gcstats::PhaseKind phase)
 {
-    markGrayReferences<GCZonesIter, GCCompartmentsIter>(phase);
+    markGrayReferences<GCZonesIter>(phase);
 }
 
 #ifdef JS_GC_ZEAL
@@ -5028,8 +5025,7 @@ js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session)
         gc->traceRuntimeForMajorGC(gcmarker, session);
 
         gc->incrementalState = State::Mark;
-        auto unlimited = SliceBudget::unlimited();
-        MOZ_RELEASE_ASSERT(gc->marker.drainMarkStack(unlimited));
+        gc->drainMarkStack();
     }
 
     gc->incrementalState = State::Sweep;
@@ -5559,8 +5555,7 @@ GCRuntime::markIncomingCrossCompartmentPointers(MarkColor color)
         }
     }
 
-    auto unlimited = SliceBudget::unlimited();
-    MOZ_RELEASE_ASSERT(marker.drainMarkStack(unlimited));
+    drainMarkStack();
 }
 
 static bool
@@ -6120,28 +6115,19 @@ GCRuntime::beginSweepingSweepGroup(FreeOp* fop, SliceBudget& budget)
 }
 
 #ifdef JS_GC_ZEAL
-
 bool
 GCRuntime::shouldYieldForZeal(ZealMode mode)
 {
-    return useZeal && isIncremental && hasZealMode(mode);
-}
+    bool yield = useZeal && isIncremental && hasZealMode(mode);
 
-IncrementalProgress
-GCRuntime::maybeYieldForSweepingZeal(FreeOp* fop, SliceBudget& budget)
-{
-    /*
-     * Check whether we need to yield for GC zeal. We always yield when running
-     * in incremental multi-slice zeal mode so RunDebugGC can reset the slice
-     * budget.
-     */
-    if (initialState != State::Sweep && shouldYieldForZeal(ZealMode::IncrementalMultipleSlices)) {
-        return NotFinished;
+    // Only yield on the first sweep slice for this mode.
+    bool firstSweepSlice = initialState != State::Sweep;
+    if (mode == ZealMode::IncrementalMultipleSlices && !firstSweepSlice) {
+        yield = false;
     }
 
-    return Finished;
+    return yield;
 }
-
 #endif
 
 IncrementalProgress
@@ -6263,7 +6249,7 @@ ArenaLists::foregroundFinalize(FreeOp* fop, AllocKind thingKind, SliceBudget& sl
 }
 
 IncrementalProgress
-GCRuntime::drainMarkStack(SliceBudget& sliceBudget, gcstats::PhaseKind phase)
+GCRuntime::markUntilBudgetExhaused(SliceBudget& sliceBudget, gcstats::PhaseKind phase)
 {
     // Marked GC things may vary between recording and replaying, so marking
     // and sweeping should not perform any recorded events.
@@ -6271,7 +6257,14 @@ GCRuntime::drainMarkStack(SliceBudget& sliceBudget, gcstats::PhaseKind phase)
 
     /* Run a marking slice and return whether the stack is now empty. */
     gcstats::AutoPhase ap(stats(), phase);
-    return marker.drainMarkStack(sliceBudget) ? Finished : NotFinished;
+    return marker.markUntilBudgetExhaused(sliceBudget) ? Finished : NotFinished;
+}
+
+void
+GCRuntime::drainMarkStack()
+{
+    auto unlimited = SliceBudget::unlimited();
+    MOZ_RELEASE_ASSERT(marker.markUntilBudgetExhaused(unlimited));
 }
 
 static void
@@ -6687,37 +6680,41 @@ class SweepActionCall final : public SweepAction<GCRuntime*, Args...>
     void assertFinished() const override { }
 };
 
-#ifdef JS_GC_ZEAL
 // Implementation of the SweepAction interface that yields in a specified zeal
-// mode and then calls another action.
+// mode.
 template <typename... Args>
 class SweepActionMaybeYield final : public SweepAction<GCRuntime*, Args...>
 {
-    using Action = SweepAction<GCRuntime*, Args...>;
-
     ZealMode mode;
-    UniquePtr<Action> action;
-    bool triggered;
+    bool isYielding;
 
   public:
-    SweepActionMaybeYield(UniquePtr<Action> action, ZealMode mode)
-      : mode(mode), action(std::move(action)), triggered(false) {}
+    explicit SweepActionMaybeYield(ZealMode mode)
+      : mode(mode), isYielding(false) {}
 
     IncrementalProgress run(GCRuntime* gc, Args... args) override {
-        if (!triggered && gc->shouldYieldForZeal(mode)) {
-            triggered = true;
+#ifdef JS_GC_ZEAL
+        if (!isYielding && gc->shouldYieldForZeal(mode)) {
+            isYielding = true;
             return NotFinished;
         }
 
-        triggered = false;
-        return action->run(gc, args...);
+        isYielding = false;
+#endif
+        return Finished;
     }
 
     void assertFinished() const override {
-        MOZ_ASSERT(!triggered);
+        MOZ_ASSERT(!isYielding);
     }
-};
+
+    // These actions should be skipped if GC zeal is not configured.
+#ifndef JS_GC_ZEAL
+    bool shouldSkip() override {
+        return true;
+    }
 #endif
+};
 
 // Implementation of the SweepAction interface that calls a list of actions in
 // sequence.
@@ -6734,7 +6731,11 @@ class SweepActionSequence final : public SweepAction<Args...>
   public:
     bool init(UniquePtr<Action>* acts, size_t count) {
         for (size_t i = 0; i < count; i++) {
-            if (!actions.emplaceBack(std::move(acts[i]))) {
+            auto& action = acts[i];
+            if (action->shouldSkip()) {
+                continue;
+            }
+            if (!actions.emplaceBack(std::move(action))) {
                 return false;
             }
         }
@@ -6863,14 +6864,14 @@ Call(IncrementalProgress (GCRuntime::*method)(Args...)) {
    return MakeUnique<SweepActionCall<Args...>>(method);
 }
 
-template <typename... Args>
-static UniquePtr<SweepAction<GCRuntime*, Args...>>
-MaybeYield(ZealMode zealMode, UniquePtr<SweepAction<GCRuntime*, Args...>> action) {
-#ifdef JS_GC_ZEAL
-    return js::MakeUnique<SweepActionMaybeYield<Args...>>(std::move(action), zealMode);
-#else
-    return action;
-#endif
+static UniquePtr<SweepAction<GCRuntime*, FreeOp*, SliceBudget&>>
+MaybeYield(ZealMode zealMode) {
+    return js::MakeUnique<SweepActionMaybeYield<FreeOp*, SliceBudget&>>(zealMode);
+}
+
+static UniquePtr<SweepAction<GCRuntime*, FreeOp*, SliceBudget&, Zone*>>
+MaybeYieldInZoneLoop(ZealMode zealMode) {
+    return js::MakeUnique<SweepActionMaybeYield<FreeOp*, SliceBudget&, Zone*>>(zealMode);
 }
 
 template <typename... Args, typename... Rest>
@@ -6937,25 +6938,23 @@ GCRuntime::initSweepActions()
             Sequence(
                 Call(&GCRuntime::endMarkingSweepGroup),
                 Call(&GCRuntime::beginSweepingSweepGroup),
-#ifdef JS_GC_ZEAL
-                Call(&GCRuntime::maybeYieldForSweepingZeal),
-#endif
-                MaybeYield(ZealMode::YieldBeforeSweepingAtoms,
-                           Call(&GCRuntime::sweepAtomsTable)),
-                MaybeYield(ZealMode::YieldBeforeSweepingCaches,
-                           Call(&GCRuntime::sweepWeakCaches)),
+                MaybeYield(ZealMode::IncrementalMultipleSlices),
+                MaybeYield(ZealMode::YieldBeforeSweepingAtoms),
+                Call(&GCRuntime::sweepAtomsTable),
+                MaybeYield(ZealMode::YieldBeforeSweepingCaches),
+                Call(&GCRuntime::sweepWeakCaches),
                 ForEachZoneInSweepGroup(rt,
                     Sequence(
-                        MaybeYield(ZealMode::YieldBeforeSweepingTypes,
-                                   Call(&GCRuntime::sweepTypeInformation)),
-                        MaybeYield(ZealMode::YieldBeforeSweepingObjects,
-                                   ForEachAllocKind(ForegroundObjectFinalizePhase.kinds,
-                                                    Call(&GCRuntime::finalizeAllocKind))),
-                        MaybeYield(ZealMode::YieldBeforeSweepingNonObjects,
-                                   ForEachAllocKind(ForegroundNonObjectFinalizePhase.kinds,
-                                                    Call(&GCRuntime::finalizeAllocKind))),
-                        MaybeYield(ZealMode::YieldBeforeSweepingShapeTrees,
-                                   Call(&GCRuntime::sweepShapeTree)),
+                        MaybeYieldInZoneLoop(ZealMode::YieldBeforeSweepingTypes),
+                        Call(&GCRuntime::sweepTypeInformation),
+                        MaybeYieldInZoneLoop(ZealMode::YieldBeforeSweepingObjects),
+                        ForEachAllocKind(ForegroundObjectFinalizePhase.kinds,
+                                         Call(&GCRuntime::finalizeAllocKind)),
+                        MaybeYieldInZoneLoop(ZealMode::YieldBeforeSweepingNonObjects),
+                        ForEachAllocKind(ForegroundNonObjectFinalizePhase.kinds,
+                                         Call(&GCRuntime::finalizeAllocKind)),
+                        MaybeYieldInZoneLoop(ZealMode::YieldBeforeSweepingShapeTrees),
+                        Call(&GCRuntime::sweepShapeTree),
                         Call(&GCRuntime::releaseSweptEmptyArenas))),
                 Call(&GCRuntime::endSweepingSweepGroup)));
 
@@ -6980,7 +6979,7 @@ GCRuntime::performSweepActions(SliceBudget& budget)
     if (initialState != State::Sweep) {
         MOZ_ASSERT(marker.isDrained());
     } else {
-        if (drainMarkStack(budget, gcstats::PhaseKind::SWEEP_MARK) == NotFinished) {
+        if (markUntilBudgetExhaused(budget, gcstats::PhaseKind::SWEEP_MARK) == NotFinished) {
             return NotFinished;
         }
     }
@@ -7295,7 +7294,7 @@ GCRuntime::resetIncrementalGC(gc::AbortReason reason, AutoGCSession& session)
         isCompacting = false;
 
         auto unlimited = SliceBudget::unlimited();
-        incrementalCollectSlice(unlimited, JS::gcreason::RESET, session);
+        incrementalSlice(unlimited, JS::gcreason::RESET, session);
 
         isCompacting = wasCompacting;
 
@@ -7316,7 +7315,7 @@ GCRuntime::resetIncrementalGC(gc::AbortReason reason, AutoGCSession& session)
         isCompacting = false;
 
         auto unlimited = SliceBudget::unlimited();
-        incrementalCollectSlice(unlimited, JS::gcreason::RESET, session);
+        incrementalSlice(unlimited, JS::gcreason::RESET, session);
 
         isCompacting = wasCompacting;
 
@@ -7331,7 +7330,7 @@ GCRuntime::resetIncrementalGC(gc::AbortReason reason, AutoGCSession& session)
         zonesToMaybeCompact.ref().clear();
 
         auto unlimited = SliceBudget::unlimited();
-        incrementalCollectSlice(unlimited, JS::gcreason::RESET, session);
+        incrementalSlice(unlimited, JS::gcreason::RESET, session);
 
         isCompacting = wasCompacting;
         break;
@@ -7339,7 +7338,7 @@ GCRuntime::resetIncrementalGC(gc::AbortReason reason, AutoGCSession& session)
 
       case State::Decommit: {
         auto unlimited = SliceBudget::unlimited();
-        incrementalCollectSlice(unlimited, JS::gcreason::RESET, session);
+        incrementalSlice(unlimited, JS::gcreason::RESET, session);
         break;
       }
     }
@@ -7433,7 +7432,7 @@ ShouldCleanUpEverything(JS::gcreason::Reason reason, JSGCInvocationKind gckind)
 }
 
 GCRuntime::IncrementalResult
-GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason reason,
+GCRuntime::incrementalSlice(SliceBudget& budget, JS::gcreason::Reason reason,
                                    AutoGCSession& session)
 {
     AutoDisableBarriers disableBarriers(rt);
@@ -7525,7 +7524,7 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
             stats().nonincremental(AbortReason::GrayRootBufferingFailed);
         }
 
-        if (drainMarkStack(budget, gcstats::PhaseKind::MARK) == NotFinished) {
+        if (markUntilBudgetExhaused(budget, gcstats::PhaseKind::MARK) == NotFinished) {
             break;
         }
 
@@ -7941,7 +7940,7 @@ GCRuntime::gcCycle(bool nonincrementalByAPI, SliceBudget& budget,
 
     gcTracer.traceMajorGCStart();
 
-    result = incrementalCollectSlice(budget, reason, session);
+    result = incrementalSlice(budget, reason, session);
 
     chunkAllocationSinceLastGC = false;
 
@@ -8738,7 +8737,7 @@ GCRuntime::runDebugGC()
         }
     } else if (hasIncrementalTwoSliceZealMode()) {
         // These modes trigger incremental GC that happens in two slices and the
-        // supplied budget is ignored by incrementalCollectSlice.
+        // supplied budget is ignored by incrementalSlice.
         budget = SliceBudget(WorkBudget(1));
 
         if (!isIncrementalGCInProgress()) {
@@ -9690,24 +9689,7 @@ js::gc::detail::CellIsNotGray(const Cell* cell)
     MOZ_ASSERT(!JS::RuntimeHeapIsCycleCollecting());
 
     auto tc = &cell->asTenured();
-    if (!detail::CellIsMarkedGray(tc)) {
-        return true;
-    }
-
-    // The cell is gray, but may eventually be marked black if we are in an
-    // incremental GC and the cell is reachable by something on the mark stack.
-
-    auto rt = tc->runtimeFromAnyThread();
-    if (!rt->gc.isIncrementalGCInProgress() || tc->zone()->wasGCStarted()) {
-        return false;
-    }
-
-    Zone* sourceZone = rt->gc.marker.stackContainsCrossZonePointerTo(tc);
-    if (sourceZone && sourceZone->wasGCStarted()) {
-        return true;
-    }
-
-    return false;
+    return !detail::CellIsMarkedGray(tc);
 }
 
 extern JS_PUBLIC_API(bool)

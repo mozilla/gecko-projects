@@ -11,6 +11,7 @@ const { DebuggerServer } = require("devtools/server/main");
 const Actions = require("./index");
 
 const {
+  getCurrentRuntime,
   findRuntimeById,
 } = require("../modules/runtimes-state-helper");
 const { isSupportedDebugTarget } = require("../modules/debug-target-support");
@@ -23,10 +24,14 @@ const {
   DISCONNECT_RUNTIME_FAILURE,
   DISCONNECT_RUNTIME_START,
   DISCONNECT_RUNTIME_SUCCESS,
+  RUNTIME_PREFERENCE,
   RUNTIMES,
   UNWATCH_RUNTIME_FAILURE,
   UNWATCH_RUNTIME_START,
   UNWATCH_RUNTIME_SUCCESS,
+  UPDATE_CONNECTION_PROMPT_SETTING_FAILURE,
+  UPDATE_CONNECTION_PROMPT_SETTING_START,
+  UPDATE_CONNECTION_PROMPT_SETTING_SUCCESS,
   USB_RUNTIMES_UPDATED,
   WATCH_RUNTIME_FAILURE,
   WATCH_RUNTIME_START,
@@ -95,18 +100,21 @@ function connectRuntime(id) {
       const runtime = findRuntimeById(id, getState().runtimes);
       const { client, transportDetails } = await createClientForRuntime(runtime);
       const info = await getRuntimeInfo(runtime, client);
-      const connection = { client, info, transportDetails };
+      const preferenceFront = await client.mainRoot.getFront("preference");
+      const connectionPromptEnabled =
+        await preferenceFront.getBoolPref(RUNTIME_PREFERENCE.CONNECTION_PROMPT);
+      const runtimeDetails = { connectionPromptEnabled, client, info, transportDetails };
 
       dispatch({
         type: CONNECT_RUNTIME_SUCCESS,
         runtime: {
           id,
-          connection,
+          runtimeDetails,
           type: runtime.type,
         },
       });
     } catch (e) {
-      dispatch({ type: CONNECT_RUNTIME_FAILURE, error: e.message });
+      dispatch({ type: CONNECT_RUNTIME_FAILURE, error: e });
     }
   };
 }
@@ -116,7 +124,7 @@ function disconnectRuntime(id) {
     dispatch({ type: DISCONNECT_RUNTIME_START });
     try {
       const runtime = findRuntimeById(id, getState().runtimes);
-      const client = runtime.connection.client;
+      const client = runtime.runtimeDetails.client;
 
       await client.close();
       DebuggerServer.destroy();
@@ -129,7 +137,28 @@ function disconnectRuntime(id) {
         },
       });
     } catch (e) {
-      dispatch({ type: DISCONNECT_RUNTIME_FAILURE, error: e.message });
+      dispatch({ type: DISCONNECT_RUNTIME_FAILURE, error: e });
+    }
+  };
+}
+
+function updateConnectionPromptSetting(connectionPromptEnabled) {
+  return async (dispatch, getState) => {
+    dispatch({ type: UPDATE_CONNECTION_PROMPT_SETTING_START });
+    try {
+      const runtime = getCurrentRuntime(getState().runtimes);
+      const client = runtime.runtimeDetails.client;
+      const preferenceFront = await client.mainRoot.getFront("preference");
+      await preferenceFront.setBoolPref(RUNTIME_PREFERENCE.CONNECTION_PROMPT,
+                                        connectionPromptEnabled);
+      // Re-get actual value from the runtime.
+      connectionPromptEnabled =
+        await preferenceFront.getBoolPref(RUNTIME_PREFERENCE.CONNECTION_PROMPT);
+
+      dispatch({ type: UPDATE_CONNECTION_PROMPT_SETTING_SUCCESS,
+                 runtime, connectionPromptEnabled });
+    } catch (e) {
+      dispatch({ type: UPDATE_CONNECTION_PROMPT_SETTING_FAILURE, error: e });
     }
   };
 }
@@ -160,7 +189,7 @@ function watchRuntime(id) {
         dispatch(Actions.requestWorkers());
       }
     } catch (e) {
-      dispatch({ type: WATCH_RUNTIME_FAILURE, error: e.message });
+      dispatch({ type: WATCH_RUNTIME_FAILURE, error: e });
     }
   };
 }
@@ -179,19 +208,39 @@ function unwatchRuntime(id) {
 
       dispatch({ type: UNWATCH_RUNTIME_SUCCESS });
     } catch (e) {
-      dispatch({ type: UNWATCH_RUNTIME_FAILURE, error: e.message });
+      dispatch({ type: UNWATCH_RUNTIME_FAILURE, error: e });
     }
   };
 }
 
 function updateUSBRuntimes(runtimes) {
-  return { type: USB_RUNTIMES_UPDATED, runtimes };
+  return async (dispatch, getState) => {
+    const currentRuntime = getCurrentRuntime(getState().runtimes);
+
+    if (currentRuntime &&
+        currentRuntime.type === RUNTIMES.USB &&
+        !runtimes.find(runtime => currentRuntime.id === runtime.id)) {
+      // Since current USB runtime was invalid, move to this firefox page.
+      // This case is considered as followings and so on:
+      // * Remove ADB addon
+      // * (Physically) Disconnect USB runtime
+      //
+      // The reason why we call selectPage before USB_RUNTIMES_UPDATED was fired is below.
+      // Current runtime can not be retrieved after USB_RUNTIMES_UPDATED action, since
+      // that updates runtime state. So, before that we fire selectPage action so that to
+      // transact unwatchRuntime correctly.
+      await dispatch(Actions.selectPage(RUNTIMES.THIS_FIREFOX, RUNTIMES.THIS_FIREFOX));
+    }
+
+    dispatch({ type: USB_RUNTIMES_UPDATED, runtimes });
+  };
 }
 
 module.exports = {
   connectRuntime,
   disconnectRuntime,
   unwatchRuntime,
+  updateConnectionPromptSetting,
   updateUSBRuntimes,
   watchRuntime,
 };

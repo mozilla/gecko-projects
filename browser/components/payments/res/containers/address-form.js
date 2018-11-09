@@ -4,7 +4,6 @@
 
 /* import-globals-from ../../../../../browser/extensions/formautofill/content/autofillEditForms.js*/
 import LabelledCheckbox from "../components/labelled-checkbox.js";
-import PaymentDialog from "./payment-dialog.js";
 import PaymentRequestPage from "../components/payment-request-page.js";
 import PaymentStateSubscriberMixin from "../mixins/PaymentStateSubscriberMixin.js";
 import paymentRequest from "../paymentRequest.js";
@@ -180,6 +179,11 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
     } else {
       this.form.dataset.addressFields = "mailing-address tel";
     }
+    if (addressPage.selectedStateKey == "selectedPayerAddress") {
+      this.form.dataset.extraRequiredFields = addressPage.addressFields;
+    } else {
+      this.form.dataset.extraRequiredFields = "";
+    }
     this.formHandler.loadRecord(record);
 
     // Add validation to some address fields
@@ -194,7 +198,7 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
       // Never show errors on an 'add' screen as they would be for a different address.
       let errorText = (editing && merchantFieldErrors && merchantFieldErrors[errorName]) || "";
       field.setCustomValidity(errorText);
-      let span = PaymentDialog.maybeCreateFieldErrorElement(container);
+      let span = paymentRequest.maybeCreateFieldErrorElement(container);
       span.textContent = errorText;
     }
 
@@ -204,6 +208,9 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
   handleEvent(event) {
     switch (event.type) {
       case "change": {
+        if (event.target.id == "country") {
+          this.updateRequiredState();
+        }
         this.updateSaveButtonState();
         break;
       }
@@ -273,7 +280,7 @@ export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequ
   onInvalidField(event) {
     let field = event.target;
     let container = field.closest(`#${field.id}-container`);
-    let errorTextSpan = PaymentDialog.maybeCreateFieldErrorElement(container);
+    let errorTextSpan = paymentRequest.maybeCreateFieldErrorElement(container);
     errorTextSpan.textContent = field.validationMessage;
   }
 

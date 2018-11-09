@@ -539,7 +539,7 @@ FetchDriver::HttpFetch(const nsACString& aPreferredAlternativeDataType)
   MOZ_ASSERT(mLoadGroup);
   nsCOMPtr<nsIChannel> chan;
 
-  nsLoadFlags loadFlags = nsIRequest::LOAD_NORMAL |
+  nsLoadFlags loadFlags = nsIRequest::LOAD_BACKGROUND |
     bypassFlag | nsIChannel::LOAD_CLASSIFY_URI;
   if (mDocument) {
     MOZ_ASSERT(mDocument->NodePrincipal() == mPrincipal);
@@ -579,6 +579,16 @@ FetchDriver::HttpFetch(const nsACString& aPreferredAlternativeDataType)
                        ios);
   }
   NS_ENSURE_SUCCESS(rv, rv);
+
+  if (mCSPEventListener) {
+    nsCOMPtr<nsILoadInfo> loadInfo = chan->GetLoadInfo();
+    if (NS_WARN_IF(!loadInfo)) {
+      return NS_ERROR_UNEXPECTED;
+    }
+
+    rv = loadInfo->SetCspEventListener(mCSPEventListener);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
 
   // Insert ourselves into the notification callbacks chain so we can set
   // headers on redirects.
@@ -1416,6 +1426,13 @@ FetchDriver::SetDocument(nsIDocument* aDocument)
 }
 
 void
+FetchDriver::SetCSPEventListener(nsICSPEventListener* aCSPEventListener)
+{
+  MOZ_ASSERT(!mFetchCalled);
+  mCSPEventListener = aCSPEventListener;
+}
+
+void
 FetchDriver::SetClientInfo(const ClientInfo& aClientInfo)
 {
   MOZ_ASSERT(!mFetchCalled);
@@ -1464,7 +1481,7 @@ FetchDriver::SetRequestHeaders(nsIHttpChannel* aChannel) const
     nsAutoString origin;
     if (NS_SUCCEEDED(nsContentUtils::GetUTFOrigin(mPrincipal, origin))) {
       DebugOnly<nsresult> rv =
-        aChannel->SetRequestHeader(NS_LITERAL_CSTRING("origin"),
+        aChannel->SetRequestHeader(nsDependentCString(net::nsHttp::Origin),
                                    NS_ConvertUTF16toUTF8(origin),
                                    false /* merge */);
       MOZ_ASSERT(NS_SUCCEEDED(rv));

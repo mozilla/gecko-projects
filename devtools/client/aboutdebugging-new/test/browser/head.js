@@ -13,6 +13,11 @@ Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js",
   this);
 
+// Load the shared Redux helpers into this compartment.
+Services.scriptloader.loadSubScript(
+  "chrome://mochitests/content/browser/devtools/client/shared/test/shared-redux-head.js",
+  this);
+
 // Load collapsibilities helpers
 Services.scriptloader.loadSubScript(
   CHROME_URL_ROOT + "debug-target-pane_collapsibilities_head.js", this);
@@ -34,6 +39,7 @@ registerCleanupFunction(async function() {
  */
 async function enableNewAboutDebugging() {
   await pushPref("devtools.aboutdebugging.new-enabled", true);
+  await pushPref("devtools.aboutdebugging.network", true);
 }
 
 async function openAboutDebugging(page, win) {
@@ -44,14 +50,27 @@ async function openAboutDebugging(page, win) {
   const browser = tab.linkedBrowser;
   const document = browser.contentDocument;
   const window = browser.contentWindow;
+  const { AboutDebugging } = window;
 
-  info("Wait until the main about debugging container is available");
-  await waitUntil(() => document.querySelector(".app"));
-
-  info("Wait until the client connection was established");
-  await waitUntil(() => document.querySelector(".js-runtime-page"));
+  await Promise.all([
+    waitForDispatch(AboutDebugging.store, "REQUEST_EXTENSIONS_SUCCESS"),
+    waitForDispatch(AboutDebugging.store, "REQUEST_TABS_SUCCESS"),
+    waitForDispatch(AboutDebugging.store, "REQUEST_WORKERS_SUCCESS"),
+  ]);
 
   return { tab, document, window };
+}
+
+function waitForDispatch(store, type) {
+  return new Promise(resolve => {
+    store.dispatch({
+      type: "@@service/waitUntil",
+      predicate: action => action.type === type,
+      run: (dispatch, getState, action) => {
+        resolve(action);
+      },
+    });
+  });
 }
 
 /**
@@ -63,12 +82,19 @@ async function selectConnectPage(doc) {
     return element.textContent === "Connect";
   });
   ok(connectSidebarItem, "Sidebar contains a Connect item");
+  const connectLink = connectSidebarItem.querySelector(".js-sidebar-link");
+  ok(connectLink, "Sidebar contains a Connect link");
 
-  info("Click on the Connect item in the sidebar");
-  connectSidebarItem.click();
+  info("Click on the Connect link in the sidebar");
+  connectLink.click();
 
   info("Wait until Connect page is displayed");
   await waitUntil(() => doc.querySelector(".js-connect-page"));
+}
+
+function findDebugTargetByText(text, document) {
+  const targets = [...document.querySelectorAll(".js-debug-target-item")];
+  return targets.find(target => target.textContent.includes(text));
 }
 
 function findSidebarItemByText(text, document) {

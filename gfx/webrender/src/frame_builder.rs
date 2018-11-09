@@ -3,17 +3,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{ColorF, DeviceIntPoint, DevicePixelScale, LayoutPixel, PicturePixel, RasterPixel};
-use api::{DeviceUintPoint, DeviceUintRect, DeviceUintSize, DocumentLayer, FontRenderMode, PictureRect};
+use api::{DeviceUintPoint, DeviceUintRect, DeviceUintSize, DocumentLayer, FontRenderMode};
 use api::{LayoutPoint, LayoutRect, LayoutSize, PipelineId, RasterSpace, WorldPoint, WorldRect, WorldPixel};
 use clip::{ClipDataStore, ClipStore};
 use clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex};
 use display_list_flattener::{DisplayListFlattener};
 use gpu_cache::GpuCache;
-use gpu_types::{PrimitiveHeaders, TransformPalette, UvRectKind};
+use gpu_types::{PrimitiveHeaders, TransformPalette, UvRectKind, ZBufferIdGenerator};
 use hit_test::{HitTester, HitTestingRun};
-use internal_types::{FastHashMap};
-use picture::{PictureCompositeMode, PictureSurface, RasterConfig};
-use prim_store::{PrimitiveIndex, PrimitiveStore, SpaceMapper, PictureIndex};
+use internal_types::{FastHashMap, PlaneSplitter};
+use picture::{PictureSurface, PictureUpdateContext, SurfaceInfo, ROOT_SURFACE_INDEX, SurfaceIndex};
+use prim_store::{PrimitiveStore, SpaceMapper, PictureIndex, PrimitiveDebugId};
 use profiler::{FrameProfileCounters, GpuCacheProfileCounters, TextureCacheProfileCounters};
 use render_backend::{FrameResources, FrameId};
 use render_task::{RenderTask, RenderTaskId, RenderTaskLocation, RenderTaskTree};
@@ -32,7 +32,7 @@ use tiling::{SpecialRenderPasses};
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum ChasePrimitive {
     Nothing,
-    Index(PrimitiveIndex),
+    Id(PrimitiveDebugId),
     LocalRect(LayoutRect),
 }
 
@@ -85,8 +85,11 @@ pub struct FrameBuildingState<'a> {
     pub transforms: &'a mut TransformPalette,
     pub resources: &'a mut FrameResources,
     pub segment_builder: SegmentBuilder,
+    pub surfaces: &'a mut Vec<SurfaceInfo>,
 }
 
+/// Immutable context of a picture when processing children.
+#[derive(Debug)]
 pub struct PictureContext {
     pub pic_index: PictureIndex,
     pub pipeline_id: PipelineId,
@@ -95,11 +98,15 @@ pub struct PictureContext {
     pub allow_subpixel_aa: bool,
     pub is_passthrough: bool,
     pub raster_space: RasterSpace,
+    pub surface_spatial_node_index: SpatialNodeIndex,
+    pub raster_spatial_node_index: SpatialNodeIndex,
+    /// The surface that this picture will render on.
+    pub surface_index: SurfaceIndex,
 }
 
-#[derive(Debug)]
+/// Mutable state of a picture that gets modified when
+/// the children are processed.
 pub struct PictureState {
-    pub tasks: Vec<RenderTaskId>,
     pub has_non_root_coord_system: bool,
     pub is_cacheable: bool,
     pub local_rect_changed: bool,
@@ -107,8 +114,9 @@ pub struct PictureState {
     pub map_pic_to_world: SpaceMapper<PicturePixel, WorldPixel>,
     pub map_pic_to_raster: SpaceMapper<PicturePixel, RasterPixel>,
     pub map_raster_to_world: SpaceMapper<RasterPixel, WorldPixel>,
-    pub surface_spatial_node_index: SpatialNodeIndex,
-    pub raster_spatial_node_index: SpatialNodeIndex,
+    /// If the plane splitter, the primitives get added to it insted of
+    /// batching into their parent pictures.
+    pub plane_splitter: Option<PlaneSplitter>,
 }
 
 pub struct PrimitiveContext<'a> {
@@ -184,10 +192,11 @@ impl FrameBuilder {
         scene_properties: &SceneProperties,
         transform_palette: &mut TransformPalette,
         resources: &mut FrameResources,
+        surfaces: &mut Vec<SurfaceInfo>,
     ) -> Option<RenderTaskId> {
         profile_scope!("cull");
 
-        if self.prim_store.primitives.is_empty() {
+        if self.prim_store.pictures.is_empty() {
             return None
         }
 
@@ -210,6 +219,35 @@ impl FrameBuilder {
             ),
         };
 
+        // Construct a dummy root surface, that represents the
+        // main framebuffer surface.
+        let root_surface = SurfaceInfo::new(
+            ROOT_SPATIAL_NODE_INDEX,
+            ROOT_SPATIAL_NODE_INDEX,
+            world_rect,
+            clip_scroll_tree,
+        );
+        surfaces.push(root_surface);
+
+        let pic_update_context = PictureUpdateContext::new(
+            ROOT_SURFACE_INDEX,
+            ROOT_SPATIAL_NODE_INDEX,
+        );
+
+        // The first major pass of building a frame is to walk the picture
+        // tree. This pass must be quick (it should never touch individual
+        // primitives). For now, all we do here is determine which pictures
+        // will create surfaces. In the future, this will be expanded to
+        // set up render tasks, determine scaling of surfaces, and detect
+        // which surfaces have valid cached surfaces that don't need to
+        // be rendered this frame.
+        self.prim_store.update_picture(
+            self.root_pic_index,
+            &pic_update_context,
+            &frame_context,
+            surfaces,
+        );
+
         let mut frame_state = FrameBuildingState {
             render_tasks,
             profile_counters,
@@ -220,66 +258,59 @@ impl FrameBuilder {
             transforms: transform_palette,
             resources,
             segment_builder: SegmentBuilder::new(),
+            surfaces,
         };
 
-        let prim_context = PrimitiveContext::new(
-            &clip_scroll_tree.spatial_nodes[root_spatial_node_index.0],
-            root_spatial_node_index,
-        );
-
-        let (pic_context, mut pic_state, mut instances) = self
+        let (pic_context, mut pic_state, mut prim_list) = self
             .prim_store
             .pictures[self.root_pic_index.0]
             .take_context(
                 self.root_pic_index,
-                &prim_context,
                 root_spatial_node_index,
                 root_spatial_node_index,
+                ROOT_SURFACE_INDEX,
                 true,
                 &mut frame_state,
                 &frame_context,
-                false,
             )
             .unwrap();
 
-        let mut pic_rect = PictureRect::zero();
-
         self.prim_store.prepare_primitives(
-            &mut instances,
+            &mut prim_list,
             &pic_context,
             &mut pic_state,
             &frame_context,
             &mut frame_state,
-            &mut pic_rect,
         );
 
         let pic = &mut self.prim_store.pictures[self.root_pic_index.0];
         pic.restore_context(
-            instances,
+            prim_list,
             pic_context,
             pic_state,
-            Some(pic_rect),
             &mut frame_state,
         );
 
-        let pic_state = pic.take_state();
+        let child_tasks = frame_state
+            .surfaces[ROOT_SURFACE_INDEX.0]
+            .take_render_tasks();
 
         let root_render_task = RenderTask::new_picture(
             RenderTaskLocation::Fixed(self.screen_rect.to_i32()),
             self.screen_rect.size.to_f32(),
             self.root_pic_index,
             DeviceIntPoint::zero(),
-            pic_state.tasks,
+            child_tasks,
             UvRectKind::Rect,
             root_spatial_node_index,
         );
 
         let render_task_id = frame_state.render_tasks.add(root_render_task);
-        pic.raster_config = Some(RasterConfig {
-            composite_mode: PictureCompositeMode::Blit,
-            surface: Some(PictureSurface::RenderTask(render_task_id)),
-            raster_spatial_node_index: ROOT_SPATIAL_NODE_INDEX,
-        });
+        frame_state
+            .surfaces
+            .first_mut()
+            .unwrap()
+            .surface = Some(PictureSurface::RenderTask(render_task_id));
         Some(render_task_id)
     }
 
@@ -310,7 +341,7 @@ impl FrameBuilder {
             .set(self.prim_store.prim_count());
 
         resource_cache.begin_frame(frame_id);
-        gpu_cache.begin_frame();
+        gpu_cache.begin_frame(frame_id);
 
         let mut transform_palette = TransformPalette::new();
         clip_scroll_tree.update_tree(
@@ -320,6 +351,7 @@ impl FrameBuilder {
         );
 
         let mut render_tasks = RenderTaskTree::new(frame_id);
+        let mut surfaces = Vec::new();
 
         let screen_size = self.screen_rect.size.to_i32();
         let mut special_render_passes = SpecialRenderPasses::new(&screen_size);
@@ -336,6 +368,7 @@ impl FrameBuilder {
             scene_properties,
             &mut transform_palette,
             resources,
+            &mut surfaces,
         );
 
         resource_cache.block_until_all_resources_added(gpu_cache,
@@ -369,6 +402,8 @@ impl FrameBuilder {
         let mut deferred_resolves = vec![];
         let mut has_texture_cache_tasks = false;
         let mut prim_headers = PrimitiveHeaders::new();
+        // Used to generated a unique z-buffer value per primitive.
+        let mut z_generator = ZBufferIdGenerator::new();
         let use_dual_source_blending = self.config.dual_source_blending_is_enabled &&
                                        self.config.dual_source_blending_is_supported;
 
@@ -380,6 +415,7 @@ impl FrameBuilder {
                 use_dual_source_blending,
                 clip_scroll_tree,
                 resources,
+                surfaces: &surfaces,
             };
 
             pass.build(
@@ -390,6 +426,7 @@ impl FrameBuilder {
                 &self.clip_store,
                 &mut transform_palette,
                 &mut prim_headers,
+                &mut z_generator,
             );
 
             if let RenderPassKind::OffScreen { ref texture_cache, .. } = pass.kind {

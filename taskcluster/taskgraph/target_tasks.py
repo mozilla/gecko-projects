@@ -7,7 +7,7 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph import try_option_syntax
-from taskgraph.util.attributes import match_run_on_projects
+from taskgraph.util.attributes import match_run_on_projects, match_run_on_hg_branches
 
 _target_task_methods = {}
 
@@ -25,7 +25,7 @@ def get_method(method):
 
 
 def filter_out_nightly(task, parameters):
-    return not task.attributes.get('nightly') or parameters.get('include_nightly')
+    return not task.attributes.get('nightly')
 
 
 def filter_out_cron(task, parameters):
@@ -41,24 +41,20 @@ def filter_for_project(task, parameters):
     return match_run_on_projects(parameters['project'], run_on_projects)
 
 
+def filter_for_hg_branch(task, parameters):
+    """Filter tasks by hg branch.
+    If `run_on_hg_branch` is not defined, then task runs on all branches"""
+    run_on_hg_branches = set(task.attributes.get('run_on_hg_branches', ['all']))
+    return match_run_on_hg_branches(parameters['hg_branch'], run_on_hg_branches)
+
+
 def filter_on_platforms(task, platforms):
     """Filter tasks on the given platform"""
     platform = task.attributes.get('build_platform')
     return (platform in platforms)
 
 
-def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=False):
-    if not standard_filter(task, parameters):
-        return False
-    if ignore_kinds is None:
-        ignore_kinds = [
-            'balrog',
-            'beetmover', 'beetmover-checksums', 'beetmover-l10n',
-            'beetmover-repackage', 'beetmover-repackage-signing',
-            'checksums-signing',
-            'nightly-l10n', 'nightly-l10n-signing',
-            'push-apk', 'repackage-l10n',
-        ]
+def filter_release_tasks(task, parameters):
     platform = task.attributes.get('build_platform')
     if platform in (
             # On beta, Nightly builds are already PGOs
@@ -83,13 +79,7 @@ def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=Fa
            task.attributes.get('unittest_suite') != 'raptor':
             return False
 
-    # skip l10n, beetmover, balrog
-    if task.kind in ignore_kinds:
-        return False
-
-    # No l10n repacks per push. They may be triggered by kinds which depend
-    # on l10n builds/repacks. For instance: "repackage-signing"
-    if not allow_l10n and task.attributes.get('locale', '') != '':
+    if task.attributes.get('shipping_phase') not in (None, 'build'):
         return False
 
     return True
@@ -98,7 +88,7 @@ def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=Fa
 def standard_filter(task, parameters):
     return all(
         filter_func(task, parameters) for filter_func in
-        (filter_out_nightly, filter_out_cron, filter_for_project)
+        (filter_out_cron, filter_for_project, filter_for_hg_branch)
     )
 
 
@@ -178,7 +168,8 @@ def target_tasks_default(full_task_graph, parameters, graph_config):
     """Target the tasks which have indicated they should be run on this project
     via the `run_on_projects` attributes."""
     return [l for l, t in full_task_graph.tasks.iteritems()
-            if standard_filter(t, parameters)]
+            if standard_filter(t, parameters)
+            and filter_out_nightly(t, parameters)]
 
 
 @_target_task('ash_tasks')
@@ -273,8 +264,9 @@ def target_tasks_mozilla_beta(full_task_graph, parameters, graph_config):
     of desktop, plus android CI. The candidates build process involves a pipeline
     of builds and signing, but does not include beetmover or balrog jobs."""
 
-    return [l for l, t in full_task_graph.tasks.iteritems() if
-            filter_beta_release_tasks(t, parameters)]
+    return [l for l, t in full_task_graph.tasks.iteritems()
+            if filter_release_tasks(t, parameters)
+            and standard_filter(t, parameters)]
 
 
 @_target_task('mozilla_release_tasks')
@@ -283,8 +275,9 @@ def target_tasks_mozilla_release(full_task_graph, parameters, graph_config):
     of desktop, plus android CI. The candidates build process involves a pipeline
     of builds and signing, but does not include beetmover or balrog jobs."""
 
-    return [l for l, t in full_task_graph.tasks.iteritems() if
-            filter_beta_release_tasks(t, parameters)]
+    return [l for l, t in full_task_graph.tasks.iteritems()
+            if filter_release_tasks(t, parameters)
+            and standard_filter(t, parameters)]
 
 
 @_target_task('mozilla_esr60_tasks')
@@ -294,7 +287,10 @@ def target_tasks_mozilla_esr60(full_task_graph, parameters, graph_config):
     of builds and signing, but does not include beetmover or balrog jobs."""
 
     def filter(task):
-        if not filter_beta_release_tasks(task, parameters):
+        if not filter_release_tasks(task, parameters):
+            return False
+
+        if not standard_filter(task, parameters):
             return False
 
         platform = task.attributes.get('build_platform')
@@ -443,7 +439,7 @@ def target_tasks_pine(full_task_graph, parameters, graph_config):
         if platform == 'linux64-asan':
             return False
         # disable non-pine and nightly tasks
-        if standard_filter(task, parameters):
+        if standard_filter(task, parameters) or filter_out_nightly(task, parameters):
             return True
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
@@ -544,10 +540,9 @@ def target_tasks_nightly_desktop(full_task_graph, parameters, graph_config):
 @_target_task('searchfox_index')
 def target_tasks_searchfox(full_task_graph, parameters, graph_config):
     """Select tasks required for indexing Firefox for Searchfox web site each day"""
-    # For now we only do Linux and Mac debug builds. Windows builds
-    # are currently broken (bug 1418415).
     return ['searchfox-linux64-searchfox/debug',
-            'searchfox-macosx64-searchfox/debug']
+            'searchfox-macosx64-searchfox/debug',
+            'searchfox-win64-searchfox/debug']
 
 
 @_target_task('pipfile_update')
@@ -606,3 +601,20 @@ def target_tasks_staging_release(full_task_graph, parameters, graph_config):
         return False
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
+@_target_task('beta_simulation')
+def target_tasks_beta_simulation(full_task_graph, parameters, graph_config):
+    """
+    Select builds that would run on mozilla-beta.
+    """
+
+    def filter_for_beta(task):
+        """Filter tasks by project.  Optionally enable nightlies."""
+        run_on_projects = set(task.attributes.get('run_on_projects', []))
+        return match_run_on_projects('mozilla-beta', run_on_projects)
+
+    return [l for l, t in full_task_graph.tasks.iteritems()
+            if filter_release_tasks(t, parameters)
+            and filter_out_cron(t, parameters)
+            and filter_for_beta(t)]

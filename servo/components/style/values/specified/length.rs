@@ -6,6 +6,7 @@
 //!
 //! [length]: https://drafts.csswg.org/css-values/#lengths
 
+use super::{AllowQuirks, Number, Percentage, ToComputedValue};
 use app_units::Au;
 use cssparser::{Parser, Token};
 use euclid::Size2D;
@@ -13,18 +14,17 @@ use font_metrics::FontMetricsQueryResult;
 use parser::{Parse, ParserContext};
 use std::cmp;
 use std::ops::{Add, Mul};
-use style_traits::{ParseError, SpecifiedValueInfo, StyleParseErrorKind};
 use style_traits::values::specified::AllowedNumericType;
-use super::{AllowQuirks, Number, Percentage, ToComputedValue};
-use values::{Auto, CSSFloat, Either, Normal};
+use style_traits::{ParseError, SpecifiedValueInfo, StyleParseErrorKind};
 use values::computed::{self, CSSPixelLength, Context, ExtremumLength};
-use values::generics::NonNegative;
 use values::generics::length::{MaxLength as GenericMaxLength, MozLength as GenericMozLength};
+use values::generics::NonNegative;
 use values::specified::calc::CalcNode;
+use values::{Auto, CSSFloat, Either, IsAuto, Normal};
 
-pub use values::specified::calc::CalcLengthOrPercentage;
 pub use super::image::{ColorStop, EndingShape as GradientEndingShape, Gradient};
 pub use super::image::{GradientKind, Image};
+pub use values::specified::calc::CalcLengthOrPercentage;
 
 /// Number of app units per pixel
 pub const AU_PER_PX: CSSFloat = 60.;
@@ -979,6 +979,13 @@ impl Parse for LengthOrPercentageOrAuto {
 
 /// A wrapper of LengthOrPercentageOrAuto, whose value must be >= 0.
 pub type NonNegativeLengthOrPercentageOrAuto = NonNegative<LengthOrPercentageOrAuto>;
+
+impl IsAuto for NonNegativeLengthOrPercentageOrAuto {
+    #[inline]
+    fn is_auto(&self) -> bool {
+        *self == Self::auto()
+    }
+}
 
 impl NonNegativeLengthOrPercentageOrAuto {
     /// 0

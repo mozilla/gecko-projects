@@ -115,7 +115,8 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     scopeList(cx),
     tryNoteList(cx),
     scopeNoteList(cx),
-    yieldAndAwaitOffsetList(cx),
+    resumeOffsetList(cx),
+    numYields(0),
     typesetCount(0),
     hasSingletons(false),
     hasTryFinally(false),
@@ -684,7 +685,9 @@ NonLocalExitControl::leaveScope(EmitterScope* es)
     }
     if (!bce_->scopeNoteList.append(enclosingScopeIndex, bce_->offset(), bce_->inPrologue(),
                                     openScopeNoteIndex_))
+    {
         return false;
+    }
     openScopeNoteIndex_ = bce_->scopeNoteList.length() - 1;
 
     return true;
@@ -742,7 +745,7 @@ NonLocalExitControl::prepareForNonLocalJump(NestableControl* target)
                 if (!flushPops(bce_)) {
                     return false;
                 }
-                if (!bce_->emitJump(JSOP_GOSUB, &finallyControl.gosubs)) { // ...
+                if (!bce_->emitGoSub(&finallyControl.gosubs)) { // ...
                     return false;
                 }
             }
@@ -1041,6 +1044,7 @@ BytecodeEmitter::checkSideEffects(ParseNode* pn, bool* answer)
         return true;
 
       case ParseNodeKind::ObjectPropertyName:
+      case ParseNodeKind::PrivateName: // no side effects, unlike ParseNodeKind::Name
       case ParseNodeKind::String:
       case ParseNodeKind::TemplateString:
         MOZ_ASSERT(pn->is<NameNode>());
@@ -1484,17 +1488,18 @@ BytecodeEmitter::checkSideEffects(ParseNode* pn, bool* answer)
       case ParseNodeKind::ForOf:           // by ParseNodeKind::For
       case ParseNodeKind::ForHead:         // by ParseNodeKind::For
       case ParseNodeKind::ClassMethod:     // by ParseNodeKind::Class
+      case ParseNodeKind::ClassField:      // by ParseNodeKind::Class
       case ParseNodeKind::ClassNames:      // by ParseNodeKind::Class
-      case ParseNodeKind::ClassMethodList: // by ParseNodeKind::Class
-      case ParseNodeKind::ImportSpecList: // by ParseNodeKind::Import
+      case ParseNodeKind::ClassMemberList: // by ParseNodeKind::Class
+      case ParseNodeKind::ImportSpecList:  // by ParseNodeKind::Import
       case ParseNodeKind::ImportSpec:      // by ParseNodeKind::Import
-      case ParseNodeKind::ExportBatchSpec:// by ParseNodeKind::Export
-      case ParseNodeKind::ExportSpecList: // by ParseNodeKind::Export
+      case ParseNodeKind::ExportBatchSpec: // by ParseNodeKind::Export
+      case ParseNodeKind::ExportSpecList:  // by ParseNodeKind::Export
       case ParseNodeKind::ExportSpec:      // by ParseNodeKind::Export
-      case ParseNodeKind::CallSiteObj:      // by ParseNodeKind::TaggedTemplate
-      case ParseNodeKind::PosHolder:        // by ParseNodeKind::NewTarget
-      case ParseNodeKind::SuperBase:        // by ParseNodeKind::Elem and others
-      case ParseNodeKind::PropertyName:     // by ParseNodeKind::Dot
+      case ParseNodeKind::CallSiteObj:     // by ParseNodeKind::TaggedTemplate
+      case ParseNodeKind::PosHolder:       // by ParseNodeKind::NewTarget
+      case ParseNodeKind::SuperBase:       // by ParseNodeKind::Elem and others
+      case ParseNodeKind::PropertyName:    // by ParseNodeKind::Dot
         MOZ_CRASH("handled by parent nodes");
 
       case ParseNodeKind::Limit: // invalid sentinel value
@@ -1787,6 +1792,8 @@ BytecodeEmitter::emitPropLHS(PropertyAccess* prop)
     }
 
     while (true) {
+        // TODO(khyperia): Implement private field access.
+
         // Walk back up the list, emitting annotated name ops.
         if (!emitAtomOp(pndot->key().atom(), JSOP_GETPROP)) {
             return false;
@@ -1808,6 +1815,7 @@ bool
 BytecodeEmitter::emitPropIncDec(UnaryNode* incDec)
 {
     PropertyAccess* prop = &incDec->kid()->as<PropertyAccess>();
+    // TODO(khyperia): Implement private field access.
     bool isSuper = prop->isSuper();
     ParseNodeKind kind = incDec->getKind();
     PropOpEmitter poe(this,
@@ -2098,6 +2106,10 @@ BytecodeEmitter::emitSwitch(SwitchStatement* switchStmt)
                 continue;
             }
 
+            if (!se.prepareForCaseValue()) {
+                return false;
+            }
+
             ParseNode* caseValue = caseClause->caseExpression();
             // If the expression is a literal, suppress line number emission so
             // that debugging works more naturally.
@@ -2178,6 +2190,23 @@ BytecodeEmitter::isRunOnceLambda()
 }
 
 bool
+BytecodeEmitter::allocateResumeIndexForCurrentOffset(uint32_t* resumeIndex)
+{
+    static constexpr uint32_t MaxResumeIndex = JS_BITMASK(24);
+
+    static_assert(MaxResumeIndex < uint32_t(GeneratorObject::RESUME_INDEX_CLOSING),
+                  "resumeIndex should not include magic GeneratorObject resumeIndex values");
+
+    *resumeIndex = resumeOffsetList.length();
+    if (*resumeIndex > MaxResumeIndex) {
+        reportError(nullptr, JSMSG_TOO_MANY_RESUME_INDEXES);
+        return false;
+    }
+
+    return resumeOffsetList.append(offset());
+}
+
+bool
 BytecodeEmitter::emitYieldOp(JSOp op)
 {
     if (op == JSOP_FINALYIELDRVAL) {
@@ -2191,23 +2220,16 @@ BytecodeEmitter::emitYieldOp(JSOp op)
         return false;
     }
 
-    uint32_t yieldAndAwaitIndex = yieldAndAwaitOffsetList.length();
-    if (yieldAndAwaitIndex >= JS_BIT(24)) {
-        reportError(nullptr, JSMSG_TOO_MANY_YIELDS);
+    if (op == JSOP_INITIALYIELD || op == JSOP_YIELD) {
+        numYields++;
+    }
+
+    uint32_t resumeIndex;
+    if (!allocateResumeIndexForCurrentOffset(&resumeIndex)) {
         return false;
     }
 
-    if (op == JSOP_AWAIT) {
-        yieldAndAwaitOffsetList.numAwaits++;
-    } else {
-        yieldAndAwaitOffsetList.numYields++;
-    }
-
-    SET_UINT24(code(off), yieldAndAwaitIndex);
-
-    if (!yieldAndAwaitOffsetList.append(offset())) {
-        return false;
-    }
+    SET_RESUMEINDEX(code(off), resumeIndex);
 
     return emit1(JSOP_DEBUGAFTERYIELD);
 }
@@ -2622,6 +2644,7 @@ BytecodeEmitter::emitSetOrInitializeDestructuring(ParseNode* target, Destructuri
             //                                            // [Other]
             //                                            // OBJ VAL
             PropertyAccess* prop = &target->as<PropertyAccess>();
+            // TODO(khyperia): Implement private field access.
             bool isSuper = prop->isSuper();
             PropOpEmitter poe(this,
                               PropOpEmitter::Kind::SimpleAssignment,
@@ -2938,7 +2961,7 @@ BytecodeEmitter::wrapWithDestructuringIteratorCloseTryNote(int32_t iterDepth, In
     }
     ptrdiff_t end = offset();
     if (start != end) {
-        return tryNoteList.append(JSTRY_DESTRUCTURING_ITERCLOSE, iterDepth, start, end);
+        return addTryNote(JSTRY_DESTRUCTURING_ITERCLOSE, iterDepth, start, end);
     }
     return true;
 }
@@ -3991,6 +4014,7 @@ BytecodeEmitter::emitAssignment(ParseNode* lhs, JSOp compoundOp, ParseNode* rhs)
         switch (lhs->getKind()) {
           case ParseNodeKind::Dot: {
             PropertyAccess* prop = &lhs->as<PropertyAccess>();
+            // TODO(khyperia): Implement private field access.
             if (!poe->emitGet(prop->key().atom())) {      // [Super]
                 //                                        // THIS SUPERBASE PROP
                 //                                        // [Other]
@@ -4064,6 +4088,7 @@ BytecodeEmitter::emitAssignment(ParseNode* lhs, JSOp compoundOp, ParseNode* rhs)
     switch (lhs->getKind()) {
       case ParseNodeKind::Dot: {
         PropertyAccess* prop = &lhs->as<PropertyAccess>();
+        // TODO(khyperia): Implement private field access.
         if (!poe->emitAssignment(prop->key().atom())) {   // VAL
             return false;
         }
@@ -4413,6 +4438,31 @@ BytecodeEmitter::emitTry(TryNode* tryNode)
         return false;
     }
 
+    return true;
+}
+
+MOZ_MUST_USE bool
+BytecodeEmitter::emitGoSub(JumpList* jump)
+{
+    if (!emit1(JSOP_FALSE)) {
+        return false;
+    }
+
+    ptrdiff_t off;
+    if (!emitN(JSOP_RESUMEINDEX, 3, &off)) {
+        return false;
+    }
+
+    if (!emitJump(JSOP_GOSUB, jump)) {
+        return false;
+    }
+
+    uint32_t resumeIndex;
+    if (!allocateResumeIndexForCurrentOffset(&resumeIndex)) {
+        return false;
+    }
+
+    SET_RESUMEINDEX(code(off), resumeIndex);
     return true;
 }
 
@@ -4862,8 +4912,8 @@ BytecodeEmitter::emitSpread(bool allowSelfHosted)
     MOZ_ASSERT(loopInfo.breaks.offset == -1);
     MOZ_ASSERT(loopInfo.continues.offset == -1);
 
-    if (!tryNoteList.append(JSTRY_FOR_OF, stackDepth, loopInfo.headOffset(),
-                            loopInfo.breakTargetOffset()))
+    if (!addTryNote(JSTRY_FOR_OF, stackDepth, loopInfo.headOffset(),
+                    loopInfo.breakTargetOffset()))
     {
         return false;
     }
@@ -6390,6 +6440,7 @@ BytecodeEmitter::emitDeleteProperty(UnaryNode* deleteNode)
     MOZ_ASSERT(deleteNode->isKind(ParseNodeKind::DeleteProp));
 
     PropertyAccess* propExpr = &deleteNode->kid()->as<PropertyAccess>();
+    // TODO(khyperia): Implement private field access.
     PropOpEmitter poe(this,
                       PropOpEmitter::Kind::Delete,
                       propExpr->as<PropertyAccess>().isSuper()
@@ -6791,6 +6842,7 @@ BytecodeEmitter::emitCalleeAndThis(ParseNode* callee, ParseNode* call, CallOrNew
       case ParseNodeKind::Dot: {
         MOZ_ASSERT(emitterMode != BytecodeEmitter::SelfHosting);
         PropertyAccess* prop = &callee->as<PropertyAccess>();
+        // TODO(khyperia): Implement private field access.
         bool isSuper = prop->isSuper();
 
         PropOpEmitter& poe = cone.prepareForPropCallee(isSuper);
@@ -7016,7 +7068,9 @@ BytecodeEmitter::emitCallOrNew(BinaryNode* callNode,
                  cur->isKind(ParseNodeKind::Dot);
                  cur = &cur->as<PropertyAccess>().expression())
             {
-                ParseNode* left = &cur->as<PropertyAccess>().expression();
+                PropertyAccess* prop = &cur->as<PropertyAccess>();
+                ParseNode* left = &prop->expression();
+                // TODO(khyperia): Implement private field access.
                 if (left->isKind(ParseNodeKind::Name) || left->isKind(ParseNodeKind::This) ||
                     left->isKind(ParseNodeKind::SuperBase))
                 {
@@ -7300,6 +7354,10 @@ bool
 BytecodeEmitter::emitPropertyList(ListNode* obj, MutableHandlePlainObject objp, PropListType type)
 {
     for (ParseNode* propdef : obj->contents()) {
+        if (propdef->is<ClassField>()) {
+            // TODO(khyperia): Implement private field access.
+            return false;
+        }
         if (!updateSourceCoordNotes(propdef->pn_pos.begin)) {
             return false;
         }
@@ -8130,9 +8188,13 @@ BytecodeEmitter::emitClass(ClassNode* classNode)
 {
     ClassNames* names = classNode->names();
     ParseNode* heritageExpression = classNode->heritage();
-    ListNode* classMethods = classNode->methodList();
+    ListNode* classMembers = classNode->memberList();
     CodeNode* constructor = nullptr;
-    for (ParseNode* mn : classMethods->contents()) {
+    for (ParseNode* mn : classMembers->contents()) {
+        if (mn->is<ClassField>()) {
+            // TODO(khyperia): Implement private field access.
+            return false;
+        }
         ClassMethod& method = mn->as<ClassMethod>();
         ParseNode& methodName = method.name();
         if (!method.isStatic() &&
@@ -8319,7 +8381,7 @@ BytecodeEmitter::emitClass(ClassNode* classNode)
     }
 
     RootedPlainObject obj(cx);
-    if (!emitPropertyList(classMethods, &obj, ClassBody)) {     // ... CONSTRUCTOR HOMEOBJ
+    if (!emitPropertyList(classMembers, &obj, ClassBody)) {     // ... CONSTRUCTOR HOMEOBJ
         return false;
     }
 
@@ -8691,6 +8753,7 @@ BytecodeEmitter::emitTree(ParseNode* pn, ValueUsage valueUsage /* = ValueUsage::
 
       case ParseNodeKind::Dot: {
         PropertyAccess* prop = &pn->as<PropertyAccess>();
+        // TODO(khyperia): Implement private field access.
         bool isSuper = prop->isSuper();
         PropOpEmitter poe(this,
                           PropOpEmitter::Kind::Get,
@@ -8878,10 +8941,6 @@ BytecodeEmitter::emitTree(ParseNode* pn, ValueUsage valueUsage /* = ValueUsage::
         break;
 
       case ParseNodeKind::CallImport:
-        if (!cx->runtime()->moduleDynamicImportHook) {
-            reportError(nullptr, JSMSG_NO_DYNAMIC_IMPORT);
-            return false;
-        }
         if (!emitTree(pn->as<BinaryNode>().right()) || !emit1(JSOP_DYNAMIC_IMPORT)) {
             return false;
         }
@@ -8920,6 +8979,16 @@ AllocSrcNote(JSContext* cx, SrcNotesVector& notes, unsigned* index)
 
     *index = notes.length() - 1;
     return true;
+}
+
+bool
+BytecodeEmitter::addTryNote(JSTryNoteKind kind, uint32_t stackDepth, size_t start, size_t end)
+{
+    // The tryNoteList stores offsets relative to current section should must
+    // be main section. During tryNoteList.finish(), the prologueLength will be
+    // added to correct offset.
+    MOZ_ASSERT(!inPrologue());
+    return tryNoteList.append(kind, stackDepth, start, end);
 }
 
 bool
@@ -9189,6 +9258,9 @@ CGTryNoteList::append(JSTryNoteKind kind, uint32_t stackDepth, size_t start, siz
     MOZ_ASSERT(size_t(uint32_t(start)) == start);
     MOZ_ASSERT(size_t(uint32_t(end)) == end);
 
+    // Offsets are given relative to sections, but we only expect main-section
+    // to have TryNotes. In finish() we will fixup base offset.
+
     JSTryNote note;
     note.kind = kind;
     note.stackDepth = stackDepth;
@@ -9199,11 +9271,12 @@ CGTryNoteList::append(JSTryNoteKind kind, uint32_t stackDepth, size_t start, siz
 }
 
 void
-CGTryNoteList::finish(mozilla::Span<JSTryNote> array)
+CGTryNoteList::finish(mozilla::Span<JSTryNote> array, uint32_t prologueLength)
 {
     MOZ_ASSERT(length() == array.size());
 
     for (unsigned i = 0; i < length(); i++) {
+        list[i].start += prologueLength;
         array[i] = list[i];
     }
 }
@@ -9214,6 +9287,9 @@ CGScopeNoteList::append(uint32_t scopeIndex, uint32_t offset, bool inPrologue,
 {
     CGScopeNote note;
     mozilla::PodZero(&note);
+
+    // Offsets are given relative to sections. In finish() we will fixup base
+    // offset if needed.
 
     note.index = scopeIndex;
     note.start = offset;
@@ -9251,7 +9327,7 @@ CGScopeNoteList::finish(mozilla::Span<ScopeNote> array, uint32_t prologueLength)
 }
 
 void
-CGYieldAndAwaitOffsetList::finish(mozilla::Span<uint32_t> array, uint32_t prologueLength)
+CGResumeOffsetList::finish(mozilla::Span<uint32_t> array, uint32_t prologueLength)
 {
     MOZ_ASSERT(length() == array.size());
 

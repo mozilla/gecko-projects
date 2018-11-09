@@ -92,10 +92,6 @@ namespace layers {
 struct TextureFactoryIdentifier;
 } // namespace layers
 
-namespace layout {
-class PRenderFrameParent;
-} // namespace layout
-
 namespace dom {
 
 class Element;
@@ -543,7 +539,6 @@ public:
   virtual mozilla::ipc::IPCResult
   RecvCreateWindow(PBrowserParent* aThisTabParent,
                    PBrowserParent* aNewTab,
-                   layout::PRenderFrameParent* aRenderFrame,
                    const uint32_t& aChromeFlags,
                    const bool& aCalledFromJS,
                    const bool& aPositionSpecified,
@@ -569,8 +564,6 @@ public:
     const nsString& aName,
     const IPC::Principal& aTriggeringPrincipal,
     const uint32_t& aReferrerPolicy) override;
-
-  static bool AllocateLayerTreeId(TabParent* aTabParent, layers::LayersId* aId);
 
   static void
   BroadcastBlobURLRegistration(const nsACString& aURI,
@@ -870,10 +863,6 @@ private:
 
   static void ForceKillTimerCallback(nsITimer* aTimer, void* aClosure);
 
-  static bool AllocateLayerTreeId(ContentParent* aContent,
-                                  TabParent* aTopLevel, const TabId& aTabId,
-                                  layers::LayersId* aId);
-
   /**
    * Get or create the corresponding content parent array to |aContentProcessType|.
    */
@@ -1033,9 +1022,6 @@ private:
   virtual mozilla::ipc::IPCResult RecvBeep() override;
   virtual mozilla::ipc::IPCResult RecvPlayEventSound(const uint32_t& aEventId) override;
 
-  virtual mozilla::ipc::IPCResult RecvGetSystemColors(const uint32_t& colorsCount,
-                                                      InfallibleTArray<uint32_t>* colors) override;
-
   virtual mozilla::ipc::IPCResult RecvGetIconForExtension(const nsCString& aFileExt,
                                                           const uint32_t& aIconSize,
                                                           InfallibleTArray<uint8_t>* bits) override;
@@ -1142,13 +1128,6 @@ public:
                                                   const bool& aInPrivateBrowsing) override;
 
   virtual void ProcessingError(Result aCode, const char* aMsgName) override;
-
-  virtual mozilla::ipc::IPCResult RecvAllocateLayerTreeId(const ContentParentId& aCpId,
-                                                          const TabId& aTabId,
-                                                          layers::LayersId* aId) override;
-
-  virtual mozilla::ipc::IPCResult RecvDeallocateLayerTreeId(const ContentParentId& aCpId,
-                                                            const layers::LayersId& aId) override;
 
   virtual mozilla::ipc::IPCResult RecvGraphicsError(const nsCString& aError) override;
 
@@ -1261,6 +1240,8 @@ public:
   // Notify the ContentChild to enable the input event prioritization when
   // initializing.
   void MaybeEnableRemoteInputEventQueue();
+
+  void AppendSandboxParams(std::vector<std::string>& aArgs);
 
 public:
   void SendGetFilesResponseAndForget(const nsID& aID,
@@ -1389,6 +1370,13 @@ private:
 
   static uint64_t sNextTabParentId;
   static nsDataHashtable<nsUint64HashKey, TabParent*> sNextTabParents;
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+  // When set to true, indicates that content processes should
+  // initialize their sandbox during startup instead of waiting
+  // for the SetProcessSandbox IPDL message.
+  static bool sEarlySandboxInit;
+#endif
 };
 
 } // namespace dom

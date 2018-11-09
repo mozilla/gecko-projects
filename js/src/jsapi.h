@@ -262,7 +262,7 @@ struct JSErrorInterceptor {
      *
      * This method MUST be infallible.
      */
-    virtual void interceptError(JSContext* cx, const JS::Value& error) = 0;
+    virtual void interceptError(JSContext* cx, JS::HandleValue error) = 0;
 };
 
 /************************************************************************/
@@ -3457,8 +3457,7 @@ GetPromiseUserInputEventHandlingState(JS::HandleObject promise);
  * Sets the given Promise's activation behavior state flag per above as a
  * JS::PromiseUserInputEventHandlingState value.
  *
- * Returns false if the given object is a wrapper that can't safely be unwrapped,
- * or if the promise isn't pending.
+ * Returns false if the given object is a wrapper that can't safely be unwrapped.
  */
 extern JS_PUBLIC_API(bool)
 SetPromiseUserInputEventHandlingState(JS::HandleObject promise,

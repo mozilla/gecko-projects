@@ -24,6 +24,8 @@ const ConnectSteps = createFactory(require("./ConnectSteps"));
 const NetworkLocationsForm = createFactory(require("./NetworkLocationsForm"));
 const NetworkLocationsList = createFactory(require("./NetworkLocationsList"));
 
+const { PREFERENCES } = require("../../constants");
+
 const USB_ICON_SRC = "chrome://devtools/skin/images/aboutdebugging-connect-icon.svg";
 const WIFI_ICON_SRC = "chrome://devtools/skin/images/aboutdebugging-connect-icon.svg";
 const GLOBE_ICON_SRC = "chrome://devtools/skin/images/aboutdebugging-globe-icon.svg";
@@ -35,12 +37,15 @@ class ConnectPage extends PureComponent {
       dispatch: PropTypes.func.isRequired,
       // Provided by wrapping the component with FluentReact.withLocalization.
       getString: PropTypes.func.isRequired,
+      networkEnabled: PropTypes.bool.isRequired,
       networkLocations: PropTypes.arrayOf(PropTypes.string).isRequired,
+      wifiEnabled: PropTypes.bool.isRequired,
     };
   }
 
   renderWifi() {
-    const { getString } = this.props;
+    const { getString, wifiEnabled } = this.props;
+
     return Localized(
       {
         id: "about-debugging-connect-wifi",
@@ -49,8 +54,9 @@ class ConnectPage extends PureComponent {
       ConnectSection(
         {
           icon: WIFI_ICON_SRC,
-          title: "Via WiFi (Recommended)",
+          title: "Via WiFi",
         },
+        wifiEnabled ?
         ConnectSteps({
           steps: [
             getString("about-debugging-connect-wifi-step-same-network"),
@@ -58,7 +64,19 @@ class ConnectPage extends PureComponent {
             getString("about-debugging-connect-wifi-step-open-options"),
             getString("about-debugging-connect-wifi-step-enable-debug"),
           ],
-        })
+        }) :
+        Localized(
+          {
+            id: "about-debugging-connect-wifi-disabled",
+            $pref: PREFERENCES.WIFI_ENABLED,
+          },
+          dom.div(
+            {
+              className: "connect-page__disabled-section",
+            },
+            "about-debugging-connect-wifi-disabled"
+          )
+        )
       )
     );
   }
@@ -103,7 +121,7 @@ class ConnectPage extends PureComponent {
       },
       dom.button(
         {
-          className: "std-button connect-page__usb__toggle-button " +
+          className: "default-button connect-page__usb__toggle-button " +
                      "js-connect-usb-toggle-button",
           disabled,
           onClick: () => this.onToggleUSBClick(),
@@ -153,7 +171,8 @@ class ConnectPage extends PureComponent {
   }
 
   renderNetwork() {
-    const { dispatch, networkLocations } = this.props;
+    const { dispatch, networkEnabled, networkLocations } = this.props;
+
     return Localized(
       {
         id: "about-debugging-connect-network",
@@ -165,9 +184,30 @@ class ConnectPage extends PureComponent {
           icon: GLOBE_ICON_SRC,
           title: "Via Network Location",
         },
-        NetworkLocationsList({ dispatch, networkLocations }),
-        dom.hr({ className: "separator separator--breathe" }),
-        NetworkLocationsForm({ dispatch }),
+        ...(
+          networkEnabled ?
+          [
+            NetworkLocationsList({ dispatch, networkLocations }),
+            dom.hr({ className: "separator separator--breathe" }),
+            NetworkLocationsForm({ dispatch }),
+          ] : [
+            // We are using an array for this single element because of the spread
+            // operator (...). The spread operator avoids React warnings about missing
+            // keys.
+            Localized(
+              {
+                id: "about-debugging-connect-network-disabled",
+                $pref: PREFERENCES.NETWORK_ENABLED,
+              },
+              dom.div(
+                {
+                  className: "connect-page__disabled-section",
+                },
+                "about-debugging-connect-network-disabled"
+              )
+            ),
+          ]
+        )
       )
     );
   }

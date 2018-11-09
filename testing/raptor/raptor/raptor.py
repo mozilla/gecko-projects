@@ -7,6 +7,7 @@ from __future__ import absolute_import
 
 import json
 import os
+import subprocess
 import sys
 import time
 
@@ -36,12 +37,15 @@ from outputhandler import OutputHandler
 from manifest import get_raptor_test_list
 from playback import get_playback
 from results import RaptorResultsHandler
+from gecko_profile import GeckoProfile
 
 
 class Raptor(object):
     """Container class for Raptor"""
 
-    def __init__(self, app, binary, run_local=False, obj_path=None):
+    def __init__(self, app, binary, run_local=False, obj_path=None,
+                 gecko_profile=False, gecko_profile_interval=None, gecko_profile_entries=None,
+                 symbols_path=None):
         self.config = {}
         self.config['app'] = app
         self.config['binary'] = binary
@@ -49,11 +53,17 @@ class Raptor(object):
         self.config['processor'] = mozinfo.processor
         self.config['run_local'] = run_local
         self.config['obj_path'] = obj_path
+        self.config['gecko_profile'] = gecko_profile
+        self.config['gecko_profile_interval'] = gecko_profile_interval
+        self.config['gecko_profile_entries'] = gecko_profile_entries
+        self.config['symbols_path'] = symbols_path
         self.raptor_venv = os.path.join(os.getcwd(), 'raptor-venv')
         self.log = get_default_logger(component='raptor-main')
         self.control_server = None
         self.playback = None
         self.benchmark = None
+        self.gecko_profiler = None
+        self.post_startup_delay = 30000  # raptor webext pause time after browser startup
 
         # Create the profile; for geckoview we want a firefox profile type
         if self.config['app'] == 'geckoview':
@@ -139,6 +149,7 @@ class Raptor(object):
         gen_test_config(self.config['app'],
                         test['name'],
                         self.control_server.port,
+                        self.post_startup_delay,
                         benchmark_port)
 
         # for android we must make the benchmarks server available to the device
@@ -148,6 +159,8 @@ class Raptor(object):
             self.device.create_socket_connection('reverse', _tcp_port, _tcp_port)
 
         # must intall raptor addon each time because we dynamically update some content
+        # note: for chrome the addon is just a list of paths that ultimately are added
+        # to the chromium command line '--load-extension' argument
         raptor_webext = os.path.join(webext_dir, 'raptor')
         self.log.info("installing webext %s" % raptor_webext)
         self.profile.addons.install(raptor_webext)
@@ -201,6 +214,7 @@ class Raptor(object):
                                             "GeckoViewActivity",
                                             extra_args=extra_args,
                                             url='about:blank',
+                                            e10s=True,
                                             fail_if_running=False)
             except Exception:
                 self.log.error("Exception launching %s" % self.config['binary'])
@@ -209,6 +223,13 @@ class Raptor(object):
             self.control_server.app_name = self.config['binary']
 
         else:
+            # For Firefox we need to set MOZ_MOZ_DISABLE_NONLOCAL_CONNECTIONS=1 env var before
+            # startup. This is because of restrictions on moz-beta that require webext to be
+            # signed unless disable non-local connections
+            if self.config['app'] == "firefox":
+                self.log.info("setting MOZ_DISABLE_NONLOCAL_CONNECTIONS=1")
+                os.environ['MOZ_DISABLE_NONLOCAL_CONNECTIONS'] = "1"
+
             # now start the desktop browser
             self.log.info("starting %s" % self.config['app'])
 
@@ -227,11 +248,31 @@ class Raptor(object):
 
             self.control_server.browser_proc = proc
 
+            # pageload tests need to be able to access non-local connections via mitmproxy
+            if self.config['app'] == "firefox" and test.get('playback', None) is not None:
+                self.log.info("setting MOZ_DISABLE_NONLOCAL_CONNECTIONS=0")
+                os.environ['MOZ_DISABLE_NONLOCAL_CONNECTIONS'] = "0"
+
+            # if geckoProfile is enabled, initialize it
+            if self.config['gecko_profile'] is True:
+                self._init_gecko_profiling(test)
+                # tell the control server the gecko_profile dir; the control server will
+                # receive the actual gecko profiles from the web ext and will write them
+                # to disk; then profiles are picked up by gecko_profile.symbolicate
+                self.control_server.gecko_profile_dir = self.gecko_profiler.gecko_profile_dir
+
         # set our cs flag to indicate we are running the browser/app
         self.control_server._finished = False
 
         # convert to seconds and account for page cycles
         timeout = int(timeout / 1000) * int(test['page_cycles'])
+        # account for the pause the raptor webext runner takes after browser startup
+        timeout += int(self.post_startup_delay / 1000)
+
+        # if geckoProfile enabled, give browser more time for profiling
+        if self.config['gecko_profile'] is True:
+            timeout += 5 * 60
+
         try:
             elapsed_time = 0
             while not self.control_server._finished:
@@ -253,16 +294,36 @@ class Raptor(object):
             self.playback.stop()
 
         # remove the raptor webext; as it must be reloaded with each subtest anyway
-        # applies to firefox only; chrome the addon is actually just cmd line arg
+        self.log.info("removing webext %s" % raptor_webext)
         if self.config['app'] in ["firefox", "geckoview"]:
-            self.log.info("removing webext %s" % raptor_webext)
             self.profile.addons.remove_addon(webext_id)
+
+        # for chrome the addon is just a list (appended to cmd line)
+        if self.config['app'] in ["chrome", "chrome-android"]:
+            self.profile.addons.remove(raptor_webext)
+
+        # gecko profiling symbolication
+        if self.config['gecko_profile'] is True:
+            self.gecko_profiler.symbolicate()
+            # clean up the temp gecko profiling folders
+            self.log.info("cleaning up after gecko profiling")
+            self.gecko_profiler.clean()
 
         if self.config['app'] != "geckoview":
             if self.runner.is_running():
                 self.runner.stop()
         # TODO the geckoview app should have been shutdown by this point by the
         # control server, but we can double-check here to make sure
+
+    def _init_gecko_profiling(self, test):
+        self.log.info("initializing gecko profiler")
+        upload_dir = os.getenv('MOZ_UPLOAD_DIR')
+        if not upload_dir:
+            self.log.critical("Profiling ignored because MOZ_UPLOAD_DIR was not set")
+        else:
+            self.gecko_profiler = GeckoProfile(upload_dir,
+                                               self.config,
+                                               test)
 
     def process_results(self):
         # when running locally output results in build/raptor.json; when running
@@ -294,6 +355,61 @@ class Raptor(object):
         self.log.info("finished")
 
 
+def view_gecko_profile(ffox_bin):
+    # automatically load the latest talos gecko-profile archive in perf-html.io
+    LOG = get_default_logger(component='raptor-view-gecko-profile')
+
+    if sys.platform.startswith('win') and not ffox_bin.endswith(".exe"):
+        ffox_bin = ffox_bin + ".exe"
+
+    if not os.path.exists(ffox_bin):
+        LOG.info("unable to find Firefox bin, cannot launch view-gecko-profile")
+        return
+
+    profile_zip = os.environ.get('RAPTOR_LATEST_GECKO_PROFILE_ARCHIVE', None)
+    if profile_zip is None or not os.path.exists(profile_zip):
+        LOG.info("No local talos gecko profiles were found so not launching perf-html.io")
+        return
+
+    # need the view-gecko-profile tool, it's in repo/testing/tools
+    repo_dir = os.environ.get('MOZ_DEVELOPER_REPO_DIR', None)
+    if repo_dir is None:
+        LOG.info("unable to find MOZ_DEVELOPER_REPO_DIR, can't launch view-gecko-profile")
+        return
+
+    view_gp = os.path.join(repo_dir, 'testing', 'tools',
+                           'view_gecko_profile', 'view_gecko_profile.py')
+    if not os.path.exists(view_gp):
+        LOG.info("unable to find the view-gecko-profile tool, cannot launch it")
+        return
+
+    command = ['python',
+               view_gp,
+               '-b', ffox_bin,
+               '-p', profile_zip]
+
+    LOG.info('Auto-loading this profile in perfhtml.io: %s' % profile_zip)
+    LOG.info(command)
+
+    # if the view-gecko-profile tool fails to launch for some reason, we don't
+    # want to crash talos! just dump error and finsh up talos as usual
+    try:
+        view_profile = subprocess.Popen(command,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE)
+        # that will leave it running in own instance and let talos finish up
+    except Exception as e:
+        LOG.info("failed to launch view-gecko-profile tool, exeption: %s" % e)
+        return
+
+    time.sleep(5)
+    ret = view_profile.poll()
+    if ret is None:
+        LOG.info("view-gecko-profile successfully started as pid %d" % view_profile.pid)
+    else:
+        LOG.error('view-gecko-profile process failed to start, poll returned: %s' % ret)
+
+
 def main(args=sys.argv[1:]):
     args = parse_args()
     commandline.setup_logging('raptor', args, {'tbpl': sys.stdout})
@@ -315,7 +431,14 @@ def main(args=sys.argv[1:]):
     for next_test in raptor_test_list:
         LOG.info(next_test['name'])
 
-    raptor = Raptor(args.app, args.binary, args.run_local, args.obj_path)
+    raptor = Raptor(args.app,
+                    args.binary,
+                    args.run_local,
+                    args.obj_path,
+                    args.gecko_profile,
+                    args.gecko_profile_interval,
+                    args.gecko_profile_entries,
+                    args.symbols_path)
 
     raptor.start_control_server()
 
@@ -324,6 +447,7 @@ def main(args=sys.argv[1:]):
             next_test['page_timeout'] = 120000
         if 'page_cycles' not in next_test.keys():
             next_test['page_cycles'] = 1
+
         raptor.run_test(next_test, timeout=int(next_test['page_timeout']))
 
     success = raptor.process_results()
@@ -343,6 +467,14 @@ def main(args=sys.argv[1:]):
             LOG.critical("TEST-UNEXPECTED-FAIL: test '%s' timed out loading test page: %s"
                          % (_page['test_name'], _page['url']))
         os.sys.exit(1)
+
+    # when running raptor locally with gecko profiling on, use the view-gecko-profile
+    # tool to automatically load the latest gecko profile in perf-html.io
+    if args.gecko_profile and args.run_local:
+        if os.environ.get('DISABLE_PROFILE_LAUNCH', '0') == '1':
+            LOG.info("Not launching perf-html.io because DISABLE_PROFILE_LAUNCH=1")
+        else:
+            view_gecko_profile(args.binary)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,6 @@ window._gBrowser = {
 
     XPCOMUtils.defineLazyServiceGetters(this, {
       serializationHelper: ["@mozilla.org/network/serialization-helper;1", "nsISerializationHelper"],
-      mURIFixup: ["@mozilla.org/docshell/urifixup;1", "nsIURIFixup"],
     });
 
     Services.obs.addObserver(this, "contextual-identity-updated");
@@ -286,10 +285,7 @@ window._gBrowser = {
   _setupInitialBrowserAndTab() {
     // See browser.js for the meaning of window.arguments.
     let userContextId = window.arguments && window.arguments[6];
-
-    // Bug 1362774 will adjust this to only set `uriIsAboutBlank` when
-    // necessary. For now, we always pass it.
-    let browser = this._createBrowser({uriIsAboutBlank: true, userContextId});
+    let browser = this._createBrowser({uriIsAboutBlank: false, userContextId});
     browser.setAttribute("primary", "true");
     browser.setAttribute("blank", "true");
     if (gBrowserAllowScriptsToCloseInitialTabs) {
@@ -710,7 +706,7 @@ window._gBrowser = {
   /**
    * Determine if a URI is an about: page pointing to a local resource.
    */
-  _isLocalAboutURI(aURI, aResolvedURI) {
+  isLocalAboutURI(aURI, aResolvedURI) {
     if (!aURI.schemeIs("about")) {
       return false;
     }
@@ -734,6 +730,15 @@ window._gBrowser = {
     } catch (ex) {
       // aURI might be invalid.
       return false;
+    }
+  },
+
+  /**
+   * Sets an icon for the tab if the URI is defined in FAVICON_DEFAULTS.
+   */
+  setDefaultIcon(aTab, aURI) {
+    if (aURI && aURI.spec in FAVICON_DEFAULTS) {
+      this.setIcon(aTab, FAVICON_DEFAULTS[aURI.spec]);
     }
   },
 
@@ -820,7 +825,7 @@ window._gBrowser = {
     // XXX https://bugzilla.mozilla.org/show_bug.cgi?id=22183#c239
     try {
       if (docElement.getAttribute("chromehidden").includes("location")) {
-        var uri = this.mURIFixup.createExposableURI(
+        var uri = Services.uriFixup.createExposableURI(
           aBrowser.currentURI);
         if (uri.scheme == "about")
           newTitle = uri.spec + sep + newTitle;
@@ -1118,7 +1123,7 @@ window._gBrowser = {
         return;
       }
 
-      if (!window.fullScreen || isTabEmpty(newTab)) {
+      if (!window.fullScreen || newTab.isEmpty) {
         focusAndSelectUrlBar();
         return;
       }
@@ -1243,7 +1248,7 @@ window._gBrowser = {
       // See if we can use the URI as the title.
       if (browser.currentURI.displaySpec) {
         try {
-          title = this.mURIFixup.createExposableURI(browser.currentURI).displaySpec;
+          title = Services.uriFixup.createExposableURI(browser.currentURI).displaySpec;
         } catch (ex) {
           title = browser.currentURI.displaySpec;
         }
@@ -1815,7 +1820,10 @@ window._gBrowser = {
     userContextId,
   } = {}) {
     let b = document.createXULElement("browser");
-    b.permanentKey = {};
+    // Use the JSM global to create the permanentKey, so that if the
+    // permanentKey is held by something after this window closes, it
+    // doesn't keep the window alive.
+    b.permanentKey = new (Cu.getGlobalForObject(Services).Object);
 
     const defaultBrowserAttributes = {
       contextmenu: "contentAreaContextMenu",
@@ -2502,9 +2510,7 @@ window._gBrowser = {
 
     // Hack to ensure that the about:newtab, and about:welcome favicon is loaded
     // instantaneously, to avoid flickering and improve perceived performance.
-    if (aURI in FAVICON_DEFAULTS) {
-      this.setIcon(t, FAVICON_DEFAULTS[aURI]);
-    }
+    this.setDefaultIcon(t, aURIObject);
 
     // Dispatch a new tab notification.  We do this once we're
     // entirely done, so that things are in a consistent state
@@ -2580,7 +2586,7 @@ window._gBrowser = {
 
   moveTabsToStart(contextTab) {
     let tabs = contextTab.multiselected ?
-      gBrowser.selectedTabs :
+      this.selectedTabs :
       [contextTab];
     // Walk the array in reverse order so the tabs are kept in order.
     for (let i = tabs.length - 1; i >= 0; i--) {
@@ -2593,7 +2599,7 @@ window._gBrowser = {
 
   moveTabsToEnd(contextTab) {
     let tabs = contextTab.multiselected ?
-      gBrowser.selectedTabs :
+      this.selectedTabs :
       [contextTab];
     for (let tab of tabs) {
       if (tab._tPos < this.tabs.length - 1) {
@@ -2652,21 +2658,16 @@ window._gBrowser = {
   },
 
   getTabsToTheEndFrom(aTab) {
-    let tab;
-    if (aTab.multiselected) {
-      // In a multi-select context, pick the rightmost
-      // selected tab as reference.
-      let selectedTabs = this.selectedTabs;
-      tab = selectedTabs[selectedTabs.length - 1];
-    } else {
-      tab = aTab;
-    }
-
     let tabsToEnd = [];
     let tabs = this.visibleTabs;
     for (let i = tabs.length - 1; i >= 0; --i) {
-      if (tabs[i] == tab || tabs[i].pinned) {
+      if (tabs[i] == aTab || tabs[i].pinned) {
         break;
+      }
+      // In a multi-select context, select all unselected tabs
+      // starting from the context tab.
+      if (aTab.multiselected && tabs[i].multiselected) {
+        continue;
       }
       tabsToEnd.push(tabs[i]);
     }
@@ -4813,7 +4814,7 @@ class TabProgressListener {
     // Don't show progress indicators in tabs for about: URIs
     // pointing to local resources.
     if ((aRequest instanceof Ci.nsIChannel) &&
-        gBrowser._isLocalAboutURI(aRequest.originalURI, aRequest.URI)) {
+        gBrowser.isLocalAboutURI(aRequest.originalURI, aRequest.URI)) {
       return false;
     }
 
@@ -5008,7 +5009,7 @@ class TabProgressListener {
 
       if (aWebProgress.isTopLevel) {
         let isSuccessful = Components.isSuccessCode(aStatus);
-        if (!isSuccessful && !isTabEmpty(this.mTab)) {
+        if (!isSuccessful && !this.mTab.isEmpty) {
           // Restore the current document's location in case the
           // request was stopped (possibly from a content script)
           // before the location changed.
@@ -5353,6 +5354,8 @@ var TabBarVisibility = {
     this._initialUpdateDone = true;
 
     toolbar.collapsed = collapse;
+    let navbar = document.getElementById("nav-bar");
+    navbar.setAttribute("tabs-hidden", collapse);
 
     document.getElementById("menu_closeWindow").hidden = collapse;
     document.getElementById("menu_close").setAttribute("label",
@@ -5451,9 +5454,6 @@ var TabContextMenu = {
     // Only one of close_tab/close_selected_tabs should be visible
     document.getElementById("context_closeTab").hidden = multiselectionContext;
     document.getElementById("context_closeSelectedTabs").hidden = !multiselectionContext;
-
-    // Disable "Close Tab Options" if all tabs are selected
-    document.getElementById("context_closeTabOptions").disabled = gBrowser.allTabsSelected();
 
     // Hide "Bookmark Tab" for multiselection.
     // Update its state if visible.

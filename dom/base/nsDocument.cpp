@@ -259,6 +259,7 @@
 #include "mozilla/dom/TabGroup.h"
 #ifdef MOZ_XUL
 #include "mozilla/dom/XULBroadcastManager.h"
+#include "mozilla/dom/XULPersist.h"
 #include "mozilla/dom/TreeBoxObject.h"
 #include "nsIXULWindow.h"
 #include "nsXULCommandDispatcher.h"
@@ -282,6 +283,7 @@
 #include "nsHTMLTags.h"
 #include "NodeUbiReporting.h"
 #include "nsICookieService.h"
+#include "mozilla/net/RequestContextService.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -496,9 +498,7 @@ struct PositionComparator
 
   int operator()(void* aElement) const {
     Element* curElement = static_cast<Element*>(aElement);
-    if (mElement == curElement) {
-      return 0;
-    }
+    MOZ_DIAGNOSTIC_ASSERT(mElement != curElement);
     if (nsContentUtils::PositionIsBefore(mElement, curElement)) {
       return -1;
     }
@@ -508,48 +508,40 @@ struct PositionComparator
 
 } // namespace
 
-bool
+void
 nsIdentifierMapEntry::AddIdElement(Element* aElement)
 {
   MOZ_ASSERT(aElement, "Must have element");
-  MOZ_ASSERT(!mIdContentList.Contains(nullptr),
-                  "Why is null in our list?");
-
-#ifdef DEBUG
-  Element* currentElement = mIdContentList.SafeElementAt(0);
-#endif
+  MOZ_ASSERT(!mIdContentList.Contains(nullptr), "Why is null in our list?");
 
   // Common case
   if (mIdContentList.IsEmpty()) {
-    if (!mIdContentList.AppendElement(aElement))
-      return false;
-    NS_ASSERTION(currentElement == nullptr, "How did that happen?");
+    mIdContentList.AppendElement(aElement);
     FireChangeCallbacks(nullptr, aElement);
-    return true;
+    return;
   }
+
+#ifdef DEBUG
+  Element* currentElement = mIdContentList.ElementAt(0);
+#endif
 
   // We seem to have multiple content nodes for the same id, or XUL is messing
   // with us.  Search for the right place to insert the content.
 
   size_t idx;
-  if (BinarySearchIf(mIdContentList, 0, mIdContentList.Length(),
-                     PositionComparator(aElement), &idx)) {
-    // Already in the list, so already in the right spot.  Get out of here.
-    // XXXbz this only happens because XUL does all sorts of random
-    // UpdateIdTableEntry calls.  Hate, hate, hate!
-    return true;
-  }
+  BinarySearchIf(mIdContentList,
+                 0,
+                 mIdContentList.Length(),
+                 PositionComparator(aElement),
+                 &idx);
 
-  if (!mIdContentList.InsertElementAt(idx, aElement)) {
-    return false;
-  }
+  mIdContentList.InsertElementAt(idx, aElement);
 
   if (idx == 0) {
     Element* oldElement = mIdContentList.SafeElementAt(1);
     NS_ASSERTION(currentElement == oldElement, "How did that happen?");
     FireChangeCallbacks(oldElement, aElement);
   }
-  return true;
 }
 
 void
@@ -1407,7 +1399,6 @@ nsIDocument::nsIDocument()
     mHasCSP(false),
     mHasUnsafeEvalCSP(false),
     mHasUnsafeInlineCSP(false),
-    mHasTrackingContentLoaded(false),
     mBFCacheDisallowed(false),
     mHasHadDefaultView(false),
     mStyleSheetChangeEventsEnabled(false),
@@ -1443,9 +1434,6 @@ nsIDocument::nsIDocument()
     mDelayFrameLoaderInitialization(false),
     mSynchronousDOMContentLoaded(false),
     mMaybeServiceWorkerControlled(false),
-    mValidWidth(false),
-    mValidHeight(false),
-    mAutoSize(false),
     mAllowZoom(false),
     mValidScaleFloat(false),
     mValidMaxScale(false),
@@ -1509,7 +1497,8 @@ nsIDocument::nsIDocument()
     mIgnoreOpensDuringUnloadCounter(0),
     mNumTrackersFound(0),
     mNumTrackersBlocked(0),
-    mDocLWTheme(Doc_Theme_Uninitialized)
+    mDocLWTheme(Doc_Theme_Uninitialized),
+    mSavedResolution(1.0f)
 {
   SetIsInDocument();
   SetIsConnected(true);
@@ -1590,6 +1579,8 @@ nsIDocument::ConstructUbiNode(void* storage)
 nsDocument::~nsDocument()
 {
   MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug, ("DOCUMENT %p destroyed", this));
+  MOZ_ASSERT(!IsTopLevelContentDocument() || !IsResourceDoc(),
+             "Can't be top-level and a resource doc at the same time");
 
   NS_ASSERTION(!mIsShowing, "Destroying a currently-showing document");
 
@@ -1657,14 +1648,30 @@ nsDocument::~nsDocument()
       if (mDocTreeHadPlayRevoked) {
         ScalarAdd(Telemetry::ScalarID::MEDIA_PAGE_HAD_PLAY_REVOKED_COUNT, 1);
       }
+
+      if (IsHTMLDocument()) {
+        switch (GetCompatibilityMode()) {
+          case eCompatibility_FullStandards:
+            Telemetry::AccumulateCategorical(Telemetry::LABELS_QUIRKS_MODE::FullStandards);
+            break;
+          case eCompatibility_AlmostStandards:
+            Telemetry::AccumulateCategorical(Telemetry::LABELS_QUIRKS_MODE::AlmostStandards);
+            break;
+          case eCompatibility_NavQuirks:
+            Telemetry::AccumulateCategorical(Telemetry::LABELS_QUIRKS_MODE::NavQuirks);
+            break;
+          default:
+            MOZ_ASSERT_UNREACHABLE("Unknown quirks mode");
+            break;
+        }
+      }
     }
 
     // Report the fastblock telemetry probes when the document is dying if
     // fastblock is enabled and we're not a private document.  We always report
     // the all probe, and for the rest, report each category's probe depending
     // on whether the respective bit has been set in our enum set.
-    if (StaticPrefs::browser_contentblocking_enabled() &&
-        StaticPrefs::browser_fastblock_enabled() &&
+    if (StaticPrefs::browser_fastblock_enabled() &&
         !nsContentUtils::IsInPrivateBrowsing(this)) {
       for (auto label : mTrackerBlockedReasons) {
         AccumulateCategorical(label);
@@ -1748,6 +1755,10 @@ nsDocument::~nsDocument()
 
   if (mXULBroadcastManager) {
     mXULBroadcastManager->DropDocumentReference();
+  }
+
+  if (mXULPersist) {
+    mXULPersist->DropDocumentReference();
   }
 
   delete mHeaderData;
@@ -2231,20 +2242,35 @@ nsIDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup)
 }
 
 /**
- * DocumentL10n is currently allowed for system
- * principal.
- *
- * In the future we'll want to expose it to non-web-exposed
- * about:* pages.
+ * Determine whether the principal is allowed access to the localization system.
+ * We don't want the web to ever see this but all our UI including in content
+ * pages should pass this test.
  */
 bool
 PrincipalAllowsL10n(nsIPrincipal* principal)
 {
+  // The system principal is always allowed.
   if (nsContentUtils::IsSystemPrincipal(principal)) {
     return true;
   }
 
-  return false;
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = principal->GetURI(getter_AddRefs(uri));
+  NS_ENSURE_SUCCESS(rv, false);
+
+  bool hasFlags;
+
+  // Allow access to uris that cannot be loaded by web content.
+  rv = NS_URIChainHasFlags(uri, nsIProtocolHandler::URI_DANGEROUS_TO_LOAD, &hasFlags);
+  NS_ENSURE_SUCCESS(rv, false);
+  if (hasFlags) {
+    return true;
+  }
+
+  // UI resources also get access.
+  rv = NS_URIChainHasFlags(uri, nsIProtocolHandler::URI_IS_UI_RESOURCE, &hasFlags);
+  NS_ENSURE_SUCCESS(rv, false);
+  return hasFlags;
 }
 
 void
@@ -2340,7 +2366,7 @@ nsIDocument::ResetToURI(nsIURI* aURI,
       // Inform the associated request context about this load start so
       // any of its internal load progress flags gets reset.
       nsCOMPtr<nsIRequestContextService> rcsvc =
-        do_GetService("@mozilla.org/network/request-context-service;1");
+        mozilla::net::RequestContextService::GetOrCreate();
       if (rcsvc) {
         nsCOMPtr<nsIRequestContext> rc;
         rcsvc->GetRequestContextFromLoadGroup(aLoadGroup, getter_AddRefs(rc));
@@ -2415,7 +2441,7 @@ nsIDocument::MaybeDowngradePrincipal(nsIPrincipal* aPrincipal)
                                  "an expanded principal");
 
     auto* expanded = basePrin->As<ExpandedPrincipal>();
-    return do_AddRef(expanded->WhiteList().LastElement());
+    return do_AddRef(expanded->AllowList().LastElement());
   }
 
   if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
@@ -3399,7 +3425,8 @@ nsIDocument::GetL10n()
 bool
 nsDocument::DocumentSupportsL10n(JSContext* aCx, JSObject* aObject)
 {
-  return PrincipalAllowsL10n(nsContentUtils::SubjectPrincipal(aCx));
+  nsCOMPtr<nsIPrincipal> callerPrincipal = nsContentUtils::SubjectPrincipal(aCx);
+  return PrincipalAllowsL10n(callerPrincipal);
 }
 
 void
@@ -7419,28 +7446,6 @@ nsIDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
     // This function sets m{Min,Max}{Width,Height}.
     ParseWidthAndHeightInMetaViewport(widthStr, heightStr, scaleStr);
 
-    mAutoSize = false;
-    if (mMaxWidth == nsViewportInfo::DeviceSize) {
-      mAutoSize = true;
-    }
-    if (widthStr.IsEmpty() &&
-        (mMaxHeight == nsViewportInfo::DeviceSize ||
-         (mScaleFloat.scale == 1.0)))
-    {
-      mAutoSize = true;
-    }
-
-    // If width or height has not been set to a valid number by this point,
-    // fall back to a default value.
-    mValidWidth = (!widthStr.IsEmpty() && mMaxWidth > 0);
-    mValidHeight = (!heightStr.IsEmpty() && mMaxHeight > 0);
-
-    // If the width is set to some unrecognized value, and there is no
-    // height set, treat it as if device-width were specified.
-    if ((!mValidWidth && !widthStr.IsEmpty()) && !mValidHeight) {
-      mAutoSize = true;
-    }
-
     mAllowZoom = true;
     nsAutoString userScalable;
     GetHeaderData(nsGkAtoms::viewport_user_scalable, userScalable);
@@ -7590,7 +7595,16 @@ nsIDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
     CSSToScreenScale scaleMinFloat = effectiveMinScale * layoutDeviceScale;
     CSSToScreenScale scaleMaxFloat = effectiveMaxScale * layoutDeviceScale;
 
-    if (mAutoSize) {
+    const bool autoSize =
+      mMaxWidth == nsViewportInfo::DeviceSize ||
+      (mWidthStrEmpty &&
+       (mMaxHeight == nsViewportInfo::DeviceSize ||
+        mScaleFloat.scale == 1.0f)) ||
+      (!mWidthStrEmpty && mMaxWidth == nsViewportInfo::Auto && mMaxHeight < 0);
+
+    // FIXME: Resolving width and height should be done above 'Resolve width
+    // value' and 'Resolve height value'.
+    if (autoSize) {
       size = displaySize;
     }
 
@@ -7618,7 +7632,7 @@ nsIDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
     }
 
     return nsViewportInfo(scaleFloat, scaleMinFloat, scaleMaxFloat, size,
-                          mAutoSize, effectiveAllowZoom);
+                          autoSize, effectiveAllowZoom);
   }
 }
 
@@ -8982,6 +8996,13 @@ nsIDocument::SetReadyStateInternal(ReadyState rs)
   }
 
   if (READYSTATE_INTERACTIVE == rs) {
+    if (nsContentUtils::IsSystemPrincipal(NodePrincipal())) {
+      Element* root = GetRootElement();
+      if (root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozpersist)) {
+        mXULPersist = new XULPersist(this);
+        mXULPersist->Init();
+      }
+    }
     TriggerInitialDocumentTranslation();
   }
 
@@ -10712,8 +10733,12 @@ public:
     {
       if (mCurrent) {
         if (mRootShellForIteration && aOption == eDocumentsWithSameRoot) {
+          // Use a temporary to avoid undefined behavior from passing
+          // mRootShellForIteration.
+          nsCOMPtr<nsIDocShellTreeItem> root;
           mRootShellForIteration->
-            GetRootTreeItem(getter_AddRefs(mRootShellForIteration));
+            GetRootTreeItem(getter_AddRefs(root));
+          mRootShellForIteration = root.forget();
         }
         SkipToNextMatch();
       }
@@ -10749,7 +10774,9 @@ public:
             continue;
           }
           while (docShell && docShell != mRootShellForIteration) {
-            docShell->GetParent(getter_AddRefs(docShell));
+            nsCOMPtr<nsIDocShellTreeItem> parent;
+            docShell->GetParent(getter_AddRefs(parent));
+            docShell = parent.forget();
           }
           if (docShell) {
             break;
@@ -11169,6 +11196,14 @@ nsIDocument::CleanupFullscreenState()
   }
   mFullscreenStack.Clear();
   mFullscreenRoot = nullptr;
+
+  // Restore the zoom level that was in place prior to entering fullscreen.
+  if (nsIPresShell* shell = GetShell()) {
+    if (shell->GetMobileViewportManager()) {
+      shell->SetResolutionAndScaleTo(mSavedResolution);
+    }
+  }
+
   UpdateViewportScrollbarOverrideForFullscreen(this);
 }
 
@@ -11572,6 +11607,21 @@ nsIDocument::ApplyFullscreen(UniquePtr<FullscreenRequest> aRequest)
   nsIDocument* child = this;
   while (true) {
     child->SetFullscreenRoot(fullScreenRootDoc);
+
+    // When entering fullscreen, reset the RCD's resolution to the intrinsic
+    // resolution, otherwise the fullscreen content could be sized larger than
+    // the screen (since fullscreen is implemented using position:fixed and
+    // fixed elements are sized to the layout viewport).
+    // This also ensures that things like video controls aren't zoomed in
+    // when in fullscreen mode.
+    if (nsIPresShell* shell = child->GetShell()) {
+      if (RefPtr<MobileViewportManager> manager = shell->GetMobileViewportManager()) {
+        // Save the previous resolution so it can be restored.
+        child->mSavedResolution = shell->GetResolution();
+        shell->SetResolutionAndScaleTo(manager->ComputeIntrinsicResolution());
+      }
+    }
+
     NS_ASSERTION(child->GetFullscreenRoot() == fullScreenRootDoc,
         "Fullscreen root should be set!");
     if (child == fullScreenRootDoc) {
@@ -12378,6 +12428,7 @@ nsIDocument::InlineScriptAllowedByCSP()
                                        EmptyString(), // aNonce
                                        true,          // aParserCreated
                                        nullptr,       // aTriggeringElement
+                                       nullptr,       // aCSPEventListener
                                        EmptyString(), // FIXME get script sample (bug 1314567)
                                        0,             // aLineNumber
                                        0,             // aColumnNumber
@@ -12499,8 +12550,8 @@ nsIDocument::ReportUseCounters(UseCounterReportKind aKind)
     }
   }
 
-  if (IsTopLevelContentDocument() && !IsResourceDoc()) {
-    using mozilla::Telemetry::LABELS_HIDDEN_VIEWPORT_OVERFLOW_TYPE;
+  if (IsTopLevelContentDocument()) {
+    using Telemetry::LABELS_HIDDEN_VIEWPORT_OVERFLOW_TYPE;
     LABELS_HIDDEN_VIEWPORT_OVERFLOW_TYPE label;
     switch (mViewportOverflowType) {
 #define CASE_OVERFLOW_TYPE(t_)                            \
@@ -12931,8 +12982,7 @@ void
 nsIDocument::MaybeAllowStorageForOpener()
 {
   if (StaticPrefs::network_cookie_cookieBehavior() !=
-        nsICookieService::BEHAVIOR_REJECT_TRACKER ||
-      !AntiTrackingCommon::ShouldHonorContentBlockingCookieRestrictions()) {
+        nsICookieService::BEHAVIOR_REJECT_TRACKER) {
     return;
   }
 
@@ -13940,8 +13990,7 @@ nsIDocument::RequestStorageAccess(mozilla::ErrorResult& aRv)
 
   bool granted = true;
   bool isTrackingWindow = false;
-  if (AntiTrackingCommon::ShouldHonorContentBlockingCookieRestrictions() &&
-      StaticPrefs::network_cookie_cookieBehavior() ==
+  if (StaticPrefs::network_cookie_cookieBehavior() ==
         nsICookieService::BEHAVIOR_REJECT_TRACKER) {
     // Only do something special for third-party tracking content.
     if (nsContentUtils::StorageDisabledByAntiTracking(this, nullptr)) {

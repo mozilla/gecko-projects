@@ -4,6 +4,7 @@
 
 const FRECENCY_DEFAULT = 10000;
 
+ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://testing-common/httpd.js");
 
@@ -28,18 +29,17 @@ ChromeUtils.import("resource://testing-common/httpd.js");
 XPCOMUtils.defineLazyModuleGetters(this, {
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
   UrlbarProviderOpenTabs: "resource:///modules/UrlbarProviderOpenTabs.jsm",
+  UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.jsm",
 });
 
 const TITLE_SEARCH_ENGINE_SEPARATOR = " \u00B7\u2013\u00B7 ";
 
 async function cleanup() {
-  Services.prefs.clearUserPref("browser.urlbar.autocomplete.enabled");
   Services.prefs.clearUserPref("browser.urlbar.autoFill");
   Services.prefs.clearUserPref("browser.urlbar.autoFill.searchEngines");
   let suggestPrefs = [
     "history",
     "bookmark",
-    "history.onlyTyped",
     "openpage",
     "searches",
   ];
@@ -143,7 +143,18 @@ async function _check_autocomplete_matches(match, result) {
   info(`Checking match: ` +
        `actual=${JSON.stringify(actual)} ... ` +
        `expected=${JSON.stringify(expected)}`);
-  if (actual.value != expected.value || actual.comment != expected.comment) {
+
+  let actualAction = PlacesUtils.parseActionUrl(actual.value);
+  let expectedAction = PlacesUtils.parseActionUrl(expected.value);
+  if (actualAction && expectedAction) {
+    if (!ObjectUtils.deepEqual(actualAction, expectedAction)) {
+      return false;
+    }
+  } else if (actual.value != expected.value) {
+    return false;
+  }
+
+  if (actual.comment != expected.comment) {
     return false;
   }
 
@@ -307,13 +318,15 @@ var addBookmark = async function(aBookmarkObj) {
 
   if (aBookmarkObj.keyword) {
     await PlacesUtils.keywords.insert({ keyword: aBookmarkObj.keyword,
-                                        url: aBookmarkObj.uri.spec ? aBookmarkObj.uri.spec : aBookmarkObj.uri,
+                                        url: aBookmarkObj.uri instanceof Ci.nsIURI ? aBookmarkObj.uri.spec : aBookmarkObj.uri,
                                         postData: aBookmarkObj.postData,
                                       });
   }
 
   if (aBookmarkObj.tags) {
-    PlacesUtils.tagging.tagURI(aBookmarkObj.uri, aBookmarkObj.tags);
+    let uri = aBookmarkObj.uri instanceof Ci.nsIURI ?
+      aBookmarkObj.uri : Services.io.newURI(aBookmarkObj.uri);
+    PlacesUtils.tagging.tagURI(uri, aBookmarkObj.tags);
   }
 };
 
@@ -363,25 +376,21 @@ function makeActionURI(action, params) {
 // Creates a full "match" entry for a search result, suitable for passing as
 // an entry to check_autocomplete.
 function makeSearchMatch(input, extra = {}) {
-  // Note that counter-intuitively, the order the object properties are defined
-  // in the object passed to makeActionURI is important for check_autocomplete
-  // to match them :(
   let params = {
     engineName: extra.engineName || "MozSearch",
     input,
     searchQuery: "searchQuery" in extra ? extra.searchQuery : input,
   };
-  if ("alias" in extra) {
-    // May be undefined, which is expected, but in that case make sure it's not
-    // included in the params of the moz-action URL.
-    params.alias = extra.alias;
-  }
   let style = [ "action", "searchengine" ];
   if ("style" in extra && Array.isArray(extra.style)) {
     style.push(...extra.style);
   }
   if (extra.heuristic) {
     style.push("heuristic");
+  }
+  if ("alias" in extra) {
+    params.alias = extra.alias;
+    style.push("alias");
   }
   if ("searchSuggestion" in extra) {
     params.searchSuggestion = extra.searchSuggestion;
@@ -489,7 +498,7 @@ async function addTestSuggestionsEngine(suggestionsFn = null) {
     let searchStr = decodeURIComponent(req.queryString.replace(/\+/g, " "));
     let suggestions =
       suggestionsFn ? suggestionsFn(searchStr) :
-      ["foo", "bar"].map(s => searchStr + " " + s);
+      [searchStr].concat(["foo", "bar"].map(s => searchStr + " " + s));
     let data = [searchStr, suggestions];
     resp.setHeader("Content-Type", "application/json", false);
     resp.write(JSON.stringify(data));

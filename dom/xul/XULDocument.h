@@ -19,7 +19,6 @@
 #include "nsIStreamListener.h"
 #include "nsIStreamLoader.h"
 #include "nsICSSLoaderObserver.h"
-#include "nsIXULStore.h"
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/ScriptLoader.h"
@@ -83,16 +82,11 @@ public:
     NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
     NS_DECL_NSIMUTATIONOBSERVER_CONTENTINSERTED
     NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
-    NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
 
     /**
      * Notify the XUL document that a subtree has been added
      */
-    nsresult AddSubtreeToDocument(nsIContent* aContent);
-    /**
-     * Notify the XUL document that a subtree has been removed
-     */
-    nsresult RemoveSubtreeFromDocument(nsIContent* aContent);
+    void AddSubtreeToDocument(nsIContent* aContent);
     /**
      * This is invoked whenever the prototype for this document is loaded
      * and should be walked, regardless of whether the XUL cache is
@@ -150,16 +144,7 @@ protected:
                            nsIPrincipal* aDocumentPrincipal,
                            nsIParser** aResult);
 
-    nsresult ApplyPersistentAttributes();
-    nsresult ApplyPersistentAttributesInternal();
-    nsresult ApplyPersistentAttributesToElements(const nsAString &aID,
-                                                 nsCOMArray<Element>& aElements);
-
-    nsresult
-    AddElementToDocumentPre(Element* aElement);
-
-    nsresult
-    AddElementToDocumentPost(Element* aElement);
+    void AddElementToDocumentPost(Element* aElement);
 
     static void DirectionChanged(const char* aPrefName, XULDocument* aData);
 
@@ -167,11 +152,6 @@ protected:
     static int32_t gRefCnt;
 
     static LazyLogModule gXULLog;
-
-    void
-    Persist(mozilla::dom::Element* aElement,
-            int32_t aNameSpaceID,
-            nsAtom* aAttribute);
 
     virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
@@ -185,8 +165,6 @@ protected:
 
     XULDocument*             mNextSrcLoadWaiter;  // [OWNER] but not COMPtr
 
-    nsCOMPtr<nsIXULStore>       mLocalStore;
-    bool                        mApplyingPersistedAttrs;
     bool                        mIsWritingFastLoad;
     bool                        mDocumentLoaded;
     /**

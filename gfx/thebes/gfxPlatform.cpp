@@ -57,9 +57,11 @@
 #elif defined(ANDROID)
 #include "gfxAndroidPlatform.h"
 #endif
+#if defined(MOZ_WIDGET_ANDROID)
+#include "mozilla/jni/Utils.h"  // for IsFennec
+#endif
 
 #ifdef XP_WIN
-#include <windows.h>
 #include "mozilla/WindowsVersion.h"
 #include "mozilla/gfx/DeviceManagerDx.h"
 #endif
@@ -82,7 +84,6 @@
 #include "nsTArray.h"
 #include "nsIObserverService.h"
 #include "nsIScreenManager.h"
-#include "FrameMetrics.h"
 #include "MainThreadUtils.h"
 
 #include "nsWeakReference.h"
@@ -604,6 +605,7 @@ WebRenderDebugPrefChangeCallback(const char* aPrefName, void*)
   GFX_WEBRENDER_DEBUG(".new-frame-indicator", 1 << 9)
   GFX_WEBRENDER_DEBUG(".new-scene-indicator", 1 << 10)
   GFX_WEBRENDER_DEBUG(".show-overdraw", 1 << 11)
+  GFX_WEBRENDER_DEBUG(".slow-frame-indicator", 1 << 13)
 #undef GFX_WEBRENDER_DEBUG
 
   gfx::gfxVars::SetWebRenderDebugFlags(flags);
@@ -676,6 +678,13 @@ struct WebRenderMemoryReporterHelper {
     ReportInternal(aBytes, path, desc, nsIMemoryReporter::KIND_OTHER);
   }
 
+  void ReportTotalGPUBytes(size_t aBytes) const
+  {
+    nsCString path(NS_LITERAL_CSTRING("gfx/webrender/total-gpu-bytes"));
+    nsCString desc(NS_LITERAL_CSTRING("Total GPU bytes used by WebRender (should match textures/ sum)"));
+    ReportInternal(aBytes, path, desc, nsIMemoryReporter::KIND_OTHER);
+  }
+
   void ReportInternal(size_t aBytes, nsACString& aPath, nsACString& aDesc, int32_t aKind) const
   {
     // Generally, memory reporters pass the empty string as the process name to
@@ -738,6 +747,9 @@ WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
       helper.ReportTexture(aReport.render_target_textures, "render-targets");
       helper.ReportTexture(aReport.texture_cache_textures, "texture-cache");
       helper.ReportTexture(aReport.depth_target_textures, "depth-targets");
+
+      // Total GPU bytes, for sanity-checking the above.
+      helper.ReportTotalGPUBytes(aReport.total_gpu_bytes_allocated);
 
       FinishAsyncMemoryReport();
     },
@@ -2666,22 +2678,6 @@ gfxPlatform::WebRenderEnvvarEnabled()
   return (env && *env == '1');
 }
 
-/* This is a pretty conservative check for having a battery.
- * For now we'd rather err on the side of thinking we do. */
-static bool HasBattery()
-{
-#ifdef XP_WIN
-  SYSTEM_POWER_STATUS status;
-  const BYTE NO_SYSTEM_BATTERY = 128;
-  if (GetSystemPowerStatus(&status)) {
-    if (status.BatteryFlag == NO_SYSTEM_BATTERY) {
-      return false;
-    }
-  }
-#endif
-  return true;
-}
-
 void
 gfxPlatform::InitWebRenderConfig()
 {
@@ -2850,10 +2846,12 @@ gfxPlatform::InitWebRenderConfig()
   }
 
 #ifdef MOZ_WIDGET_ANDROID
-  featureWebRender.ForceDisable(
-    FeatureStatus::Unavailable,
-    "WebRender not ready for use on Android",
-    NS_LITERAL_CSTRING("FEATURE_FAILURE_ANDROID"));
+  if (jni::IsFennec()) {
+    featureWebRender.ForceDisable(
+      FeatureStatus::Unavailable,
+      "WebRender not ready for use on non-e10s Android",
+      NS_LITERAL_CSTRING("FEATURE_FAILURE_ANDROID"));
+  }
 #endif
 
   // gfxFeature is not usable in the GPU process, so we use gfxVars to transmit this feature
@@ -2874,6 +2872,11 @@ gfxPlatform::InitWebRenderConfig()
         gfxVars::UseWebRender() &&
         gfxVars::UseWebRenderANGLE()) {
       gfxVars::SetUseWebRenderDCompWin(true);
+    }
+  }
+  if (Preferences::GetBool("gfx.webrender.dcomp-win-triple-buffering.enabled", false)) {
+    if (gfxVars::UseWebRenderDCompWin()) {
+      gfxVars::SetUseWebRenderDCompWinTripleBuffering(true);
     }
   }
 #endif

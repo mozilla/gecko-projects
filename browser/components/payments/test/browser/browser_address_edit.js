@@ -413,7 +413,7 @@ add_task(async function test_shipping_address_picker() {
       let selector = "address-picker[selected-state-key='selectedShippingAddress']";
       let picker = content.document.querySelector(selector);
       let option = Cu.waiveXrays(picker).dropdown.popupBox.children[0];
-      ok(option.textContent,
+      is(option.textContent,
          FormAutofillUtils.getAddressLabel(savedAddress, null),
          "Shows correct shipping option label");
     });
@@ -455,7 +455,7 @@ add_task(async function test_payer_address_picker() {
       let option = Cu.waiveXrays(picker).dropdown.popupBox.children[0];
       is(option.textContent.includes("32 Vassar Street"), false,
          "Payer option label does not contain street address");
-      ok(option.textContent,
+      is(option.textContent,
          FormAutofillUtils.getAddressLabel(savedAddress, "name tel email"),
          "Shows correct payer option label");
     });
@@ -471,6 +471,10 @@ add_task(async function test_payer_address_picker() {
  * Test that we can correctly add an address from a private window
  */
 add_task(async function test_private_persist_addresses() {
+  if (!OSKeyStoreTestUtils.canTestOSKeyStoreLogin()) {
+    todo(false, "Cannot test OS key store login on official builds.");
+    return;
+  }
   let prefilledGuids = await setup();
 
   is((await formAutofillStorage.addresses.getAll()).length, 1,
@@ -569,7 +573,7 @@ add_task(async function test_private_persist_addresses() {
     });
 
     info("clicking pay");
-    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.completePayment);
+    await loginAndCompletePayment(frame);
 
     // Add a handler to complete the payment above.
     info("acknowledging the completion from the merchant page");
@@ -721,6 +725,84 @@ add_task(async function test_hiddenFieldRemovedWhenCountryChanged() {
       is(savedAddress["address-level2"], PTU.Addresses.TimBL["address-level2"],
          "check address-level2");
       is(savedAddress["address-level1"], undefined, "address-level1 should not be saved");
+    });
+
+    info("clicking cancel");
+    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.manuallyClickCancel);
+
+    await BrowserTestUtils.waitForCondition(() => win.closed, "dialog should be closed");
+  });
+  await cleanupFormAutofillStorage();
+});
+
+add_task(async function test_countrySpecificFieldsGetRequiredness() {
+  await setup();
+  await BrowserTestUtils.withNewTab({
+    gBrowser,
+    url: BLANK_PAGE_URL,
+  }, async browser => {
+    let {win, frame} =
+      await setupPaymentDialog(browser, {
+        methodData: [PTU.MethodData.basicCard],
+        details: Object.assign({}, PTU.Details.twoShippingOptions, PTU.Details.total2USD),
+        options: PTU.Options.requestShippingOption,
+        merchantTaskFn: PTU.ContentTasks.createAndShowRequest,
+      }
+    );
+
+    await navigateToAddAddressPage(frame);
+
+    const EXPECTED_ADDRESS = {
+      "country": "MO",
+      "given-name": "First",
+      "family-name": "Last",
+      "street-address": "12345 FooFoo Bar",
+    };
+    await fillInShippingAddressForm(frame, EXPECTED_ADDRESS);
+    await submitAddressForm(frame, EXPECTED_ADDRESS, {expectPersist: true});
+
+    await navigateToAddAddressPage(frame);
+
+    await selectPaymentDialogShippingAddressByCountry(frame, "MO");
+
+    await spawnPaymentDialogTask(frame, async () => {
+      let {
+        PaymentTestUtils: PTU,
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+
+      let editLink = content.document.querySelector("address-picker .edit-link");
+      is(editLink.textContent, "Edit", "Edit link text");
+
+      editLink.click();
+
+      await PTU.DialogContentUtils.waitForState(content, (state) => {
+        return state.page.id == "address-page" && !!state["address-page"].guid;
+      }, "Check edit page state");
+
+      let provinceField = content.document.getElementById("address-level1");
+      let provinceContainer = provinceField.parentNode;
+      is(provinceContainer.style.display, "none", "Province should be hidden for Macau");
+
+      let countryField = content.document.getElementById("country");
+      await content.fillField(countryField, "CA");
+      info("changed selected country to Canada");
+
+      isnot(provinceContainer.style.display, "none", "Province should be visible for Canada");
+      ok(provinceContainer.hasAttribute("required"),
+         "Province container should have required attribute");
+      let provinceSpan = provinceContainer.querySelector("span");
+      is(provinceSpan.getAttribute("fieldRequiredSymbol"), "*",
+         "Province span should have asterisk as fieldRequiredSymbol");
+      is(content.window.getComputedStyle(provinceSpan, "::after").content,
+         "attr(fieldRequiredSymbol)",
+         "Asterisk should be on Province");
+
+      let addressBackButton = content.document.querySelector("address-form .back-button");
+      addressBackButton.click();
+
+      await PTU.DialogContentUtils.waitForState(content, (state) => {
+        return state.page.id == "payment-summary";
+      }, "Switched back to payment-summary");
     });
 
     info("clicking cancel");

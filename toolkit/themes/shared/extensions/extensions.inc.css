@@ -249,50 +249,40 @@ button.warning {
   }
 }
 
-.list-view-heading-inner {
-  width: 664px;
-}
-
 #header-utils-btn {
+  -moz-appearance: none;
+  border: 1px solid var(--in-content-box-border-color);
+  border-radius: 2px;
   line-height: 20px;
-  border-color: var(--in-content-box-border-color);
   background-color: var(--in-content-page-background);
   padding-right: 10px;
   padding-left: 10px;
   /* This button is too tall, adding margin-bottom shrinks it. */
   margin-bottom: 2px;
+  margin-inline-end: 0;
 }
 
-#header-utils-btn:not([disabled="true"]):active:hover,
-#header-utils-btn[open="true"] {
-  padding-bottom: 0px;
-  padding-top: 0px;
-  background-color: var(--in-content-box-background-active);
-}
-
-.header-button {
-  -moz-appearance: none;
-  border: 1px solid;
-  border-radius: 2px;
-}
-
-.header-button[disabled="true"] > .toolbarbutton-icon {
-  opacity: 0.4;
-}
-
-.header-button:not([disabled="true"]):hover,
-#header-utils-btn:not([disabled="true"]):hover {
-  background-color: #ebebeb;
+#header-utils-btn:hover {
+  background-color: var(--in-content-box-background-hover);
   cursor: pointer;
 }
 
-.header-button > .toolbarbutton-text {
+#header-utils-btn:active:hover,
+#header-utils-btn[open="true"] {
+  background-color: var(--in-content-box-background-active);
+}
+
+#header-utils-btn > .toolbarbutton-text {
   display: none;
 }
 
-#list-view-heading {
-  margin-top: 24px;
+#heading {
+  margin-top: 26px;
   margin-bottom: 16px;
+}
+
+.heading-inner {
+  width: 664px;
   margin-inline-start: 28px;
 }
 
@@ -337,11 +327,6 @@ button.warning {
   margin: 0;
   border-width: 0 !important;
   background-color: transparent;
-}
-
-richlistbox.list > richlistitem.addon {
-  color: var(--in-content-text-color);
-  background-origin: border-box;
 }
 
 .icon {
@@ -426,9 +411,8 @@ richlistbox.list > richlistitem.addon {
 }
 
 .description-container {
-  margin-inline-start: 6px;
   -moz-box-align: center;
-  font-size: 1.25rem;
+  font-size: 1rem;
 }
 
 .description {
@@ -560,10 +544,7 @@ richlistbox.list > richlistitem.addon {
 
 .list:focus > .addon[selected] {
   box-shadow: var(--card-shadow-focus);
-}
-
-.list > .addon {
-  margin: 8px;
+  color: var(--in-content-text-color);
 }
 
 #addon-list .addon[active="false"] > .content-container > .content-inner-container {
@@ -597,7 +578,7 @@ richlistbox.list > richlistitem.addon {
 /*** detail view ***/
 
 #detail-view > .scrollbox-innerbox {
-  margin: 32px;
+  margin: 8px 28px;
 }
 
 #detail-view .loading {
@@ -690,6 +671,9 @@ richlistbox.list > richlistitem.addon {
 }
 
 .addon.card {
+  background-origin: border-box;
+  color: var(--in-content-text-color);
+  margin: 8px 4px;
   max-width: 664px;
   /* The .addon-control element on the end has 4px of margin, remove it
    * from the padding to stay balanced. */
@@ -697,7 +681,7 @@ richlistbox.list > richlistitem.addon {
 }
 
 .addon-detail.card:hover {
-  box-shadow: none;
+  box-shadow: var(--card-shadow);
 }
 
 .addon.card > .card-heading-image {

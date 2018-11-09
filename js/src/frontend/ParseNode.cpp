@@ -104,8 +104,14 @@ ParseNode::appendOrCreateList(ParseNodeKind kind, ParseNode* left, ParseNode* ri
 
 #ifdef DEBUG
 
+const ParseNodeArity js::frontend::ParseNodeKindArity[] = {
+#define ARITY(_name, arity) arity,
+    FOR_EACH_PARSE_NODE_KIND(ARITY)
+#undef ARITY
+};
+
 static const char * const parseNodeNames[] = {
-#define STRINGIFY(name) #name,
+#define STRINGIFY(name, _arity) #name,
     FOR_EACH_PARSE_NODE_KIND(STRINGIFY)
 #undef STRINGIFY
 };
@@ -167,6 +173,9 @@ ParseNode::dump(GenericPrinter& out, int indent)
         return;
       case PN_NAME:
         as<NameNode>().dump(out, indent);
+        return;
+      case PN_FIELD:
+        as<ClassField>().dump(out, indent);
         return;
       case PN_NUMBER:
         as<NumericLiteral>().dump(out, indent);
@@ -341,6 +350,7 @@ NameNode::dump(GenericPrinter& out, int indent)
         return;
 
       case ParseNodeKind::Name:
+      case ParseNodeKind::PrivateName: // atom() already includes the '#', no need to specially include it.
       case ParseNodeKind::PropertyName:
         if (!atom()) {
             out.put("#<null name>");
@@ -380,6 +390,21 @@ NameNode::dump(GenericPrinter& out, int indent)
         return;
       }
     }
+}
+
+void
+ClassField::dump(GenericPrinter& out, int indent)
+{
+    out.printf("(");
+    if (hasInitializer()) {
+        indent += 2;
+    }
+    DumpParseTree(&name(), out, indent);
+    if (hasInitializer()) {
+        IndentNewLine(out, indent);
+        DumpParseTree(&initializer(), out, indent);
+    }
+    out.printf(")");
 }
 
 void

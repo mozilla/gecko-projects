@@ -269,6 +269,7 @@ RenderThread::HandleFrame(wr::WindowId aWindowId, bool aRender)
 
   TimeStamp startTime;
 
+  bool hadSlowFrame;
   { // scope lock
     MutexAutoLock lock(mFrameCountMapLock);
     auto it = mWindowInfos.find(AsUint64(aWindowId));
@@ -276,9 +277,11 @@ RenderThread::HandleFrame(wr::WindowId aWindowId, bool aRender)
     WindowInfo* info = it->second;
     MOZ_ASSERT(info->mPendingCount > 0);
     startTime = info->mStartTimes.front();
+    hadSlowFrame = info->mHadSlowFrame;
+    info->mHadSlowFrame = false;
   }
 
-  UpdateAndRender(aWindowId, startTime, aRender, /* aReadbackSize */ Nothing(), /* aReadbackBuffer */ Nothing());
+  UpdateAndRender(aWindowId, startTime, aRender, /* aReadbackSize */ Nothing(), /* aReadbackBuffer */ Nothing(), hadSlowFrame);
   FrameRenderingComplete(aWindowId);
 }
 
@@ -335,9 +338,13 @@ static void
 NotifyDidRender(layers::CompositorBridgeParent* aBridge,
                 wr::WrPipelineInfo aInfo,
                 TimeStamp aStart,
-                TimeStamp aEnd)
+                TimeStamp aEnd,
+                bool aRender)
 {
-  if (aBridge->GetWrBridge()) {
+  if (aRender && aBridge->GetWrBridge()) {
+    // We call this here to mimic the behavior in LayerManagerComposite, as to
+    // not change what Talos measures. That is, we do not record an empty frame
+    // as a frame.
     aBridge->GetWrBridge()->RecordFrame();
   }
 
@@ -357,7 +364,8 @@ RenderThread::UpdateAndRender(wr::WindowId aWindowId,
                               const TimeStamp& aStartTime,
                               bool aRender,
                               const Maybe<gfx::IntSize>& aReadbackSize,
-                              const Maybe<Range<uint8_t>>& aReadbackBuffer)
+                              const Maybe<Range<uint8_t>>& aReadbackBuffer,
+                              bool aHadSlowFrame)
 {
   AUTO_PROFILER_TRACING("Paint", "Composite");
   MOZ_ASSERT(IsInRenderThread());
@@ -372,10 +380,12 @@ RenderThread::UpdateAndRender(wr::WindowId aWindowId,
   auto& renderer = it->second;
 
   if (aRender) {
-    renderer->UpdateAndRender(aReadbackSize, aReadbackBuffer);
+    renderer->UpdateAndRender(aReadbackSize, aReadbackBuffer, aHadSlowFrame);
   } else {
     renderer->Update();
   }
+  // Check graphics reset status even when rendering is skipped.
+  renderer->CheckGraphicsResetStatus();
 
   TimeStamp end = TimeStamp::Now();
 
@@ -388,14 +398,15 @@ RenderThread::UpdateAndRender(wr::WindowId aWindowId,
   // removed the relevant renderer. And after that happens we should never reach
   // this code at all; it would bail out at the mRenderers.find check above.
   MOZ_ASSERT(pipelineMgr);
-  pipelineMgr->NotifyPipelinesUpdated(info);
+  pipelineMgr->NotifyPipelinesUpdated(info, aRender);
 
   layers::CompositorThreadHolder::Loop()->PostTask(NewRunnableFunction(
     "NotifyDidRenderRunnable",
     &NotifyDidRender,
     renderer->GetCompositorBridge(),
     info,
-    aStartTime, end
+    aStartTime, end,
+    aRender
   ));
 }
 
@@ -547,6 +558,19 @@ RenderThread::FrameRenderingComplete(wr::WindowId aWindowId)
   mozilla::Telemetry::AccumulateTimeDelta(mozilla::Telemetry::COMPOSITE_TIME,
                                           info->mStartTimes.front());
   info->mStartTimes.pop();
+}
+
+void
+RenderThread::NotifySlowFrame(wr::WindowId aWindowId)
+{
+  MutexAutoLock lock(mFrameCountMapLock);
+  auto it = mWindowInfos.find(AsUint64(aWindowId));
+  if (it == mWindowInfos.end()) {
+    MOZ_ASSERT(false);
+    return;
+  }
+  WindowInfo* info = it->second;
+  info->mHadSlowFrame = true;
 }
 
 void

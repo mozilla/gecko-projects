@@ -226,6 +226,8 @@ dependencies {
     androidTestImplementation 'com.android.support.test:rules:1.0.1'
     androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.1'
     androidTestImplementation "com.android.support:support-annotations:$support_library_version"
+
+    androidTestImplementation 'org.eclipse.jetty:jetty-server:7.6.21.v20160908'
 }
 
 apply from: "${topsrcdir}/mobile/android/gradle/with_gecko_binaries.gradle"
@@ -318,7 +320,7 @@ afterEvaluate {
     // The bundle tasks are only present when the particular configuration is
     // being built, so this task might not exist.  (This is due to the way the
     // Android Gradle plugin defines things during configuration.)
-    def bundleWithGeckoBinaries = tasks.findByName('bundleOfficialWithGeckoBinariesNoMinApiRelease')
+    def bundleWithGeckoBinaries = tasks.findByName('bundleWithGeckoBinariesRelease')
     if (!bundleWithGeckoBinaries) {
         return
     }
@@ -332,10 +334,10 @@ afterEvaluate {
 
     artifacts {
         // Instead of default (release) configuration, publish one with Gecko binaries.
-        archives bundleOfficialWithGeckoBinariesNoMinApiRelease
+        archives bundleWithGeckoBinariesRelease
         // Javadoc and sources for developer ergononomics.
-        archives javadocJarOfficialWithGeckoBinariesNoMinApiRelease
-        archives sourcesJarOfficialWithGeckoBinariesNoMinApiRelease
+        archives javadocJarWithGeckoBinariesRelease
+        archives sourcesJarWithGeckoBinariesRelease
     }
 
     // For now, ensure Kotlin is only used in tests.

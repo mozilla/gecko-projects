@@ -127,6 +127,9 @@ private:
   // File descriptor to notify to wake the thread up, fixed at creation.
   FileHandle mNotifyfd;
 
+  // Whether the thread should attempt to idle.
+  Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> mShouldIdle;
+
   // Whether the thread is waiting on idlefd.
   Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> mIdle;
 
@@ -136,6 +139,9 @@ private:
   std::function<void()> mUnrecordedWaitCallback;
   bool mUnrecordedWaitOnlyWhenDiverged;
   bool mUnrecordedWaitNotified;
+
+  // Identifier of any atomic which this thread currently holds.
+  Maybe<size_t> mAtomicLockId;
 
 public:
 ///////////////////////////////////////////////////////////////////////////////
@@ -251,6 +257,9 @@ public:
   // Wait until this thread finishes executing its start routine.
   void Join();
 
+  // Give access to the atomic lock which the thread owns.
+  Maybe<size_t>& AtomicLockId() { return mAtomicLockId; }
+
 ///////////////////////////////////////////////////////////////////////////////
 // Thread Coordination
 ///////////////////////////////////////////////////////////////////////////////
@@ -289,6 +298,13 @@ public:
   // After WaitForIdleThreads(), the main thread will call this to allow
   // other threads to resume execution.
   static void ResumeIdleThreads();
+
+  // Allow a single thread to resume execution.
+  static void ResumeSingleIdleThread(size_t aId);
+
+  // Return whether this thread will remain in the idle state entered after
+  // WaitForIdleThreads.
+  bool ShouldIdle() { return mShouldIdle; }
 };
 
 // This uses a stack pointer instead of TLS to make sure events are passed

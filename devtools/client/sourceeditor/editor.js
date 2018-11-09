@@ -41,7 +41,6 @@ const L10N = new LocalizationHelper("devtools/client/locales/sourceeditor.proper
 
 const {
   getWasmText,
-  getWasmLineNumberFormatter,
   isWasm,
   lineToWasmOffset,
   wasmOffsetToLine,
@@ -137,6 +136,8 @@ function Editor(config) {
     themeSwitching: true,
     autocomplete: false,
     autocompleteOpts: {},
+    // Set to true to prevent the search addon to be activated.
+    disableSearchAddon: false,
   };
 
   // Additional shortcuts.
@@ -439,7 +440,9 @@ Editor.prototype = {
       return L10N.getStr(name);
     });
 
-    this._initShortcuts(win);
+    if (!this.config.disableSearchAddon) {
+      this._initSearchShortcuts(win);
+    }
 
     editors.set(this, cm);
 
@@ -501,9 +504,6 @@ Editor.prototype = {
   replaceDocument: function(doc) {
     const cm = editors.get(this);
     cm.swapDoc(doc);
-    if (!Services.prefs.getBoolPref("devtools.debugger.new-debugger-frontend")) {
-      this._updateLineNumberFormat();
-    }
   },
 
   /**
@@ -583,16 +583,6 @@ Editor.prototype = {
     return this.isWasm ? this.lineToWasmOffset(line) : line;
   },
 
-  _updateLineNumberFormat: function() {
-    const cm = editors.get(this);
-    if (this.isWasm) {
-      const formatter = getWasmLineNumberFormatter(this.getDoc());
-      cm.setOption("lineNumberFormatter", formatter);
-    } else {
-      cm.setOption("lineNumberFormatter", (number) => number);
-    }
-  },
-
   /**
    * Replaces whatever is in the text area with the contents of
    * the 'value' argument.
@@ -618,10 +608,6 @@ Editor.prototype = {
       }
       // cm will try to split into lines anyway, saving memory
       value = { split: () => lines };
-    }
-
-    if (!Services.prefs.getBoolPref("devtools.debugger.new-debugger-frontend")) {
-      this._updateLineNumberFormat();
     }
 
     cm.setValue(value);
@@ -1349,6 +1335,10 @@ Editor.prototype = {
     });
   },
 
+  isDestroyed: function() {
+    return !editors.get(this);
+  },
+
   destroy: function() {
     this.container = null;
     this.config = null;
@@ -1412,11 +1402,11 @@ Editor.prototype = {
   /**
    * Register all key shortcuts.
    */
-  _initShortcuts: function(win) {
+  _initSearchShortcuts: function(win) {
     const shortcuts = new KeyShortcuts({
       window: win,
     });
-    this._onShortcut = this._onShortcut.bind(this);
+    this._onSearchShortcut = this._onSearchShortcut.bind(this);
     const keys = [
       "find.key",
       "findNext.key",
@@ -1431,13 +1421,13 @@ Editor.prototype = {
     // Process generic keys:
     keys.forEach(name => {
       const key = L10N.getStr(name);
-      shortcuts.on(key, event => this._onShortcut(name, event));
+      shortcuts.on(key, event => this._onSearchShortcut(name, event));
     });
   },
     /**
    * Key shortcut listener.
    */
-  _onShortcut: function(name, event) {
+  _onSearchShortcut: function(name, event) {
     if (!this._isInputOrTextarea(event.target)) {
       return;
     }

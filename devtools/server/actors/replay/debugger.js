@@ -68,6 +68,14 @@ ReplayDebugger.prototype = {
     this._repaint();
   },
 
+  replayCurrentExecutionPoint() {
+    return this._sendRequest({ type: "currentExecutionPoint" });
+  },
+
+  replayRecordingEndpoint() {
+    return this._sendRequest({ type: "recordingEndpoint" });
+  },
+
   addDebuggee() {},
   removeAllDebuggees() {},
 

@@ -52,7 +52,7 @@ fn render_task_sanity_check(size: &DeviceIntSize) {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct RenderTaskId(pub u32, FrameId); // TODO(gw): Make private when using GPU cache!
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(C)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
@@ -125,7 +125,7 @@ impl RenderTaskTree {
         };
 
         let pass = &mut passes[pass_index];
-        pass.add_render_task(id, task.get_dynamic_size(), task.target_kind());
+        pass.add_render_task(id, task.get_dynamic_size(), task.target_kind(), &task.location);
     }
 
     pub fn prepare_for_render(&mut self) {
@@ -173,7 +173,7 @@ impl ops::IndexMut<RenderTaskId> for RenderTaskTree {
 }
 
 /// Identifies the output buffer location for a given `RenderTask`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum RenderTaskLocation {
@@ -200,6 +200,16 @@ pub enum RenderTaskLocation {
         /// The target region within the above layer.
         rect: DeviceIntRect,
     },
+}
+
+impl RenderTaskLocation {
+    /// Returns true if this is a dynamic location.
+    pub fn is_dynamic(&self) -> bool {
+        match *self {
+            RenderTaskLocation::Dynamic(..) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -554,7 +564,7 @@ impl RenderTask {
                 }
                 ClipItem::Rectangle(..) |
                 ClipItem::RoundedRectangle(..) |
-                ClipItem::Image(..) => {}
+                ClipItem::Image { .. } => {}
             }
         }
 
@@ -1191,6 +1201,14 @@ impl RenderTaskCache {
 
                 // Allocate space in the texture cache, but don't supply
                 // and CPU-side data to be uploaded.
+                //
+                // Note that we currently use Eager eviction for cached render
+                // tasks, which means that any cached item not used in the last
+                // frame is discarded. There's room to be a lot smarter here,
+                // especially by considering the relative costs of re-rendering
+                // each type of item (box shadow blurs are an order of magnitude
+                // more expensive than borders, for example). Telemetry could
+                // inform our decisions here as well.
                 texture_cache.update(
                     &mut entry.handle,
                     descriptor,
@@ -1201,7 +1219,7 @@ impl RenderTaskCache {
                     gpu_cache,
                     None,
                     render_task.uv_rect_kind(),
-                    Eviction::Auto,
+                    Eviction::Eager,
                 );
 
                 // Get the allocation details in the texture cache, and store
@@ -1228,9 +1246,9 @@ impl RenderTaskCache {
         render_tasks: &mut RenderTaskTree,
         user_data: Option<[f32; 3]>,
         is_opaque: bool,
-        mut f: F,
+        f: F,
     ) -> Result<RenderTaskCacheEntryHandle, ()>
-         where F: FnMut(&mut RenderTaskTree) -> Result<RenderTaskId, ()> {
+         where F: FnOnce(&mut RenderTaskTree) -> Result<RenderTaskId, ()> {
         // Get the texture cache handle for this cache key,
         // or create one.
         let cache_entries = &mut self.cache_entries;
@@ -1238,7 +1256,7 @@ impl RenderTaskCache {
                                .entry(key)
                                .or_insert_with(|| {
                                     let entry = RenderTaskCacheEntry {
-                                        handle: TextureCacheHandle::new(),
+                                        handle: TextureCacheHandle::invalid(),
                                         pending_render_task_id: None,
                                         user_data,
                                         is_opaque,

@@ -305,8 +305,9 @@ SVGIDRenderingObserver::SVGIDRenderingObserver(URLAndReferrerInfo* aURI,
     referrerPolicy = aURI->GetReferrerPolicy();
   }
 
-  mObservedElementTracker.Reset(aObservingContent, uri, referrer,
-                                referrerPolicy, true, aReferenceImage);
+  mObservedElementTracker.ResetToURIFragmentID(aObservingContent, uri, referrer,
+                                               referrerPolicy, true,
+                                               aReferenceImage);
   StartObserving();
 }
 
@@ -799,7 +800,7 @@ SVGMaskObserverList::SVGMaskObserverList(nsIFrame* aFrame)
   const nsStyleSVGReset *svgReset = aFrame->StyleSVGReset();
 
   for (uint32_t i = 0; i < svgReset->mMask.mImageCount; i++) {
-    css::URLValue* data = svgReset->mMask.mLayers[i].mImage.GetURLValue();
+    const css::URLValue* data = svgReset->mMask.mLayers[i].mImage.GetURLValue();
     RefPtr<URLAndReferrerInfo> maskUri = ResolveURLUsingLocalRef(aFrame, data);
 
     bool hasRef = false;
@@ -1250,8 +1251,8 @@ GetOrCreateClipPathObserver(nsIFrame* aClippedFrame)
   if (svgStyleReset->mClipPath.GetType() != StyleShapeSourceType::URL) {
     return nullptr;
   }
-  css::URLValue* url = svgStyleReset->mClipPath.GetURL();
-  RefPtr<URLAndReferrerInfo> pathURI = ResolveURLUsingLocalRef(aClippedFrame, url);
+  const css::URLValue& url = svgStyleReset->mClipPath.URL();
+  RefPtr<URLAndReferrerInfo> pathURI = ResolveURLUsingLocalRef(aClippedFrame, &url);
   return GetPaintingProperty(pathURI, aClippedFrame, ClipPathProperty());
 }
 

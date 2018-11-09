@@ -7,12 +7,14 @@
 use app_units::Au;
 use euclid::{self, Rect, Transform3D};
 use num_traits::Zero;
-use values::{computed, CSSFloat};
+use std::fmt::{self, Write};
+use style_traits::{CssWriter, ToCss};
 use values::computed::length::Length as ComputedLength;
 use values::computed::length::LengthOrPercentage as ComputedLengthOrPercentage;
 use values::specified::angle::Angle as SpecifiedAngle;
 use values::specified::length::Length as SpecifiedLength;
 use values::specified::length::LengthOrPercentage as SpecifiedLengthOrPercentage;
+use values::{computed, CSSFloat};
 
 /// A generic 2D transformation matrix.
 #[allow(missing_docs)]
@@ -90,67 +92,6 @@ pub struct TransformOrigin<H, V, Depth> {
     pub depth: Depth,
 }
 
-/// A generic timing function.
-///
-/// <https://drafts.csswg.org/css-timing-1/#single-timing-function-production>
-#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToCss)]
-#[value_info(ty = "TIMING_FUNCTION")]
-pub enum TimingFunction<Integer, Number> {
-    /// `linear | ease | ease-in | ease-out | ease-in-out`
-    Keyword(TimingKeyword),
-    /// `cubic-bezier(<number>, <number>, <number>, <number>)`
-    #[allow(missing_docs)]
-    #[css(comma, function)]
-    CubicBezier {
-        x1: Number,
-        y1: Number,
-        x2: Number,
-        y2: Number,
-    },
-    /// `step-start | step-end | steps(<integer>, [ start | end ]?)`
-    #[css(comma, function)]
-    #[value_info(other_values = "step-start,step-end")]
-    Steps(Integer, #[css(skip_if = "is_end")] StepPosition),
-    /// `frames(<integer>)`
-    #[css(comma, function)]
-    Frames(Integer),
-}
-
-#[allow(missing_docs)]
-#[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    MallocSizeOf,
-    Parse,
-    PartialEq,
-    SpecifiedValueInfo,
-    ToComputedValue,
-    ToCss,
-)]
-pub enum TimingKeyword {
-    Linear,
-    Ease,
-    EaseIn,
-    EaseOut,
-    EaseInOut,
-}
-
-#[allow(missing_docs)]
-#[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
-#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, Parse, PartialEq, ToComputedValue, ToCss)]
-pub enum StepPosition {
-    Start,
-    End,
-}
-
-#[inline]
-fn is_end(position: &StepPosition) -> bool {
-    *position == StepPosition::End
-}
-
 impl<H, V, D> TransformOrigin<H, V, D> {
     /// Returns a new transform origin.
     pub fn new(horizontal: H, vertical: V, depth: D) -> Self {
@@ -158,29 +99,6 @@ impl<H, V, D> TransformOrigin<H, V, D> {
             horizontal: horizontal,
             vertical: vertical,
             depth: depth,
-        }
-    }
-}
-
-impl<Integer, Number> TimingFunction<Integer, Number> {
-    /// `ease`
-    #[inline]
-    pub fn ease() -> Self {
-        TimingFunction::Keyword(TimingKeyword::Ease)
-    }
-}
-
-impl TimingKeyword {
-    /// Returns the keyword as a quadruplet of Bezier point coordinates
-    /// `(x1, y1, x2, y2)`.
-    #[inline]
-    pub fn to_bezier(self) -> (CSSFloat, CSSFloat, CSSFloat, CSSFloat) {
-        match self {
-            TimingKeyword::Linear => (0., 0., 1., 1.),
-            TimingKeyword::Ease => (0.25, 0.1, 0.25, 1.),
-            TimingKeyword::EaseIn => (0.42, 0., 1., 1.),
-            TimingKeyword::EaseOut => (0., 0., 0.58, 1.),
-            TimingKeyword::EaseInOut => (0.42, 0., 0.58, 1.),
         }
     }
 }
@@ -644,7 +562,6 @@ pub enum Rotate<Number, Angle> {
     SpecifiedValueInfo,
     ToAnimatedZero,
     ToComputedValue,
-    ToCss,
 )]
 /// A value of the `Scale` property
 ///
@@ -652,12 +569,36 @@ pub enum Rotate<Number, Angle> {
 pub enum Scale<Number> {
     /// 'none'
     None,
-    /// '<number>'
-    ScaleX(Number),
-    /// '<number>{2}'
+    /// '<number>{1,2}'
     Scale(Number, Number),
     /// '<number>{3}'
     Scale3D(Number, Number, Number),
+}
+
+impl<Number: ToCss + PartialEq> ToCss for Scale<Number> {
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
+    where
+        W: fmt::Write,
+    {
+        match *self {
+            Scale::None => dest.write_str("none"),
+            Scale::Scale(ref x, ref y) => {
+                x.to_css(dest)?;
+                if x != y {
+                    dest.write_char(' ')?;
+                    y.to_css(dest)?;
+                }
+                Ok(())
+            },
+            Scale::Scale3D(ref x, ref y, ref z) => {
+                x.to_css(dest)?;
+                dest.write_char(' ')?;
+                y.to_css(dest)?;
+                dest.write_char(' ')?;
+                z.to_css(dest)
+            },
+        }
+    }
 }
 
 #[derive(

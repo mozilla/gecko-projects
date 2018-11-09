@@ -839,6 +839,7 @@ audiounit_reinit_stream(cubeb_stream * stm, device_flags_value flags)
       if (flags & DEV_INPUT && input_device != 0) {
         // Attempt to re-use the same device-id failed, so attempt again with
         // default input device.
+        audiounit_close_stream(stm);
         if (audiounit_set_device_info(stm, 0, io_side::INPUT) != CUBEB_OK ||
             audiounit_setup_stream(stm) != CUBEB_OK) {
           LOG("(%p) Second stream reinit failed.", stm);
@@ -3412,7 +3413,7 @@ audiounit_get_devices_of_type(cubeb_device_type devtype)
   // Remove the aggregate device from the list of devices (if any).
   for (auto it = devices.begin(); it != devices.end();) {
     CFStringRef name = get_device_name(*it);
-    if (CFStringFind(name, CFSTR("CubebAggregateDevice"), 0).location !=
+    if (name && CFStringFind(name, CFSTR("CubebAggregateDevice"), 0).location !=
         kCFNotFound) {
       it = devices.erase(it);
     } else {

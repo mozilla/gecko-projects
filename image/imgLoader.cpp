@@ -17,7 +17,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/ChaosMode.h"
 #include "mozilla/LoadInfo.h"
-#include "mozilla/Telemetry.h"
 
 #include "nsImageModule.h"
 #include "imgRequestProxy.h"
@@ -1414,9 +1413,6 @@ void imgLoader::GlobalInit()
   RegisterStrongAsyncMemoryReporter(sMemReporter);
   RegisterImagesContentUsedUncompressedDistinguishedAmount(
     imgMemoryReporter::ImagesContentUsedUncompressedDistinguishedAmount);
-
-  Telemetry::ScalarSet(Telemetry::ScalarID::IMAGES_WEBP_PROBE_OBSERVED, false);
-  Telemetry::ScalarSet(Telemetry::ScalarID::IMAGES_WEBP_CONTENT_OBSERVED, false);
 }
 
 void imgLoader::ShutdownMemoryReporter()
@@ -2321,6 +2317,11 @@ imgLoader::LoadImage(nsIURI* aURI,
   if (!aURI) {
     return NS_ERROR_NULL_POINTER;
   }
+
+#ifdef MOZ_GECKO_PROFILER
+  AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING(
+    "imgLoader::LoadImage", NETWORK, aURI->GetSpecOrDefault());
+#endif
 
   LOG_SCOPE_WITH_PARAM(gImgLog, "imgLoader::LoadImage", "aURI", aURI);
 

@@ -68,6 +68,8 @@ EXPORTS += [
     'nsRandomGenerator.h',
     'nsSecurityHeaderParser.h',
     'NSSErrorsService.h',
+    'nsSSLSocketProvider.h',
+    'nsTLSSocketProvider.h',
     'RootCertificateTelemetryUtils.h',
     'ScopedNSSTypes.h',
     'SharedCertVerifier.h',
@@ -155,6 +157,9 @@ if CONFIG['OS_ARCH'] == 'Darwin':
     ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
+    OS_LIBS += [
+        'credui'
+    ]
     UNIFIED_SOURCES += [
         'CredentialManagerSecret.cpp',
     ]

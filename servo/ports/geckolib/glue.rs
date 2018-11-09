@@ -53,6 +53,7 @@ use style::gecko_bindings::bindings::{RawServoMediaRule, RawServoMediaRuleBorrow
 use style::gecko_bindings::bindings::{RawServoMozDocumentRule, RawServoMozDocumentRuleBorrowed};
 use style::gecko_bindings::bindings::{RawServoNamespaceRule, RawServoNamespaceRuleBorrowed};
 use style::gecko_bindings::bindings::{RawServoPageRule, RawServoPageRuleBorrowed};
+use style::gecko_bindings::bindings::{RawServoQuotesBorrowed, RawServoQuotesStrong};
 use style::gecko_bindings::bindings::{RawServoSelectorListBorrowed, RawServoSelectorListOwned};
 use style::gecko_bindings::bindings::{RawServoSourceSizeListBorrowedOrNull, RawServoSourceSizeListOwned};
 use style::gecko_bindings::bindings::{RawServoStyleSetBorrowed, RawServoStyleSetBorrowedOrNull, RawServoStyleSetOwned};
@@ -113,6 +114,7 @@ use style::gecko_bindings::structs::SeenPtrs;
 use style::gecko_bindings::structs::ServoElementSnapshotTable;
 use style::gecko_bindings::structs::ServoStyleSetSizes;
 use style::gecko_bindings::structs::ServoTraversalFlags;
+use style::gecko_bindings::structs::StyleContentType;
 use style::gecko_bindings::structs::StyleRuleInclusion;
 use style::gecko_bindings::structs::URLExtraData;
 use style::gecko_bindings::structs::gfxFontFeatureValueSet;
@@ -121,6 +123,7 @@ use style::gecko_bindings::structs::nsCompatibility;
 use style::gecko_bindings::structs::nsIDocument;
 use style::gecko_bindings::structs::nsStyleTransformMatrix::MatrixTransformOperator;
 use style::gecko_bindings::structs::nsTArray;
+use style::gecko_bindings::structs::nsTimingFunction;
 use style::gecko_bindings::structs::nsresult;
 use style::gecko_bindings::sugar::ownership::{FFIArcHelpers, HasFFI, HasArcFFI};
 use style::gecko_bindings::sugar::ownership::{HasSimpleFFI, Strong};
@@ -129,13 +132,12 @@ use style::gecko_properties;
 use style::invalidation::element::restyle_hints;
 use style::media_queries::MediaList;
 use style::parser::{Parse, ParserContext, self};
-use style::properties::{ComputedValues, Importance};
+use style::properties::{ComputedValues, Importance, NonCustomPropertyId};
 use style::properties::{LonghandId, LonghandIdSet, PropertyDeclarationBlock, PropertyId};
 use style::properties::{PropertyDeclarationId, ShorthandId};
 use style::properties::{SourcePropertyDeclaration, StyleBuilder};
 use style::properties::{parse_one_declaration_into, parse_style_attribute};
 use style::properties::animated_properties::AnimationValue;
-use style::properties::animated_properties::compare_property_priority;
 use style::rule_cache::RuleCacheConditions;
 use style::rule_tree::{CascadeLevel, StrongRuleNode};
 use style::selector_parser::{PseudoElementCascadeType, SelectorImpl};
@@ -159,7 +161,7 @@ use style::traversal_flags::{self, TraversalFlags};
 use style::use_counters::UseCounters;
 use style::values::{CustomIdent, KeyframesName};
 use style::values::animated::{Animate, Procedure, ToAnimatedZero};
-use style::values::computed::{Context, ToComputedValue};
+use style::values::computed::{self, Context, QuotePair, ToComputedValue};
 use style::values::distance::ComputeSquaredDistance;
 use style::values::generics::rect::Rect;
 use style::values::specified;
@@ -943,8 +945,6 @@ pub unsafe extern "C" fn Servo_Property_GetName(
     prop: nsCSSPropertyID,
     out_length: *mut u32,
 ) -> *const u8 {
-    use style::properties::NonCustomPropertyId;
-
     let (ptr, len) = match NonCustomPropertyId::from_nscsspropertyid(prop) {
         Ok(p) => {
             let name = p.name();
@@ -1049,15 +1049,13 @@ pub unsafe extern "C" fn Servo_Property_GetCSSValuesForProperty(
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_Property_IsAnimatable(property: nsCSSPropertyID) -> bool {
-    use style::properties::animated_properties;
-    animated_properties::nscsspropertyid_is_animatable(property)
+pub extern "C" fn Servo_Property_IsAnimatable(prop: nsCSSPropertyID) -> bool {
+    NonCustomPropertyId::from_nscsspropertyid(prop).ok().map_or(false, |p| p.is_animatable())
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_Property_IsTransitionable(property: nsCSSPropertyID) -> bool {
-    use style::properties::animated_properties;
-    animated_properties::nscsspropertyid_is_transitionable(property)
+pub extern "C" fn Servo_Property_IsTransitionable(prop: nsCSSPropertyID) -> bool {
+    NonCustomPropertyId::from_nscsspropertyid(prop).ok().map_or(false, |p| p.is_transitionable())
 }
 
 #[no_mangle]
@@ -2493,14 +2491,7 @@ macro_rules! simple_font_descriptor_getter {
             read_locked_arc(rule, |rule: &FontFaceRule| {
                 match rule.$field {
                     None => return false,
-                    Some(ref f) => {
-                        // FIXME(emilio): We should probably teach bindgen about
-                        // cbindgen.toml and making it hide the types and use
-                        // the rust ones instead. This would make transmute()
-                        // calls unnecessary.
-                        // unsafe: cbindgen guarantees the same representation.
-                        *out = ::std::mem::transmute(f.$compute());
-                    }
+                    Some(ref f) => *out = f.$compute(),
                 }
                 true
             })
@@ -2567,9 +2558,7 @@ pub unsafe extern "C" fn Servo_FontFaceRule_GetSources(
 
         {
             let mut set_next = |component: FontFaceSourceListComponent| {
-                // transmute: cbindgen ensures they have the same representation.
-                *iter.next().expect("miscalculated length") =
-                    ::std::mem::transmute(component);
+                *iter.next().expect("miscalculated length") = component;
             };
 
             for source in sources.iter() {
@@ -3467,11 +3456,20 @@ pub extern "C" fn Servo_ParseEasing(
         parser.parse_entirely(|p| transition_timing_function::single_value::parse(&context, p));
     match result {
         Ok(parsed_easing) => {
-            *output = parsed_easing.into();
+            // We store as computed value in nsTimingFunction.
+            (*output).mTiming = parsed_easing.to_computed_value_without_context();
             true
         },
         Err(_) => false
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_SerializeEasing(
+    easing: nsTimingFunctionBorrowed,
+    output: *mut nsAString,
+) {
+    easing.mTiming.to_css(&mut CssWriter::new(&mut *output)).unwrap();
 }
 
 #[no_mangle]
@@ -4736,6 +4734,8 @@ struct PrioritizedPropertyIter<'a> {
 
 impl<'a> PrioritizedPropertyIter<'a> {
     fn new(properties: &'a [PropertyValuePair]) -> PrioritizedPropertyIter {
+        use style::values::animated::compare_property_priority;
+
         // If we fail to convert a nsCSSPropertyID into a PropertyId we
         // shouldn't fail outright but instead by treating that property as the
         // 'all' property we make it sort last.
@@ -5074,9 +5074,11 @@ pub unsafe extern "C" fn Servo_StyleSet_GetKeyframesForName(
         }
 
         // Override timing_function if the keyframe has an animation-timing-function.
-        let timing_function = match step.get_animation_timing_function(&guard) {
-            Some(val) => val.into(),
-            None => *inherited_timing_function,
+        let timing_function = nsTimingFunction {
+            mTiming: match step.get_animation_timing_function(&guard) {
+                Some(val) => val.to_computed_value_without_context(),
+                None => (*inherited_timing_function).mTiming,
+            }
         };
 
         // Look for an existing keyframe with the same offset and timing
@@ -5974,4 +5976,53 @@ pub unsafe extern "C" fn Servo_IsCssPropertyRecordedInUseCounter(
     };
 
     UseCounters::from_ffi(use_counters).non_custom_properties.recorded(non_custom_id)
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_Quotes_GetInitialValue() -> RawServoQuotesStrong {
+    computed::Quotes::get_initial_value().0.clone().into_strong()
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_Quotes_Equal(
+    a: RawServoQuotesBorrowed,
+    b: RawServoQuotesBorrowed,
+) -> bool {
+    let a = Box::<[QuotePair]>::as_arc(&a);
+    let b = Box::<[QuotePair]>::as_arc(&b);
+
+    a == b
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_Quotes_GetQuote(
+    quotes: RawServoQuotesBorrowed,
+    mut depth: i32,
+    quote_type: StyleContentType,
+    result: *mut nsAString,
+) {
+    debug_assert!(depth >= -1);
+
+    let quotes = Box::<[QuotePair]>::as_arc(&quotes);
+
+    // Reuse the last pair when the depth is greater than the number of
+    // pairs of quotes.  (Also make 'quotes: none' and close-quote from
+    // a depth of 0 equivalent for the next test.)
+    if depth >= quotes.len() as i32 {
+        depth = quotes.len() as i32 - 1;
+    }
+
+    if depth == -1 {
+        // close-quote from a depth of 0 or 'quotes: none'
+        return;
+    }
+
+    let quote_pair = &quotes[depth as usize];
+    let quote = if quote_type == StyleContentType::OpenQuote {
+        &quote_pair.opening
+    } else {
+        debug_assert!(quote_type == StyleContentType::CloseQuote);
+        &quote_pair.closing
+    };
+    (*result).write_str(quote).unwrap();
 }

@@ -11,10 +11,6 @@ geckoview-junit:
         by-test-platform:
             android-em-7.0-x86/opt: 3
             default: default
-    run-on-projects:
-        by-test-platform:
-            android-em-7.0-x86/opt: ['mozilla-central']
-            default: built-projects
     chunks:
         by-test-platform:
             android-em-4.3-arm7-api-16-ccov/debug: 4
@@ -62,8 +58,7 @@ telemetry-tests-client:
     suite: telemetry-tests-client
     treeherder-symbol: tt(c)
     max-run-time: 5400
-    checkout: true
-    tier: 3
+    tier: 2
     mozharness:
         script: telemetry/telemetry_client.py
         config:

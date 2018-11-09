@@ -133,6 +133,7 @@ class WakeLock;
 #if defined(MOZ_WIDGET_ANDROID)
 class WindowOrientationObserver;
 #endif
+struct WindowPostMessageOptions;
 class Worklet;
 namespace cache {
 class CacheStorage;
@@ -559,6 +560,9 @@ public:
   // false for only resetting the timestamp.
   void ResetVRTelemetry(bool aUpdate);
 
+  void StartVRActivity();
+  void StopVRActivity();
+
   // Update the VR displays for this window
   bool UpdateVRDisplays(nsTArray<RefPtr<mozilla::dom::VRDisplay>>& aDisplays);
 
@@ -731,6 +735,10 @@ public:
   void PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
                       const nsAString& aTargetOrigin,
                       const mozilla::dom::Sequence<JSObject*>& aTransfer,
+                      nsIPrincipal& aSubjectPrincipal,
+                      mozilla::ErrorResult& aError);
+  void PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
+                      const mozilla::dom::WindowPostMessageOptions& aOptions,
                       nsIPrincipal& aSubjectPrincipal,
                       mozilla::ErrorResult& aError);
   int32_t SetTimeout(JSContext* aCx, mozilla::dom::Function& aFunction,
@@ -923,15 +931,6 @@ public:
                     const mozilla::dom::ImageBitmapSource& aImage,
                     int32_t aSx, int32_t aSy, int32_t aSw, int32_t aSh,
                     mozilla::ErrorResult& aRv);
-
-  already_AddRefed<mozilla::dom::Promise>
-  CreateImageBitmap(JSContext* aCx,
-                    const mozilla::dom::ImageBitmapSource& aImage,
-                    int32_t aOffset, int32_t aLength,
-                    mozilla::dom::ImageBitmapFormat aFormat,
-                    const mozilla::dom::Sequence<mozilla::dom::ChannelPixelLayout>& aLayout,
-                    mozilla::ErrorResult& aRv);
-
 
   // ChromeWindow bits.  Do NOT call these unless your window is in
   // fact chrome.

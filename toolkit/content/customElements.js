@@ -2,13 +2,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* globals MozQueryInterface */
+ // This file defines these globals on the window object.
+ // Define them here so that ESLint can find them:
+/* globals MozElementMixin, MozXULElement, MozBaseControl */
 
 "use strict";
 
 // This is loaded into chrome windows with the subscript loader. Wrap in
 // a block to prevent accidentally leaking globals onto `window`.
-{
+(() => {
+
+// Handle customElements.js being loaded as a script in addition to the subscriptLoader
+// from MainProcessSingleton, to handle pages that can open both before and after
+// MainProcessSingleton starts. See Bug 1501845.
+if (window.MozXULElement) {
+  return;
+}
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
@@ -24,9 +33,11 @@ window.addEventListener("DOMContentLoaded", () => {
   for (let element of gElementsPendingConnection) {
     try {
       if (element.isConnected) {
+        element.isRunningDelayedConnectedCallback = true;
         element.connectedCallback();
       }
     } catch (ex) { console.error(ex); }
+    element.isRunningDelayedConnectedCallback = false;
   }
   gElementsPendingConnection.clear();
 }, { once: true, capture: true });
@@ -35,6 +46,39 @@ const gXULDOMParser = new DOMParser();
 gXULDOMParser.forceEnableXULXBL();
 
 const MozElementMixin = Base => class MozElement extends Base {
+
+  /*
+   * Implements attribute inheritance by a child element. Uses XBL @inherit
+   * syntax of |to=from|.
+   *
+   * @param {element} child
+   *        A child element that inherits an attribute.
+   * @param {string} attr
+   *        An attribute to inherit. Optionally in the form of |to=from|, where
+   *        |to| is an attribute defined on custom element, whose value will be
+   *        inherited to |from| attribute, defined a child element. Note |from| may
+   *        take a special value of "text" to propogate attribute value as
+   *        a child's text.
+   */
+  inheritAttribute(child, attr) {
+    let attrName = attr;
+    let attrNewName = attr;
+    let split = attrName.split("=");
+    if (split.length == 2) {
+      attrName = split[1];
+      attrNewName = split[0];
+    }
+
+    if (attrNewName === "text") {
+      child.textContent =
+        this.hasAttribute(attrName) ? this.getAttribute(attrName) : "";
+    } else if (this.hasAttribute(attrName)) {
+      child.setAttribute(attrNewName, this.getAttribute(attrName));
+    } else {
+      child.removeAttribute(attrNewName);
+    }
+  }
+
   /**
    * Sometimes an element may not want to run connectedCallback logic during
    * parse. This could be because we don't want to initialize the element before
@@ -188,6 +232,7 @@ const MozXULElement = MozElementMixin(XULElement);
  * onto the object itself.
  */
 function getInterfaceProxy(obj) {
+  /* globals MozQueryInterface */
   if (!obj._customInterfaceProxy) {
     obj._customInterfaceProxy = new Proxy(obj, {
       get(target, prop, receiver) {
@@ -251,6 +296,7 @@ if (!isDummyDocument) {
     "chrome://global/content/elements/radio.js",
     "chrome://global/content/elements/textbox.js",
     "chrome://global/content/elements/tabbox.js",
+    "chrome://global/content/elements/tree.js",
   ]) {
     Services.scriptloader.loadSubScript(script, window);
   }
@@ -266,4 +312,4 @@ if (!isDummyDocument) {
     });
   }
 }
-}
+})();

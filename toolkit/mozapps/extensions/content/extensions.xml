@@ -436,17 +436,6 @@
           if (this.mControl.getAttribute("remote") != "true")
             return;
 
-          if (this.mControl.mAddon.eula) {
-            var data = {
-              addon: this.mControl.mAddon,
-              accepted: false,
-            };
-            window.openDialog("chrome://mozapps/content/extensions/eula.xul", "_blank",
-                              "chrome,dialog,modal,centerscreen,resizable=no", data);
-            if (!data.accepted)
-              return;
-          }
-
           delete this.mControl.mAddon;
           this.mControl.mInstall = this.mInstall;
           this.mControl.setAttribute("status", "installing");
@@ -578,7 +567,7 @@
   <!-- Addon - generic - A normal addon item, or an update to one -->
   <binding id="addon-generic"
            extends="chrome://mozapps/content/extensions/extensions.xml#addon-base">
-    <content>
+    <content tooltiptext="&addon.details.tooltip;">
       <xul:hbox anonid="warning-container"
                 class="warning">
         <xul:image class="warning-icon"/>
@@ -627,6 +616,10 @@
 
           <xul:hbox class="advancedinfo-container" flex="1">
             <xul:vbox class="description-outer-container" flex="1">
+              <xul:hbox class="description-container">
+                <xul:label anonid="description" class="description" crop="end" flex="1"/>
+                <xul:spacer flex="5000"/> <!-- Necessary to make the description crop -->
+              </xul:hbox>
               <xul:hbox class="relnotes-toggle-container">
                 <xul:button anonid="relnotes-toggle-btn" class="relnotes-toggle"
                             hidden="true" label="&cmd.showReleaseNotes.label;"
@@ -789,6 +782,10 @@
         document.getAnonymousElementByAttribute(this, "anonid",
                                                 "date-updated");
       </field>
+      <field name="_description">
+        document.getAnonymousElementByAttribute(this, "anonid",
+                                                "description");
+      </field>
       <field name="_stateMenulist">
         document.getAnonymousElementByAttribute(this, "anonid",
                                                 "state-menulist");
@@ -904,11 +901,16 @@
 
           this.setAttribute("name", aAddon.name);
 
-          var iconURL = AddonManager.getPreferredIconURL(aAddon, 32, window);
+          var iconURL = AddonManager.getPreferredIconURL(aAddon, 24, window);
           if (iconURL)
             this._icon.src = iconURL;
           else
             this._icon.src = "";
+
+          if (this.mAddon.description)
+            this._description.value = this.mAddon.description;
+          else
+            this._description.hidden = true;
 
           let legacyWarning = legacyExtensionsEnabled && !this.mAddon.install &&
             isLegacyExtension(this.mAddon);

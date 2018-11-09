@@ -2477,6 +2477,16 @@ XMLHttpRequestMainThread::CreateChannel()
   }
   NS_ENSURE_SUCCESS(rv, rv);
 
+  if (mCSPEventListener) {
+    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
+    if (NS_WARN_IF(!loadInfo)) {
+      return NS_ERROR_UNEXPECTED;
+    }
+
+    rv = loadInfo->SetCspEventListener(mCSPEventListener);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
   nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(mChannel));
   if (httpChannel) {
     rv = httpChannel->SetRequestMethod(mRequestMethod);
@@ -2869,6 +2879,12 @@ XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
   // as per spec. We really should create the channel here in send(), but
   // we have internal code relying on the channel being created in open().
   if (!mChannel) {
+    mFlagSend = true; // so CloseRequestWithError sets us to DONE.
+    return MaybeSilentSendFailure(NS_ERROR_DOM_NETWORK_ERR);
+  }
+
+  // non-GET requests aren't allowed for blob.
+  if (IsBlobURI(mRequestURL) && !mRequestMethod.EqualsLiteral("GET")) {
     mFlagSend = true; // so CloseRequestWithError sets us to DONE.
     return MaybeSilentSendFailure(NS_ERROR_DOM_NETWORK_ERR);
   }

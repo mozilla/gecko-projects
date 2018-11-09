@@ -156,6 +156,14 @@ impl ImageTemplates {
 struct CachedImageInfo {
     texture_cache_handle: TextureCacheHandle,
     dirty_rect: Option<DeviceUintRect>,
+    manual_eviction: bool,
+}
+
+#[cfg(debug_assertions)]
+impl Drop for CachedImageInfo {
+    fn drop(&mut self) {
+        debug_assert!(!self.manual_eviction, "Manual eviction requires cleanup");
+    }
 }
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -230,8 +238,8 @@ where
         self.resources.insert(key, value);
     }
 
-    pub fn remove(&mut self, key: &K) {
-        self.resources.remove(key);
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        self.resources.remove(key)
     }
 
     pub fn get_mut(&mut self, key: &K) -> &mut V {
@@ -253,20 +261,6 @@ where
 
     pub fn clear(&mut self) {
         self.resources.clear();
-    }
-
-    fn clear_keys<F>(&mut self, key_fun: F)
-    where
-        for<'r> F: Fn(&'r &K) -> bool,
-    {
-        let resources_to_destroy = self.resources
-            .keys()
-            .filter(&key_fun)
-            .cloned()
-            .collect::<Vec<_>>();
-        for key in resources_to_destroy {
-            let _ = self.resources.remove(&key).unwrap();
-        }
     }
 
     pub fn retain<F>(&mut self, f: F)
@@ -339,6 +333,25 @@ enum ImageResult {
     UntiledAuto(CachedImageInfo),
     Multi(ResourceClassCache<CachedImageKey, CachedImageInfo, ()>),
     Err(ImageCacheError),
+}
+
+impl ImageResult {
+    /// Releases any texture cache entries held alive by this ImageResult.
+    fn drop_from_cache(&mut self, texture_cache: &mut TextureCache) {
+        match *self {
+            ImageResult::UntiledAuto(ref mut entry) => {
+                texture_cache.mark_unused(&entry.texture_cache_handle);
+                entry.manual_eviction = false;
+            },
+            ImageResult::Multi(ref mut entries) => {
+                for (_, entry) in &mut entries.resources {
+                    texture_cache.mark_unused(&entry.texture_cache_handle);
+                    entry.manual_eviction = false;
+                }
+            },
+            ImageResult::Err(_) => {},
+        }
+    }
 }
 
 type ImageCache = ResourceClassCache<ImageKey, ImageResult, ()>;
@@ -431,7 +444,7 @@ impl ResourceCache {
             cached_glyph_dimensions: FastHashMap::default(),
             texture_cache,
             state: State::Idle,
-            current_frame_id: FrameId(0),
+            current_frame_id: FrameId::invalid(),
             pending_image_requests: FastHashSet::default(),
             glyph_rasterizer,
             blob_image_handler,
@@ -470,8 +483,8 @@ impl ResourceCache {
         render_tasks: &mut RenderTaskTree,
         user_data: Option<[f32; 3]>,
         is_opaque: bool,
-        mut f: F,
-    ) -> RenderTaskCacheEntryHandle where F: FnMut(&mut RenderTaskTree) -> RenderTaskId {
+        f: F,
+    ) -> RenderTaskCacheEntryHandle where F: FnOnce(&mut RenderTaskTree) -> RenderTaskId {
         self.cached_render_tasks.request_render_task(
             key,
             &mut self.texture_cache,
@@ -847,21 +860,13 @@ impl ResourceCache {
     }
 
     pub fn delete_image_template(&mut self, image_key: ImageKey) {
+        // Remove the template.
         let value = self.resources.image_templates.remove(image_key);
 
-        match self.cached_images.try_get(&image_key) {
-            Some(&ImageResult::UntiledAuto(ref entry)) => {
-                self.texture_cache.mark_unused(&entry.texture_cache_handle);
-            }
-            Some(&ImageResult::Multi(ref entries)) => {
-                for (_, entry) in &entries.resources {
-                    self.texture_cache.mark_unused(&entry.texture_cache_handle);
-                }
-            }
-            _ => {}
+        // Release the corresponding texture cache entry, if any.
+        if let Some(mut cached) = self.cached_images.remove(&image_key) {
+            cached.drop_from_cache(&mut self.texture_cache);
         }
-
-        self.cached_images.remove(&image_key);
 
         match value {
             Some(image) => if image.data.is_blob() {
@@ -919,8 +924,9 @@ impl ResourceCache {
                     let untiled_entry = match entry {
                         &mut ImageResult::UntiledAuto(ref mut entry) => {
                             Some(mem::replace(entry, CachedImageInfo {
-                                texture_cache_handle: TextureCacheHandle::new(),
+                                texture_cache_handle: TextureCacheHandle::invalid(),
                                 dirty_rect: None,
+                                manual_eviction: false,
                             }))
                         }
                         _ => None
@@ -941,8 +947,9 @@ impl ResourceCache {
             Vacant(entry) => {
                 entry.insert(if request.is_untiled_auto() {
                     ImageResult::UntiledAuto(CachedImageInfo {
-                        texture_cache_handle: TextureCacheHandle::new(),
+                        texture_cache_handle: TextureCacheHandle::invalid(),
                         dirty_rect: Some(template.descriptor.full_rect()),
+                        manual_eviction: false,
                     })
                 } else {
                     ImageResult::Multi(ResourceClassCache::new())
@@ -957,8 +964,9 @@ impl ResourceCache {
             ImageResult::Multi(ref mut entries) => {
                 entries.entry(request.into())
                     .or_insert(CachedImageInfo {
-                        texture_cache_handle: TextureCacheHandle::new(),
+                        texture_cache_handle: TextureCacheHandle::invalid(),
                         dirty_rect: Some(template.descriptor.full_rect()),
+                        manual_eviction: false,
                     })
             },
             ImageResult::Err(_) => panic!("Errors should already have been handled"),
@@ -1082,7 +1090,7 @@ impl ResourceCache {
                     }
                 }
 
-                for_each_tile_in_range(&tiles, &mut|tile| {
+                for_each_tile_in_range(&tiles, |tile| {
                     let descriptor = BlobImageDescriptor {
                         offset: DevicePoint::new(
                             tile.x as f32 * tile_size as f32,
@@ -1194,6 +1202,20 @@ impl ResourceCache {
         );
 
         tiles.retain(|tile, _| { tile_range.contains(tile) });
+
+        let texture_cache = &mut self.texture_cache;
+        match self.cached_images.try_get_mut(&key) {
+            Some(&mut ImageResult::Multi(ref mut entries)) => {
+                entries.retain(|key, entry| {
+                    if key.tile.is_none() || tile_range.contains(&key.tile.unwrap()) {
+                        return true;
+                    }
+                    texture_cache.mark_unused(&entry.texture_cache_handle);
+                    return false;
+                });
+            }
+            _ => {}
+        }
     }
 
     pub fn request_glyphs(
@@ -1571,6 +1593,7 @@ impl ResourceCache {
                 };
 
                 let eviction = if image_template.data.is_blob() {
+                    entry.manual_eviction = true;
                     Eviction::Manual
                 } else {
                     Eviction::Auto
@@ -1600,7 +1623,9 @@ impl ResourceCache {
 
     pub fn clear(&mut self, what: ClearCache) {
         if what.contains(ClearCache::IMAGES) {
-            self.cached_images.clear();
+            for (_key, mut cached) in self.cached_images.resources.drain() {
+                cached.drop_from_cache(&mut self.texture_cache);
+            }
         }
         if what.contains(ClearCache::GLYPHS) {
             self.cached_glyphs.clear();
@@ -1620,16 +1645,7 @@ impl ResourceCache {
     }
 
     pub fn clear_namespace(&mut self, namespace: IdNamespace) {
-        self.resources
-            .image_templates
-            .images
-            .retain(|key, _| key.0 != namespace);
-        self.cached_images
-            .clear_keys(|key| key.0 == namespace);
-
-        self.blob_image_templates.retain(|key, _| key.0 != namespace);
-
-        self.rasterized_blob_images.retain(|key, _| key.0 != namespace);
+        self.clear_images(|k| k.0 == namespace);
 
         self.resources.font_instances
             .write()
@@ -1686,6 +1702,28 @@ impl ResourceCache {
         */
 
         report
+    }
+
+    /// Properly deletes all images matching the predicate.
+    fn clear_images<F: Fn(&ImageKey) -> bool>(&mut self, f: F) {
+        let keys = self.resources.image_templates.images.keys().filter(|k| f(*k))
+            .cloned().collect::<SmallVec<[ImageKey; 16]>>();
+
+        for key in keys {
+            self.delete_image_template(key);
+        }
+
+        debug_assert!(!self.resources.image_templates.images.keys().any(&f));
+        debug_assert!(!self.cached_images.resources.keys().any(&f));
+        debug_assert!(!self.blob_image_templates.keys().any(&f));
+        debug_assert!(!self.rasterized_blob_images.keys().any(&f));
+
+    }
+}
+
+impl Drop for ResourceCache {
+    fn drop(&mut self) {
+        self.clear_images(|_| true);
     }
 }
 
@@ -1994,7 +2032,7 @@ impl ResourceCache {
                 self.texture_cache = cached.textures;
             }
             None => {
-                self.current_frame_id = FrameId(0);
+                self.current_frame_id = FrameId::invalid();
                 self.cached_glyphs.clear();
                 self.cached_glyph_dimensions.clear();
                 self.cached_images.clear();

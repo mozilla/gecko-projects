@@ -2210,7 +2210,7 @@ js::IdToPrintableUTF8(JSContext* cx, HandleId id, IdToPrintableBehavior behavior
     // ToString(<symbol>) throws a TypeError, therefore require that callers
     // request source representation when |id| is a property key.
     MOZ_ASSERT_IF(behavior == IdToPrintableBehavior::IdIsIdentifier,
-                  JSID_IS_ATOM(id) && frontend::IsIdentifier(JSID_TO_ATOM(id)));
+                  JSID_IS_ATOM(id) && frontend::IsIdentifierNameOrPrivateName(JSID_TO_ATOM(id)));
 
     RootedValue v(cx, IdToValue(id));
     JSString* str;
@@ -2291,6 +2291,21 @@ js::ToStringSlow(JSContext* cx, HandleValue v)
     return ToStringSlow<CanGC>(cx, v);
 }
 
+/*
+ * Convert a JSString to its source expression; returns null after reporting an
+ * error, otherwise returns a new string reference. No Handle needed since the
+ * input is dead after the GC.
+ */
+static JSString*
+StringToSource(JSContext* cx, JSString* str)
+{
+    UniqueChars chars = QuoteString(cx, str, '"');
+    if (!chars) {
+        return nullptr;
+    }
+    return NewStringCopyZ<CanGC>(cx, chars.get());
+}
+
 static JSString*
 SymbolToSource(JSContext* cx, Symbol* symbol)
 {
@@ -2360,14 +2375,4 @@ js::ValueToSource(JSContext* cx, HandleValue v)
     }
 
     return ObjectToSource(cx, obj);
-}
-
-JSString*
-js::StringToSource(JSContext* cx, JSString* str)
-{
-    UniqueChars chars = QuoteString(cx, str, '"');
-    if (!chars) {
-        return nullptr;
-    }
-    return NewStringCopyZ<CanGC>(cx, chars.get());
 }

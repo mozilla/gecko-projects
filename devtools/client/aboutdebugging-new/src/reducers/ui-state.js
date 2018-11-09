@@ -9,14 +9,20 @@ const {
   DEBUG_TARGET_COLLAPSIBILITY_UPDATED,
   NETWORK_LOCATIONS_UPDATED,
   PAGE_SELECTED,
+  USB_RUNTIMES_SCAN_START,
+  USB_RUNTIMES_SCAN_SUCCESS,
 } = require("../constants");
 
-function UiState(locations = [], debugTargetCollapsibilities = {}) {
+function UiState(locations = [], debugTargetCollapsibilities = {},
+                 networkEnabled = false, wifiEnabled = false) {
   return {
     adbAddonStatus: null,
     debugTargetCollapsibilities,
+    isScanningUsb: false,
+    networkEnabled,
     networkLocations: locations,
     selectedPage: null,
+    wifiEnabled,
   };
 }
 
@@ -42,6 +48,14 @@ function uiReducer(state = UiState(), action) {
     case PAGE_SELECTED: {
       const { page } = action;
       return Object.assign({}, state, { selectedPage: page });
+    }
+
+    case USB_RUNTIMES_SCAN_START: {
+      return Object.assign({}, state, { isScanningUsb: true });
+    }
+
+    case USB_RUNTIMES_SCAN_SUCCESS: {
+      return Object.assign({}, state, { isScanningUsb: false });
     }
 
     default:

@@ -34,6 +34,7 @@ public:
               uint32_t* aMaxTextureSize,
               bool* aUseANGLE,
               bool* aUseDComp,
+              bool* aUseTripleBuffering,
               RefPtr<widget::CompositorWidget>&& aWidget,
               layers::SynchronousTask* aTask,
               LayoutDeviceIntSize aSize,
@@ -42,6 +43,7 @@ public:
     , mMaxTextureSize(aMaxTextureSize)
     , mUseANGLE(aUseANGLE)
     , mUseDComp(aUseDComp)
+    , mUseTripleBuffering(aUseTripleBuffering)
     , mBridge(aBridge)
     , mCompositorWidget(std::move(aWidget))
     , mTask(aTask)
@@ -68,6 +70,7 @@ public:
 
     *mUseANGLE = compositor->UseANGLE();
     *mUseDComp = compositor->UseDComp();
+    *mUseTripleBuffering = compositor->UseTripleBuffering();
 
     bool supportLowPriorityTransactions = true; // TODO only for main windows.
     wr::Renderer* wrRenderer = nullptr;
@@ -110,6 +113,7 @@ private:
   uint32_t* mMaxTextureSize;
   bool* mUseANGLE;
   bool* mUseDComp;
+  bool* mUseTripleBuffering;
   layers::CompositorBridgeParent* mBridge;
   RefPtr<widget::CompositorWidget> mCompositorWidget;
   layers::SynchronousTask* mTask;
@@ -249,7 +253,7 @@ TransactionBuilder::SetWindowParameters(const LayoutDeviceIntSize& aWindowSize,
 
 void
 TransactionBuilder::UpdateScrollPosition(const wr::WrPipelineId& aPipelineId,
-                                         const layers::FrameMetrics::ViewID& aScrollId,
+                                         const layers::ScrollableLayerGuid::ViewID& aScrollId,
                                          const wr::LayoutPoint& aScrollPosition)
 {
   wr_transaction_scroll_layer(mTxn, aPipelineId, aScrollId, aScrollPosition);
@@ -271,7 +275,7 @@ TransactionWrapper::AppendTransformProperties(const nsTArray<wr::WrTransformProp
 
 void
 TransactionWrapper::UpdateScrollPosition(const wr::WrPipelineId& aPipelineId,
-                                         const layers::FrameMetrics::ViewID& aScrollId,
+                                         const layers::ScrollableLayerGuid::ViewID& aScrollId,
                                          const wr::LayoutPoint& aScrollPosition)
 {
   wr_transaction_scroll_layer(mTxn, aPipelineId, aScrollId, aScrollPosition);
@@ -298,13 +302,14 @@ WebRenderAPI::Create(layers::CompositorBridgeParent* aBridge,
   uint32_t maxTextureSize = 0;
   bool useANGLE = false;
   bool useDComp = false;
+  bool useTripleBuffering = false;
   layers::SyncHandle syncHandle = 0;
 
   // Dispatch a synchronous task because the DocumentHandle object needs to be created
   // on the render thread. If need be we could delay waiting on this task until
   // the next time we need to access the DocumentHandle object.
   layers::SynchronousTask task("Create Renderer");
-  auto event = MakeUnique<NewRenderer>(&docHandle, aBridge, &maxTextureSize, &useANGLE, &useDComp,
+  auto event = MakeUnique<NewRenderer>(&docHandle, aBridge, &maxTextureSize, &useANGLE, &useDComp, &useTripleBuffering,
                                        std::move(aWidget), &task, aSize,
                                        &syncHandle);
   RenderThread::Get()->RunEvent(aWindowId, std::move(event));
@@ -315,7 +320,7 @@ WebRenderAPI::Create(layers::CompositorBridgeParent* aBridge,
     return nullptr;
   }
 
-  return RefPtr<WebRenderAPI>(new WebRenderAPI(docHandle, aWindowId, maxTextureSize, useANGLE, useDComp, syncHandle)).forget();
+  return RefPtr<WebRenderAPI>(new WebRenderAPI(docHandle, aWindowId, maxTextureSize, useANGLE, useDComp, useTripleBuffering, syncHandle)).forget();
 }
 
 already_AddRefed<WebRenderAPI>
@@ -324,7 +329,7 @@ WebRenderAPI::Clone()
   wr::DocumentHandle* docHandle = nullptr;
   wr_api_clone(mDocHandle, &docHandle);
 
-  RefPtr<WebRenderAPI> renderApi = new WebRenderAPI(docHandle, mId, mMaxTextureSize, mUseANGLE, mUseDComp, mSyncHandle);
+  RefPtr<WebRenderAPI> renderApi = new WebRenderAPI(docHandle, mId, mMaxTextureSize, mUseANGLE, mUseDComp, mUseTripleBuffering, mSyncHandle);
   renderApi->mRootApi = this; // Hold root api
   renderApi->mRootDocumentApi = this;
   return renderApi.forget();
@@ -344,6 +349,7 @@ WebRenderAPI::CreateDocument(LayoutDeviceIntSize aSize, int8_t aLayerIndex)
                                             mMaxTextureSize,
                                             mUseANGLE,
                                             mUseDComp,
+                                            mUseTripleBuffering,
                                             mSyncHandle));
   api->mRootApi = this;
   return api.forget();
@@ -383,7 +389,7 @@ WebRenderAPI::SendTransaction(TransactionBuilder& aTxn)
 bool
 WebRenderAPI::HitTest(const wr::WorldPoint& aPoint,
                       wr::WrPipelineId& aOutPipelineId,
-                      layers::FrameMetrics::ViewID& aOutScrollId,
+                      layers::ScrollableLayerGuid::ViewID& aOutScrollId,
                       gfx::CompositorHitTestInfo& aOutHitInfo)
 {
   static_assert(DoesCompositorHitTestInfoFitIntoBits<16>(),
@@ -425,7 +431,7 @@ WebRenderAPI::Readback(const TimeStamp& aStartTime,
 
             virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override
             {
-                aRenderThread.UpdateAndRender(aWindowId, mStartTime, /* aRender */ true, Some(mSize), Some(mBuffer));
+                aRenderThread.UpdateAndRender(aWindowId, mStartTime, /* aRender */ true, Some(mSize), Some(mBuffer), false);
                 layers::AutoCompleteTask complete(mTask);
             }
 
@@ -960,9 +966,9 @@ DisplayListBuilder::DefineStickyFrame(const wr::LayoutRect& aContentRect,
 }
 
 Maybe<wr::WrClipId>
-DisplayListBuilder::GetScrollIdForDefinedScrollLayer(layers::FrameMetrics::ViewID aViewId) const
+DisplayListBuilder::GetScrollIdForDefinedScrollLayer(layers::ScrollableLayerGuid::ViewID aViewId) const
 {
-  if (aViewId == layers::FrameMetrics::NULL_SCROLL_ID) {
+  if (aViewId == layers::ScrollableLayerGuid::NULL_SCROLL_ID) {
     return Some(wr::WrClipId::RootScrollNode());
   }
 
@@ -975,7 +981,7 @@ DisplayListBuilder::GetScrollIdForDefinedScrollLayer(layers::FrameMetrics::ViewI
 }
 
 wr::WrClipId
-DisplayListBuilder::DefineScrollLayer(const layers::FrameMetrics::ViewID& aViewId,
+DisplayListBuilder::DefineScrollLayer(const layers::ScrollableLayerGuid::ViewID& aViewId,
                                       const Maybe<wr::WrClipId>& aParentId,
                                       const wr::LayoutRect& aContentRect,
                                       const wr::LayoutRect& aClipRect)
@@ -1337,7 +1343,7 @@ DisplayListBuilder::PushBoxShadow(const wr::LayoutRect& aRect,
                         aClipMode);
 }
 
-Maybe<layers::FrameMetrics::ViewID>
+Maybe<layers::ScrollableLayerGuid::ViewID>
 DisplayListBuilder::GetContainingFixedPosScrollTarget(const ActiveScrolledRoot* aAsr)
 {
   return mActiveFixedPosTracker
@@ -1346,7 +1352,7 @@ DisplayListBuilder::GetContainingFixedPosScrollTarget(const ActiveScrolledRoot* 
 }
 
 void
-DisplayListBuilder::SetHitTestInfo(const layers::FrameMetrics::ViewID& aScrollId,
+DisplayListBuilder::SetHitTestInfo(const layers::ScrollableLayerGuid::ViewID& aScrollId,
                                    gfx::CompositorHitTestInfo aHitInfo)
 {
   static_assert(DoesCompositorHitTestInfoFitIntoBits<16>(),
@@ -1364,7 +1370,7 @@ DisplayListBuilder::ClearHitTestInfo()
 DisplayListBuilder::FixedPosScrollTargetTracker::FixedPosScrollTargetTracker(
     DisplayListBuilder& aBuilder,
     const ActiveScrolledRoot* aAsr,
-    layers::FrameMetrics::ViewID aScrollId)
+    layers::ScrollableLayerGuid::ViewID aScrollId)
   : mParentTracker(aBuilder.mActiveFixedPosTracker)
   , mBuilder(aBuilder)
   , mAsr(aAsr)
@@ -1378,7 +1384,7 @@ DisplayListBuilder::FixedPosScrollTargetTracker::~FixedPosScrollTargetTracker()
   mBuilder.mActiveFixedPosTracker = mParentTracker;
 }
 
-Maybe<layers::FrameMetrics::ViewID>
+Maybe<layers::ScrollableLayerGuid::ViewID>
 DisplayListBuilder::FixedPosScrollTargetTracker::GetScrollTargetForASR(const ActiveScrolledRoot* aAsr)
 {
   return aAsr == mAsr ? Some(mScrollId) : Nothing();

@@ -7,6 +7,8 @@
 const { AddonManager } = require("resource://gre/modules/AddonManager.jsm");
 const { gDevToolsBrowser } = require("devtools/client/framework/devtools-browser");
 
+const { l10n } = require("../modules/l10n");
+
 const {
   debugLocalAddon,
   debugRemoteAddon,
@@ -36,13 +38,13 @@ const {
 function inspectDebugTarget(type, id) {
   return async (_, getState) => {
     const runtime = getCurrentRuntime(getState().runtimes);
-    const { connection, type: runtimeType } = runtime;
+    const { runtimeDetails, type: runtimeType } = runtime;
 
     switch (type) {
       case DEBUG_TARGETS.TAB: {
         // Open tab debugger in new window.
         if (runtimeType === RUNTIMES.NETWORK || runtimeType === RUNTIMES.USB) {
-          const { host, port } = connection.transportDetails;
+          const { host, port } = runtimeDetails.transportDetails;
           window.open(`about:devtools-toolbox?type=tab&id=${id}` +
                       `&host=${host}&port=${port}`);
         } else if (runtimeType === RUNTIMES.THIS_FIREFOX) {
@@ -52,7 +54,7 @@ function inspectDebugTarget(type, id) {
       }
       case DEBUG_TARGETS.EXTENSION: {
         if (runtimeType === RUNTIMES.NETWORK) {
-          await debugRemoteAddon(id, connection.client);
+          await debugRemoteAddon(id, runtimeDetails.client);
         } else if (runtimeType === RUNTIMES.THIS_FIREFOX) {
           debugLocalAddon(id);
         }
@@ -60,7 +62,7 @@ function inspectDebugTarget(type, id) {
       }
       case DEBUG_TARGETS.WORKER: {
         // Open worker toolbox in new window.
-        gDevToolsBrowser.openWorkerToolbox(connection.client, id);
+        gDevToolsBrowser.openWorkerToolbox(runtimeDetails.client, id);
         break;
       }
 
@@ -72,7 +74,8 @@ function inspectDebugTarget(type, id) {
   };
 }
 
-function installTemporaryExtension(message) {
+function installTemporaryExtension() {
+  const message = l10n.getString("about-debugging-tmp-extension-install-message");
   return async (dispatch, getState) => {
     const file = await openTemporaryExtension(window, message);
     try {
@@ -128,7 +131,7 @@ function requestTabs() {
 
       dispatch({ type: REQUEST_TABS_SUCCESS, tabs });
     } catch (e) {
-      dispatch({ type: REQUEST_TABS_FAILURE, error: e.message });
+      dispatch({ type: REQUEST_TABS_FAILURE, error: e });
     }
   };
 }
@@ -151,7 +154,7 @@ function requestExtensions() {
         temporaryExtensions,
       });
     } catch (e) {
-      dispatch({ type: REQUEST_EXTENSIONS_FAILURE, error: e.message });
+      dispatch({ type: REQUEST_EXTENSIONS_FAILURE, error: e });
     }
   };
 }
@@ -176,7 +179,7 @@ function requestWorkers() {
         sharedWorkers,
       });
     } catch (e) {
-      dispatch({ type: REQUEST_WORKERS_FAILURE, error: e.message });
+      dispatch({ type: REQUEST_WORKERS_FAILURE, error: e });
     }
   };
 }

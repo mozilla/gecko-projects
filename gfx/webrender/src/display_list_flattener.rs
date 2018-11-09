@@ -13,8 +13,8 @@ use api::{LineOrientation, LineStyle, NinePatchBorderSource, PipelineId};
 use api::{PropertyBinding, ReferenceFrame, RepeatMode, ScrollFrameDisplayItem, ScrollSensitivity};
 use api::{Shadow, SpecificDisplayItem, StackingContext, StickyFrameDisplayItem, TexelRect};
 use api::{ClipMode, TransformStyle, YuvColorSpace, YuvData};
-use clip::{ClipChainId, ClipRegion, ClipItemKey, ClipStore};
-use clip_scroll_tree::{ClipScrollTree, SpatialNodeIndex};
+use clip::{ClipChainId, ClipRegion, ClipItemKey, ClipStore, ClipItemSceneData};
+use clip_scroll_tree::{ROOT_SPATIAL_NODE_INDEX, ClipScrollTree, SpatialNodeIndex};
 use euclid::vec2;
 use frame_builder::{ChasePrimitive, FrameBuilder, FrameBuilderConfig};
 use glyph_rasterizer::FontInstance;
@@ -23,11 +23,11 @@ use gpu_types::BrushFlags;
 use hit_test::{HitTestingItem, HitTestingRun};
 use image::simplify_repeated_primitive;
 use internal_types::{FastHashMap, FastHashSet};
-use picture::{PictureCompositeMode, PictureIdGenerator, PicturePrimitive};
-use prim_store::{BrushKind, BrushPrimitive, BrushSegmentDescriptor, PrimitiveInstance};
-use prim_store::{EdgeAaSegmentMask, ImageSource, PrimitiveOpacity, PrimitiveKey};
-use prim_store::{BorderSource, BrushSegment, BrushSegmentVec, PrimitiveContainer, PrimitiveStore};
-use prim_store::{OpacityBinding, ScrollNodeAndClipChain, TextRunPrimitive, PictureIndex};
+use picture::{Picture3DContext, PictureCompositeMode, PictureIdGenerator, PicturePrimitive, PrimitiveList};
+use prim_store::{BrushKind, BrushPrimitive, BrushSegmentDescriptor, PrimitiveInstance, PrimitiveDataInterner, PrimitiveKeyKind};
+use prim_store::{EdgeAaSegmentMask, ImageSource, PrimitiveOpacity, PrimitiveKey, PrimitiveSceneData, PrimitiveInstanceKind};
+use prim_store::{BorderSource, BrushSegment, BrushSegmentVec, PrimitiveContainer, PrimitiveDataHandle, PrimitiveStore};
+use prim_store::{OpacityBinding, ScrollNodeAndClipChain, PictureIndex, register_prim_chase_id};
 use render_backend::{DocumentView};
 use resource_cache::{FontInstanceMap, ImageRequest};
 use scene::{Scene, ScenePipeline, StackingContextHelpers};
@@ -553,6 +553,7 @@ impl<'a> DisplayListFlattener<'a> {
                     &text_info.color,
                     item.glyphs(),
                     text_info.glyph_options,
+                    pipeline_id,
                 );
             }
             SpecificDisplayItem::Rectangle(ref info) => {
@@ -799,7 +800,18 @@ impl<'a> DisplayListFlattener<'a> {
             for item in clip_items {
                 // Intern this clip item, and store the handle
                 // in the clip chain node.
-                let handle = self.resources.clip_interner.intern(&item);
+                let handle = self.resources
+                    .clip_interner
+                    .intern(&item, || {
+                        ClipItemSceneData {
+                            // The only type of clip items that exist in the per-primitive
+                            // clip items are box shadows, and they don't contribute a
+                            // local clip rect, so just provide max_rect here. In the future,
+                            // we intend to make box shadows a primitive effect, in which
+                            // case the entire clip_items API on primitives can be removed.
+                            clip_rect: LayoutRect::max_rect(),
+                        }
+                    });
 
                 clip_chain_id = self.clip_store
                                     .add_clip_chain_node(
@@ -823,22 +835,56 @@ impl<'a> DisplayListFlattener<'a> {
         spatial_node_index: SpatialNodeIndex,
         container: PrimitiveContainer,
     ) -> PrimitiveInstance {
-        let stacking_context = self.sc_stack.last().expect("bug: no stacking context!");
+        // Build a primitive key, and optionally an old
+        // style PrimitiveDetails structure from the
+        // source primitive container.
+        let mut info = info.clone();
+        let (prim_key_kind, prim_details) = container.build(&mut info);
 
         let prim_key = PrimitiveKey::new(
-            info.is_backface_visible && stacking_context.is_backface_visible,
+            info.is_backface_visible,
+            info.rect,
+            info.clip_rect,
+            prim_key_kind,
         );
 
-        let prim_data_handle = self.resources.prim_interner.intern(&prim_key);
+        // Get a tight bounding / culling rect for this primitive
+        // from its local rect intersection with minimal local
+        // clip rect.
+        let culling_rect = info.clip_rect
+            .intersection(&info.rect)
+            .unwrap_or(LayoutRect::zero());
 
-        let prim_index = self.prim_store.add_primitive(
-            &info.rect,
-            &info.clip_rect,
-            container,
-        );
+        let prim_data_handle = self.resources
+            .prim_interner
+            .intern(&prim_key, || {
+                PrimitiveSceneData {
+                    culling_rect,
+                    is_backface_visible: info.is_backface_visible,
+                }
+            });
+
+        // If we are building an old style primitive, add it to
+        // the prim store, and create a primitive index for it.
+        // For an interned primitive, use the primitive key to
+        // create a matching primitive instance kind.
+        let instance_kind = match prim_details {
+            Some(prim_details) => {
+                let prim_index = self.prim_store.add_primitive(
+                    &info.rect,
+                    &info.clip_rect,
+                    prim_details,
+                );
+
+                PrimitiveInstanceKind::LegacyPrimitive { prim_index }
+            }
+            None => {
+                prim_key.to_instance_kind(&mut self.prim_store)
+            }
+        };
 
         PrimitiveInstance::new(
-            prim_index,
+            instance_kind,
             prim_data_handle,
             clip_chain_id,
             spatial_node_index,
@@ -874,11 +920,11 @@ impl<'a> DisplayListFlattener<'a> {
         prim_instance: PrimitiveInstance,
     ) {
         // Add primitive to the top-most stacking context on the stack.
-        if cfg!(debug_assertions) && self.prim_store.chase_id == Some(prim_instance.prim_index) {
+        if prim_instance.is_chased() {
             println!("\tadded to stacking context at {}", self.sc_stack.len());
         }
         let stacking_context = self.sc_stack.last_mut().unwrap();
-        stacking_context.normal_primitives.push(prim_instance);
+        stacking_context.primitives.push(prim_instance);
     }
 
     /// Convenience interface that creates a primitive entry and adds it
@@ -905,10 +951,10 @@ impl<'a> DisplayListFlattener<'a> {
                     clip_and_scroll.spatial_node_index,
                     container,
                 );
-                if cfg!(debug_assertions) && ChasePrimitive::LocalRect(info.rect) == self.config.chase_primitive {
-                    println!("Chasing {:?} by local rect", prim_instance.prim_index);
-                    self.prim_store.chase_id = Some(prim_instance.prim_index);
-                }
+                self.register_chase_primitive_by_rect(
+                    &info.rect,
+                    &prim_instance,
+                );
                 self.add_primitive_to_hit_testing_list(info, clip_and_scroll);
                 self.add_primitive_to_draw_list(prim_instance);
             }
@@ -953,10 +999,23 @@ impl<'a> DisplayListFlattener<'a> {
         // Get the transform-style of the parent stacking context,
         // which determines if we *might* need to draw this on
         // an intermediate surface for plane splitting purposes.
-        let parent_transform_style = match self.sc_stack.last() {
-            Some(sc) => sc.transform_style,
-            None => TransformStyle::Flat,
+        let (parent_is_3d, extra_3d_instance) = match self.sc_stack.last_mut() {
+            Some(sc) => {
+                // Cut the sequence of flat children before starting a child stacking context,
+                // so that the relative order between them and our current SC is preserved.
+                let extra_instance = sc.cut_flat_item_sequence(
+                    &mut self.picture_id_generator,
+                    &mut self.prim_store,
+                    &self.resources.prim_interner,
+                );
+                (sc.is_3d(), extra_instance)
+            },
+            None => (false, None),
         };
+
+        if let Some(instance) = extra_3d_instance {
+            self.add_primitive_instance_to_3d_root(instance);
+        }
 
         // If this is preserve-3d *or* the parent is, then this stacking
         // context is participating in the 3d rendering context. In that
@@ -964,16 +1023,29 @@ impl<'a> DisplayListFlattener<'a> {
         // container, so that it's rendered as a sibling with other
         // elements in this context.
         let participating_in_3d_context =
-            composite_ops.count() == 0 &&
-            (parent_transform_style == TransformStyle::Preserve3D ||
-             transform_style == TransformStyle::Preserve3D);
+            composite_ops.is_empty() &&
+            (parent_is_3d || transform_style == TransformStyle::Preserve3D);
 
-        // If this is participating in a 3d context *and* the
-        // parent was not a 3d context, then this must be the
-        // element that establishes a new 3d context.
-        let establishes_3d_context =
-            participating_in_3d_context &&
-            parent_transform_style == TransformStyle::Flat;
+        let context_3d = if participating_in_3d_context {
+            // Find the spatial node index of the containing block, which
+            // defines the context of backface-visibility.
+            let ancestor_context = self.sc_stack
+                .iter()
+                .rfind(|sc| !sc.is_3d());
+            Picture3DContext::In {
+                root_data: if parent_is_3d {
+                    None
+                } else {
+                    Some(Vec::new())
+                },
+                ancestor_index: match ancestor_context {
+                    Some(sc) => sc.spatial_node_index,
+                    None => ROOT_SPATIAL_NODE_INDEX,
+                },
+            }
+        } else {
+            Picture3DContext::Out
+        };
 
         // Force an intermediate surface if the stacking context
         // has a clip node. In the future, we may decide during
@@ -981,29 +1053,29 @@ impl<'a> DisplayListFlattener<'a> {
         // clip node doesn't affect the stacking context rect.
         let should_isolate = clipping_node.is_some();
 
-        // preserve-3d's semantics are to hoist all your children to be your siblings
-        // when doing backface-visibility checking, so we need to grab the backface-visibility
-        // of the lowest ancestor which *doesn't* preserve-3d, and AND it in with ours.
-        //
-        // No this isn't obvious or clear, it's just what we worked out over a day of testing.
-        // There's probably a bug in here, but I couldn't find it with the examples and tests
-        // at my disposal!
-        let ancestor_is_backface_visible =
-            self.sc_stack
-                .iter()
-                .rfind(|sc| sc.transform_style == TransformStyle::Flat)
-                .map(|sc| sc.is_backface_visible)
-                .unwrap_or(is_backface_visible);
+        let prim_key = PrimitiveKey::new(
+            is_backface_visible,
+            LayoutRect::zero(),
+            LayoutRect::max_rect(),
+            PrimitiveKeyKind::Unused,
+        );
 
-        let is_backface_visible = is_backface_visible && ancestor_is_backface_visible;
+        let primitive_data_handle = self.resources
+            .prim_interner
+            .intern(&prim_key, || {
+                PrimitiveSceneData {
+                    culling_rect: LayoutRect::zero(),
+                    is_backface_visible,
+                }
+            }
+        );
 
         // Push the SC onto the stack, so we know how to handle things in
         // pop_stacking_context.
         self.sc_stack.push(FlattenedStackingContext {
-            preserve3d_primitives: Vec::new(),
-            normal_primitives: Vec::new(),
+            primitives: Vec::new(),
             pipeline_id,
-            is_backface_visible,
+            primitive_data_handle,
             requested_raster_space,
             spatial_node_index,
             clip_chain_id,
@@ -1011,8 +1083,7 @@ impl<'a> DisplayListFlattener<'a> {
             composite_ops,
             should_isolate,
             transform_style,
-            participating_in_3d_context,
-            establishes_3d_context,
+            context_3d,
         });
     }
 
@@ -1027,19 +1098,7 @@ impl<'a> DisplayListFlattener<'a> {
         // to correctly handle some CSS cases (see #1957).
         let max_clip = LayoutRect::max_rect();
 
-        // By default, this picture will be collapsed into
-        // the owning target.
-        let mut composite_mode = if stacking_context.should_isolate {
-            Some(PictureCompositeMode::Blit)
-        } else {
-            None
-        };
-
-        // Force an intermediate surface if the stacking context
-        // has a clip node. In the future, we may decide during
-        // prepare step to skip the intermediate surface if the
-        // clip node doesn't affect the stacking context rect.
-        if stacking_context.participating_in_3d_context {
+        let (leaf_context_3d, leaf_composite_mode, leaf_output_pipeline_id) = match stacking_context.context_3d {
             // TODO(gw): For now, as soon as this picture is in
             //           a 3D context, we draw it to an intermediate
             //           surface and apply plane splitting. However,
@@ -1047,71 +1106,120 @@ impl<'a> DisplayListFlattener<'a> {
             //           During culling, we can check if there is actually
             //           perspective present, and skip the plane splitting
             //           completely when that is not the case.
-            composite_mode = Some(PictureCompositeMode::Blit);
-        }
-
-        let prim_key = PrimitiveKey::new(true);
-        let prim_data_handle = self.resources.prim_interner.intern(&prim_key);
+            Picture3DContext::In { ancestor_index, .. } => (
+                Picture3DContext::In { root_data: None, ancestor_index },
+                Some(PictureCompositeMode::Blit),
+                None,
+            ),
+            Picture3DContext::Out => (
+                Picture3DContext::Out,
+                if stacking_context.should_isolate {
+                    // Add a dummy composite filter if the SC has to be isolated.
+                    Some(PictureCompositeMode::Blit)
+                } else {
+                    // By default, this picture will be collapsed into
+                    // the owning target.
+                    None
+                },
+                stacking_context.frame_output_pipeline_id
+            ),
+        };
 
         // Add picture for this actual stacking context contents to render into.
+        let prim_list = PrimitiveList::new(
+            stacking_context.primitives,
+            &self.resources.prim_interner,
+        );
         let leaf_picture = PicturePrimitive::new_image(
             self.picture_id_generator.next(),
-            composite_mode,
-            stacking_context.participating_in_3d_context,
+            leaf_composite_mode,
+            leaf_context_3d,
             stacking_context.pipeline_id,
-            stacking_context.frame_output_pipeline_id,
+            leaf_output_pipeline_id,
             true,
             stacking_context.requested_raster_space,
-            stacking_context.normal_primitives,
+            prim_list,
+            stacking_context.spatial_node_index,
+            max_clip,
         );
         let leaf_pic_index = self.prim_store.create_picture(leaf_picture);
 
-        // Create a brush primitive that draws this picture.
-        let leaf_prim = BrushPrimitive::new_picture(leaf_pic_index);
-
-        // Add the brush to the parent picture.
-        let leaf_prim_index = self.prim_store.add_primitive(
-            &LayoutRect::zero(),
-            &max_clip,
-            PrimitiveContainer::Brush(leaf_prim),
-        );
-
         // Create a chain of pictures based on presence of filters,
         // mix-blend-mode and/or 3d rendering context containers.
-        let mut current_prim_index = leaf_prim_index;
+
         let mut current_pic_index = leaf_pic_index;
+        let mut cur_instance = PrimitiveInstance::new(
+            PrimitiveInstanceKind::Picture { pic_index: leaf_pic_index },
+            stacking_context.primitive_data_handle,
+            stacking_context.clip_chain_id,
+            stacking_context.spatial_node_index,
+        );
+
+        if cur_instance.is_chased() {
+            println!("\tis a leaf primitive for a stacking context");
+        }
+
+        // If establishing a 3d context, the `cur_instance` represents
+        // a picture with all the *trailing* immediate children elements.
+        // We append this to the preserve-3D picture set and make a container picture of them.
+        if let Picture3DContext::In { root_data: Some(mut prims), ancestor_index } = stacking_context.context_3d {
+            prims.push(cur_instance.clone());
+
+            let prim_list = PrimitiveList::new(
+                prims,
+                &self.resources.prim_interner,
+            );
+
+            // This is the acttual picture representing our 3D hierarchy root.
+            let container_picture = PicturePrimitive::new_image(
+                self.picture_id_generator.next(),
+                None,
+                Picture3DContext::In {
+                    root_data: Some(Vec::new()),
+                    ancestor_index,
+                },
+                stacking_context.pipeline_id,
+                stacking_context.frame_output_pipeline_id,
+                true,
+                stacking_context.requested_raster_space,
+                prim_list,
+                stacking_context.spatial_node_index,
+                max_clip,
+            );
+
+            current_pic_index = self.prim_store.create_picture(container_picture);
+
+            cur_instance.kind = PrimitiveInstanceKind::Picture { pic_index: current_pic_index };
+        }
 
         // For each filter, create a new image with that composite mode.
         for filter in &stacking_context.composite_ops.filters {
             let filter = filter.sanitize();
+            let prim_list = PrimitiveList::new(
+                vec![cur_instance.clone()],
+                &self.resources.prim_interner,
+            );
 
             let filter_picture = PicturePrimitive::new_image(
                 self.picture_id_generator.next(),
                 Some(PictureCompositeMode::Filter(filter)),
-                false,
+                Picture3DContext::Out,
                 stacking_context.pipeline_id,
                 None,
                 true,
                 stacking_context.requested_raster_space,
-                vec![
-                    PrimitiveInstance::new(
-                        current_prim_index,
-                        prim_data_handle,
-                        stacking_context.clip_chain_id,
-                        stacking_context.spatial_node_index,
-                    ),
-                ],
+                prim_list,
+                stacking_context.spatial_node_index,
+                max_clip,
             );
             let filter_pic_index = self.prim_store.create_picture(filter_picture);
             current_pic_index = filter_pic_index;
 
-            let filter_prim = BrushPrimitive::new_picture(filter_pic_index);
+            cur_instance.kind = PrimitiveInstanceKind::Picture { pic_index: current_pic_index };
 
-            current_prim_index = self.prim_store.add_primitive(
-                &LayoutRect::zero(),
-                &max_clip,
-                PrimitiveContainer::Brush(filter_prim),
-            );
+            if cur_instance.is_chased() {
+                println!("\tis a composite picture for a stacking context with {:?}", filter);
+            }
 
             // Run the optimize pass on this picture, to see if we can
             // collapse opacity and avoid drawing to an off-screen surface.
@@ -1120,116 +1228,69 @@ impl<'a> DisplayListFlattener<'a> {
 
         // Same for mix-blend-mode.
         if let Some(mix_blend_mode) = stacking_context.composite_ops.mix_blend_mode {
+            let prim_list = PrimitiveList::new(
+                vec![cur_instance.clone()],
+                &self.resources.prim_interner,
+            );
+
             let blend_picture = PicturePrimitive::new_image(
                 self.picture_id_generator.next(),
                 Some(PictureCompositeMode::MixBlend(mix_blend_mode)),
-                false,
+                Picture3DContext::Out,
                 stacking_context.pipeline_id,
                 None,
                 true,
                 stacking_context.requested_raster_space,
-                vec![
-                    PrimitiveInstance::new(
-                        current_prim_index,
-                        prim_data_handle,
-                        stacking_context.clip_chain_id,
-                        stacking_context.spatial_node_index,
-                    ),
-                ],
+                prim_list,
+                stacking_context.spatial_node_index,
+                max_clip,
             );
             let blend_pic_index = self.prim_store.create_picture(blend_picture);
             current_pic_index = blend_pic_index;
 
-            let blend_prim = BrushPrimitive::new_picture(blend_pic_index);
+            cur_instance.kind = PrimitiveInstanceKind::Picture { pic_index: blend_pic_index };
 
-            current_prim_index = self.prim_store.add_primitive(
-                &LayoutRect::zero(),
-                &max_clip,
-                PrimitiveContainer::Brush(blend_prim),
-            );
-        }
-
-        if stacking_context.establishes_3d_context {
-            // If establishing a 3d context, we need to add a picture
-            // that will be the container for all the planes and any
-            // un-transformed content.
-            let mut prims = vec![
-                PrimitiveInstance::new(
-                    current_prim_index,
-                    prim_data_handle,
-                    stacking_context.clip_chain_id,
-                    stacking_context.spatial_node_index,
-                ),
-            ];
-            prims.extend(stacking_context.preserve3d_primitives);
-
-            let container_picture = PicturePrimitive::new_image(
-                self.picture_id_generator.next(),
-                None,
-                false,
-                stacking_context.pipeline_id,
-                None,
-                true,
-                stacking_context.requested_raster_space,
-                prims,
-            );
-            let container_pic_index = self.prim_store.create_picture(container_picture);
-            current_pic_index = container_pic_index;
-
-            let container_prim = BrushPrimitive::new_picture(container_pic_index);
-
-            current_prim_index = self.prim_store.add_primitive(
-                &LayoutRect::zero(),
-                &max_clip,
-                PrimitiveContainer::Brush(container_prim),
-            );
-        } else {
-            debug_assert!(stacking_context.preserve3d_primitives.is_empty());
-        }
-
-        if self.sc_stack.is_empty() {
-            // This must be the root stacking context
-            self.root_pic_index = current_pic_index;
-            return;
-        }
-
-        let sc_count = self.sc_stack.len();
-        let prim_instance = PrimitiveInstance::new(
-            current_prim_index,
-            prim_data_handle,
-            stacking_context.clip_chain_id,
-            stacking_context.spatial_node_index,
-        );
-
-        if !stacking_context.establishes_3d_context && stacking_context.participating_in_3d_context {
-            // If we're in a 3D context, we will parent the picture
-            // to the first stacking context we find that is a
-            // 3D rendering context container. This follows the spec
-            // by hoisting these items out into the same 3D context
-            // for plane splitting.
-            let parent_index = self.sc_stack
-                .iter()
-                .rposition(|sc| sc.establishes_3d_context)
-                .unwrap();
-
-            let parent_stacking_context = &mut self.sc_stack[parent_index];
-            parent_stacking_context.preserve3d_primitives.push(prim_instance);
-
-        } else {
-            let parent_stacking_context = self.sc_stack.last_mut().unwrap();
-
-            // If we have a mix-blend-mode, and we aren't the primary framebuffer,
-            // the stacking context needs to be isolated to blend correctly as per
-            // the CSS spec.
-            // If not already isolated for some other reason,
-            // make this picture as isolated.
-            if stacking_context.composite_ops.mix_blend_mode.is_some() &&
-               sc_count > 2 {
-                parent_stacking_context.should_isolate = true;
+            if cur_instance.is_chased() {
+                println!("\tis a mix-blend picture for a stacking context with {:?}", mix_blend_mode);
             }
+        }
 
-            parent_stacking_context.normal_primitives.push(prim_instance);
+        let has_mix_blend_on_secondary_framebuffer =
+            stacking_context.composite_ops.mix_blend_mode.is_some() &&
+            self.sc_stack.len() > 2;
+
+        // The primitive instance for the remainder of flat children of this SC
+        // if it's a part of 3D hierarchy but not the root of it.
+        let trailing_children_instance = match self.sc_stack.last_mut() {
+            // Preserve3D path (only relevant if there are no filters/mix-blend modes)
+            Some(ref parent_sc) if parent_sc.is_3d() => {
+                Some(cur_instance)
+            }
+            // Regular parenting path
+            Some(ref mut parent_sc) => {
+                // If we have a mix-blend-mode, and we aren't the primary framebuffer,
+                // the stacking context needs to be isolated to blend correctly as per
+                // the CSS spec.
+                // If not already isolated for some other reason,
+                // make this picture as isolated.
+                if has_mix_blend_on_secondary_framebuffer {
+                    parent_sc.should_isolate = true;
+                }
+                parent_sc.primitives.push(cur_instance);
+                None
+            }
+            // This must be the root stacking context
+            None => {
+                self.root_pic_index = current_pic_index;
+                None
+            }
         };
+
+        // finally, if there any outstanding 3D primitive instances,
+        // find the 3D hierarchy root and add them there.
+        if let Some(instance) = trailing_children_instance {
+            self.add_primitive_instance_to_3d_root(instance);
+        }
 
         assert!(
             self.pending_shadow_items.is_empty(),
@@ -1270,9 +1331,9 @@ impl<'a> DisplayListFlattener<'a> {
         viewport_size: &LayoutSize,
         content_size: &LayoutSize,
     ) {
-        if let ChasePrimitive::Index(prim_index) = self.config.chase_primitive {
-            println!("Chasing {:?} by index", prim_index);
-            self.prim_store.chase_id = Some(prim_index);
+        if let ChasePrimitive::Id(id) = self.config.chase_primitive {
+            println!("Chasing {:?} by index", id);
+            register_prim_chase_id(id);
         }
 
         self.push_reference_frame(
@@ -1329,7 +1390,11 @@ impl<'a> DisplayListFlattener<'a> {
         let handle = self
             .resources
             .clip_interner
-            .intern(&ClipItemKey::rectangle(clip_region.main, ClipMode::Clip));
+            .intern(&ClipItemKey::rectangle(clip_region.main, ClipMode::Clip), || {
+                ClipItemSceneData {
+                    clip_rect: clip_region.main,
+                }
+            });
 
         parent_clip_chain_index = self
             .clip_store
@@ -1344,7 +1409,11 @@ impl<'a> DisplayListFlattener<'a> {
             let handle = self
                 .resources
                 .clip_interner
-                .intern(&ClipItemKey::image_mask(image_mask));
+                .intern(&ClipItemKey::image_mask(image_mask), || {
+                    ClipItemSceneData {
+                        clip_rect: image_mask.get_local_clip_rect().unwrap_or(LayoutRect::max_rect()),
+                    }
+                });
 
             parent_clip_chain_index = self
                 .clip_store
@@ -1360,7 +1429,11 @@ impl<'a> DisplayListFlattener<'a> {
             let handle = self
                 .resources
                 .clip_interner
-                .intern(&ClipItemKey::rounded_rect(region.rect, region.radii, region.mode));
+                .intern(&ClipItemKey::rounded_rect(region.rect, region.radii, region.mode), || {
+                    ClipItemSceneData {
+                        clip_rect: region.get_local_clip_rect().unwrap_or(LayoutRect::max_rect()),
+                    }
+                });
 
             parent_clip_chain_index = self
                 .clip_store
@@ -1491,6 +1564,11 @@ impl<'a> DisplayListFlattener<'a> {
                     // No point in adding a shadow here if there were no primitives
                     // added to the shadow.
                     if !prims.is_empty() {
+                        let prim_list = PrimitiveList::new(
+                            prims,
+                            &self.resources.prim_interner,
+                        );
+
                         // Create a picture that the shadow primitives will be added to. If the
                         // blur radius is 0, the code in Picture::prepare_for_render will
                         // detect this and mark the picture to be drawn directly into the
@@ -1499,28 +1577,38 @@ impl<'a> DisplayListFlattener<'a> {
                         let mut shadow_pic = PicturePrimitive::new_image(
                             self.picture_id_generator.next(),
                             Some(PictureCompositeMode::Filter(blur_filter)),
-                            false,
+                            Picture3DContext::Out,
                             pipeline_id,
                             None,
                             is_passthrough,
                             raster_space,
-                            prims,
+                            prim_list,
+                            pending_shadow.clip_and_scroll.spatial_node_index,
+                            max_clip,
                         );
 
                         // Create the primitive to draw the shadow picture into the scene.
                         let shadow_pic_index = self.prim_store.create_picture(shadow_pic);
-                        let shadow_prim = BrushPrimitive::new_picture(shadow_pic_index);
-                        let shadow_prim_index = self.prim_store.add_primitive(
-                            &LayoutRect::zero(),
-                            &max_clip,
-                            PrimitiveContainer::Brush(shadow_prim),
+
+                        let shadow_prim_key = PrimitiveKey::new(
+                            true,
+                            LayoutRect::zero(),
+                            LayoutRect::max_rect(),
+                            PrimitiveKeyKind::Unused,
                         );
 
-                        let shadow_prim_key = PrimitiveKey::new(true);
-                        let shadow_prim_data_handle = self.resources.prim_interner.intern(&shadow_prim_key);
+                        let shadow_prim_data_handle = self.resources
+                            .prim_interner
+                            .intern(&shadow_prim_key, || {
+                                PrimitiveSceneData {
+                                    culling_rect: LayoutRect::zero(),
+                                    is_backface_visible: true,
+                                }
+                            }
+                        );
 
                         let shadow_prim_instance = PrimitiveInstance::new(
-                            shadow_prim_index,
+                            PrimitiveInstanceKind::Picture { pic_index: shadow_pic_index },
                             shadow_prim_data_handle,
                             pending_shadow.clip_and_scroll.clip_chain_id,
                             pending_shadow.clip_and_scroll.spatial_node_index,
@@ -1541,10 +1629,10 @@ impl<'a> DisplayListFlattener<'a> {
                             pending_primitive.clip_and_scroll.spatial_node_index,
                             pending_primitive.container,
                         );
-                        if cfg!(debug_assertions) && ChasePrimitive::LocalRect(pending_primitive.info.rect) == self.config.chase_primitive {
-                            println!("Chasing {:?} by local rect", prim_instance.prim_index);
-                            self.prim_store.chase_id = Some(prim_instance.prim_index);
-                        }
+                        self.register_chase_primitive_by_rect(
+                            &pending_primitive.info.rect,
+                            &prim_instance,
+                        );
                         self.add_primitive_to_hit_testing_list(&pending_primitive.info, pending_primitive.clip_and_scroll);
                         self.add_primitive_to_draw_list(prim_instance);
                     }
@@ -1554,6 +1642,26 @@ impl<'a> DisplayListFlattener<'a> {
 
         debug_assert!(items.is_empty());
         self.pending_shadow_items = items;
+    }
+
+    #[cfg(debug_assertions)]
+    fn register_chase_primitive_by_rect(
+        &mut self,
+        rect: &LayoutRect,
+        prim_instance: &PrimitiveInstance,
+    ) {
+        if ChasePrimitive::LocalRect(*rect) == self.config.chase_primitive {
+            println!("Chasing {:?} by local rect", prim_instance.id);
+            register_prim_chase_id(prim_instance.id);
+        }
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn register_chase_primitive_by_rect(
+        &mut self,
+        _rect: &LayoutRect,
+        _prim_instance: &PrimitiveInstance,
+    ) {
     }
 
     pub fn add_solid_rectangle(
@@ -1587,16 +1695,11 @@ impl<'a> DisplayListFlattener<'a> {
         clip_and_scroll: ScrollNodeAndClipChain,
         info: &LayoutPrimitiveInfo,
     ) {
-        let prim = BrushPrimitive::new(
-            BrushKind::Clear,
-            None,
-        );
-
         self.add_primitive(
             clip_and_scroll,
             info,
             Vec::new(),
-            PrimitiveContainer::Brush(prim),
+            PrimitiveContainer::Clear,
         );
     }
 
@@ -1609,18 +1712,18 @@ impl<'a> DisplayListFlattener<'a> {
         color: &ColorF,
         style: LineStyle,
     ) {
-        let prim = BrushPrimitive::new_line_decoration(
-            *color,
+        let container = PrimitiveContainer::LineDecoration {
+            color: *color,
             style,
             orientation,
             wavy_line_thickness,
-        );
+        };
 
         self.add_primitive(
             clip_and_scroll,
             info,
             Vec::new(),
-            PrimitiveContainer::Brush(prim),
+            container,
         );
     }
 
@@ -1955,14 +2058,15 @@ impl<'a> DisplayListFlattener<'a> {
     pub fn add_text(
         &mut self,
         clip_and_scroll: ScrollNodeAndClipChain,
-        run_offset: LayoutVector2D,
+        offset: LayoutVector2D,
         prim_info: &LayoutPrimitiveInfo,
         font_instance_key: &FontInstanceKey,
         text_color: &ColorF,
         glyph_range: ItemRange<GlyphInstance>,
         glyph_options: Option<GlyphOptions>,
+        pipeline_id: PipelineId,
     ) {
-        let prim = {
+        let container = {
             let instance_map = self.font_instances.read().unwrap();
             let font_instance = match instance_map.get(font_instance_key) {
                 Some(instance) => instance,
@@ -1990,7 +2094,7 @@ impl<'a> DisplayListFlattener<'a> {
                 flags |= options.flags;
             }
 
-            let prim_font = FontInstance::new(
+            let font = FontInstance::new(
                 font_instance.font_key,
                 font_instance.size,
                 *text_color,
@@ -2001,20 +2105,29 @@ impl<'a> DisplayListFlattener<'a> {
                 font_instance.platform_options,
                 font_instance.variations.clone(),
             );
-            TextRunPrimitive::new(
-                prim_font,
-                run_offset,
-                glyph_range,
-                Vec::new(),
-                false,
-            )
+
+            // TODO(gw): We can do better than a hash lookup here...
+            let display_list = self.scene.get_display_list_for_pipeline(pipeline_id);
+
+            // TODO(gw): It'd be nice not to have to allocate here for creating
+            //           the primitive key, when the common case is that the
+            //           hash will match and we won't end up creating a new
+            //           primitive template.
+            let glyphs = display_list.get(glyph_range).collect();
+
+            PrimitiveContainer::TextRun {
+                glyphs,
+                font,
+                offset,
+                shadow: false,
+            }
         };
 
         self.add_primitive(
             clip_and_scroll,
             prim_info,
             Vec::new(),
-            PrimitiveContainer::TextRun(prim),
+            container,
         );
     }
 
@@ -2122,20 +2235,32 @@ impl<'a> DisplayListFlattener<'a> {
     pub fn simple_scroll_and_clip_chain(&mut self, id: &ClipId) -> ScrollNodeAndClipChain {
         self.map_clip_and_scroll(&ClipAndScrollInfo::simple(*id))
     }
+
+    pub fn add_primitive_instance_to_3d_root(&mut self, instance: PrimitiveInstance) {
+        // find the 3D root and append to the children list
+        for sc in self.sc_stack.iter_mut().rev() {
+            match sc.context_3d {
+                Picture3DContext::In { root_data: Some(ref mut prims), .. } => {
+                    prims.push(instance);
+                    break;
+                }
+                Picture3DContext::In { .. } => {}
+                Picture3DContext::Out => panic!("Unable to find 3D root"),
+            }
+        }
+    }
 }
 
 /// Properties of a stacking context that are maintained
 /// during creation of the scene. These structures are
 /// not persisted after the initial scene build.
 struct FlattenedStackingContext {
-    /// The list of un-transformed content being
-    /// added to this stacking context.
-    normal_primitives: Vec<PrimitiveInstance>,
+    /// The list of primitive instances added to this stacking context.
+    primitives: Vec<PrimitiveInstance>,
 
-    /// The list of preserve-3d primitives that
-    /// are being hoisted to this stacking context
-    /// (implies establishes_3d_context).
-    preserve3d_primitives: Vec<PrimitiveInstance>,
+    /// The interned key for all the primitive instances associated with this
+    /// SC (but not its children);
+    primitive_data_handle: PrimitiveDataHandle,
 
     /// Whether or not the caller wants this drawn in
     /// screen space (quality) or local space (performance)
@@ -2162,19 +2287,65 @@ struct FlattenedStackingContext {
     /// Pipeline this stacking context belongs to.
     pipeline_id: PipelineId,
 
-    /// If true, visible when backface is visible.
-    is_backface_visible: bool,
-
     /// CSS transform-style property.
     transform_style: TransformStyle,
 
-    /// If true, this stacking context establishes a new
-    /// 3d rendering context.
-    establishes_3d_context: bool,
+    /// Defines the relationship to a preserve-3D hiearachy.
+    context_3d: Picture3DContext<PrimitiveInstance>,
+}
 
-    /// If true, this stacking context is part of a
-    /// surrounding 3d rendering context.
-    participating_in_3d_context: bool,
+impl FlattenedStackingContext {
+    /// Return true if the stacking context has a valid preserve-3d property
+    pub fn is_3d(&self) -> bool {
+        self.transform_style == TransformStyle::Preserve3D && self.composite_ops.is_empty()
+    }
+
+    /// For a Preserve3D context, cut the sequence of the immediate flat children
+    /// recorded so far and generate a picture from them.
+    pub fn cut_flat_item_sequence(
+        &mut self,
+        picture_id_generator: &mut PictureIdGenerator,
+        prim_store: &mut PrimitiveStore,
+        prim_interner: &PrimitiveDataInterner,
+    ) -> Option<PrimitiveInstance> {
+        if !self.is_3d() || self.primitives.is_empty() {
+            return None
+        }
+        let flat_items_context_3d = match self.context_3d {
+            Picture3DContext::In { ancestor_index, .. } => Picture3DContext::In {
+                root_data: None,
+                ancestor_index,
+            },
+            Picture3DContext::Out => panic!("Unexpected out of 3D context"),
+        };
+
+        let prim_list = PrimitiveList::new(
+            mem::replace(&mut self.primitives, Vec::new()),
+            prim_interner,
+        );
+
+        let container_picture = PicturePrimitive::new_image(
+            picture_id_generator.next(),
+            Some(PictureCompositeMode::Blit),
+            flat_items_context_3d,
+            self.pipeline_id,
+            None,
+            true,
+            self.requested_raster_space,
+            prim_list,
+            self.spatial_node_index,
+            LayoutRect::max_rect(),
+        );
+
+        let pic_index = prim_store.create_picture(container_picture);
+
+        Some(PrimitiveInstance::new(
+            PrimitiveInstanceKind::Picture { pic_index },
+            self.primitive_data_handle,
+            self.clip_chain_id,
+            self.spatial_node_index,
+        ))
+    }
 }
 
 /// A primitive that is added while a shadow context is

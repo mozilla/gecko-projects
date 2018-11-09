@@ -335,16 +335,19 @@ struct DIGroup
   LayerIntRect mPaintRect;
   int32_t mAppUnitsPerDevPixel;
   gfx::Size mScale;
-  FrameMetrics::ViewID mScrollId;
+  ScrollableLayerGuid::ViewID mScrollId;
   LayerPoint mResidualOffset;
   LayerIntRect mLayerBounds;
+  // The current bounds of the blob image, relative to
+  // the top-left of the mLayerBounds.
+  IntRect mImageBounds;
   Maybe<wr::ImageKey> mKey;
   std::vector<RefPtr<SourceSurface>> mExternalSurfaces;
   std::vector<RefPtr<ScaledFont>> mFonts;
 
   DIGroup()
     : mAppUnitsPerDevPixel(0)
-    , mScrollId(FrameMetrics::NULL_SCROLL_ID)
+    , mScrollId(ScrollableLayerGuid::NULL_SCROLL_ID)
   {
   }
 
@@ -407,9 +410,7 @@ struct DIGroup
     LayoutDeviceIntPoint offset = RoundedToInt(bounds.TopLeft());
     GP("\n");
     GP("CGC offset %d %d\n", offset.x, offset.y);
-    LayerIntSize size = mLayerBounds.Size();
-    IntRect imageRect(0, 0, size.width, size.height);
-    GP("imageSize: %d %d\n", size.width, size.height);
+    GP("imageRect %d %d %d %d\n", mImageBounds.x, mImageBounds.y, mImageBounds.width, mImageBounds.height);
     /*if (aItem->IsReused() && aData->mGeometry) {
       return;
     }*/
@@ -425,14 +426,13 @@ struct DIGroup
       nsRect bounds = combined.GetBounds();
 
       IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mLayerBounds.TopLeft());
-      aData->mRect = transformedRect.Intersect(imageRect);
+      aData->mRect = transformedRect.Intersect(mImageBounds);
       GP("CGC %s %d %d %d %d\n", aItem->Name(), bounds.x, bounds.y, bounds.width, bounds.height);
       GP("%d %d,  %f %f\n", mLayerBounds.TopLeft().x, mLayerBounds.TopLeft().y, aMatrix._11, aMatrix._22);
       GP("mRect %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.width, aData->mRect.height);
       InvalidateRect(aData->mRect);
       aData->mInvalid = true;
     } else if (aData->mInvalid || /* XXX: handle image load invalidation */ (aItem->IsInvalid(invalid) && invalid.IsEmpty())) {
-      MOZ_RELEASE_ASSERT(imageRect.IsEqualEdges(aData->mImageRect));
       MOZ_RELEASE_ASSERT(mLayerBounds.TopLeft() == aData->mGroupOffset);
       UniquePtr<nsDisplayItemGeometry> geometry(aItem->AllocateGeometry(aBuilder));
       /* Instead of doing this dance, let's just invalidate the old rect and the
@@ -452,11 +452,11 @@ struct DIGroup
              aData->mRect.y,
              aData->mRect.width,
              aData->mRect.height);
-      InvalidateRect(aData->mRect.Intersect(imageRect));
+      InvalidateRect(aData->mRect.Intersect(mImageBounds));
       // We want to snap to outside pixels. When should we multiply by the matrix?
       // XXX: TransformBounds is expensive. We should avoid doing it if we have no transform
       IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mLayerBounds.TopLeft());
-      aData->mRect = transformedRect.Intersect(imageRect);
+      aData->mRect = transformedRect.Intersect(mImageBounds);
       InvalidateRect(aData->mRect);
       GP("new rect: %d %d %d %d\n",
              aData->mRect.x,
@@ -465,7 +465,6 @@ struct DIGroup
              aData->mRect.height);
       aData->mInvalid = true;
     } else {
-      MOZ_RELEASE_ASSERT(imageRect.IsEqualEdges(aData->mImageRect));
       MOZ_RELEASE_ASSERT(mLayerBounds.TopLeft() == aData->mGroupOffset);
       GP("else invalidate: %s\n", aItem->Name());
       // this includes situations like reflow changing the position
@@ -473,7 +472,7 @@ struct DIGroup
       if (!combined.IsEmpty()) {
         // There might be no point in doing this elaborate tracking here to get
         // smaller areas
-        InvalidateRect(aData->mRect.Intersect(imageRect)); // invalidate the old area -- in theory combined should take care of this
+        InvalidateRect(aData->mRect.Intersect(mImageBounds)); // invalidate the old area -- in theory combined should take care of this
         UniquePtr<nsDisplayItemGeometry> geometry(aItem->AllocateGeometry(aBuilder));
         // invalidate the invalidated area.
 
@@ -481,7 +480,7 @@ struct DIGroup
 
         combined = clip.ApplyNonRoundedIntersection(aData->mGeometry->ComputeInvalidationRegion());
         IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mLayerBounds.TopLeft());
-        aData->mRect = transformedRect.Intersect(imageRect);
+        aData->mRect = transformedRect.Intersect(mImageBounds);
         InvalidateRect(aData->mRect);
 
         // CGC invariant broken
@@ -509,8 +508,8 @@ struct DIGroup
           }
           combined = clip.ApplyNonRoundedIntersection(aData->mGeometry->ComputeInvalidationRegion());
           IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mLayerBounds.TopLeft());
-          InvalidateRect(aData->mRect.Intersect(imageRect));
-          aData->mRect = transformedRect.Intersect(imageRect);
+          InvalidateRect(aData->mRect.Intersect(mImageBounds));
+          aData->mRect = transformedRect.Intersect(mImageBounds);
           InvalidateRect(aData->mRect);
 
           GP("ClipChange: %s %d %d %d %d\n", aItem->Name(),
@@ -533,8 +532,8 @@ struct DIGroup
           }
           combined = clip.ApplyNonRoundedIntersection(aData->mGeometry->ComputeInvalidationRegion());
           IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mLayerBounds.TopLeft());
-          InvalidateRect(aData->mRect.Intersect(imageRect));
-          aData->mRect = transformedRect.Intersect(imageRect);
+          InvalidateRect(aData->mRect.Intersect(mImageBounds));
+          aData->mRect = transformedRect.Intersect(mImageBounds);
           InvalidateRect(aData->mRect);
 
           GP("TransformChange: %s %d %d %d %d\n", aItem->Name(),
@@ -546,35 +545,29 @@ struct DIGroup
             combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
             aData->mGeometry = std::move(geometry);
             IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mLayerBounds.TopLeft());
-            InvalidateRect(aData->mRect.Intersect(imageRect));
-            aData->mRect = transformedRect.Intersect(imageRect);
+            InvalidateRect(aData->mRect.Intersect(mImageBounds));
+            aData->mRect = transformedRect.Intersect(mImageBounds);
             InvalidateRect(aData->mRect);
             GP("UpdateContainerLayerPropertiesAndDetectChange change\n");
           } else {
             // XXX: this code can eventually be deleted/made debug only
             combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
-            IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mLayerBounds.TopLeft());
-            auto rect = transformedRect.Intersect(imageRect);
             GP("Layer NoChange: %s %d %d %d %d\n", aItem->Name(),
                    aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
-            MOZ_RELEASE_ASSERT(rect.IsEqualEdges(aData->mRect));
           }
         } else {
           // XXX: this code can eventually be deleted/made debug only
           UniquePtr<nsDisplayItemGeometry> geometry(aItem->AllocateGeometry(aBuilder));
           combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
-          IntRect transformedRect = ToDeviceSpace(combined.GetBounds(), aMatrix, appUnitsPerDevPixel, mLayerBounds.TopLeft());
-          auto rect = transformedRect.Intersect(imageRect);
           GP("NoChange: %s %d %d %d %d\n", aItem->Name(),
                  aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
-          MOZ_RELEASE_ASSERT(rect.IsEqualEdges(aData->mRect));
         }
       }
     }
     aData->mClip = clip;
     aData->mMatrix = aMatrix;
     aData->mGroupOffset = mLayerBounds.TopLeft();
-    aData->mImageRect = imageRect;
+    aData->mImageRect = mImageBounds;
     GP("post mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
   }
 
@@ -1065,6 +1058,7 @@ Grouper::ConstructGroups(nsDisplayListBuilder* aDisplayListBuilder,
       groupData->mFollowingGroup.mGroupBounds = currentGroup->mGroupBounds;
       groupData->mFollowingGroup.mAppUnitsPerDevPixel = currentGroup->mAppUnitsPerDevPixel;
       groupData->mFollowingGroup.mLayerBounds = currentGroup->mLayerBounds;
+      groupData->mFollowingGroup.mImageBounds = currentGroup->mImageBounds;
       groupData->mFollowingGroup.mScale = currentGroup->mScale;
       groupData->mFollowingGroup.mResidualOffset = currentGroup->mResidualOffset;
       groupData->mFollowingGroup.mPaintRect = currentGroup->mPaintRect;
@@ -1119,11 +1113,22 @@ Grouper::ConstructItemInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
    * time that we painted */
   data->mInvalid = false;
 
+  // we compute the geometry change here because we have the transform around still
+  aGroup->ComputeGeometryChange(aItem, data, mTransform, mDisplayListBuilder);
+  
+  // Temporarily restrict the image bounds to the bounds of the container so that
+  // clipped children within the container know about the clip.
+  IntRect oldImageBounds = aGroup->mImageBounds;
+  aGroup->mImageBounds = aGroup->mImageBounds.Intersect(data->mRect);
+
   if (aItem->GetType() == DisplayItemType::TYPE_FILTER) {
     gfx::Size scale(1, 1);
     // If ComputeDifferences finds any change, we invalidate the entire container item.
     // This is needed because blob merging requires the entire item to be within the invalid region.
-    data->mInvalid = BuildLayer(aItem, data, mDisplayListBuilder, scale);
+    if (BuildLayer(aItem, data, mDisplayListBuilder, scale)) {
+      data->mInvalid = true;
+      aGroup->InvalidateRect(data->mRect);
+    }
   } else if (aItem->GetType() == DisplayItemType::TYPE_TRANSFORM) {
     nsDisplayTransform* transformItem = static_cast<nsDisplayTransform*>(aItem);
     const Matrix4x4Flagged& t = transformItem->GetTransform();
@@ -1134,7 +1139,10 @@ Grouper::ConstructItemInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
       gfx::Size scale(1, 1);
       // If ComputeDifferences finds any change, we invalidate the entire container item.
       // This is needed because blob merging requires the entire item to be within the invalid region.
-      data->mInvalid = BuildLayer(aItem, data, mDisplayListBuilder, scale);
+      if (BuildLayer(aItem, data, mDisplayListBuilder, scale)) {
+        data->mInvalid = true;
+        aGroup->InvalidateRect(data->mRect);
+      }
     } else {
       Matrix m = mTransform;
 
@@ -1152,8 +1160,7 @@ Grouper::ConstructItemInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
   }
 
   GP("Including %s of %d\n", aItem->Name(), aGroup->mDisplayItems.Count());
-
-  aGroup->ComputeGeometryChange(aItem, data, mTransform, mDisplayListBuilder); // we compute the geometry change here because we have the transform around still
+  aGroup->mImageBounds = oldImageBounds;
 }
 
 /* This is just a copy of nsRect::ScaleToOutsidePixels with an offset added in.
@@ -1234,7 +1241,7 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
     group.ClearImageKey(mManager);
   }
 
-  FrameMetrics::ViewID scrollId = FrameMetrics::NULL_SCROLL_ID;
+  ScrollableLayerGuid::ViewID scrollId = ScrollableLayerGuid::NULL_SCROLL_ID;
   if (const ActiveScrolledRoot* asr = aWrappingItem->GetActiveScrolledRoot()) {
     scrollId = asr->GetViewId();
   }
@@ -1248,6 +1255,7 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
                                                                                 scale.height,
                                                                                 group.mAppUnitsPerDevPixel,
                                                                                 residualOffset));
+  group.mImageBounds = IntRect(0, 0, group.mLayerBounds.width, group.mLayerBounds.height);
   group.mPaintRect = LayerIntRect::FromUnknownRect(
                        ScaleToOutsidePixelsOffset(aWrappingItem->GetPaintRect(),
                                                   scale.width,
@@ -1313,8 +1321,8 @@ WebRenderCommandBuilder::BuildWebRenderCommands(wr::DisplayListBuilder& aBuilder
   mClipManager.BeginBuild(mManager, aBuilder);
 
   {
-    StackingContextHelper pageRootSc(sc, aBuilder, aFilters);
-    if (ShouldDumpDisplayList()) {
+    StackingContextHelper pageRootSc(sc, nullptr, aBuilder, aFilters);
+    if (ShouldDumpDisplayList(aDisplayListBuilder)) {
       mBuilderDumpIndex = aBuilder.Dump(mDumpIndent + 1, Some(mBuilderDumpIndex), Nothing());
     }
     CreateWebRenderCommandsFromDisplayList(aDisplayList, nullptr, aDisplayListBuilder,
@@ -1324,7 +1332,7 @@ WebRenderCommandBuilder::BuildWebRenderCommands(wr::DisplayListBuilder& aBuilder
   // Make a "root" layer data that has everything else as descendants
   mLayerScrollData.emplace_back();
   mLayerScrollData.back().InitializeRoot(mLayerScrollData.size() - 1);
-  auto callback = [&aScrollData](FrameMetrics::ViewID aScrollId) -> bool {
+  auto callback = [&aScrollData](ScrollableLayerGuid::ViewID aScrollId) -> bool {
     return aScrollData.HasMetadataFor(aScrollId).isSome();
   };
   if (Maybe<ScrollMetadata> rootMetadata = nsLayoutUtils::GetRootMetadata(
@@ -1346,10 +1354,11 @@ WebRenderCommandBuilder::BuildWebRenderCommands(wr::DisplayListBuilder& aBuilder
 }
 
 bool
-WebRenderCommandBuilder::ShouldDumpDisplayList()
+WebRenderCommandBuilder::ShouldDumpDisplayList(nsDisplayListBuilder* aBuilder)
 {
-  return (XRE_IsParentProcess() && gfxPrefs::WebRenderDLDumpParent()) ||
-         (XRE_IsContentProcess() && gfxPrefs::WebRenderDLDumpContent());
+  return aBuilder != nullptr && aBuilder->IsInActiveDocShell() &&
+         ((XRE_IsParentProcess() && gfxPrefs::WebRenderDLDumpParent()) ||
+          (XRE_IsContentProcess() && gfxPrefs::WebRenderDLDumpContent()));
 }
 
 void
@@ -1367,7 +1376,7 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
     return;
   }
 
-  bool dumpEnabled = ShouldDumpDisplayList();
+  bool dumpEnabled = ShouldDumpDisplayList(aDisplayListBuilder);
   if (dumpEnabled) {
     // If we're inside a nested display list, print the WR DL items from the
     // wrapper item before we start processing the nested items.
@@ -1419,6 +1428,20 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
       const ActiveScrolledRoot* asr = item->GetActiveScrolledRoot();
       if (asr != mLastAsr) {
         mLastAsr = asr;
+        forceNewLayerData = true;
+      }
+
+      // Refer to the comment on StackingContextHelper::mDeferredTransformItem
+      // for an overview of what this is about. This bit of code applies to the
+      // case where we are deferring a transform item, and we then need to defer
+      // another transform with a different ASR. In such a case we cannot just
+      // merge the deferred transforms, but need to force a new
+      // WebRenderLayerScrollData item to flush the old deferred transform, so
+      // that we can then start deferring the new one.
+      if (!forceNewLayerData &&
+          item->GetType() == DisplayItemType::TYPE_TRANSFORM &&
+          aSc.GetDeferredTransformItem() &&
+          (*aSc.GetDeferredTransformItem())->GetActiveScrolledRoot() != asr) {
         forceNewLayerData = true;
       }
 
@@ -1474,13 +1497,12 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
 
         int32_t descendants = mLayerScrollData.size() - layerCountBeforeRecursing;
 
-        // A deferred transform item is a nsDisplayTransform for which we did
-        // not create a dedicated WebRenderLayerScrollData item at the point
-        // that we encountered the item. Instead, we "deferred" the transform
-        // from that item to combine it into the WebRenderLayerScrollData produced
-        // by child display items. However, in the case where we have a child
-        // display item with a different ASR than the nsDisplayTransform item,
-        // we cannot do this, because it will not conform to APZ's expectations
+        // See the comments on StackingContextHelper::mDeferredTransformItem
+        // for an overview of what deferred transforms are.
+        // In the case where we deferred a transform, but have a child display
+        // item with a different ASR than the deferred transform item, we cannot
+        // put the transform on the WebRenderLayerScrollData item for the child.
+        // We cannot do this because it will not conform to APZ's expectations
         // with respect to how the APZ tree ends up structured. In particular,
         // the GetTransformToThis() for the child APZ (which is created for the
         // child item's ASR) will not include the transform when we actually do
@@ -1505,20 +1527,20 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
           descendants++;
 
           // This creates the WebRenderLayerScrollData for the deferred transform
-          // item. This holds the transform matrix. and the remaining ASRs
+          // item. This holds the transform matrix and the remaining ASRs
           // needed to complete the ASR chain (i.e. the ones from the stopAtAsr
           // down to the deferred transform item's ASR, which must be "between"
-          // stopAtAsr and |item|'s ASR in the ASR tree.
+          // stopAtAsr and |item|'s ASR in the ASR tree).
           mLayerScrollData.emplace_back();
           mLayerScrollData.back().Initialize(mManager->GetScrollData(), *deferred,
-              descendants, stopAtAsr, Some((*deferred)->GetTransform().GetMatrix()));
+              descendants, stopAtAsr, aSc.GetDeferredTransformMatrix());
         } else {
           // This is the "simple" case where we don't need to create two
           // WebRenderLayerScrollData items; we can just create one that also
           // holds the deferred transform matrix, if any.
           mLayerScrollData.emplace_back();
           mLayerScrollData.back().Initialize(mManager->GetScrollData(), item,
-              descendants, stopAtAsr, deferred ? Some((*deferred)->GetTransform().GetMatrix()) : Nothing());
+              descendants, stopAtAsr, aSc.GetDeferredTransformMatrix());
         }
       }
     }
@@ -1758,7 +1780,7 @@ PaintItemByDrawTarget(nsDisplayItem* aItem,
   case DisplayItemType::TYPE_FILTER:
     {
       context->SetMatrix(context->CurrentMatrix().PreScale(aScale.width, aScale.height).PreTranslate(-aOffset.x, -aOffset.y));
-      isInvalidated = PaintByLayer(aItem, aDisplayListBuilder, aManager, context, aScale, [&]() {
+      isInvalidated = PaintByLayer(aItem, aDisplayListBuilder, aManager, context, { 1, 1 }, [&]() {
         static_cast<nsDisplayFilters*>(aItem)->PaintAsLayer(aDisplayListBuilder,
                                                             context, aManager);
       });

@@ -22,10 +22,11 @@ loader.lazyRequireGetter(this, "DebuggerSocket", "devtools/shared/security/socke
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 
 loader.lazyRequireGetter(this, "WebConsoleClient", "devtools/shared/webconsole/client", true);
-loader.lazyRequireGetter(this, "AddonClient", "devtools/shared/client/addon-client");
-loader.lazyRequireGetter(this, "RootClient", "devtools/shared/client/root-client");
-loader.lazyRequireGetter(this, "BrowsingContextFront", "devtools/shared/fronts/targets/browsing-context", true);
+loader.lazyRequireGetter(this, "AddonTargetFront", "devtools/shared/fronts/targets/addon", true);
+loader.lazyRequireGetter(this, "RootFront", "devtools/shared/fronts/root", true);
+loader.lazyRequireGetter(this, "BrowsingContextTargetFront", "devtools/shared/fronts/targets/browsing-context", true);
 loader.lazyRequireGetter(this, "WorkerTargetFront", "devtools/shared/fronts/targets/worker", true);
+loader.lazyRequireGetter(this, "ContentProcessTargetFront", "devtools/shared/fronts/targets/content-process", true);
 loader.lazyRequireGetter(this, "ThreadClient", "devtools/shared/client/thread-client");
 loader.lazyRequireGetter(this, "ObjectClient", "devtools/shared/client/object-client");
 loader.lazyRequireGetter(this, "Pool", "devtools/shared/protocol", true);
@@ -80,7 +81,8 @@ function DebuggerClient(transport) {
    */
   this.mainRoot = null;
   this.expectReply("root", (packet) => {
-    this.mainRoot = new RootClient(this, packet);
+    this.mainRoot = new RootFront(this, packet);
+    this._frontPool.manage(this.mainRoot);
     this.emit("connected", packet.applicationType, packet.traits);
   });
 }
@@ -372,12 +374,21 @@ DebuggerClient.prototype = {
   attachTarget: async function(targetActor) {
     let front = this._frontPool.actor(targetActor);
     if (!front) {
-      front = new BrowsingContextFront(this, { actor: targetActor });
+      front = new BrowsingContextTargetFront(this, { actor: targetActor });
       this._frontPool.manage(front);
     }
 
     const response = await front.attach();
     return [response, front];
+  },
+
+  attachContentProcessTarget: async function(form) {
+    let front = this._frontPool.actor(form.actor);
+    if (!front) {
+      front = new ContentProcessTargetFront(this, form);
+      this._frontPool.manage(front);
+    }
+    return front;
   },
 
   attachWorker: async function(workerTargetActor) {
@@ -397,17 +408,15 @@ DebuggerClient.prototype = {
    * @param string addonTargetActor
    *        The actor ID for the addon to attach.
    */
-  attachAddon: function(addonTargetActor) {
-    const packet = {
-      to: addonTargetActor,
-      type: "attach",
-    };
-    return this.request(packet).then(response => {
-      const addonClient = new AddonClient(this, addonTargetActor);
-      this.registerClient(addonClient);
-      this.activeAddon = addonClient;
-      return [response, addonClient];
-    });
+  attachAddon: async function(form) {
+    let front = this._frontPool.actor(form.actor);
+    if (!front) {
+      front = new AddonTargetFront(this, form);
+      this._frontPool.manage(front);
+    }
+
+    const response = await front.attach();
+    return [response, front];
   },
 
   /**
@@ -799,21 +808,21 @@ DebuggerClient.prototype = {
       return;
     }
 
+    // Check for "forwardingCancelled" here instead of using a front to handle it.
+    // This is necessary because we might receive this event while the client is closing,
+    // and the fronts have already been removed by that point.
+    if (this.mainRoot &&
+        packet.from == this.mainRoot.actorID &&
+        packet.type == "forwardingCancelled") {
+      this.purgeRequests(packet.prefix);
+      return;
+    }
+
     // If we have a registered Front for this actor, let it handle the packet
     // and skip all the rest of this unpleasantness.
     const front = this.getActor(packet.from);
     if (front) {
       front.onPacket(packet);
-      return;
-    }
-
-    // Check for "forwardingCancelled" here instead of using a client to handle it.
-    // This is necessary because we might receive this event while the client is closing,
-    // and the clients have already been removed by that point.
-    if (this.mainRoot &&
-        packet.from == this.mainRoot.actor &&
-        packet.type == "forwardingCancelled") {
-      this.purgeRequests(packet.prefix);
       return;
     }
 

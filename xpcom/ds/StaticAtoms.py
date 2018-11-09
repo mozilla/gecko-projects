@@ -39,6 +39,7 @@ STATIC_ATOMS = [
     Atom("moztype", "_moz-type"),
     Atom("mozdirty", "_moz_dirty"),
     Atom("mozdisallowselectionprint", "mozdisallowselectionprint"),
+    Atom("mozpersist", "mozpersist"),
     Atom("mozdonotsend", "moz-do-not-send"),
     Atom("mozeditorbogusnode", "_moz_editor_bogus_node"),
     Atom("mozgeneratedcontentbefore", "_moz_generated_content_before"),
@@ -996,6 +997,10 @@ STATIC_ATOMS = [
     Atom("rubyTextContainer", "ruby-text-container"),
     Atom("rules", "rules"),
     Atom("s", "s"),
+    Atom("safe_area_inset_top", "safe-area-inset-top"),
+    Atom("safe_area_inset_bottom", "safe-area-inset-bottom"),
+    Atom("safe_area_inset_left", "safe-area-inset-left"),
+    Atom("safe_area_inset_right", "safe-area-inset-right"),
     Atom("samp", "samp"),
     Atom("sandbox", "sandbox"),
     Atom("sbattr", "sbattr"),
@@ -2070,6 +2075,7 @@ STATIC_ATOMS = [
     # Scroll origins without smooth-scrolling prefs
     Atom("apz",        "apz"),
     Atom("restore",    "restore"),
+    Atom("relative",    "relative"),
 
     Atom("alert", "alert"),
     Atom("alertdialog", "alertdialog"),

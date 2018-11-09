@@ -33,7 +33,6 @@
 // Local
 #include "CacheInvalidator.h"
 #include "WebGLContextLossHandler.h"
-#include "WebGLContextUnchecked.h"
 #include "WebGLObjectModel.h"
 #include "WebGLStrongTypes.h"
 
@@ -246,8 +245,11 @@ struct TexImageSourceAdapter final : public TexImageSource
         mPboOffset = pboOffset;
     }
 
-    TexImageSourceAdapter(const dom::ImageBitmap* imageBitmap, ErrorResult*) {
+    TexImageSourceAdapter(const dom::ImageBitmap* imageBitmap,
+                          ErrorResult* out_error)
+    {
         mImageBitmap = imageBitmap;
+        mOut_error = out_error;
     }
 
     TexImageSourceAdapter(const dom::ImageData* imageData, ErrorResult*) {
@@ -282,7 +284,6 @@ public:
 class WebGLContext
     : public nsICanvasRenderingContextInternal
     , public nsSupportsWeakReference
-    , public WebGLContextUnchecked
     , public nsWrapperCache
 {
     friend class ScopedDrawCallWrapper;
@@ -327,6 +328,16 @@ class WebGLContext
         UNMASKED_RENDERER_WEBGL = 0x9246
     };
 
+private:
+    // We've had issues in the past with nulling `gl` without actually releasing
+    // all of our resources. This construction ensures that we are aware that we
+    // should only null `gl` in DestroyResourcesAndContext.
+    RefPtr<gl::GLContext> mGL_OnlyClearInDestroyResourcesAndContext;
+public:
+    // Grab a const reference so we can see changes, but can't make changes.
+    const decltype(mGL_OnlyClearInDestroyResourcesAndContext)& gl;
+
+protected:
     const uint32_t mMaxPerfWarnings;
     mutable uint64_t mNumPerfWarnings;
     const uint32_t mMaxAcceptableFBStatusInvals;
@@ -1042,8 +1053,6 @@ public:
         retval.set(GetParameter(cx, pname, rv));
     }
 
-    void GetParameterIndexed(JSContext* cx, GLenum pname, GLuint index,
-                             JS::MutableHandle<JS::Value> retval);
     bool IsEnabled(GLenum cap);
 
 private:

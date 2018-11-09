@@ -32,22 +32,21 @@ add_task(async function() {
     ['network.cookie.cookieBehavior', BEHAVIOR_ACCEPT],
   ]});
 
+  // Open the top-level page.
+  info("Opening a new tab: " + SW_REGISTER_PAGE);
+  let topTab = await BrowserTestUtils.openNewForegroundTab({
+    gBrowser,
+    opening: SW_REGISTER_PAGE
+  });
+
   // ## Install SW
   info("Installing SW");
-  await BrowserTestUtils.withNewTab(
-    {
-      gBrowser,
-      url: SW_REGISTER_PAGE
-    },
-    async function(linkedBrowser) {
-      await ContentTask.spawn(
-        linkedBrowser,
-        { sw: SW_REL_SW_SCRIPT },
-        async function({ sw }) {
-          // Waive the xray to use the content utils.js script functions.
-          await content.wrappedJSObject.registerAndWaitForActive(sw);
-        }
-      );
+  await ContentTask.spawn(
+    topTab.linkedBrowser,
+    { sw: SW_REL_SW_SCRIPT },
+    async function({ sw }) {
+      // Waive the xray to use the content utils.js script functions.
+      await content.wrappedJSObject.registerAndWaitForActive(sw);
     }
   );
 
@@ -60,12 +59,11 @@ add_task(async function() {
   ]});
   await UrlClassifierTestUtils.addTestTrackers();
 
-  // Open the top-level page.
-  info("Open top-level page");
-  let topTab = await BrowserTestUtils.openNewForegroundTab({
-    gBrowser,
-    opening: TOP_EMPTY_PAGE
-  });
+  // Open the top-level URL.
+  info("Loading a new top-level URL: " + TOP_EMPTY_PAGE);
+  let browserLoadedPromise = BrowserTestUtils.browserLoaded(topTab.linkedBrowser);
+  await BrowserTestUtils.loadURI(topTab.linkedBrowser, TOP_EMPTY_PAGE);
+  await browserLoadedPromise;
 
   // Create Iframe in the top-level page and verify its state.
   let { controlled } = await ContentTask.spawn(
@@ -81,23 +79,19 @@ add_task(async function() {
   ok(!controlled, "Should not be controlled!");
 
   // ## Cleanup
-  // Close the testing tab.
-  BrowserTestUtils.removeTab(topTab);
-  // Unregister the SW we registered for the tracking protection origin.
-  await BrowserTestUtils.withNewTab(
-    {
-      gBrowser,
-      url: SW_REGISTER_PAGE
-    },
-    async function(linkedBrowser) {
-      await ContentTask.spawn(
-        linkedBrowser,
-        {},
-        async function() {
-          // Waive the xray to use the content utils.js script functions.
-          await content.wrappedJSObject.unregisterAll();
-        }
-      );
+  info("Loading the SW unregister page: " + SW_REGISTER_PAGE);
+  browserLoadedPromise = BrowserTestUtils.browserLoaded(topTab.linkedBrowser);
+  await BrowserTestUtils.loadURI(topTab.linkedBrowser, SW_REGISTER_PAGE);
+  await browserLoadedPromise;
+
+  await ContentTask.spawn(
+    topTab.linkedBrowser,
+    null,
+    async function() {
+      await content.wrappedJSObject.unregisterAll();
     }
   );
+
+  // Close the testing tab.
+  BrowserTestUtils.removeTab(topTab);
 });

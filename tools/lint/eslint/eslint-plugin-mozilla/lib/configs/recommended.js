@@ -64,6 +64,7 @@ module.exports = {
     // generators, see bug 968038.
     "StopIteration": false,
     "StructuredCloneHolder": false,
+    "TelemetryStopwatch": false,
     "WebAssembly": false,
     "WebExtensionContentScript": false,
     "WebExtensionPolicy": false,
@@ -291,6 +292,9 @@ module.exports = {
 
     // Dissallow use of new wrappers
     "no-new-wrappers": "error",
+
+    // Disallow use of event global.
+    "no-restricted-globals": ["error", "event"],
 
     // Disallows unnecessary `return await ...`.
     "no-return-await": "error",

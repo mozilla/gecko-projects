@@ -291,8 +291,14 @@ function setSearchLabel(type) {
 }
 
 function setThemeScreenshot(addon, node) {
-  let screenshot = node.querySelector(".theme-screenshot")
+  let findElement = () => node.querySelector(".theme-screenshot")
     || document.getAnonymousElementByAttribute(node, "anonid", "theme-screenshot");
+  let screenshot = findElement();
+  if (!screenshot) {
+    // Force a layout since screenshot might not exist yet on Windows.
+    node.clientTop;
+    screenshot = findElement();
+  }
   // There's a test that doesn't have this for some reason, but it's doing weird things.
   if (!screenshot)
     return;
@@ -865,6 +871,16 @@ var gViewController = {
     this.displayedView = this.currentViewObj;
     this.currentViewObj.node.setAttribute("loading", "true");
     this.currentViewObj.node.focus();
+
+    let headingName = document.getElementById("heading-name");
+    try {
+      headingName.textContent = gStrings.ext.GetStringFromName(`listHeading.${view.param}`);
+      setSearchLabel(view.param);
+    } catch (e) {
+      // In tests we sometimes render this view with a type we don't support, that's fine.
+      headingName.textContent = "";
+    }
+
 
     if (aViewId == aPreviousView)
       this.currentViewObj.refresh(view.param, ++this.currentViewRequest, aState);
@@ -2399,14 +2415,6 @@ var gListView = {
     this.node.setAttribute("type", aType);
     this.showEmptyNotice(false);
 
-    try {
-      document.getElementById("list-view-heading-name")
-        .textContent = gStrings.ext.GetStringFromName(`listHeading.${aType}`);
-      setSearchLabel(aType);
-    } catch (e) {
-      // In tests we sometimes render this view with a type we don't support, that's fine.
-    }
-
     this._listBox.textContent = "";
 
     if (aType == "plugin") {
@@ -2632,7 +2640,7 @@ var gDetailView = {
     gCategories.select(category);
 
     document.getElementById("detail-name").textContent = aAddon.name;
-    var icon = AddonManager.getPreferredIconURL(aAddon, 64, window);
+    var icon = AddonManager.getPreferredIconURL(aAddon, 32, window);
     document.getElementById("detail-icon").src = icon ? icon : "";
     document.getElementById("detail-creator").setCreator(aAddon.creator, aAddon.homepageURL);
 
@@ -3081,10 +3089,9 @@ var gDetailView = {
       let policy = ExtensionParent.WebExtensionPolicy.getByID(this._addon.id);
       browser.sameProcessAsFrameLoader = policy.extension.groupFrameLoader;
     }
-    let remote = !E10SUtils.canLoadURIInProcess(optionsURL, Services.appinfo.PROCESS_TYPE_DEFAULT);
 
     let readyPromise;
-    if (remote) {
+    if (E10SUtils.canLoadURIInRemoteType(optionsURL, E10SUtils.EXTENSION_REMOTE_TYPE)) {
       browser.setAttribute("remote", "true");
       browser.setAttribute("remoteType", E10SUtils.EXTENSION_REMOTE_TYPE);
       readyPromise = promiseEvent("XULFrameLoaderCreated", browser);

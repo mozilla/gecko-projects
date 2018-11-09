@@ -32,9 +32,7 @@ XPCOMUtils.defineLazyGetter(
 XPCOMUtils.defineLazyGetter(
   this, "VR_USER_AGENT",
   function() {
-    return MOBILE_USER_AGENT
-           .getService(Ci.nsIHttpProtocolHandler).userAgent
-           .replace(/Android \d+; [a-zA-Z]+/, "VR");
+    return MOBILE_USER_AGENT.replace(/Mobile/, "Mobile VR");
   });
 
 // This needs to match GeckoSessionSettings.java
@@ -46,12 +44,6 @@ const USER_AGENT_MODE_VR = 2;
 // * multiprocess
 // * user agent override
 class GeckoViewSettings extends GeckoViewModule {
-  onInitBrowser() {
-    if (this.settings.useMultiprocess) {
-      this.browser.setAttribute("remote", "true");
-    }
-  }
-
   onInit() {
     debug `onInit`;
     this._useTrackingProtection = false;

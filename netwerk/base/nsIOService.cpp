@@ -12,7 +12,7 @@
 #include "nscore.h"
 #include "nsIURI.h"
 #include "prprf.h"
-#include "nsIErrorService.h"
+#include "nsErrorService.h"
 #include "netCore.h"
 #include "nsIObserverService.h"
 #include "nsIPrefService.h"
@@ -53,6 +53,7 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ServiceWorkerDescriptor.h"
 #include "mozilla/net/CaptivePortalService.h"
+#include "mozilla/net/NetworkConnectivityService.h"
 #include "mozilla/Unused.h"
 #include "ReferrerPolicy.h"
 #include "nsContentSecurityManager.h"
@@ -215,12 +216,9 @@ nsresult
 nsIOService::Init()
 {
     // XXX hack until xpidl supports error info directly (bug 13423)
-    nsCOMPtr<nsIErrorService> errorService = do_GetService(NS_ERRORSERVICE_CONTRACTID);
-    if (errorService) {
-        errorService->RegisterErrorStringBundle(NS_ERROR_MODULE_NETWORK, NECKO_MSGS_URL);
-    }
-    else
-        NS_WARNING("failed to get error service");
+    nsCOMPtr<nsIErrorService> errorService = nsErrorService::GetOrCreate();
+    MOZ_ALWAYS_TRUE(errorService);
+    errorService->RegisterErrorStringBundle(NS_ERROR_MODULE_NETWORK, NECKO_MSGS_URL);
 
     InitializeCaptivePortalService();
 
@@ -261,6 +259,10 @@ nsIOService::Init()
     InitializeProtocolProxyService();
 
     SetOffline(false);
+
+    RefPtr<NetworkConnectivityService> ncs =
+      NetworkConnectivityService::GetSingleton();
+    ncs->Init();
 
     return NS_OK;
 }
@@ -1655,10 +1657,23 @@ nsIOService::ExtractCharsetFromContentType(const nsACString &aTypeHeader,
 // parse policyString to policy enum value (see ReferrerPolicy.h)
 NS_IMETHODIMP
 nsIOService::ParseAttributePolicyString(const nsAString& policyString,
-                                                uint32_t *outPolicyEnum)
+                                        uint32_t *outPolicyEnum)
 {
   NS_ENSURE_ARG(outPolicyEnum);
   *outPolicyEnum = (uint32_t)AttributeReferrerPolicyFromString(policyString);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsIOService::GetReferrerPolicyString(uint32_t aPolicy,
+                                     nsACString &aResult)
+{
+  if (aPolicy >= ArrayLength(kReferrerPolicyString)) {
+    aResult.AssignLiteral("unknown");
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  aResult.AssignASCII(ReferrerPolicyToString(static_cast<ReferrerPolicy>(aPolicy)));
   return NS_OK;
 }
 

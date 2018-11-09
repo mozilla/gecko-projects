@@ -223,17 +223,6 @@ radio {
 /******** groupbox *********/
 
 groupbox {
-  -moz-binding: url("chrome://global/content/bindings/groupbox.xml#groupbox");
-  display: -moz-groupbox;
-}
-
-caption {
-  -moz-binding: url("chrome://global/content/bindings/groupbox.xml#caption");
-}
-
-.groupbox-body {
-  -moz-box-pack: inherit;
-  -moz-box-align: inherit;
   -moz-box-orient: vertical;
 }
 
@@ -281,17 +270,6 @@ toolbar[customizing="true"][hidden="true"] {
 toolbar[type="menubar"] {
   min-height: 0 !important;
   border: 0 !important;
-}
-%else
-toolbar[type="menubar"][autohide="true"] {
-  overflow: hidden;
-}
-
-toolbar[type="menubar"][autohide="true"][inactive="true"]:not([customizing="true"]) {
-  min-height: 0 !important;
-  height: 0 !important;
-  -moz-appearance: none !important;
-  border-style: none !important;
 }
 %endif
 
@@ -484,12 +462,7 @@ treecols {
 }
 
 treecol {
-  -moz-binding: url("chrome://global/content/bindings/tree.xml#treecol");
   -moz-box-ordinal-group: 2147483646;
-}
-
-treecol.treecol-image {
-  -moz-binding: url("chrome://global/content/bindings/tree.xml#treecol-image");
 }
 
 tree > treechildren {

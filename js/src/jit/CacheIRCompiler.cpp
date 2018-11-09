@@ -14,6 +14,7 @@
 #include "jslibmath.h"
 #include "jit/IonIC.h"
 #include "jit/SharedICHelpers.h"
+#include "jit/SharedICRegisters.h"
 
 #include "builtin/Boolean-inl.h"
 
@@ -1616,29 +1617,25 @@ CacheIRCompiler::emitGuardIsInt32Index()
 
     masm.bind(&notInt32);
 
-    if (cx_->runtime()->jitSupportsFloatingPoint) {
-        masm.branchTestDouble(Assembler::NotEqual, input, failure->label());
+    masm.branchTestDouble(Assembler::NotEqual, input, failure->label());
 
-        // If we're compiling a Baseline IC, FloatReg0 is always available.
-        Label failurePopReg;
-        if (mode_ != Mode::Baseline) {
-            masm.push(FloatReg0);
-        }
+    // If we're compiling a Baseline IC, FloatReg0 is always available.
+    Label failurePopReg;
+    if (mode_ != Mode::Baseline) {
+        masm.push(FloatReg0);
+    }
 
-        masm.unboxDouble(input, FloatReg0);
-        // ToPropertyKey(-0.0) is "0", so we can truncate -0.0 to 0 here.
-        masm.convertDoubleToInt32(FloatReg0, output,
-                                  (mode_ == Mode::Baseline) ? failure->label() : &failurePopReg,
-                                  false);
-        if (mode_ != Mode::Baseline) {
-            masm.pop(FloatReg0);
-            masm.jump(&done);
+    masm.unboxDouble(input, FloatReg0);
+    // ToPropertyKey(-0.0) is "0", so we can truncate -0.0 to 0 here.
+    masm.convertDoubleToInt32(FloatReg0, output,
+                              (mode_ == Mode::Baseline) ? failure->label() : &failurePopReg,
+                              false);
+    if (mode_ != Mode::Baseline) {
+        masm.pop(FloatReg0);
+        masm.jump(&done);
 
-            masm.bind(&failurePopReg);
-            masm.pop(FloatReg0);
-            masm.jump(failure->label());
-        }
-    } else {
+        masm.bind(&failurePopReg);
+        masm.pop(FloatReg0);
         masm.jump(failure->label());
     }
 
@@ -1731,6 +1728,35 @@ CacheIRCompiler::emitGuardClass()
                                                     failure->label());
     }
 
+    return true;
+}
+
+bool
+CacheIRCompiler::emitGuardIsExtensible()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    AutoScratchRegister scratch(allocator, masm);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure)) {
+        return false;
+    }
+
+    Address shape(obj, ShapedObject::offsetOfShape());
+    masm.loadPtr(shape, scratch);
+
+    Address baseShape(scratch, Shape::offsetOfBaseShape());
+    masm.loadPtr(baseShape, scratch);
+
+    Address baseShapeFlags(scratch, BaseShape::offsetOfFlags());
+    masm.loadPtr(baseShapeFlags, scratch);
+
+    masm.and32(Imm32(js::BaseShape::NOT_EXTENSIBLE), scratch);
+
+    // Spectre-style checks are not needed here because we do not
+    // interpret data based on this check.
+    masm.branch32(Assembler::Equal, scratch, Imm32(js::BaseShape::NOT_EXTENSIBLE),
+                  failure->label());
     return true;
 }
 
@@ -2836,13 +2862,96 @@ CacheIRCompiler::emitGuardIndexGreaterThanDenseInitLength()
     // Load obj->elements.
     masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch);
 
-    // Ensure index >= capacity.
+    // Ensure index >= initLength.
     Label outOfBounds;
     Address capacity(scratch, ObjectElements::offsetOfInitializedLength());
     masm.spectreBoundsCheck32(index, capacity, scratch2, &outOfBounds);
     masm.jump(failure->label());
     masm.bind(&outOfBounds);
 
+    return true;
+}
+
+bool
+CacheIRCompiler::emitGuardIndexGreaterThanDenseCapacity()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    Register index = allocator.useRegister(masm, reader.int32OperandId());
+    AutoScratchRegister scratch(allocator, masm);
+    AutoScratchRegister scratch2(allocator, masm);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure)) {
+        return false;
+    }
+
+    // Load obj->elements.
+    masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch);
+
+    // Ensure index >= capacity.
+    Label outOfBounds;
+    Address capacity(scratch, ObjectElements::offsetOfCapacity());
+    masm.spectreBoundsCheck32(index, capacity, scratch2, &outOfBounds);
+    masm.jump(failure->label());
+    masm.bind(&outOfBounds);
+
+    return true;
+}
+
+bool
+CacheIRCompiler::emitGuardIndexGreaterThanArrayLength()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    Register index = allocator.useRegister(masm, reader.int32OperandId());
+    AutoScratchRegister scratch(allocator, masm);
+    AutoScratchRegister scratch2(allocator, masm);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure)) {
+        return false;
+    }
+
+    // Load obj->elements.
+    masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch);
+
+    // Ensure index >= length;
+    Label outOfBounds;
+    Address length(scratch, ObjectElements::offsetOfLength());
+    masm.spectreBoundsCheck32(index, length, scratch2, &outOfBounds);
+    masm.jump(failure->label());
+    masm.bind(&outOfBounds);
+    return true;
+}
+
+bool
+CacheIRCompiler::emitGuardIndexIsValidUpdateOrAdd()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    Register index = allocator.useRegister(masm, reader.int32OperandId());
+    AutoScratchRegister scratch(allocator, masm);
+    AutoScratchRegister scratch2(allocator, masm);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure)) {
+        return false;
+    }
+
+    // Load obj->elements.
+    masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch);
+
+    Label success;
+
+    // If length is writable, branch to &success.  All indices are writable.
+    Address flags(scratch, ObjectElements::offsetOfFlags());
+    masm.branchTest32(Assembler::Zero, flags,
+                      Imm32(ObjectElements::Flags::NONWRITABLE_ARRAY_LENGTH),
+                      &success);
+
+    // Otherwise, ensure index is in bounds.
+    Address length(scratch, ObjectElements::offsetOfLength());
+    masm.spectreBoundsCheck32(index, length, scratch2,
+                              /* failure = */ failure->label());
+    masm.bind(&success);
     return true;
 }
 

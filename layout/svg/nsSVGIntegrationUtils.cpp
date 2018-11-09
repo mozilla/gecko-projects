@@ -181,7 +181,7 @@ nsSVGIntegrationUtils::UsingEffectsForFrame(const nsIFrame* aFrame)
 bool
 nsSVGIntegrationUtils::UsingMaskOrClipPathForFrame(const nsIFrame* aFrame)
 {
-  const nsStyleSVGReset *style = aFrame->StyleSVGReset();
+  const nsStyleSVGReset* style = aFrame->StyleSVGReset();
   return style->HasClipPath() || style->HasMask();
 }
 
@@ -1149,6 +1149,18 @@ nsSVGIntegrationUtils::PaintFilter(const PaintFramesParams& aParams)
 
   nsFilterInstance::PaintFilteredFrame(frame, &context, &callback,
                                        &dirtyRegion, aParams.imgParams, opacity);
+}
+
+bool
+nsSVGIntegrationUtils::BuildWebRenderFilters(nsIFrame *aFilteredFrame,
+                                             const mozilla::LayoutDeviceIntRect& aPreFilterBounds,
+                                             nsTArray<mozilla::wr::WrFilterOp>& aWrFilters,
+                                             mozilla::LayoutDeviceIntRect& aPostFilterBounds)
+{
+  return nsFilterInstance::BuildWebRenderFilters(aFilteredFrame,
+                                                 aPreFilterBounds,
+                                                 aWrFilters,
+                                                 aPostFilterBounds);
 }
 
 class PaintFrameCallback : public gfxDrawingCallback {

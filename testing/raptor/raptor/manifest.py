@@ -66,6 +66,7 @@ def write_test_settings_json(test_details, oskey):
     # write test settings json file with test details that the control
     # server will provide for the web ext
     test_url = transform_platform(test_details['test_url'], oskey)
+
     test_settings = {
         "raptor-options": {
             "type": test_details['type'],
@@ -102,6 +103,22 @@ def write_test_settings_json(test_details, oskey):
 
     if test_details.get("alert_threshold", None) is not None:
         test_settings['raptor-options']['alert_threshold'] = float(test_details['alert_threshold'])
+
+    # if gecko profiling is enabled, write profiling settings for webext
+    if test_details.get("gecko_profile", False):
+        test_settings['raptor-options']['gecko_profile'] = True
+        # when profiling, if webRender is enabled we need to set that, so
+        # the runner can add the web render threads to gecko profiling
+        test_settings['raptor-options']['gecko_profile_interval'] = \
+            float(test_details.get("gecko_profile_interval", 0))
+        test_settings['raptor-options']['gecko_profile_entries'] = \
+            float(test_details.get("gecko_profile_entries", 0))
+        if str(os.getenv('MOZ_WEBRENDER')) == '1':
+            test_settings['raptor-options']['webrender_enabled'] = True
+
+    if test_details.get("newtab_per_cycle", None) is not None:
+        test_settings['raptor-options']['newtab_per_cycle'] = \
+            bool(test_details['newtab_per_cycle'])
 
     settings_file = os.path.join(tests_dir, test_details['name'] + '.json')
     try:
@@ -154,6 +171,28 @@ def get_raptor_test_list(args, oskey):
             if tail == _ini:
                 # subtest comes from matching test ini file name, so add it
                 tests_to_run.append(next_test)
+
+    # if geckoProfile is enabled, turn it on in test settings and limit pagecycles to 3
+    if args.gecko_profile is True:
+        for next_test in tests_to_run:
+            next_test['gecko_profile'] = True
+            if next_test['page_cycles'] > 3:
+                LOG.info("gecko profiling enabled, limiting pagecycles "
+                         "to 3 for test %s" % next_test['name'])
+                next_test['page_cycles'] = 3
+
+    # if --page-cycles command line arg was provided, override the page_cycles value
+    # that was in the manifest/test INI with the command line arg value instead
+    # also allow the cmd line opt to override pagecycles auto set when gecko profiling is on
+    if args.page_cycles is not None:
+        LOG.info("setting page-cycles to %d as specified on the command line" % args.page_cycles)
+        next_test['page_cycles'] = args.page_cycles
+
+    # if --page-timeout command line arg was provided, override the page_timeout value
+    # that was in the manifest/test INI with the command line arg value instead
+    if args.page_timeout is not None:
+        LOG.info("setting page-timeout to %d as specified on the command line" % args.page_timeout)
+        next_test['page_timeout'] = args.page_timeout
 
     # write out .json test setting files for the control server to read and send to web ext
     if len(tests_to_run) != 0:

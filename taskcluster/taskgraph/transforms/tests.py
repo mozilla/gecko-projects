@@ -371,9 +371,9 @@ test_description_schema = Schema({
     Optional('product'): basestring,
 
     # conditional files to determine when these tests should be run
-    Exclusive(Optional('when'), 'optimization'): Any({
+    Exclusive(Optional('when'), 'optimization'): {
         Optional('files-changed'): [basestring],
-    }),
+    },
 
     # Optimization to perform on this task during the optimization phase.
     # Optimizations are defined in taskcluster/taskgraph/optimize.py.
@@ -640,7 +640,8 @@ def set_tier(config, tests):
                                          'macosx64-qr/debug',
                                          'android-em-4.3-arm7-api-16/opt',
                                          'android-em-4.3-arm7-api-16/debug',
-                                         'android-em-4.2-x86/opt']:
+                                         'android-em-4.2-x86/opt',
+                                         'android-em-7.0-x86/opt']:
                 test['tier'] = 1
             else:
                 test['tier'] = 2
@@ -777,7 +778,7 @@ def enable_code_coverage(config, tests):
             if 'linux' in test['build-platform']:
                 test['fetches']['toolchain'].append('linux64-grcov')
             elif 'osx' in test['build-platform']:
-                test['fetches']['toolchain'].append('macosx64-grcov')
+                test['fetches']['fetch'].append('grcov-osx-x86_64')
             elif 'win' in test['build-platform']:
                 test['fetches']['toolchain'].append('win64-grcov')
 
@@ -958,7 +959,7 @@ def set_profile(config, tests):
     if config.params['try_mode'] == 'try_option_syntax':
         profile = config.params['try_options']['profile']
     for test in tests:
-        if profile and test['suite'] == 'talos':
+        if profile and test['suite'] in ['talos', 'raptor']:
             test['mozharness']['extra-options'].append('--geckoProfile')
         yield test
 
@@ -1038,7 +1039,7 @@ def set_worker_type(config, tests):
         elif test_platform.startswith('linux') or test_platform.startswith('android'):
             if test.get('suite', '') in ['talos', 'raptor'] and \
                  not test['build-platform'].startswith('linux64-ccov'):
-                test['worker-type'] = 'releng-hardware/gecko-t-linux-talos-tw'
+                test['worker-type'] = 'releng-hardware/gecko-t-linux-talos'
             else:
                 test['worker-type'] = LINUX_WORKER_TYPES[test['instance-size']]
         else:

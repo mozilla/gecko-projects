@@ -46,7 +46,7 @@ class UrlbarInput {
     this.window = this.textbox.ownerGlobal;
     this.document = this.window.document;
     this.controller = options.controller || new UrlbarController({
-      window: this.window,
+      browserWindow: this.window,
     });
     this.view = new UrlbarView(this);
     this.valueIsTyped = false;
@@ -64,7 +64,7 @@ class UrlbarInput {
 
     for (let method of METHODS) {
       this[method] = (...args) => {
-        this.textbox[method](...args);
+        return this.textbox[method](...args);
       };
     }
 
@@ -230,8 +230,25 @@ class UrlbarInput {
    * @param {UrlbarMatch} result The result that was selected.
    */
   resultSelected(event, result) {
-    // TODO: Set the input value to the target url.
+    this.setValueFromResult(result);
     this.controller.resultSelected(event, result);
+  }
+
+  /**
+   * Called by the view when moving through results with the keyboard.
+   *
+   * @param {UrlbarMatch} result The result that was selected.
+   */
+  setValueFromResult(result) {
+    let val = result.url;
+    let uri;
+    try {
+      uri = Services.io.newURI(val);
+    } catch (ex) {}
+    if (uri) {
+      val = this.window.losslessDecodeURI(uri);
+    }
+    this.value = val;
   }
 
   // Getters and Setters below.
@@ -243,6 +260,10 @@ class UrlbarInput {
   get goButton() {
     return this.document.getAnonymousElementByAttribute(this.textbox, "anonid",
       "urlbar-go-button");
+  }
+
+  get textValue() {
+    return this.inputField.value;
   }
 
   get value() {
@@ -349,7 +370,7 @@ class UrlbarInput {
     // since those are hard to read when encoded.
     if (inputVal == selectedVal &&
         !uri.schemeIs("javascript") && !uri.schemeIs("data") &&
-        !Services.prefs.getBoolPref("browser.urlbar.decodeURLsOnCopy")) {
+        !UrlbarPrefs.get("decodeURLsOnCopy")) {
       return uri.displaySpec;
     }
 

@@ -1250,7 +1250,9 @@ CSPAllowsInlineScript(nsIScriptElement* aElement, nsIDocument* aDocument)
 
   bool allowInlineScript = false;
   rv = csp->GetAllowsInline(nsIContentPolicy::TYPE_SCRIPT,
-                            nonce, parserCreated, scriptContent, EmptyString(),
+                            nonce, parserCreated, scriptContent,
+                            nullptr /* nsICSPEventListener */,
+                            EmptyString(),
                             aElement->GetScriptLineNumber(),
                             aElement->GetScriptColumnNumber(),
                             &allowInlineScript);
@@ -2131,9 +2133,7 @@ ScriptLoader::FillCompileOptionsForRequest(const AutoJSAPI&jsapi,
 {
   // It's very important to use aRequest->mURI, not the final URI of the channel
   // aRequest ended up getting script data from, as the script filename.
-  nsresult rv;
-  nsContentUtils::GetWrapperSafeScriptFilename(mDocument, aRequest->mURI,
-                                               aRequest->mURL, &rv);
+  nsresult rv = aRequest->mURI->GetSpec(aRequest->mURL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -2942,6 +2942,7 @@ ScriptLoader::VerifySRI(ScriptLoadRequest* aRequest,
       csp->LogViolationDetails(
         nsIContentSecurityPolicy::VIOLATION_TYPE_REQUIRE_SRI_FOR_SCRIPT,
         nullptr, // triggering element
+        nullptr, // nsICSPEventListener
         NS_ConvertUTF8toUTF16(violationURISpec),
         EmptyString(), lineNo, columnNo, EmptyString(), EmptyString());
       rv = NS_ERROR_SRI_CORRUPT;

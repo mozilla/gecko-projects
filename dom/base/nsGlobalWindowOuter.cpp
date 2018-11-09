@@ -20,6 +20,7 @@
 #include "nsIDOMStorageManager.h"
 #include "nsIPermission.h"
 #include "nsIPermissionManager.h"
+#include "nsIPrefBranch.h"
 #include "nsISecureBrowserUI.h"
 #include "nsIWebProgressListener.h"
 #include "mozilla/AntiTrackingCommon.h"
@@ -65,7 +66,7 @@
 #include "nsPrintfCString.h"
 #include "mozilla/intl/LocaleService.h"
 #include "WindowDestroyedEvent.h"
-#include "nsDocShellLoadInfo.h"
+#include "nsDocShellLoadState.h"
 
 // Helper Classes
 #include "nsJSUtils.h"
@@ -983,6 +984,11 @@ nsGlobalWindowOuter::~nsGlobalWindowOuter()
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
     obs->RemoveObserver(this, PERM_CHANGE_NOTIFICATION);
+  }
+  nsCOMPtr<nsIPrefBranch> prefBranch =
+    do_GetService(NS_PREFSERVICE_CONTRACTID);
+  if (prefBranch) {
+    prefBranch->RemoveObserver("network.cookie.cookieBehavior", this);
   }
 
   nsLayoutStatics::Release();
@@ -2029,8 +2035,7 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
   mHasStorageAccess = false;
   nsIURI* uri = aDocument->GetDocumentURI();
   if (newInnerWindow) {
-    if (AntiTrackingCommon::ShouldHonorContentBlockingCookieRestrictions() &&
-        StaticPrefs::network_cookie_cookieBehavior() ==
+    if (StaticPrefs::network_cookie_cookieBehavior() ==
           nsICookieService::BEHAVIOR_REJECT_TRACKER &&
         nsContentUtils::IsThirdPartyWindowOrChannel(newInnerWindow, nullptr,
                                                     uri) &&
@@ -5291,6 +5296,8 @@ nsGlobalWindowOuter::NotifyContentBlockingState(unsigned aState,
                                                 bool aBlocked,
                                                 nsIURI* aURIHint)
 {
+  MOZ_ASSERT(aURIHint);
+
   nsCOMPtr<nsIDocShell> docShell = GetDocShell();
   if (!docShell) {
     return;
@@ -5320,15 +5327,18 @@ nsGlobalWindowOuter::NotifyContentBlockingState(unsigned aState,
   }
   securityUI->GetState(&state);
   nsAutoString origin;
-  origin.SetIsVoid(true);
-  if (aURIHint) {
-    nsContentUtils::GetUTFOrigin(aURIHint, origin);
-  }
+  nsContentUtils::GetUTFOrigin(aURIHint, origin);
+
   bool unblocked = false;
   if (aState == nsIWebProgressListener::STATE_BLOCKED_TRACKING_CONTENT) {
     doc->SetHasTrackingContentBlocked(aBlocked, origin);
     if (!aBlocked) {
       unblocked = !doc->GetHasTrackingContentBlocked();
+    }
+  } else if (aState == nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT) {
+    doc->SetHasTrackingContentLoaded(aBlocked, origin);
+    if (!aBlocked) {
+      unblocked = !doc->GetHasTrackingContentLoaded();
     }
   } else if (aState == nsIWebProgressListener::STATE_BLOCKED_SLOW_TRACKING_CONTENT) {
     doc->SetHasSlowTrackingContentBlocked(aBlocked, origin);
@@ -5468,6 +5478,14 @@ nsGlobalWindowOuter::RevisePopupAbuseLevel(PopupControlState aControl)
       abuse = openOverridden;
   }
 
+  // If this popup is allowed, let's block any other for this event, forcing
+  // openBlocked state.
+  if ((abuse == openAllowed || abuse == openControlled) &&
+      StaticPrefs::dom_block_multiple_popups() &&
+      !PopupWhitelisted()) {
+    nsContentUtils::PushPopupControlState(openBlocked, true);
+  }
+
   return abuse;
 }
 
@@ -5504,7 +5522,7 @@ nsGlobalWindowOuter::FireAbuseEvents(const nsAString &aPopupURL,
     ios->NewURI(NS_ConvertUTF16toUTF8(aPopupURL), nullptr, baseURL,
                 getter_AddRefs(popupURI));
 
-  // fire an event chock full of informative URIs
+  // fire an event block full of informative URIs
   FirePopupBlockedEvent(topDoc, popupURI, aPopupWindowName,
                         aPopupWindowFeatures);
 }
@@ -5520,7 +5538,7 @@ nsGlobalWindowOuter::OpenOuter(const nsAString& aUrl, const nsAString& aName,
 
 nsresult
 nsGlobalWindowOuter::Open(const nsAString& aUrl, const nsAString& aName,
-                          const nsAString& aOptions, nsDocShellLoadInfo* aLoadInfo,
+                          const nsAString& aOptions, nsDocShellLoadState* aLoadState,
                           bool aForceNoOpener, nsPIDOMWindowOuter **_retval)
 {
   return OpenInternal(aUrl, aName, aOptions,
@@ -5530,7 +5548,7 @@ nsGlobalWindowOuter::Open(const nsAString& aUrl, const nsAString& aName,
                       false,          // aDoJSFixups
                       true,           // aNavigate
                       nullptr, nullptr,  // No args
-                      aLoadInfo,
+                      aLoadState,
                       aForceNoOpener,
                       _retval);
 }
@@ -5546,7 +5564,7 @@ nsGlobalWindowOuter::OpenJS(const nsAString& aUrl, const nsAString& aName,
                       true,           // aDoJSFixups
                       true,           // aNavigate
                       nullptr, nullptr,  // No args
-                      nullptr,        // aLoadInfo
+                      nullptr,        // aLoadState
                       false,          // aForceNoOpener
                       _retval);
 }
@@ -5566,7 +5584,7 @@ nsGlobalWindowOuter::OpenDialog(const nsAString& aUrl, const nsAString& aName,
                       false,                   // aDoJSFixups
                       true,                    // aNavigate
                       nullptr, aExtraArgument, // Arguments
-                      nullptr,                 // aLoadInfo
+                      nullptr,                 // aLoadState
                       false,                   // aForceNoOpener
                       _retval);
 }
@@ -5585,7 +5603,7 @@ nsGlobalWindowOuter::OpenNoNavigate(const nsAString& aUrl,
                       false,          // aDoJSFixups
                       false,          // aNavigate
                       nullptr, nullptr,  // No args
-                      nullptr,        // aLoadInfo
+                      nullptr,        // aLoadState
                       false,          // aForceNoOpener
                       _retval);
 
@@ -5613,7 +5631,7 @@ nsGlobalWindowOuter::OpenDialogOuter(JSContext* aCx, const nsAString& aUrl,
                         false,            // aDoJSFixups
                         true,                // aNavigate
                         argvArray, nullptr,  // Arguments
-                        nullptr,          // aLoadInfo
+                        nullptr,          // aLoadState
                         false,            // aForceNoOpener
                         getter_AddRefs(dialog));
   return dialog.forget();
@@ -5784,6 +5802,31 @@ nsGlobalWindowOuter::PostMessageMozOuter(JSContext* aCx, JS::Handle<JS::Value> a
     if (NS_WARN_IF(!providedPrincipal)) {
       return;
     }
+  } else {
+    // We still need to check the originAttributes if the target origin is '*'.
+    // But we will ingore the FPD here since the FPDs are possible to be different.
+    auto principal = BasePrincipal::Cast(GetPrincipal());
+    NS_ENSURE_TRUE_VOID(principal);
+
+    OriginAttributes targetAttrs = principal->OriginAttributesRef();
+    OriginAttributes sourceAttrs = aSubjectPrincipal.OriginAttributesRef();
+    // We have to exempt the check of OA if the subject prioncipal is a system
+    // principal since there are many tests try to post messages to content from
+    // chrome with a mismatch OA. For example, using the ContentTask.spawn() to
+    // post a message into a private browsing window. The injected code in
+    // ContentTask.spawn() will be executed under the system principal and the
+    // OA of the system principal mismatches with the OA of a private browsing
+    // window.
+    MOZ_DIAGNOSTIC_ASSERT(aSubjectPrincipal.GetIsSystemPrincipal() ||
+                          sourceAttrs.EqualsIgnoringFPD(targetAttrs));
+
+    // If 'privacy.firstparty.isolate.block_post_message' is true, we will block
+    // postMessage across different first party domains.
+    if (OriginAttributes::IsBlockPostMessageForFPI() &&
+        !aSubjectPrincipal.GetIsSystemPrincipal() &&
+        sourceAttrs.mFirstPartyDomain != targetAttrs.mFirstPartyDomain) {
+      return;
+    }
   }
 
   // Create and asynchronously dispatch a runnable which will handle actual DOM
@@ -5797,8 +5840,7 @@ nsGlobalWindowOuter::PostMessageMozOuter(JSContext* aCx, JS::Handle<JS::Value> a
                          providedPrincipal,
                          callerInnerWin
                          ? callerInnerWin->GetDoc()
-                         : nullptr,
-                         nsContentUtils::IsCallerChrome());
+                         : nullptr);
 
   JS::Rooted<JS::Value> message(aCx, aMessage);
   JS::Rooted<JS::Value> transfer(aCx, aTransfer);
@@ -6610,6 +6652,7 @@ nsGlobalWindowOuter::SetIsBackground(bool aIsBackground)
     // the background window.
     if (inner && changed) {
       inner->StopGamepadHaptics();
+      inner->StopVRActivity();
       // true is for asking to set the delta time to
       // the telemetry.
       inner->ResetVRTelemetry(true);
@@ -6622,6 +6665,7 @@ nsGlobalWindowOuter::SetIsBackground(bool aIsBackground)
     // false is for only resetting the timestamp.
     inner->ResetVRTelemetry(false);
     inner->SyncGamepadState();
+    inner->StartVRActivity();
   }
 }
 
@@ -6857,6 +6901,10 @@ nsGlobalWindowOuter::Observe(nsISupports* aSupports, const char* aTopic,
         return NS_OK;
       }
     }
+  } else if (!nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
+    // Reset the storage access permission when our cookie policy changes.
+    mHasStorageAccess = false;
+    return NS_OK;
   }
   return NS_OK;
 }
@@ -6937,7 +6985,7 @@ nsGlobalWindowOuter::OpenInternal(const nsAString& aUrl, const nsAString& aName,
                                   bool aDoJSFixups, bool aNavigate,
                                   nsIArray *argv,
                                   nsISupports *aExtraArgument,
-                                  nsDocShellLoadInfo* aLoadInfo,
+                                  nsDocShellLoadState* aLoadState,
                                   bool aForceNoOpener,
                                   nsPIDOMWindowOuter **aReturn)
 {
@@ -7086,7 +7134,7 @@ nsGlobalWindowOuter::OpenInternal(const nsAString& aUrl, const nsAString& aName,
                                 aDialog, aNavigate, argv,
                                 isPopupSpamWindow,
                                 forceNoOpener,
-                                aLoadInfo,
+                                aLoadState,
                                 getter_AddRefs(domReturn));
     } else {
       // Force a system caller here so that the window watcher won't screw us
@@ -7109,7 +7157,7 @@ nsGlobalWindowOuter::OpenInternal(const nsAString& aUrl, const nsAString& aName,
                                 aDialog, aNavigate, aExtraArgument,
                                 isPopupSpamWindow,
                                 forceNoOpener,
-                                aLoadInfo,
+                                aLoadState,
                                 getter_AddRefs(domReturn));
 
     }
@@ -7735,6 +7783,11 @@ nsGlobalWindowOuter::Create(nsIDocShell* aDocShell, bool aIsChrome)
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
     obs->AddObserver(window, PERM_CHANGE_NOTIFICATION, true);
+  }
+  nsCOMPtr<nsIPrefBranch> prefBranch =
+    do_GetService(NS_PREFSERVICE_CONTRACTID);
+  if (prefBranch) {
+    prefBranch->AddObserver("network.cookie.cookieBehavior", window, true);
   }
   return window.forget();
 }

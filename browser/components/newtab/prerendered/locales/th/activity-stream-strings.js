@@ -50,7 +50,7 @@ window.gActivityStreamStrings = {
   "prefs_highlights_options_visited_label": "หน้าที่เยี่ยมชมแล้ว",
   "prefs_highlights_options_download_label": "การดาวน์โหลดล่าสุด",
   "prefs_highlights_options_pocket_label": "หน้าที่บันทึกไว้ใน Pocket",
-  "prefs_snippets_description": "ข้อมูลอัปเดตจาก Mozilla และ Firefox",
+  "prefs_snippets_description": "การอัปเดตจาก Mozilla และ Firefox",
   "settings_pane_button_label": "ปรับแต่งหน้าแท็บใหม่ของคุณ",
   "settings_pane_topsites_header": "ไซต์เด่น",
   "settings_pane_highlights_header": "รายการเด่น",
@@ -107,6 +107,6 @@ window.gActivityStreamStrings = {
   "firstrun_privacy_notice": "ประกาศความเป็นส่วนตัว",
   "firstrun_continue_to_login": "ดำเนินการต่อ",
   "firstrun_skip_login": "ข้ามขั้นตอนนี้",
-  "context_menu_title": "Open menu",
+  "context_menu_title": "เปิดเมนู",
   "pocket_learn_more": "เรียนรู้เพิ่มเติม"
 };

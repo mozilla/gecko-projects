@@ -82,6 +82,7 @@
 #include "mozilla/dom/ProcessingInstruction.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/XULDocumentBinding.h"
+#include "mozilla/dom/XULPersist.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/Preferences.h"
@@ -127,7 +128,6 @@ namespace dom {
 XULDocument::XULDocument(void)
     : XMLDocument("application/vnd.mozilla.xul+xml"),
       mNextSrcLoadWaiter(nullptr),
-      mApplyingPersistedAttrs(false),
       mIsWritingFastLoad(false),
       mDocumentLoaded(false),
       mStillWalking(false),
@@ -201,12 +201,10 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(XULDocument, XMLDocument)
 
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCurrentPrototype)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPrototypes)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLocalStore)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(XULDocument, XMLDocument)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(mLocalStore)
     //XXX We should probably unlink all the objects we traverse.
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
@@ -423,58 +421,6 @@ XULDocument::OnPrototypeLoadDone(bool aResumeWalk)
     return rv;
 }
 
-static bool
-ShouldPersistAttribute(Element* aElement, nsAtom* aAttribute)
-{
-    if (aElement->IsXULElement(nsGkAtoms::window)) {
-        // This is not an element of the top document, its owner is
-        // not an nsXULWindow. Persist it.
-        if (aElement->OwnerDoc()->GetParentDocument()) {
-            return true;
-        }
-        // The following attributes of xul:window should be handled in
-        // nsXULWindow::SavePersistentAttributes instead of here.
-        if (aAttribute == nsGkAtoms::screenX ||
-            aAttribute == nsGkAtoms::screenY ||
-            aAttribute == nsGkAtoms::width ||
-            aAttribute == nsGkAtoms::height ||
-            aAttribute == nsGkAtoms::sizemode) {
-            return false;
-        }
-    }
-    return true;
-}
-
-void
-XULDocument::AttributeChanged(Element* aElement, int32_t aNameSpaceID,
-                              nsAtom* aAttribute, int32_t aModType,
-                              const nsAttrValue* aOldValue)
-{
-    NS_ASSERTION(aElement->OwnerDoc() == this, "unexpected doc");
-
-    // Might not need this, but be safe for now.
-    nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
-
-    // See if there is anything we need to persist in the localstore.
-    //
-    // XXX Namespace handling broken :-(
-    nsAutoString persist;
-    aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::persist, persist);
-    // Persistence of attributes of xul:window is handled in nsXULWindow.
-    if (ShouldPersistAttribute(aElement, aAttribute) && !persist.IsEmpty() &&
-        // XXXldb This should check that it's a token, not just a substring.
-        persist.Find(nsDependentAtomString(aAttribute)) >= 0) {
-      nsContentUtils::AddScriptRunner(
-        NewRunnableMethod<Element*, int32_t, nsAtom*>(
-          "dom::XULDocument::Persist",
-          this,
-          &XULDocument::Persist,
-          aElement,
-          kNameSpaceID_None,
-          aAttribute));
-    }
-}
-
 void
 XULDocument::ContentAppended(nsIContent* aFirstNewContent)
 {
@@ -484,10 +430,9 @@ XULDocument::ContentAppended(nsIContent* aFirstNewContent)
     nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
 
     // Update our element map
-    nsresult rv = NS_OK;
-    for (nsIContent* cur = aFirstNewContent; cur && NS_SUCCEEDED(rv);
+    for (nsIContent* cur = aFirstNewContent; cur;
          cur = cur->GetNextSibling()) {
-        rv = AddSubtreeToDocument(cur);
+        AddSubtreeToDocument(cur);
     }
 }
 
@@ -505,12 +450,8 @@ XULDocument::ContentInserted(nsIContent* aChild)
 void
 XULDocument::ContentRemoved(nsIContent* aChild, nsIContent* aPreviousSibling)
 {
-    NS_ASSERTION(aChild->OwnerDoc() == this, "unexpected doc");
-
-    // Might not need this, but be safe for now.
-    nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
-
-    RemoveSubtreeFromDocument(aChild);
+    // FIXME(emilio): Doesn't this need to remove the l10n links if they go
+    // away, or something?
 }
 
 //----------------------------------------------------------------------
@@ -518,77 +459,7 @@ XULDocument::ContentRemoved(nsIContent* aChild, nsIContent* aPreviousSibling)
 // nsIDocument interface
 //
 
-
 void
-XULDocument::Persist(Element* aElement, int32_t aNameSpaceID,
-                     nsAtom* aAttribute)
-{
-    // For non-chrome documents, persistance is simply broken
-    if (!nsContentUtils::IsSystemPrincipal(NodePrincipal()))
-        return;
-
-    if (!mLocalStore) {
-        mLocalStore = do_GetService("@mozilla.org/xul/xulstore;1");
-        if (NS_WARN_IF(!mLocalStore)) {
-            return;
-        }
-    }
-
-    nsAutoString id;
-
-    aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::id, id);
-    nsAtomString attrstr(aAttribute);
-
-    nsAutoString valuestr;
-    aElement->GetAttr(kNameSpaceID_None, aAttribute, valuestr);
-
-    nsAutoCString utf8uri;
-    nsresult rv = mDocumentURI->GetSpec(utf8uri);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-    }
-    NS_ConvertUTF8toUTF16 uri(utf8uri);
-
-    bool hasAttr;
-    rv = mLocalStore->HasValue(uri, id, attrstr, &hasAttr);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-    }
-
-    if (hasAttr && valuestr.IsEmpty()) {
-        mLocalStore->RemoveValue(uri, id, attrstr);
-        return;
-    }
-
-    // Persisting attributes to top level windows is handled by nsXULWindow.
-    if (aElement->IsXULElement(nsGkAtoms::window)) {
-        if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
-           return;
-        }
-    }
-
-    mLocalStore->SetValue(uri, id, attrstr, valuestr);
-}
-
-nsresult
-XULDocument::AddElementToDocumentPre(Element* aElement)
-{
-    // Do a bunch of work that's necessary when an element gets added
-    // to the XUL Document.
-
-    // 1. Add the element to the id map, since it seems this can be
-    // called when creating elements from prototypes.
-    nsAtom* id = aElement->GetID();
-    if (id) {
-        // FIXME: Shouldn't BindToTree take care of this?
-        nsAutoScriptBlocker scriptBlocker;
-        AddToIdTable(aElement, id);
-    }
-
-    return NS_OK;
-}
-
-nsresult
 XULDocument::AddElementToDocumentPost(Element* aElement)
 {
     if (aElement == GetRootElement()) {
@@ -600,71 +471,38 @@ XULDocument::AddElementToDocumentPost(Element* aElement)
     } else if (aElement->IsXULElement(nsGkAtoms::linkset)) {
         OnL10nResourceContainerParsed();
     }
-
-    return NS_OK;
 }
 
-nsresult
+void
 XULDocument::AddSubtreeToDocument(nsIContent* aContent)
 {
-    NS_ASSERTION(aContent->GetUncomposedDoc() == this, "Element not in doc!");
+    MOZ_ASSERT(aContent->GetComposedDoc() == this, "Element not in doc!");
+
+    // If the content is not in the document, it must be in a shadow tree.
+    //
+    // The shadow root itself takes care of maintaining the ID tables and such,
+    // and there's no use case for localization links in shadow trees, or at
+    // least they don't work in regular HTML documents either as of today so...
+    if (MOZ_UNLIKELY(!aContent->IsInUncomposedDoc())) {
+        MOZ_ASSERT(aContent->IsInShadowTree());
+        return;
+    }
+
     // From here on we only care about elements.
     Element* aElement = Element::FromNode(aContent);
     if (!aElement) {
-        return NS_OK;
+        return;
     }
-
-    // Do pre-order addition magic
-    nsresult rv = AddElementToDocumentPre(aElement);
-    if (NS_FAILED(rv)) return rv;
 
     // Recurse to children
     for (nsIContent* child = aElement->GetLastChild();
          child;
          child = child->GetPreviousSibling()) {
-
-        rv = AddSubtreeToDocument(child);
-        if (NS_FAILED(rv))
-            return rv;
+        AddSubtreeToDocument(child);
     }
 
     // Do post-order addition magic
-    return AddElementToDocumentPost(aElement);
-}
-
-nsresult
-XULDocument::RemoveSubtreeFromDocument(nsIContent* aContent)
-{
-    // From here on we only care about elements.
-    Element* aElement = Element::FromNode(aContent);
-    if (!aElement) {
-        return NS_OK;
-    }
-
-    // Do a bunch of cleanup to remove an element from the XUL
-    // document.
-    nsresult rv;
-
-    // Remove any children from the document.
-    for (nsIContent* child = aElement->GetLastChild();
-         child;
-         child = child->GetPreviousSibling()) {
-
-        rv = RemoveSubtreeFromDocument(child);
-        if (NS_FAILED(rv))
-            return rv;
-    }
-
-    // Remove the element from the id map, since we added it in
-    // AddElementToDocumentPre().
-    nsAtom* id = aElement->GetID();
-    if (id) {
-        // FIXME: Shouldn't UnbindFromTree take care of this?
-        nsAutoScriptBlocker scriptBlocker;
-        RemoveFromIdTable(aElement, id);
-    }
-
-    return NS_OK;
+    AddElementToDocumentPost(aElement);
 }
 
 //----------------------------------------------------------------------
@@ -776,145 +614,6 @@ XULDocument::PrepareToLoadPrototype(nsIURI* aURI, const char* aCommand,
     return NS_OK;
 }
 
-
-nsresult
-XULDocument::ApplyPersistentAttributes()
-{
-    // For non-chrome documents, persistance is simply broken
-    if (!nsContentUtils::IsSystemPrincipal(NodePrincipal()))
-        return NS_ERROR_NOT_AVAILABLE;
-
-    // Add all of the 'persisted' attributes into the content
-    // model.
-    if (!mLocalStore) {
-        mLocalStore = do_GetService("@mozilla.org/xul/xulstore;1");
-        if (NS_WARN_IF(!mLocalStore)) {
-            return NS_ERROR_NOT_INITIALIZED;
-        }
-    }
-
-    mApplyingPersistedAttrs = true;
-    ApplyPersistentAttributesInternal();
-    mApplyingPersistedAttrs = false;
-
-    return NS_OK;
-}
-
-
-nsresult
-XULDocument::ApplyPersistentAttributesInternal()
-{
-    nsCOMArray<Element> elements;
-
-    nsAutoCString utf8uri;
-    nsresult rv = mDocumentURI->GetSpec(utf8uri);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-    }
-    NS_ConvertUTF8toUTF16 uri(utf8uri);
-
-    // Get a list of element IDs for which persisted values are available
-    nsCOMPtr<nsIStringEnumerator> ids;
-    rv = mLocalStore->GetIDsEnumerator(uri, getter_AddRefs(ids));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-    }
-
-    while (1) {
-        bool hasmore = false;
-        ids->HasMore(&hasmore);
-        if (!hasmore) {
-            break;
-        }
-
-        nsAutoString id;
-        ids->GetNext(id);
-
-        nsIdentifierMapEntry* entry = mIdentifierMap.GetEntry(id);
-        if (!entry) {
-            continue;
-        }
-
-        // We want to hold strong refs to the elements while applying
-        // persistent attributes, just in case.
-        elements.Clear();
-        elements.SetCapacity(entry->GetIdElements().Length());
-        for (Element* element : entry->GetIdElements()) {
-            elements.AppendObject(element);
-        }
-        if (elements.IsEmpty()) {
-            continue;
-        }
-
-        rv = ApplyPersistentAttributesToElements(id, elements);
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-            return rv;
-        }
-    }
-
-    return NS_OK;
-}
-
-nsresult
-XULDocument::ApplyPersistentAttributesToElements(const nsAString &aID,
-                                                 nsCOMArray<Element>& aElements)
-{
-    nsAutoCString utf8uri;
-    nsresult rv = mDocumentURI->GetSpec(utf8uri);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-    }
-    NS_ConvertUTF8toUTF16 uri(utf8uri);
-
-    // Get a list of attributes for which persisted values are available
-    nsCOMPtr<nsIStringEnumerator> attrs;
-    rv = mLocalStore->GetAttributeEnumerator(uri, aID, getter_AddRefs(attrs));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-    }
-
-    while (1) {
-        bool hasmore = PR_FALSE;
-        attrs->HasMore(&hasmore);
-        if (!hasmore) {
-            break;
-        }
-
-        nsAutoString attrstr;
-        attrs->GetNext(attrstr);
-
-        nsAutoString value;
-        rv = mLocalStore->GetValue(uri, aID, attrstr, value);
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-            return rv;
-        }
-
-        RefPtr<nsAtom> attr = NS_Atomize(attrstr);
-        if (NS_WARN_IF(!attr)) {
-            return NS_ERROR_OUT_OF_MEMORY;
-        }
-
-        uint32_t cnt = aElements.Count();
-        for (int32_t i = int32_t(cnt) - 1; i >= 0; --i) {
-            RefPtr<Element> element = aElements.SafeObjectAt(i);
-            if (!element) {
-                 continue;
-            }
-
-            // Applying persistent attributes to top level windows is handled
-            // by nsXULWindow.
-            if (element->IsXULElement(nsGkAtoms::window)) {
-                if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
-                    continue;
-                }
-            }
-
-            Unused << element->SetAttr(kNameSpaceID_None, attr, value, true);
-        }
-    }
-
-    return NS_OK;
-}
 
 void
 XULDocument::TraceProtos(JSTracer* aTrc)
@@ -1240,9 +939,6 @@ XULDocument::ResumeWalk()
                 rv = element->AppendChildTo(child, false);
                 if (NS_FAILED(rv)) return rv;
 
-                // do pre-order document-level hookup.
-                AddElementToDocumentPre(child);
-
                 // If it has children, push the element onto the context
                 // stack and begin to process them.
                 if (protoele->mChildren.Length() > 0) {
@@ -1341,7 +1037,8 @@ XULDocument::ResumeWalk()
     // If we get here, there is nothing left for us to walk. The content
     // model is built and ready for layout.
 
-    ApplyPersistentAttributes();
+    mXULPersist = new XULPersist(this);
+    mXULPersist->Init();
 
     mStillWalking = false;
     if (mPendingSheets == 0) {

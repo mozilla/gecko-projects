@@ -56,7 +56,6 @@
 #include "mozilla/dom/XULPopupElementBinding.h"
 #include "mozilla/dom/XULTextElementBinding.h"
 #include "mozilla/dom/Promise.h"
-#include "mozilla/dom/ResolveSystemBinding.h"
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerScope.h"
@@ -685,16 +684,48 @@ DefineConstants(JSContext* cx, JS::Handle<JSObject*> obj,
 }
 
 static inline bool
-Define(JSContext* cx, JS::Handle<JSObject*> obj, const JSFunctionSpec* spec) {
-  return JS_DefineFunctions(cx, obj, spec);
+Define(JSContext* cx, JS::Handle<JSObject*> obj, const JSFunctionSpec* spec)
+{
+  bool ok = JS_DefineFunctions(cx, obj, spec);
+  if (ok) {
+    return true;
+  }
+
+  if (!strcmp(js::GetObjectClass(obj)->name, "DocumentPrototype")) {
+    MOZ_CRASH("Bug 1405521/1488480: JS_DefineFunctions failed for Document.prototype");
+  }
+
+  return false;
 }
 static inline bool
-Define(JSContext* cx, JS::Handle<JSObject*> obj, const JSPropertySpec* spec) {
-  return JS_DefineProperties(cx, obj, spec);
+Define(JSContext* cx, JS::Handle<JSObject*> obj, const JSPropertySpec* spec)
+{
+  bool ok = JS_DefineProperties(cx, obj, spec);
+  if (ok) {
+    return true;
+  }
+
+  if (!strcmp(js::GetObjectClass(obj)->name, "DocumentPrototype")) {
+    MOZ_CRASH("Bug 1405521/1488480: JS_DefineProperties failed for Document.prototype");
+  }
+
+  return false;
 }
+
 static inline bool
-Define(JSContext* cx, JS::Handle<JSObject*> obj, const ConstantSpec* spec) {
-  return DefineConstants(cx, obj, spec);
+Define(JSContext* cx, JS::Handle<JSObject*> obj, const ConstantSpec* spec)
+{
+  bool ok = DefineConstants(cx, obj, spec);
+  if (ok) {
+    return true;
+  }
+
+
+  if (!strcmp(js::GetObjectClass(obj)->name, "DocumentPrototype")) {
+    MOZ_CRASH("Bug 1405521/1488480: DefineConstants failed for Document.prototype");
+  }
+
+  return false;
 }
 
 template<typename T>
@@ -930,6 +961,13 @@ CreateInterfacePrototypeObject(JSContext* cx, JS::Handle<JSObject*> global,
       // properties go on the global itself.
       (!isGlobal &&
        !DefineProperties(cx, ourProto, properties, chromeOnlyProperties))) {
+    if (!strcmp(protoClass->name, "DocumentPrototype")) {
+      if (!ourProto) {
+        MOZ_CRASH("Bug 1405521/1488480: JS_NewObjectWithUniqueType failed for Document.prototype");
+      } else {
+        MOZ_CRASH("Bug 1405521/1488480: DefineProperties failed for Document.prototype");
+      }
+    }
     return nullptr;
   }
 
@@ -937,12 +975,18 @@ CreateInterfacePrototypeObject(JSContext* cx, JS::Handle<JSObject*> global,
     JS::Rooted<JSObject*> unscopableObj(cx,
       JS_NewObjectWithGivenProto(cx, nullptr, nullptr));
     if (!unscopableObj) {
+      if (!strcmp(protoClass->name, "DocumentPrototype")) {
+        MOZ_CRASH("Bug 1405521/1488480: Unscopable object creation failed for Document.prototype");
+      }
       return nullptr;
     }
 
     for (; *unscopableNames; ++unscopableNames) {
       if (!JS_DefineProperty(cx, unscopableObj, *unscopableNames,
                              JS::TrueHandleValue, JSPROP_ENUMERATE)) {
+        if (!strcmp(protoClass->name, "DocumentPrototype")) {
+          MOZ_CRASH("Bug 1405521/1488480: Defining property on unscopable object failed for Document.prototype");
+        }
         return nullptr;
       }
     }
@@ -952,6 +996,9 @@ CreateInterfacePrototypeObject(JSContext* cx, JS::Handle<JSObject*> global,
     // Readonly and non-enumerable to match Array.prototype.
     if (!JS_DefinePropertyById(cx, ourProto, unscopableId, unscopableObj,
                                JSPROP_READONLY)) {
+      if (!strcmp(protoClass->name, "DocumentPrototype")) {
+        MOZ_CRASH("Bug 1405521/1488480: Defining @@unscopables failed for Document.prototype");
+      }
       return nullptr;
     }
   }
@@ -960,6 +1007,9 @@ CreateInterfacePrototypeObject(JSContext* cx, JS::Handle<JSObject*> global,
     JS::Rooted<JSString*> toStringTagStr(cx,
                                          JS_NewStringCopyZ(cx, toStringTag));
     if (!toStringTagStr) {
+      if (!strcmp(protoClass->name, "DocumentPrototype")) {
+        MOZ_CRASH("Bug 1405521/1488480: Copying string tag failed for Document.prototype");
+      }
       return nullptr;
     }
 
@@ -967,6 +1017,9 @@ CreateInterfacePrototypeObject(JSContext* cx, JS::Handle<JSObject*> global,
       SYMBOL_TO_JSID(JS::GetWellKnownSymbol(cx, JS::SymbolCode::toStringTag)));
     if (!JS_DefinePropertyById(cx, ourProto, toStringTagId, toStringTagStr,
                                JSPROP_READONLY)) {
+      if (!strcmp(protoClass->name, "DocumentPrototype")) {
+        MOZ_CRASH("Bug 1405521/1488480: Defining @@toStringTag failed for Document.prototype");
+      }
       return nullptr;
     }
   }
@@ -1071,6 +1124,9 @@ CreateInterfaceObjects(JSContext* cx, JS::Handle<JSObject*> global,
                                      isChrome ? chromeOnlyProperties : nullptr,
                                      unscopableNames, toStringTag, isGlobal);
     if (!proto) {
+      if (name && !strcmp(name, "Document")) {
+        MOZ_CRASH("Bug 1405521/1488480: CreateInterfacePrototypeObject failed for Document.prototype");
+      }
       return;
     }
 
@@ -1089,6 +1145,9 @@ CreateInterfaceObjects(JSContext* cx, JS::Handle<JSObject*> global,
                                       isChrome,
                                       defineOnGlobal);
     if (!interface) {
+      if (name && !strcmp(name, "Document")) {
+        MOZ_CRASH("Bug 1405521/1488480: CreateInterfaceObject failed for Document");
+      }
       if (protoCache) {
         // If we fail we need to make sure to clear the value of protoCache we
         // set above.
@@ -3412,31 +3471,6 @@ CreateGlobalOptionsWithXPConnect::PostCreateGlobal(JSContext* aCx,
   return true;
 }
 
-static bool sRegisteredDOMNames = false;
-
-static void
-RegisterDOMNames()
-{
-  if (sRegisteredDOMNames) {
-    return;
-  }
-
-  // Register new DOM bindings
-  WebIDLGlobalNameHash::Init();
-
-  sRegisteredDOMNames = true;
-}
-
-/* static */
-bool
-CreateGlobalOptions<nsGlobalWindowInner>::PostCreateGlobal(JSContext* aCx,
-                                                           JS::Handle<JSObject*> aGlobal)
-{
-  RegisterDOMNames();
-
-  return CreateGlobalOptionsWithXPConnect::PostCreateGlobal(aCx, aGlobal);
-}
-
 #ifdef DEBUG
 void
 AssertReturnTypeMatchesJitinfo(const JSJitInfo* aJitInfo,
@@ -3535,29 +3569,6 @@ UnwrapWindowProxyImpl(JSContext* cx,
   nsCOMPtr<nsPIDOMWindowOuter> outer = inner->GetOuterWindow();
   outer.forget(ppArg);
   return NS_OK;
-}
-
-bool
-SystemGlobalResolve(JSContext* cx, JS::Handle<JSObject*> obj,
-                    JS::Handle<jsid> id, bool* resolvedp)
-{
-  if (!ResolveGlobal(cx, obj, id, resolvedp)) {
-    return false;
-  }
-
-  if (*resolvedp) {
-    return true;
-  }
-
-  return ResolveSystemBinding(cx, obj, id, resolvedp);
-}
-
-bool
-SystemGlobalEnumerate(JSContext* cx, JS::Handle<JSObject*> obj)
-{
-  bool ignored = false;
-  return JS_EnumerateStandardClasses(cx, obj) &&
-         ResolveSystemBinding(cx, obj, JSID_VOIDHANDLE, &ignored);
 }
 
 template<decltype(JS::NewMapObject) Method>

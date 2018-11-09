@@ -458,7 +458,10 @@ TEST(GeckoProfiler, Markers)
   PROFILER_ADD_MARKER("M3");
   profiler_add_marker(
     "M4",
-    MakeUnique<TracingMarkerPayload>("C", TRACING_EVENT,
+    MakeUnique<TracingMarkerPayload>("C",
+                                     TRACING_EVENT,
+                                     mozilla::Nothing(),
+                                     mozilla::Nothing(),
                                      profiler_get_backtrace()));
 
   for (int i = 0; i < 10; i++) {
@@ -748,9 +751,9 @@ TEST(GeckoProfiler, ProfilingStack)
     ASSERT_TRUE(profiler_get_backtrace());
   }
 
-  AutoProfilerLabel label1("A", nullptr, 888,
+  AutoProfilerLabel label1("A", nullptr,
                            js::ProfilingStackFrame::Category::DOM);
-  AutoProfilerLabel label2("A", dynamic.get(), 888,
+  AutoProfilerLabel label2("A", dynamic.get(),
                            js::ProfilingStackFrame::Category::NETWORK);
   ASSERT_TRUE(profiler_get_backtrace());
 

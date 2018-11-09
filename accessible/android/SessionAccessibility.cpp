@@ -5,6 +5,7 @@
 
 #include "SessionAccessibility.h"
 #include "AndroidUiThread.h"
+#include "DocAccessibleParent.h"
 #include "nsThreadUtils.h"
 #include "AccessibilityEvent.h"
 #include "HyperTextAccessible.h"
@@ -12,6 +13,10 @@
 #include "RootAccessibleWrap.h"
 #include "nsAccessibilityService.h"
 #include "nsViewManager.h"
+
+#include "mozilla/dom/TabParent.h"
+#include "mozilla/a11y/DocAccessibleParent.h"
+#include "mozilla/a11y/DocManager.h"
 
 #ifdef DEBUG
 #include <android/log.h>
@@ -115,12 +120,15 @@ SessionAccessibility::SetText(int32_t aID, jni::String::Param aText)
 SessionAccessibility*
 SessionAccessibility::GetInstanceFor(ProxyAccessible* aAccessible)
 {
-  Accessible* outerDoc = aAccessible->OuterDocOfRemoteBrowser();
-  if (!outerDoc) {
+  auto tab = static_cast<dom::TabParent*>(aAccessible->Document()->Manager());
+  dom::Element* frame = tab->GetOwnerElement();
+  MOZ_ASSERT(frame);
+  if (!frame) {
     return nullptr;
   }
 
-  return GetInstanceFor(outerDoc);
+  Accessible* chromeDoc = GetExistingDocAccessible(frame->OwnerDoc());
+  return chromeDoc ? GetInstanceFor(chromeDoc) : nullptr;
 }
 
 SessionAccessibility*
@@ -151,7 +159,7 @@ SessionAccessibility::SendAccessibilityFocusedEvent(AccessibleWrap* aAccessible)
 {
   mSessionAccessibility->SendEvent(
     java::sdk::AccessibilityEvent::TYPE_VIEW_ACCESSIBILITY_FOCUSED,
-    aAccessible->VirtualViewID(), nullptr, aAccessible->ToBundle());
+    aAccessible->VirtualViewID(), aAccessible->AndroidClass(), nullptr);
   aAccessible->ScrollTo(nsIAccessibleScrollType::SCROLL_TYPE_ANYWHERE);
 }
 
@@ -160,7 +168,7 @@ SessionAccessibility::SendHoverEnterEvent(AccessibleWrap* aAccessible)
 {
   mSessionAccessibility->SendEvent(
     java::sdk::AccessibilityEvent::TYPE_VIEW_HOVER_ENTER,
-    aAccessible->VirtualViewID(), nullptr, aAccessible->ToBundle());
+    aAccessible->VirtualViewID(), aAccessible->AndroidClass(), nullptr);
 }
 
 void
@@ -174,7 +182,7 @@ SessionAccessibility::SendFocusEvent(AccessibleWrap* aAccessible)
 
   mSessionAccessibility->SendEvent(
     java::sdk::AccessibilityEvent::TYPE_VIEW_FOCUSED,
-    aAccessible->VirtualViewID(), nullptr, aAccessible->ToBundle());
+    aAccessible->VirtualViewID(), aAccessible->AndroidClass(), nullptr);
 }
 
 void
@@ -200,7 +208,7 @@ SessionAccessibility::SendScrollingEvent(AccessibleWrap* aAccessible,
 
   mSessionAccessibility->SendEvent(
     java::sdk::AccessibilityEvent::TYPE_VIEW_SCROLLED, virtualViewId,
-    eventInfo, aAccessible->ToBundle());
+    aAccessible->AndroidClass(), eventInfo);
 
   SendWindowContentChangedEvent(aAccessible);
 }
@@ -210,7 +218,7 @@ SessionAccessibility::SendWindowContentChangedEvent(AccessibleWrap* aAccessible)
 {
   mSessionAccessibility->SendEvent(
     java::sdk::AccessibilityEvent::TYPE_WINDOW_CONTENT_CHANGED,
-    aAccessible->VirtualViewID(), nullptr, aAccessible->ToBundle());
+    aAccessible->VirtualViewID(), aAccessible->AndroidClass(), nullptr);
 }
 
 void
@@ -224,7 +232,7 @@ SessionAccessibility::SendWindowStateChangedEvent(AccessibleWrap* aAccessible)
 
   mSessionAccessibility->SendEvent(
     java::sdk::AccessibilityEvent::TYPE_WINDOW_STATE_CHANGED,
-    aAccessible->VirtualViewID(), nullptr, aAccessible->ToBundle());
+    aAccessible->VirtualViewID(), aAccessible->AndroidClass(), nullptr);
 }
 
 void
@@ -245,7 +253,7 @@ SessionAccessibility::SendTextSelectionChangedEvent(AccessibleWrap* aAccessible,
 
   mSessionAccessibility->SendEvent(
     java::sdk::AccessibilityEvent::TYPE_VIEW_TEXT_SELECTION_CHANGED,
-    aAccessible->VirtualViewID(), eventInfo, aAccessible->ToBundle());
+    aAccessible->VirtualViewID(), aAccessible->AndroidClass(), eventInfo);
 }
 
 void
@@ -279,7 +287,7 @@ SessionAccessibility::SendTextChangedEvent(AccessibleWrap* aAccessible,
 
   mSessionAccessibility->SendEvent(
     java::sdk::AccessibilityEvent::TYPE_VIEW_TEXT_CHANGED,
-    aAccessible->VirtualViewID(), eventInfo, aAccessible->ToBundle());
+    aAccessible->VirtualViewID(), aAccessible->AndroidClass(), eventInfo);
 }
 
 void
@@ -299,15 +307,20 @@ SessionAccessibility::SendTextTraversedEvent(AccessibleWrap* aAccessible,
   mSessionAccessibility->SendEvent(
     java::sdk::AccessibilityEvent::
       TYPE_VIEW_TEXT_TRAVERSED_AT_MOVEMENT_GRANULARITY,
-    aAccessible->VirtualViewID(), eventInfo, aAccessible->ToBundle());
+    aAccessible->VirtualViewID(), aAccessible->AndroidClass(), eventInfo);
 }
 
 void
-SessionAccessibility::SendClickedEvent(AccessibleWrap* aAccessible)
+SessionAccessibility::SendClickedEvent(AccessibleWrap* aAccessible, bool aChecked)
 {
+  GECKOBUNDLE_START(eventInfo);
+  // Boolean::FALSE/TRUE gets clobbered by a macro, so ugh.
+  GECKOBUNDLE_PUT(eventInfo, "checked", java::sdk::Integer::ValueOf(aChecked ? 1 : 0));
+  GECKOBUNDLE_FINISH(eventInfo);
+
   mSessionAccessibility->SendEvent(
     java::sdk::AccessibilityEvent::TYPE_VIEW_CLICKED,
-    aAccessible->VirtualViewID(), nullptr, aAccessible->ToBundle());
+    aAccessible->VirtualViewID(), aAccessible->AndroidClass(), eventInfo);
 }
 
 void
@@ -315,5 +328,23 @@ SessionAccessibility::SendSelectedEvent(AccessibleWrap* aAccessible)
 {
   mSessionAccessibility->SendEvent(
     java::sdk::AccessibilityEvent::TYPE_VIEW_SELECTED,
-    aAccessible->VirtualViewID(), nullptr, aAccessible->ToBundle());
+    aAccessible->VirtualViewID(), aAccessible->AndroidClass(), nullptr);
+}
+
+void
+SessionAccessibility::ReplaceViewportCache(const nsTArray<AccessibleWrap*>& aAccessibles,
+                                          const nsTArray<BatchData>& aData)
+{
+  auto infos = jni::ObjectArray::New<java::GeckoBundle>(aAccessibles.Length());
+  for (size_t i = 0; i < aAccessibles.Length(); i++) {
+    AccessibleWrap* acc = aAccessibles.ElementAt(i);
+    if (aData.Length() == aAccessibles.Length()) {
+      const BatchData& data = aData.ElementAt(i);
+      infos->SetElement(i, acc->ToSmallBundle(data.State(), data.Bounds()));
+    } else {
+      infos->SetElement(i, acc->ToSmallBundle());
+    }
+  }
+
+  mSessionAccessibility->ReplaceViewportCache(infos);
 }

@@ -713,7 +713,7 @@ BrowserGlue.prototype = {
   observe: async function BG_observe(subject, topic, data) {
     switch (topic) {
       case "notifications-open-settings":
-        this._openPreferences("privacy", { origin: "notifOpenSettings" });
+        this._openPreferences("privacy-permissions", { origin: "notifOpenSettings" });
         break;
       case "final-ui-startup":
         this._beforeUIStartup();
@@ -1027,11 +1027,17 @@ BrowserGlue.prototype = {
       name: gBrowserBundle.GetStringFromName("lightTheme.name"),
       description: gBrowserBundle.GetStringFromName("lightTheme.description"),
       iconURL: "resource:///chrome/browser/content/browser/defaultthemes/light.icon.svg",
-      textcolor: "black",
-      accentcolor: "white",
+      textcolor: "rgb(24, 25, 26)",
+      icon_color: "rgb(24, 25, 26, 0.7)",
+      accentcolor: "#E3E4E6",
       popup: "#fff",
       popup_text: "#0c0c0d",
       popup_border: "#ccc",
+      tab_line: "#0a84ff",
+      toolbarColor: "#f5f6f7",
+      toolbar_bottom_separator: "#ccc",
+      toolbar_field: "#fff",
+      toolbar_field_border: "#ccc",
       author: vendorShortName,
     });
     LightweightThemeManager.addBuiltInTheme({
@@ -1039,13 +1045,19 @@ BrowserGlue.prototype = {
       name: gBrowserBundle.GetStringFromName("darkTheme.name"),
       description: gBrowserBundle.GetStringFromName("darkTheme.description"),
       iconURL: "resource:///chrome/browser/content/browser/defaultthemes/dark.icon.svg",
-      textcolor: "white",
-      accentcolor: "black",
+      textcolor: "rgb(249, 249, 250)",
+      icon_color: "rgb(249, 249, 250, 0.7)",
+      accentcolor: "hsl(240, 5%, 5%)",
       popup: "#4a4a4f",
       popup_text: "rgb(249, 249, 250)",
       popup_border: "#27272b",
-      toolbar_field_text: "rgb(249, 249, 250)",
+      tab_line: "#0a84ff",
+      toolbarColor: "hsl(240, 1%, 20%)",
+      toolbar_bottom_separator: "hsl(240, 5%, 5%)",
+      toolbar_field: "rgb(71, 71, 73)",
       toolbar_field_border: "rgba(249, 249, 250, 0.2)",
+      toolbar_field_separator: "#5F6670",
+      toolbar_field_text: "rgb(249, 249, 250)",
       ntp_background: "#2A2A2E",
       ntp_text: "rgb(249, 249, 250)",
       sidebar: "#38383D",
@@ -1363,12 +1375,6 @@ BrowserGlue.prototype = {
 
     let cookieBehavior = Services.prefs.getIntPref("network.cookie.cookieBehavior");
     Services.telemetry.getHistogramById("COOKIE_BEHAVIOR").add(cookieBehavior);
-
-    let fastBlockEnabled = Services.prefs.getBoolPref("browser.fastblock.enabled");
-    Services.telemetry.scalarSet("contentblocking.fastblock_enabled", fastBlockEnabled);
-
-    let contentBlockingEnabled = Services.prefs.getBoolPref("browser.contentblocking.enabled");
-    Services.telemetry.scalarSet("contentblocking.enabled", contentBlockingEnabled);
 
     let exceptions = 0;
     for (let permission of Services.perms.enumerator) {
@@ -1724,11 +1730,9 @@ BrowserGlue.prototype = {
 
     // There are several cases where we won't show a dialog here:
     // 1. There is only 1 tab open in 1 window
-    // 2. The session will be restored at startup, indicated by
-    //    browser.startup.page == 3 or browser.sessionstore.resume_session_once == true
-    // 3. browser.warnOnQuit == false
-    // 4. The browser is currently in Private Browsing mode
-    // 5. The browser will be restarted.
+    // 2. browser.warnOnQuit or browser.warnOnClose == false
+    // 3. The browser is currently in Private Browsing mode
+    // 4. The browser will be restarted.
     //
     // Otherwise, we will show the "closing multiple tabs" dialog.
     //
@@ -1760,12 +1764,8 @@ BrowserGlue.prototype = {
       aQuitType = "quit";
 
     // browser.warnOnQuit is a hidden global boolean to override all quit prompts
-    // browser.showQuitWarning specifically covers quitting
     // browser.tabs.warnOnClose is the global "warn when closing multiple tabs" pref
-
-    var sessionWillBeRestored = Services.prefs.getIntPref("browser.startup.page") == 3 ||
-                                Services.prefs.getBoolPref("browser.sessionstore.resume_session_once");
-    if (sessionWillBeRestored || !Services.prefs.getBoolPref("browser.warnOnQuit") ||
+    if (!Services.prefs.getBoolPref("browser.warnOnQuit") ||
         !Services.prefs.getBoolPref("browser.tabs.warnOnClose"))
       return;
 
@@ -2187,7 +2187,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 76;
+    const UI_VERSION = 77;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
@@ -2369,7 +2369,7 @@ BrowserGlue.prototype = {
         }, SEARCH_SERVICE_TOPIC);
       });
       searchInitializedPromise.then(() => {
-        let currentEngine = Services.search.currentEngine.wrappedJSObject;
+        let currentEngine = Services.search.defaultEngine.wrappedJSObject;
         // Only reset the current engine if it wasn't set by a WebExtension
         // and it is not one of the default engines.
         // If the original default is not a default, the user has a weird
@@ -2545,6 +2545,14 @@ BrowserGlue.prototype = {
         for (let item of onboardingPrefsArray) {
           Services.prefs.clearUserPref("browser.onboarding." + item);
         }
+      }
+    }
+
+    if (currentUIVersion < 77) {
+      // Remove currentset from all the toolbars
+      let toolbars = ["nav-bar", "PersonalToolbar", "TabsToolbar", "toolbar-menubar"];
+      for (let toolbarId of toolbars) {
+        xulStore.removeValue(BROWSER_DOCURL, toolbarId, "currentset");
       }
     }
 

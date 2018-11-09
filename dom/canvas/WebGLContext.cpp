@@ -118,7 +118,7 @@ WebGLContextOptions::operator==(const WebGLContextOptions& r) const
 }
 
 WebGLContext::WebGLContext()
-    : WebGLContextUnchecked(nullptr)
+    : gl(mGL_OnlyClearInDestroyResourcesAndContext) // const reference
     , mMaxPerfWarnings(gfxPrefs::WebGLMaxPerfWarnings())
     , mNumPerfWarnings(0)
     , mMaxAcceptableFBStatusInvals(gfxPrefs::WebGLMaxAcceptableFBStatusInvals())
@@ -2493,7 +2493,10 @@ WebGLContext::ValidateIsObject(const WebGLDeletableObject* const object) const
     if (!object->IsCompatibleWithContext(this))
         return false;
 
-    return !object->IsDeleted();
+    if (object->IsDeleted())
+        return false;
+
+    return true;
 }
 
 bool

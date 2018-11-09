@@ -2,27 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var FastBlock = {
-  reportBreakageLabel: "fastblock",
-  telemetryIdentifier: "fb",
-  PREF_ENABLED: "browser.fastblock.enabled",
-  PREF_UI_ENABLED: "browser.contentblocking.fastblock.control-center.ui.enabled",
-
-  get categoryItem() {
-    delete this.categoryItem;
-    return this.categoryItem = document.getElementById("identity-popup-content-blocking-category-fastblock");
-  },
-
-  init() {
-    XPCOMUtils.defineLazyPreferenceGetter(this, "enabled", this.PREF_ENABLED, false);
-    XPCOMUtils.defineLazyPreferenceGetter(this, "visible", this.PREF_UI_ENABLED, false);
-  },
-
-  isBlockerActivated(state) {
-    return state & Ci.nsIWebProgressListener.STATE_BLOCKED_SLOW_TRACKING_CONTENT;
-  },
-};
-
 var TrackingProtection = {
   reportBreakageLabel: "trackingprotection",
   telemetryIdentifier: "tp",
@@ -36,32 +15,6 @@ var TrackingProtection = {
     delete this.categoryItem;
     return this.categoryItem =
       document.getElementById("identity-popup-content-blocking-category-tracking-protection");
-  },
-
-  strings: {
-    get enableTooltip() {
-      delete this.enableTooltip;
-      return this.enableTooltip =
-        gNavigatorBundle.getString("trackingProtection.toggle.enable.tooltip");
-    },
-
-    get disableTooltip() {
-      delete this.disableTooltip;
-      return this.disableTooltip =
-        gNavigatorBundle.getString("trackingProtection.toggle.disable.tooltip");
-    },
-
-    get disableTooltipPB() {
-      delete this.disableTooltipPB;
-      return this.disableTooltipPB =
-        gNavigatorBundle.getString("trackingProtection.toggle.disable.pbmode.tooltip");
-    },
-
-    get enableTooltipPB() {
-      delete this.enableTooltipPB;
-      return this.enableTooltipPB =
-        gNavigatorBundle.getString("trackingProtection.toggle.enable.pbmode.tooltip");
-    },
   },
 
   init() {
@@ -88,36 +41,11 @@ var TrackingProtection = {
             PrivateBrowsingUtils.isWindowPrivate(window));
   },
 
-  onGlobalToggleCommand() {
-    if (PrivateBrowsingUtils.isWindowPrivate(window)) {
-      Services.prefs.setBoolPref(this.PREF_ENABLED_IN_PRIVATE_WINDOWS, !this.enabledInPrivateWindows);
-    } else {
-      Services.prefs.setBoolPref(this.PREF_ENABLED_GLOBALLY, !this.enabledGlobally);
-    }
-  },
-
   updateEnabled() {
     this.enabledGlobally =
       Services.prefs.getBoolPref(this.PREF_ENABLED_GLOBALLY);
     this.enabledInPrivateWindows =
       Services.prefs.getBoolPref(this.PREF_ENABLED_IN_PRIVATE_WINDOWS);
-
-    if (!ContentBlocking.contentBlockingUIEnabled) {
-      ContentBlocking.updateEnabled();
-      let appMenuButton = ContentBlocking.appMenuButton;
-
-      if (PrivateBrowsingUtils.isWindowPrivate(window)) {
-        appMenuButton.setAttribute("tooltiptext", this.enabledInPrivateWindows ?
-          this.strings.disableTooltipPB : this.strings.enableTooltipPB);
-        appMenuButton.setAttribute("enabled", this.enabledInPrivateWindows);
-        appMenuButton.setAttribute("aria-pressed", this.enabledInPrivateWindows);
-      } else {
-        appMenuButton.setAttribute("tooltiptext", this.enabledGlobally ?
-          this.strings.disableTooltip : this.strings.enableTooltip);
-        appMenuButton.setAttribute("enabled", this.enabledGlobally);
-        appMenuButton.setAttribute("aria-pressed", this.enabledGlobally);
-      }
-    }
   },
 
   isBlockerActivated(state) {
@@ -201,21 +129,17 @@ var ThirdPartyCookies = {
 var ContentBlocking = {
   // If the user ignores the doorhanger, we stop showing it after some time.
   MAX_INTROS: 20,
-  PREF_ENABLED: "browser.contentblocking.enabled",
-  PREF_UI_ENABLED: "browser.contentblocking.ui.enabled",
   PREF_ANIMATIONS_ENABLED: "toolkit.cosmeticAnimations.enabled",
   PREF_REPORT_BREAKAGE_ENABLED: "browser.contentblocking.reportBreakage.enabled",
   PREF_REPORT_BREAKAGE_URL: "browser.contentblocking.reportBreakage.url",
   PREF_INTRO_COUNT_CB: "browser.contentblocking.introCount",
-  PREF_INTRO_COUNT_TP: "privacy.trackingprotection.introCount",
-  PREF_GLOBAL_TOGGLE: "browser.contentblocking.global-toggle.enabled",
   content: null,
   icon: null,
   activeTooltipText: null,
   disabledTooltipText: null,
 
   get prefIntroCount() {
-    return this.contentBlockingUIEnabled ? this.PREF_INTRO_COUNT_CB : this.PREF_INTRO_COUNT_TP;
+    return this.PREF_INTRO_COUNT_CB;
   },
 
   get appMenuLabel() {
@@ -223,29 +147,7 @@ var ContentBlocking = {
     return this.appMenuLabel = document.getElementById("appMenu-tp-label");
   },
 
-  get appMenuButton() {
-    delete this.appMenuButton;
-    return this.appMenuButton = document.getElementById("appMenu-tp-toggle");
-  },
-
-  get appMenuVerticalSeparator() {
-    delete this.appMenuVerticalSeparator;
-    return this.appMenuVerticalSeparator = document.getElementById("appMenu-tp-vertical-separator");
-  },
-
   strings: {
-    get enableTooltip() {
-      delete this.enableTooltip;
-      return this.enableTooltip =
-        gNavigatorBundle.getString("contentBlocking.toggle.enable.tooltip");
-    },
-
-    get disableTooltip() {
-      delete this.disableTooltip;
-      return this.disableTooltip =
-        gNavigatorBundle.getString("contentBlocking.toggle.disable.tooltip");
-    },
-
     get appMenuTitle() {
       delete this.appMenuTitle;
       return this.appMenuTitle =
@@ -267,7 +169,7 @@ var ContentBlocking = {
   //
   // It may also contain an init() and uninit() function, which will be called
   // on ContentBlocking.init() and ContentBlocking.uninit().
-  blockers: [FastBlock, TrackingProtection, ThirdPartyCookies],
+  blockers: [TrackingProtection, ThirdPartyCookies],
 
   get _baseURIForChannelClassifier() {
     // Convert document URI into the format used by
@@ -298,20 +200,6 @@ var ContentBlocking = {
     let baseURL = Services.urlFormatter.formatURLPref("app.support.baseURL");
     this.reportBreakageLearnMore.href = baseURL + "blocking-breakage";
 
-    this.updateGlobalToggleVisibility = () => {
-      if (Services.prefs.getBoolPref(this.PREF_GLOBAL_TOGGLE, true)) {
-        this.appMenuButton.removeAttribute("hidden");
-        this.appMenuVerticalSeparator.removeAttribute("hidden");
-      } else {
-        this.appMenuButton.setAttribute("hidden", "true");
-        this.appMenuVerticalSeparator.setAttribute("hidden", "true");
-      }
-    };
-
-    this.updateGlobalToggleVisibility();
-
-    Services.prefs.addObserver(this.PREF_GLOBAL_TOGGLE, this.updateGlobalToggleVisibility);
-
     this.updateAnimationsEnabled = () => {
       this.iconBox.toggleAttribute("animationsenabled",
         Services.prefs.getBoolPref(this.PREF_ANIMATIONS_ENABLED, false));
@@ -327,15 +215,11 @@ var ContentBlocking = {
 
     Services.prefs.addObserver(this.PREF_ANIMATIONS_ENABLED, this.updateAnimationsEnabled);
 
-    XPCOMUtils.defineLazyPreferenceGetter(this, "contentBlockingEnabled", this.PREF_ENABLED, false,
-      this.updateEnabled.bind(this));
     XPCOMUtils.defineLazyPreferenceGetter(this, "reportBreakageEnabled",
       this.PREF_REPORT_BREAKAGE_ENABLED, false);
-    XPCOMUtils.defineLazyPreferenceGetter(this, "contentBlockingUIEnabled", this.PREF_UI_ENABLED, false,
-      this.updateUIEnabled.bind(this));
 
-    this.updateEnabled();
-    this.updateUIEnabled();
+    this.appMenuLabel.setAttribute("label", this.strings.appMenuTitle);
+    this.appMenuLabel.setAttribute("tooltiptext", this.strings.appMenuTooltip);
 
     this.activeTooltipText =
       gNavigatorBundle.getString("trackingProtection.icon.activeTooltip");
@@ -351,46 +235,6 @@ var ContentBlocking = {
     }
 
     Services.prefs.removeObserver(this.PREF_ANIMATIONS_ENABLED, this.updateAnimationsEnabled);
-    Services.prefs.removeObserver(this.PREF_GLOBAL_TOGGLE, this.updateGlobalToggleVisibility);
-  },
-
-  get enabled() {
-    return this.contentBlockingUIEnabled ? this.contentBlockingEnabled : TrackingProtection.enabled;
-  },
-
-  updateEnabled() {
-    this.content.toggleAttribute("enabled", this.enabled);
-
-    if (this.contentBlockingUIEnabled) {
-      this.appMenuButton.setAttribute("tooltiptext", this.enabled ?
-        this.strings.disableTooltip : this.strings.enableTooltip);
-      this.appMenuButton.setAttribute("enabled", this.enabled);
-      this.appMenuButton.setAttribute("aria-pressed", this.enabled);
-    }
-
-    // The enabled state of blockers may also change since it depends on this.enabled.
-    for (let blocker of this.blockers) {
-      blocker.categoryItem.classList.toggle("blocked", this.enabled && blocker.enabled);
-    }
-  },
-
-  updateUIEnabled() {
-    this.content.toggleAttribute("contentBlockingUI", this.contentBlockingUIEnabled);
-
-    if (this.contentBlockingUIEnabled) {
-      this.appMenuLabel.setAttribute("label", this.strings.appMenuTitle);
-      this.appMenuLabel.setAttribute("tooltiptext", this.strings.appMenuTooltip);
-    }
-
-    this.updateEnabled();
-  },
-
-  onGlobalToggleCommand() {
-    if (this.contentBlockingUIEnabled) {
-      Services.prefs.setBoolPref(this.PREF_ENABLED, !this.enabled);
-    } else {
-      TrackingProtection.onGlobalToggleCommand();
-    }
   },
 
   hideIdentityPopupAndReload() {
@@ -433,9 +277,6 @@ var ContentBlocking = {
     body += `${ThirdPartyCookies.PREF_ENABLED}: ${Services.prefs.getIntPref(ThirdPartyCookies.PREF_ENABLED)}\n`;
     body += `network.cookie.lifetimePolicy: ${Services.prefs.getIntPref("network.cookie.lifetimePolicy")}\n`;
     body += `privacy.restrict3rdpartystorage.expiration: ${Services.prefs.getIntPref("privacy.restrict3rdpartystorage.expiration")}\n`;
-    body += `${FastBlock.PREF_ENABLED}: ${Services.prefs.getBoolPref(FastBlock.PREF_ENABLED)}\n`;
-    body += `${FastBlock.PREF_UI_ENABLED}: ${Services.prefs.getBoolPref(FastBlock.PREF_UI_ENABLED)}\n`;
-    body += `browser.fastblock.timeout: ${Services.prefs.getIntPref("browser.fastblock.timeout")}\n`;
 
     let comments = document.getElementById("identity-popup-breakageReportView-collection-comments");
     body += "\n**Comments**\n" + comments.value;
@@ -507,7 +348,7 @@ var ContentBlocking = {
       // dialog should only be able to open in the currently selected tab and onSecurityChange
       // runs on tab switch, so we can avoid associating the data with the document directly.
       blocker.activated = blocker.isBlockerActivated(state);
-      blocker.categoryItem.classList.toggle("blocked", this.enabled && blocker.enabled);
+      blocker.categoryItem.classList.toggle("blocked", blocker.enabled);
       blocker.categoryItem.hidden = !blocker.visible;
       anyBlockerActivated = anyBlockerActivated || blocker.activated;
     }
@@ -516,7 +357,7 @@ var ContentBlocking = {
     // occurs on the page.  Note that merely allowing the loading of content that
     // we could have blocked does not trigger the appearance of the shield.
     // This state will be overriden later if there's an exception set for this site.
-    let active = this.enabled && anyBlockerActivated;
+    let active = anyBlockerActivated;
     let isAllowing = state & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT;
     let detected = anyBlockerActivated || isAllowing;
 
@@ -532,14 +373,13 @@ var ContentBlocking = {
     this.content.toggleAttribute("active", active);
 
     this.iconBox.toggleAttribute("active", active);
-    this.iconBox.toggleAttribute("hasException", this.enabled && hasException);
+    this.iconBox.toggleAttribute("hasException", hasException);
 
     // For release (due to the large volume) we only want to receive reports
     // for breakage that is directly related to third party cookie blocking.
     if (this.reportBreakageEnabled ||
         (ThirdPartyCookies.reportBreakageEnabled &&
          ThirdPartyCookies.activated &&
-         !FastBlock.activated &&
          !TrackingProtection.activated)) {
       this.reportBreakageButton.removeAttribute("hidden");
     } else {
@@ -615,30 +455,22 @@ var ContentBlocking = {
     let brandBundle = document.getElementById("bundle_brand");
     let brandShortName = brandBundle.getString("brandShortName");
 
-    let introTitle;
+
+    let introTitle = gNavigatorBundle.getFormattedString("contentBlocking.intro.title",
+                                                         [brandShortName]);
     let introDescription;
     // This will be sent to the onboarding website to let them know which
     // UI variation we're showing.
     let variation;
-
-    if (this.contentBlockingUIEnabled) {
-      introTitle = gNavigatorBundle.getFormattedString("contentBlocking.intro.title",
-                                                       [brandShortName]);
-      // We show a different UI tour variation for users that already have TP
-      // enabled globally.
-      if (TrackingProtection.enabledGlobally) {
-        introDescription = gNavigatorBundle.getString("contentBlocking.intro.v2.description");
-        variation = 2;
-      } else {
-        introDescription = gNavigatorBundle.getFormattedString("contentBlocking.intro.v1.description",
-                                                               [brandShortName]);
-        variation = 1;
-      }
+    // We show a different UI tour variation for users that already have TP
+    // enabled globally.
+    if (TrackingProtection.enabledGlobally) {
+      introDescription = gNavigatorBundle.getString("contentBlocking.intro.v2.description");
+      variation = 2;
     } else {
-      introTitle = gNavigatorBundle.getString("trackingProtection.intro.title");
-      introDescription = gNavigatorBundle.getFormattedString("trackingProtection.intro.description2",
+      introDescription = gNavigatorBundle.getFormattedString("contentBlocking.intro.v1.description",
                                                              [brandShortName]);
-      variation = 0;
+      variation = 1;
     }
 
     let openStep2 = () => {

@@ -231,6 +231,16 @@ pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys",
 pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_in_content", false);
 #endif
 
+#ifdef NIGHTLY_BUILD
+// Blacklist of domains of web apps which handle keyCode and charCode of
+// keypress events with a path only for Firefox (i.e., broken if we set
+// non-zero keyCode or charCode value to the other).  The format is exactly
+// same as "dom.keyboardevent.keypress.hack.dispatch_non_printable_keys". So,
+// check its explanation for the detail.
+pref("dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode",
+     "docs.google.com,www.rememberthemilk.com");
+#endif
+
 // Whether the WebMIDI API is enabled
 pref("dom.webmidi.enabled", false);
 
@@ -635,11 +645,6 @@ pref("media.audioipc.stack_size", 262144);
 pref("media.cubeb.sandbox", false);
 #endif
 
-#ifdef XP_LINUX
-// Bug 1481152
-pref("media.cubeb_max_input_streams", 1);
-#endif
-
 #ifdef MOZ_AV1
 pref("media.av1.enabled", false);
 #endif
@@ -737,6 +742,9 @@ pref("apz.pinch_lock.scoll_lock_threshold", "0.03125");  // 1/32 inches
 pref("apz.pinch_lock.span_breakout_threshold", "0.03125");  // 1/32 inches
 pref("apz.pinch_lock.span_lock_threshold", "0.03125");  // 1/32 inches
 pref("apz.popups.enabled", false);
+#ifdef NIGHTLY_BUILD
+pref("apz.relative-update.enabled", true);
+#endif
 
 // Whether to print the APZC tree for debugging
 pref("apz.printtree", false);
@@ -914,6 +922,7 @@ pref("gfx.webrender.force-disabled", false);
 #ifdef XP_WIN
 pref("gfx.webrender.force-angle", true);
 pref("gfx.webrender.dcomp-win.enabled", true);
+pref("gfx.webrender.dcomp-win-triple-buffering.enabled", true);
 pref("gfx.webrender.program-binary", true);
 pref("gfx.webrender.program-binary-disk", true);
 #endif
@@ -941,6 +950,7 @@ pref("gfx.webrender.debug.echo-driver-messages", false);
 pref("gfx.webrender.debug.new-frame-indicator", false);
 pref("gfx.webrender.debug.new-scene-indicator", false);
 pref("gfx.webrender.debug.show-overdraw", false);
+pref("gfx.webrender.debug.slow-frame-indicator", false);
 pref("gfx.webrender.dl.dump-parent", false);
 pref("gfx.webrender.dl.dump-content", false);
 
@@ -1099,6 +1109,7 @@ pref("devtools.recordreplay.enableRewinding", true);
 #endif
 
 pref("devtools.recordreplay.mvp.enabled", false);
+pref("devtools.recordreplay.timeline.enabled", false);
 
 // view source
 pref("view_source.syntax_highlight", true);
@@ -1143,12 +1154,6 @@ pref("browser.fixup.alternate.prefix", "www.");
 pref("browser.fixup.alternate.suffix", ".com");
 pref("browser.fixup.dns_first_for_single_words", false);
 pref("browser.fixup.hide_user_pass", true);
-
-// Location Bar AutoComplete
-pref("browser.urlbar.autocomplete.enabled", true);
-// This is disabled until Bug 1340663 figures out the remaining requirements.
-pref("browser.urlbar.usepreloadedtopurls.enabled", false);
-pref("browser.urlbar.usepreloadedtopurls.expire_days", 14);
 
 // Print header customization
 // Use the following codes:
@@ -1359,6 +1364,14 @@ pref("content.sink.pending_event_mode", 0);
 //   3 = openAbused
 pref("privacy.popups.disable_from_plugins", 3);
 
+// Excessive reporting of blocked popups can be a DOS vector,
+// by overloading the main process as popups get blocked and when
+// users try to restore all popups, which is the most visible
+// option in our UI at the time of writing.
+// We will invisibly drop any popups from a page that has already
+// opened more than this number of popups.
+pref("privacy.popups.maxReported", 100);
+
 // send "do not track" HTTP header, disabled by default
 pref("privacy.donottrackheader.enabled",    false);
 // If true, close button will be shown on permission prompts
@@ -1534,15 +1547,28 @@ pref("javascript.options.throw_on_debuggee_would_run", false);
 pref("javascript.options.dump_stack_on_debuggee_would_run", false);
 
 // Spectre security vulnerability mitigations.
+#if defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
+pref("javascript.options.spectre.index_masking", false);
+pref("javascript.options.spectre.object_mitigations.barriers", false);
+pref("javascript.options.spectre.object_mitigations.misc", false);
+pref("javascript.options.spectre.string_mitigations", false);
+pref("javascript.options.spectre.value_masking", false);
+pref("javascript.options.spectre.jit_to_C++_calls", false);
+#else
 pref("javascript.options.spectre.index_masking", true);
 pref("javascript.options.spectre.object_mitigations.barriers", true);
 pref("javascript.options.spectre.object_mitigations.misc", true);
 pref("javascript.options.spectre.string_mitigations", true);
 pref("javascript.options.spectre.value_masking", true);
 pref("javascript.options.spectre.jit_to_C++_calls", true);
+#endif
 
 // Streams API
+#ifdef NIGHTLY_BUILD
+pref("javascript.options.streams", true);
+#else
 pref("javascript.options.streams", false);
+#endif
 
 // advanced prefs
 pref("advanced.mailftp",                    false);
@@ -1807,6 +1833,7 @@ pref("network.http.spdy.push-allowance", 131072);   // 128KB
 pref("network.http.spdy.pull-allowance", 12582912); // 12MB
 pref("network.http.spdy.default-concurrent", 100);
 pref("network.http.spdy.default-hpack-buffer", 65536); // 64k
+pref("network.http.spdy.websockets", true);
 
 // alt-svc allows separation of transport routing from
 // the origin host without using a proxy.
@@ -2229,12 +2256,9 @@ pref("network.auth.private-browsing-sso", false);
 
 // Control how throttling of http responses works - number of ms that each
 // suspend and resume period lasts (prefs named appropriately)
-#ifdef ANDROID
-// disabled because of bug 1382274
+// This feature is occasionally causing visible regressions (download too slow for
+// too long time, jitter in video/audio in background tabs...)
 pref("network.http.throttle.enable", false);
-#else
-pref("network.http.throttle.enable", true);
-#endif
 
 // Make HTTP throttling v2 algorithm Nightly-only due to bug 1462906
 #ifdef NIGHTLY_BUILD
@@ -2656,6 +2680,14 @@ pref("security.cert_pinning.process_headers_from_non_builtin_roots", false);
 // their protocol with the inner URI of the view-source URI
 pref("security.view-source.reachable-from-inner-protocol", false);
 
+// If set to true strict checks will happen on the triggering principal for loads.
+// Android is disabled at the moment pending Bug 1504968
+#if !defined(RELEASE_OR_BETA) && !defined(ANDROID)
+pref("security.strict_security_checks.enabled", true);
+#else
+pref("security.strict_security_checks.enabled", false);
+#endif
+
 // Remote settings preferences
 pref("services.settings.poll_interval", 86400); // 24H
 pref("services.settings.server", "https://firefox.settings.services.mozilla.com/v1");
@@ -3018,9 +3050,6 @@ pref("layout.css.convertFromNode.enabled", false);
 pref("layout.css.convertFromNode.enabled", true);
 #endif
 
-// Is support for CSS "text-align: unsafe X" enabled?
-pref("layout.css.text-align-unsafe-value.enabled", false);
-
 // Is support for CSS text-justify property enabled?
 pref("layout.css.text-justify.enabled", true);
 
@@ -3086,9 +3115,6 @@ pref("layout.css.scroll-behavior.damping-ratio", "1.0");
 
 // Is support for scroll-snap enabled?
 pref("layout.css.scroll-snap.enabled", true);
-
-// Is support for CSS shape-outside enabled?
-pref("layout.css.shape-outside.enabled", true);
 
 // Is support for document.fonts enabled?
 pref("layout.css.font-loading-api.enabled", true);
@@ -3259,10 +3285,6 @@ pref("dom.ipc.plugins.hangUITimeoutSecs", 11);
 // Minimum time that the plugin hang UI will be displayed
 pref("dom.ipc.plugins.hangUIMinDisplaySecs", 10);
 #endif
-// How long a content process can take before closing its IPC channel
-// after shutdown is initiated.  If the process exceeds the timeout,
-// we fear the worst and kill it.
-pref("dom.ipc.tabs.shutdownTimeoutSecs", 5);
 #else
 // No timeout in leak-checking builds
 pref("dom.ipc.plugins.timeoutSecs", 0);
@@ -3273,7 +3295,6 @@ pref("dom.ipc.plugins.parentTimeoutSecs", 0);
 pref("dom.ipc.plugins.hangUITimeoutSecs", 0);
 pref("dom.ipc.plugins.hangUIMinDisplaySecs", 0);
 #endif
-pref("dom.ipc.tabs.shutdownTimeoutSecs", 0);
 #endif
 
 pref("dom.ipc.plugins.flash.disable-protected-mode", false);
@@ -4642,6 +4663,11 @@ pref("image.animated.decode-on-demand.threshold-kb", 20480);
 // animation's currently displayed frame.
 pref("image.animated.decode-on-demand.batch-size", 6);
 
+// Whether we should recycle already displayed frames instead of discarding
+// them. This saves on the allocation itself, and may be able to reuse the
+// contents as well. Only applies if generating full frames.
+pref("image.animated.decode-on-demand.recycle", true);
+
 // Whether we should generate full frames at decode time or partial frames which
 // are combined at display time (historical behavior and default).
 pref("image.animated.generate-full-frames", false);
@@ -4757,6 +4783,9 @@ pref("image.multithreaded_decoding.limit", -1);
 // How long in ms before we should start shutting down idle decoder threads.
 pref("image.multithreaded_decoding.idle_timeout", 600000);
 
+// Whether we attempt to decode WebP images or not.
+pref("image.webp.enabled", false);
+
 // Limit for the canvas image cache. 0 means we don't limit the size of the
 // cache.
 pref("canvas.image.cache.limit", 0);
@@ -4851,13 +4880,7 @@ pref("network.tcp.keepalive.retry_interval", 1); // seconds
 pref("network.tcp.keepalive.probe_count", 4);
 #endif
 
-#if !defined(EARLY_BETA_OR_EARLIER)
 pref("network.tcp.tcp_fastopen_enable", false);
-#elif  defined(XP_WIN) || defined(XP_MACOSX)
-pref("network.tcp.tcp_fastopen_enable", true);
-#else
-pref("network.tcp.tcp_fastopen_enable", false);
-#endif
 
 pref("network.tcp.tcp_fastopen_consecutive_failure_limit", 5);
 // We are trying to detect stalled tcp connections that use TFO and TLS
@@ -5277,10 +5300,6 @@ pref("io.activity.intervalMilliseconds", 0);
 // to take effect.
 pref("jsloader.shareGlobal", true);
 
-// When we're asked to take a screenshot, don't wait more than 2000ms for the
-// event loop to become idle before actually taking the screenshot.
-pref("dom.browserElement.maxScreenshotDelayMS", 2000);
-
 // Whether we should show the placeholder when the element is focused but empty.
 pref("dom.placeholder.show_on_focus", true);
 
@@ -5428,6 +5447,10 @@ pref("network.captive-portal-service.maxInterval", 1500000); // 25 minutes
 pref("network.captive-portal-service.backoffFactor", "5.0");
 pref("network.captive-portal-service.enabled", false);
 
+pref("network.connectivity-service.enabled", true);
+pref("network.connectivity-service.DNSv4.domain", "mozilla.org");
+pref("network.connectivity-service.DNSv6.domain", "mozilla.org");
+
 // DNS Trusted Recursive Resolver
 // 0 - default off, 1 - race, 2 TRR first, 3 TRR only, 4 shadow, 5 off by choice
 pref("network.trr.mode", 0);
@@ -5496,8 +5519,13 @@ pref("urlclassifier.downloadBlockTable", "goog-badbinurl-proto");
 // Tables for login reputation
 pref("urlclassifier.passwordAllowTable", "goog-passwordwhite-proto");
 
-// Tables for tracking protection
+// Tables for anti-tracking features
+#ifdef EARLY_BETA_OR_EARLIER
+// Use the strict list for the default cookie restrictions in Nightly and early betas
+pref("urlclassifier.trackingAnnotationTable", "test-track-simple,base-track-digest256,content-track-digest256");
+#else
 pref("urlclassifier.trackingAnnotationTable", "test-track-simple,base-track-digest256");
+#endif
 pref("urlclassifier.trackingAnnotationWhitelistTable", "test-trackwhite-simple,mozstd-trackwhite-digest256");
 pref("urlclassifier.trackingTable", "test-track-simple,base-track-digest256");
 pref("urlclassifier.trackingWhitelistTable", "test-trackwhite-simple,mozstd-trackwhite-digest256");
@@ -5879,6 +5907,12 @@ pref("dom.xhr.lowercase_header.enabled", true);
 // this can be removed.
 pref("dom.clients.openwindow_favors_same_process", true);
 
+#ifdef RELEASE_OR_BETA
+pref("toolkit.aboutPerformance.showInternals", false);
+#else
+pref("toolkit.aboutPerformance.showInternals", true);
+#endif
+
 // When a crash happens, whether to include heap regions of the crash context
 // in the minidump. Enabled by default on nightly and aurora.
 #ifdef RELEASE_OR_BETA
@@ -5935,8 +5969,7 @@ pref("prio.enabled", false);
 #endif
 
 #ifdef NIGHTLY_BUILD
-// Bug 1499552; add a dummy pref to verify that collection of preferences
-// via telemetry is working as expected.
-pref("app.normandy.test.with_true_default", true);
-pref("app.normandy.test.with_false_default", false);
+pref("dom.sidebar.enabled", false);
+#else
+pref("dom.sidebar.enabled", true);
 #endif

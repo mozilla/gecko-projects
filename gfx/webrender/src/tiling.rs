@@ -8,18 +8,19 @@ use api::{MixBlendMode, PipelineId, DeviceRect, LayoutSize};
 use batch::{AlphaBatchBuilder, AlphaBatchContainer, ClipBatcher, resolve_image};
 use clip::ClipStore;
 use clip_scroll_tree::{ClipScrollTree};
-use device::{FrameId, Texture};
+use device::{Texture};
 #[cfg(feature = "pathfinder")]
 use euclid::{TypedPoint2D, TypedVector2D};
 use gpu_cache::{GpuCache};
 use gpu_types::{BorderInstance, BlurDirection, BlurInstance, PrimitiveHeaders, ScalingInstance};
-use gpu_types::{TransformData, TransformPalette};
+use gpu_types::{TransformData, TransformPalette, ZBufferIdGenerator};
 use internal_types::{CacheTextureId, FastHashMap, SavedTargetIndex, TextureSource};
 #[cfg(feature = "pathfinder")]
 use pathfinder_partitioner::mesh::Mesh;
+use picture::SurfaceInfo;
 use prim_store::{PrimitiveStore, DeferredResolve};
 use profiler::FrameProfileCounters;
-use render_backend::FrameResources;
+use render_backend::{FrameId, FrameResources};
 use render_task::{BlitSource, RenderTaskAddress, RenderTaskId, RenderTaskKind};
 use render_task::{BlurTask, ClearMode, GlyphTask, RenderTaskLocation, RenderTaskTree, ScalingTask};
 use resource_cache::ResourceCache;
@@ -28,9 +29,14 @@ use texture_allocator::GuillotineAllocator;
 #[cfg(feature = "pathfinder")]
 use webrender_api::{DevicePixel, FontRenderMode};
 
-const MIN_TARGET_SIZE: u32 = 2048;
 const STYLE_SOLID: i32 = ((BorderStyle::Solid as i32) << 8) | ((BorderStyle::Solid as i32) << 16);
 const STYLE_MASK: i32 = 0x00FF_FF00;
+
+/// According to apitrace, textures larger than 2048 break fast clear
+/// optimizations on some intel drivers. We sometimes need to go larger, but
+/// we try to avoid it. This can go away when proper tiling support lands,
+/// since we can then split large primitives across multiple textures.
+const IDEAL_MAX_TEXTURE_DIMENSION: u32 = 2048;
 
 /// Identifies a given `RenderTarget` in a `RenderTargetList`.
 #[derive(Debug, Copy, Clone)]
@@ -45,6 +51,7 @@ pub struct RenderTargetContext<'a, 'rc> {
     pub use_dual_source_blending: bool,
     pub clip_scroll_tree: &'a ClipScrollTree,
     pub resources: &'a FrameResources,
+    pub surfaces: &'a [SurfaceInfo],
 }
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -124,6 +131,7 @@ pub trait RenderTarget {
         _deferred_resolves: &mut Vec<DeferredResolve>,
         _prim_headers: &mut PrimitiveHeaders,
         _transforms: &mut TransformPalette,
+        _z_generator: &mut ZBufferIdGenerator,
     ) {
     }
 
@@ -189,7 +197,14 @@ pub enum RenderTargetKind {
 pub struct RenderTargetList<T> {
     screen_size: DeviceIntSize,
     pub format: ImageFormat,
-    pub max_size: DeviceUintSize,
+    /// The maximum width and height of any single primitive we've encountered
+    /// that will be drawn to a dynamic location.
+    ///
+    /// We initially create our per-slice allocators with a width and height of
+    /// IDEAL_MAX_TEXTURE_DIMENSION. If we encounter a larger primitive, the
+    /// allocation will fail, but we'll bump max_dynamic_size, which will cause the
+    /// allocator for the next slice to be just large enough to accomodate it.
+    pub max_dynamic_size: DeviceUintSize,
     pub targets: Vec<T>,
     pub saved_index: Option<SavedTargetIndex>,
 }
@@ -202,7 +217,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
         RenderTargetList {
             screen_size,
             format,
-            max_size: DeviceUintSize::new(MIN_TARGET_SIZE, MIN_TARGET_SIZE),
+            max_dynamic_size: DeviceUintSize::new(0, 0),
             targets: Vec::new(),
             saved_index: None,
         }
@@ -217,6 +232,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
         saved_index: Option<SavedTargetIndex>,
         prim_headers: &mut PrimitiveHeaders,
         transforms: &mut TransformPalette,
+        z_generator: &mut ZBufferIdGenerator,
     ) {
         debug_assert_eq!(None, self.saved_index);
         self.saved_index = saved_index;
@@ -229,6 +245,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
                 deferred_resolves,
                 prim_headers,
                 transforms,
+                z_generator,
             );
         }
     }
@@ -265,7 +282,14 @@ impl<T: RenderTarget> RenderTargetList<T> {
         let origin = match existing_origin {
             Some(origin) => origin,
             None => {
-                let mut new_target = T::new(Some(self.max_size), self.screen_size);
+                // Have the allocator restrict slice sizes to our max ideal
+                // dimensions, unless we've already gone bigger on a previous
+                // slice.
+                let allocator_dimensions = DeviceUintSize::new(
+                    cmp::max(IDEAL_MAX_TEXTURE_DIMENSION, self.max_dynamic_size.width),
+                    cmp::max(IDEAL_MAX_TEXTURE_DIMENSION, self.max_dynamic_size.height),
+                );
+                let mut new_target = T::new(Some(allocator_dimensions), self.screen_size);
                 let origin = new_target.allocate(alloc_size).expect(&format!(
                     "Each render task must allocate <= size of one target! ({})",
                     alloc_size
@@ -283,7 +307,9 @@ impl<T: RenderTarget> RenderTargetList<T> {
     }
 
     pub fn check_ready(&self, t: &Texture) {
-        assert_eq!(t.get_dimensions(), self.max_size);
+        let dimensions = t.get_dimensions();
+        assert!(dimensions.width >= self.max_dynamic_size.width);
+        assert!(dimensions.height >= self.max_dynamic_size.height);
         assert_eq!(t.get_format(), self.format);
         assert_eq!(t.get_layer_count() as usize, self.targets.len());
         assert!(t.supports_depth() >= self.needs_depth());
@@ -399,6 +425,7 @@ impl RenderTarget for ColorRenderTarget {
         deferred_resolves: &mut Vec<DeferredResolve>,
         prim_headers: &mut PrimitiveHeaders,
         transforms: &mut TransformPalette,
+        z_generator: &mut ZBufferIdGenerator,
     ) {
         let mut merged_batches = AlphaBatchContainer::new(None);
 
@@ -427,6 +454,7 @@ impl RenderTarget for ColorRenderTarget {
                         prim_headers,
                         transforms,
                         pic_task.root_spatial_node_index,
+                        z_generator,
                     );
 
                     if let Some(batch_container) = batch_builder.build(&mut merged_batches) {
@@ -868,14 +896,21 @@ impl RenderPass {
         task_id: RenderTaskId,
         size: DeviceIntSize,
         target_kind: RenderTargetKind,
+        location: &RenderTaskLocation,
     ) {
         if let RenderPassKind::OffScreen { ref mut color, ref mut alpha, .. } = self.kind {
-            let max_size = match target_kind {
-                RenderTargetKind::Color => &mut color.max_size,
-                RenderTargetKind::Alpha => &mut alpha.max_size,
-            };
-            max_size.width = cmp::max(max_size.width, size.width as u32);
-            max_size.height = cmp::max(max_size.height, size.height as u32);
+            // If this will be rendered to a dynamically-allocated region on an
+            // off-screen render target, update the max-encountered size. We don't
+            // need to do this for things drawn to the texture cache, since those
+            // don't affect our render target allocation.
+            if location.is_dynamic() {
+                let max_size = match target_kind {
+                    RenderTargetKind::Color => &mut color.max_dynamic_size,
+                    RenderTargetKind::Alpha => &mut alpha.max_dynamic_size,
+                };
+                max_size.width = cmp::max(max_size.width, size.width as u32);
+                max_size.height = cmp::max(max_size.height, size.height as u32);
+            }
         }
 
         self.tasks.push(task_id);
@@ -895,6 +930,7 @@ impl RenderPass {
         clip_store: &ClipStore,
         transforms: &mut TransformPalette,
         prim_headers: &mut PrimitiveHeaders,
+        z_generator: &mut ZBufferIdGenerator,
     ) {
         profile_scope!("RenderPass::build");
 
@@ -919,6 +955,7 @@ impl RenderPass {
                     deferred_resolves,
                     prim_headers,
                     transforms,
+                    z_generator,
                 );
             }
             RenderPassKind::OffScreen { ref mut color, ref mut alpha, ref mut texture_cache } => {
@@ -1023,6 +1060,7 @@ impl RenderPass {
                     saved_color,
                     prim_headers,
                     transforms,
+                    z_generator,
                 );
                 alpha.build(
                     ctx,
@@ -1032,6 +1070,7 @@ impl RenderPass {
                     saved_alpha,
                     prim_headers,
                     transforms,
+                    z_generator,
                 );
             }
         }
@@ -1055,8 +1094,8 @@ impl CompositeOps {
         }
     }
 
-    pub fn count(&self) -> usize {
-        self.filters.len() + if self.mix_blend_mode.is_some() { 1 } else { 0 }
+    pub fn is_empty(&self) -> bool {
+        self.filters.is_empty() && self.mix_blend_mode.is_none()
     }
 }
 

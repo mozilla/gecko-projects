@@ -32,7 +32,6 @@ include protocol PPrinting;
 include protocol PChildToParentStream;
 include protocol PParentToChildStream;
 include protocol POfflineCacheUpdate;
-include protocol PRenderFrame;
 include protocol PSpeechSynthesis;
 include protocol PTestShell;
 include protocol PJavaScript;
@@ -194,10 +193,10 @@ union FileDescOrError {
 struct DomainPolicyClone
 {
     bool        active;
-    URIParams[] blacklist;
-    URIParams[] whitelist;
-    URIParams[] superBlacklist;
-    URIParams[] superWhitelist;
+    URIParams[] blocklist;
+    URIParams[] allowlist;
+    URIParams[] superBlocklist;
+    URIParams[] superAllowlist;
 };
 
 struct AndroidSystemInfo
@@ -892,9 +891,6 @@ parent:
     async Beep() compress;
     async PlayEventSound(uint32_t aEventId) compress;
 
-    sync GetSystemColors(uint32_t colorsCount)
-        returns (uint32_t[] colors);
-
     sync GetIconForExtension(nsCString aFileExt, uint32_t aIconSize)
         returns (uint8_t[] bits);
 
@@ -915,11 +911,6 @@ parent:
     sync NotifyKeywordSearchLoading(nsString providerName, nsString keyword);
 
     async CopyFavicon(URIParams oldURI, URIParams newURI, Principal aLoadingPrincipal, bool isPrivate);
-
-    // Tell the compositor to allocate a layer tree id for nested remote mozbrowsers.
-    sync AllocateLayerTreeId(ContentParentId cpId, TabId tabId)
-        returns (LayersId id);
-    async DeallocateLayerTreeId(ContentParentId cpId, LayersId id);
 
     /**
      * Notifies the parent about a recording device is starting or shutdown.
@@ -1057,7 +1048,6 @@ parent:
 
     async CreateWindow(nullable PBrowser aThisTab,
                        PBrowser aNewTab,
-                       PRenderFrame aRenderFrame,
                        uint32_t aChromeFlags,
                        bool aCalledFromJS,
                        bool aPositionSpecified,

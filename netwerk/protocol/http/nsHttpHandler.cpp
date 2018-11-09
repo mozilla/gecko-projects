@@ -24,7 +24,7 @@
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsIPrefLocalizedString.h"
-#include "nsISocketProviderService.h"
+#include "nsSocketProviderService.h"
 #include "nsISocketProvider.h"
 #include "nsPrintfCString.h"
 #include "nsCOMPtr.h"
@@ -61,6 +61,7 @@
 
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/NeckoParent.h"
+#include "mozilla/net/RequestContextService.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
@@ -259,6 +260,7 @@ nsHttpHandler::nsHttpHandler()
     , mEnableAltSvc(false)
     , mEnableAltSvcOE(false)
     , mEnableOriginExtension(false)
+    , mEnableH2Websockets(true)
     , mSpdySendingChunkSize(ASpdySession::kSendingChunkSize)
     , mSpdySendBufferSize(ASpdySession::kTCPSendBufferSize)
     , mSpdyPushAllowance(131072) // match default pref
@@ -510,8 +512,7 @@ nsHttpHandler::Init()
     rv = InitConnectionMgr();
     if (NS_FAILED(rv)) return rv;
 
-    mRequestContextService =
-        do_GetService("@mozilla.org/network/request-context-service;1");
+    mRequestContextService = RequestContextService::GetOrCreate();
 
 #if defined(ANDROID)
     mProductSub.AssignLiteral(MOZILLA_UAVERSION);
@@ -1443,8 +1444,8 @@ nsHttpHandler::PrefsChanged(const char *pref)
                 mDefaultSocketType.SetIsVoid(true);
             else {
                 // verify that this socket type is actually valid
-                nsCOMPtr<nsISocketProviderService> sps(
-                        do_GetService(NS_SOCKETPROVIDERSERVICE_CONTRACTID));
+                nsCOMPtr<nsISocketProviderService> sps =
+                  nsSocketProviderService::GetOrCreate();
                 if (sps) {
                     nsCOMPtr<nsISocketProvider> sp;
                     rv = sps->GetSocketProvider(sval.get(), getter_AddRefs(sp));
@@ -1580,6 +1581,14 @@ nsHttpHandler::PrefsChanged(const char *pref)
                                 &cVar);
         if (NS_SUCCEEDED(rv))
             mEnableOriginExtension = cVar;
+    }
+
+    if (PREF_CHANGED(HTTP_PREF("spdy.websockets"))) {
+        rv = Preferences::GetBool(HTTP_PREF("spdy.websockets"),
+                                  &cVar);
+        if (NS_SUCCEEDED(rv)) {
+            mEnableH2Websockets = cVar;
+        }
     }
 
     if (PREF_CHANGED(HTTP_PREF("spdy.push-allowance"))) {
@@ -2787,6 +2796,19 @@ nsHttpHandler::IsBeforeLastActiveTabLoadOptimization(TimeStamp const &when)
 
   return !mLastActiveTabLoadOptimizationHit.IsNull() &&
          when <= mLastActiveTabLoadOptimizationHit;
+}
+
+void
+nsHttpHandler::BlacklistSpdy(const nsHttpConnectionInfo *ci)
+{
+    mConnMgr->BlacklistSpdy(ci);
+    mBlacklistedSpdyOrigins.PutEntry(ci->GetOrigin());
+}
+
+bool
+nsHttpHandler::IsSpdyBlacklisted(const nsHttpConnectionInfo *ci)
+{
+    return mBlacklistedSpdyOrigins.Contains(ci->GetOrigin());
 }
 
 } // namespace net

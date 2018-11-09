@@ -2345,6 +2345,22 @@ nsContentUtils::IsCallerContentXBL()
 }
 
 bool
+nsContentUtils::IsCallerUAWidget()
+{
+  JSContext *cx = GetCurrentJSContext();
+  if (!cx) {
+    return false;
+  }
+
+  JS::Realm* realm = JS::GetCurrentRealmOrNull(cx);
+  if (!realm) {
+    return false;
+  }
+
+  return xpc::IsUAWidgetScope(realm);
+}
+
+bool
 nsContentUtils::IsSystemCaller(JSContext* aCx)
 {
   // Note that SubjectPrincipal() assumes we are in a compartment here.
@@ -2674,7 +2690,8 @@ nsContentUtils::PositionIsBefore(nsINode* aNode1, nsINode* aNode2,
 int32_t
 nsContentUtils::ComparePoints(nsINode* aParent1, int32_t aOffset1,
                               nsINode* aParent2, int32_t aOffset2,
-                              bool* aDisconnected)
+                              bool* aDisconnected,
+                              ComparePointsCache* aParent1Cache)
 {
   if (aParent1 == aParent2) {
     // XXX This is odd.  aOffset1 and/or aOffset2 may be -1, e.g., it's result
@@ -2716,7 +2733,9 @@ nsContentUtils::ComparePoints(nsINode* aParent1, int32_t aOffset1,
     nsINode* child1 = parents1.ElementAt(--pos1);
     nsINode* child2 = parents2.ElementAt(--pos2);
     if (child1 != child2) {
-      return parent->ComputeIndexOf(child1) < parent->ComputeIndexOf(child2) ? -1 : 1;
+      int32_t child1index = aParent1Cache ? aParent1Cache->ComputeIndexOf(parent, child1) :
+                                            parent->ComputeIndexOf(child1);
+      return child1index < parent->ComputeIndexOf(child2) ? -1 : 1;
     }
     parent = child1;
   }
@@ -2738,7 +2757,9 @@ nsContentUtils::ComparePoints(nsINode* aParent1, int32_t aOffset1,
   nsINode* child1 = parents1.ElementAt(--pos1);
   // XXX aOffset2 may be -1 as mentioned above.  So, why does this return it's
   //     *after* of the valid DOM point?
-  return parent->ComputeIndexOf(child1) < aOffset2 ? -1 : 1;
+  int32_t child1index = aParent1Cache ? aParent1Cache->ComputeIndexOf(parent, child1) :
+                                        parent->ComputeIndexOf(child1);
+  return child1index < aOffset2 ? -1 : 1;
 }
 
 /* static */
@@ -4166,62 +4187,6 @@ nsContentUtils::IsUtf8OnlyPlainTextType(const nsACString& aContentType)
          aContentType.EqualsLiteral(TEXT_VTT);
 }
 
-bool
-nsContentUtils::GetWrapperSafeScriptFilename(nsIDocument* aDocument,
-                                             nsIURI* aURI,
-                                             nsACString& aScriptURI,
-                                             nsresult* aRv)
-{
-  MOZ_ASSERT(aRv);
-  bool scriptFileNameModified = false;
-  *aRv = NS_OK;
-
-  *aRv = aURI->GetSpec(aScriptURI);
-  NS_ENSURE_SUCCESS(*aRv, false);
-
-  if (IsChromeDoc(aDocument)) {
-    nsCOMPtr<nsIChromeRegistry> chromeReg =
-      mozilla::services::GetChromeRegistryService();
-
-    if (!chromeReg) {
-      // If we're running w/o a chrome registry we won't modify any
-      // script file names.
-
-      return scriptFileNameModified;
-    }
-
-    bool docWrappersEnabled =
-      chromeReg->WrappersEnabled(aDocument->GetDocumentURI());
-
-    bool uriWrappersEnabled = chromeReg->WrappersEnabled(aURI);
-
-    nsIURI *docURI = aDocument->GetDocumentURI();
-
-    if (docURI && docWrappersEnabled && !uriWrappersEnabled) {
-      // aURI is a script from a URL that doesn't get wrapper
-      // automation. aDocument is a chrome document that does get
-      // wrapper automation. Prepend the chrome document's URI
-      // followed by the string " -> " to the URI of the script we're
-      // loading here so that script in that URI gets the same wrapper
-      // automation that the chrome document expects.
-      nsAutoCString spec;
-      *aRv = docURI->GetSpec(spec);
-      if (NS_WARN_IF(NS_FAILED(*aRv))) {
-        return false;
-      }
-
-      spec.AppendLiteral(" -> ");
-      spec.Append(aScriptURI);
-
-      aScriptURI = spec;
-
-      scriptFileNameModified = true;
-    }
-  }
-
-  return scriptFileNameModified;
-}
-
 // static
 bool
 nsContentUtils::IsInChromeDocshell(nsIDocument *aDocument)
@@ -4666,7 +4631,7 @@ nsContentUtils::HasMutationListeners(nsINode* aNode,
     return false;
   }
 
-  if (aNode->IsContent() && aNode->AsContent()->ChromeOnlyAccess()) {
+  if (aNode->ChromeOnlyAccess() || aNode->IsInShadowTree()) {
     return false;
   }
 
@@ -5204,8 +5169,7 @@ nsContentUtils::ConvertToPlainText(const nsAString& aSourceBuffer,
     !(aFlags & nsIDocumentEncoder::OutputNoScriptContent));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIDocumentEncoder> encoder = do_CreateInstance(
-    "@mozilla.org/layout/documentEncoder;1?type=text/plain");
+  nsCOMPtr<nsIDocumentEncoder> encoder = do_createDocumentEncoder("text/plain");
 
   rv = encoder->Init(document, NS_LITERAL_STRING("text/plain"), aFlags);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -7868,11 +7832,16 @@ nsContentUtils::CalculateBufferSizeForImage(const uint32_t& aStride,
 {
   CheckedInt32 requiredBytes =
     CheckedInt32(aStride) * CheckedInt32(aImageSize.height);
-  if (!requiredBytes.isValid()) {
+
+  CheckedInt32 usedBytes = requiredBytes - aStride +
+    (CheckedInt32(aImageSize.width) * BytesPerPixel(aFormat));
+  if (!usedBytes.isValid()) {
     return NS_ERROR_FAILURE;
   }
+
+  MOZ_ASSERT(requiredBytes.isValid(), "usedBytes valid but not required?");
   *aMaxBufferSize = requiredBytes.value();
-  *aUsedBufferSize = *aMaxBufferSize - aStride + (aImageSize.width * BytesPerPixel(aFormat));
+  *aUsedBufferSize = usedBytes.value();
   return NS_OK;
 }
 

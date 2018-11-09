@@ -13,7 +13,7 @@ add_task(async function setup() {
   sandbox = sinon.sandbox.create();
 
   controller = new UrlbarController({
-    window,
+    browserWindow: window,
   });
 
   registerCleanupFunction(async () => {
@@ -52,14 +52,22 @@ add_task(function test_handleEnteredText_url() {
 
 add_task(function test_resultSelected_switchtab() {
   sandbox.stub(window, "switchToTabHavingURI").returns(true);
-  sandbox.stub(window, "isTabEmpty").returns(false);
+  sandbox.stub(window.gBrowser.selectedTab, "isEmpty").returns(false);
   sandbox.stub(window.gBrowser, "removeTab");
 
   const event = new MouseEvent("click", {button: 0});
   const url = "https://example.com/1";
-  const result = new UrlbarMatch(UrlbarUtils.MATCH_TYPE.TAB_SWITCH, {url});
+  const result = new UrlbarMatch(UrlbarUtils.MATCH_TYPE.TAB_SWITCH,
+                                 UrlbarUtils.MATCH_SOURCE.TABS,
+                                 { url });
 
-  controller.resultSelected(event, result);
+  Assert.equal(gURLBar.value, "", "urlbar input is empty before selecting a result");
+  if (Services.prefs.getBoolPref("browser.urlbar.quantumbar", true)) {
+    gURLBar.resultSelected(event, result);
+    Assert.equal(gURLBar.value, url, "urlbar value updated for selected result");
+  } else {
+    controller.resultSelected(event, result);
+  }
 
   Assert.ok(window.switchToTabHavingURI.calledOnce,
     "Should have triggered switching to the tab");

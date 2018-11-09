@@ -65,7 +65,7 @@ class StructuredCloneData;
 } // namespace dom
 
 namespace layout {
-class RenderFrameParent;
+class RenderFrame;
 } // namespace layout
 } // namespace mozilla
 
@@ -86,7 +86,7 @@ class nsFrameLoader final : public nsStubMutationObserver,
   friend class AutoResetInFrameSwap;
   typedef mozilla::dom::PBrowserParent PBrowserParent;
   typedef mozilla::dom::TabParent TabParent;
-  typedef mozilla::layout::RenderFrameParent RenderFrameParent;
+  typedef mozilla::layout::RenderFrame RenderFrame;
 
 public:
   static nsFrameLoader* Create(mozilla::dom::Element* aOwner,
@@ -296,7 +296,7 @@ public:
    * returned.  (In-process <browser> behaves similarly, and this
    * behavior seems desirable.)
    */
-  RenderFrameParent* GetCurrentRenderFrame() const;
+  RenderFrame* GetCurrentRenderFrame() const;
 
   mozilla::dom::ChromeMessageSender* GetFrameMessageManager() { return mMessageManager; }
 
@@ -423,10 +423,8 @@ private:
   bool ShowRemoteFrame(const mozilla::ScreenIntSize& size,
                        nsSubDocumentFrame *aFrame = nullptr);
 
-  bool AddTreeItemToTreeOwner(nsIDocShellTreeItem* aItem,
-                              nsIDocShellTreeOwner* aOwner,
-                              int32_t aParentType,
-                              nsIDocShell* aParentNode);
+  void AddTreeItemToTreeOwner(nsIDocShellTreeItem* aItem,
+                              nsIDocShellTreeOwner* aOwner);
 
   nsAtom* TypeAttrName() const {
     return mOwnerContent->IsXULElement()

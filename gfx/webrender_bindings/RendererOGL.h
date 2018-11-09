@@ -57,7 +57,7 @@ public:
   void Update();
 
   /// This can be called on the render thread only.
-  bool UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize, const Maybe<Range<uint8_t>>& aReadbackBuffer);
+  bool UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize, const Maybe<Range<uint8_t>>& aReadbackBuffer, bool aHadSlowFrame);
 
   /// This can be called on the render thread only.
   bool RenderToTarget(gfx::DrawTarget& aTarget);
@@ -83,6 +83,9 @@ public:
 
   /// This can be called on the render thread only.
   bool Resume();
+
+  /// This can be called on the render thread only.
+  void CheckGraphicsResetStatus();
 
   layers::SyncObjectHost* GetSyncObject() const;
 

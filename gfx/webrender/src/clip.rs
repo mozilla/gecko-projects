@@ -10,13 +10,15 @@ use api::{VoidPtrToSizeFn, LayoutRectAu, ImageKey, AuHelpers};
 use app_units::Au;
 use border::{ensure_no_corner_overlap, BorderRadiusAu};
 use box_shadow::{BLUR_SAMPLE_SCALE, BoxShadowClipSource, BoxShadowCacheKey};
+use box_shadow::get_max_scale_for_box_shadow;
 use clip_scroll_tree::{ClipScrollTree, CoordinateSystemId, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex};
 use ellipse::Ellipse;
 use gpu_cache::{GpuCache, GpuCacheHandle, ToGpuBlocks};
 use gpu_types::{BoxShadowStretchMode};
+use image::{self, Repetition};
 use intern;
 use internal_types::FastHashSet;
-use prim_store::{ClipData, ImageMaskData, SpaceMapper};
+use prim_store::{ClipData, ImageMaskData, SpaceMapper, VisibleMaskImageTile};
 use render_task::to_cache_size;
 use resource_cache::{ImageRequest, ResourceCache};
 use std::{cmp, u32};
@@ -101,7 +103,7 @@ pub struct ClipDataMarker;
 pub type ClipDataStore = intern::DataStore<ClipItemKey, ClipNode, ClipDataMarker>;
 pub type ClipDataHandle = intern::Handle<ClipDataMarker>;
 pub type ClipDataUpdateList = intern::UpdateList<ClipItemKey>;
-pub type ClipDataInterner = intern::Interner<ClipItemKey, ClipDataMarker>;
+pub type ClipDataInterner = intern::Interner<ClipItemKey, ClipItemSceneData, ClipDataMarker>;
 
 // Result of comparing a clip node instance against a local rect.
 #[derive(Debug)]
@@ -145,14 +147,14 @@ impl From<ClipItemKey> for ClipNode {
                 )
             }
             ClipItemKey::ImageMask(rect, image, repeat) => {
-                ClipItem::Image(
-                    ImageMask {
+                ClipItem::Image {
+                    mask: ImageMask {
                         image,
                         rect: LayoutRect::from_au(rect),
                         repeat,
                     },
-                    true,
-                )
+                    visible_tiles: None,
+                }
             }
             ClipItemKey::BoxShadow(shadow_rect, shadow_radius, prim_shadow_rect, blur_radius, clip_mode) => {
                 ClipItem::new_box_shadow(
@@ -263,14 +265,79 @@ impl ClipNode {
         gpu_cache: &mut GpuCache,
         resource_cache: &mut ResourceCache,
         device_pixel_scale: DevicePixelScale,
+        clipped_rect: &LayoutRect,
     ) {
-        if let Some(mut request) = gpu_cache.request(&mut self.gpu_cache_handle) {
-            match self.item {
-                ClipItem::Image(ref mask, ..) => {
-                    let data = ImageMaskData { local_rect: mask.rect };
-                    data.write_gpu_blocks(request);
+        match self.item {
+            ClipItem::Image { ref mask, ref mut visible_tiles } => {
+                let request = ImageRequest {
+                    key: mask.image,
+                    rendering: ImageRendering::Auto,
+                    tile: None,
+                };
+                *visible_tiles = None;
+                if let Some(props) = resource_cache.get_image_properties(mask.image) {
+                    if let Some(tile_size) = props.tiling {
+                        let mut mask_tiles = Vec::new();
+
+                        let device_image_size = props.descriptor.size;
+                        let visible_rect = if mask.repeat {
+                            *clipped_rect
+                        } else {
+                            clipped_rect.intersection(&mask.rect).unwrap()
+                        };
+
+                        let repetitions = image::repetitions(
+                            &mask.rect,
+                            &visible_rect,
+                            mask.rect.size,
+                        );
+
+                        for Repetition { origin, .. } in repetitions {
+                            let image_rect = LayoutRect {
+                                origin,
+                                size: mask.rect.size,
+                            };
+                            let tiles = image::tiles(
+                                &image_rect,
+                                &visible_rect,
+                                &device_image_size,
+                                tile_size as u32,
+                            );
+                            for tile in tiles {
+                                resource_cache.request_image(
+                                    request.with_tile(tile.offset),
+                                    gpu_cache,
+                                );
+                                let mut handle = GpuCacheHandle::new();
+                                if let Some(request) = gpu_cache.request(&mut handle) {
+                                    let data = ImageMaskData {
+                                        local_mask_rect: mask.rect,
+                                        local_tile_rect: tile.rect,
+                                    };
+                                    data.write_gpu_blocks(request);
+                                }
+
+                                mask_tiles.push(VisibleMaskImageTile {
+                                    tile_offset: tile.offset,
+                                    handle,
+                                });
+                            }
+                        }
+                        *visible_tiles = Some(mask_tiles);
+                    } else {
+                        if let Some(request) = gpu_cache.request(&mut self.gpu_cache_handle) {
+                            let data = ImageMaskData {
+                                local_mask_rect: mask.rect,
+                                local_tile_rect: mask.rect,
+                            };
+                            data.write_gpu_blocks(request);
+                        }
+                        resource_cache.request_image(request, gpu_cache);
+                    }
                 }
-                ClipItem::BoxShadow(ref info) => {
+            }
+            ClipItem::BoxShadow(ref mut info) => {
+                if let Some(mut request) = gpu_cache.request(&mut self.gpu_cache_handle) {
                     request.push([
                         info.shadow_rect_alloc_size.width,
                         info.shadow_rect_alloc_size.height,
@@ -285,49 +352,25 @@ impl ClipNode {
                     ]);
                     request.push(info.prim_shadow_rect);
                 }
-                ClipItem::Rectangle(rect, mode) => {
-                    let data = ClipData::uniform(rect, 0.0, mode);
-                    data.write(&mut request);
-                }
-                ClipItem::RoundedRectangle(ref rect, ref radius, mode) => {
-                    let data = ClipData::rounded_rect(rect, radius, mode);
-                    data.write(&mut request);
-                }
-            }
-        }
 
-        match self.item {
-            ClipItem::Image(ref mask, ref mut is_valid) => {
-                if let Some(properties) = resource_cache.get_image_properties(mask.image) {
-                    // Clip masks with tiled blob images are not currently supported.
-                    // This results in them being ignored, which is not ideal, but
-                    // is better than crashing in resource cache!
-                    // See https://github.com/servo/webrender/issues/2852.
-                    *is_valid = properties.tiling.is_none();
-                }
-
-                if *is_valid {
-                    resource_cache.request_image(
-                        ImageRequest {
-                            key: mask.image,
-                            rendering: ImageRendering::Auto,
-                            tile: None,
-                        },
-                        gpu_cache,
-                    );
-                }
-            }
-            ClipItem::BoxShadow(ref mut info) => {
                 // Quote from https://drafts.csswg.org/css-backgrounds-3/#shadow-blur
                 // "the image that would be generated by applying to the shadow a
                 // Gaussian blur with a standard deviation equal to half the blur radius."
-                let blur_radius_dp = (info.blur_radius * 0.5 * device_pixel_scale.0).round();
+                let blur_radius_dp = info.blur_radius * 0.5;
+
+                // Create scaling from requested size to cache size.  If the
+                // requested size exceeds the maximum size of the cache, the
+                // box shadow will be scaled down and stretched when rendered
+                // into the document.
+                let world_scale = LayoutToWorldScale::new(1.0);
+                let mut content_scale = world_scale * device_pixel_scale;
+                let max_scale = get_max_scale_for_box_shadow(&info.shadow_rect_alloc_size);
+                content_scale.0 = content_scale.0.min(max_scale.0);
 
                 // Create the cache key for this box-shadow render task.
-                let content_scale = LayoutToWorldScale::new(1.0) * device_pixel_scale;
                 let cache_size = to_cache_size(info.shadow_rect_alloc_size * content_scale);
                 let bs_cache_key = BoxShadowCacheKey {
-                    blur_radius_dp: blur_radius_dp as i32,
+                    blur_radius_dp: (blur_radius_dp * content_scale.0).round() as i32,
                     clip_mode: info.clip_mode,
                     rect_size: (info.shadow_rect_alloc_size * content_scale).round().to_i32(),
                     br_top_left: (info.shadow_radius.top_left * content_scale).round().to_i32(),
@@ -348,8 +391,18 @@ impl ClipNode {
                     data.write(&mut request);
                 }
             }
-            ClipItem::Rectangle(..) |
-            ClipItem::RoundedRectangle(..) => {}
+            ClipItem::Rectangle(rect, mode) => {
+                if let Some(mut request) = gpu_cache.request(&mut self.gpu_cache_handle) {
+                    let data = ClipData::uniform(rect, 0.0, mode);
+                    data.write(&mut request);
+                }
+            }
+            ClipItem::RoundedRectangle(ref rect, ref radius, mode) => {
+                if let Some(mut request) = gpu_cache.request(&mut self.gpu_cache_handle) {
+                    let data = ClipData::rounded_rect(rect, radius, mode);
+                    data.write(&mut request);
+                }
+            }
         }
     }
 }
@@ -568,6 +621,7 @@ impl ClipStore {
                         gpu_cache,
                         resource_cache,
                         device_pixel_scale,
+                        &local_bounding_rect,
                     );
 
                     // Calculate some flags that are required for the segment
@@ -593,7 +647,7 @@ impl ClipStore {
                     needs_mask |= match node.item {
                         ClipItem::Rectangle(_, ClipMode::ClipOut) |
                         ClipItem::RoundedRectangle(..) |
-                        ClipItem::Image(..) |
+                        ClipItem::Image { .. } |
                         ClipItem::BoxShadow(..) => {
                             true
                         }
@@ -631,6 +685,52 @@ impl ClipStore {
             pic_clip_rect,
             needs_mask,
         })
+    }
+
+    /// Walk the clip chain of a primitive, and calculate a minimal
+    /// local clip rect for the primitive.
+    #[allow(dead_code)]
+    pub fn build_local_clip_rect(
+        &self,
+        prim_clip_rect: LayoutRect,
+        spatial_node_index: SpatialNodeIndex,
+        clip_chain_id: ClipChainId,
+        clip_interner: &ClipDataInterner,
+    ) -> LayoutRect {
+        let mut clip_rect = prim_clip_rect;
+        let mut current_clip_chain_id = clip_chain_id;
+
+        // for each clip chain node
+        while current_clip_chain_id != ClipChainId::NONE {
+            let clip_chain_node = &self.clip_chain_nodes[current_clip_chain_id.0 as usize];
+
+            // If the clip chain node and the primitive share a spatial node,
+            // then by definition the clip can't move relative to the primitive,
+            // due to scrolling or transform animation. When that constraint
+            // holds, it's fine to include the local clip rect of this
+            // clip node in the local clip rect of the primitive itself. This
+            // is used to minimize the size of any render target allocations
+            // if this primitive ends up being part of an off-screen surface.
+
+            if clip_chain_node.spatial_node_index == spatial_node_index {
+                let clip_data = &clip_interner[clip_chain_node.handle];
+
+                // TODO(gw): For now, if a clip results in the local
+                //           rect of this primitive becoming zero, just
+                //           ignore and continue (it will be culled later
+                //           on). Technically, we could add a code path
+                //           here to drop the primitive immediately, but
+                //           that complicates some of the existing callers
+                //           of build_local_clip_rect.
+                clip_rect = clip_rect
+                    .intersection(&clip_data.clip_rect)
+                    .unwrap_or(LayoutRect::zero());
+            }
+
+            current_clip_chain_id = clip_chain_node.parent_clip_chain_id;
+        }
+
+        clip_rect
     }
 
     /// Reports the heap usage of this clip store.
@@ -707,6 +807,15 @@ impl ClipRegion<Option<ComplexClipRegion>> {
     }
 }
 
+/// The information about an interned clip item that
+/// is stored and available in the scene builder
+/// thread.
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct ClipItemSceneData {
+    pub clip_rect: LayoutRect,
+}
+
 // The ClipItemKey is a hashable representation of the contents
 // of a clip item. It is used during interning to de-duplicate
 // clip nodes between frames and display lists. This allows quick
@@ -767,15 +876,13 @@ impl ClipItemKey {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum ClipItem {
     Rectangle(LayoutRect, ClipMode),
     RoundedRectangle(LayoutRect, BorderRadius, ClipMode),
-    /// The boolean below is a crash workaround for #2852, will be true unless
-    /// the mask is a tiled blob.
-    Image(ImageMask, bool),
+    Image { mask: ImageMask, visible_tiles: Option<Vec<VisibleMaskImageTile>> },
     BoxShadow(BoxShadowClipSource),
 }
 
@@ -888,8 +995,8 @@ impl ClipItem {
             ClipItem::Rectangle(_, ClipMode::ClipOut) => None,
             ClipItem::RoundedRectangle(clip_rect, _, ClipMode::Clip) => Some(clip_rect),
             ClipItem::RoundedRectangle(_, _, ClipMode::ClipOut) => None,
-            ClipItem::Image(ref mask, ..) if mask.repeat => None,
-            ClipItem::Image(ref mask, ..) => Some(mask.rect),
+            ClipItem::Image { ref mask, .. } if mask.repeat => None,
+            ClipItem::Image { ref mask, .. } => Some(mask.rect),
             ClipItem::BoxShadow(..) => None,
         }
     }
@@ -910,7 +1017,7 @@ impl ClipItem {
             }
             ClipItem::Rectangle(_, ClipMode::ClipOut) |
             ClipItem::RoundedRectangle(_, _, ClipMode::ClipOut) |
-            ClipItem::Image(..) |
+            ClipItem::Image { .. } |
             ClipItem::BoxShadow(..) => {
                 return ClipResult::Partial
             }
@@ -1021,7 +1128,7 @@ impl ClipItem {
                     }
                 }
             }
-            ClipItem::Image(ref mask, ..) => {
+            ClipItem::Image { ref mask, .. } => {
                 if mask.repeat {
                     ClipResult::Partial
                 } else {

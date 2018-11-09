@@ -74,6 +74,7 @@ const TEST_GLOBAL = {
   Ci: {
     nsIHttpChannel: {REFERRER_POLICY_UNSAFE_URL: 5},
     nsITimer: {TYPE_ONE_SHOT: 1},
+    nsIWebProgressListener: {LOCATION_CHANGE_SAME_DOCUMENT: 1},
   },
   Cu: {
     importGlobalProperties() {},
@@ -182,7 +183,7 @@ const TEST_GLOBAL = {
     search: {
       init(cb) { cb(); },
       getVisibleEngines: () => [{identifier: "google"}, {identifier: "bing"}],
-      defaultEngine: {identifier: "google"},
+      defaultEngine: {identifier: "google", searchForm: "https://www.google.com/search?q=&ie=utf-8&oe=utf-8&client=firefox-b"},
       currentEngine: {identifier: "google", searchForm: "https://www.google.com/search?q=&ie=utf-8&oe=utf-8&client=firefox-b"},
     },
     scriptSecurityManager: {

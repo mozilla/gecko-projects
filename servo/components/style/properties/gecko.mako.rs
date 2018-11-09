@@ -368,34 +368,6 @@ def set_gecko_property(ffi_name, expr):
     return "self.gecko.%s = %s;" % (ffi_name, expr)
 %>
 
-<%def name="impl_cbindgen_keyword(ident, gecko_ffi_name)">
-    #[allow(non_snake_case)]
-    #[inline]
-    pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
-        // unsafe: cbindgen ensures the representations match.
-        ${set_gecko_property(gecko_ffi_name, "unsafe { transmute(v) }")}
-    }
-
-    #[allow(non_snake_case)]
-    #[inline]
-    pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
-        // unsafe: cbindgen ensures the representations match.
-        unsafe { transmute(${get_gecko_property(gecko_ffi_name)}) }
-    }
-
-    #[allow(non_snake_case)]
-    #[inline]
-    pub fn copy_${ident}_from(&mut self, other: &Self) {
-        self.gecko.${gecko_ffi_name} = other.gecko.${gecko_ffi_name};
-    }
-
-    #[allow(non_snake_case)]
-    #[inline]
-    pub fn reset_${ident}(&mut self, other: &Self) {
-        self.copy_${ident}_from(other)
-    }
-</%def>
-
 <%def name="impl_keyword_setter(ident, gecko_ffi_name, keyword, cast_type='u8', on_set=None)">
     #[allow(non_snake_case)]
     pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
@@ -589,17 +561,24 @@ def set_gecko_property(ffi_name, expr):
             return SVGLength::ContextValue;
         }
         let length = match self.gecko.${gecko_ffi_name}.as_value() {
-            CoordDataValue::Factor(number) =>
-                SvgLengthOrPercentageOrNumber::Number(number),
-            CoordDataValue::Coord(coord) =>
+            CoordDataValue::Factor(number) => {
+                SvgLengthOrPercentageOrNumber::Number(number)
+            },
+            CoordDataValue::Coord(coord) => {
                 SvgLengthOrPercentageOrNumber::LengthOrPercentage(
-                    LengthOrPercentage::Length(Au(coord).into())),
-            CoordDataValue::Percent(p) =>
+                    LengthOrPercentage::Length(Au(coord).into())
+                )
+            },
+            CoordDataValue::Percent(p) => {
                 SvgLengthOrPercentageOrNumber::LengthOrPercentage(
-                    LengthOrPercentage::Percentage(Percentage(p))),
-            CoordDataValue::Calc(calc) =>
+                    LengthOrPercentage::Percentage(Percentage(p))
+                )
+            },
+            CoordDataValue::Calc(calc) => {
                 SvgLengthOrPercentageOrNumber::LengthOrPercentage(
-                    LengthOrPercentage::Calc(calc.into())),
+                    LengthOrPercentage::Calc(calc.into())
+                )
+            },
             _ => unreachable!("Unexpected coordinate in ${ident}"),
         };
         SVGLength::Length(length.into())
@@ -1425,6 +1404,7 @@ impl Clone for ${style_struct.gecko_struct_name} {
         "length::LengthOrNormal": impl_style_coord,
         "length::NonNegativeLengthOrAuto": impl_style_coord,
         "length::NonNegativeLengthOrPercentageOrNormal": impl_style_coord,
+        "FillRule": impl_simple,
         "FlexBasis": impl_style_coord,
         "Length": impl_absolute_length,
         "LengthOrNormal": impl_style_coord,
@@ -2394,7 +2374,7 @@ fn static_assert() {
     /// from the parent.
     ///
     /// This is a port of Gecko's old ComputeScriptLevelSize function:
-    /// https://searchfox.org/mozilla-central/rev/c05d9d61188d32b8209dfe4295944c0f1e0ce621/layout/style/nsRuleNode.cpp#3103
+    /// https://searchfox.org/mozilla-central/rev/c05d9d61188d32b8/layout/style/nsRuleNode.cpp#3103
     ///
     /// scriptlevel is a property that affects how font-size is inherited. If scriptlevel is
     /// +1, for example, it will inherit as the script size multiplier times
@@ -2855,7 +2835,7 @@ fn static_assert() {
     ${impl_simple_copy('_moz_min_font_size_ratio', 'mMinFontSizeRatio')}
 </%self:impl_trait>
 
-<%def name="impl_copy_animation_or_transition_value(type, ident, gecko_ffi_name)">
+<%def name="impl_copy_animation_or_transition_value(type, ident, gecko_ffi_name, member=None)">
     #[allow(non_snake_case)]
     pub fn copy_${type}_${ident}_from(&mut self, other: &Self) {
         self.gecko.m${type.capitalize()}s.ensure_len(other.gecko.m${type.capitalize()}s.len());
@@ -2868,7 +2848,11 @@ fn static_assert() {
         );
 
         for (ours, others) in iter {
+            % if member:
+            ours.m${gecko_ffi_name}.${member} = others.m${gecko_ffi_name}.${member};
+            % else:
             ours.m${gecko_ffi_name} = others.m${gecko_ffi_name};
+            % endif
         }
     }
 
@@ -2923,14 +2907,14 @@ fn static_assert() {
 
         self.gecko.m${type.capitalize()}TimingFunctionCount = input_len as u32;
         for (gecko, servo) in self.gecko.m${type.capitalize()}s.iter_mut().take(input_len as usize).zip(v) {
-            gecko.mTimingFunction = servo.into();
+            gecko.mTimingFunction.mTiming = servo;
         }
     }
     ${impl_animation_or_transition_count(type, 'timing_function', 'TimingFunction')}
-    ${impl_copy_animation_or_transition_value(type, 'timing_function', 'TimingFunction')}
+    ${impl_copy_animation_or_transition_value(type, 'timing_function', "TimingFunction", "mTiming")}
     pub fn ${type}_timing_function_at(&self, index: usize)
         -> longhands::${type}_timing_function::computed_value::SingleComputedValue {
-        self.gecko.m${type.capitalize()}s[index].mTimingFunction.into()
+        self.gecko.m${type.capitalize()}s[index].mTimingFunction.mTiming
     }
 </%def>
 
@@ -2996,7 +2980,9 @@ fn static_assert() {
             % for value in keyword.gecko_values():
                 structs::${keyword.gecko_constant(value)} => Keyword::${to_camel_case(value)},
             % endfor
+            % if keyword.gecko_inexhaustive:
             _ => panic!("Found unexpected value for animation-${ident}"),
+            % endif
         }
     }
     ${impl_animation_count(ident, gecko_ffi_name)}
@@ -3053,9 +3039,8 @@ fn static_assert() {
 <%self:impl_trait style_struct_name="Box" skip_longhands="${skip_box_longhands}">
     #[inline]
     pub fn set_display(&mut self, v: longhands::display::computed_value::T) {
-        // unsafe: cbindgen ensures the representation is the same.
-        self.gecko.mDisplay = unsafe { transmute(v) };
-        self.gecko.mOriginalDisplay = unsafe { transmute(v) };
+        self.gecko.mDisplay = v;
+        self.gecko.mOriginalDisplay = v;
     }
 
     #[inline]
@@ -3075,17 +3060,15 @@ fn static_assert() {
         v: longhands::display::computed_value::T,
         _is_item_or_root: bool
     ) {
-        // unsafe: cbindgen ensures the representation is the same.
-        self.gecko.mDisplay = unsafe { transmute(v) };
+        self.gecko.mDisplay = v;
     }
 
     #[inline]
     pub fn clone_display(&self) -> longhands::display::computed_value::T {
-        // unsafe: cbindgen ensures the representation is the same.
-        unsafe { transmute(self.gecko.mDisplay) }
+        self.gecko.mDisplay
     }
 
-    ${impl_cbindgen_keyword('_moz_appearance', 'mAppearance')}
+    ${impl_simple('_moz_appearance', 'mAppearance')}
 
     <% float_keyword = Keyword("float", "Left Right None", gecko_enum_prefix="StyleFloat") %>
     ${impl_keyword('float', 'mFloat', float_keyword)}
@@ -4197,23 +4180,11 @@ fn static_assert() {
     }
 
     pub fn set_quotes(&mut self, other: longhands::quotes::computed_value::T) {
-        use gecko_bindings::bindings::Gecko_NewStyleQuoteValues;
-        use gecko_bindings::sugar::refptr::UniqueRefPtr;
-
-        let mut refptr = unsafe {
-            UniqueRefPtr::from_addrefed(Gecko_NewStyleQuoteValues(other.0.len() as u32))
-        };
-
-        for (servo, gecko) in other.0.into_iter().zip(refptr.mQuotePairs.iter_mut()) {
-            gecko.first.assign_str(&servo.0);
-            gecko.second.assign_str(&servo.1);
-        }
-
-        self.gecko.mQuotes.set_move(refptr.get())
+        self.gecko.mQuotes.set_arc(other.0.clone());
     }
 
     pub fn copy_quotes_from(&mut self, other: &Self) {
-        unsafe { self.gecko.mQuotes.set(&other.gecko.mQuotes); }
+        self.set_quotes(other.clone_quotes());
     }
 
     pub fn reset_quotes(&mut self, other: &Self) {
@@ -4221,17 +4192,13 @@ fn static_assert() {
     }
 
     pub fn clone_quotes(&self) -> longhands::quotes::computed_value::T {
-        unsafe {
-            let ref gecko_quote_values = *self.gecko.mQuotes.mRawPtr;
-            longhands::quotes::computed_value::T(
-                gecko_quote_values.mQuotePairs.iter().map(|gecko_pair| {
-                    (
-                        gecko_pair.first.to_string().into_boxed_str(),
-                        gecko_pair.second.to_string().into_boxed_str(),
-                    )
-                }).collect::<Vec<_>>().into_boxed_slice()
-            )
-        }
+        use gecko_bindings::sugar::ownership::HasArcFFI;
+        use values::computed::QuotePair;
+
+        let quote_pairs = unsafe { &*self.gecko.mQuotes.mRawPtr };
+        longhands::quotes::computed_value::T(
+            Box::<[QuotePair]>::as_arc(&quote_pairs).clone_arc()
+        )
     }
 
     #[allow(non_snake_case)]
@@ -4971,15 +4938,10 @@ fn set_style_svg_path(
         &mut shape_source.__bindgen_anon_1.mSVGPath.as_mut().mPtr.as_mut().unwrap()
     };
 
-    let iter = servo_path.commands().iter().map(|command| {
-        // unsafe: cbindgen ensures the representation is the same.
-        unsafe { transmute(*command) }
-    });
-    gecko_path.mPath.assign_from_iter_pod(iter);
+    gecko_path.mPath.assign_from_iter_pod(servo_path.commands().iter().cloned());
 
     // Setup fill-rule.
-    // unsafe: cbindgen ensures the representation is the same.
-    gecko_path.mFillRule = unsafe { transmute(fill) };
+    gecko_path.mFillRule = fill;
 }
 
 <%def name="impl_shape_source(ident, gecko_ffi_name)">
@@ -5084,8 +5046,7 @@ fn set_style_svg_path(
                             coord.0.to_gecko_style_coord(&mut shape.mCoordinates[2 * i]);
                             coord.1.to_gecko_style_coord(&mut shape.mCoordinates[2 * i + 1]);
                         }
-                        // unsafe: cbindgen ensures the representation is the same.
-                        shape.mFillRule = unsafe { transmute(poly.fill) };
+                        shape.mFillRule = poly.fill;
                     }
                 }
 

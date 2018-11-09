@@ -14,20 +14,47 @@ const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 class SidebarItem extends PureComponent {
   static get propTypes() {
     return {
-      children: PropTypes.arrayOf(PropTypes.element).isRequired,
+      children: PropTypes.node.isRequired,
       className: PropTypes.string,
       isSelected: PropTypes.bool.isRequired,
       selectable: PropTypes.bool.isRequired,
-      onSelect: PropTypes.func.isRequired,
+      // only require `onSelect` function when `selectable` is true
+      onSelect: (props, propName, componentName) => {
+        const isFn = props[propName] && typeof props[propName] === "function";
+        if (props.selectable && !isFn) {
+          return new Error(`Missing ${propName} function supplied to ${componentName}. ` +
+            "(you must set this prop when selectable is true)");
+        }
+        return null; // for eslint (consistent-return rule)
+      },
     };
   }
 
-  onItemClick() {
+  // temporary handler until a router is in place
+  onItemClick(evt) {
+    evt.preventDefault();
     this.props.onSelect();
   }
 
+  renderContent() {
+    const { children, selectable } = this.props;
+
+    if (selectable) {
+      return dom.a(
+        {
+          className: "sidebar-item__link js-sidebar-link",
+          href: "#", // to be changed with a path when a router is in place
+          onClick: (evt) => this.onItemClick(evt),
+        },
+        children
+      );
+    }
+
+    return children;
+  }
+
   render() {
-    const {children, className, isSelected, selectable } = this.props;
+    const {className, isSelected, selectable } = this.props;
 
     return dom.li(
       {
@@ -38,9 +65,8 @@ class SidebarItem extends PureComponent {
                       ""
                    ) +
                    (selectable ? " sidebar-item--selectable" : ""),
-        onClick: selectable ? () => this.onItemClick() : null,
       },
-      children
+      this.renderContent()
     );
   }
 }

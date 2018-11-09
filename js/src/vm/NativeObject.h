@@ -1615,12 +1615,20 @@ NativeGetElement(JSContext* cx, HandleNativeObject obj, HandleValue reciever, in
                  MutableHandleValue vp);
 
 bool
+GetSparseElementHelper(JSContext* cx, HandleArrayObject obj, int32_t int_id,
+                       MutableHandleValue result);
+
+bool
 SetPropertyByDefining(JSContext* cx, HandleId id, HandleValue v, HandleValue receiver,
                       ObjectOpResult& result);
 
 bool
 SetPropertyOnProto(JSContext* cx, HandleObject obj, HandleId id, HandleValue v,
                    HandleValue receiver, ObjectOpResult& result);
+
+bool
+AddOrUpdateSparseElementHelper(JSContext* cx, HandleArrayObject obj, int32_t int_id,
+                               HandleValue v, bool strict);
 
 /*
  * Indicates whether an assignment operation is qualified (`x.y = 0`) or

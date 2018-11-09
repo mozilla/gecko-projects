@@ -55,7 +55,6 @@ async function test() {
     fullDescription: "Longer description",
     type: "extension",
     iconURL: "chrome://foo/skin/icon.png",
-    icon64URL: "chrome://foo/skin/icon64.png",
     contributionURL: "http://foo.com",
     contributionAmount: "$0.99",
     sourceURI: Services.io.newURI("http://example.com/foo"),
@@ -514,7 +513,6 @@ add_test(function() {
       fullDescription: "Longer description replacement",
       type: "extension",
       iconURL: "chrome://foo/skin/icon.png",
-      icon64URL: "chrome://foo/skin/icon264.png",
       sourceURI: Services.io.newURI("http://example.com/foo"),
       averageRating: 2,
       optionsURL: "chrome://foo/content/options.xul",
@@ -525,7 +523,7 @@ add_test(function() {
     is(get("detail-name").textContent, "Test add-on replacement", "Name should be correct");
     is_element_visible(get("detail-version"), "Version should not be hidden");
     is(get("detail-version").value, "2.5", "Version should be correct");
-    is(get("detail-icon").src, "chrome://foo/skin/icon264.png", "Icon should be correct");
+    is(get("detail-icon").src, "chrome://foo/skin/icon.png", "Icon should be correct");
     is_element_hidden(get("detail-creator"), "Creator should be hidden");
     is(get("detail-desc").textContent, "Short description replacement", "Description should be correct");
     is(get("detail-fulldesc").textContent, "Longer description replacement", "Full description should be correct");

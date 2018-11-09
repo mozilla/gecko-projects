@@ -8,20 +8,20 @@
 // element is selected. Some items may be clamped, others not, so not all sections are
 // visible at all times.
 
-const TEST_URI = URL_ROOT + "doc_flexbox_simple.html";
+const TEST_URI = URL_ROOT + "doc_flexbox_specific_cases.html";
 
 const TEST_DATA = [{
   selector: ".shrinking .item",
-  expectedSections: ["Base Size", "Flexibility", "Final Size"]
+  expectedSections: ["Base Size", "Flexibility", "Final Size"],
 }, {
   selector: ".shrinking.is-clamped .item",
-  expectedSections: ["Base Size", "Flexibility", "Minimum Size", "Final Size"]
+  expectedSections: ["Base Size", "Flexibility", "Minimum Size", "Final Size"],
 }, {
   selector: ".growing .item",
-  expectedSections: ["Base Size", "Flexibility", "Final Size"]
+  expectedSections: ["Base Size", "Flexibility", "Final Size"],
 }, {
   selector: ".growing.is-clamped .item",
-  expectedSections: ["Base Size", "Flexibility", "Maximum Size", "Final Size"]
+  expectedSections: ["Base Size", "Flexibility", "Maximum Size", "Final Size"],
 }];
 
 add_task(async function() {
@@ -35,7 +35,8 @@ add_task(async function() {
 
     is(sections.length, expectedSections.length, "Correct number of sections found");
     expectedSections.forEach((expectedSection, i) => {
-      is(sections[i], expectedSection, `The ${expectedSection} section was found`);
+      ok(sections[i].includes(expectedSection),
+         `The ${expectedSection} section was found`);
     });
   }
 });

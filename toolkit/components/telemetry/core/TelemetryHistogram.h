@@ -45,8 +45,8 @@ void Accumulate(mozilla::Telemetry::HistogramID aID, const nsCString& aKey,
                                             uint32_t aSample);
 void Accumulate(mozilla::Telemetry::HistogramID aID, const nsCString& aKey,
                                           const nsTArray<uint32_t>& aSamples);
-void Accumulate(const char* name, uint32_t sample);
-void Accumulate(const char* name, const nsCString& key, uint32_t sample);
+bool Accumulate(const char* name, uint32_t sample);
+bool Accumulate(const char* name, const nsCString& key, uint32_t sample);
 
 void AccumulateCategorical(mozilla::Telemetry::HistogramID aId, const nsCString& aLabel);
 void AccumulateCategorical(mozilla::Telemetry::HistogramID aId, const nsTArray<nsCString>& aLabels);
@@ -69,11 +69,11 @@ GetHistogramName(mozilla::Telemetry::HistogramID id);
 
 nsresult
 CreateHistogramSnapshots(JSContext* aCx, JS::MutableHandleValue aResult, unsigned int aDataset,
-                         bool aClearSubsession);
+                         bool aClearSubsession, bool aFilterTest=false);
 
 nsresult
 GetKeyedHistogramSnapshots(JSContext *aCx, JS::MutableHandleValue aResult, unsigned int aDataset,
-                           bool aClearSubsession);
+                           bool aClearSubsession, bool aFilterTest=false);
 
 size_t
 GetHistogramSizesOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);

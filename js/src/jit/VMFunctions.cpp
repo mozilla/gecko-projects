@@ -819,12 +819,12 @@ WrapObjectPure(JSContext* cx, JSObject* obj)
     return nullptr;
 }
 
-bool
-DebugPrologue(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool* mustReturn)
+static bool
+HandlePrologueResumeMode(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool* mustReturn,
+                         ResumeMode resumeMode)
 {
     *mustReturn = false;
-
-    switch (Debugger::onEnterFrame(cx, frame)) {
+    switch (resumeMode) {
       case ResumeMode::Continue:
         return true;
 
@@ -842,6 +842,13 @@ DebugPrologue(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool* mustRet
       default:
         MOZ_CRASH("bad Debugger::onEnterFrame resume mode");
     }
+}
+
+bool
+DebugPrologue(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool* mustReturn)
+{
+    ResumeMode resumeMode = Debugger::onEnterFrame(cx, frame);
+    return HandlePrologueResumeMode(cx, frame, pc, mustReturn, resumeMode);
 }
 
 bool
@@ -958,8 +965,6 @@ InterpretResume(JSContext* cx, HandleObject obj, HandleValue val, HandleProperty
 bool
 DebugAfterYield(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool* mustReturn)
 {
-    *mustReturn = false;
-
     // The BaselineFrame has just been constructed by JSOP_RESUME in the
     // caller. We need to set its debuggee flag as necessary.
     //
@@ -967,8 +972,11 @@ DebugAfterYield(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool* mustR
     // we may already have done this work. Don't fire onEnterFrame again.
     if (frame->script()->isDebuggee() && !frame->isDebuggee()) {
         frame->setIsDebuggee();
-        return DebugPrologue(cx, frame, pc, mustReturn);
+        ResumeMode resumeMode = Debugger::onResumeFrame(cx, frame);
+        return HandlePrologueResumeMode(cx, frame, pc, mustReturn, resumeMode);
     }
+
+    *mustReturn = false;
     return true;
 }
 
@@ -980,7 +988,7 @@ GeneratorThrowOrReturn(JSContext* cx, BaselineFrame* frame, Handle<GeneratorObje
     // work. This function always returns false, so we're guaranteed to enter
     // the exception handler where we will clear the pc.
     JSScript* script = frame->script();
-    uint32_t offset = script->yieldAndAwaitOffsets()[genObj->yieldAndAwaitIndex()];
+    uint32_t offset = script->resumeOffsets()[genObj->resumeIndex()];
     jsbytecode* pc = script->offsetToPC(offset);
     frame->setOverridePc(pc);
 
@@ -1108,7 +1116,7 @@ HandleDebugTrap(JSContext* cx, BaselineFrame* frame, uint8_t* retAddr, bool* mus
     *mustReturn = false;
 
     RootedScript script(cx, frame->script());
-    jsbytecode* pc = script->baselineScript()->icEntryFromReturnAddress(retAddr).pc(script);
+    jsbytecode* pc = script->baselineScript()->retAddrEntryFromReturnAddress(retAddr).pc(script);
 
     if (*pc == JSOP_DEBUGAFTERYIELD) {
         // JSOP_DEBUGAFTERYIELD will set the frame's debuggee flag and call the
@@ -2071,6 +2079,16 @@ typedef bool (*NativeGetElementFn)(JSContext*, HandleNativeObject, HandleValue, 
                                    MutableHandleValue);
 const VMFunction NativeGetElementInfo =
     FunctionInfo<NativeGetElementFn>(NativeGetElement, "NativeGetProperty");
+
+typedef bool (*AddOrUpdateSparseElementHelperFn)(JSContext* cx, HandleArrayObject obj,
+                                                 int32_t int_id, HandleValue v, bool strict);
+const VMFunction AddOrUpdateSparseElementHelperInfo =
+    FunctionInfo<AddOrUpdateSparseElementHelperFn>(AddOrUpdateSparseElementHelper, "AddOrUpdateSparseElementHelper");
+
+typedef bool (*GetSparseElementHelperFn)(JSContext* cx, HandleArrayObject obj,
+                                         int32_t int_id, MutableHandleValue result);
+const VMFunction GetSparseElementHelperInfo =
+    FunctionInfo<GetSparseElementHelperFn>(GetSparseElementHelper, "getSparseElementHelper");
 
 } // namespace jit
 } // namespace js

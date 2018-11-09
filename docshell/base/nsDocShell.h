@@ -182,8 +182,9 @@ public:
   // nsIWebProgressListener has methods with identical names...
   NS_FORWARD_NSISECURITYEVENTSINK(nsDocLoader::)
 
-  nsDocShell();
-  virtual nsresult Init() override;
+  // Create a new nsDocShell object, initializing it.
+  static already_AddRefed<nsDocShell>
+  Create(mozilla::dom::BrowsingContext* aBrowsingContext);
 
   NS_IMETHOD Stop() override
   {
@@ -380,13 +381,16 @@ public:
   // shift while triggering reload)
   bool IsForceReloading();
 
-  already_AddRefed<mozilla::dom::BrowsingContext>
-  GetBrowsingContext() const;
+  /**
+   * Native getter for a DocShell's BrowsingContext.
+   */
+  mozilla::dom::BrowsingContext* GetBrowsingContext() const;
 
 private: // member functions
   friend class nsDSURIContentListener;
   friend class FramingChecker;
   friend class OnLinkClickEvent;
+  friend class nsIDocShell;
 
   // It is necessary to allow adding a timeline marker wherever a docshell
   // instance is available. This operation happens frequently and needs to
@@ -404,6 +408,8 @@ private: // member functions
     nsDocShell*, UniquePtr<AbstractTimelineMarker>&&);
   friend void mozilla::TimelineConsumers::PopMarkers(nsDocShell*,
     JSContext*, nsTArray<dom::ProfileTimelineMarker>&);
+
+  nsDocShell();
 
   // Security checks to prevent frameset spoofing. See comments at
   // implementation sites.
@@ -534,7 +540,7 @@ private: // member functions
                      uint32_t aReferrerPolicy,
                      nsIPrincipal* aTriggeringPrincipal,
                      nsIPrincipal* aPrincipalToInherit,
-                     const char* aTypeHint,
+                     const nsACString& aTypeHint,
                      const nsAString& aFileName,
                      nsIInputStream* aPostData,
                      nsIInputStream* aHeadersData,
@@ -905,6 +911,14 @@ private: // member functions
     return mCSSErrorReportingEnabled;
   }
 
+  // Handles retrieval of subframe session history for nsDocShell::LoadURI. If a
+  // load is requested in a subframe of the current DocShell, the subframe
+  // loadType may need to reflect the loadType of the parent document, or in
+  // some cases (like reloads), the history load may need to be cancelled. See
+  // function comments for in-depth logic descriptions.
+  void
+  MaybeHandleSubframeHistory(nsDocShellLoadState* aLoadState);
+
 private: // data members
   static nsIURIFixup* sURIFixup;
 
@@ -1124,6 +1138,7 @@ private: // data members
   bool mAllowContentRetargeting : 1;
   bool mAllowContentRetargetingOnChildren : 1;
   bool mUseErrorPages : 1;
+  bool mUseStrictSecurityChecks : 1;
   bool mObserveErrorPages : 1;
   bool mCSSErrorReportingEnabled : 1;
   bool mAllowAuth : 1;

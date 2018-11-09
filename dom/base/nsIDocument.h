@@ -31,13 +31,13 @@
 #include "nsIURI.h"                      // for use in inline functions
 #include "nsIUUIDGenerator.h"
 #include "nsIWebProgressListener.h"      // for nsIWebProgressListener
+#include "nsIWeakReferenceUtils.h"       // for nsWeakPtr
 #include "nsPIDOMWindow.h"               // for use in inline functions
 #include "nsPropertyTable.h"             // for member
 #include "nsStringFwd.h"
 #include "nsTHashtable.h"                // for member
 #include "nsURIHashKey.h"
 #include "mozilla/net/ReferrerPolicy.h"  // for member
-#include "nsWeakReference.h"
 #include "mozilla/UseCounter.h"
 #include "mozilla/WeakPtr.h"
 #include "Units.h"
@@ -149,6 +149,7 @@ class AnonymousContent;
 class Attr;
 class BoxObject;
 class XULBroadcastManager;
+class XULPersist;
 class ClientInfo;
 class ClientState;
 class CDATASection;
@@ -560,7 +561,7 @@ public:
    * @param aBoundTitleElement true if an HTML or SVG <title> element
    * has just been bound to the document.
    */
-  void NotifyPossibleTitleChange(bool aBoundTitleElement);
+  virtual void NotifyPossibleTitleChange(bool aBoundTitleElement);
 
   /**
    * Return the URI for the document. May return null.
@@ -1115,15 +1116,19 @@ public:
    */
   bool GetHasTrackingContentLoaded()
   {
-    return mHasTrackingContentLoaded;
+    return mContentBlockingLog.HasBlockedAnyOfType(
+        nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT);
   }
 
   /**
    * Set the tracking content loaded flag for this document.
    */
-  void SetHasTrackingContentLoaded(bool aHasTrackingContentLoaded)
+  void SetHasTrackingContentLoaded(bool aHasTrackingContentLoaded,
+                                   const nsAString& aOriginBlocked)
   {
-    mHasTrackingContentLoaded = aHasTrackingContentLoaded;
+    RecordContentBlockingLog(aOriginBlocked,
+                             nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT,
+                             aHasTrackingContentLoaded);
   }
 
   /**
@@ -4213,9 +4218,6 @@ protected:
   // True if a document load has a CSP with unsafe-inline attached.
   bool mHasUnsafeInlineCSP : 1;
 
-  // True if a document has loaded Tracking Content
-  bool mHasTrackingContentLoaded : 1;
-
   // True if DisallowBFCaching has been called on this document.
   bool mBFCacheDisallowed : 1;
 
@@ -4318,9 +4320,6 @@ protected:
 
   // These member variables cache information about the viewport so we don't
   // have to recalculate it each time.
-  bool mValidWidth: 1;
-  bool mValidHeight: 1;
-  bool mAutoSize: 1;
   bool mAllowZoom: 1;
   bool mValidScaleFloat: 1;
   bool mValidMaxScale: 1;
@@ -4758,6 +4757,7 @@ protected:
   nsCOMPtr<nsIDOMXULCommandDispatcher> mCommandDispatcher; // [OWNER] of the focus tracker
 
   RefPtr<mozilla::dom::XULBroadcastManager> mXULBroadcastManager;
+  RefPtr<mozilla::dom::XULPersist> mXULPersist;
 
   // At the moment, trackers might be blocked by Tracking Protection or FastBlock.
   // In order to know the numbers of trackers detected and blocked, we add
@@ -4771,6 +4771,9 @@ protected:
   // document lightweight theme for use with :-moz-lwtheme, :-moz-lwtheme-brighttext
   // and :-moz-lwtheme-darktext
   DocumentTheme                         mDocLWTheme;
+
+  // Pres shell resolution saved before entering fullscreen mode.
+  float mSavedResolution;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIDocument, NS_IDOCUMENT_IID)

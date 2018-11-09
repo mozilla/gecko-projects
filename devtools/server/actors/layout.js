@@ -100,10 +100,13 @@ const FlexboxActor = ActorClassWithSpec(flexboxSpec, {
     }
 
     const flexItemActors = [];
+    const { crossAxisDirection, mainAxisDirection } = flex;
 
     for (const line of flex.getLines()) {
       for (const item of line.getItems()) {
         flexItemActors.push(new FlexItemActor(this, item.node, {
+          crossAxisDirection,
+          mainAxisDirection,
           crossMaxSize: item.crossMaxSize,
           crossMinSize: item.crossMinSize,
           mainBaseSize: item.mainBaseSize,
@@ -111,6 +114,7 @@ const FlexboxActor = ActorClassWithSpec(flexboxSpec, {
           mainMaxSize: item.mainMaxSize,
           mainMinSize: item.mainMinSize,
           lineGrowthState: line.growthState,
+          clampState: item.clampState,
         }));
       }
     }
@@ -154,8 +158,8 @@ const FlexItemActor = ActorClassWithSpec(flexItemSpec, {
       return this.actorID;
     }
 
-    const { flexDirection } = CssLogic.getComputedStyle(this.containerEl);
-    const dimension = flexDirection.startsWith("row") ? "width" : "height";
+    const { mainAxisDirection } = this.flexItemSizing;
+    const dimension = mainAxisDirection.startsWith("horizontal") ? "width" : "height";
 
     // Find the authored sizing properties for this item.
     const properties = {
@@ -167,7 +171,9 @@ const FlexItemActor = ActorClassWithSpec(flexItemSpec, {
       [dimension]: "",
     };
 
-    if (this.element.nodeType === this.element.ELEMENT_NODE) {
+    const isElementNode = this.element.nodeType === this.element.ELEMENT_NODE;
+
+    if (isElementNode) {
       for (const name in properties) {
         let value = "";
         // Look first on the element style.
@@ -191,12 +197,20 @@ const FlexItemActor = ActorClassWithSpec(flexItemSpec, {
       }
     }
 
+    // Also find some computed sizing properties that will be useful for this item.
+    const { flexGrow, flexShrink } = isElementNode
+      ? CssLogic.getComputedStyle(this.element)
+      : { flexGrow: null, flexShrink: null };
+    const computedStyle = { flexGrow, flexShrink };
+
     const form = {
       actor: this.actorID,
       // The flex item sizing data.
       flexItemSizing: this.flexItemSizing,
       // The authored style properties of the flex item.
       properties,
+      // The computed style properties of the flex item.
+      computedStyle,
     };
 
     // If the WalkerActor already knows the flex item element, then also return its

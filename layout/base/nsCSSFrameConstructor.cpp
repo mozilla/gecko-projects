@@ -1795,8 +1795,10 @@ nsCSSFrameConstructor::CreateGeneratedContentItem(nsFrameConstructorState& aStat
              aPseudoElement == CSSPseudoElementType::after,
              "unexpected aPseudoElement");
 
-  if (aParentFrame && aParentFrame->IsHTMLVideoFrame()) {
-    // Video frames may not be leafs when backed by an UA widget, but we still don't want to expose generated content.
+  if (aParentFrame &&
+      (aParentFrame->IsHTMLVideoFrame() || aParentFrame->IsDateTimeControlFrame())) {
+    // Video frames and date time control frames may not be leafs when backed by an UA widget,
+    // but we still don't want to expose generated content.
     MOZ_ASSERT(aOriginatingElement.GetShadowRoot()->IsUAWidget());
     return;
   }
@@ -8326,9 +8328,6 @@ nsCSSFrameConstructor::CreateContinuingFrame(nsPresContext*    aPresContext,
   // Use the frame type to determine what type of frame to create
   LayoutFrameType frameType = aFrame->Type();
   nsIContent* content = aFrame->GetContent();
-
-  NS_ASSERTION(aFrame->GetSplittableType() != NS_FRAME_NOT_SPLITTABLE,
-               "why CreateContinuingFrame for a non-splittable frame?");
 
   if (LayoutFrameType::Text == frameType) {
     newFrame = NS_NewContinuingTextFrame(shell, computedStyle);

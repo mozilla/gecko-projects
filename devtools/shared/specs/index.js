@@ -59,6 +59,11 @@ const Types = exports.__TypesForTests = [
     front: "devtools/shared/fronts/canvas",
   },
   {
+    types: ["changes"],
+    spec: "devtools/shared/specs/changes",
+    front: "devtools/shared/fronts/changes",
+  },
+  {
     types: ["cssProperties"],
     spec: "devtools/shared/specs/css-properties",
     front: "devtools/shared/fronts/css-properties",
@@ -245,6 +250,11 @@ const Types = exports.__TypesForTests = [
     front: null,
   },
   {
+    types: ["contentProcessTarget"],
+    spec: "devtools/shared/specs/targets/content-process",
+    front: null,
+  },
+  {
     types: ["frameTarget"],
     spec: "devtools/shared/specs/targets/frame",
     front: null,
@@ -263,11 +273,6 @@ const Types = exports.__TypesForTests = [
     types: ["workerTarget"],
     spec: "devtools/shared/specs/targets/worker",
     front: null,
-  },
-  {
-    types: ["timeline"],
-    spec: "devtools/shared/specs/timeline",
-    front: "devtools/shared/fronts/timeline",
   },
   {
     types: ["audionode", "webaudio"],

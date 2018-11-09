@@ -266,74 +266,6 @@ browser.engagement.navigation:
     record_in_processes:
       - 'main'
 
-# The following section contains (RSS/Atom) feed usage
-browser.feeds:
-  preview_loaded:
-    bug_numbers:
-      - 1350349
-    description: >
-      The number of times a feed preview page is loaded.
-    expires: "65"
-    kind: uint
-    notification_emails:
-      - gijs@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - 'main'
-      - 'content'
-
-  feed_subscribed:
-    bug_numbers:
-      - 1350349
-    description: >
-      The number of times a user subscribes to a feed.
-    expires: "65"
-    kind: uint
-    notification_emails:
-      - gijs@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - 'main'
-
-  livebookmark_opened:
-    bug_numbers:
-      - 1350349
-    description: >
-      The number of times a user opens a live bookmark dropdown.
-    expires: "65"
-    kind: uint
-    notification_emails:
-      - gijs@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - 'main'
-
-  livebookmark_item_opened:
-    bug_numbers:
-      - 1350349
-    description: >
-      The number of times a user opens an item that is part of a live bookmark.
-    expires: "65"
-    kind: uint
-    notification_emails:
-      - gijs@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - 'main'
-
-  livebookmark_count:
-    bug_numbers:
-      - 1350349
-    description: >
-      The number of live bookmark folders the user has (ie not individual items).
-    expires: "65"
-    kind: uint
-    notification_emails:
-      - gijs@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - 'main'
-
 # The following section contains the browser usage scalars.
 browser.usage:
   graphite:
@@ -510,34 +442,6 @@ security:
       - main
 
 contentblocking:
-  enabled:
-    bug_numbers:
-      - 1484251
-    description: >
-      Whether content blocking was enabled at startup.
-    expires: never
-    kind: boolean
-    notification_emails:
-      - jhofmann@mozilla.com
-      - pdol@mozilla.com
-      - seceng-telemetry@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - main
-  fastblock_enabled:
-    bug_numbers:
-      - 1484251
-    description: >
-      Whether FastBlock was enabled at startup.
-    expires: never
-    kind: boolean
-    notification_emails:
-      - jhofmann@mozilla.com
-      - pdol@mozilla.com
-      - seceng-telemetry@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - main
   exceptions:
     bug_numbers:
       - 1484251
@@ -1366,12 +1270,13 @@ devtools.tool:
   registered:
     bug_numbers:
       - 1447302
+      - 1503568
     description: >
       Recorded on enable tool checkbox check/uncheck in Developer Tools options
       panel. Boolean stating if the tool was enabled or disabled by the user.
       Keyed by tool id. Current default tools with their id's are defined in
       https://dxr.mozilla.org/mozilla-central/source/devtools/client/definitions.js
-    expires: "65"
+    expires: "70"
     kind: boolean
     keyed: true
     notification_emails:
@@ -1385,10 +1290,11 @@ devtools.accessibility:
   node_inspected_count:
     bug_numbers:
       - 1447302
+      - 1503568
     description: >
       Number of times a DOM node was inspected from within the Accessibility
       tool.
-    expires: "65"
+    expires: "70"
     kind: uint
     notification_emails:
       - dev-developer-tools@lists.mozilla.org
@@ -1400,9 +1306,10 @@ devtools.accessibility:
   opened_count:
     bug_numbers:
       - 1447302
+      - 1503568
     description: >
       Number of times the DevTools Accessibility tool has been opened.
-    expires: "65"
+    expires: "70"
     kind: uint
     notification_emails:
       - dev-developer-tools@lists.mozilla.org
@@ -1414,10 +1321,11 @@ devtools.accessibility:
   picker_used_count:
     bug_numbers:
       - 1447302
+      - 1503568
     description: >
       Number of times the picker tool has been used in DevTools Accessibility
       panel.
-    expires: "65"
+    expires: "70"
     kind: uint
     notification_emails:
       - dev-developer-tools@lists.mozilla.org
@@ -1429,11 +1337,12 @@ devtools.accessibility:
   select_accessible_for_node:
     bug_numbers:
       - 1447302
+      - 1503568
     description: >
       Number of times an accessible object was inspected from outside the
       Accessibility tool (navigation to Accessibility panel). Keyed by the
       source of user action (inspector context menu, browser context menu, etc).
-    expires: "65"
+    expires: "70"
     kind: uint
     keyed: true
     notification_emails:
@@ -1446,10 +1355,11 @@ devtools.accessibility:
   service_enabled_count:
     bug_numbers:
       - 1447302
+      - 1503568
     description: >
       Number of times platform accessibility has been enabled in DevTools
       Accessibility panel.
-    expires: "65"
+    expires: "70"
     kind: uint
     notification_emails:
       - dev-developer-tools@lists.mozilla.org
@@ -1708,6 +1618,20 @@ telemetry:
     record_in_processes:
       - 'main'
 
+  keyed_scalars_exceed_limit:
+    bug_numbers:
+      - 1451813
+    description: >
+      The number of times keyed scalars exceeded the number of keys limit, keyed by scalar name.
+    expires: "never"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - chutten@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
 telemetry.discarded:
   accumulations:
     bug_numbers:
@@ -1803,53 +1727,6 @@ gfx.omtp:
       - gfx-telemetry-alerts@mozilla.com
       - rhunt@mozilla.com
     record_in_processes:
-      - 'content'
-
-images.webp:
-  probe_observed:
-    bug_numbers:
-      - 1472145
-    description: >
-      Whether we received a probe detecting our WebP image support.
-    kind: boolean
-    expires: "65"
-    notification_emails:
-      - gfx-telemetry-alerts@mozilla.com
-      - aosmond@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - 'main'
-      - 'content'
-
-  content_observed:
-    bug_numbers:
-      - 1472145
-    description: >
-      Whether we received a request to decode a WebP image, excluding probes.
-    kind: boolean
-    expires: "65"
-    notification_emails:
-      - gfx-telemetry-alerts@mozilla.com
-      - aosmond@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - 'main'
-      - 'content'
-
-  content_frequency:
-    bug_numbers:
-      - 1472145
-    description: >
-      How many image requests are WebP images, excluding probes.
-    kind: uint
-    keyed: true
-    expires: "65"
-    notification_emails:
-      - gfx-telemetry-alerts@mozilla.com
-      - aosmond@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - 'main'
       - 'content'
 
 # The following section contains the form autofill related scalars.
@@ -2289,6 +2166,25 @@ resistfingerprinting:
     record_in_processes:
       - 'main'
 
+update:
+  binarytransparencyresult:
+    bug_numbers:
+      - 1501889
+    description: >
+      If the binary transparency information for an update does not verify
+      successfully, this probe will contain an error code from
+      toolkit/mozapps/update/common/errors.h indicating why.
+    expires: "73"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - application-update-telemetry-alerts@mozilla.com
+      - seceng-telemetry@mozilla.com
+      - dkeeler@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+
 # The following section is for probes testing the Telemetry system. They will not be
 # submitted in pings and are only used for testing.
 telemetry.test:
@@ -2575,6 +2471,49 @@ telemetry.test:
     products:
       - fennec
       - geckoview
+
+  main_only:
+    bug_numbers:
+      - 1498164
+    description: >
+      This is a test uint type with only the main store.
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'main'
+    record_into_store:
+      - 'main'
+
+  sync_only:
+    bug_numbers:
+      - 1498164
+    description: >
+      This is a test uint type with only the sync store.
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'main'
+    record_into_store:
+      - 'sync'
+
+  multiple_stores:
+    bug_numbers:
+      - 1498164
+    description: >
+      This is a test uint type with multiple stores.
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'main'
+    record_into_store:
+      - 'main'
+      - 'sync'
 
 # NOTE: Please don't add new definitions below this point. Consider adding
 # them earlier in the file and leave the telemetry.test category as the last

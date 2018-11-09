@@ -63,7 +63,6 @@
 #include "mozilla/layers/RemoteContentController.h"
 #include "mozilla/layers/WebRenderBridgeParent.h"
 #include "mozilla/layers/AsyncImagePipelineManager.h"
-#include "mozilla/layout/RenderFrameParent.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/media/MediaSystemResourceService.h" // for MediaSystemResourceService
 #include "mozilla/mozalloc.h"           // for operator new, etc
@@ -229,13 +228,13 @@ CompositorBridgeParentBase::StartSharingMetrics(ipc::SharedMemoryBasic::Handle a
 }
 
 bool
-CompositorBridgeParentBase::StopSharingMetrics(FrameMetrics::ViewID aScrollId,
+CompositorBridgeParentBase::StopSharingMetrics(ScrollableLayerGuid::ViewID aScrollId,
                                                uint32_t aApzcId)
 {
   if (!CompositorThreadHolder::IsInCompositorThread()) {
     MOZ_ASSERT(CompositorLoop());
     CompositorLoop()->PostTask(
-      NewRunnableMethod<FrameMetrics::ViewID, uint32_t>(
+      NewRunnableMethod<ScrollableLayerGuid::ViewID, uint32_t>(
         "layers::CompositorBridgeParent::StopSharingMetrics",
         this,
         &CompositorBridgeParentBase::StopSharingMetrics,
@@ -759,13 +758,15 @@ CompositorBridgeParent::PauseComposition()
   if (!mPaused) {
     mPaused = true;
 
+    TimeStamp now = TimeStamp::Now();
     if (mCompositor) {
       mCompositor->Pause();
+      DidComposite(now, now);
     } else if (mWrBridge) {
       mWrBridge->Pause();
+      NotifyPipelineRendered(mWrBridge->PipelineId(), mWrBridge->GetCurrentEpoch(),
+                             now, now);
     }
-    TimeStamp now = TimeStamp::Now();
-    DidComposite(now, now);
   }
 
   // if anyone's waiting to make sure that composition really got paused, tell them
@@ -1467,7 +1468,7 @@ CompositorBridgeParent::RecvGetFrameUniformity(FrameUniformityData* aOutData)
 void
 CompositorBridgeParent::SetTestAsyncScrollOffset(
     const LayersId& aLayersId,
-    const FrameMetrics::ViewID& aScrollId,
+    const ScrollableLayerGuid::ViewID& aScrollId,
     const CSSPoint& aPoint)
 {
   if (mApzUpdater) {
@@ -1479,7 +1480,7 @@ CompositorBridgeParent::SetTestAsyncScrollOffset(
 void
 CompositorBridgeParent::SetTestAsyncZoom(
     const LayersId& aLayersId,
-    const FrameMetrics::ViewID& aScrollId,
+    const ScrollableLayerGuid::ViewID& aScrollId,
     const LayerToParentLayerScale& aZoom)
 {
   if (mApzUpdater) {

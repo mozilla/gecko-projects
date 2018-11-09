@@ -76,10 +76,6 @@ void SetBreakpoint(size_t aId, const js::BreakpointPosition& aPosition);
 // children cannot process such requests).
 void MaybeSwitchToReplayingChild();
 
-// If the active child is replaying, get its fractional (range [0,1]) position
-// in the recording. If the active child is recording, return Nothing.
-Maybe<double> GetRecordingPosition();
-
 ///////////////////////////////////////////////////////////////////////////////
 // Graphics
 ///////////////////////////////////////////////////////////////////////////////
@@ -93,9 +89,6 @@ void SendGraphicsMemoryToChild();
 // from a child process, or null if a repaint was triggered and failed due to
 // an unhandled recording divergence.
 void UpdateGraphicsInUIProcess(const PaintMessage* aMsg);
-
-// Update the overlay shown over the tab's graphics.
-void UpdateGraphicsOverlay();
 
 // If necessary, update graphics after the active child sends a paint message
 // or reaches a checkpoint.
@@ -274,6 +267,11 @@ class ChildProcessInfo
   // Whether we need this child to pause while the recording is updated.
   bool mPauseNeeded;
 
+  // Flags for whether we have received messages from the child indicating it
+  // is crashing.
+  bool mHasBegunFatalError;
+  bool mHasFatalError;
+
   void OnIncomingMessage(size_t aChannelId, const Message& aMsg);
   void OnIncomingRecoveryMessage(const Message& aMsg);
   void SendNextRecoveryMessage();
@@ -366,7 +364,6 @@ public:
   }
 
   void SetPauseNeeded() {
-    MOZ_RELEASE_ASSERT(!mPauseNeeded);
     mPauseNeeded = true;
   }
 

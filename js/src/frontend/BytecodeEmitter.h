@@ -66,9 +66,12 @@ struct CGTryNoteList {
     Vector<JSTryNote> list;
     explicit CGTryNoteList(JSContext* cx) : list(cx) {}
 
+    // Start/end offset are relative to main section and will be patch in
+    // finish().
+
     MOZ_MUST_USE bool append(JSTryNoteKind kind, uint32_t stackDepth, size_t start, size_t end);
     size_t length() const { return list.length(); }
-    void finish(mozilla::Span<JSTryNote> array);
+    void finish(mozilla::Span<JSTryNote> array, uint32_t prologueLength);
 };
 
 struct CGScopeNote : public ScopeNote
@@ -95,11 +98,9 @@ struct CGScopeNoteList {
     void finish(mozilla::Span<ScopeNote> array, uint32_t prologueLength);
 };
 
-struct CGYieldAndAwaitOffsetList {
+struct CGResumeOffsetList {
     Vector<uint32_t> list;
-    uint32_t numYields;
-    uint32_t numAwaits;
-    explicit CGYieldAndAwaitOffsetList(JSContext* cx) : list(cx), numYields(0), numAwaits(0) {}
+    explicit CGResumeOffsetList(JSContext* cx) : list(cx) {}
 
     MOZ_MUST_USE bool append(uint32_t offset) { return list.append(offset); }
     size_t length() const { return list.length(); }
@@ -199,11 +200,15 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     CGTryNoteList    tryNoteList;    /* list of emitted try notes */
     CGScopeNoteList  scopeNoteList;  /* list of emitted block scope notes */
 
-    /*
-     * For each yield or await op, map the yield and await index (stored as
-     * bytecode operand) to the offset of the next op.
-     */
-    CGYieldAndAwaitOffsetList yieldAndAwaitOffsetList;
+    // Certain ops (yield, await, gosub) have an entry in the script's
+    // resumeOffsets list. This can be used to map from the op's resumeIndex to
+    // the bytecode offset of the next pc. This indirection makes it easy to
+    // resume in the JIT (because BaselineScript stores a resumeIndex => native
+    // code array).
+    CGResumeOffsetList resumeOffsetList;
+
+    // Number of yield instructions emitted. Does not include JSOP_AWAIT.
+    uint32_t        numYields;
 
     uint16_t        typesetCount;   /* Number of JOF_TYPESET opcodes generated */
 
@@ -432,6 +437,10 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool checkStrictOrSloppy(JSOp op);
 #endif
 
+    // Add TryNote to the tryNoteList array. The start and end offset are
+    // relative to current section.
+    MOZ_MUST_USE bool addTryNote(JSTryNoteKind kind, uint32_t stackDepth, size_t start, size_t end);
+
     // Append a new source note of the given type (and therefore size) to the
     // notes dynamic array, updating noteCount. Return the new note's index
     // within the array pointed at by current->notes as outparam.
@@ -608,6 +617,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     }
     MOZ_MUST_USE bool emitGetDotGeneratorInScope(EmitterScope& currentScope);
 
+    MOZ_MUST_USE bool allocateResumeIndexForCurrentOffset(uint32_t* resumeIndex);
+
     MOZ_MUST_USE bool emitInitialYield(UnaryNode* yieldNode);
     MOZ_MUST_USE bool emitYield(UnaryNode* yieldNode);
     MOZ_MUST_USE bool emitYieldOp(JSOp op);
@@ -648,6 +659,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter
                                            EmitLineNumberNote emitLineNote = EMIT_LINENOTE);
     MOZ_NEVER_INLINE MOZ_MUST_USE bool emitSwitch(SwitchStatement* switchStmt);
     MOZ_NEVER_INLINE MOZ_MUST_USE bool emitTry(TryNode* tryNode);
+
+    MOZ_MUST_USE bool emitGoSub(JumpList* jump);
 
     enum DestructuringFlavor {
         // Destructuring into a declaration.

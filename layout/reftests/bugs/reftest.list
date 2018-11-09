@@ -1391,7 +1391,7 @@ random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == 495385-4.html 495385-4-r
 == 501257-1a.html 501257-1-ref.html
 == 501257-1b.html 501257-1-ref.html
 == 501257-1.xhtml 501257-1-ref.xhtml
-fuzzy-if(webrender,2-6,39042-97456) == 501627-1.html 501627-1-ref.html # Bug 1481664
+fuzzy-if(webrender,0-6,0-97456) == 501627-1.html 501627-1-ref.html # Bug 1481664
 == 502288-1.html 502288-1-ref.html
 fuzzy-if(gtkWidget,0-1,0-2) == 502447-1.html 502447-1-ref.html #Bug 1315834
 == 502795-1.html 502795-1-ref.html
@@ -1772,7 +1772,7 @@ fuzzy-if(asyncPan,0-190,0-510) fuzzy-if(asyncPan&&!layersGPUAccelerated,0-102,0-
 == 827577-1b.html 827577-1-ref.html
 == 827799-1.html about:blank
 == 829958.html 829958-ref.html
-fuzzy-if(webrender&&gtkWidget,1-2,44000-152400) == 836844-1.html 836844-1-ref.html
+fuzzy-if(webrender&&gtkWidget,0-2,0-152400) == 836844-1.html 836844-1-ref.html
 == 841192-1.html 841192-1-ref.html
 == 844178.html 844178-ref.html
 fuzzy-if(OSX,0-1,0-364) fuzzy-if(skiaContent,0-1,0-320) == 846144-1.html 846144-1-ref.html
@@ -1858,9 +1858,9 @@ pref(layout.css.moz-document.content.enabled,false) == 1035091-2.html 1035091-re
 == 1053035-1-flex.html 1053035-1-ref.html
 == 1053035-1-grid.html 1053035-1-ref.html
 == 1059167-1.html 1059167-1-ref.html
-== 1059498-1.html 1059498-1-ref.html
-== 1059498-2.html 1059498-1-ref.html
-== 1059498-3.html 1059498-1-ref.html
+fails-if(webrender) == 1059498-1.html 1059498-1-ref.html # WebRender: see bug 1504290
+fails-if(webrender) == 1059498-2.html 1059498-1-ref.html # WebRender: see bug 1504290
+fails-if(webrender) == 1059498-3.html 1059498-1-ref.html # WebRender: see bug 1499113
 == 1062108-1.html 1062108-1-ref.html
 == 1062792-1.html 1062792-1-ref.html
 == 1062963-floatmanager-reflow.html 1062963-floatmanager-reflow-ref.html
@@ -2045,7 +2045,7 @@ skip-if(isDebugBuild&&winWidget) == 1330051.svg 1330051-ref.svg
 == 1375674.html 1375674-ref.html
 == 1372041.html 1372041-ref.html
 == 1376092.html 1376092-ref.html
-needs-focus == 1377447-1.html 1377447-1-ref.html
+fuzzy-if(Android,0-3,0-3) needs-focus == 1377447-1.html 1377447-1-ref.html
 needs-focus != 1377447-1.html 1377447-2.html
 == 1379041.html 1379041-ref.html
 == 1379696.html 1379696-ref.html

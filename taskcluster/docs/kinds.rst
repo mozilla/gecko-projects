@@ -291,6 +291,10 @@ release-notify-promote
 ----------------------
 Notify when a release has been promoted.
 
+release-notify-started
+-------------------
+Notify when a release has been started.
+
 release-bouncer-sub
 -------------------
 Submits bouncer updates for releases.
@@ -314,10 +318,6 @@ Checks Bouncer (download.mozilla.org) uptake.
 bouncer-locations
 -----------------
 Updates nightly bouncer locations for version bump
-
-bouncer-locations-breakpoint
-----------------------------
-Human breakpoint to block the running of the bouncer locations job until shippable builds are implemented
 
 release-bouncer-check
 ---------------------
@@ -459,6 +459,15 @@ repackage-signing-l10n
 ----------------------
 Repackage-signing take the repackaged installers (windows) and update packaging (with
 the signed internal bits) and signs them for localized versions.
+
+repackage-msi
+-------------
+Repackage-msi takes the signed full installer and produces an msi installer (that wraps the full installer)
+Using the ```./mach repackage``` command
+
+repackage-signing-msi
+---------------------
+Repackage-signing-msi takes the repackaged msi installers and signs them.
 
 repo-update
 -----------

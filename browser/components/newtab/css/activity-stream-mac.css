@@ -341,9 +341,6 @@ main {
   margin: auto;
   padding-bottom: 68px;
   width: 274px; }
-  @media (min-width: 482px) {
-    main {
-      width: 402px; } }
   @media (min-width: 610px) {
     main {
       width: 530px; } }
@@ -414,20 +411,13 @@ main {
   list-style: none;
   margin: 0 -16px;
   padding: 0; }
-  @media (max-width: 482px) {
+  @media (max-width: 610px) {
     .top-sites-list :nth-child(2n+1) .context-menu {
       margin-inline-end: auto;
       margin-inline-start: auto;
       inset-inline-end: auto;
       inset-inline-start: -32px; }
     .top-sites-list :nth-child(2n) .context-menu {
-      margin-inline-end: 5px;
-      margin-inline-start: auto;
-      inset-inline-end: 0;
-      inset-inline-start: auto; } }
-  @media (min-width: 482px) and (max-width: 610px) {
-    .top-sites-list :nth-child(3n+2) .context-menu,
-    .top-sites-list :nth-child(3n) .context-menu {
       margin-inline-end: 5px;
       margin-inline-start: auto;
       inset-inline-end: 0;
@@ -468,7 +458,10 @@ main {
       margin-inline-start: auto;
       inset-inline-end: 0;
       inset-inline-start: auto; } }
-  @media not all and (min-width: 1122px) {
+  @media (max-width: 610px) {
+    .top-sites-list .hide-for-narrow {
+      display: none; } }
+  @media (min-width: 866px) and (max-width: 1122px) {
     .top-sites-list .hide-for-narrow {
       display: none; } }
   .top-sites-list li {
@@ -639,9 +632,6 @@ main {
   right: 0;
   top: 40px;
   width: 274px; }
-  @media (min-width: 482px) {
-    .edit-topsites-wrapper .modal {
-      width: 402px; } }
   @media (min-width: 610px) {
     .edit-topsites-wrapper .modal {
       width: 530px; } }
@@ -779,7 +769,7 @@ main {
     margin-inline-start: 10px;
     margin-inline-end: 0; }
 
-@media (max-width: 482px) {
+@media (max-width: 610px) {
   .topsite-form .fields-and-preview {
     flex-direction: column; }
     .topsite-form .fields-and-preview .top-site-outer {
@@ -917,7 +907,9 @@ main {
   color: var(--newtab-section-navigation-text-color);
   font-size: 12px;
   line-height: 1.6;
-  margin-top: 12px; }
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between; }
   .top-stories-bottom-container a {
     color: var(--newtab-link-secondary-color);
     font-weight: bold; }
@@ -928,10 +920,6 @@ main {
     .top-stories-bottom-container {
       line-height: 16px;
       height: 16px; } }
-  .top-stories-bottom-container::after {
-    clear: both;
-    content: '';
-    display: table; }
 
 @media (min-width: 1122px) {
   .sections-list .normal-cards .section-list {
@@ -1238,7 +1226,7 @@ a.firstrun-link {
       height: 97px;
       margin-inline-start: 15px;
       width: 142px; }
-    @media (max-width: 481px) {
+    @media (max-width: 609px) {
       .search-wrapper .logo-and-wordmark .logo {
         background-size: 64px;
         height: 64px;
@@ -1254,9 +1242,6 @@ a.firstrun-link {
     margin: 0 auto;
     position: relative;
     width: 224px; }
-    @media (min-width: 482px) {
-      .search-wrapper .search-inner-wrapper {
-        width: 352px; } }
     @media (min-width: 610px) {
       .search-wrapper .search-inner-wrapper {
         width: 480px; } }
@@ -1331,7 +1316,8 @@ a.firstrun-link {
   .contentSearchSuggestionTable .contentSearchHeader {
     background-color: var(--newtab-search-dropdown-header-color);
     color: var(--newtab-text-secondary-color); }
-  .contentSearchSuggestionTable .contentSearchHeader, .contentSearchSuggestionTable .contentSearchSettingsButton {
+  .contentSearchSuggestionTable .contentSearchHeader,
+  .contentSearchSuggestionTable .contentSearchSettingsButton {
     border-color: var(--newtab-border-secondary-color); }
   .contentSearchSuggestionTable .contentSearchSuggestionsList {
     border: 0; }
@@ -1364,7 +1350,8 @@ a.firstrun-link {
     background: var(--newtab-element-hover-color);
     color: var(--newtab-text-primary-color); }
 
-.contentSearchHeaderRow > td > img, .contentSearchSuggestionRow > td > .historyIcon {
+.contentSearchHeaderRow > td > img,
+.contentSearchSuggestionRow > td > .historyIcon {
   margin-inline-start: 7px;
   margin-inline-end: 15px; }
 
@@ -1815,15 +1802,30 @@ a.firstrun-link {
   .asrouter-admin h1 {
     font-weight: 200;
     font-size: 32px; }
+  .asrouter-admin h2 .button {
+    font-size: 14px;
+    padding: 6px 12px;
+    margin-inline-start: 5px;
+    margin-bottom: 0; }
   .asrouter-admin table {
     border-collapse: collapse;
     width: 100%; }
+  .asrouter-admin .sourceLabel {
+    background: #EDEDF0;
+    padding: 2px 5px;
+    border-radius: 3px; }
+    .asrouter-admin .sourceLabel.isDisabled {
+      background: rgba(215, 0, 34, 0.3);
+      color: #D70022; }
   .asrouter-admin .message-item:first-child td {
     border-top: 1px solid var(--newtab-border-secondary-color); }
   .asrouter-admin .message-item td {
     vertical-align: top;
     border-bottom: 1px solid var(--newtab-border-secondary-color);
     padding: 8px; }
+    .asrouter-admin .message-item td.min {
+      width: 1%;
+      white-space: nowrap; }
     .asrouter-admin .message-item td:first-child {
       border-left: 1px solid var(--newtab-border-secondary-color); }
     .asrouter-admin .message-item td:last-child {
@@ -1849,6 +1851,8 @@ a.firstrun-link {
     max-width: 750px;
     overflow: auto;
     font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Mono", "Droid Sans Mono", "Source Code Pro", monospace; }
+  .asrouter-admin .errorState {
+    border: 1px solid #D70022; }
 
 .pocket-logged-in-cta {
   font-size: 13px;
@@ -1876,25 +1880,22 @@ a.firstrun-link {
   .pocket-logged-in-cta .cta-text {
     vertical-align: top; }
 
-@media (min-width: 866px) {
-  .more-recommendations {
-    float: right; }
-    .more-recommendations:dir(rtl) {
-      float: left; } }
-
-.more-recommendations::after {
-  background: url("../data/content/assets/topic-show-more-12.svg") no-repeat center center;
-  content: '';
-  -moz-context-properties: fill;
-  display: inline-block;
-  fill: var(--newtab-link-secondary-color);
-  height: 16px;
-  margin-inline-start: 5px;
-  vertical-align: top;
-  width: 12px; }
-
-.more-recommendations:dir(rtl)::after {
-  transform: scaleX(-1); }
+.more-recommendations {
+  display: flex;
+  align-items: center;
+  white-space: nowrap; }
+  .more-recommendations::after {
+    background: url("../data/content/assets/topic-show-more-12.svg") no-repeat center center;
+    content: '';
+    -moz-context-properties: fill;
+    display: inline-block;
+    fill: var(--newtab-link-secondary-color);
+    height: 16px;
+    margin-inline-start: 5px;
+    vertical-align: top;
+    width: 12px; }
+  .more-recommendations:dir(rtl)::after {
+    transform: scaleX(-1); }
 
 .ASRouterButton {
   font-weight: bold;

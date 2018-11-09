@@ -120,7 +120,6 @@
 #include "vm/TypedArrayObject.h"
 #include "vm/WrapperObject.h"
 #include "wasm/WasmJS.h"
-#include "wasm/WasmModule.h"
 
 #include "vm/Compartment-inl.h"
 #include "vm/ErrorObject-inl.h"
@@ -2276,6 +2275,17 @@ js::shell::FileAsString(JSContext* cx, JS::HandleString pathnameStr)
 
     AutoCloseFile autoClose(file);
 
+    struct stat st;
+    if (fstat(fileno(file), &st) != 0) {
+        JS_ReportErrorUTF8(cx, "can't stat %s", pathname.get());
+        return nullptr;
+    }
+
+    if ((st.st_mode & S_IFMT) != S_IFREG) {
+        JS_ReportErrorUTF8(cx, "can't read non-regular file %s", pathname.get());
+        return nullptr;
+    }
+
     if (fseek(file, 0, SEEK_END) != 0) {
         pathname = JS_EncodeStringToUTF8(cx, pathnameStr);
         if (!pathname) {
@@ -2285,7 +2295,13 @@ js::shell::FileAsString(JSContext* cx, JS::HandleString pathnameStr)
         return nullptr;
     }
 
-    size_t len = ftell(file);
+    long endPos = ftell(file);
+    if (endPos < 0) {
+        JS_ReportErrorUTF8(cx, "can't read length of %s", pathname.get());
+        return nullptr;
+    }
+
+    size_t len = endPos;
     if (fseek(file, 0, SEEK_SET) != 0) {
         pathname = JS_EncodeStringToUTF8(cx, pathnameStr);
         if (!pathname) {
@@ -2297,6 +2313,7 @@ js::shell::FileAsString(JSContext* cx, JS::HandleString pathnameStr)
 
     UniqueChars buf(js_pod_malloc<char>(len + 1));
     if (!buf) {
+        JS_ReportErrorUTF8(cx, "out of memory reading %s", pathname.get());
         return nullptr;
     }
 
@@ -3102,10 +3119,9 @@ TryNotes(JSContext* cx, HandleScript script, Sprinter* sp)
     }
 
     for (const JSTryNote& tn : script->trynotes()) {
-        uint32_t startOff = script->pcToOffset(script->main()) + tn.start;
         if (!sp->jsprintf(" %-16s %6u %8u %8u\n",
                           TryNoteName(static_cast<JSTryNoteKind>(tn.kind)),
-                          tn.stackDepth, startOff, startOff + tn.length))
+                          tn.stackDepth, tn.start, tn.start + tn.length))
         {
             return false;
         }
@@ -4969,11 +4985,7 @@ ShellModuleDynamicImportHook(JSContext* cx, HandleValue referencingPrivate, Hand
     args[2].setObject(*promise);
 
     RootedValue result(cx);
-    if (!JS_CallFunctionValue(cx, nullptr, hookValue, args, &result)) {
-        return false;
-    }
-
-    return true;
+    return JS_CallFunctionValue(cx, nullptr, hookValue, args, &result);
 }
 
 static bool
@@ -5622,29 +5634,6 @@ runOffThreadDecodedScript(JSContext* cx, unsigned argc, Value* vp)
     return JS_ExecuteScript(cx, script, args.rval());
 }
 
-struct MOZ_RAII FreeOnReturn
-{
-    JSContext* cx;
-    const char* ptr;
-    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-
-    explicit FreeOnReturn(JSContext* cx, const char* ptr = nullptr
-                 MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : cx(cx), ptr(ptr)
-    {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    }
-
-    void init(const char* ptr) {
-        MOZ_ASSERT(!this->ptr);
-        this->ptr = ptr;
-    }
-
-    ~FreeOnReturn() {
-        JS_free(cx, (void*)ptr);
-    }
-};
-
 static int sArgc;
 static char** sArgv;
 
@@ -5831,6 +5820,313 @@ NestedShell(JSContext* cx, unsigned argc, Value* vp)
     }
 
     args.rval().setUndefined();
+    return true;
+}
+
+static bool
+ReadAll(int fd, wasm::Bytes* bytes)
+{
+    size_t lastLength = bytes->length();
+    while (true) {
+        static const int ChunkSize = 64 * 1024;
+        if (!bytes->growBy(ChunkSize)) {
+            return false;
+        }
+
+        intptr_t readCount;
+        while (true) {
+            readCount = read(fd, bytes->begin() + lastLength, ChunkSize);
+            if (readCount >= 0) {
+                break;
+            }
+            if (errno != EINTR) {
+                return false;
+            }
+        }
+
+        if (readCount < ChunkSize) {
+            bytes->shrinkTo(lastLength + readCount);
+            if (readCount == 0) {
+                return true;
+            }
+        }
+
+        lastLength = bytes->length();
+    }
+}
+
+static bool
+WriteAll(int fd, const uint8_t* bytes, size_t length)
+{
+    while (length > 0) {
+        int written = write(fd, bytes, length);
+        if (written < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        MOZ_ASSERT(unsigned(written) <= length);
+        length -= written;
+        bytes += written;
+    }
+
+    return true;
+}
+
+class AutoPipe
+{
+    int fds_[2];
+
+  public:
+    AutoPipe()
+    {
+        fds_[0] = -1;
+        fds_[1] = -1;
+    }
+
+    ~AutoPipe() {
+        if (fds_[0] != -1) {
+            close(fds_[0]);
+        }
+        if (fds_[1] != -1) {
+            close(fds_[1]);
+        }
+    }
+
+    bool init() {
+#ifdef XP_WIN
+        return !_pipe(fds_, 4096, O_BINARY);
+#else
+        return !pipe(fds_);
+#endif
+    }
+
+    int reader() const {
+        MOZ_ASSERT(fds_[0] != -1);
+        return fds_[0];
+    }
+
+    int writer() const {
+        MOZ_ASSERT(fds_[1] != -1);
+        return fds_[1];
+    }
+
+    void closeReader() {
+        MOZ_ASSERT(fds_[0] != -1);
+        close(fds_[0]);
+        fds_[0] = -1;
+    }
+
+    void closeWriter() {
+        MOZ_ASSERT(fds_[1] != -1);
+        close(fds_[1]);
+        fds_[1] = -1;
+    }
+};
+
+static bool
+CompileAndSerializeInSeparateProcess(JSContext* cx, const uint8_t* bytecode, size_t bytecodeLength,
+                                     wasm::Bytes* serialized)
+{
+    AutoPipe stdIn, stdOut;
+    if (!stdIn.init() || !stdOut.init()) {
+        return false;
+    }
+
+    AutoCStringVector argv(cx);
+
+    UniqueChars argv0 = DuplicateString(cx, sArgv[0]);
+    if (!argv0 || !argv.append(std::move(argv0))) {
+        return false;
+    }
+
+    UniqueChars argv1 = DuplicateString("--wasm-compile-and-serialize");
+    if (!argv1 || !argv.append(std::move(argv1))) {
+        return false;
+    }
+
+#ifdef XP_WIN
+    // The spawned process will have all the stdIn/stdOut file handles open, but
+    // without the power of fork, we need some other way to communicate the
+    // integer fd values so we encode them in argv and WasmCompileAndSerialize()
+    // has a matching #ifdef XP_WIN to parse them out. Communicate both ends of
+    // both pipes so the child process can closed the unused ends.
+
+    UniqueChars argv2 = JS_smprintf("%d", stdIn.reader());
+    if (!argv2 || !argv.append(std::move(argv2))) {
+        return false;
+    }
+
+    UniqueChars argv3 = JS_smprintf("%d", stdIn.writer());
+    if (!argv3 || !argv.append(std::move(argv3))) {
+        return false;
+    }
+
+    UniqueChars argv4 = JS_smprintf("%d", stdOut.reader());
+    if (!argv4 || !argv.append(std::move(argv4))) {
+        return false;
+    }
+
+    UniqueChars argv5 = JS_smprintf("%d", stdOut.writer());
+    if (!argv5 || !argv.append(std::move(argv5))) {
+        return false;
+    }
+#endif
+
+    for (unsigned i = 0; i < sPropagatedFlags.length(); i++) {
+        UniqueChars flags = DuplicateString(cx, sPropagatedFlags[i]);
+        if (!flags || !argv.append(std::move(flags))) {
+            return false;
+        }
+    }
+
+    if (!argv.append(nullptr)) {
+        return false;
+    }
+
+#ifdef XP_WIN
+    if (!EscapeForShell(cx, argv)) {
+        return false;
+    }
+
+    int childPid = _spawnv(P_NOWAIT, sArgv[0], argv.get());
+    if (childPid == -1) {
+        return false;
+    }
+#else
+    pid_t childPid = fork();
+    switch (childPid) {
+      case -1:
+        return false;
+      case 0:
+        // In the child process. Redirect stdin/stdout to the respective ends of
+        // the pipes. Closing stdIn.writer() is necessary for stdin to hit EOF.
+        // This case statement must not return before exec() takes over. Rather,
+        // exit(-1) is used to return failure to the parent process.
+        if (dup2(stdIn.reader(), STDIN_FILENO) == -1) {
+            exit(-1);
+        }
+        if (dup2(stdOut.writer(), STDOUT_FILENO) == -1) {
+            exit(-1);
+        }
+        close(stdIn.reader());
+        close(stdIn.writer());
+        close(stdOut.reader());
+        close(stdOut.writer());
+        execv(sArgv[0], argv.get());
+        exit(-1);
+    }
+#endif
+
+    // In the parent process. Closing stdOut.writer() is necessary for
+    // stdOut.reader() below to hit EOF.
+    stdIn.closeReader();
+    stdOut.closeWriter();
+
+    if (!WriteAll(stdIn.writer(), bytecode, bytecodeLength)) {
+        return false;
+    }
+
+    stdIn.closeWriter();
+
+    if (!ReadAll(stdOut.reader(), serialized)) {
+        return false;
+    }
+
+    stdOut.closeReader();
+
+    int status;
+#ifdef XP_WIN
+    if (_cwait(&status, childPid, WAIT_CHILD) == -1) {
+        return false;
+    }
+#else
+    while (true) {
+        if (waitpid(childPid, &status, 0) >= 0) {
+            break;
+        }
+        if (errno != EINTR) {
+            return false;
+        }
+    }
+#endif
+
+    return status == 0;
+}
+
+static bool
+WasmCompileAndSerialize(JSContext* cx)
+{
+    MOZ_ASSERT(wasm::HasCachingSupport(cx));
+
+#ifdef XP_WIN
+    // See CompileAndSerializeInSeparateProcess for why we've had to smuggle
+    // these fd values through argv. Closing the writing ends is necessary for
+    // the reading ends to hit EOF.
+    MOZ_RELEASE_ASSERT(sArgc >= 6);
+    MOZ_ASSERT(!strcmp(sArgv[1], "--wasm-compile-and-serialize"));
+    int stdIn = atoi(sArgv[2]);   // stdIn.reader()
+    close(atoi(sArgv[3]));        // stdIn.writer()
+    close(atoi(sArgv[4]));        // stdOut.reader()
+    int stdOut = atoi(sArgv[5]);  // stdOut.writer()
+#else
+    int stdIn = STDIN_FILENO;
+    int stdOut = STDOUT_FILENO;
+#endif
+
+    wasm::MutableBytes bytecode = js_new<wasm::ShareableBytes>();
+    if (!ReadAll(stdIn, &bytecode->bytes)) {
+        return false;
+    }
+
+    wasm::Bytes serialized;
+    if (!wasm::CompileAndSerialize(*bytecode, &serialized)) {
+        return false;
+    }
+
+    if (!WriteAll(stdOut, serialized.begin(), serialized.length())) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool
+WasmCompileInSeparateProcess(JSContext* cx, unsigned argc, Value* vp)
+{
+    if (!wasm::HasCachingSupport(cx)) {
+        JS_ReportErrorASCII(cx, "WebAssembly caching not supported");
+        return false;
+    }
+
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (!args.requireAtLeast(cx, "wasmCompileInSeparateProcess", 1)) {
+        return false;
+    }
+
+    SharedMem<uint8_t*> bytecode;
+    size_t numBytes;
+    if (!args[0].isObject() || !IsBufferSource(&args[0].toObject(), &bytecode, &numBytes)) {
+        RootedObject callee(cx, &args.callee());
+        ReportUsageErrorASCII(cx, callee, "Argument must be a buffer source");
+        return false;
+    }
+
+    wasm::Bytes serialized;
+    if (!CompileAndSerializeInSeparateProcess(cx, bytecode.unwrap(), numBytes, &serialized)) {
+        if (!cx->isExceptionPending()) {
+            JS_ReportErrorASCII(cx, "creating and executing child process");
+        }
+        return false;
+    }
+
+    RootedObject module(cx);
+    if (!wasm::DeserializeModule(cx, serialized, &module)) {
+        return false;
+    }
+
+    args.rval().setObject(*module);
     return true;
 }
 
@@ -6518,7 +6814,7 @@ DisableGeckoProfiling(JSContext* cx, unsigned argc, Value* vp)
 //
 // For the SharedArrayBuffer and WasmMemoryObject we transmit the underlying
 // SharedArrayRawBuffer ("SARB"). For the WasmModuleObject we transmit the
-// underlying wasm::Module.  The transmitted types are refcounted.  When they
+// underlying JS::WasmModule.  The transmitted types are refcounted.  When they
 // are in the mailbox their reference counts are at least 1, accounting for the
 // reference from the mailbox.
 //
@@ -6549,7 +6845,7 @@ struct SharedObjectMailbox
             SharedArrayRawBuffer* buffer;
             uint32_t              length;
         } sarb;
-        const wasm::Module*       module;
+        JS::WasmModule*           module;
         double                    number;
     };
 
@@ -6670,8 +6966,7 @@ GetSharedObject(JSContext* cx, unsigned argc, Value* vp)
 
             // WasmModuleObject::create() increments the refcount on the module
             // and signals an error and returns null if that fails.
-            RootedObject proto(cx, &cx->global()->getPrototype(JSProto_WasmModule).toObject());
-            newObj = WasmModuleObject::create(cx, *mbx->val.module, proto);
+            newObj = mbx->val.module->createObject(cx);
             if (!newObj) {
                 return false;
             }
@@ -6725,10 +7020,9 @@ SetSharedObject(JSContext* cx, unsigned argc, Value* vp)
                 JS_ReportErrorASCII(cx, "Invalid argument to SetSharedObject");
                 return false;
             }
-        } else if (obj->is<WasmModuleObject>()) {
+        } else if (JS::IsWasmModuleObject(obj)) {
             tag = MailboxTag::WasmModule;
-            value.module = &obj->as<WasmModuleObject>().module();
-            value.module->AddRef();
+            value.module = JS::GetWasmModule(obj).forget().take();
         } else {
             JS_ReportErrorASCII(cx, "Invalid argument to SetSharedObject");
             return false;
@@ -8602,6 +8896,12 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "underneath you."),
 #endif // ENABLE_INTL_API
 
+    JS_FN_HELP("wasmCompileInSeparateProcess", WasmCompileInSeparateProcess, 1, 0,
+"wasmCompileInSeparateProcess(buffer)",
+"  Compile the given buffer in a separate process, serialize the resulting\n"
+"  wasm::Module into bytes, and deserialize those bytes in the current\n"
+"  process, returning the resulting WebAssembly.Module."),
+
     JS_FS_HELP_END
 };
 
@@ -10027,7 +10327,7 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
 #endif
     enableTestWasmAwaitTier2 = op.getBoolOption("test-wasm-await-tier2");
     enableAsyncStacks = !op.getBoolOption("no-async-stacks");
-    enableStreams = op.getBoolOption("enable-streams");
+    enableStreams = !op.getBoolOption("no-streams");
 
 #if defined ENABLE_WASM_GC && defined ENABLE_WASM_CRANELIFT
     // Note, once we remove --wasm-gc this test will no longer make any sense
@@ -10400,6 +10700,15 @@ SetWorkerContextOptions(JSContext* cx)
 static int
 Shell(JSContext* cx, OptionParser* op, char** envp)
 {
+    if (op->getBoolOption("wasm-compile-and-serialize")) {
+        if (!WasmCompileAndSerialize(cx)) {
+            // Errors have been printed directly to stderr.
+            MOZ_ASSERT(!cx->isExceptionPending());
+            return -1;
+        }
+        return EXIT_SUCCESS;
+    }
+
 #ifdef MOZ_CODE_COVERAGE
     InstallCoverageSignalHandlers();
 #endif
@@ -10652,7 +10961,8 @@ main(int argc, char** argv, char** envp)
 #endif
         || !op.addBoolOption('\0', "no-native-regexp", "Disable native regexp compilation")
         || !op.addBoolOption('\0', "no-unboxed-objects", "Disable creating unboxed plain objects")
-        || !op.addBoolOption('\0', "enable-streams", "Enable WHATWG Streams")
+        || !op.addBoolOption('\0', "enable-streams", "Enable WHATWG Streams (default)")
+        || !op.addBoolOption('\0', "no-streams", "Disable WHATWG Streams")
 #ifdef ENABLE_SHARED_ARRAY_BUFFER
         || !op.addStringOption('\0', "shared-memory", "on/off",
                                "SharedArrayBuffer and Atomics "
@@ -10774,6 +11084,7 @@ main(int argc, char** argv, char** envp)
         || !op.addBoolOption('\0', "no-async-stacks", "Disable async stacks")
         || !op.addMultiStringOption('\0', "dll", "LIBRARY", "Dynamically load LIBRARY")
         || !op.addBoolOption('\0', "suppress-minidump", "Suppress crash minidumps")
+        || !op.addBoolOption('\0', "wasm-compile-and-serialize", "Compile the wasm bytecode from stdin and serialize the results to stdout")
     )
     {
         return EXIT_FAILURE;
@@ -10949,7 +11260,7 @@ main(int argc, char** argv, char** envp)
 
 #ifdef DEBUG
     if (OOM_printAllocationCount) {
-        printf("OOM max count: %" PRIu64 "\n", js::oom::counter);
+        printf("OOM max count: %" PRIu64 "\n", js::oom::simulator.counter());
     }
 #endif
 

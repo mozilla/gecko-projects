@@ -10,8 +10,8 @@
 
 use cssparser::ToCss;
 use gecko_bindings::structs::{self, CSSPseudoElementType};
-use properties::{ComputedValues, PropertyFlags};
 use properties::longhands::display::computed_value::T as Display;
+use properties::{ComputedValues, PropertyFlags};
 use selector_parser::{NonTSPseudoClass, PseudoElementCascadeType, SelectorImpl};
 use std::fmt;
 use str::{starts_with_ignore_ascii_case, string_as_ascii_lowercase};
@@ -26,6 +26,18 @@ include!(concat!(
 
 impl ::selectors::parser::PseudoElement for PseudoElement {
     type Impl = SelectorImpl;
+
+    // ::slotted() should support all tree-abiding pseudo-elements, see
+    // https://drafts.csswg.org/css-scoping/#slotted-pseudo
+    // https://drafts.csswg.org/css-pseudo-4/#treelike
+    fn valid_after_slotted(&self) -> bool {
+        matches!(
+            *self,
+            PseudoElement::Before |
+            PseudoElement::After |
+            PseudoElement::Placeholder
+        )
+    }
 
     fn supports_pseudo_class(&self, pseudo_class: &NonTSPseudoClass) -> bool {
         if !self.supports_user_action_state() {

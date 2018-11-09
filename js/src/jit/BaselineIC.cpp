@@ -118,9 +118,6 @@ ICEntry::fallbackStub() const
 void
 ICEntry::trace(JSTracer* trc)
 {
-    if (!hasStub()) {
-        return;
-    }
     for (ICStub* stub = firstStub(); stub; stub = stub->next()) {
         stub->trace(trc);
     }
@@ -185,7 +182,6 @@ ICStub::NonCacheIRStubMakesGCCalls(Kind kind)
       case Call_ScriptedFunCall:
       case Call_ConstStringSplit:
       case WarmUpCounter_Fallback:
-      case RetSub_Fallback:
       // These two fallback stubs don't actually make non-tail calls,
       // but the fallback code for the bailout path needs to pop the stub frame
       // pushed during the bailout.
@@ -2188,14 +2184,10 @@ StoreToTypedArray(JSContext* cx, MacroAssembler& masm, Scalar::Type type,
         // If the value is a double, clamp to uint8 and jump back.
         // Else, jump to failure.
         masm.bind(&notInt32);
-        if (cx->runtime()->jitSupportsFloatingPoint) {
-            masm.branchTestDouble(Assembler::NotEqual, value, failure);
-            masm.unboxDouble(value, FloatReg0);
-            masm.clampDoubleToUint8(FloatReg0, scratch);
-            masm.jump(&clamped);
-        } else {
-            masm.jump(failure);
-        }
+        masm.branchTestDouble(Assembler::NotEqual, value, failure);
+        masm.unboxDouble(value, FloatReg0);
+        masm.clampDoubleToUint8(FloatReg0, scratch);
+        masm.jump(&clamped);
     } else {
         Label notInt32;
         masm.branchTestInt32(Assembler::NotEqual, value, &notInt32);
@@ -2209,14 +2201,10 @@ StoreToTypedArray(JSContext* cx, MacroAssembler& masm, Scalar::Type type,
         // If the value is a double, truncate and jump back.
         // Else, jump to failure.
         masm.bind(&notInt32);
-        if (cx->runtime()->jitSupportsFloatingPoint) {
-            masm.branchTestDouble(Assembler::NotEqual, value, failure);
-            masm.unboxDouble(value, FloatReg0);
-            masm.branchTruncateDoubleMaybeModUint32(FloatReg0, scratch, failure);
-            masm.jump(&isInt32);
-        } else {
-            masm.jump(failure);
-        }
+        masm.branchTestDouble(Assembler::NotEqual, value, failure);
+        masm.unboxDouble(value, FloatReg0);
+        masm.branchTruncateDoubleMaybeModUint32(FloatReg0, scratch, failure);
+        masm.jump(&isInt32);
     }
 
     masm.bind(&done);
@@ -4625,13 +4613,13 @@ ICCall_IsSuspendedGenerator::Compiler::generateStubCode(MacroAssembler& masm)
     masm.branchTestObjClass(Assembler::NotEqual, genObj, &GeneratorObject::class_, scratch,
                             genObj, &returnFalse);
 
-    // If the yield index slot holds an int32 value < YIELD_AND_AWAIT_INDEX_CLOSING,
+    // If the resumeIndex slot holds an int32 value < RESUME_INDEX_CLOSING,
     // the generator is suspended.
-    masm.loadValue(Address(genObj, GeneratorObject::offsetOfYieldAndAwaitIndexSlot()), argVal);
+    masm.loadValue(Address(genObj, GeneratorObject::offsetOfResumeIndexSlot()), argVal);
     masm.branchTestInt32(Assembler::NotEqual, argVal, &returnFalse);
     masm.unboxInt32(argVal, scratch);
     masm.branch32(Assembler::AboveOrEqual, scratch,
-                  Imm32(GeneratorObject::YIELD_AND_AWAIT_INDEX_CLOSING),
+                  Imm32(GeneratorObject::RESUME_INDEX_CLOSING),
                   &returnFalse);
 
     masm.moveValue(BooleanValue(true), R0);
@@ -5154,19 +5142,6 @@ ICCall_ScriptedFunCall::Compiler::generateStubCode(MacroAssembler& masm)
     return true;
 }
 
-static bool
-DoubleValueToInt32ForSwitch(Value* v)
-{
-    double d = v->toDouble();
-    int32_t truncated = int32_t(d);
-    if (d != double(truncated)) {
-        return false;
-    }
-
-    v->setInt32(truncated);
-    return true;
-}
-
 bool
 ICTableSwitch::Compiler::generateStubCode(MacroAssembler& masm)
 {
@@ -5193,27 +5168,10 @@ ICTableSwitch::Compiler::generateStubCode(MacroAssembler& masm)
     masm.bind(&notInt32);
 
     masm.branchTestDouble(Assembler::NotEqual, R0, &outOfRange);
-    if (cx->runtime()->jitSupportsFloatingPoint) {
-        masm.unboxDouble(R0, FloatReg0);
+    masm.unboxDouble(R0, FloatReg0);
 
-        // N.B. -0 === 0, so convert -0 to a 0 int32.
-        masm.convertDoubleToInt32(FloatReg0, key, &outOfRange, /* negativeZeroCheck = */ false);
-    } else {
-        // Pass pointer to double value.
-        masm.pushValue(R0);
-        masm.moveStackPtrTo(R0.scratchReg());
-
-        masm.setupUnalignedABICall(scratch);
-        masm.passABIArg(R0.scratchReg());
-        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, DoubleValueToInt32ForSwitch));
-
-        // If the function returns |true|, the value has been converted to
-        // int32.
-        masm.movePtr(ReturnReg, scratch);
-        masm.popValue(R0);
-        masm.branchIfFalseBool(scratch, &outOfRange);
-        masm.unboxInt32(R0, key);
-    }
+    // N.B. -0 === 0, so convert -0 to a 0 int32.
+    masm.convertDoubleToInt32(FloatReg0, key, &outOfRange, /* negativeZeroCheck = */ false);
     masm.jump(&isInt32);
 
     masm.bind(&outOfRange);
@@ -5265,10 +5223,13 @@ ICTableSwitch::Compiler::getStub(ICStubSpace* space)
 void
 ICTableSwitch::fixupJumpTable(JSScript* script, BaselineScript* baseline)
 {
-    defaultTarget_ = baseline->nativeCodeForPC(script, (jsbytecode*) defaultTarget_);
+    PCMappingSlotInfo slotInfo;
+    defaultTarget_ = baseline->nativeCodeForPC(script, (jsbytecode*) defaultTarget_, &slotInfo);
+    MOZ_ASSERT(slotInfo.isStackSynced());
 
     for (int32_t i = 0; i < length_; i++) {
-        table_[i] = baseline->nativeCodeForPC(script, (jsbytecode*) table_[i]);
+        table_[i] = baseline->nativeCodeForPC(script, (jsbytecode*) table_[i], &slotInfo);
+        MOZ_ASSERT(slotInfo.isStackSynced());
     }
 }
 
@@ -5554,115 +5515,6 @@ ICTypeOf_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
     pushStubPayload(masm, R0.scratchReg());
 
     return tailCallVM(DoTypeOfFallbackInfo, masm);
-}
-
-static bool
-DoRetSubFallback(JSContext* cx, BaselineFrame* frame, ICRetSub_Fallback* stub,
-                 HandleValue val, uint8_t** resumeAddr)
-{
-    stub->incrementEnteredCount();
-    FallbackICSpew(cx, stub, "RetSub");
-
-    // |val| is the bytecode offset where we should resume.
-
-    MOZ_ASSERT(val.isInt32());
-    MOZ_ASSERT(val.toInt32() >= 0);
-
-    JSScript* script = frame->script();
-    uint32_t offset = uint32_t(val.toInt32());
-
-    *resumeAddr = script->baselineScript()->nativeCodeForPC(script, script->offsetToPC(offset));
-
-    if (stub->numOptimizedStubs() >= ICRetSub_Fallback::MAX_OPTIMIZED_STUBS) {
-        return true;
-    }
-
-    // Attach an optimized stub for this pc offset.
-    JitSpew(JitSpew_BaselineIC, "  Generating RetSub stub for pc offset %u", offset);
-    ICRetSub_Resume::Compiler compiler(cx, offset, *resumeAddr);
-    ICStub* optStub = compiler.getStub(compiler.getStubSpace(script));
-    if (!optStub) {
-        return false;
-    }
-
-    stub->addNewStub(optStub);
-    return true;
-}
-
-typedef bool(*DoRetSubFallbackFn)(JSContext* cx, BaselineFrame*, ICRetSub_Fallback*,
-                                  HandleValue, uint8_t**);
-static const VMFunction DoRetSubFallbackInfo =
-    FunctionInfo<DoRetSubFallbackFn>(DoRetSubFallback, "DoRetSubFallback");
-
-typedef bool (*ThrowFn)(JSContext*, HandleValue);
-static const VMFunction ThrowInfoBaseline =
-    FunctionInfo<ThrowFn>(js::Throw, "ThrowInfoBaseline", TailCall);
-
-bool
-ICRetSub_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
-{
-    // If R0 is BooleanValue(true), rethrow R1.
-    Label rethrow;
-    masm.branchTestBooleanTruthy(true, R0, &rethrow);
-    {
-        // Call a stub to get the native code address for the pc offset in R1.
-        AllocatableGeneralRegisterSet regs(availableGeneralRegs(0));
-        regs.take(R1);
-        regs.takeUnchecked(ICTailCallReg);
-        Register scratch = regs.getAny();
-
-        enterStubFrame(masm, scratch);
-
-        masm.pushValue(R1);
-        masm.push(ICStubReg);
-        pushStubPayload(masm, scratch);
-
-        if (!callVM(DoRetSubFallbackInfo, masm)) {
-            return false;
-        }
-
-        leaveStubFrame(masm);
-
-        EmitChangeICReturnAddress(masm, ReturnReg);
-        EmitReturnFromIC(masm);
-    }
-
-    masm.bind(&rethrow);
-    EmitRestoreTailCallReg(masm);
-    masm.pushValue(R1);
-    return tailCallVM(ThrowInfoBaseline, masm);
-}
-
-bool
-ICRetSub_Resume::Compiler::generateStubCode(MacroAssembler& masm)
-{
-    // If R0 is BooleanValue(true), rethrow R1.
-    Label fail, rethrow;
-    masm.branchTestBooleanTruthy(true, R0, &rethrow);
-
-    // R1 is the pc offset. Ensure it matches this stub's offset.
-    Register offset = masm.extractInt32(R1, ExtractTemp0);
-    masm.branch32(Assembler::NotEqual,
-                  Address(ICStubReg, ICRetSub_Resume::offsetOfPCOffset()),
-                  offset,
-                  &fail);
-
-    // pc offset matches, resume at the target pc.
-    masm.loadPtr(Address(ICStubReg, ICRetSub_Resume::offsetOfAddr()), R0.scratchReg());
-    EmitChangeICReturnAddress(masm, R0.scratchReg());
-    EmitReturnFromIC(masm);
-
-    // Rethrow the Value stored in R1.
-    masm.bind(&rethrow);
-    EmitRestoreTailCallReg(masm);
-    masm.pushValue(R1);
-    if (!tailCallVM(ThrowInfoBaseline, masm)) {
-        return false;
-    }
-
-    masm.bind(&fail);
-    EmitStubGuardFailure(masm);
-    return true;
 }
 
 ICTypeMonitor_SingleObject::ICTypeMonitor_SingleObject(JitCode* stubCode, JSObject* obj)
@@ -6056,11 +5908,6 @@ DoCompareFallback(JSContext* cx, BaselineFrame* frame, ICCompare_Fallback* stub_
     JSOp op = JSOp(*pc);
 
     FallbackICSpew(cx, stub, "Compare(%s)", CodeName[op]);
-
-    // Case operations in a CONDSWITCH are performing strict equality.
-    if (op == JSOP_CASE) {
-        op = JSOP_STRICTEQ;
-    }
 
     // Don't pass lhs/rhs directly, we need the original values when
     // generating stubs.

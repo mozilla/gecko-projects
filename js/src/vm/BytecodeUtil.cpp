@@ -441,7 +441,7 @@ class BytecodeParser
     };
 
     JSContext* cx_;
-    LifoAllocScope allocScope_;
+    LifoAlloc& alloc_;
     RootedScript script_;
 
     Bytecode** codeArray_;
@@ -454,9 +454,9 @@ class BytecodeParser
 #endif
 
   public:
-    BytecodeParser(JSContext* cx, JSScript* script)
+    BytecodeParser(JSContext* cx, LifoAlloc& alloc, JSScript* script)
       : cx_(cx),
-        allocScope_(&cx->tempLifoAlloc()),
+        alloc_(alloc),
         script_(cx, script),
         codeArray_(nullptr)
 #ifdef DEBUG
@@ -540,11 +540,10 @@ class BytecodeParser
 
   private:
     LifoAlloc& alloc() {
-        return allocScope_.alloc();
+        return alloc_;
     }
 
     void reportOOM() {
-        allocScope_.releaseEarly();
         ReportOutOfMemory(cx_);
     }
 
@@ -947,9 +946,8 @@ BytecodeParser::parse()
             // exception but is not caught by a later handler in the same function:
             // no more code will execute, and it does not matter what is defined.
             for (const JSTryNote& tn : script_->trynotes()) {
-                uint32_t startOffset = script_->mainOffset() + tn.start;
-                if (startOffset == offset + 1) {
-                    uint32_t catchOffset = startOffset + tn.length;
+                if (tn.start == offset + 1) {
+                    uint32_t catchOffset = tn.start + tn.length;
                     if (tn.kind == JSTRY_CATCH) {
                         if (!addJump(catchOffset, &nextOffset, stackDepth, offsetStack,
                                      pc, JumpKind::TryCatch))
@@ -1004,7 +1002,8 @@ BytecodeParser::parse()
 bool
 js::ReconstructStackDepth(JSContext* cx, JSScript* script, jsbytecode* pc, uint32_t* depth, bool* reachablePC)
 {
-    BytecodeParser parser(cx, script);
+    LifoAllocScope allocScope(&cx->tempLifoAlloc());
+    BytecodeParser parser(cx, allocScope.alloc(), script);
     if (!parser.parse()) {
         return false;
     }
@@ -1031,8 +1030,9 @@ static MOZ_MUST_USE bool
 DisassembleAtPC(JSContext* cx, JSScript* scriptArg, bool lines,
                 jsbytecode* pc, bool showAll, Sprinter* sp)
 {
+    LifoAllocScope allocScope(&cx->tempLifoAlloc());
     RootedScript script(cx, scriptArg);
-    BytecodeParser parser(cx, script);
+    BytecodeParser parser(cx, allocScope.alloc(), script);
     parser.setStackDump();
     if (!parser.parse()) {
         return false;
@@ -1454,9 +1454,8 @@ Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
           // with an offset. This simplifies code coverage analysis
           // based on this disassembled output.
           if (op == JSOP_TRY) {
-              size_t mainOffset = script->mainOffset();
               for (const JSTryNote& tn : script->trynotes()) {
-                  if (tn.kind == JSTRY_CATCH && tn.start + mainOffset == loc + 1) {
+                  if (tn.kind == JSTRY_CATCH && tn.start == loc + 1) {
                       if (!sp->jsprintf(" %u (%+d)",
                                         unsigned(loc + tn.length + 1),
                                         int(tn.length + 1)))
@@ -1611,10 +1610,12 @@ Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
         }
         break;
 
+      case JOF_ARGC:
       case JOF_UINT16:
         i = (int)GET_UINT16(pc);
         goto print_int;
 
+      case JOF_RESUMEINDEX:
       case JOF_UINT24:
         MOZ_ASSERT(len == 4);
         i = (int)GET_UINT24(pc);
@@ -2264,7 +2265,8 @@ static bool
 DecompileAtPCForStackDump(JSContext* cx, HandleScript script,
                           const OffsetAndDefIndex& offsetAndDefIndex, Sprinter* sp)
 {
-    BytecodeParser parser(cx, script);
+    LifoAllocScope allocScope(&cx->tempLifoAlloc());
+    BytecodeParser parser(cx, allocScope.alloc(), script);
     parser.setStackDump();
     if (!parser.parse()) {
         return false;
@@ -2387,7 +2389,8 @@ DecompileExpressionFromStack(JSContext* cx, int spindex, int skipStackHits, Hand
         return true;
     }
 
-    BytecodeParser parser(cx, frameIter.script());
+    LifoAllocScope allocScope(&cx->tempLifoAlloc());
+    BytecodeParser parser(cx, allocScope.alloc(), frameIter.script());
     if (!parser.parse()) {
         return false;
     }
@@ -2491,7 +2494,8 @@ DecompileArgumentFromStack(JSContext* cx, int formalIndex, UniqueChars* res)
         return true;
     }
 
-    BytecodeParser parser(cx, script);
+    LifoAllocScope allocScope(&cx->tempLifoAlloc());
+    BytecodeParser parser(cx, allocScope.alloc(), script);
     if (!parser.parse()) {
         return false;
     }
@@ -2659,18 +2663,14 @@ js::GetPCCountScriptCount(JSContext* cx)
     return rt->scriptAndCountsVector->length();
 }
 
-enum MaybeComma {NO_COMMA, COMMA};
-
 static MOZ_MUST_USE bool
-AppendJSONProperty(StringBuffer& buf, const char* name, MaybeComma comma = COMMA)
-{
-    if (comma && !buf.append(',')) {
+JSONStringProperty(Sprinter& sp, JSONPrinter& json, const char* name, JSString* str) {
+    json.beginStringProperty(name);
+    if (!JSONQuoteString(&sp, str)) {
         return false;
     }
-
-    return buf.append('\"') &&
-           buf.append(name, strlen(name)) &&
-           buf.append("\":", 2);
+    json.endStringProperty();
+    return true;
 }
 
 JS_FRIEND_API(JSString*)
@@ -2686,45 +2686,27 @@ js::GetPCCountScriptSummary(JSContext* cx, size_t index)
     const ScriptAndCounts& sac = (*rt->scriptAndCountsVector)[index];
     RootedScript script(cx, sac.script);
 
-    /*
-     * OOM on buffer appends here will not be caught immediately, but since
-     * StringBuffer uses a TempAllocPolicy will trigger an exception on the
-     * context if they occur, which we'll catch before returning.
-     */
-    StringBuffer buf(cx);
-
-    if (!buf.append('{')) {
+    Sprinter sp(cx);
+    if (!sp.init()) {
         return nullptr;
     }
 
-    if (!AppendJSONProperty(buf, "file", NO_COMMA)) {
-        return nullptr;
-    }
-    JSString* str = JS_NewStringCopyZ(cx, script->filename());
-    if (!str || !(str = StringToSource(cx, str))) {
-        return nullptr;
-    }
-    if (!buf.append(str)) {
-        return nullptr;
-    }
+    JSONPrinter json(sp, false);
 
-    if (!AppendJSONProperty(buf, "line")) {
-        return nullptr;
-    }
-    if (!NumberValueToStringBuffer(cx, Int32Value(script->lineno()), buf)) {
-        return nullptr;
-    }
+    json.beginObject();
 
-    if (script->functionNonDelazifying()) {
-        JSAtom* atom = script->functionNonDelazifying()->displayAtom();
-        if (atom) {
-            if (!AppendJSONProperty(buf, "name")) {
-                return nullptr;
-            }
-            if (!(str = StringToSource(cx, atom))) {
-                return nullptr;
-            }
-            if (!buf.append(str)) {
+    RootedString filename(cx, NewStringCopyZ<CanGC>(cx, script->filename()));
+    if (!filename) {
+        return nullptr;
+    }
+    if (!JSONStringProperty(sp, json, "file", filename)) {
+        return nullptr;
+    }
+    json.property("line", script->lineno());
+
+    if (JSFunction* fun = script->functionNonDelazifying()) {
+        if (JSAtom* atom = fun->displayAtom()) {
+            if (!JSONStringProperty(sp, json, "name", atom)) {
                 return nullptr;
             }
         }
@@ -2734,26 +2716,14 @@ js::GetPCCountScriptSummary(JSContext* cx, size_t index)
 
     jsbytecode* codeEnd = script->codeEnd();
     for (jsbytecode* pc = script->code(); pc < codeEnd; pc = GetNextPc(pc)) {
-        const PCCounts* counts = sac.maybeGetPCCounts(pc);
-        if (!counts) {
-            continue;
+        if (const PCCounts* counts = sac.maybeGetPCCounts(pc)) {
+            total += counts->numExec();
         }
-        total += counts->numExec();
     }
 
-    if (!AppendJSONProperty(buf, "totals")) {
-        return nullptr;
-    }
-    if (!buf.append('{')) {
-        return nullptr;
-    }
+    json.beginObjectProperty("totals");
 
-    if (!AppendJSONProperty(buf, PCCounts::numExecName, NO_COMMA)) {
-        return nullptr;
-    }
-    if (!NumberValueToStringBuffer(cx, DoubleValue(total), buf)) {
-        return nullptr;
-    }
+    json.property(PCCounts::numExecName, total);
 
     uint64_t ionActivity = 0;
     jit::IonScriptCounts* ionCounts = sac.getIonCounts();
@@ -2764,64 +2734,49 @@ js::GetPCCountScriptSummary(JSContext* cx, size_t index)
         ionCounts = ionCounts->previous();
     }
     if (ionActivity) {
-        if (!AppendJSONProperty(buf, "ion", COMMA)) {
-            return nullptr;
-        }
-        if (!NumberValueToStringBuffer(cx, DoubleValue(ionActivity), buf)) {
-            return nullptr;
-        }
+        json.property("ion", ionActivity);
     }
 
-    if (!buf.append('}')) {
-        return nullptr;
-    }
-    if (!buf.append('}')) {
+    json.endObject();
+
+    json.endObject();
+
+    if (sp.hadOutOfMemory()) {
         return nullptr;
     }
 
-    MOZ_ASSERT(!cx->isExceptionPending());
-
-    return buf.finishString();
+    return NewStringCopyZ<CanGC>(cx, sp.string());
 }
 
 static bool
-GetPCCountJSON(JSContext* cx, const ScriptAndCounts& sac, StringBuffer& buf)
+GetPCCountJSON(JSContext* cx, const ScriptAndCounts& sac, Sprinter& sp)
 {
+    JSONPrinter json(sp, false);
+
     RootedScript script(cx, sac.script);
 
-    if (!buf.append('{')) {
+    LifoAllocScope allocScope(&cx->tempLifoAlloc());
+    BytecodeParser parser(cx, allocScope.alloc(), script);
+    if (!parser.parse()) {
         return false;
     }
-    if (!AppendJSONProperty(buf, "text", NO_COMMA)) {
-        return false;
-    }
+
+    json.beginObject();
 
     JSString* str = JS_DecompileScript(cx, script);
-    if (!str || !(str = StringToSource(cx, str))) {
+    if (!str) {
         return false;
     }
 
-    if (!buf.append(str)) {
+    if (!JSONStringProperty(sp, json, "text", str)) {
         return false;
     }
 
-    if (!AppendJSONProperty(buf, "line")) {
-        return false;
-    }
-    if (!NumberValueToStringBuffer(cx, Int32Value(script->lineno()), buf)) {
-        return false;
-    }
+    json.property("line", script->lineno());
 
-    if (!AppendJSONProperty(buf, "opcodes")) {
-        return false;
-    }
-    if (!buf.append('[')) {
-        return false;
-    }
-    bool comma = false;
+    json.beginListProperty("opcodes");
 
     uint64_t hits = 0;
-
     for (BytecodeRangeWithPosition range(cx, script); !range.empty(); range.popFront()) {
         jsbytecode *pc = range.frontPC();
         size_t offset = script->pcToOffset(pc);
@@ -2829,55 +2784,17 @@ GetPCCountJSON(JSContext* cx, const ScriptAndCounts& sac, StringBuffer& buf)
 
         // If the current instruction is a jump target,
         // then update the number of hits.
-        const PCCounts* counts = sac.maybeGetPCCounts(pc);
-        if (counts) {
+        if (const PCCounts* counts = sac.maybeGetPCCounts(pc)) {
             hits = counts->numExec();
         }
 
-        if (comma && !buf.append(',')) {
-            return false;
-        }
-        comma = true;
+        json.beginObject();
 
-        if (!buf.append('{')) {
-            return false;
-        }
-
-        if (!AppendJSONProperty(buf, "id", NO_COMMA)) {
-            return false;
-        }
-        if (!NumberValueToStringBuffer(cx, Int32Value(offset), buf)) {
-            return false;
-        }
-
-        if (!AppendJSONProperty(buf, "line")) {
-            return false;
-        }
-        if (!NumberValueToStringBuffer(cx, Int32Value(range.frontLineNumber()), buf)) {
-            return false;
-        }
+        json.property("id", offset);
+        json.property("line", range.frontLineNumber());
+        json.property("name", CodeName[op]);
 
         {
-            const char* name = CodeName[op];
-            if (!AppendJSONProperty(buf, "name")) {
-                return false;
-            }
-            if (!buf.append('\"')) {
-                return false;
-            }
-            if (!buf.append(name, strlen(name))) {
-                return false;
-            }
-            if (!buf.append('\"')) {
-                return false;
-            }
-        }
-
-        {
-            BytecodeParser parser(cx, script);
-            if (!parser.parse()) {
-                return false;
-            }
             ExpressionDecompiler ed(cx, script, parser);
             if (!ed.init()) {
                 return false;
@@ -2890,147 +2807,76 @@ GetPCCountJSON(JSContext* cx, const ScriptAndCounts& sac, StringBuffer& buf)
             if (!text) {
                 return false;
             }
+
             JS::ConstUTF8CharsZ utf8chars(text.get(), strlen(text.get()));
             JSString* str = NewStringCopyUTF8Z<CanGC>(cx, utf8chars);
-            if (!AppendJSONProperty(buf, "text")) {
+            if (!str) {
                 return false;
             }
-            if (!str || !(str = StringToSource(cx, str))) {
-                return false;
-            }
-            if (!buf.append(str)) {
+
+            if (!JSONStringProperty(sp, json, "text", str)) {
                 return false;
             }
         }
 
-        if (!AppendJSONProperty(buf, "counts")) {
-            return false;
-        }
-        if (!buf.append('{')) {
-            return false;
-        }
-
+        json.beginObjectProperty("counts");
         if (hits > 0) {
-            if (!AppendJSONProperty(buf, PCCounts::numExecName, NO_COMMA)) {
-                return false;
-            }
-            if (!NumberValueToStringBuffer(cx, DoubleValue(hits), buf)) {
-                return false;
-            }
+            json.property(PCCounts::numExecName, hits);
         }
+        json.endObject();
 
-        if (!buf.append('}')) {
-            return false;
-        }
-        if (!buf.append('}')) {
-            return false;
-        }
+        json.endObject();
 
         // If the current instruction has thrown,
         // then decrement the hit counts with the number of throws.
-        counts = sac.maybeGetThrowCounts(pc);
-        if (counts) {
+        if (const PCCounts* counts = sac.maybeGetThrowCounts(pc)) {
             hits -= counts->numExec();
         }
     }
 
-    if (!buf.append(']')) {
-        return false;
-    }
+    json.endList();
 
-    jit::IonScriptCounts* ionCounts = sac.getIonCounts();
-    if (ionCounts) {
-        if (!AppendJSONProperty(buf, "ion")) {
-            return false;
-        }
-        if (!buf.append('[')) {
-            return false;
-        }
-        bool comma = false;
+    if (jit::IonScriptCounts* ionCounts = sac.getIonCounts()) {
+        json.beginListProperty("ion");
+
         while (ionCounts) {
-            if (comma && !buf.append(',')) {
-                return false;
-            }
-            comma = true;
-
-            if (!buf.append('[')) {
-                return false;
-            }
+            json.beginList();
             for (size_t i = 0; i < ionCounts->numBlocks(); i++) {
-                if (i && !buf.append(',')) {
-                    return false;
-                }
                 const jit::IonBlockCounts& block = ionCounts->block(i);
 
-                if (!buf.append('{')) {
-                    return false;
-                }
-                if (!AppendJSONProperty(buf, "id", NO_COMMA)) {
-                    return false;
-                }
-                if (!NumberValueToStringBuffer(cx, Int32Value(block.id()), buf)) {
-                    return false;
-                }
-                if (!AppendJSONProperty(buf, "offset")) {
-                    return false;
-                }
-                if (!NumberValueToStringBuffer(cx, Int32Value(block.offset()), buf)) {
-                    return false;
-                }
-                if (!AppendJSONProperty(buf, "successors")) {
-                    return false;
-                }
-                if (!buf.append('[')) {
-                    return false;
-                }
+                json.beginObject();
+                json.property("id", block.id());
+                json.property("offset", block.offset());
+
+                json.beginListProperty("successors");
                 for (size_t j = 0; j < block.numSuccessors(); j++) {
-                    if (j && !buf.append(',')) {
-                        return false;
-                    }
-                    if (!NumberValueToStringBuffer(cx, Int32Value(block.successor(j)), buf)) {
-                        return false;
-                    }
+                    json.value(block.successor(j));
                 }
-                if (!buf.append(']')) {
-                    return false;
-                }
-                if (!AppendJSONProperty(buf, "hits")) {
-                    return false;
-                }
-                if (!NumberValueToStringBuffer(cx, DoubleValue(block.hitCount()), buf)) {
+                json.endList();
+
+                json.property("hits", block.hitCount());
+
+                JSString* str = NewStringCopyZ<CanGC>(cx, block.code());
+                if (!str) {
                     return false;
                 }
 
-                if (!AppendJSONProperty(buf, "code")) {
+                if (!JSONStringProperty(sp, json, "code", str)) {
                     return false;
                 }
-                JSString* str = JS_NewStringCopyZ(cx, block.code());
-                if (!str || !(str = StringToSource(cx, str))) {
-                    return false;
-                }
-                if (!buf.append(str)) {
-                    return false;
-                }
-                if (!buf.append('}')) {
-                    return false;
-                }
+
+                json.endObject();
             }
-            if (!buf.append(']')) {
-                return false;
-            }
+            json.endList();
 
             ionCounts = ionCounts->previous();
         }
-        if (!buf.append(']')) {
-            return false;
-        }
+
+        json.endList();
     }
 
-    if (!buf.append('}')) {
-        return false;
-    }
+    json.endObject();
 
-    MOZ_ASSERT(!cx->isExceptionPending());
     return true;
 }
 
@@ -3047,16 +2893,23 @@ js::GetPCCountScriptContents(JSContext* cx, size_t index)
     const ScriptAndCounts& sac = (*rt->scriptAndCountsVector)[index];
     JSScript* script = sac.script;
 
-    StringBuffer buf(cx);
+    Sprinter sp(cx);
+    if (!sp.init()) {
+        return nullptr;
+    }
 
     {
         AutoRealm ar(cx, &script->global());
-        if (!GetPCCountJSON(cx, sac, buf)) {
+        if (!GetPCCountJSON(cx, sac, sp)) {
             return nullptr;
         }
     }
 
-    return buf.finishString();
+    if (sp.hadOutOfMemory()) {
+        return nullptr;
+    }
+
+    return NewStringCopyZ<CanGC>(cx, sp.string());
 }
 
 static bool
@@ -3069,81 +2922,83 @@ GenerateLcovInfo(JSContext* cx, JS::Realm* realm, GenericPrinter& out)
         js::gc::AutoPrepareForTracing apft(cx);
     }
 
-    Rooted<ScriptVector> topScripts(cx, ScriptVector(cx));
+    // Hold the scripts that we have already flushed, to avoid flushing them twice.
+    using JSScriptSet = GCHashSet<JSScript*>;
+    Rooted<JSScriptSet> scriptsDone(cx, JSScriptSet(cx));
+
+    Rooted<ScriptVector> queue(cx, ScriptVector(cx));
     for (ZonesIter zone(rt, SkipAtoms); !zone.done(); zone.next()) {
         for (auto script = zone->cellIter<JSScript>(); !script.done(); script.next()) {
             if (script->realm() != realm ||
-                !script->isTopLevel() ||
                 !script->filename())
             {
                 continue;
             }
 
-            if (!topScripts.append(script)) {
+            if (!queue.append(script)) {
                 return false;
             }
         }
     }
 
-    if (topScripts.length() == 0) {
+    if (queue.length() == 0) {
         return true;
     }
 
     // Collect code coverage info for one realm.
-    coverage::LCovRealm realmCover;
-    for (JSScript* topLevel: topScripts) {
-        RootedScript topScript(cx, topLevel);
+    do {
+        RootedScript script(cx, queue.popCopy());
+        RootedFunction fun(cx);
 
-        // We found the top-level script, visit all the functions reachable
-        // from the top-level function, and delazify them.
-        Rooted<ScriptVector> queue(cx, ScriptVector(cx));
-        if (!queue.append(topLevel)) {
-            return false;
+        JSScriptSet::AddPtr entry = scriptsDone.lookupForAdd(script);
+        if (script->filename() && !entry) {
+            realm->lcovOutput.collectCodeCoverageInfo(realm, script, script->filename());
+            script->resetScriptCounts();
+
+            if (!scriptsDone.add(entry, script)) {
+                return false;
+            }
         }
 
-        RootedScript script(cx);
-        RootedFunction fun(cx);
-        do {
-            script = queue.popCopy();
-            if (script->filename()) {
-                realmCover.collectCodeCoverageInfo(realm, script, script->filename());
-            }
+        if (!script->isTopLevel()) {
+            continue;
+        }
 
-            // Iterate from the last to the first object in order to have
-            // the functions them visited in the opposite order when popping
-            // elements from the stack of remaining scripts, such that the
-            // functions are more-less listed with increasing line numbers.
-            if (!script->hasObjects()) {
+        // Iterate from the last to the first object in order to have
+        // the functions them visited in the opposite order when popping
+        // elements from the stack of remaining scripts, such that the
+        // functions are more-less listed with increasing line numbers.
+        if (!script->hasObjects()) {
+            continue;
+        }
+        auto objects = script->objects();
+        for (JSObject* obj : mozilla::Reversed(objects)) {
+            // Only continue on JSFunction objects.
+            if (!obj->is<JSFunction>()) {
                 continue;
             }
-            auto objects = script->objects();
-            for (JSObject* obj : mozilla::Reversed(objects)) {
-                // Only continue on JSFunction objects.
-                if (!obj->is<JSFunction>()) {
-                    continue;
-                }
-                fun = &obj->as<JSFunction>();
+            fun = &obj->as<JSFunction>();
 
-                // Let's skip wasm for now.
-                if (!fun->isInterpreted()) {
-                    continue;
-                }
-
-                // Queue the script in the list of script associated to the
-                // current source.
-                JSScript* childScript = JSFunction::getOrCreateScript(cx, fun);
-                if (!childScript || !queue.append(childScript)) {
-                    return false;
-                }
+            // Let's skip wasm for now.
+            if (!fun->isInterpreted()) {
+                continue;
             }
-        } while (!queue.empty());
-    }
+
+            // Queue the script in the list of script associated to the
+            // current source.
+            JSScript* childScript = JSFunction::getOrCreateScript(cx, fun);
+            if (!childScript || !queue.append(childScript)) {
+                return false;
+            }
+        }
+    } while (!queue.empty());
 
     bool isEmpty = true;
-    realmCover.exportInto(out, &isEmpty);
+    realm->lcovOutput.exportInto(out, &isEmpty);
     if (out.hadOutOfMemory()) {
         return false;
     }
+
     return true;
 }
 
@@ -3156,9 +3011,11 @@ js::GetCodeCoverageSummary(JSContext* cx, size_t* length)
         return nullptr;
     }
 
-    if (!GenerateLcovInfo(cx, cx->realm(), out)) {
-        JS_ReportOutOfMemory(cx);
-        return nullptr;
+    for (RealmsIter realm(cx->runtime()); !realm.done(); realm.next()) {
+        if (!GenerateLcovInfo(cx, realm, out)) {
+            JS_ReportOutOfMemory(cx);
+            return nullptr;
+        }
     }
 
     if (out.hadOutOfMemory()) {

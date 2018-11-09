@@ -7,15 +7,17 @@ Transform the repackage signing task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import os
+
+from taskgraph.loader.single_dep import schema
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, Schema
+from taskgraph.util.schema import validate_schema
 from taskgraph.util.scriptworker import (
     add_scope_prefix,
     get_signing_cert_scope_per_platform,
     get_worker_type_for_scope,
 )
-from taskgraph.util.taskcluster import get_artifact_path
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Required, Optional
 
@@ -25,8 +27,7 @@ task_description_schema = {str(k): v for k, v in task_description_schema.schema.
 
 transforms = TransformSequence()
 
-repackage_signing_description_schema = Schema({
-    Required('dependent-task'): object,
+repackage_signing_description_schema = schema.extend({
     Required('depname', default='repackage'): basestring,
     Optional('label'): basestring,
     Optional('treeherder'): task_description_schema['treeherder'],
@@ -39,13 +40,14 @@ SIGNING_FORMATS = {
     'target.bz2.complete.mar': ["mar"],
     "target.installer.exe": ["sha2signcode"],
     "target.stub-installer.exe": ["sha2signcodestub"],
+    "target.installer.msi": ["sha2signcode"],
 }
 
 
 @transforms.add
 def validate(config, jobs):
     for job in jobs:
-        label = job.get('dependent-task', object).__dict__.get('label', '?no-label?')
+        label = job.get('primary-dependency', object).__dict__.get('label', '?no-label?')
         validate_schema(
             repackage_signing_description_schema, job,
             "In repackage-signing ({!r} kind) task for {!r}:".format(config.kind, label))
@@ -55,8 +57,9 @@ def validate(config, jobs):
 @transforms.add
 def make_repackage_signing_description(config, jobs):
     for job in jobs:
-        dep_job = job['dependent-task']
+        dep_job = job['primary-dependency']
         attributes = copy_attributes_from_dependent_job(dep_job)
+        locale = attributes.get('locale', dep_job.attributes.get('locale'))
         attributes['repackage_type'] = 'repackage-signing'
 
         treeherder = job.get('treeherder', {})
@@ -74,21 +77,25 @@ def make_repackage_signing_description(config, jobs):
             )
         treeherder.setdefault('kind', 'build')
 
+        if locale:
+            treeherder['symbol'] = 'rs({})'.format(locale)
+
+        if config.kind == 'repackage-signing-msi':
+            treeherder['symbol'] = 'MSIs({})'.format(locale or 'N')
+
         label = job['label']
 
-        dependencies = {"repackage": dep_job.label}
+        dep_kind = dep_job.kind
+        if 'l10n' in dep_kind:
+            dep_kind = 'repackage'
+
+        dependencies = {dep_kind: dep_job.label}
 
         signing_dependencies = dep_job.dependencies
         # This is so we get the build task etc in our dependencies to
         # have better beetmover support.
         dependencies.update({k: v for k, v in signing_dependencies.items()
                              if k != 'docker-image'})
-
-        locale_str = ""
-        if dep_job.attributes.get('locale'):
-            treeherder['symbol'] = 'rs({})'.format(dep_job.attributes.get('locale'))
-            attributes['locale'] = dep_job.attributes.get('locale')
-            locale_str = "{}/".format(dep_job.attributes.get('locale'))
 
         description = (
             "Signing of repackaged artifacts for locale '{locale}' for build '"
@@ -104,40 +111,24 @@ def make_repackage_signing_description(config, jobs):
         signing_cert_scope = get_signing_cert_scope_per_platform(
             build_platform, is_nightly, config
         )
-        scopes = [signing_cert_scope, add_scope_prefix(config, 'signing:format:autograph_mar384')]
+        scopes = [signing_cert_scope]
 
-        upstream_artifacts = [{
-            "taskId": {"task-reference": "<repackage>"},
-            "taskType": "repackage",
-            "paths": [
-                get_artifact_path(dep_job, "{}target.complete.mar".format(locale_str)),
-            ],
-            "formats": ["autograph_mar384"]
-        }]
-        if 'win' in build_platform:
-            upstream_artifacts.append({
-                "taskId": {"task-reference": "<repackage>"},
-                "taskType": "repackage",
-                "paths": [
-                    get_artifact_path(dep_job, "{}target.installer.exe".format(locale_str)),
-                ],
-                "formats": ["sha2signcode"]
-            })
-            scopes.append(add_scope_prefix(config, "signing:format:sha2signcode"))
-
-            use_stub = attributes.get('stub-installer')
-            if use_stub:
+        upstream_artifacts = []
+        for artifact in dep_job.release_artifacts:
+            basename = os.path.basename(artifact)
+            if basename in SIGNING_FORMATS:
                 upstream_artifacts.append({
-                    "taskId": {"task-reference": "<repackage>"},
+                    "taskId": {"task-reference": "<{}>".format(dep_kind)},
                     "taskType": "repackage",
-                    "paths": [
-                        get_artifact_path(
-                            dep_job, "{}target.stub-installer.exe".format(locale_str)
-                        ),
-                    ],
-                    "formats": ["sha2signcodestub"]
+                    "paths": [artifact],
+                    "formats": SIGNING_FORMATS[os.path.basename(artifact)],
                 })
-                scopes.append(add_scope_prefix(config, "signing:format:sha2signcodestub"))
+
+        scopes += list({
+            add_scope_prefix(config, 'signing:format:{}'.format(format))
+            for artifact in upstream_artifacts
+            for format in artifact['formats']
+        })
 
         task = {
             'label': label,

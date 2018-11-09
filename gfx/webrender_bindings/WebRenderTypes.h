@@ -7,7 +7,6 @@
 #ifndef GFX_WEBRENDERTYPES_H
 #define GFX_WEBRENDERTYPES_H
 
-#include "FrameMetrics.h"
 #include "ImageTypes.h"
 #include "mozilla/webrender/webrender_ffi.h"
 #include "mozilla/Maybe.h"
@@ -15,6 +14,7 @@
 #include "mozilla/gfx/Types.h"
 #include "mozilla/gfx/Tools.h"
 #include "mozilla/gfx/Rect.h"
+#include "mozilla/layers/LayersTypes.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
 #include "mozilla/Variant.h"
@@ -501,6 +501,31 @@ static inline wr::BorderRadius ToBorderRadius(const mozilla::LayoutDeviceSize& t
   br.bottom_left = ToLayoutSize(bottomLeft);
   br.bottom_right = ToLayoutSize(bottomRight);
   return br;
+}
+
+static inline wr::ComplexClipRegion ToComplexClipRegion(
+  const nsRect& aRect,
+  const nscoord* aRadii,
+  int32_t aAppUnitsPerDevPixel)
+{
+  wr::ComplexClipRegion ret;
+  ret.rect = ToRoundedLayoutRect(
+    LayoutDeviceRect::FromAppUnits(aRect, aAppUnitsPerDevPixel));
+  ret.radii = ToBorderRadius(
+    LayoutDeviceSize::FromAppUnits(
+      nsSize(aRadii[eCornerTopLeftX], aRadii[eCornerTopLeftY]),
+      aAppUnitsPerDevPixel),
+    LayoutDeviceSize::FromAppUnits(
+      nsSize(aRadii[eCornerTopRightX], aRadii[eCornerTopRightY]),
+      aAppUnitsPerDevPixel),
+    LayoutDeviceSize::FromAppUnits(
+      nsSize(aRadii[eCornerBottomLeftX], aRadii[eCornerBottomLeftY]),
+      aAppUnitsPerDevPixel),
+    LayoutDeviceSize::FromAppUnits(
+      nsSize(aRadii[eCornerBottomRightX], aRadii[eCornerBottomRightY]),
+      aAppUnitsPerDevPixel));
+  ret.mode = ClipMode::Clip;
+  return ret;
 }
 
 static inline wr::LayoutSideOffsets ToBorderWidths(float top, float right, float bottom, float left)

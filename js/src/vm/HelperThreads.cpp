@@ -56,7 +56,7 @@ GlobalHelperThreadState* gHelperThreadState = nullptr;
 #define PROFILER_RAII_EXPAND(id, line) PROFILER_RAII_PASTE(id, line)
 #define PROFILER_RAII PROFILER_RAII_EXPAND(raiiObject, __LINE__)
 #define AUTO_PROFILER_LABEL(label, category) \
-  HelperThread::AutoProfilerLabel PROFILER_RAII(this, label, __LINE__, \
+  HelperThread::AutoProfilerLabel PROFILER_RAII(this, label, \
                                                 js::ProfilingStackFrame::Category::category)
 
 bool
@@ -568,8 +568,7 @@ ScriptParseTask::parse(JSContext* cx)
 
     ScopeKind scopeKind = options.nonSyntacticScope ? ScopeKind::NonSyntactic : ScopeKind::Global;
 
-    JSScript* script = frontend::CompileGlobalScript(cx, cx->tempLifoAlloc(), scopeKind,
-                                                     options, data,
+    JSScript* script = frontend::CompileGlobalScript(cx, scopeKind, options, data,
                                                      /* sourceObjectOut = */ &sourceObject.get());
     if (script) {
         scripts.infallibleAppend(script);
@@ -592,7 +591,7 @@ ModuleParseTask::parse(JSContext* cx)
 
     Rooted<ScriptSourceObject*> sourceObject(cx);
 
-    ModuleObject* module = frontend::CompileModule(cx, options, data, cx->tempLifoAlloc(), &sourceObject.get());
+    ModuleObject* module = frontend::CompileModule(cx, options, data, &sourceObject.get());
     if (module) {
         scripts.infallibleAppend(module->script());
         if (sourceObject) {
@@ -615,8 +614,7 @@ ScriptDecodeTask::parse(JSContext* cx)
     RootedScript resultScript(cx);
     Rooted<ScriptSourceObject*> sourceObject(cx);
 
-    XDROffThreadDecoder decoder(cx, cx->tempLifoAlloc(), &options,
-                                /* sourceObjectOut = */ &sourceObject.get(), range);
+    XDROffThreadDecoder decoder(cx, &options, /* sourceObjectOut = */ &sourceObject.get(), range);
     XDRResult res = decoder.codeScript(&resultScript);
     MOZ_ASSERT(bool(resultScript) == res.isOk());
     if (res.isOk()) {
@@ -681,7 +679,7 @@ MultiScriptsDecodeTask::parse(JSContext* cx)
         RootedScript resultScript(cx);
         Rooted<ScriptSourceObject*> sourceObject(cx);
 
-        XDROffThreadDecoder decoder(cx, cx->tempLifoAlloc(), &opts, &sourceObject.get(),
+        XDROffThreadDecoder decoder(cx, &opts, &sourceObject.get(),
                                     source.range);
         XDRResult res = decoder.codeScript(&resultScript);
         MOZ_ASSERT(bool(resultScript) == res.isOk());
@@ -1325,7 +1323,7 @@ static inline bool
 IsHelperThreadSimulatingOOM(js::ThreadType threadType)
 {
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
-    return js::oom::targetThread == threadType;
+    return js::oom::simulator.targetThread() == threadType;
 #else
     return false;
 #endif
@@ -2310,6 +2308,8 @@ HelperThread::handleParseWorkload(AutoLockHelperThreadState& locked)
 
         task->parse(cx);
 
+        MOZ_ASSERT(cx->tempLifoAlloc().isEmpty());
+        cx->tempLifoAlloc().freeAll();
         cx->frontendCollectionPool().purge();
         cx->atomsZoneFreeLists().clear();
     }
@@ -2583,12 +2583,11 @@ const HelperThread::TaskSpec HelperThread::taskSpecs[] = {
 
 HelperThread::AutoProfilerLabel::AutoProfilerLabel(HelperThread* helperThread,
                                                    const char* label,
-                                                   uint32_t line,
                                                    ProfilingStackFrame::Category category)
   : profilingStack(helperThread->profilingStack)
 {
     if (profilingStack) {
-        profilingStack->pushLabelFrame(label, nullptr, this, line, category);
+        profilingStack->pushLabelFrame(label, nullptr, this, category);
     }
 }
 

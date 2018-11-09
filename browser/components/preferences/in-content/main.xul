@@ -85,7 +85,7 @@
               onsyncfrompreference="return gMainPane.readLinkTarget();"
               onsynctopreference="return gMainPane.writeLinkTarget();"/>
 
-    <checkbox id="warnCloseMultiple" data-l10n-id="warn-on-close-multiple-tabs"
+    <checkbox id="warnCloseMultiple" data-l10n-id="warn-on-quit-close-multiple-tabs"
               preference="browser.tabs.warnOnClose"/>
 
     <checkbox id="warnOpenMany" data-l10n-id="warn-on-open-many-tabs"
@@ -300,7 +300,7 @@
     <image class="message-bar-icon"/>
     <hbox class="message-bar-content" align="center" flex="1">
       <description class="message-bar-description" flex="1"/>
-      <button class="message-bar-button" oncommand="gMainPane.confirmBrowserLanguageChange()"/>
+      <button class="message-bar-button" oncommand="gMainPane.confirmBrowserLanguageChange(event)"/>
     </hbox>
   </hbox>
 
@@ -459,7 +459,10 @@
               class="accessory-button"
               data-l10n-id="update-history"
               preference="app.update.disable_button.showUpdateHistory"
-              searchkeywords="&history.title; &history2.intro;"/>
+              search-l10n-ids="
+                history-title,
+                history-intro
+              "/>
     </vbox>
 #endif
   </hbox>
@@ -469,8 +472,7 @@
       <hbox id="checkForUpdates" align="start">
         <spacer flex="1"/>
         <button id="checkForUpdatesButton"
-                label="&update.checkForUpdatesButton.label;"
-                accesskey="&update.checkForUpdatesButton.accesskey;"
+                data-l10n-id="update-checkForUpdatesButton"
                 oncommand="gAppUpdater.checkForUpdates();"/>
       </hbox>
       <hbox id="downloadAndInstall" align="start">
@@ -482,76 +484,72 @@
       <hbox id="apply" align="start">
         <spacer flex="1"/>
         <button id="updateButton"
-                label="&update.updateButton.label3;"
-                accesskey="&update.updateButton.accesskey;"
+                data-l10n-id="update-updateButton"
                 oncommand="gAppUpdater.buttonRestartAfterDownload();"/>
       </hbox>
       <hbox id="checkingForUpdates" align="start">
-        <image class="update-throbber"/><label>&update.checkingForUpdates;</label>
+        <image class="update-throbber"/>
+        <label data-l10n-id="update-checkingForUpdates"></label>
         <spacer flex="1"/>
-        <button label="&update.checkForUpdatesButton.label;"
-                accesskey="&update.checkForUpdatesButton.accesskey;"
+        <button data-l10n-id="update-checkForUpdatesButton"
                 disabled="true"/>
       </hbox>
-      <hbox id="downloading" align="start">
-        <image class="update-throbber"/><label>&update.downloading.start;</label><label id="downloadStatus"/><label>&update.downloading.end;</label>
+      <hbox id="downloading" align="start" data-l10n-id="update-downloading">
+        <html:img class="update-throbber" src="chrome://global/skin/icons/loading.png" data-l10n-name="icon"/>
+        <label id="downloadStatus" data-l10n-name="download-status"/>
       </hbox>
       <hbox id="applying" align="start">
-        <image class="update-throbber"/><label>&update.applying;</label>
+        <image class="update-throbber"/>
+        <label data-l10n-id="update-applying"></label>
       </hbox>
       <hbox id="downloadFailed" align="start">
-        <label>&update.failed.start;</label><label id="failedLink" class="text-link">&update.failed.linkText;</label><label>&update.failed.end;</label>
+        <label data-l10n-id="update-failed-main">
+          <html:a id="failedLink" target="_blank" class="learnMore text-link" data-l10n-name="failed-link-main"></html:a>
+        </label>
         <spacer flex="1"/>
-        <button label="&update.checkForUpdatesButton.label;"
-                accesskey="&update.checkForUpdatesButton.accesskey;"
+        <button data-l10n-id="update-checkForUpdatesButton"
                 oncommand="gAppUpdater.checkForUpdates();"/>
       </hbox>
       <hbox id="policyDisabled" align="start">
-        <label>&update.adminDisabled;</label>
+        <label data-l10n-id="update-adminDisabled"></label>
         <spacer flex="1"/>
-        <button label="&update.checkForUpdatesButton.label;"
-                accesskey="&update.checkForUpdatesButton.accesskey;"
+        <button data-l10n-id="update-checkForUpdatesButton"
                 disabled="true"/>
       </hbox>
       <hbox id="noUpdatesFound" align="start">
         <image class="face-smile"/>
-        <label>&update.noUpdatesFound;</label>
+        <label data-l10n-id="update-noUpdatesFound"></label>
         <spacer flex="1"/>
-        <button label="&update.checkForUpdatesButton.label;"
-                accesskey="&update.checkForUpdatesButton.accesskey;"
+        <button data-l10n-id="update-checkForUpdatesButton"
                 oncommand="gAppUpdater.checkForUpdates();"/>
       </hbox>
       <hbox id="otherInstanceHandlingUpdates" align="start">
-        <label>&update.otherInstanceHandlingUpdates;</label>
+        <label data-l10n-id="update-otherInstanceHandlingUpdates"></label>
         <spacer flex="1"/>
-        <button label="&update.checkForUpdatesButton.label;"
-                accesskey="&update.checkForUpdatesButton.accesskey;"
+        <button data-l10n-id="update-checkForUpdatesButton"
                 disabled="true"/>
       </hbox>
       <hbox id="manualUpdate" align="start">
         <image class="face-sad"/>
-        <description flex="1">
-          <label>&update.manual.start;</label><label id="manualLink" class="text-link"/><label>&update.manual.end;</label>
+        <description flex="1" data-l10n-id="update-manual">
+          <label id="manualLink" class="text-link" data-l10n-name="manual-link"/>
         </description>
         <spacer flex="1"/>
-        <button label="&update.checkForUpdatesButton.label;"
-                accesskey="&update.checkForUpdatesButton.accesskey;"
+        <button data-l10n-id="update-checkForUpdatesButton"
                 disabled="true"/>
       </hbox>
       <hbox id="unsupportedSystem" align="start">
-        <description flex="1">
-          <label>&update.unsupported.start;</label><label id="unsupportedLink" class="learnMore text-link">&update.unsupported.linkText;</label><label>&update.unsupported.end;</label>
+        <description flex="1" data-l10n-id="update-unsupported">
+          <label id="unsupportedLink" class="learnMore text-link" data-l10n-name="unsupported-link"></label>
         </description>
         <spacer flex="1"/>
-        <button label="&update.checkForUpdatesButton.label;"
-                accesskey="&update.checkForUpdatesButton.accesskey;"
+        <button data-l10n-id="update-checkForUpdatesButton"
                 disabled="true"/>
       </hbox>
       <hbox id="restarting" align="start">
-        <image class="update-throbber"/><label>&update.restarting;</label>
+        <image class="update-throbber"/><label data-l10n-id="update-restarting"></label>
         <spacer flex="1"/>
-        <button label="&update.updateButton.label3;"
-                accesskey="&update.updateButton.accesskey;"
+        <button data-l10n-id="update-updateButton"
                 disabled="true"/>
       </hbox>
     </deck>
@@ -560,11 +558,12 @@
 
 #ifdef MOZ_UPDATER
   <description id="updateAllowDescription" data-l10n-id="update-application-allow-description"></description>
-  <radiogroup id="updateRadioGroup" preference="app.update.auto">
+  <radiogroup id="updateRadioGroup">
     <radio id="autoDesktop"
            value="true"
            data-l10n-id="update-application-auto"/>
-    <radio value="false"
+    <radio id="manualDesktop"
+           value="false"
            data-l10n-id="update-application-check-choose"/>
   </radiogroup>
 #ifdef MOZ_MAINTENANCE_SERVICE

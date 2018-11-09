@@ -17,6 +17,7 @@
 #include "mozilla/layers/PWebRenderBridgeParent.h"
 #include "mozilla/layers/UiCompositorControllerParent.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/webrender/WebRenderTypes.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "nsTArrayForwardDeclare.h"
@@ -78,7 +79,8 @@ public:
   mozilla::ipc::IPCResult RecvDeleteCompositorAnimations(InfallibleTArray<uint64_t>&& aIds) override;
   mozilla::ipc::IPCResult RecvUpdateResources(nsTArray<OpUpdateResource>&& aUpdates,
                                               nsTArray<RefCountedShmem>&& aSmallShmems,
-                                              nsTArray<ipc::Shmem>&& aLargeShmems) override;
+                                              nsTArray<ipc::Shmem>&& aLargeShmems,
+                                              const bool& aScheduleComposite) override;
   mozilla::ipc::IPCResult RecvSetDisplayList(const gfx::IntSize& aSize,
                                              InfallibleTArray<WebRenderParentCommand>&& aCommands,
                                              InfallibleTArray<OpDestroy>&& aToDestroy,
@@ -103,6 +105,9 @@ public:
                                                InfallibleTArray<OpDestroy>&& aToDestroy,
                                                const uint64_t& aFwdTransactionId,
                                                const TransactionId& aTransactionId,
+                                               nsTArray<OpUpdateResource>&& aResourceUpdates,
+                                               nsTArray<RefCountedShmem>&& aSmallShmems,
+                                               nsTArray<ipc::Shmem>&& aLargeShmems,
                                                const wr::IdNamespace& aIdNamespace,
                                                const TimeStamp& aRefreshStartTime,
                                                const TimeStamp& aTxnStartTime,
@@ -125,10 +130,10 @@ public:
   mozilla::ipc::IPCResult RecvLeaveTestMode() override;
   mozilla::ipc::IPCResult RecvGetAnimationValue(const uint64_t& aCompositorAnimationsId,
                                                 OMTAValue* aValue) override;
-  mozilla::ipc::IPCResult RecvSetAsyncScrollOffset(const FrameMetrics::ViewID& aScrollId,
+  mozilla::ipc::IPCResult RecvSetAsyncScrollOffset(const ScrollableLayerGuid::ViewID& aScrollId,
                                                    const float& aX,
                                                    const float& aY) override;
-  mozilla::ipc::IPCResult RecvSetAsyncZoom(const FrameMetrics::ViewID& aScrollId,
+  mozilla::ipc::IPCResult RecvSetAsyncZoom(const ScrollableLayerGuid::ViewID& aScrollId,
                                            const float& aZoom) override;
   mozilla::ipc::IPCResult RecvFlushApzRepaints() override;
   mozilla::ipc::IPCResult RecvGetAPZTestData(APZTestData* data) override;
@@ -170,6 +175,7 @@ public:
 
   void ExtractImageCompositeNotifications(nsTArray<ImageCompositeNotificationInfo>* aNotifications);
 
+  wr::Epoch GetCurrentEpoch() const { return mWrEpoch; }
   wr::IdNamespace GetIdNamespace()
   {
     return mIdNamespace;
@@ -217,6 +223,8 @@ public:
   void ForceIsFirstPaint() { mIsFirstPaint = true; }
 
 private:
+  class ScheduleSharedSurfaceRelease;
+
   explicit WebRenderBridgeParent(const wr::PipelineId& aPipelineId);
   virtual ~WebRenderBridgeParent();
 
@@ -233,7 +241,8 @@ private:
                         wr::TransactionBuilder& aResources);
   bool UpdateExternalImage(wr::ExternalImageId aExtId, wr::ImageKey aKey,
                            const ImageIntRect& aDirtyRect,
-                           wr::TransactionBuilder& aResources);
+                           wr::TransactionBuilder& aResources,
+                           UniquePtr<ScheduleSharedSurfaceRelease>& aScheduleRelease);
 
   bool PushExternalImageForTexture(wr::ExternalImageId aExtId,
                                    wr::ImageKey aKey,
@@ -249,7 +258,8 @@ private:
   void RemovePipelineIdForCompositable(const wr::PipelineId& aPipelineId,
                                        wr::TransactionBuilder& aTxn);
 
-  void RemoveExternalImageId(const ExternalImageId& aImageId);
+  void DeleteImage(const wr::ImageKey& aKey,
+                   wr::TransactionBuilder& aUpdates);
   void ReleaseTextureOfImage(const wr::ImageKey& aKey);
 
   LayersId GetLayersId() const;
@@ -335,7 +345,7 @@ private:
   std::unordered_set<uint64_t> mActiveAnimations;
   std::unordered_map<uint64_t, RefPtr<WebRenderImageHost>> mAsyncCompositables;
   std::unordered_map<uint64_t, CompositableTextureHostRef> mTextureHosts;
-  std::unordered_set<uint64_t> mSharedSurfaceIds;
+  std::unordered_map<uint64_t, wr::ExternalImageId> mSharedSurfaceIds;
 
   TimeDuration mVsyncRate;
   TimeStamp mPreviousFrameTimeStamp;

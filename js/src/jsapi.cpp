@@ -867,9 +867,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
         // destination's cross compartment map and that the same
         // object will continue to work.
         AutoRealmUnchecked ar(cx, origobj->nonCCWRealm());
-        if (!JSObject::swap(cx, origobj, target)) {
-            MOZ_CRASH();
-        }
+        JSObject::swap(cx, origobj, target);
         newIdentity = origobj;
     } else if (WrapperMap::Ptr p = destination->lookupWrapper(origv)) {
         // There might already be a wrapper for the original object in
@@ -883,9 +881,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
         NukeCrossCompartmentWrapper(cx, newIdentity);
 
         AutoRealm ar(cx, newIdentity);
-        if (!JSObject::swap(cx, newIdentity, target)) {
-            MOZ_CRASH();
-        }
+        JSObject::swap(cx, newIdentity, target);
     } else {
         // Otherwise, we use |target| for the new identity object.
         newIdentity = target;
@@ -908,9 +904,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
             MOZ_CRASH();
         }
         MOZ_ASSERT(Wrapper::wrappedObject(newIdentityWrapper) == newIdentity);
-        if (!JSObject::swap(cx, origobj, newIdentityWrapper)) {
-            MOZ_CRASH();
-        }
+        JSObject::swap(cx, origobj, newIdentityWrapper);
         if (!origobj->compartment()->putWrapper(cx, CrossCompartmentKey(newIdentity), origv)) {
             MOZ_CRASH();
         }
@@ -4595,9 +4589,6 @@ JS::SetPromiseUserInputEventHandlingState(JS::HandleObject promiseObj_,
     }
 
     auto& promise = promiseObj->as<PromiseObject>();
-    if (promise.state() != JS::PromiseState::Pending) {
-      return false;
-    }
 
     switch (state) {
       case JS::PromiseUserInputEventHandlingState::DontCare:
@@ -4635,386 +4626,6 @@ JS::GetWaitForAllPromise(JSContext* cx, const JS::AutoObjectVector& promises)
     CHECK_THREAD(cx);
 
     return js::GetWaitForAllPromise(cx, promises);
-}
-
-extern JS_PUBLIC_API(void)
-JS::SetReadableStreamCallbacks(JSContext* cx,
-                               JS::RequestReadableStreamDataCallback dataRequestCallback,
-                               JS::WriteIntoReadRequestBufferCallback writeIntoReadRequestCallback,
-                               JS::CancelReadableStreamCallback cancelCallback,
-                               JS::ReadableStreamClosedCallback closedCallback,
-                               JS::ReadableStreamErroredCallback erroredCallback,
-                               JS::ReadableStreamFinalizeCallback finalizeCallback)
-{
-    MOZ_ASSERT(dataRequestCallback);
-    MOZ_ASSERT(writeIntoReadRequestCallback);
-    MOZ_ASSERT(cancelCallback);
-    MOZ_ASSERT(closedCallback);
-    MOZ_ASSERT(erroredCallback);
-    MOZ_ASSERT(finalizeCallback);
-
-    JSRuntime* rt = cx->runtime();
-
-    MOZ_ASSERT(!rt->readableStreamDataRequestCallback);
-    MOZ_ASSERT(!rt->readableStreamWriteIntoReadRequestCallback);
-    MOZ_ASSERT(!rt->readableStreamCancelCallback);
-    MOZ_ASSERT(!rt->readableStreamClosedCallback);
-    MOZ_ASSERT(!rt->readableStreamErroredCallback);
-    MOZ_ASSERT(!rt->readableStreamFinalizeCallback);
-
-    rt->readableStreamDataRequestCallback = dataRequestCallback;
-    rt->readableStreamWriteIntoReadRequestCallback = writeIntoReadRequestCallback;
-    rt->readableStreamCancelCallback = cancelCallback;
-    rt->readableStreamClosedCallback = closedCallback;
-    rt->readableStreamErroredCallback = erroredCallback;
-    rt->readableStreamFinalizeCallback = finalizeCallback;
-}
-
-JS_PUBLIC_API(bool)
-JS::HasReadableStreamCallbacks(JSContext* cx)
-{
-    return cx->runtime()->readableStreamDataRequestCallback;
-}
-
-JS_PUBLIC_API(JSObject*)
-JS::NewReadableDefaultStreamObject(JSContext* cx,
-                                   JS::HandleObject underlyingSource /* = nullptr */,
-                                   JS::HandleFunction size /* = nullptr */,
-                                   double highWaterMark /* = 1 */,
-                                   JS::HandleObject proto /* = nullptr */)
-{
-    MOZ_ASSERT(!cx->zone()->isAtomsZone());
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-
-    RootedObject source(cx, underlyingSource);
-    if (!source) {
-        source = NewBuiltinClassInstance<PlainObject>(cx);
-        if (!source)
-            return nullptr;
-    }
-    RootedValue sourceVal(cx, ObjectValue(*source));
-    RootedValue sizeVal(cx, size ? ObjectValue(*size) : UndefinedValue());
-    RootedValue highWaterMarkVal(cx, NumberValue(highWaterMark));
-    return ReadableStream::createDefaultStream(cx, sourceVal, sizeVal, highWaterMarkVal, proto);
-}
-
-JS_PUBLIC_API(JSObject*)
-JS::NewReadableExternalSourceStreamObject(JSContext* cx, void* underlyingSource,
-                                          uint8_t flags /* = 0 */,
-                                          HandleObject proto /* = nullptr */)
-{
-    MOZ_ASSERT(!cx->zone()->isAtomsZone());
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-    MOZ_ASSERT((uintptr_t(underlyingSource) & 1) == 0,
-               "external underlying source pointers must be aligned");
-#ifdef DEBUG
-    JSRuntime* rt = cx->runtime();
-    MOZ_ASSERT(rt->readableStreamDataRequestCallback);
-    MOZ_ASSERT(rt->readableStreamWriteIntoReadRequestCallback);
-    MOZ_ASSERT(rt->readableStreamCancelCallback);
-    MOZ_ASSERT(rt->readableStreamClosedCallback);
-    MOZ_ASSERT(rt->readableStreamErroredCallback);
-    MOZ_ASSERT(rt->readableStreamFinalizeCallback);
-#endif // DEBUG
-
-    return ReadableStream::createExternalSourceStream(cx, underlyingSource, flags, proto);
-}
-
-JS_PUBLIC_API(bool)
-JS::IsReadableStream(const JSObject* obj)
-{
-    if (IsWrapper(const_cast<JSObject*>(obj)))
-        obj = CheckedUnwrap(const_cast<JSObject*>(obj));
-    return obj && obj->is<ReadableStream>();
-}
-
-JS_PUBLIC_API(bool)
-JS::IsReadableStreamReader(const JSObject* obj)
-{
-    if (IsWrapper(const_cast<JSObject*>(obj)))
-        obj = CheckedUnwrap(const_cast<JSObject*>(obj));
-    return obj && obj->is<ReadableStreamDefaultReader>();
-}
-
-JS_PUBLIC_API(bool)
-JS::IsReadableStreamDefaultReader(const JSObject* obj)
-{
-    if (IsWrapper(const_cast<JSObject*>(obj)))
-        obj = CheckedUnwrap(const_cast<JSObject*>(obj));
-    return obj && obj->is<ReadableStreamDefaultReader>();
-}
-
-template<class T>
-static MOZ_MUST_USE T*
-ToUnwrapped(JSContext* cx, JSObject* obj)
-{
-    cx->check(obj);
-    if (IsWrapper(obj)) {
-        obj = CheckedUnwrap(obj);
-        if (!obj) {
-            ReportAccessDenied(cx);
-            return nullptr;
-        }
-    }
-    return &obj->as<T>();
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamIsReadable(JSContext* cx, const JSObject* streamObj, bool* result)
-{
-    ReadableStream* stream = ToUnwrapped<ReadableStream>(cx, const_cast<JSObject*>(streamObj));
-    if (!stream)
-        return false;
-
-    *result = stream->readable();
-    return true;
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamIsLocked(JSContext* cx, const JSObject* streamObj, bool* result)
-{
-    ReadableStream* stream = ToUnwrapped<ReadableStream>(cx, const_cast<JSObject*>(streamObj));
-    if (!stream)
-        return false;
-
-    *result = stream->locked();
-    return true;
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamIsDisturbed(JSContext* cx, const JSObject* streamObj, bool* result)
-{
-    ReadableStream* stream = ToUnwrapped<ReadableStream>(cx, const_cast<JSObject*>(streamObj));
-    if (!stream)
-        return false;
-
-    *result = stream->disturbed();
-    return true;
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamGetEmbeddingFlags(JSContext* cx, const JSObject* streamObj, uint8_t* flags)
-{
-    ReadableStream* stream = ToUnwrapped<ReadableStream>(cx, const_cast<JSObject*>(streamObj));
-    if (!stream)
-        return false;
-
-    *flags = stream->embeddingFlags();
-    return true;
-}
-
-JS_PUBLIC_API(JSObject*)
-JS::ReadableStreamCancel(JSContext* cx, HandleObject streamObj, HandleValue reason)
-{
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-    cx->check(reason);
-
-    Rooted<ReadableStream*> stream(cx, ToUnwrapped<ReadableStream>(cx, streamObj));
-    if (!stream)
-        return nullptr;
-
-    return ReadableStream::cancel(cx, stream, reason);
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamGetMode(JSContext* cx, const JSObject* streamObj, JS::ReadableStreamMode* mode)
-{
-    ReadableStream* stream = ToUnwrapped<ReadableStream>(cx, const_cast<JSObject*>(streamObj));
-    if (!stream)
-        return false;
-
-    *mode = stream->mode();
-    return true;
-}
-
-JS_PUBLIC_API(JSObject*)
-JS::ReadableStreamGetReader(JSContext* cx, HandleObject streamObj, ReadableStreamReaderMode mode)
-{
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-
-    Rooted<ReadableStream*> stream(cx, ToUnwrapped<ReadableStream>(cx, streamObj));
-    if (!stream)
-        return nullptr;
-
-    JSObject* result = ReadableStream::getReader(cx, stream, mode);
-    MOZ_ASSERT_IF(result, IsObjectInContextCompartment(result, cx));
-    return result;
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamGetExternalUnderlyingSource(JSContext* cx, HandleObject streamObj, void** source)
-{
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-
-    Rooted<ReadableStream*> stream(cx, ToUnwrapped<ReadableStream>(cx, streamObj));
-    if (!stream)
-        return false;
-
-    return ReadableStream::getExternalSource(cx, stream, source);
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamReleaseExternalUnderlyingSource(JSContext* cx, JSObject* streamObj)
-{
-    ReadableStream* stream = ToUnwrapped<ReadableStream>(cx, const_cast<JSObject*>(streamObj));
-    if (!stream)
-        return false;
-
-    stream->releaseExternalSource();
-    return true;
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamUpdateDataAvailableFromSource(JSContext* cx, JS::HandleObject streamObj,
-                                                uint32_t availableData)
-{
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-
-    Rooted<ReadableStream*> stream(cx, ToUnwrapped<ReadableStream>(cx, streamObj));
-    if (!stream)
-        return false;
-
-    return ReadableStream::updateDataAvailableFromSource(cx, stream, availableData);
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamTee(JSContext* cx, HandleObject streamObj,
-                      MutableHandleObject branch1Obj, MutableHandleObject branch2Obj)
-{
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-
-    Rooted<ReadableStream*> stream(cx, ToUnwrapped<ReadableStream>(cx, streamObj));
-    if (!stream)
-        return false;
-
-    Rooted<ReadableStream*> branch1Stream(cx);
-    Rooted<ReadableStream*> branch2Stream(cx);
-
-    if (!ReadableStream::tee(cx, stream, false, &branch1Stream, &branch2Stream)) {
-        return false;
-    }
-
-    branch1Obj.set(branch1Stream);
-    branch2Obj.set(branch2Stream);
-
-    return true;
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamGetDesiredSize(JSContext* cx, JSObject* streamObj, bool* hasValue, double* value)
-{
-    ReadableStream* stream = ToUnwrapped<ReadableStream>(cx, streamObj);
-    if (!stream)
-        return false;
-
-    stream->desiredSize(hasValue, value);
-    return true;
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamClose(JSContext* cx, HandleObject streamObj)
-{
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-
-    Rooted<ReadableStream*> stream(cx, ToUnwrapped<ReadableStream>(cx, streamObj));
-    if (!stream)
-        return false;
-
-    return ReadableStream::close(cx, stream);
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamEnqueue(JSContext* cx, HandleObject streamObj, HandleValue chunk)
-{
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-    cx->check(chunk);
-
-    Rooted<ReadableStream*> stream(cx, ToUnwrapped<ReadableStream>(cx, streamObj));
-    if (!stream)
-        return false;
-
-    if (stream->mode() != JS::ReadableStreamMode::Default) {
-        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                                  JSMSG_READABLESTREAM_NOT_DEFAULT_CONTROLLER,
-                                  "JS::ReadableStreamEnqueue");
-        return false;
-    }
-    return ReadableStream::enqueue(cx, stream, chunk);
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamError(JSContext* cx, HandleObject streamObj, HandleValue error)
-{
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-    cx->check(error);
-
-    Rooted<ReadableStream*> stream(cx, ToUnwrapped<ReadableStream>(cx, streamObj));
-    if (!stream)
-        return false;
-
-    return js::ReadableStream::error(cx, stream, error);
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamReaderIsClosed(JSContext* cx, const JSObject* reader, bool* result)
-{
-    reader = ToUnwrapped<NativeObject>(cx, const_cast<JSObject*>(reader));
-    if (!reader)
-        return false;
-
-    *result = js::ReadableStreamReaderIsClosed(reader);
-    return true;
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamReaderCancel(JSContext* cx, HandleObject readerObj, HandleValue reason)
-{
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-    cx->check(reason);
-
-    RootedNativeObject reader(cx, ToUnwrapped<NativeObject>(cx, readerObj));
-    if (!reader)
-        return false;
-
-    return js::ReadableStreamReaderCancel(cx, reader, reason);
-}
-
-JS_PUBLIC_API(bool)
-JS::ReadableStreamReaderReleaseLock(JSContext* cx, HandleObject readerObj)
-{
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-
-    RootedNativeObject reader(cx, ToUnwrapped<NativeObject>(cx, readerObj));
-    if (!reader)
-        return false;
-
-    return js::ReadableStreamReaderReleaseLock(cx, reader);
-}
-
-JS_PUBLIC_API(JSObject*)
-JS::ReadableStreamDefaultReaderRead(JSContext* cx, HandleObject readerObj)
-{
-    AssertHeapIsIdle();
-    CHECK_THREAD(cx);
-
-    Rooted<ReadableStreamDefaultReader*> reader(cx);
-    reader = ToUnwrapped<ReadableStreamDefaultReader>(cx, readerObj);
-    if (!reader)
-        return nullptr;
-
-    return js::ReadableStreamDefaultReader::read(cx, reader);
 }
 
 JS_PUBLIC_API(void)
@@ -6008,8 +5619,7 @@ JS_NewRegExpObject(JSContext* cx, const char* bytes, size_t length, unsigned fla
         return nullptr;
     }
 
-    return RegExpObject::create(cx, chars.get(), length, RegExpFlag(flags), cx->tempLifoAlloc(),
-                                GenericObject);
+    return RegExpObject::create(cx, chars.get(), length, RegExpFlag(flags), GenericObject);
 }
 
 JS_PUBLIC_API(JSObject*)
@@ -6018,8 +5628,7 @@ JS_NewUCRegExpObject(JSContext* cx, const char16_t* chars, size_t length, unsign
     AssertHeapIsIdle();
     CHECK_THREAD(cx);
 
-    return RegExpObject::create(cx, chars, length, RegExpFlag(flags), cx->tempLifoAlloc(),
-                                GenericObject);
+    return RegExpObject::create(cx, chars, length, RegExpFlag(flags), GenericObject);
 }
 
 JS_PUBLIC_API(bool)

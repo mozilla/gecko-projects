@@ -135,6 +135,7 @@ EXPORTS.mozilla.dom += [
     'FontFaceSetIterator.h',
     'MediaList.h',
     'MediaQueryList.h',
+    'PaintWorkletGlobalScope.h',
 ]
 
 EXPORTS.mozilla.css += [
@@ -203,6 +204,7 @@ UNIFIED_SOURCES += [
     'nsStyleTransformMatrix.cpp',
     'nsStyleUtil.cpp',
     'nsTransitionManager.cpp',
+    'PaintWorkletGlobalScope.cpp',
     'PaintWorkletImpl.cpp',
     'PostTraversalTask.cpp',
     'PreloadedStyleSheet.cpp',
@@ -289,13 +291,21 @@ servo_props.inputs = [
 
 if CONFIG['COMPILE_ENVIRONMENT']:
     GENERATED_FILES += [
+        'CompositorAnimatableProperties.h',
         'nsComputedDOMStyleGenerated.cpp',
         'nsCSSPropsGenerated.inc',
         'ServoStyleConsts.h',
     ]
 
     EXPORTS.mozilla += [
+        '!CompositorAnimatableProperties.h',
         '!ServoStyleConsts.h',
+    ]
+
+    compositor = GENERATED_FILES['CompositorAnimatableProperties.h']
+    compositor.script = 'GenerateCompositorAnimatableProperties.py:generate'
+    compositor.inputs = [
+        '!ServoCSSPropList.py',
     ]
 
     computed = GENERATED_FILES['nsComputedDOMStyleGenerated.cpp']

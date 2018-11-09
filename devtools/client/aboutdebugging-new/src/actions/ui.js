@@ -16,10 +16,13 @@ const {
   NETWORK_LOCATIONS_UPDATED,
   PAGE_SELECTED,
   PAGES,
+  USB_RUNTIMES_SCAN_START,
+  USB_RUNTIMES_SCAN_SUCCESS,
 } = require("../constants");
 
 const NetworkLocationsModule = require("../modules/network-locations");
 const { adbAddon } = require("devtools/shared/adb/adb-addon");
+const { refreshUSBRuntimes } = require("../modules/usb-runtimes");
 
 const Actions = require("./index");
 
@@ -81,10 +84,12 @@ function installAdbAddon() {
     dispatch({ type: ADB_ADDON_INSTALL_START });
 
     try {
-      await adbAddon.install();
+      // "aboutdebugging" will be forwarded to telemetry as the installation source
+      // for the addon.
+      await adbAddon.install("about:debugging");
       dispatch({ type: ADB_ADDON_INSTALL_SUCCESS });
     } catch (e) {
-      dispatch({ type: ADB_ADDON_INSTALL_FAILURE, error: e.message });
+      dispatch({ type: ADB_ADDON_INSTALL_FAILURE, error: e });
     }
   };
 }
@@ -97,8 +102,21 @@ function uninstallAdbAddon() {
       await adbAddon.uninstall();
       dispatch({ type: ADB_ADDON_UNINSTALL_SUCCESS });
     } catch (e) {
-      dispatch({ type: ADB_ADDON_UNINSTALL_FAILURE, error: e.message });
+      dispatch({ type: ADB_ADDON_UNINSTALL_FAILURE, error: e });
     }
+  };
+}
+
+function scanUSBRuntimes() {
+  return async (dispatch, getState) => {
+    // do not re-scan if we are already doing it
+    if (getState().ui.isScanningUsb) {
+      return;
+    }
+
+    dispatch({ type: USB_RUNTIMES_SCAN_START });
+    await refreshUSBRuntimes();
+    dispatch({ type: USB_RUNTIMES_SCAN_SUCCESS });
   };
 }
 
@@ -106,6 +124,7 @@ module.exports = {
   addNetworkLocation,
   installAdbAddon,
   removeNetworkLocation,
+  scanUSBRuntimes,
   selectPage,
   uninstallAdbAddon,
   updateAdbAddonStatus,

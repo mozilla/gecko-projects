@@ -9,9 +9,14 @@
 const { PerformanceStats } = ChromeUtils.import("resource://gre/modules/PerformanceStats.jsm", {});
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
 const { ObjectUtils } = ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm", {});
+const { AddonManager } = ChromeUtils.import("resource://gre/modules/AddonManager.jsm", {});
 const { ExtensionParent } = ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm", {});
 
 const {WebExtensionPolicy} = Cu.getGlobalForObject(Services);
+
+// Time in ms before we start changing the sort order again after receiving a
+// mousemove event.
+const TIME_BEFORE_SORTING_AGAIN = 5000;
 
 // about:performance observes notifications on this topic.
 // if a notification is sent, this causes the page to be updated immediately,
@@ -76,6 +81,13 @@ function performanceCountersEnabled() {
 function extensionCountersEnabled() {
   return Services.prefs.getBoolPref("extensions.webextensions.enablePerformanceCounters", false);
 }
+
+// The ids of system add-ons, so that we can hide them when the
+// toolkit.aboutPerformance.showInternals pref is false.
+// The API to access addons is async, so we cache the list during init.
+// The list is unlikely to change while the about:performance
+// tab is open, so not updating seems fine.
+var gSystemAddonIds = new Set();
 
 let tabFinder = {
   update() {
@@ -602,7 +614,8 @@ var State = {
 
     let previous = this._buffer[Math.max(this._buffer.length - 2, 0)].tabs;
     let current = this._latest.tabs;
-    return Object.keys(current).map(id => {
+    let counters = [];
+    for (let id of Object.keys(current)) {
       let tab = current[id];
       let oldest;
       for (let index = 0; index <= this._buffer.length - 2; ++index) {
@@ -614,7 +627,7 @@ var State = {
       let prev = previous[id];
       let host = tab.host;
 
-      let type = "tab";
+      let type = "other";
       let name = `${host} (${id})`;
       let image = "chrome://mozapps/skin/places/defaultFavicon.svg";
       let found = tabFinder.get(parseInt(id));
@@ -622,10 +635,10 @@ var State = {
         if (found.tabbrowser) {
           name = found.tab.getAttribute("label");
           image = found.tab.getAttribute("image");
+          type = "tab";
         } else {
           name = {id: "preloaded-tab",
                   title: found.tab.linkedBrowser.contentTitle};
-          type = "other";
         }
       } else if (id == 1) {
         name = BRAND_NAME;
@@ -635,10 +648,14 @@ var State = {
         let addon = WebExtensionPolicy.getByHostname(host);
         name = `${addon.name} (${addon.id})`;
         image = "chrome://mozapps/skin/extensions/extensionGeneric-16.svg";
-        type = "addon";
+        type = gSystemAddonIds.has(addon.id) ? "system-addon" : "addon";
       } else if (id == 0 && !tab.isWorker) {
         name = {id: "ghost-windows"};
-        type = "other";
+      }
+
+      if (type != "tab" && type != "addon" &&
+          !Services.prefs.getBoolPref("toolkit.aboutPerformance.showInternals", false)) {
+        continue;
       }
 
       // Create a map of all the child items from the previous time we read the
@@ -697,12 +714,13 @@ var State = {
         durationSinceStartOfBuffer =
           duration - oldest.duration - (oldest.durationFromFormerChildren || 0);
       }
-      return ({id, name, image, type,
-               totalDispatches: dispatches, totalDuration: duration,
-               durationSincePrevious, dispatchesSincePrevious,
-               durationSinceStartOfBuffer, dispatchesSinceStartOfBuffer,
-               children});
-    });
+      counters.push({id, name, image, type,
+                     totalDispatches: dispatches, totalDuration: duration,
+                     durationSincePrevious, dispatchesSincePrevious,
+                     durationSinceStartOfBuffer, dispatchesSinceStartOfBuffer,
+                     children});
+    }
+    return counters;
   },
 };
 
@@ -1006,6 +1024,19 @@ var View = {
     row.parentNode.insertBefore(this._fragment, row.nextSibling);
     this._fragment = document.createDocumentFragment();
   },
+  displayEnergyImpact(elt, energyImpact) {
+    if (!energyImpact)
+      elt.textContent = "–";
+    else {
+      let impact = "high";
+      if (energyImpact < 1)
+        impact = "low";
+      else if (energyImpact < 25)
+        impact = "medium";
+      document.l10n.setAttributes(elt, "energy-impact-" + impact,
+                                  {value: energyImpact});
+    }
+  },
   appendRow(name, energyImpact, tooltip, type, image = "") {
     let row = document.createElement("tr");
 
@@ -1029,21 +1060,13 @@ var View = {
     row.appendChild(elt);
 
     elt = document.createElement("td");
+    if (type == "system-addon")
+      type = "addon";
     document.l10n.setAttributes(elt, "type-" + type);
     row.appendChild(elt);
 
     elt = document.createElement("td");
-    if (!energyImpact)
-      elt.textContent = "–";
-    else {
-      let impact = "high";
-      if (energyImpact < 1)
-        impact = "low";
-      else if (energyImpact < 25)
-        impact = "medium";
-      document.l10n.setAttributes(elt, "energy-impact-" + impact,
-                                  {value: energyImpact});
-    }
+    this.displayEnergyImpact(elt, energyImpact);
     row.appendChild(elt);
 
     if (tooltip)
@@ -1074,7 +1097,9 @@ var Control = {
     this._initAutorefresh();
     this._initDisplayMode();
     let tbody = document.getElementById("dispatch-tbody");
-    tbody.addEventListener("click", () => {
+    tbody.addEventListener("click", event => {
+      this._updateLastMouseEvent();
+
       // Handle showing or hiding subitems of a row.
       let target = event.target;
       if (target.classList.contains("twisty")) {
@@ -1129,7 +1154,7 @@ var Control = {
     });
 
     // Select the tab of double clicked items.
-    tbody.addEventListener("dblclick", () => {
+    tbody.addEventListener("dblclick", event => {
       let id = parseInt(event.target.parentNode.windowId);
       if (isNaN(id))
         return;
@@ -1140,6 +1165,14 @@ var Control = {
       tabbrowser.selectedTab = tab;
       tabbrowser.ownerGlobal.focus();
     });
+
+    tbody.addEventListener("mousemove", () => {
+      this._updateLastMouseEvent();
+    });
+  },
+  _lastMouseEvent: 0,
+  _updateLastMouseEvent() {
+    this._lastMouseEvent = Date.now();
   },
   async update() {
     let mode = this._displayMode;
@@ -1164,6 +1197,32 @@ var Control = {
       // Make sure that we do not keep obsolete stuff around.
       View.DOMCache.trimTo(state.deltas);
     } else {
+      // If the mouse has been moved recently, update the data displayed
+      // without moving any item to avoid the risk of users clicking an action
+      // button for the wrong item.
+      if (Date.now() - this._lastMouseEvent < TIME_BEFORE_SORTING_AGAIN) {
+        let energyImpactPerId = new Map();
+        for (let {id, dispatchesSincePrevious,
+                  durationSincePrevious} of State.getCounters()) {
+          let energyImpact = this._computeEnergyImpact(dispatchesSincePrevious,
+                                                       durationSincePrevious);
+          energyImpactPerId.set(id, energyImpact);
+        }
+
+        let row = document.getElementById("dispatch-tbody").firstChild;
+        while (row) {
+          if (row.windowId && energyImpactPerId.has(row.windowId)) {
+            // We update the value in the Energy Impact column, but don't
+            // update the children, as if the child count changes there's a
+            // risk of making other rows move up or down.
+            const kEnergyImpactColumn = 2;
+            let elt = row.childNodes[kEnergyImpactColumn];
+            View.displayEnergyImpact(elt, energyImpactPerId.get(row.windowId));
+          }
+          row = row.nextSibling;
+        }
+        return;
+      }
 
       let selectedId = -1;
       // Reset the selectedRow field and the _openItems set each time we redraw
@@ -1352,6 +1411,13 @@ var go = async function() {
     let opt = document.querySelector(".options");
     opt.style.display = "none";
     opt.nextElementSibling.style.display = "none";
+
+    let addons = await AddonManager.getAddonsByTypes(["extension"]);
+    for (let addon of addons) {
+      if (addon.isSystem) {
+        gSystemAddonIds.add(addon.id);
+      }
+    }
   } else {
     document.getElementById("dispatch-table").parentNode.style.display = "none";
   }

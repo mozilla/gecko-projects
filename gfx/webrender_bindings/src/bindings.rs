@@ -435,6 +435,8 @@ pub enum WrFilterOpType {
   Sepia = 8,
   DropShadow = 9,
   ColorMatrix = 10,
+  SrgbToLinear = 11,
+  LinearToSrgb = 12,
 }
 
 #[repr(C)]
@@ -597,7 +599,11 @@ pub extern "C" fn wr_renderer_update(renderer: &mut Renderer) {
 #[no_mangle]
 pub extern "C" fn wr_renderer_render(renderer: &mut Renderer,
                                      width: u32,
-                                     height: u32) -> bool {
+                                     height: u32,
+                                     had_slow_frame: bool) -> bool {
+    if had_slow_frame {
+      renderer.notify_slow_frame();
+    }
     match renderer.render(DeviceUintSize::new(width, height)) {
         Ok(_) => true,
         Err(errors) => {
@@ -1394,7 +1400,7 @@ pub extern "C" fn wr_resource_updates_add_blob_image(
         image_key,
         descriptor.into(),
         ImageData::new_blob_image(bytes.flush_into_vec()),
-        None
+        if descriptor.format == ImageFormat::BGRA8 { Some(256) } else { None }
     );
 }
 
@@ -1828,6 +1834,8 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
                                                                c_filter.argument,
                                                                c_filter.color),
             WrFilterOpType::ColorMatrix => FilterOp::ColorMatrix(c_filter.matrix),
+            WrFilterOpType::SrgbToLinear => FilterOp::SrgbToLinear,
+            WrFilterOpType::LinearToSrgb => FilterOp::LinearToSrgb,
         }
     }).collect();
 
@@ -1903,7 +1911,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
                                 clip_node_id,
                                 transform_style,
                                 mix_blend_mode,
-                                filters,
+                                &filters,
                                 glyph_raster_space);
 }
 

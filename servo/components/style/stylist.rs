@@ -4,7 +4,6 @@
 
 //! Selector matching.
 
-use {Atom, LocalName, Namespace, WeakAtom};
 use applicable_declarations::{ApplicableDeclarationBlock, ApplicableDeclarationList};
 use context::{CascadeInputs, QuirksMode};
 use dom::{TElement, TShadowRoot};
@@ -16,9 +15,9 @@ use hashglobe::FailedAllocationError;
 use invalidation::element::invalidation_map::InvalidationMap;
 use invalidation::media_queries::{EffectiveMediaQueryResults, ToMediaListKey};
 #[cfg(feature = "gecko")]
-use malloc_size_of::{MallocShallowSizeOf, MallocSizeOf, MallocSizeOfOps};
-#[cfg(feature = "gecko")]
 use malloc_size_of::MallocUnconditionalShallowSizeOf;
+#[cfg(feature = "gecko")]
+use malloc_size_of::{MallocShallowSizeOf, MallocSizeOf, MallocSizeOfOps};
 use media_queries::Device;
 use properties::{self, CascadeMode, ComputedValues};
 use properties::{AnimationRules, PropertyDeclarationBlock};
@@ -26,14 +25,14 @@ use rule_cache::{RuleCache, RuleCacheConditions};
 use rule_tree::{CascadeLevel, RuleTree, ShadowCascadeOrder, StrongRuleNode, StyleSource};
 use selector_map::{PrecomputedHashMap, PrecomputedHashSet, SelectorMap, SelectorMapEntry};
 use selector_parser::{PerPseudoElementMap, PseudoElement, SelectorImpl, SnapshotMap};
-use selectors::NthIndexCache;
 use selectors::attr::{CaseSensitivity, NamespaceConstraint};
 use selectors::bloom::BloomFilter;
-use selectors::matching::{matches_selector, ElementSelectorFlags, MatchingContext, MatchingMode};
 use selectors::matching::VisitedHandlingMode;
+use selectors::matching::{matches_selector, ElementSelectorFlags, MatchingContext, MatchingMode};
 use selectors::parser::{AncestorHashes, Combinator, Component, Selector};
 use selectors::parser::{SelectorIter, Visit};
 use selectors::visitor::SelectorVisitor;
+use selectors::NthIndexCache;
 use servo_arc::{Arc, ArcBorrow};
 use shared_lock::{Locked, SharedRwLockReadGuard, StylesheetGuards};
 use smallbitvec::SmallBitVec;
@@ -43,14 +42,15 @@ use std::sync::Mutex;
 use style_traits::viewport::ViewportConstraints;
 use stylesheet_set::{DataValidity, DocumentStylesheetSet, SheetRebuildKind};
 use stylesheet_set::{DocumentStylesheetFlusher, SheetCollectionFlusher};
+use stylesheets::keyframes_rule::KeyframesAnimation;
+use stylesheets::viewport_rule::{self, MaybeNew, ViewportRule};
+use stylesheets::StyleRule;
+use stylesheets::StylesheetInDocument;
 #[cfg(feature = "gecko")]
 use stylesheets::{CounterStyleRule, FontFaceRule, FontFeatureValuesRule, PageRule};
 use stylesheets::{CssRule, Origin, OriginSet, PerOrigin, PerOriginIter};
-use stylesheets::StyleRule;
-use stylesheets::StylesheetInDocument;
-use stylesheets::keyframes_rule::KeyframesAnimation;
-use stylesheets::viewport_rule::{self, MaybeNew, ViewportRule};
 use thread_state::{self, ThreadState};
+use {Atom, LocalName, Namespace, WeakAtom};
 
 /// The type of the stylesheets that the stylist contains.
 #[cfg(feature = "servo")]
@@ -517,7 +517,8 @@ impl Stylist {
                     self.stylesheets.iter(),
                     guards,
                     &self.device,
-                ).finish(),
+                )
+                .finish(),
             };
 
             self.viewport_constraints =
@@ -605,11 +606,11 @@ impl Stylist {
                 maybe = maybe || f(&*data);
             });
 
-        if maybe || !doc_author_rules_apply {
-            return maybe;
+        if maybe || f(&self.cascade_data.user) {
+            return true;
         }
 
-        f(&self.cascade_data.author) || f(&self.cascade_data.user)
+        doc_author_rules_apply && f(&self.cascade_data.author)
     }
 
     /// Computes the style for a given "precomputed" pseudo-element, taking the
@@ -1017,7 +1018,8 @@ impl Stylist {
                         stylesheets.clone(),
                         guards,
                         &device,
-                    ).finish(),
+                    )
+                    .finish(),
                 }
             };
 
@@ -1491,7 +1493,33 @@ impl Stylist {
         // the lookups, which means that the bitvecs are comparable. We verify
         // this in the caller by asserting that the bitvecs are same-length.
         let mut results = SmallBitVec::new();
-        for (data, _) in self.cascade_data.iter_origins() {
+
+        let matches_document_rules =
+            element.each_applicable_non_document_style_rule_data(|data, quirks_mode, host| {
+                matching_context.with_shadow_host(host, |matching_context| {
+                    data.selectors_for_cache_revalidation.lookup(
+                        element,
+                        quirks_mode,
+                        |selector_and_hashes| {
+                            results.push(matches_selector(
+                                &selector_and_hashes.selector,
+                                selector_and_hashes.selector_offset,
+                                Some(&selector_and_hashes.hashes),
+                                &element,
+                                matching_context,
+                                flags_setter,
+                            ));
+                            true
+                        },
+                    );
+                })
+            });
+
+        for (data, origin) in self.cascade_data.iter_origins() {
+            if origin == Origin::Author && !matches_document_rules {
+                continue;
+            }
+
             data.selectors_for_cache_revalidation.lookup(
                 element,
                 self.quirks_mode,
@@ -1508,26 +1536,6 @@ impl Stylist {
                 },
             );
         }
-
-        element.each_applicable_non_document_style_rule_data(|data, quirks_mode, host| {
-            matching_context.with_shadow_host(host, |matching_context| {
-                data.selectors_for_cache_revalidation.lookup(
-                    element,
-                    quirks_mode,
-                    |selector_and_hashes| {
-                        results.push(matches_selector(
-                            &selector_and_hashes.selector,
-                            selector_and_hashes.selector_offset,
-                            Some(&selector_and_hashes.hashes),
-                            &element,
-                            matching_context,
-                            flags_setter,
-                        ));
-                        true
-                    },
-                );
-            })
-        });
 
         results
     }

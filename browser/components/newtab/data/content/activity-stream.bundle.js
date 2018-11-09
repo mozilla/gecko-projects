@@ -1760,14 +1760,24 @@ class ASRouterAdmin extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureCom
     super(props);
     this.onMessage = this.onMessage.bind(this);
     this.handleEnabledToggle = this.handleEnabledToggle.bind(this);
+    this.handleUserPrefToggle = this.handleUserPrefToggle.bind(this);
     this.onChangeMessageFilter = this.onChangeMessageFilter.bind(this);
     this.findOtherBundledMessagesOfSameTemplate = this.findOtherBundledMessagesOfSameTemplate.bind(this);
-    this.state = { messageFilter: "all" };
+    this.handleExpressionEval = this.handleExpressionEval.bind(this);
+    this.onChangeTargetingParameters = this.onChangeTargetingParameters.bind(this);
+    this.state = { messageFilter: "all", evaluationStatus: {}, stringTargetingParameters: null };
   }
 
   onMessage({ data: action }) {
     if (action.type === "ADMIN_SET_STATE") {
       this.setState(action.data);
+      if (!this.state.stringTargetingParameters) {
+        const stringTargetingParameters = {};
+        for (const param of Object.keys(action.data.targetingParameters)) {
+          stringTargetingParameters[param] = JSON.stringify(action.data.targetingParameters[param], null, 2);
+        }
+        this.setState({ stringTargetingParameters });
+      }
     }
   }
 
@@ -1813,6 +1823,41 @@ class ASRouterAdmin extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureCom
 
   resetPref() {
     _asrouter_asrouter_content__WEBPACK_IMPORTED_MODULE_0__["ASRouterUtils"].sendMessage({ type: "RESET_PROVIDER_PREF" });
+  }
+
+  handleExpressionEval() {
+    const context = {};
+    for (const param of Object.keys(this.state.stringTargetingParameters)) {
+      const value = this.state.stringTargetingParameters[param];
+      context[param] = value ? JSON.parse(value) : null;
+    }
+    _asrouter_asrouter_content__WEBPACK_IMPORTED_MODULE_0__["ASRouterUtils"].sendMessage({
+      type: "EVALUATE_JEXL_EXPRESSION",
+      data: {
+        expression: this.refs.expressionInput.value,
+        context
+      }
+    });
+  }
+
+  onChangeTargetingParameters(event) {
+    const { name } = event.target;
+    const { value } = event.target;
+    this.refs.evaluationStatus.innerText = "";
+
+    this.setState(({ stringTargetingParameters }) => {
+      let targetingParametersError = null;
+      const updatedParameters = Object.assign({}, stringTargetingParameters);
+      updatedParameters[name] = value;
+      try {
+        JSON.parse(value);
+      } catch (e) {
+        console.log(`Error parsing value of parameter ${name}`); // eslint-disable-line no-console
+        targetingParametersError = { id: name };
+      }
+
+      return { stringTargetingParameters: updatedParameters, targetingParametersError };
+    });
   }
 
   renderMessageItem(msg) {
@@ -1924,32 +1969,50 @@ class ASRouterAdmin extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureCom
       react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
         "tr",
         { className: "message-item" },
+        react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("td", { className: "min" }),
         react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
           "td",
-          null,
-          "id"
+          { className: "min" },
+          "Provider ID"
         ),
         react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
           "td",
           null,
-          "enabled"
+          "Source"
         ),
         react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
           "td",
           null,
-          "source"
-        ),
-        react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
-          "td",
-          null,
-          "last updated"
+          "Last Updated"
         )
       )
     );
   }
 
   handleEnabledToggle(event) {
-    const action = { type: event.target.checked ? "ENABLE_PROVIDER" : "DISABLE_PROVIDER", data: event.target.name };
+    const provider = this.state.providerPrefs.find(p => p.id === event.target.dataset.provider);
+    const userPrefInfo = this.state.userPrefs;
+
+    const isUserEnabled = provider.id in userPrefInfo ? userPrefInfo[provider.id] : true;
+    const isSystemEnabled = provider.enabled;
+    const isEnabling = event.target.checked;
+
+    if (isEnabling) {
+      if (!isUserEnabled) {
+        _asrouter_asrouter_content__WEBPACK_IMPORTED_MODULE_0__["ASRouterUtils"].sendMessage({ type: "SET_PROVIDER_USER_PREF", data: { id: provider.id, value: true } });
+      }
+      if (!isSystemEnabled) {
+        _asrouter_asrouter_content__WEBPACK_IMPORTED_MODULE_0__["ASRouterUtils"].sendMessage({ type: "ENABLE_PROVIDER", data: provider.id });
+      }
+    } else {
+      _asrouter_asrouter_content__WEBPACK_IMPORTED_MODULE_0__["ASRouterUtils"].sendMessage({ type: "DISABLE_PROVIDER", data: provider.id });
+    }
+
+    this.setState({ messageFilter: "all" });
+  }
+
+  handleUserPrefToggle(event) {
+    const action = { type: "SET_PROVIDER_USER_PREF", data: { id: event.target.dataset.provider, value: event.target.checked } };
     _asrouter_asrouter_content__WEBPACK_IMPORTED_MODULE_0__["ASRouterUtils"].sendMessage(action);
     this.setState({ messageFilter: "all" });
   }
@@ -1957,6 +2020,8 @@ class ASRouterAdmin extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureCom
   renderProviders() {
     const providersConfig = this.state.providerPrefs;
     const providerInfo = this.state.providers;
+    const userPrefInfo = this.state.userPrefs;
+
     return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
       "table",
       null,
@@ -1967,19 +2032,48 @@ class ASRouterAdmin extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureCom
         providersConfig.map((provider, i) => {
           const isTestProvider = provider.id === "snippets_local_testing";
           const info = providerInfo.find(p => p.id === provider.id) || {};
-          let label = "(local)";
+          const isUserEnabled = provider.id in userPrefInfo ? userPrefInfo[provider.id] : true;
+          const isSystemEnabled = isTestProvider || provider.enabled;
+
+          let label = "local";
           if (provider.type === "remote") {
+            let displayUrl = "";
+            try {
+              displayUrl = `(${new URL(info.url).hostname})`;
+            } catch (err) {}
             label = react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
-              "a",
-              { target: "_blank", href: info.url },
-              info.url
+              "span",
+              null,
+              "endpoint ",
+              react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+                "a",
+                { target: "_blank", href: info.url },
+                displayUrl
+              )
             );
           } else if (provider.type === "remote-settings") {
-            label = `${provider.bucket} (Remote Settings)`;
+            label = `remote settings (${provider.bucket})`;
           }
+
+          let reasonsDisabled = [];
+          if (!isSystemEnabled) {
+            reasonsDisabled.push("system pref");
+          }
+          if (!isUserEnabled) {
+            reasonsDisabled.push("user pref");
+          }
+          if (reasonsDisabled.length) {
+            label = `disabled via ${reasonsDisabled.join(", ")}`;
+          }
+
           return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
             "tr",
             { className: "message-item", key: i },
+            react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+              "td",
+              null,
+              isTestProvider ? react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("input", { type: "checkbox", disabled: true, readOnly: true, checked: true }) : react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("input", { type: "checkbox", "data-provider": provider.id, checked: isUserEnabled && isSystemEnabled, onChange: this.handleEnabledToggle })
+            ),
             react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
               "td",
               null,
@@ -1988,17 +2082,112 @@ class ASRouterAdmin extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureCom
             react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
               "td",
               null,
-              isTestProvider ? null : react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("input", { type: "checkbox", name: provider.id, checked: provider.enabled, onChange: this.handleEnabledToggle })
-            ),
-            react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
-              "td",
-              null,
-              label
+              react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+                "span",
+                { className: `sourceLabel${isUserEnabled && isSystemEnabled ? "" : " isDisabled"}` },
+                label
+              )
             ),
             react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
               "td",
               { style: { whiteSpace: "nowrap" } },
               info.lastUpdated ? new Date(info.lastUpdated).toLocaleString() : ""
+            )
+          );
+        })
+      )
+    );
+  }
+
+  renderTargetingParameters() {
+    // There was no error and the result is truthy
+    const success = this.state.evaluationStatus.success && !!this.state.evaluationStatus.result;
+    const result = JSON.stringify(this.state.evaluationStatus.result, null, 2) || "(Empty result)";
+
+    return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+      "table",
+      null,
+      react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+        "tbody",
+        null,
+        react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+          "tr",
+          null,
+          react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+            "td",
+            null,
+            react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+              "h2",
+              null,
+              "Evaluate JEXL expression"
+            )
+          )
+        ),
+        react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+          "tr",
+          null,
+          react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+            "td",
+            null,
+            react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+              "p",
+              null,
+              react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("textarea", { ref: "expressionInput", rows: "10", cols: "60", placeholder: "Evaluate JEXL expressions and mock parameters by changing their values below" })
+            ),
+            react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+              "p",
+              null,
+              "Status: ",
+              react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+                "span",
+                { ref: "evaluationStatus" },
+                success ? "✅" : "❌",
+                ", Result: ",
+                result
+              )
+            )
+          ),
+          react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+            "td",
+            null,
+            react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+              "button",
+              { className: "ASRouterButton secondary", onClick: this.handleExpressionEval },
+              "Evaluate"
+            )
+          )
+        ),
+        react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+          "tr",
+          null,
+          react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+            "td",
+            null,
+            react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+              "h2",
+              null,
+              "Modify targeting parameters"
+            )
+          )
+        ),
+        this.state.stringTargetingParameters && Object.keys(this.state.stringTargetingParameters).map((param, i) => {
+          const value = this.state.stringTargetingParameters[param];
+          const errorState = this.state.targetingParametersError && this.state.targetingParametersError.id === param;
+          const className = errorState ? "errorState" : "";
+          const inputComp = (value && value.length) > 30 ? react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("textarea", { name: param, className: className, value: value, rows: "10", cols: "60", onChange: this.onChangeTargetingParameters }) : react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("input", { name: param, className: className, value: value, onChange: this.onChangeTargetingParameters });
+
+          return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+            "tr",
+            { key: i },
+            react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+              "td",
+              null,
+              param
+            ),
+            react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+              "td",
+              null,
+              inputComp
             )
           );
         })
@@ -2029,12 +2218,12 @@ class ASRouterAdmin extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureCom
       react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
         "h2",
         null,
-        "Message Providers"
-      ),
-      react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
-        "button",
-        { className: "button", onClick: this.resetPref },
-        "Restore defaults"
+        "Message Providers ",
+        react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
+          "button",
+          { title: "Restore all provider settings that ship with Firefox", className: "button", onClick: this.resetPref },
+          "Restore default prefs"
+        )
       ),
       this.state.providers ? this.renderProviders() : null,
       react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(
@@ -2043,7 +2232,8 @@ class ASRouterAdmin extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureCom
         "Messages"
       ),
       this.renderMessageFilter(),
-      this.renderMessages()
+      this.renderMessages(),
+      this.renderTargetingParameters()
     );
   }
 }
@@ -2840,9 +3030,17 @@ class Section extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureComponent
         id === "topstories" && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(
           "div",
           { className: "top-stories-bottom-container" },
-          shouldShowTopics && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_Topics_Topics__WEBPACK_IMPORTED_MODULE_9__["Topics"], { topics: this.props.topics }),
-          shouldShowPocketCta && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_PocketLoggedInCta_PocketLoggedInCta__WEBPACK_IMPORTED_MODULE_7__["PocketLoggedInCta"], null),
-          read_more_endpoint && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_MoreRecommendations_MoreRecommendations__WEBPACK_IMPORTED_MODULE_6__["MoreRecommendations"], { read_more_endpoint: read_more_endpoint })
+          react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(
+            "div",
+            null,
+            shouldShowTopics && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_Topics_Topics__WEBPACK_IMPORTED_MODULE_9__["Topics"], { topics: this.props.topics }),
+            shouldShowPocketCta && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_PocketLoggedInCta_PocketLoggedInCta__WEBPACK_IMPORTED_MODULE_7__["PocketLoggedInCta"], null)
+          ),
+          react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(
+            "div",
+            null,
+            read_more_endpoint && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_MoreRecommendations_MoreRecommendations__WEBPACK_IMPORTED_MODULE_6__["MoreRecommendations"], { read_more_endpoint: read_more_endpoint })
+          )
         )
       )
     );
@@ -9188,7 +9386,10 @@ function Sections(prevState = INITIAL_STATE.Sections, action) {
             const rows = Array.from(action.data.rows);
             section.rows.forEach((card, index) => {
               if (card.pinned) {
-                rows.splice(index, 0, card);
+                // Only add it if it's not already there.
+                if (rows[index].guid !== card.guid) {
+                  rows.splice(index, 0, card);
+                }
               }
             });
             return Object.assign({}, section, initialized, Object.assign({}, action.data, { rows }));

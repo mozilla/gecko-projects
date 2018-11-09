@@ -62,6 +62,9 @@
 #include "nsITelemetry.h"
 #include "nsIXPConnect.h"
 #include "nsIXULAppInfo.h"
+#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+#include "other/UntrustedModules.h"
+#endif
 #include "nsJSUtils.h"
 #include "nsLocalFile.h"
 #include "nsNativeCharsetUtils.h"
@@ -619,46 +622,54 @@ TelemetryImpl::SetHistogramRecordingEnabled(const nsACString &id, bool aEnabled)
 
 NS_IMETHODIMP
 TelemetryImpl::GetSnapshotForHistograms(const nsACString& aStoreName,
-                                        bool aClearStore, JSContext* aCx,
+                                        bool aClearStore,
+                                        bool aFilterTest,
+                                        JSContext* aCx,
                                         JS::MutableHandleValue aResult)
 {
   unsigned int dataset = mCanRecordExtended ?
     nsITelemetry::DATASET_RELEASE_CHANNEL_OPTIN :
     nsITelemetry::DATASET_RELEASE_CHANNEL_OPTOUT;
-  return TelemetryHistogram::CreateHistogramSnapshots(aCx, aResult, dataset, aClearStore);
+  return TelemetryHistogram::CreateHistogramSnapshots(aCx, aResult, dataset, aClearStore, aFilterTest);
 }
 
 NS_IMETHODIMP
 TelemetryImpl::GetSnapshotForKeyedHistograms(const nsACString& aStoreName,
-                                             bool aClearStore, JSContext* aCx,
+                                             bool aClearStore,
+                                             bool aFilterTest,
+                                             JSContext* aCx,
                                              JS::MutableHandleValue aResult)
 {
   unsigned int dataset = mCanRecordExtended ?
     nsITelemetry::DATASET_RELEASE_CHANNEL_OPTIN :
     nsITelemetry::DATASET_RELEASE_CHANNEL_OPTOUT;
-  return TelemetryHistogram::GetKeyedHistogramSnapshots(aCx, aResult, dataset, aClearStore);
+  return TelemetryHistogram::GetKeyedHistogramSnapshots(aCx, aResult, dataset, aClearStore, aFilterTest);
 }
 
 NS_IMETHODIMP
 TelemetryImpl::GetSnapshotForScalars(const nsACString& aStoreName,
-                                     bool aClearStore, JSContext* aCx,
+                                     bool aClearStore,
+                                     bool aFilterTest,
+                                     JSContext* aCx,
                                      JS::MutableHandleValue aResult)
 {
   unsigned int dataset = mCanRecordExtended ?
     nsITelemetry::DATASET_RELEASE_CHANNEL_OPTIN :
     nsITelemetry::DATASET_RELEASE_CHANNEL_OPTOUT;
-  return TelemetryScalar::CreateSnapshots(dataset, aClearStore, aCx, 1, aResult);
+  return TelemetryScalar::CreateSnapshots(dataset, aClearStore, aCx, 1, aResult, aFilterTest);
 }
 
 NS_IMETHODIMP
 TelemetryImpl::GetSnapshotForKeyedScalars(const nsACString& aStoreName,
-                                          bool aClearStore, JSContext* aCx,
+                                          bool aClearStore,
+                                          bool aFilterTest,
+                                          JSContext* aCx,
                                           JS::MutableHandleValue aResult)
 {
   unsigned int dataset = mCanRecordExtended ?
     nsITelemetry::DATASET_RELEASE_CHANNEL_OPTIN :
     nsITelemetry::DATASET_RELEASE_CHANNEL_OPTOUT;
-  return TelemetryScalar::CreateKeyedSnapshots(dataset, aClearStore, aCx, 1, aResult);
+  return TelemetryScalar::CreateKeyedSnapshots(dataset, aClearStore, aCx, 1, aResult, aFilterTest);
 }
 
 NS_IMETHODIMP
@@ -729,6 +740,16 @@ TelemetryImpl::GetMaximalNumberOfConcurrentThreads(uint32_t *ret)
 {
   *ret = nsThreadManager::get().GetHighestNumberOfThreads();
   return NS_OK;
+}
+
+NS_IMETHODIMP
+TelemetryImpl::GetUntrustedModuleLoadEvents(JSContext *cx, Promise** aPromise)
+{
+#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+  return Telemetry::GetUntrustedModuleLoadEvents(cx, aPromise);
+#else
+  return NS_ERROR_NOT_IMPLEMENTED;
+#endif
 }
 
 NS_IMETHODIMP
@@ -1620,12 +1641,12 @@ NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsITelemetry, TelemetryImpl::CreateTele
 NS_DEFINE_NAMED_CID(NS_TELEMETRY_CID);
 
 const Module::CIDEntry kTelemetryCIDs[] = {
-  { &kNS_TELEMETRY_CID, false, nullptr, nsITelemetryConstructor, Module::ALLOW_IN_GPU_PROCESS },
+  { &kNS_TELEMETRY_CID, false, nullptr, nsITelemetryConstructor, Module::ALLOW_IN_GPU_AND_VR_PROCESS },
   { nullptr }
 };
 
 const Module::ContractIDEntry kTelemetryContracts[] = {
-  { "@mozilla.org/base/telemetry;1", &kNS_TELEMETRY_CID, Module::ALLOW_IN_GPU_PROCESS },
+  { "@mozilla.org/base/telemetry;1", &kNS_TELEMETRY_CID, Module::ALLOW_IN_GPU_AND_VR_PROCESS },
   { nullptr }
 };
 
@@ -1637,7 +1658,7 @@ const Module kTelemetryModule = {
   nullptr,
   nullptr,
   TelemetryImpl::ShutdownTelemetry,
-  Module::ALLOW_IN_GPU_PROCESS
+  Module::ALLOW_IN_GPU_AND_VR_PROCESS
 };
 
 NS_IMETHODIMP

@@ -12,15 +12,17 @@ use app_units::Au;
 use gecko::values::GeckoStyleCoordConvertible;
 use gecko_bindings::bindings;
 use gecko_bindings::structs::{self, nsStyleCoord_CalcValue};
-use gecko_bindings::structs::{nsresult, SheetType, nsStyleImage};
+use gecko_bindings::structs::{nsStyleImage, nsresult, SheetType};
 use gecko_bindings::sugar::ns_style_coord::{CoordData, CoordDataMut, CoordDataValue};
 use std::f32::consts::PI;
 use stylesheets::{Origin, RulesMutateError};
-use values::computed::{Angle, CalcLengthOrPercentage, Gradient, Image};
-use values::computed::{Integer, LengthOrPercentage, LengthOrPercentageOrAuto, NonNegativeLengthOrPercentageOrAuto};
-use values::computed::{Percentage, TextAlign};
 use values::computed::image::LineDirection;
 use values::computed::url::ComputedImageUrl;
+use values::computed::{Angle, CalcLengthOrPercentage, Gradient, Image};
+use values::computed::{
+    Integer, LengthOrPercentage, LengthOrPercentageOrAuto, NonNegativeLengthOrPercentageOrAuto,
+};
+use values::computed::{Percentage, TextAlign};
 use values::generics::box_::VerticalAlign;
 use values::generics::grid::{TrackListValue, TrackSize};
 use values::generics::image::{CompatMode, GradientItem, Image as GenericImage};
@@ -113,13 +115,15 @@ impl From<nsStyleCoord_CalcValue> for NonNegativeLengthOrPercentageOrAuto {
         use style_traits::values::specified::AllowedNumericType;
         use values::generics::NonNegative;
         NonNegative(if other.mLength < 0 || other.mPercent < 0. {
-            LengthOrPercentageOrAuto::Calc(
-                CalcLengthOrPercentage::with_clamping_mode(
-                    Au(other.mLength).into(),
-                    if other.mHasPercent { Some(Percentage(other.mPercent)) } else { None },
-                    AllowedNumericType::NonNegative,
-                )
-            )
+            LengthOrPercentageOrAuto::Calc(CalcLengthOrPercentage::with_clamping_mode(
+                Au(other.mLength).into(),
+                if other.mHasPercent {
+                    Some(Percentage(other.mPercent))
+                } else {
+                    None
+                },
+                AllowedNumericType::NonNegative,
+            ))
         } else {
             other.into()
         })
@@ -231,11 +235,11 @@ impl nsStyleImage {
 
     // FIXME(emilio): This is really complex, we should use cbindgen for this.
     fn set_gradient(&mut self, gradient: Gradient) {
+        use self::structs::nsStyleCoord;
         use self::structs::NS_STYLE_GRADIENT_SIZE_CLOSEST_CORNER as CLOSEST_CORNER;
         use self::structs::NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE as CLOSEST_SIDE;
         use self::structs::NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER as FARTHEST_CORNER;
         use self::structs::NS_STYLE_GRADIENT_SIZE_FARTHEST_SIDE as FARTHEST_SIDE;
-        use self::structs::nsStyleCoord;
         use values::generics::image::{Circle, Ellipse, EndingShape, GradientKind, ShapeExtent};
         use values::specified::position::{X, Y};
 
@@ -493,9 +497,9 @@ impl nsStyleImage {
         use self::structs::NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE as CLOSEST_SIDE;
         use self::structs::NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER as FARTHEST_CORNER;
         use self::structs::NS_STYLE_GRADIENT_SIZE_FARTHEST_SIDE as FARTHEST_SIDE;
-        use values::computed::Length;
         use values::computed::image::LineDirection;
         use values::computed::position::Position;
+        use values::computed::Length;
         use values::generics::image::{Circle, ColorStop, CompatMode, Ellipse};
         use values::generics::image::{EndingShape, GradientKind, ShapeExtent};
 
@@ -625,7 +629,8 @@ impl nsStyleImage {
                         position: LengthOrPercentage::from_gecko_style_coord(&stop.mLocation),
                     })
                 }
-            }).collect();
+            })
+            .collect();
 
         let compat_mode = if gecko_gradient.mMozLegacySyntax {
             CompatMode::Moz
@@ -649,9 +654,9 @@ pub mod basic_shape {
 
     use gecko::values::GeckoStyleCoordConvertible;
     use gecko_bindings::structs;
-    use gecko_bindings::structs::{StyleBasicShape, StyleBasicShapeType, StyleFillRule};
-    use gecko_bindings::structs::{StyleGeometryBox, StyleShapeSource, StyleShapeSourceType};
     use gecko_bindings::structs::{nsStyleCoord, nsStyleCorners};
+    use gecko_bindings::structs::{StyleBasicShape, StyleBasicShapeType};
+    use gecko_bindings::structs::{StyleGeometryBox, StyleShapeSource, StyleShapeSourceType};
     use gecko_bindings::sugar::ns_style_coord::{CoordDataMut, CoordDataValue};
     use gecko_bindings::sugar::refptr::RefPtr;
     use std::borrow::Borrow;
@@ -662,7 +667,7 @@ pub mod basic_shape {
     use values::computed::position;
     use values::computed::url::ComputedUrl;
     use values::generics::basic_shape::{BasicShape as GenericBasicShape, InsetRect, Polygon};
-    use values::generics::basic_shape::{Circle, Ellipse, FillRule, Path, PolygonCoord};
+    use values::generics::basic_shape::{Circle, Ellipse, Path, PolygonCoord};
     use values::generics::basic_shape::{GeometryBox, ShapeBox, ShapeSource};
     use values::generics::border::BorderRadius as GenericBorderRadius;
     use values::generics::rect::Rect;
@@ -693,12 +698,7 @@ pub mod basic_shape {
                 StyleShapeSourceType::URL | StyleShapeSourceType::Image => None,
                 StyleShapeSourceType::Path => {
                     let path = self.to_svg_path().expect("expect an SVGPathData");
-                    let gecko_path = unsafe { &*self.__bindgen_anon_1.mSVGPath.as_ref().mPtr };
-                    let fill = if gecko_path.mFillRule == StyleFillRule::Evenodd {
-                        FillRule::Evenodd
-                    } else {
-                        FillRule::Nonzero
-                    };
+                    let fill = unsafe { &*self.__bindgen_anon_1.mSVGPath.as_ref().mPtr }.mFillRule;
                     Some(ShapeSource::Path(Path { fill, path }))
                 },
             }
@@ -706,18 +706,11 @@ pub mod basic_shape {
 
         /// Generate a SVGPathData from StyleShapeSource if possible.
         fn to_svg_path(&self) -> Option<SVGPathData> {
-            use gecko_bindings::structs::StylePathCommand;
             use values::specified::svg_path::PathCommand;
             match self.mType {
                 StyleShapeSourceType::Path => {
                     let gecko_path = unsafe { &*self.__bindgen_anon_1.mSVGPath.as_ref().mPtr };
-                    let result: Vec<PathCommand> = gecko_path
-                        .mPath
-                        .iter()
-                        .map(|gecko: &StylePathCommand| {
-                            // unsafe: cbindgen ensures the representation is the same.
-                            unsafe { ::std::mem::transmute(*gecko) }
-                        }).collect();
+                    let result: Vec<PathCommand> = gecko_path.mPath.iter().cloned().collect();
                     Some(SVGPathData::new(result.into_boxed_slice()))
                 },
                 _ => None,
@@ -730,7 +723,8 @@ pub mod basic_shape {
             match other.mType {
                 StyleShapeSourceType::URL => unsafe {
                     let shape_image = &*other.__bindgen_anon_1.mShapeImage.as_ref().mPtr;
-                    let other_url = RefPtr::new(*shape_image.__bindgen_anon_1.mURLValue.as_ref());
+                    let other_url =
+                        RefPtr::new(*shape_image.__bindgen_anon_1.mURLValue.as_ref() as *mut _);
                     let url = ComputedUrl::from_url_value(other_url);
                     ShapeSource::ImageOrUrl(url)
                 },
@@ -805,11 +799,6 @@ pub mod basic_shape {
                     position: (&other.mPosition).into(),
                 }),
                 StyleBasicShapeType::Polygon => {
-                    let fill_rule = if other.mFillRule == StyleFillRule::Evenodd {
-                        FillRule::Evenodd
-                    } else {
-                        FillRule::Nonzero
-                    };
                     let mut coords = Vec::with_capacity(other.mCoordinates.len() / 2);
                     for i in 0..(other.mCoordinates.len() / 2) {
                         let x = 2 * i;
@@ -828,7 +817,7 @@ pub mod basic_shape {
                         ))
                     }
                     GenericBasicShape::Polygon(Polygon {
-                        fill: fill_rule,
+                        fill: other.mFillRule,
                         coordinates: coords,
                     })
                 },
@@ -1032,13 +1021,13 @@ impl TrackSize<LengthOrPercentage> {
         match *self {
             TrackSize::FitContent(ref lop) => {
                 // Gecko sets min value to None and max value to the actual value in fit-content
-                // https://searchfox.org/mozilla-central/rev/c05d9d61188d32b8209dfe4295944c0f1e0ce621/layout/style/nsRuleNode.cpp#7910
+                // https://searchfox.org/mozilla-central/rev/c05d9d61188d32b8/layout/style/nsRuleNode.cpp#7910
                 gecko_min.set_value(CoordDataValue::None);
                 lop.to_gecko_style_coord(gecko_max);
             },
             TrackSize::Breadth(ref breadth) => {
                 // Set the value to both fields if there's one breadth value
-                // https://searchfox.org/mozilla-central/rev/c05d9d61188d32b8209dfe4295944c0f1e0ce621/layout/style/nsRuleNode.cpp#7919
+                // https://searchfox.org/mozilla-central/rev/c05d9d61188d32b8/layout/style/nsRuleNode.cpp#7919
                 breadth.to_gecko_style_coord(gecko_min);
                 breadth.to_gecko_style_coord(gecko_max);
             },

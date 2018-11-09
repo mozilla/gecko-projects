@@ -176,7 +176,7 @@ using mozilla::dom::HTMLMediaElement_Binding::HAVE_METADATA;
 bool nsLayoutUtils::gPreventAssertInCompareTreePosition = false;
 #endif // DEBUG
 
-typedef FrameMetrics::ViewID ViewID;
+typedef ScrollableLayerGuid::ViewID ViewID;
 typedef nsStyleTransformMatrix::TransformReferenceBox TransformReferenceBox;
 
 /* static */ uint32_t nsLayoutUtils::sFontSizeInflationEmPerLine;
@@ -195,7 +195,7 @@ typedef nsStyleTransformMatrix::TransformReferenceBox TransformReferenceBox;
 /* static */ uint32_t nsLayoutUtils::sIdlePeriodDeadlineLimit;
 /* static */ uint32_t nsLayoutUtils::sQuiescentFramesBeforeIdlePeriod;
 
-static ViewID sScrollIdCounter = FrameMetrics::START_SCROLL_ID;
+static ViewID sScrollIdCounter = ScrollableLayerGuid::START_SCROLL_ID;
 
 typedef nsDataHashtable<nsUint64HashKey, nsIContent*> ContentMap;
 static ContentMap* sContentMap = nullptr;
@@ -616,7 +616,7 @@ nsLayoutUtils::FindOrCreateIDFor(nsIContent* aContent)
 nsIContent*
 nsLayoutUtils::FindContentFor(ViewID aId)
 {
-  MOZ_ASSERT(aId != FrameMetrics::NULL_SCROLL_ID,
+  MOZ_ASSERT(aId != ScrollableLayerGuid::NULL_SCROLL_ID,
              "Cannot find a content element in map for null IDs.");
   nsIContent* content;
   bool exists = GetContentMap().Get(aId, &content);
@@ -663,19 +663,19 @@ ViewID
 nsLayoutUtils::FindIDForScrollableFrame(nsIScrollableFrame* aScrollable)
 {
   if (!aScrollable) {
-    return FrameMetrics::NULL_SCROLL_ID;
+    return ScrollableLayerGuid::NULL_SCROLL_ID;
   }
 
   nsIFrame* scrollFrame = do_QueryFrame(aScrollable);
   nsIContent* scrollContent = scrollFrame->GetContent();
 
-  FrameMetrics::ViewID scrollId;
+  ScrollableLayerGuid::ViewID scrollId;
   if (scrollContent &&
       nsLayoutUtils::FindIDFor(scrollContent, &scrollId)) {
     return scrollId;
   }
 
-  return FrameMetrics::NULL_SCROLL_ID;
+  return ScrollableLayerGuid::NULL_SCROLL_ID;
 }
 
 static nsRect
@@ -1909,10 +1909,10 @@ nsLayoutUtils::SetFixedPositionLayerData(Layer* aLayer,
   aLayer->SetFixedPositionData(id, anchor, sides);
 }
 
-FrameMetrics::ViewID
+ScrollableLayerGuid::ViewID
 nsLayoutUtils::ScrollIdForRootScrollFrame(nsPresContext* aPresContext)
 {
-  ViewID id = FrameMetrics::NULL_SCROLL_ID;
+  ViewID id = ScrollableLayerGuid::NULL_SCROLL_ID;
   if (nsIFrame* rootScrollFrame = aPresContext->PresShell()->GetRootScrollFrame()) {
     if (nsIContent* content = rootScrollFrame->GetContent()) {
       id = FindOrCreateIDFor(content);
@@ -3509,6 +3509,62 @@ GetOrCreateRetainedDisplayListBuilder(nsIFrame* aFrame, bool aRetainingEnabled,
   return retainedBuilder;
 }
 
+// #define PRINT_HITTESTINFO_STATS
+#ifdef PRINT_HITTESTINFO_STATS
+void
+PrintHitTestInfoStatsInternal(nsDisplayList& aList,
+                              int& aTotal,
+                              int& aHitTest,
+                              int& aVisible,
+                              int& aSpecial)
+{
+  for (nsDisplayItem* i = aList.GetBottom(); i; i = i->GetAbove()) {
+    aTotal++;
+
+    if (i->GetChildren()) {
+      PrintHitTestInfoStatsInternal(
+        *i->GetChildren(), aTotal, aHitTest, aVisible, aSpecial);
+    }
+
+    if (i->GetType() == DisplayItemType::TYPE_COMPOSITOR_HITTEST_INFO) {
+      aHitTest++;
+
+      const auto& hitTestInfo =
+        static_cast<nsDisplayHitTestInfoItem*>(i)->HitTestFlags();
+
+      if (hitTestInfo.size() > 1) {
+        aSpecial++;
+        continue;
+      }
+
+      if (hitTestInfo == CompositorHitTestVisibleToHit) {
+        aVisible++;
+        continue;
+      }
+
+      aSpecial++;
+    }
+  }
+}
+
+void
+PrintHitTestInfoStats(nsDisplayList& aList)
+{
+  int total = 0;
+  int hitTest = 0;
+  int visible = 0;
+  int special = 0;
+
+  PrintHitTestInfoStatsInternal(
+    aList, total, hitTest, visible, special);
+
+  double ratio = (double)hitTest / (double)total;
+
+  printf("List %p: total items: %d, hit test items: %d, ratio: %f, visible: %d, special: %d\n",
+    &aList, total, hitTest, ratio, visible, special);
+}
+#endif
+
 nsresult
 nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
                           const nsRegion& aDirtyRegion, nscolor aBackstop,
@@ -3606,6 +3662,12 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     builder.IgnorePaintSuppression();
   }
 
+  if (nsIDocShell* doc = presContext->GetDocShell()) {
+    bool isActive = false;
+    doc->GetIsActive(&isActive);
+    builder.SetInActiveDocShell(isActive);
+  }
+
   nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
   if (rootScrollFrame && !aFrame->GetParent()) {
     nsIScrollableFrame* rootScrollableFrame = presShell->GetRootScrollFrameAsScrollable();
@@ -3694,7 +3756,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
       // BuildDisplayListForStackingContext call below. We need to set the scroll
       // parent on the display list builder while we build those items, so that they
       // can pick up their scroll parent's id.
-      ViewID id = FrameMetrics::NULL_SCROLL_ID;
+      ViewID id = ScrollableLayerGuid::NULL_SCROLL_ID;
       if (ignoreViewportScrolling && presContext->IsRootContentDocument()) {
         if (nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame()) {
           if (nsIContent* content = rootScrollFrame->GetContent()) {
@@ -3710,6 +3772,22 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
         // nsGfxScrollFrame::BuilDisplayList will do it instead.
         if (dom::Element* element = presShell->GetDocument()->GetDocumentElement()) {
           id = nsLayoutUtils::FindOrCreateIDFor(element);
+        }
+      // In some cases we get a root document here on an APZ-enabled window
+      // that doesn't have the root displayport initialized yet, even though
+      // the ChromeProcessController is supposed to do it when the widget is
+      // created. This can happen simply because the ChromeProcessController
+      // does it on the next spin of the event loop, and we can trigger a paint
+      // synchronously after window creation but before that runs. In that case
+      // we should initialize the root displayport here before we do the paint.
+      } else if (XRE_IsParentProcess() && presContext->IsRoot()
+          && presShell->GetDocument() != nullptr
+          && presShell->GetRootScrollFrame() != nullptr
+          && nsLayoutUtils::UsesAsyncScrolling(presShell->GetRootScrollFrame())) {
+        if (dom::Element* element = presShell->GetDocument()->GetDocumentElement()) {
+          if (!nsLayoutUtils::HasDisplayPort(element)) {
+            APZCCallbackHelper::InitializeRootDisplayport(presShell);
+          }
         }
       }
 
@@ -3809,7 +3887,9 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   Telemetry::AccumulateTimeDelta(Telemetry::PAINT_BUILD_DISPLAYLIST_TIME,
                                  startBuildDisplayList);
 
-  bool consoleNeedsDisplayList = gfxUtils::DumpDisplayList() || gfxEnv::DumpPaint();
+  bool consoleNeedsDisplayList =
+      (gfxUtils::DumpDisplayList() || gfxEnv::DumpPaint()) &&
+      builder.IsInActiveDocShell();
 #ifdef MOZ_DUMP_PAINTING
   FILE* savedDumpFile = gfxUtils::sDumpPaintFile;
 #endif
@@ -3882,6 +3962,12 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
       !aRenderingContext) {
     flags |= nsDisplayList::PAINT_IDENTICAL_DISPLAY_LIST;
   }
+
+#ifdef PRINT_HITTESTINFO_STATS
+  if (XRE_IsContentProcess()) {
+    PrintHitTestInfoStats(list);
+  }
+#endif
 
   TimeStamp paintStart = TimeStamp::Now();
   RefPtr<LayerManager> layerManager
@@ -4828,8 +4914,7 @@ GetPercentBSize(const nsStyleCoord& aStyle,
   nscoord h;
   if (!GetAbsoluteCoord(bSizeCoord, h) &&
       !GetPercentBSize(bSizeCoord, f, aHorizontalAxis, h)) {
-    NS_ASSERTION(bSizeCoord.GetUnit() == eStyleUnit_Auto ||
-                 bSizeCoord.HasPercent(),
+    NS_ASSERTION(bSizeCoord.IsAutoOrEnum() || bSizeCoord.HasPercent(),
                  "unknown block-size unit");
     LayoutFrameType fType = f->Type();
     if (fType != LayoutFrameType::Viewport &&
@@ -4843,7 +4928,7 @@ GetPercentBSize(const nsStyleCoord& aStyle,
       return false;
     }
 
-    NS_ASSERTION(bSizeCoord.GetUnit() == eStyleUnit_Auto,
+    NS_ASSERTION(bSizeCoord.IsAutoOrEnum(),
                  "Unexpected block-size unit for viewport or canvas or page-content");
     // For the viewport, canvas, and page-content kids, the percentage
     // basis is just the parent block-size.
@@ -4862,8 +4947,7 @@ GetPercentBSize(const nsStyleCoord& aStyle,
     if (maxh < h)
       h = maxh;
   } else {
-    NS_ASSERTION(maxBSizeCoord.GetUnit() == eStyleUnit_None ||
-                 maxBSizeCoord.HasPercent(),
+    NS_ASSERTION(maxBSizeCoord.IsAutoOrEnum() || maxBSizeCoord.HasPercent(),
                  "unknown max block-size unit");
   }
 
@@ -4875,8 +4959,7 @@ GetPercentBSize(const nsStyleCoord& aStyle,
     if (minh > h)
       h = minh;
   } else {
-    NS_ASSERTION(minBSizeCoord.HasPercent() ||
-                 minBSizeCoord.GetUnit() == eStyleUnit_Auto,
+    NS_ASSERTION(minBSizeCoord.IsAutoOrEnum() || minBSizeCoord.HasPercent(),
                  "unknown min block-size unit");
   }
 
@@ -6529,7 +6612,7 @@ nsLayoutUtils::GetSamplingFilterForFrame(nsIFrame* aForFrame)
     return SamplingFilter::POINT;
   case NS_STYLE_IMAGE_RENDERING_OPTIMIZEQUALITY:
     return SamplingFilter::LINEAR;
-  case NS_STYLE_IMAGE_RENDERING_CRISPEDGES:
+  case NS_STYLE_IMAGE_RENDERING_CRISP_EDGES:
     return SamplingFilter::POINT;
   default:
     return defaultFilter;
@@ -8219,9 +8302,6 @@ nsLayoutUtils::Shutdown()
   }
 
   nsComputedDOMStyle::UnregisterPrefChangeCallbacks();
-
-  // so the cached initial quotes array doesn't appear to be a leak
-  nsStyleList::Shutdown();
 }
 
 /* static */
@@ -8453,11 +8533,11 @@ nsLayoutUtils::FontSizeInflationInner(const nsIFrame *aFrame,
         MOZ_ASSERT(grandparent && grandparent->IsRubyFrame());
         return FontSizeInflationFor(grandparent);
       }
-      nsStyleCoord stylePosWidth = f->StylePosition()->mWidth;
-      nsStyleCoord stylePosHeight = f->StylePosition()->mHeight;
-      if (stylePosWidth.GetUnit() != eStyleUnit_Auto ||
-          stylePosHeight.GetUnit() != eStyleUnit_Auto) {
-
+      WritingMode wm = f->GetWritingMode();
+      nsStyleCoord stylePosISize = f->StylePosition()->ISize(wm);
+      nsStyleCoord stylePosBSize = f->StylePosition()->BSize(wm);
+      if (stylePosISize.GetUnit() != eStyleUnit_Auto ||
+          !stylePosBSize.IsAutoOrEnum()) {
         return 1.0;
       }
     }
@@ -9181,7 +9261,7 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
   FrameMetrics& metrics = metadata.GetMetrics();
   metrics.SetViewport(CSSRect::FromAppUnits(aViewport));
 
-  ViewID scrollId = FrameMetrics::NULL_SCROLL_ID;
+  ViewID scrollId = ScrollableLayerGuid::NULL_SCROLL_ID;
   if (aContent) {
     if (void* paintRequestTime = aContent->GetProperty(nsGkAtoms::paintRequestTime)) {
       metrics.SetPaintRequestTime(*static_cast<TimeStamp*>(paintRequestTime));
@@ -9221,7 +9301,9 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
 
   if (scrollableFrame) {
     CSSPoint scrollPosition = CSSPoint::FromAppUnits(scrollableFrame->GetScrollPosition());
+    CSSPoint apzScrollPosition = CSSPoint::FromAppUnits(scrollableFrame->GetApzScrollPosition());
     metrics.SetScrollOffset(scrollPosition);
+    metrics.SetBaseScrollOffset(apzScrollPosition);
 
     CSSRect viewport = metrics.GetViewport();
     viewport.MoveTo(scrollPosition);
@@ -9235,12 +9317,17 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
     // its scroll offset. We want to distinguish the case where the scroll offset
     // was "restored" because in that case the restored scroll position should
     // not overwrite a user-driven scroll.
-    if (scrollableFrame->LastScrollOrigin() == nsGkAtoms::restore) {
-      metrics.SetScrollOffsetRestored(scrollableFrame->CurrentScrollGeneration());
-    } else if (CanScrollOriginClobberApz(scrollableFrame->LastScrollOrigin())) {
-      metrics.SetScrollOffsetUpdated(scrollableFrame->CurrentScrollGeneration());
+    nsAtom* lastOrigin = scrollableFrame->LastScrollOrigin();
+    if (lastOrigin == nsGkAtoms::restore) {
+      metrics.SetScrollGeneration(scrollableFrame->CurrentScrollGeneration());
+      metrics.SetScrollOffsetUpdateType(FrameMetrics::eRestore);
+    } else if (CanScrollOriginClobberApz(lastOrigin)) {
+      if (lastOrigin == nsGkAtoms::relative) {
+        metrics.SetIsRelative(true);
+      }
+      metrics.SetScrollGeneration(scrollableFrame->CurrentScrollGeneration());
+      metrics.SetScrollOffsetUpdateType(FrameMetrics::eMainThread);
     }
-    scrollableFrame->AllowScrollOriginDowngrade();
 
     nsAtom* lastSmoothScrollOrigin = scrollableFrame->LastSmoothScrollOrigin();
     if (lastSmoothScrollOrigin) {
@@ -9276,7 +9363,7 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
   // If we have the scrollparent being the same as the scroll id, the
   // compositor-side code could get into an infinite loop while building the
   // overscroll handoff chain.
-  MOZ_ASSERT(aScrollParentId == FrameMetrics::NULL_SCROLL_ID || scrollId != aScrollParentId);
+  MOZ_ASSERT(aScrollParentId == ScrollableLayerGuid::NULL_SCROLL_ID || scrollId != aScrollParentId);
   metrics.SetScrollId(scrollId);
   metrics.SetIsRootContent(aIsRootContent);
   metadata.SetScrollParentId(aScrollParentId);
@@ -9285,7 +9372,7 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
   bool isRootScrollFrame = aScrollFrame == rootScrollFrame;
   nsIDocument* document = presShell->GetDocument();
 
-  if (scrollId != FrameMetrics::NULL_SCROLL_ID && !presContext->GetParentPresContext()) {
+  if (scrollId != ScrollableLayerGuid::NULL_SCROLL_ID && !presContext->GetParentPresContext()) {
     if ((aScrollFrame && isRootScrollFrame)) {
       metadata.SetIsLayersIdRoot(true);
     } else {
@@ -9506,7 +9593,7 @@ nsLayoutUtils::GetRootMetadata(nsDisplayListBuilder* aBuilder,
     return Some(nsLayoutUtils::ComputeScrollMetadata(frame,
                            rootScrollFrame, content,
                            aBuilder->FindReferenceFrameFor(frame),
-                           aLayerManager, FrameMetrics::NULL_SCROLL_ID, viewport, Nothing(),
+                           aLayerManager, ScrollableLayerGuid::NULL_SCROLL_ID, viewport, Nothing(),
                            isRootContent, Some(aContainerParameters)));
   }
 
@@ -9729,7 +9816,7 @@ GetPresShell(const nsIContent* aContent)
   return result.forget();
 }
 
-static void UpdateDisplayPortMarginsForPendingMetrics(FrameMetrics& aMetrics) {
+static void UpdateDisplayPortMarginsForPendingMetrics(const RepaintRequest& aMetrics) {
   nsIContent* content = nsLayoutUtils::FindContentFor(aMetrics.GetScrollId());
   if (!content) {
     return;
@@ -9770,10 +9857,10 @@ static void UpdateDisplayPortMarginsForPendingMetrics(FrameMetrics& aMetrics) {
   }
 
   CSSPoint frameScrollOffset = CSSPoint::FromAppUnits(frame->GetScrollPosition());
-  APZCCallbackHelper::AdjustDisplayPortForScrollDelta(aMetrics, frameScrollOffset);
+  ScreenMargin displayPortMargins = APZCCallbackHelper::AdjustDisplayPortForScrollDelta(aMetrics, frameScrollOffset);
 
   nsLayoutUtils::SetDisplayPortMargins(content, shell,
-                                       aMetrics.GetDisplayPortMargins(), 0);
+                                       displayPortMargins, 0);
 }
 
 /* static */ void
@@ -9786,13 +9873,13 @@ nsLayoutUtils::UpdateDisplayPortMarginsFromPendingMessages()
       [](const IPC::Message& aMsg) -> bool {
         if (aMsg.type() == mozilla::layers::PAPZ::Msg_RequestContentRepaint__ID) {
           PickleIterator iter(aMsg);
-          FrameMetrics frame;
-          if (!IPC::ReadParam(&aMsg, &iter, &frame)) {
+          RepaintRequest request;
+          if (!IPC::ReadParam(&aMsg, &iter, &request)) {
             MOZ_ASSERT(false);
             return true;
           }
 
-          UpdateDisplayPortMarginsForPendingMetrics(frame);
+          UpdateDisplayPortMarginsForPendingMetrics(request);
         }
         return true;
       });
@@ -10356,7 +10443,7 @@ nsLayoutUtils::ResolveMotionPath(const nsIFrame* aFrame)
     RefPtr<PathBuilder> builder =
       drawTarget->CreatePathBuilder(FillRule::FILL_WINDING);
     RefPtr<gfx::Path> gfxPath =
-      SVGPathData::BuildPath(motion->OffsetPath().GetPath()->Path(),
+      SVGPathData::BuildPath(motion->OffsetPath().Path().Path(),
                              builder,
                              NS_STYLE_STROKE_LINECAP_BUTT,
                              0.0);

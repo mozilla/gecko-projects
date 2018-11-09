@@ -41,7 +41,6 @@ class OffscreenCanvas;
 
 class ArrayBufferViewOrArrayBuffer;
 class CanvasRenderingContext2D;
-struct ChannelPixelLayout;
 class CreateImageBitmapFromBlob;
 class CreateImageBitmapFromBlobTask;
 class CreateImageBitmapFromBlobWorkerTask;
@@ -49,20 +48,19 @@ class File;
 class HTMLCanvasElement;
 class HTMLImageElement;
 class HTMLVideoElement;
-enum class ImageBitmapFormat : uint8_t;
+class ImageBitmapShutdownObserver;
 class ImageData;
 class ImageUtils;
-template<typename T> class MapDataIntoBufferSource;
 class Promise;
 class PostMessageEvent; // For StructuredClone between windows.
-class ImageBitmapShutdownObserver;
+class SVGImageElement;
 
 struct ImageBitmapCloneData final
 {
   RefPtr<gfx::DataSourceSurface> mSurface;
   gfx::IntRect mPictureRect;
   gfxAlphaType mAlphaType;
-  bool mIsCroppingAreaOutSideOfSourceImage;
+  bool mWriteOnly;
 };
 
 /*
@@ -135,14 +133,6 @@ public:
   Create(nsIGlobalObject* aGlobal, const ImageBitmapSource& aSrc,
          const Maybe<gfx::IntRect>& aCropRect, ErrorResult& aRv);
 
-  static already_AddRefed<Promise>
-  Create(nsIGlobalObject* aGlobal,
-         const ImageBitmapSource& aBuffer,
-         int32_t aOffset, int32_t aLength,
-         mozilla::dom::ImageBitmapFormat aFormat,
-         const Sequence<mozilla::dom::ChannelPixelLayout>& aLayout,
-         ErrorResult& aRv);
-
   static JSObject*
   ReadStructuredClone(JSContext* aCx,
                       JSStructuredCloneReader* aReader,
@@ -159,26 +149,14 @@ public:
   friend CreateImageBitmapFromBlobTask;
   friend CreateImageBitmapFromBlobWorkerTask;
 
-  template<typename T>
-  friend class MapDataIntoBufferSource;
-
-  // Mozilla Extensions
-  ImageBitmapFormat
-  FindOptimalFormat(const Optional<Sequence<ImageBitmapFormat>>& aPossibleFormats,
-                    ErrorResult& aRv);
-
-  int32_t
-  MappedDataLength(ImageBitmapFormat aFormat, ErrorResult& aRv);
-
-  already_AddRefed<Promise>
-  MapDataInto(JSContext* aCx,
-              ImageBitmapFormat aFormat,
-              const ArrayBufferViewOrArrayBuffer& aBuffer,
-              int32_t aOffset, ErrorResult& aRv);
-
   size_t GetAllocatedSize() const;
 
   void OnShutdown();
+
+  bool IsWriteOnly() const
+  {
+    return mWriteOnly;
+  }
 
 protected:
 
@@ -202,17 +180,19 @@ protected:
    * CreateInternal(from ImageData) method.
    */
   ImageBitmap(nsIGlobalObject* aGlobal, layers::Image* aData,
+              bool aWriteOnly,
               gfxAlphaType aAlphaType = gfxAlphaType::Premult);
 
   virtual ~ImageBitmap();
 
   void SetPictureRect(const gfx::IntRect& aRect, ErrorResult& aRv);
 
-  void SetIsCroppingAreaOutSideOfSourceImage(const gfx::IntSize& aSourceSize,
-                                             const Maybe<gfx::IntRect>& aCroppingRect);
-
   static already_AddRefed<ImageBitmap>
   CreateInternal(nsIGlobalObject* aGlobal, HTMLImageElement& aImageEl,
+                 const Maybe<gfx::IntRect>& aCropRect, ErrorResult& aRv);
+
+  static already_AddRefed<ImageBitmap>
+  CreateInternal(nsIGlobalObject* aGlobal, SVGImageElement& aImageEl,
                  const Maybe<gfx::IntRect>& aCropRect, ErrorResult& aRv);
 
   static already_AddRefed<ImageBitmap>
@@ -279,18 +259,16 @@ protected:
   RefPtr<ImageBitmapShutdownObserver> mShutdownObserver;
 
   /*
-   * Set mIsCroppingAreaOutSideOfSourceImage if image bitmap was cropped to the
-   * source rectangle so that it contains any transparent black pixels (cropping
-   * area is outside of the source image).
-   * This is used in mapDataInto() to check if we should reject promise with
-   * IndexSizeError.
-   */
-  bool mIsCroppingAreaOutSideOfSourceImage;
-
-  /*
    * Whether this object allocated allocated and owns the image data.
    */
   bool mAllocatedImageData;
+
+  /*
+   * Write-Only flag is set to true if this image has been generated from a
+   * cross-origin source. This is the opposite of what is called 'origin-clean'
+   * in the spec.
+   */
+  bool mWriteOnly;
 };
 
 } // namespace dom

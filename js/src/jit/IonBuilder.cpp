@@ -680,6 +680,7 @@ IonBuilder::analyzeNewLoopTypes(const CFGBlock* loopEntryBlock)
               case JSOP_INT32:
               case JSOP_UINT16:
               case JSOP_UINT24:
+              case JSOP_RESUMEINDEX:
               case JSOP_BITAND:
               case JSOP_BITOR:
               case JSOP_BITXOR:
@@ -779,6 +780,14 @@ IonBuilder::init()
 AbortReasonOr<Ok>
 IonBuilder::build()
 {
+    // Spew IC info for inlined script, but only when actually compiling,
+    // not when analyzing it.
+#ifdef JS_JITSPEW
+    if (!info().isAnalysis()) {
+        JitSpewBaselineICStats(script(), "To-Be-Compiled");
+    }
+#endif
+
     MOZ_TRY(init());
 
     if (script()->hasBaselineScript()) {
@@ -971,6 +980,14 @@ IonBuilder::buildInline(IonBuilder* callerBuilder, MResumePoint* callerResumePoi
                         CallInfo& callInfo)
 {
     inlineCallInfo_ = &callInfo;
+
+    // Spew IC info for inlined script, but only when actually compiling,
+    // not when analyzing it.
+#ifdef JS_JITSPEW
+    if (!info().isAnalysis()) {
+        JitSpewBaselineICStats(script(), "To-Be-Inlined");
+    }
+#endif
 
     MOZ_TRY(init());
 
@@ -1867,8 +1884,8 @@ IonBuilder::visitControlInstruction(CFGControlInstruction* ins, bool* restarted)
     switch (ins->type()) {
       case CFGControlInstruction::Type_Test:
         return visitTest(ins->toTest());
-      case CFGControlInstruction::Type_Compare:
-        return visitCompare(ins->toCompare());
+      case CFGControlInstruction::Type_CondSwitchCase:
+        return visitCondSwitchCase(ins->toCondSwitchCase());
       case CFGControlInstruction::Type_Goto:
         return visitGoto(ins->toGoto());
       case CFGControlInstruction::Type_BackEdge:
@@ -2267,6 +2284,7 @@ IonBuilder::inspectOpcode(JSOp op)
         return jsop_setaliasedvar(EnvironmentCoordinate(pc));
 
       case JSOP_UINT24:
+      case JSOP_RESUMEINDEX:
         pushConstant(Int32Value(GET_UINT24(pc)));
         return Ok();
 
@@ -2570,7 +2588,6 @@ IonBuilder::inspectOpcode(JSOp op)
         // Intentionally not implemented.
         break;
 
-      case JSOP_UNUSED126:
       case JSOP_UNUSED206:
       case JSOP_LIMIT:
         break;
@@ -3160,32 +3177,22 @@ IonBuilder::visitTest(CFGTest* test)
 }
 
 AbortReasonOr<Ok>
-IonBuilder::visitCompare(CFGCompare* compare)
+IonBuilder::visitCondSwitchCase(CFGCondSwitchCase* switchCase)
 {
-    MDefinition* rhs = current->peek(-1);
-    MDefinition* lhs = current->peek(-2);
-
-    // Execute the compare operation.
-    MOZ_TRY(jsop_compare(JSOP_STRICTEQ));
-    MInstruction* cmpResult = current->pop()->toInstruction();
-    MOZ_ASSERT(!cmpResult->isEffectful());
-
-    // Put the rhs/lhs again on the stack.
-    current->push(lhs);
-    current->push(rhs);
+    MDefinition* cond = current->peek(-1);
 
     // Create true and false branches.
     MBasicBlock* ifTrue;
-    MOZ_TRY_VAR(ifTrue, newBlockPopN(current, compare->trueBranch()->startPc(),
-                                     compare->truePopAmount()));
+    MOZ_TRY_VAR(ifTrue, newBlockPopN(current, switchCase->trueBranch()->startPc(),
+                                     switchCase->truePopAmount()));
     MBasicBlock* ifFalse;
-    MOZ_TRY_VAR(ifFalse, newBlockPopN(current, compare->falseBranch()->startPc(),
-                                      compare->falsePopAmount()));
+    MOZ_TRY_VAR(ifFalse, newBlockPopN(current, switchCase->falseBranch()->startPc(),
+                                      switchCase->falsePopAmount()));
 
-    blockWorklist[compare->trueBranch()->id()] = ifTrue;
-    blockWorklist[compare->falseBranch()->id()] = ifFalse;
+    blockWorklist[switchCase->trueBranch()->id()] = ifTrue;
+    blockWorklist[switchCase->falseBranch()->id()] = ifFalse;
 
-    MTest* mir = newTest(cmpResult, ifTrue, ifFalse);
+    MTest* mir = newTest(cond, ifTrue, ifFalse);
     current->end(mir);
 
     // Filter the types in the true branch.
@@ -5356,6 +5363,14 @@ IonBuilder::jsop_funcall(uint32_t argc)
     TemporaryTypeSet* funTypes = current->peek(funcDepth)->resultTypeSet();
     JSFunction* target = getSingleCallTarget(funTypes);
 
+    CallInfo callInfo(alloc(), pc, /* constructing = */ false,
+                      /* ignoresReturnValue = */ BytecodeIsPopped(pc));
+
+    // Save prior call stack in case we need to resolve during bailout
+    // recovery of inner inlined function. This includes the JSFunction and the
+    // 'call' native function.
+    MOZ_TRY(callInfo.savePriorCallStack(this, current, argc + 2));
+
     // Shimmy the slots down to remove the native 'call' function.
     current->shimmySlots(funcDepth - 1);
 
@@ -5370,8 +5385,6 @@ IonBuilder::jsop_funcall(uint32_t argc)
         argc -= 1;
     }
 
-    CallInfo callInfo(alloc(), pc, /* constructing = */ false,
-                      /* ignoresReturnValue = */ BytecodeIsPopped(pc));
     if (!callInfo.init(current, argc)) {
         return abort(AbortReason::Alloc);
     }
@@ -6470,7 +6483,7 @@ IonBuilder::compareTryBinaryStub(bool* emitted, MDefinition* left, MDefinition* 
         return Ok();
     }
 
-    if (JSOp(*pc) == JSOP_CASE || IsCallPC(pc)) {
+    if (IsCallPC(pc)) {
         return Ok();
     }
 

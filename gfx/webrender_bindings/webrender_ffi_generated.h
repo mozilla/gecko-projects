@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Generated with cbindgen:0.6.6 */
+/* Generated with cbindgen:0.6.7 */
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
@@ -50,6 +50,7 @@ enum class BoxShadowClipMode : uint32_t {
 enum class Checkpoint : uint32_t {
   SceneBuilt,
   FrameBuilt,
+  FrameTexturesUpdated,
   FrameRendered,
   // NotificationRequests get notified with this if they get dropped without having been
   // notified. This provides the guarantee that if a request is created it will get notified.
@@ -252,6 +253,8 @@ enum class WrFilterOpType : uint32_t {
   Sepia = 8,
   DropShadow = 9,
   ColorMatrix = 10,
+  SrgbToLinear = 11,
+  LinearToSrgb = 12,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -539,6 +542,7 @@ struct MemoryReport {
   uintptr_t render_target_textures;
   uintptr_t texture_cache_textures;
   uintptr_t depth_target_textures;
+  uintptr_t total_gpu_bytes_allocated;
 
   bool operator==(const MemoryReport& aOther) const {
     return primitive_stores == aOther.primitive_stores &&
@@ -554,7 +558,8 @@ struct MemoryReport {
            vertex_data_textures == aOther.vertex_data_textures &&
            render_target_textures == aOther.render_target_textures &&
            texture_cache_textures == aOther.texture_cache_textures &&
-           depth_target_textures == aOther.depth_target_textures;
+           depth_target_textures == aOther.depth_target_textures &&
+           total_gpu_bytes_allocated == aOther.total_gpu_bytes_allocated;
   }
 };
 
@@ -972,7 +977,7 @@ struct ByteSlice {
   }
 };
 
-using TileOffset = TypedPoint2D<uint16_t, Tiles>;
+using TileOffset = TypedPoint2D<uint32_t, Tiles>;
 
 using DeviceUintRect = TypedRect<uint32_t, DevicePixel>;
 
@@ -1630,7 +1635,8 @@ WR_FUNC;
 WR_INLINE
 bool wr_renderer_render(Renderer *aRenderer,
                         uint32_t aWidth,
-                        uint32_t aHeight)
+                        uint32_t aHeight,
+                        bool aHadSlowFrame)
 WR_FUNC;
 
 WR_INLINE
