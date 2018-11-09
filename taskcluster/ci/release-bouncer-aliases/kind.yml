@@ -54,7 +54,7 @@ jobs:
                fennec-latest: apk
             birch:
                fennec-latest: apk
-            maple:
+            birch:
                fennec-beta-latest: apk
             default: {}
       shipping-product: fennec
@@ -82,7 +82,7 @@ jobs:
             jamun:
                firefox-esr-latest-ssl: installer-ssl
                firefox-esr-latest: installer
-            maple:
+            birch:
                firefox-beta-latest-ssl: installer-ssl
                firefox-beta-latest: installer
                firefox-beta-stub: stub-installer
