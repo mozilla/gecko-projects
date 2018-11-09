@@ -7,23 +7,18 @@ Transform the beetmover task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import os
-import itertools
-from copy import deepcopy
-import yaml
-from datetime import datetime
-import jsone
+from voluptuous import Any, Optional, Required
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.transforms.task import task_description_schema
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, Schema, resolve_keyed_by
-from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
+from taskgraph.util.schema import Schema, validate_schema
+from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
+                                         generate_beetmover_upstream_artifacts,
                                          get_beetmover_action_scope,
-                                         get_phase,
+                                         get_beetmover_bucket_scope, get_phase,
                                          get_worker_type_for_scope)
 from taskgraph.util.taskcluster import get_artifact_prefix
-from taskgraph.transforms.task import task_description_schema
-from voluptuous import Any, Required, Optional
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
 # need to be transfered to S3, please be aware you also need to follow-up
@@ -225,156 +220,6 @@ def make_task_description(config, jobs):
         yield task
 
 
-# TODO: Candidate for moving into its own file
-def generate_artifact_map_for_task(config, job, platform, dependencies, locale=None):
-    base_artifact_prefix = get_artifact_prefix(job)
-    map_config = load_mapping_file(job['artifact-map'])
-    artifacts = list()
-
-    if not locale:
-        locales = map_config['default_locales']
-    else:
-        locales = [locale]
-
-    for locale, dep in itertools.product(locales, dependencies):
-        paths = dict()
-        for filename in map_config['mapping']:
-            # Relevancy checks
-            if dep not in map_config['mapping'][filename]['from']:
-                # We don't get this file from this dependency.
-                continue
-            if locale != 'en-US' and not map_config['mapping'][filename]['all_locales']:
-                # This locale either doesn't produce or shouldn't upload this file.
-                continue
-
-            # Filling in destinations
-
-            # deepcopy because the next time we look at this file the locale will differ.
-            file_config = deepcopy(map_config['mapping'][filename])
-            for field in [
-                'destinations',
-                'locale_prefix',
-                'source_path_modifier',
-                'update_balrog_manifest'
-            ]:
-                resolve_keyed_by(file_config, field, field, locale=locale)
-
-            # This format string should ideally be in the configuration file,
-            # but this would mean keeping variable names in sync between code + config.
-            destinations = [
-                "{s3_bucket_path}/{dest_path}/{locale_prefix}{filename}".format(
-                    s3_bucket_path=bucket_path,
-                    dest_path=dest_path,
-                    locale_prefix=file_config['locale_prefix'],
-                    filename=file_config['pretty_name']
-                )
-                for dest_path, bucket_path
-                in itertools.product(file_config['destinations'], map_config['s3_bucket_paths'])
-            ]
-
-            # Creating map entries
-
-            # Key must be artifact path, to avoid trampling duplicates, such
-            # as public/build/target.apk and public/build/en-US/target.apk
-            key = "{}{}/{}".format(
-                base_artifact_prefix,
-                jsone.render(file_config['source_path_modifier'], {'locale': locale}),
-                filename,
-            )
-            paths[key] = {
-                'destinations': destinations,
-                'checksums_path': file_config['checksums_path'],
-            }
-
-            # Optional flags.
-            if file_config.get('update_balrog_manifest'):
-                paths[key]['update_balrog_manifest'] = True
-                if file_config.get('balrog_format'):
-                    paths[key]['balrog_format'] = file_config['balrog_format']
-
-        if not paths:
-            # No files for this dependency/locale combination.
-            continue
-
-        # Render all variables for the artifact map
-
-        platforms = deepcopy(map_config['platform_names'])
-        for key in ['path_platform', 'filename_platform']:
-            resolve_keyed_by(platforms, key, key, platform=platform)
-
-        upload_date = datetime.fromtimestamp(config.params['build_date'])
-        paths = jsone.render(paths, {
-            'locale': locale,
-            'version': config.params['app_version'],
-            'branch': config.params['project'],
-            'filename_platform': platforms['filename_platform'],
-            'path_platform': platforms['path_platform'],
-            'year': upload_date.year,
-            'month': upload_date.strftime("%m"),  # zero-pad the month
-            'upload_date': upload_date.strftime("%Y-%m-%d-%H-%M-%S")
-        })
-
-        artifacts.append({
-            'taskId': {'task-reference': "<{}>".format(dep)},
-            'locale': locale,
-            'paths': paths,
-        })
-
-    return artifacts
-
-
-# TODO: Candidate for moving into its own file
-def load_mapping_file(path):
-    """Load artifact map yaml config."""
-    # TODO: resolve_keyed_by platform, if needed.
-    with open(os.path.join(os.getcwd(), path), 'r') as yamlfile:
-        return yaml.safe_load(yamlfile)
-
-
-def generate_upstream_artifacts_mapped(job, dependencies, platform, locale=None):
-    base_artifact_prefix = get_artifact_prefix(job)
-    map_config = load_mapping_file(job['artifact-map'])
-    upstream_artifacts = list()
-
-    if not locale:
-        locales = map_config['default_locales']
-    else:
-        locales = [locale]
-
-    for locale, dep in itertools.product(locales, dependencies):
-        paths = list()
-
-        for filename in map_config['mapping']:
-            if dep not in map_config['mapping'][filename]['from']:
-                continue
-            if locale != 'en-US' and not map_config['mapping'][filename]['all_locales']:
-                continue
-
-            # The next time we look at this file it might be a different locale.
-            file_config = deepcopy(map_config['mapping'][filename])
-            resolve_keyed_by(file_config, "source_path_modifier",
-                             'source path modifier', locale=locale)
-            paths.append("{}{}/{}".format(
-                base_artifact_prefix,
-                jsone.render(file_config['source_path_modifier'], {'locale': locale}),
-                filename,
-            ))
-
-        if not paths:
-            continue
-
-        upstream_artifacts.append({
-            "taskId": {
-                "task-reference": "<{}>".format(dep)
-            },
-            "taskType": map_config['tasktype_map'].get(dep),
-            "paths": sorted(paths),
-            "locale": locale,
-        })
-
-    return upstream_artifacts
-
-
 def generate_upstream_artifacts(job, signing_task_ref, build_task_ref, platform,
                                 locale=None):
     build_mapping = UPSTREAM_ARTIFACT_UNSIGNED_PATHS
@@ -484,7 +329,7 @@ def make_task_worker(config, jobs):
         build_task_ref = "<" + str(build_task) + ">"
 
         if 'android' in platform:
-            upstream_artifacts = generate_upstream_artifacts_mapped(
+            upstream_artifacts = generate_beetmover_upstream_artifacts(
                 job, [str(signing_task), str(build_task)], platform, locale
             )
         else:
@@ -498,7 +343,7 @@ def make_task_worker(config, jobs):
         }
 
         if 'android' in platform:
-            worker['artifact-map'] = generate_artifact_map_for_task(
+            worker['artifact-map'] = generate_beetmover_artifact_map(
                 config, job, platform, [str(signing_task), str(build_task)], locale)
 
         if locale:

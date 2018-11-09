@@ -17,3 +17,6 @@ only-for-attributes:
 
 job-template:
    shipping-phase: promote
+   artifact-map: taskcluster/taskgraph/manifests/checksums.yml
+   attributes:
+      artifact_prefix: public
