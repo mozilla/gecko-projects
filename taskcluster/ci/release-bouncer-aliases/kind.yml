@@ -52,7 +52,7 @@ jobs:
                fennec-beta-latest: apk
             mozilla-release:
                fennec-latest: apk
-            birch:
+            maple:
                fennec-latest: apk
             birch:
                fennec-beta-latest: apk
@@ -75,7 +75,7 @@ jobs:
             mozilla-esr60:
                firefox-esr-latest-ssl: installer-ssl
                firefox-esr-latest: installer
-            birch:
+            maple:
                firefox-latest-ssl: installer-ssl
                firefox-latest: installer
                firefox-stub: stub-installer
