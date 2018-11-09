@@ -7,6 +7,7 @@ Transform the beetmover task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import os
 import itertools
 from copy import deepcopy
 import yaml
@@ -147,6 +148,8 @@ beetmover_description_schema = Schema({
 
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
+
+    Optional('artifact-map'): basestring,
 })
 
 
@@ -216,13 +219,16 @@ def make_task_description(config, jobs):
             'treeherder': treeherder,
             'shipping-phase': phase,
         }
+        if job.get('artifact-map'):
+            task['artifact-map'] = job['artifact-map']
 
         yield task
 
 
+# TODO: Candidate for moving into its own file
 def generate_artifact_map_for_task(config, job, platform, dependencies, locale=None):
     base_artifact_prefix = get_artifact_prefix(job)
-    map_config = load_mapping_file()
+    map_config = load_mapping_file(job['artifact-map'])
     artifacts = list()
 
     if not locale:
@@ -317,15 +323,17 @@ def generate_artifact_map_for_task(config, job, platform, dependencies, locale=N
     return artifacts
 
 
-def load_mapping_file():
-    # TODO: Use the file from kind.yml instead.
-    MAGIC = "./taskcluster/taskgraph/manifests/fennec_nightly.yml"
-    return yaml.safe_load(open(MAGIC))
+# TODO: Candidate for moving into its own file
+def load_mapping_file(path):
+    """Load artifact map yaml config."""
+    # TODO: resolve_keyed_by platform, if needed.
+    with open(os.path.join(os.getcwd(), path), 'r') as yamlfile:
+        return yaml.safe_load(yamlfile)
 
 
 def generate_upstream_artifacts_mapped(job, dependencies, platform, locale=None):
     base_artifact_prefix = get_artifact_prefix(job)
-    map_config = load_mapping_file()
+    map_config = load_mapping_file(job['artifact-map'])
     upstream_artifacts = list()
 
     if not locale:
@@ -496,5 +504,8 @@ def make_task_worker(config, jobs):
         if locale:
             worker["locale"] = locale
         job["worker"] = worker
+
+        if job.get('artifact-map'):
+            del job['artifact-map']
 
         yield job

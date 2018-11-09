@@ -28,3 +28,6 @@ not-for-build-platforms:
    - win64-devedition-nightly/opt
    - linux64-asan-reporter-nightly/opt
    - win64-asan-reporter-nightly/opt
+
+job-template:
+   artifact-map: taskcluster/taskgraph/manifests/fennec_nightly.yml
