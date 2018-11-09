@@ -59,6 +59,7 @@ mapping:
   buildhub.json:
     <<: *default
     all_locales: true
+    locale_prefix: ''
     pretty_name: fennec-${version}.${locale}.${filename_platform}.buildhub.json
     checksums_path: fennec-${version}.${locale}.${filename_platform}.buildhub.json
   target.common.tests.tar.gz:
@@ -80,8 +81,8 @@ mapping:
     checksums_path: fennec-${version}.${locale}.${filename_platform}.json
   target.mochitest.tests.tar.gz:
     <<: *default
-    pretty_name: fennec-${version}.${locale}.${filename_platform}.mochitest.tests.zip
-    checksums_path: fennec-${version}.${locale}.${filename_platform}.mochitest.tests.zip
+    pretty_name: fennec-${version}.${locale}.${filename_platform}.mochitest.tests.tar.gz
+    checksums_path: fennec-${version}.${locale}.${filename_platform}.mochitest.tests.tar.gz
   target.mozinfo.json:
     <<: *default
     all_locales: true
@@ -117,8 +118,8 @@ mapping:
   target.xpcshell.tests.tar.gz:
     <<: *default
     description: "XPCShell test suite <TODO>"
-    pretty_name: fennec-${version}.${locale}.${filename_platform}.xpcshell.tests.zip
-    checksums_path: fennec-${version}.${locale}.${filename_platform}.xpcshell.tests.zip
+    pretty_name: fennec-${version}.${locale}.${filename_platform}.xpcshell.tests.tar.gz
+    checksums_path: fennec-${version}.${locale}.${filename_platform}.xpcshell.tests.tar.gz
   target_info.txt:
     <<: *default
     all_locales: true
