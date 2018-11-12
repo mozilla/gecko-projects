@@ -12,7 +12,7 @@ from voluptuous import Any, Optional, Required
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.task import task_description_schema
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import Schema, validate_schema
+from taskgraph.util.schema import Schema, validate_schema, optionally_keyed_by
 from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
                                          generate_beetmover_upstream_artifacts,
                                          get_beetmover_action_scope,
