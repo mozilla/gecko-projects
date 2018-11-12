@@ -509,6 +509,7 @@ def generate_beetmover_upstream_artifacts(job, platform, locale=None, dependenci
         list: A list of dictionaries conforming to the upstream_artifacts spec.
     """
     base_artifact_prefix = get_artifact_prefix(job)
+    resolve_keyed_by(job, 'artifact-map', 'artifact map', platform=platform)
     map_config = load_yaml(*os.path.split(job['artifact-map']))
     upstream_artifacts = list()
 
@@ -572,6 +573,7 @@ def generate_beetmover_artifact_map(config, job, platform, dependencies=None, lo
             maps for beetmover.
     """
     base_artifact_prefix = get_artifact_prefix(job)
+    resolve_keyed_by(job, 'artifact-map', 'artifact map', platform=platform)
     map_config = load_yaml(*os.path.split(job['artifact-map']))
     artifacts = list()
 

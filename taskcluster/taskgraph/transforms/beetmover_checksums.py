@@ -13,7 +13,7 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import craft_release_properties
 from taskgraph.transforms.task import task_description_schema
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import Schema, validate_schema
+from taskgraph.util.schema import Schema, validate_schema, optionally_keyed_by
 from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
                                          generate_beetmover_upstream_artifacts,
                                          get_beetmover_action_scope,
@@ -39,7 +39,7 @@ beetmover_checksums_description_schema = Schema({
     Optional('locale'): basestring,
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
-    Optional('artifact-map'): basestring,
+    Optional('artifact-map'): optionally_keyed_by('platform', basestring),
 })
 
 
@@ -184,11 +184,12 @@ def make_beetmover_checksums_worker(config, jobs):
                 job, platform, locale
             )
             worker['artifact-map'] = generate_beetmover_artifact_map(
-                config, job, platform, locale)
+                config, job, platform=platform, locale=locale)
         else:
             upstream_artifacts = generate_upstream_artifacts(
                 refs, platform, locale
             )
+
         worker['upstream-artifacts'] = upstream_artifacts
 
         if locale:

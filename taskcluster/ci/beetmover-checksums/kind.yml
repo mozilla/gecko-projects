@@ -17,6 +17,9 @@ only-for-attributes:
 
 job-template:
    shipping-phase: promote
-   artifact-map: taskcluster/taskgraph/manifests/checksums.yml
+   artifact-map:
+      by-platform:
+         android.*: taskcluster/taskgraph/manifests/fennec_nightly_checksums.yml
+         default: taskcluster/taskgraph/manifests/firefox_nightly_checksums.yml
    attributes:
       artifact_prefix: public
