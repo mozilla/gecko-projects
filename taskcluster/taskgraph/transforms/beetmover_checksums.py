@@ -181,10 +181,10 @@ def make_beetmover_checksums_worker(config, jobs):
 
         if 'android' in platform:
             upstream_artifacts = generate_beetmover_upstream_artifacts(
-                job, job["dependencies"].keys(), platform, locale
+                job, platform, locale
             )
             worker['artifact-map'] = generate_beetmover_artifact_map(
-                config, job, platform, job["dependencies"].keys(), locale)
+                config, job, platform, locale)
         else:
             upstream_artifacts = generate_upstream_artifacts(
                 refs, platform, locale

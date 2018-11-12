@@ -330,7 +330,7 @@ def make_task_worker(config, jobs):
 
         if 'android' in platform:
             upstream_artifacts = generate_beetmover_upstream_artifacts(
-                job, [str(signing_task), str(build_task)], platform, locale
+                job, platform, locale
             )
         else:
             upstream_artifacts = generate_upstream_artifacts(
@@ -344,7 +344,7 @@ def make_task_worker(config, jobs):
 
         if 'android' in platform:
             worker['artifact-map'] = generate_beetmover_artifact_map(
-                config, job, platform, [str(signing_task), str(build_task)], locale)
+                config, job, platform, locale)
 
         if locale:
             worker["locale"] = locale

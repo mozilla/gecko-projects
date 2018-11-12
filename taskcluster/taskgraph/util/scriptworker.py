@@ -494,7 +494,7 @@ def get_worker_type_for_scope(config, scope):
 
 
 # generate_beetmover_upstream_artifacts {{{1
-def generate_beetmover_upstream_artifacts(job, dependencies, platform, locale=None):
+def generate_beetmover_upstream_artifacts(job, platform, locale=None, dependencies=None):
     """Generate the upstream artifacts for beetmover, using the artifact map.
 
     Currently only applies to beetmover tasks.
@@ -516,6 +516,9 @@ def generate_beetmover_upstream_artifacts(job, dependencies, platform, locale=No
         locales = map_config['default_locales']
     else:
         locales = [locale]
+
+    if not dependencies:
+        dependencies = job['dependencies'].keys()
 
     for locale, dep in itertools.product(locales, dependencies):
         paths = list()
@@ -552,7 +555,7 @@ def generate_beetmover_upstream_artifacts(job, dependencies, platform, locale=No
 
 
 # generate_artifact_map_for_task {{{1
-def generate_beetmover_artifact_map(config, job, platform, dependencies, locale=None):
+def generate_beetmover_artifact_map(config, job, platform=None, dependencies=None, locale=None):
     """Generate the beetmover artifact map.
 
     Currently only applies to beetmover tasks.
@@ -571,6 +574,9 @@ def generate_beetmover_artifact_map(config, job, platform, dependencies, locale=
     base_artifact_prefix = get_artifact_prefix(job)
     map_config = load_yaml(*os.path.split(job['artifact-map']))
     artifacts = list()
+
+    if not dependencies:
+        dependencies = job['dependencies'].keys()
 
     if not locale:
         locales = map_config['default_locales']
@@ -607,7 +613,7 @@ def generate_beetmover_artifact_map(config, job, platform, dependencies, locale=
                     s3_bucket_path=bucket_path,
                     dest_path=dest_path,
                     locale_prefix=file_config['locale_prefix'],
-                    filename=file_config['pretty_name']
+                    filename=file_config.get('pretty_name', filename),
                 )
                 for dest_path, bucket_path
                 in itertools.product(file_config['destinations'], map_config['s3_bucket_paths'])
@@ -624,7 +630,7 @@ def generate_beetmover_artifact_map(config, job, platform, dependencies, locale=
             )
             paths[key] = {
                 'destinations': destinations,
-                'checksums_path': file_config['checksums_path'],
+                'checksums_path': file_config.get('checksums_path', filename),
             }
 
             # Optional flags.
@@ -640,14 +646,16 @@ def generate_beetmover_artifact_map(config, job, platform, dependencies, locale=
         # Render all variables for the artifact map
 
         platforms = deepcopy(map_config['platform_names'])
-        for key in ['path_platform', 'filename_platform']:
-            resolve_keyed_by(platforms, key, key, platform=platform)
+        if platform:
+            for key in platforms.keys():
+                resolve_keyed_by(platforms, key, key, platform=platform)
 
         upload_date = datetime.fromtimestamp(config.params['build_date'])
         paths = jsone.render(paths, {
             'locale': locale,
             'version': config.params['app_version'],
             'branch': config.params['project'],
+            'build_number': config.params['build_number'],
             'filename_platform': platforms['filename_platform'],
             'path_platform': platforms['path_platform'],
             'year': upload_date.year,
