@@ -144,7 +144,7 @@ beetmover_description_schema = Schema({
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
 
-    Optional('artifact-map'): basestring,
+    Optional('artifact-map'): optionally_keyed_by('platform', basestring),
 })
 
 
