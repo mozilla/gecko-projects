@@ -9,7 +9,9 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
-from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
+from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
+                                         generate_beetmover_upstream_artifacts,
+                                         get_beetmover_bucket_scope,
                                          get_beetmover_action_scope,
                                          get_phase,
                                          get_worker_type_for_scope,
@@ -58,6 +60,7 @@ release_generate_checksums_beetmover_schema = Schema({
 
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
+    Optional('artifact-map'): basestring,
 })
 
 
@@ -118,6 +121,9 @@ def make_task_description(config, jobs):
             'shipping-phase': phase,
         }
 
+        if 'artifact-map' in job:
+            task['artifact-map'] = job['artifact-map']
+
         yield task
 
 
@@ -133,7 +139,7 @@ def generate_upstream_artifacts(job, signing_task_ref, build_task_ref):
         "paths": ["{}/{}".format(artifact_prefix, p)
                   for p in build_mapping],
         "locale": "en-US",
-        }, {
+    }, {
         "taskId": {"task-reference": signing_task_ref},
         "taskType": "signing",
         "paths": ["{}/{}".format(artifact_prefix, p)
@@ -166,11 +172,27 @@ def make_task_worker(config, jobs):
         worker = {
             'implementation': 'beetmover',
             'release-properties': craft_release_properties(config, job),
-            'upstream-artifacts': generate_upstream_artifacts(
-                job, signing_task_ref, build_task_ref
-            )
         }
 
+        platform = job["attributes"]["build_platform"]
+        if 'fennec-release' in platform:
+            upstream_artifacts = generate_beetmover_upstream_artifacts(
+                job, platform=None, locale=None
+            )
+        else:
+            upstream_artifacts = generate_upstream_artifacts(
+                job, signing_task_ref, build_task_ref
+            )
+
+        worker['upstream-artifacts'] = upstream_artifacts
+
+        if 'fennec-release' in platform:
+            worker['artifact-map'] = generate_beetmover_artifact_map(config, job)
+
         job["worker"] = worker
+
+        # Clean up
+        if job.get('artifact-map'):
+            del job['artifact-map']
 
         yield job
