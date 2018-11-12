@@ -555,7 +555,7 @@ def generate_beetmover_upstream_artifacts(job, platform, locale=None, dependenci
 
 
 # generate_artifact_map_for_task {{{1
-def generate_beetmover_artifact_map(config, job, platform=None, dependencies=None, locale=None):
+def generate_beetmover_artifact_map(config, job, platform, dependencies=None, locale=None):
     """Generate the beetmover artifact map.
 
     Currently only applies to beetmover tasks.
@@ -582,6 +582,8 @@ def generate_beetmover_artifact_map(config, job, platform=None, dependencies=Non
         locales = map_config['default_locales']
     else:
         locales = [locale]
+
+    resolve_keyed_by(map_config, 's3_bucket_paths', 's3_bucket_paths', platform=platform)
 
     for locale, dep in itertools.product(locales, dependencies):
         paths = dict()

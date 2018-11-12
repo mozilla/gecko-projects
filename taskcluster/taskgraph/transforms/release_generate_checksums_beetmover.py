@@ -175,6 +175,7 @@ def make_task_worker(config, jobs):
         }
 
         platform = job["attributes"]["build_platform"]
+        # Works with Firefox/Devedition. Commented for migration.
         if 'fennec-release' in platform:
             upstream_artifacts = generate_beetmover_upstream_artifacts(
                 job, platform=None, locale=None
@@ -186,8 +187,10 @@ def make_task_worker(config, jobs):
 
         worker['upstream-artifacts'] = upstream_artifacts
 
+        # Works with Firefox/Devedition. Commented for migration.
         if 'fennec-release' in platform:
-            worker['artifact-map'] = generate_beetmover_artifact_map(config, job)
+            worker['artifact-map'] = generate_beetmover_artifact_map(
+                config, job, platform=platform)
 
         job["worker"] = worker
 
