@@ -344,7 +344,7 @@ def make_task_worker(config, jobs):
 
         if 'android' in platform:
             worker['artifact-map'] = generate_beetmover_artifact_map(
-                config, job, platform, locale)
+                config, job, platform=platform, locale=locale)
 
         if locale:
             worker["locale"] = locale
