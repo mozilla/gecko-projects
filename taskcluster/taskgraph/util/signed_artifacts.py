@@ -32,7 +32,7 @@ def generate_specifications_of_artifacts_to_sign(
                 get_artifact_path(task, '{locale}/target.apk'),
             ],
             # switch to signing via Autograph - bug 1492245
-            'formats': ['autograph_fennec'],
+            'formats': ['autograph_fennec_sha1'],
         }]
     # XXX: Mars aren't signed here (on any platform) because internals will be
     # signed at after this stage of the release
