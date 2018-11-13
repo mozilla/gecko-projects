@@ -539,6 +539,7 @@ task_description_schema = Schema({
             Required('paths'): [basestring],
             Required('zipExtract', default=False): bool,
         }],
+        Optional('artifact-map'): object,
     }, {
         Required('implementation'): 'balrog',
         Required('balrog-action'): Any(*BALROG_ACTIONS),

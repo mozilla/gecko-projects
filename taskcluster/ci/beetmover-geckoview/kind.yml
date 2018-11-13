@@ -33,6 +33,7 @@ job-template:
    # Beetmoving geckoview makes it available to the official maven repo. So we want beetmover to
    # act only when the release is greenlit.
    shipping-phase: ship
+   artifact-map: taskcluster/taskgraph/manifests/fennec_geckoview.yml
    bucket-scope:
       by-release-level:
          production: 'project:releng:beetmover:bucket:maven-production'

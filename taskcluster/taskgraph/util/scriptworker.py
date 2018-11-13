@@ -555,8 +555,59 @@ def generate_beetmover_upstream_artifacts(job, platform, locale=None, dependenci
     return upstream_artifacts
 
 
+# generate_beetmover_upstream_artifacts {{{1
+def generate_beetmover_compressed_upstream_artifacts(job, dependencies=None):
+    """Generate compressed file upstream artifacts for beetmover.
+
+    These artifacts will not be beetmoved directly, but
+    will be decompressed and the contents beetmoved using the
+    `zip_mapping` entry in the artifact map.
+
+    Currently only applies to beetmover tasks.
+
+    Args:
+        job (dict): The current job being generated
+        dependencies (list): A list of the job's dependency labels.
+
+    Returns:
+        list: A list of dictionaries conforming to the upstream_artifacts spec.
+    """
+    base_artifact_prefix = get_artifact_prefix(job)
+    map_config = load_yaml(*os.path.split(job['artifact-map']))
+    upstream_artifacts = list()
+
+    if not dependencies:
+        dependencies = job['dependencies'].keys()
+
+    for dep in dependencies:
+        paths = list()
+
+        for filename in map_config['upstream_mapping']:
+            if dep not in map_config['upstream_mapping'][filename]['from']:
+                continue
+
+            paths.append("{}/{}".format(
+                base_artifact_prefix,
+                filename,
+            ))
+
+        if not paths:
+            continue
+
+        upstream_artifacts.append({
+            "taskId": {
+                "task-reference": "<{}>".format(dep)
+            },
+            "taskType": map_config['tasktype_map'].get(dep),
+            "paths": sorted(paths),
+            "zipExtract": True,
+        })
+
+    return upstream_artifacts
+
+
 # generate_artifact_map_for_task {{{1
-def generate_beetmover_artifact_map(config, job, platform, dependencies=None, locale=None):
+def generate_beetmover_artifact_map(config, job, **kwargs):
     """Generate the beetmover artifact map.
 
     Currently only applies to beetmover tasks.
@@ -564,7 +615,7 @@ def generate_beetmover_artifact_map(config, job, platform, dependencies=None, lo
     Args:
         config (): Current taskgraph configuration.
         job (dict): The current job being generated
-        dependencies (list): A list of the job's dependency labels.
+    Common kwargs:
         platform (str): The current build platform
         locale (str): The current locale being beetmoved.
 
@@ -572,18 +623,19 @@ def generate_beetmover_artifact_map(config, job, platform, dependencies=None, lo
         list: A list of dictionaries containing source->destination
             maps for beetmover.
     """
-    base_artifact_prefix = get_artifact_prefix(job)
+    platform = kwargs.get('platform', '')
     resolve_keyed_by(job, 'artifact-map', 'artifact map', platform=platform)
     map_config = load_yaml(*os.path.split(job['artifact-map']))
+    base_artifact_prefix = map_config.get('base_artifact_prefix', get_artifact_prefix(job))
+
     artifacts = list()
 
-    if not dependencies:
-        dependencies = job['dependencies'].keys()
+    dependencies = job['dependencies'].keys()
 
-    if not locale:
-        locales = map_config['default_locales']
+    if kwargs.get('locale'):
+        locales = [kwargs['locale']]
     else:
-        locales = [locale]
+        locales = map_config['default_locales']
 
     resolve_keyed_by(map_config, 's3_bucket_paths', 's3_bucket_paths', platform=platform)
 
@@ -602,6 +654,7 @@ def generate_beetmover_artifact_map(config, job, platform, dependencies=None, lo
 
             # deepcopy because the next time we look at this file the locale will differ.
             file_config = deepcopy(map_config['mapping'][filename])
+
             for field in [
                 'destinations',
                 'locale_prefix',
@@ -622,14 +675,13 @@ def generate_beetmover_artifact_map(config, job, platform, dependencies=None, lo
                 for dest_path, bucket_path
                 in itertools.product(file_config['destinations'], map_config['s3_bucket_paths'])
             ]
-
             # Creating map entries
 
             # Key must be artifact path, to avoid trampling duplicates, such
             # as public/build/target.apk and public/build/en-US/target.apk
             key = "{}{}/{}".format(
                 base_artifact_prefix,
-                jsone.render(file_config['source_path_modifier'], {'locale': locale}),
+                file_config['source_path_modifier'],
                 filename,
             )
             paths[key] = {
@@ -655,7 +707,13 @@ def generate_beetmover_artifact_map(config, job, platform, dependencies=None, lo
                 resolve_keyed_by(platforms, key, key, platform=platform)
 
         upload_date = datetime.fromtimestamp(config.params['build_date'])
-        paths = jsone.render(paths, {
+
+        # TODO move more specific variables into the transforms.
+        # Such as year, month, upload_date.
+        # Proposal: Leep anything generated inside this function,
+        # and anything from config.params.
+        # Should we .update(config.params) ?
+        kwargs.update({
             'locale': locale,
             'version': config.params['app_version'],
             'branch': config.params['project'],
@@ -666,7 +724,7 @@ def generate_beetmover_artifact_map(config, job, platform, dependencies=None, lo
             'month': upload_date.strftime("%m"),  # zero-pad the month
             'upload_date': upload_date.strftime("%Y-%m-%d-%H-%M-%S")
         })
-
+        paths = jsone.render(paths, kwargs)
         artifacts.append({
             'taskId': {'task-reference': "<{}>".format(dep)},
             'locale': locale,

@@ -7,12 +7,16 @@ Transform the beetmover task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import re
+
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import \
     craft_release_properties as beetmover_craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema, resolve_keyed_by, optionally_keyed_by
-from taskgraph.util.scriptworker import (get_phase,
+from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
+                                         generate_beetmover_compressed_upstream_artifacts,
+                                         get_phase,
                                          get_worker_type_for_scope)
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Required, Optional
@@ -31,6 +35,7 @@ _MOZ_UPDATE_CHANNEL_PER_BRANCH = {
     'mozilla-central': '-nightly',
     'try': '-nightly-try',
     'maple': '-nightly-maple',
+    'birch': '-nightly-birch',
 }
 
 task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
@@ -46,6 +51,7 @@ beetmover_description_schema = Schema({
     Optional('bucket-scope'): optionally_keyed_by('release-level', basestring),
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
+    Optional('artifact-map'): optionally_keyed_by('platform', basestring),
 })
 
 
@@ -107,6 +113,9 @@ def make_task_description(config, jobs):
             'shipping-phase': job.get('shipping-phase', get_phase(config)),
         }
 
+        if 'artifact-map' in job:
+            task['artifact-map'] = job['artifact-map']
+
         yield task
 
 
@@ -130,16 +139,33 @@ def make_task_worker(config, jobs):
                 )
             )
 
-        build_task = list(job["dependencies"].keys())[0]
-        build_task_ref = "<" + str(build_task) + ">"
-
         worker = {
             'implementation': 'beetmover-maven',
             'release-properties': craft_release_properties(config, job),
-            'upstream-artifacts': generate_upstream_artifacts(build_task_ref)
         }
 
+        upstream_artifacts = generate_beetmover_compressed_upstream_artifacts(job)
+
+        worker['upstream-artifacts'] = upstream_artifacts
+
+        version_groups = re.match(r'(\d+).(\d+).*', config.params['version'])
+        if version_groups:
+            major_version, minor_version = version_groups.groups()
+
+        template_vars = {
+            'artifact_id': worker['release-properties']['artifact-id'],
+            'build_date': config.params['moz_build_date'],
+            'major_version': major_version,
+            'minor_version': minor_version,
+        }
+        worker['artifact-map'] = generate_beetmover_artifact_map(
+            config, job, **template_vars)
+
         job["worker"] = worker
+
+        # Clean up
+        if job.get('artifact-map'):
+            del job['artifact-map']
 
         yield job
 
