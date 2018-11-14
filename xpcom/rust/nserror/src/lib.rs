@@ -1,6 +1,7 @@
 extern crate nsstring;
 
 use nsstring::{nsCString, nsACString};
+use std::fmt;
 
 /// The type of errors in gecko.  Uses a newtype to provide additional type
 /// safety in Rust and #[repr(transparent)] to ensure the same representation
@@ -35,6 +36,12 @@ impl nsresult {
             Gecko_GetErrorName(self, &mut *cstr);
         }
         cstr
+    }
+}
+
+impl fmt::Display for nsresult {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.error_name().fmt(f)
     }
 }
 
