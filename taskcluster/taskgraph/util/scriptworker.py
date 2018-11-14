@@ -606,8 +606,8 @@ def generate_beetmover_compressed_upstream_artifacts(job, dependencies=None):
     return upstream_artifacts
 
 
-# generate_artifact_map_for_task {{{1
-def generate_beetmover_artifact_map(config, job, **kwargs):
+# generate_beetmover_artifact_map {{{1
+def generate_beetmover_artifact_map(config, job, include_checksums=True, **kwargs):
     """Generate the beetmover artifact map.
 
     Currently only applies to beetmover tasks.
@@ -686,8 +686,9 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
             )
             paths[key] = {
                 'destinations': destinations,
-                'checksums_path': file_config.get('checksums_path', filename),
             }
+            if include_checksums:
+                paths[key]['checksums_path'] = file_config.get('checksums_path', filename)
 
             # Optional flags.
             if file_config.get('update_balrog_manifest'):
