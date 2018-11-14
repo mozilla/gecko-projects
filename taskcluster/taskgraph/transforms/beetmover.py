@@ -328,7 +328,7 @@ def make_task_worker(config, jobs):
         signing_task_ref = "<" + str(signing_task) + ">"
         build_task_ref = "<" + str(build_task) + ">"
 
-        if 'android' in platform:
+        if 'android' in platform or 'fennec' in platform:
             upstream_artifacts = generate_beetmover_upstream_artifacts(
                 job, platform, locale
             )
@@ -342,7 +342,7 @@ def make_task_worker(config, jobs):
             'upstream-artifacts': upstream_artifacts,
         }
 
-        if 'android' in platform:
+        if 'android' in platform or 'fennec' in platform:
             worker['artifact-map'] = generate_beetmover_artifact_map(
                 config, job, platform=platform, locale=locale)
 

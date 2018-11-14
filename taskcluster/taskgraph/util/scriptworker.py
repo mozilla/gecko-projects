@@ -607,7 +607,7 @@ def generate_beetmover_compressed_upstream_artifacts(job, dependencies=None):
 
 
 # generate_beetmover_artifact_map {{{1
-def generate_beetmover_artifact_map(config, job, include_checksums=True, **kwargs):
+def generate_beetmover_artifact_map(config, job, **kwargs):
     """Generate the beetmover artifact map.
 
     Currently only applies to beetmover tasks.
@@ -659,9 +659,10 @@ def generate_beetmover_artifact_map(config, job, include_checksums=True, **kwarg
                 'destinations',
                 'locale_prefix',
                 'source_path_modifier',
-                'update_balrog_manifest'
+                'update_balrog_manifest',
+                'pretty_name'
             ]:
-                resolve_keyed_by(file_config, field, field, locale=locale)
+                resolve_keyed_by(file_config, field, field, locale=locale, platform=platform)
 
             # This format string should ideally be in the configuration file,
             # but this would mean keeping variable names in sync between code + config.
@@ -687,8 +688,8 @@ def generate_beetmover_artifact_map(config, job, include_checksums=True, **kwarg
             paths[key] = {
                 'destinations': destinations,
             }
-            if include_checksums:
-                paths[key]['checksums_path'] = file_config.get('checksums_path', filename)
+            if file_config.get('checksums_path'):
+                paths[key]['checksums_path'] = file_config['checksums_path']
 
             # Optional flags.
             if file_config.get('update_balrog_manifest'):

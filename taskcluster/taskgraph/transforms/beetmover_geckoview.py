@@ -159,7 +159,7 @@ def make_task_worker(config, jobs):
             'minor_version': minor_version,
         }
         worker['artifact-map'] = generate_beetmover_artifact_map(
-            config, job, include_checksums=False, **template_vars)
+            config, job, **template_vars)
 
         job["worker"] = worker
 
