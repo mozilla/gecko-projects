@@ -660,7 +660,8 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
                 'locale_prefix',
                 'source_path_modifier',
                 'update_balrog_manifest',
-                'pretty_name'
+                'pretty_name',
+                'checksums_path'
             ]:
                 resolve_keyed_by(file_config, field, field, locale=locale, platform=platform)
 

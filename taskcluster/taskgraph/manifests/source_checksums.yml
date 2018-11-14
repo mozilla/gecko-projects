@@ -14,7 +14,7 @@ s3_bucket_paths:
 default_locales:  # if given an empty locale, use these locales
   - en-US
 tasktype_map:  # Map task reference to task type.
-  release-source-signing: signing
+  release-source-checksums-signing: signing
 platform_names:
   path_platform: ''
   filename_platform: ''
@@ -24,37 +24,27 @@ platform_names:
 # s3_bucket_paths + destinations + locale_prefix + pretty_name
 default: &default
   from:
-    - release-source-signing
+    - release-source-checksums-signing
   all_locales: false
   description: "TODO"
   locale_prefix: ''
   source_path_modifier: ''
   destinations:  # locale_prefix is appended
-    - ${version}-candidates/build${build_number}/source
+    - ${version}-candidates/build${build_number}/beetmover-checksums/source
 
 # Configuration for individual files. Extends 'default', above.
 mapping:
-  source.tar.xz:
+  target-source.checksums:
     <<: *default
     pretty_name:
       by-platform:
-        firefox-source: firefox-${version}.source.tar.xz
-        devedition-source: firefox-${version}.source.tar.xz
-        fennec-source: fennec-${version}.source.tar.xz
-    checksums_path:
-      by-platform:
-        firefox-source: firefox-${version}.source.tar.xz
-        devedition-source: firefox-${version}.source.tar.xz
-        fennec-source: fennec-${version}.source.tar.xz
-  source.tar.xz.asc:
+        firefox-source: firefox-${version}.checksums.beet
+        devedition-source: firefox-${version}.checksums.beet
+        fennec-source: fennec-${version}.checksums.beet
+  target-source.checksums.asc:
     <<: *default
     pretty_name:
       by-platform:
-        firefox-source: firefox-${version}.source.tar.xz.asc
-        devedition-source: firefox-${version}.source.tar.xz.asc
-        fennec-source: fennec-${version}.source.tar.xz.asc
-    checksums_path:
-      by-platform:
-        firefox-source: firefox-${version}.source.tar.xz.asc
-        devedition-source: firefox-${version}.source.tar.xz.asc
-        fennec-source: fennec-${version}.source.tar.xz.asc
+        firefox-source: firefox-${version}.checksums.asc
+        devedition-source: firefox-${version}.checksums.asc
+        fennec-source: fennec-${version}.checksums.asc
