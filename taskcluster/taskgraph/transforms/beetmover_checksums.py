@@ -18,7 +18,8 @@ from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
                                          generate_beetmover_upstream_artifacts,
                                          get_beetmover_action_scope,
                                          get_beetmover_bucket_scope,
-                                         get_worker_type_for_scope)
+                                         get_worker_type_for_scope,
+                                         should_use_artifact_map)
 
 # Voluptuous uses marker objects as dictionary *keys*, but they are not
 # comparable, so we cast all of the keys back to regular strings
@@ -179,7 +180,7 @@ def make_beetmover_checksums_worker(config, jobs):
             'release-properties': craft_release_properties(config, job),
         }
 
-        if 'android' in platform:
+        if should_use_artifact_map(platform, config.params['project']):
             upstream_artifacts = generate_beetmover_upstream_artifacts(
                 job, platform, locale
             )

@@ -735,3 +735,18 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
         })
 
     return artifacts
+
+
+# should_use_artifact_map {{{
+def should_use_artifact_map(platform, project):
+    """Return True if this task uses the beetmover artifact map.
+
+    This function exists solely for the beetmover artifact map
+    migration.
+    """
+    platforms = ['android', 'fennec']
+    projects = ['mozilla-central', 'birch']
+
+    if any([pl in platform for pl in platforms]) and any([pj in project for pj in projects]):
+        return True
+    return False

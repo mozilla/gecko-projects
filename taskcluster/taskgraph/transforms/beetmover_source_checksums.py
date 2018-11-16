@@ -15,7 +15,8 @@ from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
                                          generate_beetmover_upstream_artifacts,
                                          get_beetmover_bucket_scope,
                                          get_beetmover_action_scope,
-                                         get_worker_type_for_scope)
+                                         get_worker_type_for_scope,
+                                         should_use_artifact_map)
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -157,7 +158,7 @@ def make_beetmover_checksums_worker(config, jobs):
             raise NotImplementedError(
                 "Beetmover checksums must have a beetmover and signing dependency!")
 
-        if 'fennec' in platform:
+        if should_use_artifact_map(platform, config.params['project']):
             upstream_artifacts = generate_beetmover_upstream_artifacts(job, platform, locale)
         else:
             upstream_artifacts = generate_upstream_artifacts(refs, platform, locale)
@@ -168,7 +169,7 @@ def make_beetmover_checksums_worker(config, jobs):
             'upstream-artifacts': upstream_artifacts,
         }
 
-        if 'fennec' in platform:
+        if should_use_artifact_map(platform, config.params['project']):
             worker['artifact-map'] = generate_beetmover_artifact_map(
                 config, job, platform=platform)
 

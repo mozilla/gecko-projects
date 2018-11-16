@@ -15,6 +15,7 @@ from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
                                          get_beetmover_action_scope,
                                          get_phase,
                                          get_worker_type_for_scope,
+                                         should_use_artifact_map,
                                          )
 from taskgraph.util.taskcluster import get_artifact_prefix
 from taskgraph.transforms.beetmover import craft_release_properties
@@ -176,7 +177,7 @@ def make_task_worker(config, jobs):
 
         platform = job["attributes"]["build_platform"]
         # Works with Firefox/Devedition. Commented for migration.
-        if 'fennec-release' in platform:
+        if should_use_artifact_map(platform, config.params['project']):
             upstream_artifacts = generate_beetmover_upstream_artifacts(
                 job, platform=None, locale=None
             )
@@ -188,7 +189,7 @@ def make_task_worker(config, jobs):
         worker['upstream-artifacts'] = upstream_artifacts
 
         # Works with Firefox/Devedition. Commented for migration.
-        if 'fennec-release' in platform:
+        if should_use_artifact_map(platform, config.params['project']):
             worker['artifact-map'] = generate_beetmover_artifact_map(
                 config, job, platform=platform)
 
