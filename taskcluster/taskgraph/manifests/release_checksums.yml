@@ -40,23 +40,30 @@ mapping:
     from:
       - release-generate-checksums
     pretty_name: SHA256SUMMARY
+    checksums_path: SHA256SUMMARY
   SHA512SUMMARY:
     <<: *default
     from:
       - release-generate-checksums
     pretty_name: SHA512SUMMARY
+    checksums_path: SHA512SUMMARY
   KEY:
     <<: *default
     pretty_name: KEY
+    checksums_path: KEY
   SHA256SUMS:
     <<: *default
     pretty_name: SHA256SUMS
+    checksums_path: SHA256SUMS
   SHA256SUMS.asc:
     <<: *default
     pretty_name: SHA256SUMS.asc
+    checksums_path: SHA256SUMS.asc
   SHA512SUMS:
     <<: *default
     pretty_name: SHA512SUMS
+    checksums_path: SHA512SUMS
   SHA512SUMS.asc:
     <<: *default
     pretty_name: SHA512SUMS.asc
+    checksums_path: SHA512SUMS.asc
