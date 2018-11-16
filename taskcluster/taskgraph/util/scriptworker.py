@@ -534,7 +534,7 @@ def generate_beetmover_upstream_artifacts(job, platform, locale=None, dependenci
             file_config = deepcopy(map_config['mapping'][filename])
             resolve_keyed_by(file_config, "source_path_modifier",
                              'source path modifier', locale=locale)
-            paths.append("{}{}/{}".format(
+            paths.append(os.path.join(
                 base_artifact_prefix,
                 jsone.render(file_config['source_path_modifier'], {'locale': locale}),
                 filename,
@@ -586,7 +586,7 @@ def generate_beetmover_compressed_upstream_artifacts(job, dependencies=None):
             if dep not in map_config['upstream_mapping'][filename]['from']:
                 continue
 
-            paths.append("{}/{}".format(
+            paths.append(os.path.join(
                 base_artifact_prefix,
                 filename,
             ))
