@@ -12,7 +12,7 @@ const { UiState } = require("devtools/client/webconsole/reducers/ui");
 const {
   applyMiddleware,
   compose,
-  createStore
+  createStore,
 } = require("devtools/client/shared/vendor/redux");
 
 // Prefs
@@ -74,12 +74,12 @@ function configureStore(hud, options = {}) {
       filterBarVisible: getBoolPref(PREFS.UI.FILTER_BAR),
       networkMessageActiveTabId: "headers",
       persistLogs: getBoolPref(PREFS.UI.PERSIST),
-    })
+    }),
   };
 
   // Prepare middleware.
   const middleware = applyMiddleware(
-    thunk.bind(null, {prefsService}),
+    thunk.bind(null, {prefsService, client: (options.services || {})}),
     historyPersistence,
     eventTelemetry.bind(null, options.telemetry, options.sessionId),
   );

@@ -30,8 +30,8 @@ private:
   }
 
 public:
-  explicit nsTextNode(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-    : mozilla::dom::Text(aNodeInfo)
+  explicit nsTextNode(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
+    : mozilla::dom::Text(std::move(aNodeInfo))
   {
     Init();
   }
@@ -59,10 +59,6 @@ public:
 
   nsresult AppendTextForNormalize(const char16_t* aBuffer, uint32_t aLength,
                                   bool aNotify, nsIContent* aNextSibling);
-
-  // Need to have a copy here because including nsDocument.h in this file will
-  // fail to build on Windows.
-  static bool IsShadowDOMEnabled(JSContext* aCx, JSObject* aObject);
 
 #ifdef DEBUG
   virtual void List(FILE* out, int32_t aIndent) const override;

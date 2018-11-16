@@ -610,17 +610,13 @@ static const StaticFingerprints kPinset_spideroak = {
 
 static const char* const kPinset_yahoo_Data[] = {
   kYahooBackup1Fingerprint,
-  kGOOGLE_PIN_VeriSignClass2_G2Fingerprint,
   kDigiCert_Assured_ID_Root_CAFingerprint,
-  kVeriSign_Class_3_Public_Primary_Certification_Authority___G5Fingerprint,
-  kVerisign_Class_3_Public_Primary_Certification_Authority___G3Fingerprint,
-  kVeriSign_Class_3_Public_Primary_Certification_Authority___G4Fingerprint,
+  kGlobalSign_Root_CAFingerprint,
   kDigiCert_Trusted_Root_G4Fingerprint,
   kDigiCert_High_Assurance_EV_Root_CAFingerprint,
-  kVerisign_Class_2_Public_Primary_Certification_Authority___G3Fingerprint,
+  kGlobalSign_Root_CA___R3Fingerprint,
   kYahooBackup2Fingerprint,
   kDigiCert_Global_Root_G2Fingerprint,
-  kVeriSign_Universal_Root_Certification_AuthorityFingerprint,
   kDigiCert_Global_Root_CAFingerprint,
   kDigiCert_Global_Root_G3Fingerprint,
 };
@@ -773,6 +769,7 @@ static const TransportSecurityPreload kPublicKeyPinningPreloadList[] = {
   { "fi.google.com", true, false, false, -1, &kPinset_google_root_pems },
   { "fi.search.yahoo.com", false, true, false, -1, &kPinset_yahoo },
   { "firebaseio.com", true, false, false, -1, &kPinset_google_root_pems },
+  { "firefox.com", true, true, true, 15, &kPinset_mozilla_services },
   { "fj.search.yahoo.com", false, true, false, -1, &kPinset_yahoo },
   { "fr.search.yahoo.com", false, true, false, -1, &kPinset_yahoo },
   { "g.co", true, false, false, -1, &kPinset_google_root_pems },
@@ -1170,8 +1167,8 @@ static const TransportSecurityPreload kPublicKeyPinningPreloadList[] = {
   { "zh.search.yahoo.com", false, true, false, -1, &kPinset_yahoo },
 };
 
-// Pinning Preload List Length = 487;
+// Pinning Preload List Length = 488;
 
 static const int32_t kUnknownId = -1;
 
-static const PRTime kPreloadPKPinsExpirationTime = INT64_C(1545652781713000);
+static const PRTime kPreloadPKPinsExpirationTime = INT64_C(1550750947378000);

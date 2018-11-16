@@ -23,45 +23,50 @@ class DebugTargetItem extends PureComponent {
 
   renderAction() {
     const { actionComponent, dispatch, target } = this.props;
-    return actionComponent({ dispatch, target });
+    return dom.div(
+      {
+        className: "debug-target-item__action",
+      },
+      actionComponent({ dispatch, target }),
+    );
   }
 
   renderDetail() {
     const { detailComponent, target } = this.props;
-    return detailComponent({ target });
+    return dom.div(
+      {
+        className: "debug-target-item__detail",
+      },
+      detailComponent({ target }),
+    );
   }
 
   renderIcon() {
     return dom.img({
-      className: "debug-target-item__icon",
+      className: "debug-target-item__icon js-debug-target-item-icon",
       src: this.props.target.icon,
     });
   }
 
-  renderInfo() {
-    return dom.div(
+  renderName() {
+    return dom.span(
       {
-        className: "debug-target-item__info",
+        className: "debug-target-item__name ellipsis-text",
+        title: this.props.target.name,
       },
-      dom.div(
-        {
-          className: "debug-target-item__info__name ellipsis-text",
-          title: this.props.target.name,
-        },
-        this.props.target.name
-      ),
-      this.renderDetail(),
+      this.props.target.name,
     );
   }
 
   render() {
     return dom.li(
       {
-        className: "debug-target-item",
+        className: "debug-target-item js-debug-target-item",
       },
       this.renderIcon(),
-      this.renderInfo(),
+      this.renderName(),
       this.renderAction(),
+      this.renderDetail(),
     );
   }
 }

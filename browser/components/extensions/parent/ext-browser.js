@@ -124,6 +124,7 @@ global.replaceUrlInTab = (gBrowser, tab, url) => {
   let loaded = waitForTabLoaded(tab, url);
   gBrowser.loadURI(url, {
     flags: Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY,
+    triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(), // This is safe from this functions usage however it would be preferred not to dot his.
   });
   return loaded;
 };
@@ -188,6 +189,12 @@ global.TabContext = class extends EventEmitter {
   }
 
   onLocationChange(browser, webProgress, request, locationURI, flags) {
+    if (!webProgress.isTopLevel) {
+      // Only pageAction and browserAction are consuming the "location-change" event
+      // to update their per-tab status, and they should only do so in response of
+      // location changes related to the top level frame (See Bug 1493470 for a rationale).
+      return;
+    }
     let gBrowser = browser.ownerGlobal.gBrowser;
     let tab = gBrowser.getTabForBrowser(browser);
     // fromBrowse will be false in case of e.g. a hash change or history.pushState
@@ -326,6 +333,9 @@ class TabTracker extends TabTrackerBase {
   }
 
   setId(nativeTab, id) {
+    if (!nativeTab.parentNode) {
+      throw new Error("Cannot attach ID to a destroyed tab.");
+    }
     this._tabs.set(nativeTab, id);
     if (nativeTab.linkedBrowser) {
       this._browsers.set(nativeTab.linkedBrowser, id);
@@ -434,16 +444,25 @@ class TabTracker extends TabTrackerBase {
             windowId: windowTracker.getId(nativeTab.ownerGlobal),
           });
         } else {
-          // Save the current tab, since the newly-created tab will likely be
-          // active by the time the promise below resolves and the event is
-          // dispatched.
-          let currentTab = nativeTab.ownerGlobal.gBrowser.selectedTab;
+          // Save the size of the current tab, since the newly-created tab will
+          // likely be active by the time the promise below resolves and the
+          // event is dispatched.
+          const currentTab = nativeTab.ownerGlobal.gBrowser.selectedTab;
+          const {frameLoader} = currentTab.linkedBrowser;
+          const currentTabSize = {
+            width: frameLoader.lazyWidth,
+            height: frameLoader.lazyHeight,
+          };
 
           // We need to delay sending this event until the next tick, since the
           // tab could have been created with a lazy browser but still not have
           // been assigned a SessionStore tab state with the URL and title.
           Promise.resolve().then(() => {
-            this.emitCreated(event.originalTarget, currentTab);
+            if (!event.originalTarget.parentNode) {
+              // If the tab is already be destroyed, do nothing.
+              return;
+            }
+            this.emitCreated(event.originalTarget, currentTabSize);
           });
         }
         break;
@@ -465,6 +484,10 @@ class TabTracker extends TabTrackerBase {
         // Because we are delaying calling emitCreated above, we also need to
         // delay sending this event because it shouldn't fire before onCreated.
         Promise.resolve().then(() => {
+          if (!nativeTab.parentNode) {
+            // If the tab is already be destroyed, do nothing.
+            return;
+          }
           this.emitActivated(nativeTab);
         });
         break;
@@ -574,12 +597,12 @@ class TabTracker extends TabTrackerBase {
    *
    * @param {NativeTab} nativeTab
    *        The tab element which is being created.
-   * @param {NativeTab} [currentTab]
-   *        The tab element for the currently active tab.
+   * @param {Object} [currentTabSize]
+   *        The size of the tab element for the currently active tab.
    * @private
    */
-  emitCreated(nativeTab, currentTab) {
-    this.emit("tab-created", {nativeTab, currentTab});
+  emitCreated(nativeTab, currentTabSize) {
+    this.emit("tab-created", {nativeTab, currentTabSize});
   }
 
   /**

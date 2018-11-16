@@ -110,12 +110,19 @@ class Benchmark(object):
     def run(self):
         self.reset()
 
+        # Update the environment variables
+        env = os.environ.copy()
+
+        # disable "GC poisoning" Bug# 1499043
+        env['JSGC_DISABLE_POISONING'] = '1'
+
         process_args = {
             'cmd': self.command,
             'cwd': self.path,
             'onFinish': self.collect_results,
             'processOutputLine': self.process_line,
             'stream': sys.stdout,
+            'env': env,
         }
         proc = ProcessHandler(**process_args)
         proc.run()
@@ -255,6 +262,7 @@ class WebToolingBenchmark(Benchmark):
     main_js = 'cli.js'
     units = 'score'
     lower_is_better = False
+    subtests_lower_is_better = False
 
     @property
     def command(self):
@@ -284,7 +292,11 @@ class WebToolingBenchmark(Benchmark):
             for score_name, values in scores.items():
                 test_name = "{}-{}".format(self.name, score_name)
                 mean = sum(values) / len(values)
-                self.suite['subtests'].append({'name': test_name, 'value': mean})
+                self.suite['subtests'].append({
+                    'lower_is_better': self.subtests_lower_is_better,
+                    'name': test_name,
+                    'value': mean,
+                });
                 if score_name == 'mean':
                     bench_mean = mean
         self.suite['value'] = bench_mean

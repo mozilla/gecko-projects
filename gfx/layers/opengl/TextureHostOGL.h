@@ -26,6 +26,7 @@
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
 #include "mozilla/layers/TextureHost.h"  // for TextureHost, etc
 #include "mozilla/mozalloc.h"           // for operator delete, etc
+#include "mozilla/webrender/RenderThread.h"
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_WARNING
 #include "nsISupportsImpl.h"            // for TextureImage::Release, etc
@@ -91,6 +92,14 @@ public:
 
   virtual void BindTexture(GLenum aTextureUnit,
                            gfx::SamplingFilter aSamplingFilter) = 0;
+
+  // To be overridden in textures that need this. This method will be called
+  // when the compositor has used the texture to draw. This allows us to set
+  // a fence with glFenceSync which we can wait on later to ensure the GPU
+  // is done with the draw calls using that texture. We would like to be able
+  // to simply use glFinishObjectAPPLE, but this returns earlier than
+  // expected with nvidia drivers.
+  virtual void MaybeFenceTexture() {}
 
   virtual gfx::IntSize GetSize() const = 0;
 
@@ -298,6 +307,7 @@ class DirectMapTextureSource : public GLTextureSource
 public:
   DirectMapTextureSource(TextureSourceProvider* aProvider,
                          gfx::DataSourceSurface* aSurface);
+  ~DirectMapTextureSource();
 
   virtual bool Update(gfx::DataSourceSurface* aSurface,
                       nsIntRegion* aDestRegion = nullptr,
@@ -310,11 +320,15 @@ public:
   // done with it.
   virtual bool Sync(bool aBlocking) override;
 
+  virtual void MaybeFenceTexture() override;
+
 private:
   bool UpdateInternal(gfx::DataSourceSurface* aSurface,
                       nsIntRegion* aDestRegion,
                       gfx::IntPoint* aSrcOffset,
                       bool aInit);
+
+  GLsync mSync;
 };
 
 class GLTextureHost : public TextureHost
@@ -460,6 +474,19 @@ public:
   virtual gfx::IntSize GetSize() const override { return mSize; }
 
   virtual const char* Name() override { return "SurfaceTextureHost"; }
+
+  virtual void CreateRenderTexture(const wr::ExternalImageId& aExternalImageId) override;
+
+  virtual void PushResourceUpdates(wr::TransactionBuilder& aResources,
+                                   ResourceUpdateOp aOp,
+                                   const Range<wr::ImageKey>& aImageKeys,
+                                   const wr::ExternalImageId& aExtID) override;
+
+  virtual void PushDisplayItems(wr::DisplayListBuilder& aBuilder,
+                                const wr::LayoutRect& aBounds,
+                                const wr::LayoutRect& aClip,
+                                wr::ImageRendering aFilter,
+                                const Range<wr::ImageKey>& aImageKeys) override;
 
 protected:
   bool EnsureAttached();

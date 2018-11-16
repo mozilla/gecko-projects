@@ -9,6 +9,7 @@
 #include "AndroidColors.h"
 #include "nsCSSRendering.h"
 #include "PathHelpers.h"
+#include "mozilla/ClearOnShutdown.h"
 
 NS_IMPL_ISUPPORTS_INHERITED(nsNativeThemeAndroid, nsNativeTheme, nsITheme)
 
@@ -172,15 +173,15 @@ PaintCheckedRadioButton(nsIFrame* aFrame,
 NS_IMETHODIMP
 nsNativeThemeAndroid::DrawWidgetBackground(gfxContext* aContext,
                                            nsIFrame* aFrame,
-                                           WidgetType aWidgetType,
+                                           StyleAppearance aAppearance,
                                            const nsRect& aRect,
                                            const nsRect& aDirtyRect)
 {
-  EventStates eventState = GetContentState(aFrame, aWidgetType);
+  EventStates eventState = GetContentState(aFrame, aAppearance);
   nsRect rect(aRect);
   ClampRectAndMoveToCenter(rect);
 
-  switch (aWidgetType) {
+  switch (aAppearance) {
     case StyleAppearance::Radio:
       PaintRadioControl(aFrame, aContext->GetDrawTarget(), rect, eventState);
       if (IsSelected(aFrame)) {
@@ -206,17 +207,18 @@ nsNativeThemeAndroid::DrawWidgetBackground(gfxContext* aContext,
 
 LayoutDeviceIntMargin
 nsNativeThemeAndroid::GetWidgetBorder(nsDeviceContext* aContext, nsIFrame* aFrame,
-                                      WidgetType aWidgetType)
+                                      StyleAppearance aAppearance)
 {
   return LayoutDeviceIntMargin();
 }
 
 bool
 nsNativeThemeAndroid::GetWidgetPadding(nsDeviceContext* aContext,
-                                       nsIFrame* aFrame, WidgetType aWidgetType,
+                                       nsIFrame* aFrame,
+                                       StyleAppearance aAppearance,
                                        LayoutDeviceIntMargin* aResult)
 {
-  switch (aWidgetType) {
+  switch (aAppearance) {
     // Radios and checkboxes return a fixed size in GetMinimumWidgetSize
     // and have a meaningful baseline, so they can't have
     // author-specified padding.
@@ -231,7 +233,8 @@ nsNativeThemeAndroid::GetWidgetPadding(nsDeviceContext* aContext,
 
 bool
 nsNativeThemeAndroid::GetWidgetOverflow(nsDeviceContext* aContext,
-                                        nsIFrame* aFrame, WidgetType aWidgetType,
+                                        nsIFrame* aFrame,
+                                        StyleAppearance aAppearance,
                                         nsRect* aOverflowRect)
 {
   return false;
@@ -239,11 +242,13 @@ nsNativeThemeAndroid::GetWidgetOverflow(nsDeviceContext* aContext,
 
 NS_IMETHODIMP
 nsNativeThemeAndroid::GetMinimumWidgetSize(nsPresContext* aPresContext,
-                                       nsIFrame* aFrame, WidgetType aWidgetType,
+                                       nsIFrame* aFrame,
+                                       StyleAppearance aAppearance,
                                        LayoutDeviceIntSize* aResult,
                                        bool* aIsOverridable)
 {
-  if (aWidgetType == StyleAppearance::Radio || aWidgetType == StyleAppearance::Checkbox) {
+  if (aAppearance == StyleAppearance::Radio ||
+      aAppearance == StyleAppearance::Checkbox) {
     // 9px + (1px padding + 1px border) * 2
     aResult->width = aPresContext->CSSPixelsToDevPixels(13);
     aResult->height = aPresContext->CSSPixelsToDevPixels(13);
@@ -253,11 +258,14 @@ nsNativeThemeAndroid::GetMinimumWidgetSize(nsPresContext* aPresContext,
 }
 
 NS_IMETHODIMP
-nsNativeThemeAndroid::WidgetStateChanged(nsIFrame* aFrame, WidgetType aWidgetType,
-                                     nsAtom* aAttribute, bool* aShouldRepaint,
-                                     const nsAttrValue* aOldValue)
+nsNativeThemeAndroid::WidgetStateChanged(nsIFrame* aFrame,
+                                         StyleAppearance aAppearance,
+                                         nsAtom* aAttribute,
+                                         bool* aShouldRepaint,
+                                         const nsAttrValue* aOldValue)
 {
-  if (aWidgetType == StyleAppearance::Radio || aWidgetType == StyleAppearance::Checkbox) {
+  if (aAppearance == StyleAppearance::Radio ||
+      aAppearance == StyleAppearance::Checkbox) {
     if (aAttribute == nsGkAtoms::active ||
         aAttribute == nsGkAtoms::disabled ||
         aAttribute == nsGkAtoms::hover) {
@@ -279,9 +287,9 @@ nsNativeThemeAndroid::ThemeChanged()
 NS_IMETHODIMP_(bool)
 nsNativeThemeAndroid::ThemeSupportsWidget(nsPresContext* aPresContext,
                                           nsIFrame* aFrame,
-                                          WidgetType aWidgetType)
+                                          StyleAppearance aAppearance)
 {
-  switch (aWidgetType) {
+  switch (aAppearance) {
     case StyleAppearance::Radio:
     case StyleAppearance::Checkbox:
       return true;
@@ -291,13 +299,13 @@ nsNativeThemeAndroid::ThemeSupportsWidget(nsPresContext* aPresContext,
 }
 
 NS_IMETHODIMP_(bool)
-nsNativeThemeAndroid::WidgetIsContainer(WidgetType aWidgetType)
+nsNativeThemeAndroid::WidgetIsContainer(StyleAppearance aAppearance)
 {
   return false;
 }
 
 bool
-nsNativeThemeAndroid::ThemeDrawsFocusForWidget(WidgetType aWidgetType)
+nsNativeThemeAndroid::ThemeDrawsFocusForWidget(StyleAppearance aAppearance)
 {
   return false;
 }
@@ -309,7 +317,21 @@ nsNativeThemeAndroid::ThemeNeedsComboboxDropmarker()
 }
 
 nsITheme::Transparency
-nsNativeThemeAndroid::GetWidgetTransparency(nsIFrame* aFrame, WidgetType aWidgetType)
+nsNativeThemeAndroid::GetWidgetTransparency(nsIFrame* aFrame,
+                                            StyleAppearance aAppearance)
 {
   return eUnknownTransparency;
+}
+
+already_AddRefed<nsITheme>
+do_GetNativeTheme()
+{
+  static nsCOMPtr<nsITheme> inst;
+
+  if (!inst) {
+    inst = new nsNativeThemeAndroid();
+    ClearOnShutdown(&inst);
+  }
+
+  return do_AddRef(inst);
 }

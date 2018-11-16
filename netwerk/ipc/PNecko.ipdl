@@ -26,6 +26,8 @@ include protocol PChildToParentStream; //FIXME: bug #792908
 include protocol PParentToChildStream; //FIXME: bug #792908
 include protocol PStunAddrsRequest;
 include protocol PFileChannel;
+include protocol PTrackingDummyChannel;
+include protocol PWebrtcProxyChannel;
 
 include IPCStream;
 include URIParams;
@@ -63,6 +65,8 @@ nested(upto inside_cpow) sync protocol PNecko
   manages PTransportProvider;
   manages PAltDataOutputStream;
   manages PStunAddrsRequest;
+  manages PTrackingDummyChannel;
+  manages PWebrtcProxyChannel;
 
 parent:
   async __delete__();
@@ -94,9 +98,10 @@ parent:
   async PredReset();
 
   async SpeculativeConnect(URIParams uri, Principal principal, bool anonymous);
-  async HTMLDNSPrefetch(nsString hostname, OriginAttributes originAttributes,
-                        uint16_t flags);
-  async CancelHTMLDNSPrefetch(nsString hostname, OriginAttributes originAttributes,
+  async HTMLDNSPrefetch(nsString hostname, bool isHttps,
+                        OriginAttributes originAttributes, uint16_t flags);
+  async CancelHTMLDNSPrefetch(nsString hostname, bool isHttps,
+                              OriginAttributes originAttributes,
                               uint16_t flags, nsresult reason);
 
   /**
@@ -108,6 +113,10 @@ parent:
   async PFileChannel(uint32_t channelId);
 
   async PChannelDiverter(ChannelDiverterArgs channel);
+
+  async PTrackingDummyChannel(nsIURI uri, nsIURI aTopWindowURI,
+                              nsresult aTopWindowURIResult,
+                              OptionalLoadInfoArgs loadInfo);
 
   /**
    * These are called from the child with the results of the auth prompt.
@@ -125,6 +134,8 @@ parent:
   async PAltDataOutputStream(nsCString type, int64_t predictedSize, PHttpChannel channel);
 
   async PStunAddrsRequest();
+
+  async PWebrtcProxyChannel(PBrowserOrId browser);
 
   /**
    * WebExtension-specific remote resource loading

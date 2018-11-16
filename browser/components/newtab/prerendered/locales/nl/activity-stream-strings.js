@@ -74,10 +74,10 @@ window.gActivityStreamStrings = {
   "topsites_form_image_validation": "Afbeelding kon niet worden geladen. Probeer een andere URL.",
   "pocket_read_more": "Populaire onderwerpen:",
   "pocket_read_even_more": "Meer verhalen bekijken",
-  "pocket_more_reccommendations": "More Recommendations",
-  "pocket_learn_more": "Learn More",
-  "pocket_cta_button": "Get Pocket",
-  "pocket_cta_text": "Save the stories you love in Pocket, and fuel your mind with fascinating reads.",
+  "pocket_more_reccommendations": "Meer aanbevelingen",
+  "pocket_how_it_works": "Hoe het werkt",
+  "pocket_cta_button": "Pocket gebruiken",
+  "pocket_cta_text": "Bewaar de verhalen die u interessant vindt in Pocket, en stimuleer uw gedachten met boeiende leesstof.",
   "highlights_empty_state": "Begin met surfen, en we tonen hier een aantal geweldige artikelen, video’s en andere pagina’s die u onlangs hebt bezocht of waarvoor u een bladwijzer hebt gemaakt.",
   "topstories_empty_state": "U bent weer bij. Kijk later nog eens voor meer topverhalen van {provider}. Kunt u niet wachten? Selecteer een populair onderwerp voor meer geweldige verhalen van het hele web.",
   "manual_migration_explanation2": "Probeer Firefox met de bladwijzers, geschiedenis en wachtwoorden van een andere browser.",
@@ -106,5 +106,7 @@ window.gActivityStreamStrings = {
   "firstrun_terms_of_service": "Servicevoorwaarden",
   "firstrun_privacy_notice": "Privacyverklaring",
   "firstrun_continue_to_login": "Doorgaan",
-  "firstrun_skip_login": "Deze stap overslaan"
+  "firstrun_skip_login": "Deze stap overslaan",
+  "context_menu_title": "Menu openen",
+  "pocket_learn_more": "Meer info"
 };

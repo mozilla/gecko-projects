@@ -114,6 +114,8 @@ const char* const XPCJSRuntime::mStrings[] = {
     "lastIndex",            // IDX_LASTINDEX
     "then",                 // IDX_THEN
     "isInstance",           // IDX_ISINSTANCE
+    "Infinity",             // IDX_INFINITY
+    "NaN",                  // IDX_NAN
 };
 
 /***************************************************************************/
@@ -455,13 +457,6 @@ Scriptability::Get(JSObject* aScope)
     return RealmPrivate::Get(aScope)->scriptability;
 }
 
-/* static */
-Scriptability&
-Scriptability::Get(JSScript* aScript)
-{
-    return RealmPrivate::Get(aScript)->scriptability;
-}
-
 bool
 IsContentXBLCompartment(JS::Compartment* compartment)
 {
@@ -594,6 +589,26 @@ bool
 CompartmentOriginInfo::IsSameOrigin(nsIPrincipal* aOther) const
 {
     return mOrigin->FastEquals(aOther);
+}
+
+/* static */ bool
+CompartmentOriginInfo::Subsumes(JS::Compartment* aCompA, JS::Compartment* aCompB)
+{
+    CompartmentPrivate* apriv = CompartmentPrivate::Get(aCompA);
+    CompartmentPrivate* bpriv = CompartmentPrivate::Get(aCompB);
+    MOZ_ASSERT(apriv);
+    MOZ_ASSERT(bpriv);
+    return apriv->originInfo.mOrigin->FastSubsumes(bpriv->originInfo.mOrigin);
+}
+
+/* static */ bool
+CompartmentOriginInfo::SubsumesIgnoringFPD(JS::Compartment* aCompA, JS::Compartment* aCompB)
+{
+    CompartmentPrivate* apriv = CompartmentPrivate::Get(aCompA);
+    CompartmentPrivate* bpriv = CompartmentPrivate::Get(aCompB);
+    MOZ_ASSERT(apriv);
+    MOZ_ASSERT(bpriv);
+    return apriv->originInfo.mOrigin->FastSubsumesIgnoringFPD(bpriv->originInfo.mOrigin);
 }
 
 void
@@ -2763,6 +2778,9 @@ AccumulateTelemetryCallback(int id, uint32_t sample, const char* key)
       case JS_TELEMETRY_WEB_PARSER_COMPILE_LAZY_AFTER_MS:
         Telemetry::Accumulate(Telemetry::JS_WEB_PARSER_COMPILE_LAZY_AFTER_MS, sample);
         break;
+      case JS_TELEMETRY_GC_NURSERY_PROMOTION_RATE:
+        Telemetry::Accumulate(Telemetry::GC_NURSERY_PROMOTION_RATE, sample);
+        break;
       default:
         MOZ_ASSERT_UNREACHABLE("Unexpected JS_TELEMETRY id");
     }
@@ -2808,7 +2826,7 @@ DestroyRealm(JSFreeOp* fop, JS::Realm* realm)
 }
 
 static bool
-PreserveWrapper(JSContext* cx, JSObject* obj)
+PreserveWrapper(JSContext* cx, JS::Handle<JSObject*> obj)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(obj);
@@ -3339,7 +3357,7 @@ JSObject*
 XPCJSRuntime::LoaderGlobal()
 {
     if (!mLoaderGlobal) {
-        RefPtr<mozJSComponentLoader> loader = mozJSComponentLoader::GetOrCreate();
+        RefPtr<mozJSComponentLoader> loader = mozJSComponentLoader::Get();
 
         dom::AutoJSAPI jsapi;
         jsapi.Init();

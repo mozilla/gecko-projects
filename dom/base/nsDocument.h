@@ -17,8 +17,7 @@
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsCRT.h"
-#include "nsWeakReference.h"
-#include "nsWeakPtr.h"
+#include "nsIWeakReferenceUtils.h"
 #include "nsTArray.h"
 #include "nsIdentifierMapEntry.h"
 #include "nsStubDocumentObserver.h"
@@ -66,9 +65,7 @@
 
 class nsDOMStyleSheetSetList;
 class nsDocument;
-class nsIRadioVisitor;
 class nsIFormControl;
-struct nsRadioGroupStruct;
 class nsOnloadBlocker;
 class nsDOMNavigationTiming;
 class nsWindowSizes;
@@ -147,37 +144,61 @@ public:
   // nsIRadioGroupContainer
   NS_IMETHOD WalkRadioGroup(const nsAString& aName,
                             nsIRadioVisitor* aVisitor,
-                            bool aFlushContent) override;
+                            bool aFlushContent) override
+  {
+    return DocumentOrShadowRoot::WalkRadioGroup(aName, aVisitor, aFlushContent);
+  }
   virtual void
     SetCurrentRadioButton(const nsAString& aName,
-                          mozilla::dom::HTMLInputElement* aRadio) override;
+                          mozilla::dom::HTMLInputElement* aRadio) override
+  {
+    DocumentOrShadowRoot::SetCurrentRadioButton(aName, aRadio);
+  }
   virtual mozilla::dom::HTMLInputElement*
-    GetCurrentRadioButton(const nsAString& aName) override;
+    GetCurrentRadioButton(const nsAString& aName) override
+  {
+    return DocumentOrShadowRoot::GetCurrentRadioButton(aName);
+  }
   NS_IMETHOD
     GetNextRadioButton(const nsAString& aName,
                        const bool aPrevious,
-                       mozilla::dom::HTMLInputElement*  aFocusedRadio,
-                       mozilla::dom::HTMLInputElement** aRadioOut) override;
+                       mozilla::dom::HTMLInputElement* aFocusedRadio,
+                       mozilla::dom::HTMLInputElement** aRadioOut) override
+  {
+    return DocumentOrShadowRoot::GetNextRadioButton(aName, aPrevious,
+                                                    aFocusedRadio, aRadioOut);
+  }
   virtual void AddToRadioGroup(const nsAString& aName,
-                               mozilla::dom::HTMLInputElement* aRadio) override;
+                               mozilla::dom::HTMLInputElement* aRadio) override
+  {
+    DocumentOrShadowRoot::AddToRadioGroup(aName, aRadio);
+  }
   virtual void RemoveFromRadioGroup(const nsAString& aName,
-                                    mozilla::dom::HTMLInputElement* aRadio) override;
-  virtual uint32_t GetRequiredRadioCount(const nsAString& aName) const override;
+                                    mozilla::dom::HTMLInputElement* aRadio) override
+  {
+    DocumentOrShadowRoot::RemoveFromRadioGroup(aName, aRadio);
+  }
+  virtual uint32_t GetRequiredRadioCount(const nsAString& aName) const override
+  {
+    return DocumentOrShadowRoot::GetRequiredRadioCount(aName);
+  }
   virtual void RadioRequiredWillChange(const nsAString& aName,
-                                       bool aRequiredAdded) override;
-  virtual bool GetValueMissingState(const nsAString& aName) const override;
-  virtual void SetValueMissingState(const nsAString& aName, bool aValue) override;
+                                       bool aRequiredAdded) override
+  {
+    DocumentOrShadowRoot::RadioRequiredWillChange(aName, aRequiredAdded);
+  }
+  virtual bool GetValueMissingState(const nsAString& aName) const override
+  {
+    return DocumentOrShadowRoot::GetValueMissingState(aName);
+  }
+  virtual void SetValueMissingState(const nsAString& aName, bool aValue) override
+  {
+    return DocumentOrShadowRoot::SetValueMissingState(aName, aValue);
+  }
 
-  // for radio group
-  nsRadioGroupStruct* GetRadioGroup(const nsAString& aName) const;
-  nsRadioGroupStruct* GetOrCreateRadioGroup(const nsAString& aName);
-
-  // Check whether shadow DOM is enabled for aGlobal.
-  static bool IsShadowDOMEnabled(JSContext* aCx, JSObject* aGlobal);
   // Check whether shadow DOM is enabled for the document this node belongs to.
   // Same as above, but also checks that the caller is either chrome or some addon.
-  static bool IsShadowDOMEnabledAndCallerIsChromeOrAddon(JSContext* aCx, JSObject* aObject);
-  static bool IsShadowDOMEnabled(const nsINode* aNode);
+  static bool IsCallerChromeOrAddon(JSContext* aCx, JSObject* aObject);
 
 public:
   using mozilla::dom::DocumentOrShadowRoot::GetElementById;
@@ -261,8 +282,6 @@ public:
   // This can be fixed after updating to rust 1.25 and updating bindgen to
   // include https://github.com/rust-lang-nursery/rust-bindgen/pull/1271.
   js::ExpandoAndGeneration mExpandoAndGeneration;
-
-  nsClassHashtable<nsStringHashKey, nsRadioGroupStruct> mRadioGroups;
 
   friend class nsCallRequestFullscreen;
 

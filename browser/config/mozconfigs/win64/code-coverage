@@ -8,6 +8,7 @@ ac_add_options --enable-debug
 ac_add_options --disable-sandbox
 ac_add_options --disable-warnings-as-errors
 ac_add_options --enable-coverage
+ac_add_options --enable-rust-tests
 
 # Needed to enable breakpad in application.ini
 export MOZILLA_OFFICIAL=1
@@ -28,8 +29,8 @@ if [ -d "$topsrcdir/clang" ]; then
     export LDFLAGS="clang_rt.profile-x86_64.lib"
 fi
 
-export CFLAGS="--coverage"
-export CXXFLAGS="--coverage"
+export CFLAGS="--coverage -Xclang -coverage-no-function-names-in-data"
+export CXXFLAGS="--coverage -Xclang -coverage-no-function-names-in-data"
 export RUSTFLAGS="-Ccodegen-units=1 -Zprofile -Zno-landing-pads"
 
 . "$topsrcdir/build/mozconfig.common.override"

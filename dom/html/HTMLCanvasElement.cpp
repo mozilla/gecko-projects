@@ -393,9 +393,10 @@ NS_IMPL_ISUPPORTS(HTMLCanvasElementObserver, nsIObserver)
 
 // ---------------------------------------------------------------------------
 
-HTMLCanvasElement::HTMLCanvasElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-  : nsGenericHTMLElement(aNodeInfo),
+HTMLCanvasElement::HTMLCanvasElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
+  : nsGenericHTMLElement(std::move(aNodeInfo)),
     mResetLayer(true) ,
+    mMaybeModified(false) ,
     mWriteOnly(false)
 {}
 
@@ -670,9 +671,8 @@ HTMLCanvasElement::ToDataURL(JSContext* aCx, const nsAString& aType,
                              nsIPrincipal& aSubjectPrincipal,
                              ErrorResult& aRv)
 {
-  // do a trust check if this is a write-only canvas
-  if (mWriteOnly &&
-      !nsContentUtils::CallerHasPermission(aCx, nsGkAtoms::all_urlsPermission)) {
+  // mWriteOnly check is redundant, but optimizes for the common case.
+  if (mWriteOnly && !CallerCanRead(aCx)) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return;
   }
@@ -881,9 +881,8 @@ HTMLCanvasElement::ToBlob(JSContext* aCx,
                           nsIPrincipal& aSubjectPrincipal,
                           ErrorResult& aRv)
 {
-  // do a trust check if this is a write-only canvas
-  if (mWriteOnly &&
-      !nsContentUtils::CallerHasPermission(aCx, nsGkAtoms::all_urlsPermission)) {
+  // mWriteOnly check is redundant, but optimizes for the common case.
+  if (mWriteOnly && !CallerCanRead(aCx)) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return;
   }
@@ -1012,6 +1011,7 @@ HTMLCanvasElement::GetContext(const nsAString& aContextId,
                               nsISupports** aContext)
 {
   ErrorResult rv;
+  mMaybeModified = true; // For FirstContentfulPaint
   *aContext = GetContext(nullptr, aContextId, JS::NullHandleValue, rv).take();
   return rv.StealNSResult();
 }
@@ -1026,6 +1026,7 @@ HTMLCanvasElement::GetContext(JSContext* aCx,
     return nullptr;
   }
 
+  mMaybeModified = true; // For FirstContentfulPaint
   return CanvasRenderingContextHelper::GetContext(aCx, aContextId,
     aContextOptions.isObject() ? aContextOptions : JS::NullHandleValue,
     aRv);
@@ -1085,7 +1086,7 @@ HTMLCanvasElement::GetSize()
 }
 
 bool
-HTMLCanvasElement::IsWriteOnly()
+HTMLCanvasElement::IsWriteOnly() const
 {
   return mWriteOnly;
 }
@@ -1093,7 +1094,34 @@ HTMLCanvasElement::IsWriteOnly()
 void
 HTMLCanvasElement::SetWriteOnly()
 {
+  mExpandedReader = nullptr;
   mWriteOnly = true;
+}
+
+void
+HTMLCanvasElement::SetWriteOnly(nsIPrincipal* aExpandedReader)
+{
+  mExpandedReader = aExpandedReader;
+  mWriteOnly = true;
+}
+
+bool
+HTMLCanvasElement::CallerCanRead(JSContext* aCx)
+{
+  if (!mWriteOnly) {
+    return true;
+  }
+
+  nsIPrincipal* prin = nsContentUtils::SubjectPrincipal(aCx);
+
+  // If mExpandedReader is set, this canvas was tainted only by
+  // mExpandedReader's resources. So allow reading if the subject
+  // principal subsumes mExpandedReader.
+  if (mExpandedReader && prin->Subsumes(mExpandedReader)) {
+    return true;
+  }
+
+  return nsContentUtils::PrincipalHasPermission(prin, nsGkAtoms::all_urlsPermission);
 }
 
 void

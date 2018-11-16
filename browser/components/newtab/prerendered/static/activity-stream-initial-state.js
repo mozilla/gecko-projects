@@ -10,6 +10,10 @@ window.gActivityStreamPrerenderedState = {
   "App": {
     "initialized": false
   },
+  "ASRouter": {
+    "initialized": false,
+    "allowLegacySnippets": null
+  },
   "Snippets": {
     "initialized": false
   },
@@ -58,7 +62,7 @@ window.gActivityStreamPrerenderedState = {
     }
   ],
   "Pocket": {
-    "isUserLoggedIn": false,
+    "isUserLoggedIn": null,
     "pocketCta": {},
     "waitingForSpoc": true
   }

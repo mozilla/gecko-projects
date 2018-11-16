@@ -4,22 +4,24 @@ XPCOMUtils.defineLazyServiceGetter(this, "aboutNewTabService",
                                    "nsIAboutNewTabService");
 
 // Tests are by default run with non-debug en-US configuration
-const DEFAULT_URL = "resource://activity-stream/prerendered/en-US/activity-stream-prerendered.html";
+const DEFAULT_URL = SpecialPowers.getBoolPref("browser.tabs.remote.separatePrivilegedContentProcess") ?
+  "resource://activity-stream/prerendered/en-US/activity-stream-prerendered-noscripts.html" :
+  "resource://activity-stream/prerendered/en-US/activity-stream-prerendered.html";
 
 /**
  * Temporarily change the app locale to get the localized activity stream url
  */
 async function getUrlForLocale(locale) {
-  const origAvailable = Services.locale.getAvailableLocales();
-  const origRequested = Services.locale.getRequestedLocales();
+  const origAvailable = Services.locale.availableLocales;
+  const origRequested = Services.locale.requestedLocales;
   try {
-    Services.locale.setAvailableLocales([locale]);
-    Services.locale.setRequestedLocales([locale]);
+    Services.locale.availableLocales = [locale];
+    Services.locale.requestedLocales = [locale];
     return aboutNewTabService.defaultURL;
   } finally {
     // Always clean up after returning the url
-    Services.locale.setAvailableLocales(origAvailable);
-    Services.locale.setRequestedLocales(origRequested);
+    Services.locale.availableLocales = origAvailable;
+    Services.locale.requestedLocales = origRequested;
   }
 }
 

@@ -178,7 +178,6 @@ function OnRefTestLoad(win)
       g.browser.setAttribute("mozbrowser", "");
     } else {
       g.browser = g.containingWindow.document.createElementNS(XUL_NS, "xul:browser");
-      g.browser.setAttribute("class", "lightweight");
     }
     g.browser.setAttribute("id", "browser");
     g.browser.setAttribute("type", "content");
@@ -306,6 +305,10 @@ function InitAndStartRefTests()
 
     // Focus the content browser.
     if (g.focusFilterMode != FOCUS_FILTER_NON_NEEDS_FOCUS_TESTS) {
+        var fm = Cc["@mozilla.org/focus-manager;1"].getService(Ci.nsIFocusManager);
+        if (fm.activeWindow != g.containingWindow) {
+            Focus();
+        }
         g.browser.addEventListener("focus", ReadTests, true);
         g.browser.focus();
     } else {
@@ -934,6 +937,12 @@ function RecordResult(testRunTime, errorMsg, typeSpecificResults)
     };
     // for EXPECTED_FUZZY we need special handling because we can have
     // Pass, UnexpectedPass, or UnexpectedFail
+
+    if ((g.currentURLTargetType == URL_TARGET_TYPE_TEST && g.urls[0].wrCapture.test) ||
+        (g.currentURLTargetType == URL_TARGET_TYPE_REFERENCE && g.urls[0].wrCapture.ref)) {
+      logger.info("Running webrender capture");
+      g.windowUtils.wrCapture();
+    }
 
     var output;
     var extra;

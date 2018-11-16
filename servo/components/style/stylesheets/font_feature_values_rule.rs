@@ -6,23 +6,23 @@
 //!
 //! [font-feature-values]: https://drafts.csswg.org/css-fonts-3/#at-font-feature-values-rule
 
-use Atom;
+use crate::error_reporting::ContextualParseError;
+#[cfg(feature = "gecko")]
+use crate::gecko_bindings::bindings::Gecko_AppendFeatureValueHashEntry;
+#[cfg(feature = "gecko")]
+use crate::gecko_bindings::structs::{self, gfxFontFeatureValueSet, nsTArray};
+use crate::parser::{Parse, ParserContext};
+use crate::shared_lock::{SharedRwLockReadGuard, ToCssWithGuard};
+use crate::str::CssStringWriter;
+use crate::stylesheets::CssRuleType;
+use crate::values::computed::font::FamilyName;
+use crate::values::serialize_atom_identifier;
+use crate::Atom;
 use cssparser::{AtRuleParser, AtRuleType, BasicParseErrorKind, CowRcStr};
 use cssparser::{DeclarationListParser, DeclarationParser, Parser};
 use cssparser::{QualifiedRuleParser, RuleListParser, SourceLocation, Token};
-use error_reporting::ContextualParseError;
-#[cfg(feature = "gecko")]
-use gecko_bindings::bindings::Gecko_AppendFeatureValueHashEntry;
-#[cfg(feature = "gecko")]
-use gecko_bindings::structs::{self, gfxFontFeatureValueSet, nsTArray};
-use parser::{Parse, ParserContext};
-use shared_lock::{SharedRwLockReadGuard, ToCssWithGuard};
 use std::fmt::{self, Write};
-use str::CssStringWriter;
 use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
-use stylesheets::CssRuleType;
-use values::computed::font::FamilyName;
-use values::serialize_atom_identifier;
 
 /// A @font-feature-values block declaration.
 /// It is `<ident>: <integer>+`.
@@ -179,12 +179,7 @@ impl Parse for VectorValues {
 #[cfg(feature = "gecko")]
 impl ToGeckoFontFeatureValues for VectorValues {
     fn to_gecko_font_feature_values(&self, array: &mut nsTArray<u32>) {
-        unsafe {
-            array.set_len_pod(self.0.len() as u32);
-        }
-        for (dest, value) in array.iter_mut().zip(self.0.iter()) {
-            *dest = *value;
-        }
+        array.assign_from_iter_pod(self.0.iter().map(|v| *v));
     }
 }
 

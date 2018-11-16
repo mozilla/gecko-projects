@@ -38,6 +38,10 @@ namespace mozilla {
     namespace ipc {
         class Shmem;
     } // namespace ipc
+
+    namespace a11y {
+      class SessionAccessibility;
+    }
 }
 
 class nsWindow final : public nsBaseWidget
@@ -79,6 +83,7 @@ public:
     class NativePtr final
     {
         friend WindowPtr<Impl>;
+        friend nsWindow;
 
         static const char sName[];
 
@@ -86,11 +91,11 @@ public:
         Impl* mImpl;
         mozilla::Mutex mImplLock;
 
-    public:
-        class Locked;
-
         NativePtr() : mPtr(nullptr), mImpl(nullptr), mImplLock(sName) {}
         ~NativePtr() { MOZ_ASSERT(!mPtr); }
+
+    public:
+        class Locked;
 
         operator Impl*() const
         {
@@ -100,9 +105,11 @@ public:
 
         Impl* operator->() const { return operator Impl*(); }
 
-        template<class Instance, typename... Args>
-        void Attach(Instance aInstance, nsWindow* aWindow, Args&&... aArgs);
-        void Detach();
+        template<class Cls, typename... Args>
+        void Attach(const mozilla::jni::LocalRef<Cls>& aInstance,
+                    nsWindow* aWindow, Args&&... aArgs);
+        template<class Cls, typename T>
+        void Detach(const mozilla::jni::Ref<Cls, T>& aInstance);
     };
 
     template<class Impl>
@@ -185,6 +192,10 @@ private:
     // Strong referenced by the Java instance.
     NativePtr<mozilla::widget::GeckoEditableSupport> mEditableSupport;
     mozilla::jni::Object::GlobalRef mEditableParent;
+
+    // Object that implements native SessionAccessibility calls.
+    // Strong referenced by the Java instance.
+    NativePtr<mozilla::a11y::SessionAccessibility> mSessionAccessibility;
 
     class GeckoViewSupport;
     // Object that implements native GeckoView calls and associated states.
@@ -279,7 +290,7 @@ public:
     virtual uint32_t GetMaxTouchPoints() const override;
 
     void UpdateZoomConstraints(const uint32_t& aPresShellId,
-                               const FrameMetrics::ViewID& aViewId,
+                               const ScrollableLayerGuid::ViewID& aViewId,
                                const mozilla::Maybe<ZoomConstraints>& aConstraints) override;
 
     nsresult SynthesizeNativeTouchPoint(uint32_t aPointerId,
@@ -305,6 +316,8 @@ public:
     void UserActivity();
 
     mozilla::jni::Object::Ref& GetEditableParent() { return mEditableParent; }
+
+    mozilla::a11y::SessionAccessibility* GetSessionAccessibility() { return mSessionAccessibility; }
 
     void RecvToolbarAnimatorMessageFromCompositor(int32_t aMessage) override;
     void UpdateRootFrameMetrics(const ScreenPoint& aScrollOffset, const CSSToScreenScale& aZoom) override;
@@ -353,6 +366,7 @@ private:
 // Explicit template declarations to make clang be quiet.
 template<> const char nsWindow::NativePtr<nsWindow::LayerViewSupport>::sName[];
 template<> const char nsWindow::NativePtr<mozilla::widget::GeckoEditableSupport>::sName[];
+template<> const char nsWindow::NativePtr<mozilla::a11y::SessionAccessibility>::sName[];
 template<> const char nsWindow::NativePtr<nsWindow::NPZCSupport>::sName[];
 
 template<class Impl>

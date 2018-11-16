@@ -138,6 +138,8 @@ nrappkit copyright:
 #undef strlcpy
 
 #include "mozilla/dom/network/TCPSocketChild.h"
+#include "mozilla/dom/network/UDPSocketChild.h"
+#include "nr_socket_proxy.h"
 
 #ifdef LOG_TEMP_INFO
 #define LOG_INFO LOG_TEMP_INFO
@@ -1521,14 +1523,7 @@ void NrUdpSocketIpc::create_i(const nsACString &host, const uint16_t port) {
   ASSERT_ON_THREAD(io_thread_);
 
   uint32_t minBuffSize = 0;
-  nsresult rv;
-  nsCOMPtr<nsIUDPSocketChild> socketChild = do_CreateInstance("@mozilla.org/udp-socket-child;1", &rv);
-  if (NS_FAILED(rv)) {
-    ReentrantMonitorAutoEnter mon(monitor_);
-    err_ = true;
-    MOZ_ASSERT(false, "Failed to create UDPSocketChild");
-    return;
-  }
+  nsCOMPtr<nsIUDPSocketChild> socketChild = new dom::UDPSocketChild();
 
   // This can spin the event loop; don't do that with the monitor held
   socketChild->SetBackgroundSpinsEvents();
@@ -1542,7 +1537,7 @@ void NrUdpSocketIpc::create_i(const nsACString &host, const uint16_t port) {
   }
 
   RefPtr<NrUdpSocketIpcProxy> proxy(new NrUdpSocketIpcProxy);
-  rv = proxy->Init(this);
+  nsresult rv = proxy->Init(this);
   if (NS_FAILED(rv)) {
     err_ = true;
     mon.NotifyAll();
@@ -2159,7 +2154,9 @@ static nr_socket_vtbl nr_socket_local_vtbl={
 
 /* static */
 int
-NrSocketBase::CreateSocket(nr_transport_addr *addr, RefPtr<NrSocketBase> *sock)
+NrSocketBase::CreateSocket(nr_transport_addr *addr,
+                           RefPtr<NrSocketBase> *sock,
+                           const std::shared_ptr<NrSocketProxyConfig>& config)
 {
   int r, _status;
 
@@ -2173,10 +2170,12 @@ NrSocketBase::CreateSocket(nr_transport_addr *addr, RefPtr<NrSocketBase> *sock)
         break;
       case IPPROTO_TCP:
 #if defined(MOZILLA_INTERNAL_API)
-        {
+        if (!config) {
           nsCOMPtr<nsIThread> main_thread;
           NS_GetMainThread(getter_AddRefs(main_thread));
           *sock = new NrTcpSocketIpc(main_thread.get());
+        } else {
+          *sock = new NrSocketProxy(config);
         }
 #else
         ABORT(R_REJECTED);
@@ -2194,33 +2193,6 @@ abort:
   if (_status) {
     *sock = nullptr;
   }
-  return _status;
-}
-
-int nr_socket_local_create(void *obj, nr_transport_addr *addr, nr_socket **sockp) {
-  RefPtr<NrSocketBase> sock;
-  int r, _status;
-
-  r = NrSocketBase::CreateSocket(addr, &sock);
-  if (r) {
-    ABORT(r);
-  }
-
-  r = nr_socket_create_int(static_cast<void *>(sock),
-                           sock->vtbl(), sockp);
-  if (r)
-    ABORT(r);
-
-  _status = 0;
-
-  {
-    // We will release this reference in destroy(), not exactly the normal
-    // ownership model, but it is what it is.
-    NrSocketBase* dummy = sock.forget().take();
-    (void)dummy;
-  }
-
-abort:
   return _status;
 }
 

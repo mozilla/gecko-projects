@@ -144,13 +144,13 @@ nsSVGFilterInstance::GetFilterFrame(nsIFrame* aTargetFrame)
   }
 
   // Look up the filter element by URL.
-  IDTracker filterElement;
+  IDTracker idTracker;
   bool watch = false;
-  filterElement.Reset(mTargetContent, url,
-                      mFilter.GetURL()->mExtraData->GetReferrer(),
-                      mFilter.GetURL()->mExtraData->GetReferrerPolicy(),
-                      watch);
-  Element* element = filterElement.get();
+  idTracker.ResetToURIFragmentID(mTargetContent, url,
+                                 mFilter.GetURL()->ExtraData()->GetReferrer(),
+                                 mFilter.GetURL()->ExtraData()->GetReferrerPolicy(),
+                                 watch);
+  Element* element = idTracker.get();
   if (!element) {
     // The URL points to no element.
     return nullptr;
@@ -309,7 +309,7 @@ nsSVGFilterInstance::GetOrCreateSourceAlphaIndex(nsTArray<FilterPrimitiveDescrip
 
   // Otherwise, create a primitive description to turn the previous filter's
   // output into a SourceAlpha input.
-  FilterPrimitiveDescription descr(PrimitiveType::ToAlpha);
+  FilterPrimitiveDescription descr(AsVariant(ToAlphaAttributes()));
   descr.SetInputPrimitive(0, mSourceGraphicIndex);
 
   const FilterPrimitiveDescription& sourcePrimitiveDescr =
@@ -321,7 +321,7 @@ nsSVGFilterInstance::GetOrCreateSourceAlphaIndex(nsTArray<FilterPrimitiveDescrip
   descr.SetInputColorSpace(0, colorSpace);
   descr.SetOutputColorSpace(colorSpace);
 
-  aPrimitiveDescrs.AppendElement(descr);
+  aPrimitiveDescrs.AppendElement(std::move(descr));
   mSourceAlphaIndex = aPrimitiveDescrs.Length() - 1;
   mSourceAlphaAvailable = true;
   return mSourceAlphaIndex;
@@ -356,8 +356,9 @@ nsSVGFilterInstance::GetSourceIndices(nsSVGFE* aPrimitiveElement,
       sourceIndex = GetLastResultIndex(aPrimitiveDescrs);
     } else {
       bool inputExists = aImageTable.Get(str, &sourceIndex);
-      if (!inputExists)
-        return NS_ERROR_FAILURE;
+      if (!inputExists) {
+        sourceIndex = GetLastResultIndex(aPrimitiveDescrs);
+      }
     }
 
     aSourceIndices.AppendElement(sourceIndex);
@@ -440,7 +441,7 @@ nsSVGFilterInstance::BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrim
       descr.SetOutputColorSpace(filter->GetOutputColorSpace());
     }
 
-    aPrimitiveDescrs.AppendElement(descr);
+    aPrimitiveDescrs.AppendElement(std::move(descr));
     uint32_t primitiveDescrIndex = aPrimitiveDescrs.Length() - 1;
 
     nsAutoString str;

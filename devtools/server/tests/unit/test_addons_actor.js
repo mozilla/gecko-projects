@@ -4,19 +4,16 @@
 
 "use strict";
 
-const {AddonsFront} = require("devtools/shared/fronts/addon/addons");
-
 startupAddonsManager();
 
 async function connect() {
-  const client = await new Promise(resolve => {
-    get_parent_process_actors(client => resolve(client));
-  });
-  const root = await listTabs(client);
-  const addonsActor = root.addonsActor;
-  ok(addonsActor, "Got AddonsActor instance");
+  DebuggerServer.init();
+  DebuggerServer.registerAllActors();
 
-  const addons = AddonsFront(client, {addonsActor});
+  const client = new DebuggerClient(DebuggerServer.connectPipe());
+  await client.connect();
+
+  const addons = await client.mainRoot.getFront("addons");
   return [client, addons];
 }
 

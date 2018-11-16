@@ -87,6 +87,7 @@ class TransportLayerDtls final : public TransportLayer {
 
   nsresult SetSrtpCiphers(const std::vector<uint16_t>& ciphers);
   nsresult GetSrtpCipher(uint16_t *cipher) const;
+  static std::vector<uint16_t> GetDefaultSrtpCiphers();
 
   nsresult ExportKeyingMaterial(const std::string& label,
                                 bool use_context,
@@ -164,7 +165,7 @@ class TransportLayerDtls final : public TransportLayer {
                         UniqueCERTCertificate& cert) const;
 
   void RecordHandshakeCompletionTelemetry(TransportLayer::State endState);
-  void RecordCipherTelemetry();
+  void RecordTlsTelemetry();
 
   static PRBool WriteSrtpXtn(PRFileDesc* fd, SSLHandshakeType message,
                              uint8_t* data, unsigned int* len,

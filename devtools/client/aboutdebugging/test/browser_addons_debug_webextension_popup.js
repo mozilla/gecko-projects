@@ -12,10 +12,9 @@ requestLongerTimeout(2);
 
 const ADDON_ID = "test-devtools-webextension@mozilla.org";
 const ADDON_NAME = "test-devtools-webextension";
-const ADDON_MANIFEST_PATH = "addons/test-devtools-webextension/manifest.json";
 
 const {
-  BrowserToolboxProcess
+  BrowserToolboxProcess,
 } = ChromeUtils.import("resource://devtools/client/framework/ToolboxProcess.jsm", {});
 
 /**
@@ -42,8 +41,51 @@ function makeWidgetId(id) {
 }
 
 add_task(async function testWebExtensionsToolboxSwitchToPopup() {
+  const addonFile = ExtensionTestCommon.generateXPI({
+    background: function() {
+      const {browser} = this;
+      window.myWebExtensionShowPopup = function() {
+        browser.test.sendMessage("readyForOpenPopup");
+      };
+    },
+    manifest: {
+      name: ADDON_NAME,
+      applications: {
+        gecko: {id: ADDON_ID},
+      },
+      browser_action: {
+        default_title: "WebExtension Popup Debugging",
+        default_popup: "popup.html",
+      },
+    },
+    files: {
+      "popup.html": `<!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <script src="popup.js"></script>
+          </head>
+          <body>
+            Background Page Body Test Content
+          </body>
+        </html>
+      `,
+      "popup.js": function() {
+        const {browser} = this;
+        window.myWebExtensionPopupAddonFunction = function() {
+          browser.test.sendMessage("popupPageFunctionCalled",
+                                   browser.runtime.getManifest());
+        };
+      },
+    },
+  });
+  registerCleanupFunction(() => addonFile.remove(false));
+
   let onReadyForOpenPopup;
   let onPopupCustomMessage;
+
+  is(Services.prefs.getBoolPref("ui.popup.disable_autohide"), false,
+     "disable_autohide shoult be initially false");
 
   Management.on("startup", function listener(event, extension) {
     if (extension.name != ADDON_NAME) {
@@ -55,7 +97,7 @@ add_task(async function testWebExtensionsToolboxSwitchToPopup() {
     function waitForExtensionTestMessage(expectedMessage) {
       return new Promise(done => {
         extension.on("test-message", function testLogListener(evt, ...args) {
-          const [message, ] = args;
+          const [message ] = args;
 
           if (message !== expectedMessage) {
             return;
@@ -78,7 +120,7 @@ add_task(async function testWebExtensionsToolboxSwitchToPopup() {
 
   const {
     tab, document, debugBtn,
-  } = await setupTestAboutDebuggingWebExtension(ADDON_NAME, ADDON_MANIFEST_PATH);
+  } = await setupTestAboutDebuggingWebExtension(ADDON_NAME, addonFile);
 
   // Be careful, this JS function is going to be executed in the addon toolbox,
   // which lives in another process. So do not try to use any scope variable!
@@ -88,7 +130,17 @@ add_task(async function testWebExtensionsToolboxSwitchToPopup() {
     /* eslint-disable no-undef */
 
     let jsterm;
-    let popupFramePromise;
+    const popupFramePromise = new Promise(resolve => {
+      const listener = data => {
+        if (data.frames.some(({url}) => url && url.endsWith("popup.html"))) {
+          toolbox.target.off("frame-update", listener);
+          resolve();
+        }
+      };
+      toolbox.target.on("frame-update", listener);
+    });
+
+    const waitForFrameListUpdate = toolbox.target.once("frame-update");
 
     toolbox.selectTool("webconsole")
       .then(async (console) => {
@@ -97,7 +149,7 @@ add_task(async function testWebExtensionsToolboxSwitchToPopup() {
             toolbox.doc.getElementById("toolbox-meatball-menu-button").click();
             toolbox.doc.addEventListener("popupshown", () => {
               const menuItem =
-                toolbox.doc.getElementById("toolbox-meatball-menu-noautohide");
+                    toolbox.doc.getElementById("toolbox-meatball-menu-noautohide");
               menuItem.click();
               resolve();
             }, { once: true });
@@ -107,18 +159,6 @@ add_task(async function testWebExtensionsToolboxSwitchToPopup() {
         dump(`Clicking the menu button\n`);
         await clickNoAutoHideMenu();
         dump(`Clicked the menu button\n`);
-
-        popupFramePromise = new Promise(resolve => {
-          const listener = data => {
-            if (data.frames.some(({url}) => url && url.endsWith("popup.html"))) {
-              toolbox.target.off("frame-update", listener);
-              resolve();
-            }
-          };
-          toolbox.target.on("frame-update", listener);
-        });
-
-        const waitForFrameListUpdate = toolbox.target.once("frame-update");
 
         jsterm = console.hud.jsterm;
         jsterm.execute("myWebExtensionShowPopup()");
@@ -132,19 +172,31 @@ add_task(async function testWebExtensionsToolboxSwitchToPopup() {
 
         dump(`Clicking the frame list button\n`);
         const btn = toolbox.doc.getElementById("command-button-frames");
-        const frameMenu = await toolbox.showFramesMenu({target: btn});
+        btn.click();
+
+        // This is webextension toolbox process. So we can't access mochitest framework.
+        const waitUntil = function(predicate, interval = 10) {
+          if (predicate()) {
+            return Promise.resolve(true);
+          }
+          return new Promise(resolve => {
+            toolbox.win.setTimeout(function() {
+              waitUntil(predicate, interval).then(() => resolve(true));
+            }, interval);
+          });
+        };
+        await waitUntil(() => btn.style.pointerEvents === "none");
         dump(`Clicked the frame list button\n`);
 
-        await frameMenu.once("open");
-
-        const frames = frameMenu.items;
+        const menuList = toolbox.doc.getElementById("toolbox-frame-menu");
+        const frames = Array.from(menuList.querySelectorAll(".command"));
 
         if (frames.length != 2) {
           throw Error(`Number of frames found is wrong: ${frames.length} != 2`);
         }
 
         const popupFrameBtn = frames.filter((frame) => {
-          return frame.label.endsWith("popup.html");
+          return frame.querySelector(".label").textContent.endsWith("popup.html");
         }).pop();
 
         if (!popupFrameBtn) {
@@ -194,7 +246,10 @@ add_task(async function testWebExtensionsToolboxSwitchToPopup() {
 
   await onToolboxClose;
 
-  ok(true, "Addon toolbox closed");
+  info("Addon toolbox closed");
+
+  is(Services.prefs.getBoolPref("ui.popup.disable_autohide"), false,
+     "disable_autohide should be reset to false when the toolbox is closed");
 
   await uninstallAddon({document, id: ADDON_ID, name: ADDON_NAME});
   await closeAboutDebugging(tab);

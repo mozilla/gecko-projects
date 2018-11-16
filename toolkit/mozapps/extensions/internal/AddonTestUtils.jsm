@@ -23,6 +23,9 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 const {EventEmitter} = ChromeUtils.import("resource://gre/modules/EventEmitter.jsm", {});
 const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm", {});
 
+
+ChromeUtils.defineModuleGetter(this, "AMTelemetry",
+                               "resource://gre/modules/AddonManager.jsm");
 ChromeUtils.defineModuleGetter(this, "Extension",
                                "resource://gre/modules/Extension.jsm");
 XPCOMUtils.defineLazyGetter(this, "Management", () => {
@@ -295,6 +298,7 @@ var AddonTestUtils = {
   addonsList: null,
   appInfo: null,
   addonStartup: null,
+  collectedTelemetryEvents: [],
   testUnpacked: false,
   useRealCertChecks: false,
   usePrivilegedSignatures: true,
@@ -436,6 +440,11 @@ var AddonTestUtils = {
   },
 
   initMochitest(testScope) {
+    if (this.testScope === testScope) {
+      return;
+    }
+    this.testScope = testScope;
+
     this.profileDir = FileUtils.getDir("ProfD", []);
 
     this.profileExtensions = FileUtils.getDir("ProfD", ["extensions"]);
@@ -664,7 +673,9 @@ var AddonTestUtils = {
           if (this.usePrivilegedSignatures) {
             let privileged = typeof this.usePrivilegedSignatures == "function" ?
                              this.usePrivilegedSignatures(id) : this.usePrivilegedSignatures;
-            if (privileged) {
+            if (privileged === "system") {
+              fakeCert.organizationalUnit = "Mozilla Components";
+            } else if (privileged) {
               fakeCert.organizationalUnit = "Mozilla Extensions";
             }
           }
@@ -783,12 +794,13 @@ var AddonTestUtils = {
                                  addon => addon.startupPromise));
   },
 
-  async promiseShutdownManager() {
+  async promiseShutdownManager(clearOverrides = true) {
     if (!this.addonIntegrationService)
       return false;
 
-    if (this.overrideEntry) {
+    if (this.overrideEntry && clearOverrides) {
       this.overrideEntry.destruct();
+      this.overrideEntry = null;
     }
 
     Services.obs.notifyObservers(null, "quit-application-granted");
@@ -844,7 +856,7 @@ var AddonTestUtils = {
    *        after the AddonManager is shut down, before it is re-started.
    */
   async promiseRestartManager(newVersion) {
-    await this.promiseShutdownManager();
+    await this.promiseShutdownManager(false);
     await this.promiseStartupManager(newVersion);
   },
 
@@ -946,9 +958,8 @@ var AddonTestUtils = {
     data = Object.assign({}, defaults, data);
 
     let props = ["id", "version", "type", "internalName", "updateURL",
-                 "optionsURL", "optionsType", "aboutURL", "iconURL", "icon64URL",
-                 "skinnable", "bootstrap", "strictCompatibility",
-                 "hasEmbeddedWebExtension"];
+                 "optionsURL", "optionsType", "aboutURL", "iconURL",
+                 "skinnable", "bootstrap", "strictCompatibility"];
     rdf += this._writeProps(data, props);
 
     rdf += this._writeLocaleStrings(data);
@@ -1172,9 +1183,7 @@ var AddonTestUtils = {
       dir.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
 
       let zip = ZipReader(xpiFile);
-      let entries = zip.findEntries(null);
-      while (entries.hasMore()) {
-        let entry = entries.getNext();
+      for (let entry of zip.findEntries(null)) {
         let target = dir.clone();
         for (let part of entry.split("/"))
           target.append(part);
@@ -1368,11 +1377,14 @@ var AddonTestUtils = {
    * @param {boolean} [ignoreIncompatible = false]
    *        Optional parameter to ignore add-ons that are incompatible
    *        with the application
+   * @param {Object} [installTelemetryInfo = undefined]
+   *        Optional parameter to set the install telemetry info for the
+   *        installed addon
    * @returns {Promise}
    *        Resolves when the install has completed.
    */
-  async promiseInstallFile(file, ignoreIncompatible = false) {
-    let install = await AddonManager.getInstallForFile(file);
+  async promiseInstallFile(file, ignoreIncompatible = false, installTelemetryInfo) {
+    let install = await AddonManager.getInstallForFile(file, null, installTelemetryInfo);
     if (!install)
       throw new Error(`No AddonInstall created for ${file.path}`);
 
@@ -1639,6 +1651,36 @@ var AddonTestUtils = {
        Services.io.newFileURI(file).spec],
     ]);
     Services.prefs.setBoolPref(PREF_DISABLE_SECURITY, prevPrefVal);
+  },
+
+  // AMTelemetry events helpers.
+
+  /**
+   * Redefine AMTelemetry.recordEvent to collect the recorded telemetry events and
+   * ensure that there are no unexamined events after the test file is exiting.
+   */
+  hookAMTelemetryEvents() {
+    let originalRecordEvent = AMTelemetry.recordEvent;
+    AMTelemetry.recordEvent = (event) => {
+      this.collectedTelemetryEvents.push(event);
+    };
+    this.testScope.registerCleanupFunction(() => {
+      this.testScope.Assert.deepEqual([], this.collectedTelemetryEvents,
+                       "No unexamined telemetry events after test is finished");
+      AMTelemetry.recordEvent = originalRecordEvent;
+    });
+  },
+
+  /**
+   * Retrive any AMTelemetry event collected and empty the array of the collected events.
+   *
+   * @returns {Array<Object>}
+   *          The array of the collected telemetry data.
+   */
+  getAMTelemetryEvents() {
+    let events = this.collectedTelemetryEvents;
+    this.collectedTelemetryEvents = [];
+    return events;
   },
 };
 

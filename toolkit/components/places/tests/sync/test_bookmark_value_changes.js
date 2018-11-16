@@ -3,6 +3,14 @@
 
 let unfiledFolderId;
 
+async function setChangesSynced(buf, changes) {
+  await storeRecords(buf, Object.values(changes), { needsMerge: false });
+  for (let id in changes) {
+    changes[id].synced = true;
+  }
+  await PlacesSyncUtils.bookmarks.pushChanges(changes);
+}
+
 add_task(async function setup() {
   unfiledFolderId =
     await PlacesUtils.promiseItemId(PlacesUtils.bookmarks.unfiledGuid);
@@ -85,7 +93,7 @@ add_task(async function test_value_combo() {
   deepEqual(changesToUpload, {
     bzBmk_______: {
       tombstone: false,
-      counter: 3,
+      counter: 1,
       synced: false,
       cleartext: {
         id: "bzBmk_______",
@@ -101,7 +109,7 @@ add_task(async function test_value_combo() {
     },
     toolbar: {
       tombstone: false,
-      counter: 2,
+      counter: 1,
       synced: false,
       cleartext: {
         id: "toolbar",
@@ -119,7 +127,7 @@ add_task(async function test_value_combo() {
   let localItemIds = await PlacesUtils.promiseManyItemIds(["fxBmk_______",
     "tFolder_____", "tbBmk_______", "bzBmk_______", "mozBmk______"]);
   observer.check([{
-    name: "onItemAdded",
+    name: "bookmark-added",
     params: { itemId: localItemIds.get("fxBmk_______"),
               parentId: PlacesUtils.toolbarFolderId, index: 0,
               type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
@@ -128,15 +136,15 @@ add_task(async function test_value_combo() {
               parentGuid: PlacesUtils.bookmarks.toolbarGuid,
               source: PlacesUtils.bookmarks.SOURCES.SYNC },
   }, {
-    name: "onItemAdded",
+    name: "bookmark-added",
     params: { itemId: localItemIds.get("tFolder_____"),
               parentId: PlacesUtils.toolbarFolderId,
               index: 1, type: PlacesUtils.bookmarks.TYPE_FOLDER,
-              urlHref: null, title: "Mail", guid: "tFolder_____",
+              urlHref: "", title: "Mail", guid: "tFolder_____",
               parentGuid: PlacesUtils.bookmarks.toolbarGuid,
               source: PlacesUtils.bookmarks.SOURCES.SYNC },
   }, {
-    name: "onItemAdded",
+    name: "bookmark-added",
     params: { itemId: localItemIds.get("tbBmk_______"),
               parentId: localItemIds.get("tFolder_____"), index: 0,
               type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
@@ -449,6 +457,142 @@ add_task(async function test_value_only_changes() {
   await PlacesSyncUtils.bookmarks.reset();
 });
 
+add_task(async function test_conflicting_keywords() {
+  let buf = await openMirror("conflicting_keywords");
+  let dateAdded = new Date();
+
+  info("Set up mirror");
+  await PlacesUtils.bookmarks.insertTree({
+    guid: PlacesUtils.bookmarks.menuGuid,
+    children: [{
+      guid: "bookmarkAAAA",
+      title: "A",
+      url: "http://example.com/a",
+      keyword: "one",
+      dateAdded,
+    }],
+  });
+  await storeRecords(buf, shuffle([{
+    id: "menu",
+    type: "folder",
+    children: ["bookmarkAAAA"],
+  }, {
+    id: "bookmarkAAAA",
+    type: "bookmark",
+    title: "A",
+    bmkUri: "http://example.com/a",
+    keyword: "one",
+    dateAdded: dateAdded.getTime(),
+  }]), { needsMerge: false });
+  await PlacesTestUtils.markBookmarksAsSynced();
+
+  {
+    let entryByKeyword = await PlacesUtils.keywords.fetch("one");
+    equal(entryByKeyword.url.href, "http://example.com/a",
+      "Should return new keyword entry by URL");
+    let entryByURL = await PlacesUtils.keywords.fetch({
+      url: "http://example.com/a",
+    });
+    equal(entryByURL.keyword, "one", "Should return new entry by keyword");
+  }
+
+  info("Insert new bookmark with same URL and different keyword");
+  {
+    await storeRecords(buf, shuffle([{
+      id: "toolbar",
+      type: "folder",
+      children: ["bookmarkAAA1"],
+    }, {
+      id: "bookmarkAAA1",
+      type: "bookmark",
+      title: "A1",
+      bmkUri: "http://example.com/a",
+      keyword: "two",
+      dateAdded: dateAdded.getTime(),
+    }]));
+    let changesToUpload = await buf.apply();
+    deepEqual(await buf.fetchUnmergedGuids(), [], "Should merge all items");
+    deepEqual(changesToUpload, {
+      bookmarkAAAA: {
+        tombstone: false,
+        counter: 1,
+        synced: false,
+        cleartext: {
+          id: "bookmarkAAAA",
+          type: "bookmark",
+          parentid: "menu",
+          hasDupe: true,
+          parentName: BookmarksMenuTitle,
+          dateAdded: dateAdded.getTime(),
+          bmkUri: "http://example.com/a",
+          title: "A",
+          keyword: "two",
+        },
+      },
+    }, "Should reupload bookmarks with different keyword");
+    await setChangesSynced(buf, changesToUpload);
+
+    let entryByOldKeyword = await PlacesUtils.keywords.fetch("one");
+    ok(!entryByOldKeyword,
+      "Should remove old entry when inserting bookmark with different keyword");
+    let entryByNewKeyword = await PlacesUtils.keywords.fetch("two");
+    equal(entryByNewKeyword.url.href, "http://example.com/a",
+      "Should return new keyword entry by URL");
+    let entryByURL = await PlacesUtils.keywords.fetch({
+      url: "http://example.com/a",
+    });
+    equal(entryByURL.keyword, "two", "Should return new entry by URL");
+  }
+
+  info("Update bookmark with different keyword");
+  {
+    await storeRecords(buf, shuffle([{
+      id: "bookmarkAAAA",
+      type: "bookmark",
+      title: "A",
+      bmkUri: "http://example.com/a",
+      keyword: "three",
+      dateAdded: dateAdded.getTime(),
+    }]));
+    let changesToUpload = await buf.apply();
+    deepEqual(await buf.fetchUnmergedGuids(), [], "Should merge all items");
+    deepEqual(changesToUpload, {
+      bookmarkAAA1: {
+        tombstone: false,
+        counter: 1,
+        synced: false,
+        cleartext: {
+          id: "bookmarkAAA1",
+          type: "bookmark",
+          parentid: "toolbar",
+          hasDupe: true,
+          parentName: BookmarksToolbarTitle,
+          dateAdded: dateAdded.getTime(),
+          bmkUri: "http://example.com/a",
+          title: "A1",
+          keyword: "three",
+        },
+      },
+    }, "Should reupload bookmarks with updated keyword");
+    await setChangesSynced(buf, changesToUpload);
+
+    let entryByOldKeyword = await PlacesUtils.keywords.fetch("two");
+    ok(!entryByOldKeyword,
+      "Should remove old entry when updating bookmark keyword");
+    let entryByNewKeyword = await PlacesUtils.keywords.fetch("three");
+    equal(entryByNewKeyword.url.href, "http://example.com/a",
+      "Should return updated keyword entry by URL");
+    let entryByURL = await PlacesUtils.keywords.fetch({
+      url: "http://example.com/a",
+    });
+    equal(entryByURL.keyword, "three", "Should return updated entry by URL");
+  }
+
+  await buf.finalize();
+  await PlacesUtils.bookmarks.eraseEverything();
+  await PlacesSyncUtils.bookmarks.reset();
+});
+
 add_task(async function test_keywords() {
   let buf = await openMirror("keywords");
 
@@ -533,7 +677,7 @@ add_task(async function test_keywords() {
 
   let idsToUpload = inspectChangeRecords(changesToUpload);
   deepEqual(idsToUpload, {
-    updated: ["bookmarkAAAA", "bookmarkCCCC", "bookmarkDDDD"],
+    updated: ["bookmarkBBBB", "bookmarkCCCC", "bookmarkDDDD"],
     deleted: [],
   }, "Should reupload all local records with changed keywords");
 
@@ -649,7 +793,7 @@ add_task(async function test_keywords_complex() {
 
   let idsToUpload = inspectChangeRecords(changesToUpload);
   let expectedIdsToUpload = {
-    updated: ["bookmarkBBBB", "bookmarkCCCC"],
+    updated: ["bookmarkBBBB"],
     deleted: [],
   };
 
@@ -676,7 +820,7 @@ add_task(async function test_keywords_complex() {
     "bookmarkAAA1", "bookmarkBBB1", "bookmarkBBBB", "bookmarkCCCC",
     "bookmarkDDDD", "bookmarkEEEE"]);
   let expectedNotifications = [{
-    name: "onItemAdded",
+    name: "bookmark-added",
     params: { itemId: localItemIds.get("bookmarkAAAA"),
               parentId: PlacesUtils.bookmarksMenuFolderId, index: 0,
               type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
@@ -685,7 +829,7 @@ add_task(async function test_keywords_complex() {
               parentGuid: PlacesUtils.bookmarks.menuGuid,
               source: PlacesUtils.bookmarks.SOURCES.SYNC },
   }, {
-    name: "onItemAdded",
+    name: "bookmark-added",
     params: { itemId: localItemIds.get("bookmarkAAA1"),
               parentId: PlacesUtils.bookmarksMenuFolderId, index: 1,
               type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
@@ -694,7 +838,7 @@ add_task(async function test_keywords_complex() {
               parentGuid: PlacesUtils.bookmarks.menuGuid,
               source: PlacesUtils.bookmarks.SOURCES.SYNC },
   }, {
-    name: "onItemAdded",
+    name: "bookmark-added",
     params: { itemId: localItemIds.get("bookmarkBBB1"),
               parentId: unfiledFolderId, index: 0,
               type: PlacesUtils.bookmarks.TYPE_BOOKMARK,

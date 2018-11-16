@@ -8,6 +8,7 @@
 
 #include "mozilla/Atomics.h"
 #include "mozilla/Poison.h"
+#include "mozilla/RemoteDecoderManagerChild.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/XPCOM.h"
 #include "nsXULAppAPI.h"
@@ -37,7 +38,6 @@
 #include "nsMemoryImpl.h"
 #include "nsDebugImpl.h"
 #include "nsTraceRefcnt.h"
-#include "nsErrorService.h"
 
 #include "nsArray.h"
 #include "nsINIParserImpl.h"
@@ -93,6 +93,7 @@ extern nsresult nsStringInputStreamConstructor(nsISupports*, REFNSIID, void**);
 
 #ifdef MOZ_WIDGET_COCOA
 #include "nsMacUtilsImpl.h"
+#include "nsMacPreferencesReader.h"
 #endif
 
 #include "nsSystemInfo.h"
@@ -198,7 +199,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsSupportsDouble)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsSupportsInterfacePointer)
 
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsConsoleService, Init)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsTimer)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsBinaryOutputStream)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsBinaryInputStream)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsStorageStream)
@@ -213,6 +213,7 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsUUIDGenerator, Init)
 
 #ifdef MOZ_WIDGET_COCOA
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsMacUtilsImpl)
+NS_GENERIC_FACTORY_CONSTRUCTOR(nsMacPreferencesReader)
 #endif
 
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsSystemInfo, Init)
@@ -251,6 +252,10 @@ NS_DEFINE_NAMED_CID(NS_CHROMEPROTOCOLHANDLER_CID);
 
 NS_DEFINE_NAMED_CID(NS_SECURITY_CONSOLE_MESSAGE_CID);
 
+#ifdef MOZ_WIDGET_COCOA
+NS_DEFINE_NAMED_CID(NS_MACPREFERENCESREADER_CID);
+#endif
+
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsChromeRegistry,
                                          nsChromeRegistry::GetSingleton)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsChromeProtocolHandler)
@@ -272,12 +277,15 @@ CreateINIParserFactory(const mozilla::Module& aModule,
 #define COMPONENT(NAME, Ctor) { &kNS_##NAME##_CID, false, nullptr, Ctor },
 #define COMPONENT_M(NAME, Ctor, Selector) { &kNS_##NAME##_CID, false, nullptr, Ctor, Selector },
 const mozilla::Module::CIDEntry kXPCOMCIDEntries[] = {
-  { &kComponentManagerCID, true, nullptr, nsComponentManagerImpl::Create, Module::ALLOW_IN_GPU_PROCESS },
+  { &kComponentManagerCID, true, nullptr, nsComponentManagerImpl::Create, Module::ALLOW_IN_GPU_AND_VR_PROCESS },
   { &kINIParserFactoryCID, false, CreateINIParserFactory },
 #include "XPCOMModule.inc"
   { &kNS_CHROMEREGISTRY_CID, false, nullptr, nsChromeRegistryConstructor },
   { &kNS_CHROMEPROTOCOLHANDLER_CID, false, nullptr, nsChromeProtocolHandlerConstructor },
   { &kNS_SECURITY_CONSOLE_MESSAGE_CID, false, nullptr, nsSecurityConsoleMessageConstructor },
+#ifdef MOZ_WIDGET_COCOA
+  { &kNS_MACPREFERENCESREADER_CID, false, nullptr, nsMacPreferencesReaderConstructor },
+#endif
   { nullptr }
 };
 #undef COMPONENT
@@ -291,6 +299,9 @@ const mozilla::Module::ContractIDEntry kXPCOMContracts[] = {
   { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "chrome", &kNS_CHROMEPROTOCOLHANDLER_CID },
   { NS_INIPARSERFACTORY_CONTRACTID, &kINIParserFactoryCID },
   { NS_SECURITY_CONSOLE_MESSAGE_CONTRACTID, &kNS_SECURITY_CONSOLE_MESSAGE_CID },
+#ifdef MOZ_WIDGET_COCOA
+  { NS_MACPREFERENCESREADER_CONTRACTID, &kNS_MACPREFERENCESREADER_CID },
+#endif
   { nullptr }
 };
 #undef COMPONENT
@@ -302,7 +313,7 @@ const mozilla::Module kXPCOMModule = {
   nullptr,
   nullptr,
   nullptr,
-  Module::ALLOW_IN_GPU_PROCESS
+  Module::ALLOW_IN_GPU_AND_VR_PROCESS
 };
 
 // gDebug will be freed during shutdown.
@@ -699,13 +710,6 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
   // Init SharedThreadPool (which needs the service manager).
   SharedThreadPool::InitStatics();
 
-  // Force layout to spin up so that nsContentUtils is available for cx stack
-  // munging.  Note that layout registers a number of static atoms, and also
-  // seals the static atom table, so NS_RegisterStaticAtom may not be called
-  // beyond this point.
-  nsCOMPtr<nsISupports> componentLoader =
-    do_GetService("@mozilla.org/moz/jsloader;1");
-
   mozilla::ScriptPreloader::GetSingleton();
   mozilla::scache::StartupCache::GetSingleton();
   mozilla::AvailableMemoryTracker::Init();
@@ -897,6 +901,7 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
     NS_ProcessPendingEvents(thread);
     gfxPlatform::ShutdownLayersIPC();
     mozilla::dom::VideoDecoderManagerChild::Shutdown();
+    mozilla::RemoteDecoderManagerChild::Shutdown();
 
     mozilla::scache::StartupCache::DeleteSingleton();
     if (observerService)

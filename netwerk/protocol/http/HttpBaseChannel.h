@@ -46,10 +46,12 @@
 #include "nsCOMArray.h"
 #include "mozilla/net/ChannelEventQueue.h"
 #include "mozilla/Move.h"
+#include "mozilla/Tuple.h"
 #include "nsIThrottledInputChannel.h"
 #include "nsTArray.h"
 #include "nsCOMPtr.h"
 #include "mozilla/IntegerPrintfMacros.h"
+#include "nsStringEnumerator.h"
 
 #define HTTP_BASE_CHANNEL_IID \
 { 0x9d5cde03, 0xe6e9, 0x4612, \
@@ -69,6 +71,17 @@ class LogCollector;
 
 namespace net {
 extern mozilla::LazyLogModule gHttpLog;
+
+typedef nsTArray<Tuple<nsCString, nsCString>> ArrayOfStringPairs;
+
+enum CacheDisposition : uint8_t {
+  kCacheUnresolved = 0,
+  kCacheHit = 1,
+  kCacheHitViaReval = 2,
+  kCacheMissedViaReval = 3,
+  kCacheMissed = 4,
+  kCacheUnknown = 5
+};
 
 /*
  * This class is a partial implementation of nsIHttpChannel.  It contains code
@@ -232,6 +245,8 @@ public:
   NS_IMETHOD GetLocalPort(int32_t* port) override;
   NS_IMETHOD GetRemoteAddress(nsACString& addr) override;
   NS_IMETHOD GetRemotePort(int32_t* port) override;
+  NS_IMETHOD GetOnlyConnect(bool* aOnlyConnect) override;
+  NS_IMETHOD SetConnectOnly() override;
   NS_IMETHOD GetAllowSpdy(bool *aAllowSpdy) override;
   NS_IMETHOD SetAllowSpdy(bool aAllowSpdy) override;
   NS_IMETHOD GetAllowAltSvc(bool *aAllowAltSvc) override;
@@ -322,11 +337,13 @@ public:
   void
   ClearConsoleReports() override;
 
-  class nsContentEncodings : public nsIUTF8StringEnumerator
+  class nsContentEncodings : public nsStringEnumeratorBase
     {
     public:
         NS_DECL_ISUPPORTS
         NS_DECL_NSIUTF8STRINGENUMERATOR
+
+        using nsStringEnumeratorBase::GetNext;
 
         nsContentEncodings(nsIHttpChannel* aChannel, const char* aEncodingHeader);
 
@@ -550,8 +567,8 @@ protected:
   // The initiator type (for this resource) - how was the resource referenced in
   // the HTML file.
   nsString mInitiatorType;
-  // Holds the name of the preferred alt-data type.
-  nsCString mPreferredCachedAltDataType;
+  // Holds the name of the preferred alt-data type for each contentType.
+  ArrayOfStringPairs mPreferredCachedAltDataTypes;
   // Holds the name of the alternative data type the channel returned.
   nsCString mAvailableCachedAltDataType;
   nsString mIntegrityMetadata;

@@ -89,8 +89,7 @@ import org.mozilla.gecko.dlc.DlcStudyService;
 import org.mozilla.gecko.dlc.DlcSyncService;
 import org.mozilla.gecko.extensions.ExtensionPermissionsHelper;
 import org.mozilla.gecko.firstrun.OnboardingHelper;
-import org.mozilla.gecko.gfx.DynamicToolbarAnimator;
-import org.mozilla.gecko.gfx.DynamicToolbarAnimator.PinReason;
+import org.mozilla.geckoview.DynamicToolbarAnimator.PinReason;
 import org.mozilla.gecko.home.BrowserSearch;
 import org.mozilla.gecko.home.HomeBanner;
 import org.mozilla.gecko.home.HomeConfig;
@@ -118,7 +117,6 @@ import org.mozilla.gecko.overlays.ui.ShareDialog;
 import org.mozilla.gecko.permissions.Permissions;
 import org.mozilla.gecko.preferences.ClearOnShutdownPref;
 import org.mozilla.gecko.preferences.GeckoPreferences;
-import org.mozilla.gecko.promotion.AddToHomeScreenPromotion;
 import org.mozilla.gecko.promotion.ReaderViewBookmarkPromotion;
 import org.mozilla.gecko.prompts.Prompt;
 import org.mozilla.gecko.reader.ReaderModeUtils;
@@ -167,6 +165,7 @@ import org.mozilla.gecko.widget.AnchoredPopup;
 import org.mozilla.gecko.widget.AnimatedProgressBar;
 import org.mozilla.gecko.widget.GeckoActionProvider;
 import org.mozilla.gecko.widget.SplashScreen;
+import org.mozilla.geckoview.DynamicToolbarAnimator;
 import org.mozilla.geckoview.GeckoSession;
 
 import java.io.File;
@@ -318,7 +317,6 @@ public class BrowserApp extends GeckoApp
     private final TelemetryCorePingDelegate mTelemetryCorePingDelegate = new TelemetryCorePingDelegate();
 
     private final List<BrowserAppDelegate> delegates = Collections.unmodifiableList(Arrays.asList(
-            new AddToHomeScreenPromotion(),
             new ScreenshotDelegate(),
             new BookmarkStateChangeDelegate(),
             new ReaderViewBookmarkPromotion(),
@@ -715,6 +713,8 @@ public class BrowserApp extends GeckoApp
             GuestSession.onNotificationIntentReceived(this);
         } else if (TabQueueHelper.LOAD_URLS_ACTION.equals(action)) {
             Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.NOTIFICATION, "tabqueue");
+        } else if (NotificationHelper.HELPER_BROADCAST_ACTION.equals(action)) {
+            NotificationHelper.getInstance(getApplicationContext()).handleNotificationIntent(safeStartingIntent);
         }
 
         if (HardwareUtils.isTablet()) {
@@ -1038,6 +1038,8 @@ public class BrowserApp extends GeckoApp
 
     @Override
     public void onPause() {
+        dismissTabHistoryFragment();
+
         super.onPause();
         if (mIsAbortingAppLaunch) {
             return;
@@ -1747,7 +1749,7 @@ public class BrowserApp extends GeckoApp
                 break;
 
             case "GeckoView:AccessibilityEnabled":
-                mDynamicToolbar.setAccessibilityEnabled(message.getBoolean("enabled"));
+                mDynamicToolbar.setAccessibilityEnabled(message.getBoolean("touchEnabled"));
                 break;
 
             case "Menu:Open":
@@ -1865,9 +1867,16 @@ public class BrowserApp extends GeckoApp
 
             case "Sanitize:Finished":
                 if (message.getBoolean("shutdown", false)) {
-                    // Gecko is shutting down and has called our sanitize handlers,
-                    // so we can start exiting, too.
-                    finishAndShutdown(/* restart */ false);
+                    // Gecko is shutting down and has called our sanitize handlers, so to make us
+                    // appear more responsive, we can start shutting down the UI as well, even if
+                    // that means that Android might kill our process before Gecko has fully exited.
+
+                    // There is at least one exception, though: If we want to dump a captured
+                    // profile to disk, Gecko must be able to fully shutdown, so we only kill the UI
+                    // later on, in response to the Gecko thread exiting.
+                    if (!mDumpProfileOnShutdown) {
+                        finishAndShutdown(/* restart */ false);
+                    }
                 }
                 break;
 
@@ -3118,10 +3127,7 @@ public class BrowserApp extends GeckoApp
             return false;
 
         // Hide the tab history panel when hardware menu button is pressed.
-        TabHistoryFragment frag = (TabHistoryFragment) getSupportFragmentManager().findFragmentByTag(TAB_HISTORY_FRAGMENT_TAG);
-        if (frag != null) {
-            frag.dismiss();
-        }
+        dismissTabHistoryFragment();
 
         if (!GeckoThread.isRunning()) {
             aMenu.findItem(R.id.settings).setEnabled(false);
@@ -3145,12 +3151,13 @@ public class BrowserApp extends GeckoApp
         final MenuItem enterGuestMode = aMenu.findItem(R.id.new_guest_session);
         final MenuItem exitGuestMode = aMenu.findItem(R.id.exit_guest_session);
 
-        // Only show the "Quit" menu item on pre-ICS, television devices,
+        // Only show the "Quit" menu when capturing a profile, on television devices,
         // or if the user has explicitly enabled the clear on shutdown pref.
         // (We check the pref last to save the pref read.)
         // In ICS+, it's easy to kill an app through the task switcher.
         final SharedPreferences prefs = GeckoSharedPrefs.forProfile(this);
         final boolean visible = HardwareUtils.isTelevision() ||
+                                mDumpProfileOnShutdown ||
                                 prefs.getBoolean(GeckoPreferences.PREFS_SHOW_QUIT_MENU, false) ||
                                 !PrefUtils.getStringSet(prefs,
                                                         ClearOnShutdownPref.PREF,
@@ -3350,7 +3357,7 @@ public class BrowserApp extends GeckoApp
         if (SwitchBoard.isInExperiment(this, Experiments.TOP_ADDONS_MENU)) {
             MenuUtils.safeSetVisible(aMenu, R.id.addons_top_level, true);
             GeckoMenuItem item = (GeckoMenuItem) aMenu.findItem(R.id.addons_top_level);
-            if (item != null) {
+            if (item != null && mExtensionPermissionsHelper != null) {
                 if (mExtensionPermissionsHelper.getShowUpdateIcon()) {
                     item.setIcon(R.drawable.ic_addon_update);
                 } else {
@@ -4138,6 +4145,13 @@ public class BrowserApp extends GeckoApp
     public void onFinishedOnboarding(final boolean showBrowserHint) {
         if (showBrowserHint && !Tabs.hasHomepage(this)) {
             enterEditingMode();
+        }
+    }
+
+    private void dismissTabHistoryFragment() {
+        TabHistoryFragment frag = (TabHistoryFragment) getSupportFragmentManager().findFragmentByTag(TAB_HISTORY_FRAGMENT_TAG);
+        if (frag != null) {
+            frag.dismiss();
         }
     }
 }

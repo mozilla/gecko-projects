@@ -107,6 +107,7 @@ public:
 
   void ResponsiveContentDensityChanged();
   void SetupForContentURLRequest();
+  bool ShouldShowBrokenImageIcon() const;
 
 #ifdef ACCESSIBILITY
   virtual mozilla::a11y::AccType AccessibleType() override;
@@ -123,11 +124,6 @@ public:
   void List(FILE* out = stderr, const char* aPrefix = "",
             uint32_t aFlags = 0) const override;
 #endif
-
-  nsSplittableType GetSplittableType() const override
-  {
-    return NS_FRAME_SPLITTABLE;
-  }
 
   virtual LogicalSides GetLogicalSkipSides(const ReflowInput* aReflowInput = nullptr) const override;
 

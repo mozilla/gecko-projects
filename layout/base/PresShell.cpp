@@ -23,6 +23,7 @@
 #include "mozilla/Logging.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/TouchEvents.h"
@@ -208,7 +209,7 @@ using namespace mozilla::layers;
 using namespace mozilla::gfx;
 using namespace mozilla::layout;
 using PaintFrameFlags = nsLayoutUtils::PaintFrameFlags;
-typedef FrameMetrics::ViewID ViewID;
+typedef ScrollableLayerGuid::ViewID ViewID;
 
 CapturingContentInfo nsIPresShell::gCaptureInfo =
   { false /* mAllowed */, false /* mPointerLock */, false /* mRetargetToElement */,
@@ -256,6 +257,7 @@ struct VerifyReflowFlags {
 };
 
 static const VerifyReflowFlags gFlags[] = {
+  // clang-format off
   { "verify",                VERIFY_REFLOW_ON },
   { "reflow",                VERIFY_REFLOW_NOISY },
   { "all",                   VERIFY_REFLOW_ALL },
@@ -263,6 +265,7 @@ static const VerifyReflowFlags gFlags[] = {
   { "noisy-commands",        VERIFY_REFLOW_NOISY_RC },
   { "really-noisy-commands", VERIFY_REFLOW_REALLY_NOISY_RC },
   { "resize",                VERIFY_REFLOW_DURING_RESIZE_REFLOW },
+  // clang-format on
 };
 
 #define NUM_VERIFY_REFLOW_FLAGS (sizeof(gFlags) / sizeof(gFlags[0]))
@@ -725,25 +728,18 @@ nsIPresShell::FrameSelection()
 
 static bool sSynthMouseMove = true;
 static uint32_t sNextPresShellId;
-static bool sAccessibleCaretEnabled = false;
-static bool sAccessibleCaretOnTouch = false;
 
 /* static */ bool
 PresShell::AccessibleCaretEnabled(nsIDocShell* aDocShell)
 {
-  static bool initialized = false;
-  if (!initialized) {
-    Preferences::AddBoolVarCache(&sAccessibleCaretEnabled, "layout.accessiblecaret.enabled");
-    Preferences::AddBoolVarCache(&sAccessibleCaretOnTouch, "layout.accessiblecaret.enabled_on_touch");
-    initialized = true;
-  }
   // If the pref forces it on, then enable it.
-  if (sAccessibleCaretEnabled) {
+  if (StaticPrefs::layout_accessiblecaret_enabled()) {
     return true;
   }
   // If the touch pref is on, and touch events are enabled (this depends
   // on the specific device running), then enable it.
-  if (sAccessibleCaretOnTouch && dom::TouchEvent::PrefEnabled(aDocShell)) {
+  if (StaticPrefs::layout_accessiblecaret_enabled_on_touch() &&
+      dom::TouchEvent::PrefEnabled(aDocShell)) {
     return true;
   }
   // Otherwise, disabled.
@@ -751,8 +747,7 @@ PresShell::AccessibleCaretEnabled(nsIDocShell* aDocShell)
 }
 
 nsIPresShell::nsIPresShell()
-    : mFrameConstructor(nullptr)
-    , mViewManager(nullptr)
+    : mViewManager(nullptr)
     , mFrameManager(nullptr)
 #ifdef ACCESSIBILITY
     , mDocAccessible(nullptr)
@@ -794,6 +789,7 @@ nsIPresShell::nsIPresShell()
     , mPaintingIsFrozen(false)
     , mIsNeverPainting(false)
     , mInFlush(false)
+    , mCurrentEventFrame(nullptr)
   {}
 
 PresShell::PresShell()
@@ -806,7 +802,6 @@ PresShell::PresShell()
   , mReflowCountMgr(nullptr)
 #endif
   , mMouseLocation(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE)
-  , mCurrentEventFrame(nullptr)
   , mFirstCallbackEventRequest(nullptr)
   , mLastCallbackEventRequest(nullptr)
   , mLastReflowStart(0.0)
@@ -830,13 +825,14 @@ PresShell::PresShell()
   , mHasHandledUserInput(false)
 #ifdef NIGHTLY_BUILD
   , mForceDispatchKeyPressEventsForNonPrintableKeys(false)
-  , mInitializedForceDispatchKeyPressEventsForNonPrintableKeys(false)
+  , mForceUseLegacyKeyCodeAndCharCodeValues(false)
+  , mInitializedWithKeyPressEventDispatchingBlacklist(false)
 #endif // #ifdef NIGHTLY_BUILD
 {
   MOZ_LOG(gLog, LogLevel::Debug, ("PresShell::PresShell this=%p", this));
 
 #ifdef MOZ_REFLOW_PERF
-  mReflowCountMgr = new ReflowCountMgr();
+  mReflowCountMgr = MakeUnique<ReflowCountMgr>();
   mReflowCountMgr->SetPresContext(mPresContext);
   mReflowCountMgr->SetPresShell(this);
 #endif
@@ -895,7 +891,8 @@ PresShell::~PresShell()
   MOZ_ASSERT(mAllocatedPointers.IsEmpty(), "Some pres arena objects were not freed");
 
   mStyleSet = nullptr;
-  delete mFrameConstructor;
+  mFrameManager = nullptr;
+  mFrameConstructor = nullptr;
 
   mCurrentEventContent = nullptr;
 }
@@ -932,9 +929,9 @@ PresShell::Init(nsIDocument* aDocument,
   SetNeedStyleFlush();
 
   // Create our frame constructor.
-  mFrameConstructor = new nsCSSFrameConstructor(mDocument, this);
+  mFrameConstructor = MakeUnique<nsCSSFrameConstructor>(mDocument, this);
 
-  mFrameManager = mFrameConstructor;
+  mFrameManager = mFrameConstructor.get();
 
   // The document viewer owns both view manager and pres shell.
   mViewManager->SetPresShell(this);
@@ -1051,9 +1048,9 @@ PresShell::Init(nsIDocument* aDocument,
   if (mPresContext->IsRootContentDocument()) {
     mZoomConstraintsClient = new ZoomConstraintsClient();
     mZoomConstraintsClient->Init(this, mDocument);
-    if (gfxPrefs::MetaViewportEnabled() || gfxPrefs::APZAllowZooming()) {
-      mMobileViewportManager = new MobileViewportManager(this, mDocument);
-    }
+
+    // We call this to create mMobileViewportManager, if it is needed.
+    UpdateViewportOverridden(false);
   }
 }
 
@@ -1157,6 +1154,8 @@ PresShell::Destroy()
   NS_ASSERTION(!nsContentUtils::IsSafeToRunScript(),
     "destroy called on presshell while scripts not blocked");
 
+  AUTO_PROFILER_LABEL("PresShell::Destroy", LAYOUT);
+
   // dump out cumulative text perf metrics
   gfxTextPerfMetrics* tp;
   if (mPresContext && (tp = mPresContext->GetTextPerfMetrics())) {
@@ -1183,10 +1182,7 @@ PresShell::Destroy()
 
 #ifdef MOZ_REFLOW_PERF
   DumpReflows();
-  if (mReflowCountMgr) {
-    delete mReflowCountMgr;
-    mReflowCountMgr = nullptr;
-  }
+  mReflowCountMgr = nullptr;
 #endif
 
   if (mZoomConstraintsClient) {
@@ -2100,6 +2096,40 @@ PresShell::FireResizeEvent()
   }
 }
 
+static nsIContent* GetNativeAnonymousSubtreeRoot(nsIContent* aContent)
+{
+  if (!aContent || !aContent->IsInNativeAnonymousSubtree()) {
+    return nullptr;
+  }
+  auto* current = aContent;
+  while (current && !current->IsRootOfNativeAnonymousSubtree()) {
+    current = current->GetFlattenedTreeParent();
+    MOZ_DIAGNOSTIC_ASSERT(current, "How?");
+  }
+  return current;
+}
+
+void
+nsIPresShell::NativeAnonymousContentRemoved(nsIContent* aAnonContent)
+{
+  MOZ_ASSERT(aAnonContent->IsRootOfNativeAnonymousSubtree());
+  if (nsIContent* root = GetNativeAnonymousSubtreeRoot(mCurrentEventContent)) {
+    if (aAnonContent == root) {
+      mCurrentEventContent = aAnonContent->GetFlattenedTreeParent();
+      mCurrentEventFrame = nullptr;
+    }
+  }
+
+  for (unsigned int i = 0; i < mCurrentEventContentStack.Length(); i++) {
+    nsIContent* anon =
+      GetNativeAnonymousSubtreeRoot(mCurrentEventContentStack.ElementAt(i));
+    if (aAnonContent == anon) {
+      mCurrentEventContentStack.ReplaceObjectAt(aAnonContent->GetFlattenedTreeParent(), i);
+      mCurrentEventFrameStack[i] = nullptr;
+    }
+  }
+}
+
 void
 PresShell::SetIgnoreFrameDestruction(bool aIgnore)
 {
@@ -2317,13 +2347,17 @@ PresShell::IntraLineMove(bool aForward, bool aExtend)
 NS_IMETHODIMP
 PresShell::PageMove(bool aForward, bool aExtend)
 {
-  nsIScrollableFrame *scrollableFrame =
-    GetScrollableFrameToScroll(nsIPresShell::eVertical);
-  if (!scrollableFrame)
+  nsIFrame* frame;
+  if (!aExtend) {
+    frame = do_QueryFrame(GetScrollableFrameToScroll(nsIPresShell::eVertical));
+  } else {
+    frame = mSelection->GetFrameToPageSelect();
+  }
+  if (!frame) {
     return NS_OK;
-
+  }
   RefPtr<nsFrameSelection> frameSelection = mSelection;
-  frameSelection->CommonPageMove(aForward, aExtend, scrollableFrame);
+  frameSelection->CommonPageMove(aForward, aExtend, frame);
   // After ScrollSelectionIntoView(), the pending notifications might be
   // flushed and PresShell/PresContext/Frames may be dead. See bug 418470.
   return ScrollSelectionIntoView(nsISelectionController::SELECTION_NORMAL,
@@ -2731,8 +2765,16 @@ PresShell::FrameNeedsReflow(nsIFrame *aFrame, IntrinsicDirty aIntrinsicDirty,
       // ancestor of subtreeRoot.)
       for (nsIFrame *a = subtreeRoot;
            a && !FRAME_IS_REFLOW_ROOT(a);
-           a = a->GetParent())
+           a = a->GetParent()) {
         a->MarkIntrinsicISizesDirty();
+        if (a->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW) &&
+            a->IsAbsolutelyPositioned()) {
+          // If we get here, 'a' is abspos, so its subtree's intrinsic sizing
+          // has no effect on its ancestors' intrinsic sizing. So, don't loop
+          // upwards any further.
+          break;
+        }
+      }
     }
 
     if (aIntrinsicDirty == eStyleChange) {
@@ -3438,9 +3480,15 @@ ComputeWhereToScroll(int16_t aWhereToScroll,
  * This function takes a scrollable frame, a rect in the coordinate system
  * of the scrolled frame, and a desired percentage-based scroll
  * position and attempts to scroll the rect to that position in the
- * scrollport.
+ * visual viewport.
  *
  * This needs to work even if aRect has a width or height of zero.
+ *
+ * Note that, since we are performing a layout scroll, it's possible that
+ * this fnction will sometimes be unsuccessful; the content will move as
+ * fast as it can on the screen using layout viewport scrolling, and then
+ * stop there, even if it could get closer to the desired position by
+ * moving the visual viewport within the layout viewport.
  */
 static void ScrollToShowRect(nsIScrollableFrame*      aFrameAsScrollable,
                              const nsRect&            aRect,
@@ -3448,7 +3496,7 @@ static void ScrollToShowRect(nsIScrollableFrame*      aFrameAsScrollable,
                              nsIPresShell::ScrollAxis aHorizontal,
                              uint32_t                 aFlags)
 {
-  nsPoint scrollPt = aFrameAsScrollable->GetScrollPosition();
+  nsPoint scrollPt = aFrameAsScrollable->GetVisualViewportOffset();
   nsRect visibleRect(scrollPt,
                      aFrameAsScrollable->GetVisualViewportSize());
 
@@ -3828,7 +3876,8 @@ PresShell::ScheduleViewManagerFlush(PaintType aType)
 void
 nsIPresShell::DispatchSynthMouseMove(WidgetGUIEvent* aEvent)
 {
-  AUTO_PROFILER_TRACING("Paint", "DispatchSynthMouseMove");
+  AUTO_PROFILER_TRACING_DOCSHELL(
+    "Paint", "DispatchSynthMouseMove", mPresContext->GetDocShell());
   nsEventStatus status = nsEventStatus_eIgnore;
   nsView* targetView = nsView::GetViewFor(aEvent->mWidget);
   if (!targetView)
@@ -4298,7 +4347,10 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     if (MOZ_LIKELY(!mIsDestroying)) {
       nsAutoScriptBlocker scriptBlocker;
 #ifdef MOZ_GECKO_PROFILER
-      AutoProfilerStyleMarker tracingStyleFlush(std::move(mStyleCause));
+      nsCOMPtr<nsIDocShell> docShell = mPresContext->GetDocShell();
+      DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
+      AutoProfilerStyleMarker tracingStyleFlush(
+        std::move(mStyleCause), docShellId, docShellHistoryId);
 #endif
 
       mPresContext->RestyleManager()->ProcessPendingRestyles();
@@ -4321,7 +4373,10 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     if (MOZ_LIKELY(!mIsDestroying)) {
       nsAutoScriptBlocker scriptBlocker;
 #ifdef MOZ_GECKO_PROFILER
-      AutoProfilerStyleMarker tracingStyleFlush(std::move(mStyleCause));
+      nsCOMPtr<nsIDocShell> docShell = mPresContext->GetDocShell();
+      DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
+      AutoProfilerStyleMarker tracingStyleFlush(
+        std::move(mStyleCause), docShellId, docShellHistoryId);
 #endif
 
       mPresContext->RestyleManager()->ProcessPendingRestyles();
@@ -5545,12 +5600,8 @@ void PresShell::SynthesizeMouseMove(bool aFromScroll)
     RefPtr<nsSynthMouseMoveEvent> ev =
         new nsSynthMouseMoveEvent(this, aFromScroll);
 
-    if (!GetPresContext()->RefreshDriver()
-                         ->AddRefreshObserver(ev, FlushType::Display)) {
-      NS_WARNING("failed to dispatch nsSynthMouseMoveEvent");
-      return;
-    }
-
+    GetPresContext()->RefreshDriver()
+                    ->AddRefreshObserver(ev, FlushType::Display);
     mSynthMouseMoveEvent = std::move(ev);
   }
 }
@@ -6349,6 +6400,14 @@ PresShell::Paint(nsView*         aViewToPaint,
     // We can paint directly into the widget using its layer manager.
     nsLayoutUtils::PaintFrame(nullptr, frame, aDirtyRegion, bgcolor,
                               nsDisplayListBuilderMode::PAINTING, flags);
+
+    // When recording/replaying, create a checkpoint after every paint. This
+    // can cause content JS to run, so reset |nojs|.
+    if (recordreplay::IsRecordingOrReplaying()) {
+      nojs.reset();
+      recordreplay::child::CreateCheckpoint();
+    }
+
     return;
   }
 
@@ -6409,7 +6468,7 @@ nsIPresShell::SetCapturingContent(nsIContent* aContent, uint8_t aFlags)
 }
 
 nsIContent*
-PresShell::GetCurrentEventContent()
+nsIPresShell::GetCurrentEventContent()
 {
   if (mCurrentEventContent &&
       mCurrentEventContent->GetComposedDoc() != mDocument) {
@@ -6420,7 +6479,7 @@ PresShell::GetCurrentEventContent()
 }
 
 nsIFrame*
-PresShell::GetCurrentEventFrame()
+nsIPresShell::GetCurrentEventFrame()
 {
   if (MOZ_UNLIKELY(mIsDestroying)) {
     return nullptr;
@@ -6440,7 +6499,7 @@ PresShell::GetCurrentEventFrame()
 }
 
 already_AddRefed<nsIContent>
-PresShell::GetEventTargetContent(WidgetEvent* aEvent)
+nsIPresShell::GetEventTargetContent(WidgetEvent* aEvent)
 {
   nsCOMPtr<nsIContent> content = GetCurrentEventContent();
   if (!content) {
@@ -6455,7 +6514,7 @@ PresShell::GetEventTargetContent(WidgetEvent* aEvent)
 }
 
 void
-PresShell::PushCurrentEventInfo(nsIFrame* aFrame, nsIContent* aContent)
+nsIPresShell::PushCurrentEventInfo(nsIFrame* aFrame, nsIContent* aContent)
 {
   if (mCurrentEventFrame || mCurrentEventContent) {
     mCurrentEventFrameStack.InsertElementAt(0, mCurrentEventFrame);
@@ -6466,7 +6525,7 @@ PresShell::PushCurrentEventInfo(nsIFrame* aFrame, nsIContent* aContent)
 }
 
 void
-PresShell::PopCurrentEventInfo()
+nsIPresShell::PopCurrentEventInfo()
 {
   mCurrentEventFrame = nullptr;
   mCurrentEventContent = nullptr;
@@ -6911,10 +6970,8 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     if (aEvent->mMessage == eKeyDown) {
       mNoDelayedKeyEvents = true;
     } else if (!mNoDelayedKeyEvents) {
-      DelayedEvent* event = new DelayedKeyEvent(aEvent->AsKeyboardEvent());
-      if (!mDelayedEvents.AppendElement(event)) {
-        delete event;
-      }
+      auto event = MakeUnique<DelayedKeyEvent>(aEvent->AsKeyboardEvent());
+      mDelayedEvents.AppendElement(std::move(event));
     }
     aEvent->mFlags.mIsSuppressedOrDelayed = true;
     return NS_OK;
@@ -7133,10 +7190,8 @@ PresShell::HandleEvent(nsIFrame* aFrame,
         // contextmenu is triggered after right mouseup on Windows and right
         // mousedown on other platforms.
         aEvent->mMessage == eContextMenu)) {
-        DelayedEvent* event = new DelayedMouseEvent(aEvent->AsMouseEvent());
-        if (!mDelayedEvents.AppendElement(event)) {
-          delete event;
-        }
+        auto event = MakeUnique<DelayedMouseEvent>(aEvent->AsMouseEvent());
+        mDelayedEvents.AppendElement(std::move(event));
       }
       return NS_OK;
     }
@@ -7872,76 +7927,6 @@ GetDocumentURIToCompareWithBlacklist(PresShell& aPresShell)
   }
   return nullptr;
 }
-
-static bool
-DispatchKeyPressEventsEvenForNonPrintableKeys(nsIURI* aURI)
-{
-  if (!aURI) {
-    return false;
-  }
-
-  nsAutoCString scheme;
-  aURI->GetScheme(scheme);
-  if (!scheme.EqualsLiteral("http") &&
-      !scheme.EqualsLiteral("https")) {
-    return false;
-  }
-
-  nsAutoCString host;
-  aURI->GetHost(host);
-  if (host.IsEmpty()) {
-    return false;
-  }
-
-  // The black list is comma separated domain list.  Each item may start with
-  // "*.".  If starts with "*.", it matches any sub-domains.
-  static const char* kPrefNameOfBlackList =
-    "dom.keyboardevent.keypress.hack.dispatch_non_printable_keys";
-
-  nsAutoCString blackList;
-  Preferences::GetCString(kPrefNameOfBlackList, blackList);
-  if (blackList.IsEmpty()) {
-    return false;
-  }
-
-  for (;;) {
-    int32_t index = blackList.Find(host, false);
-    if (index >= 0 &&
-        static_cast<uint32_t>(index) + host.Length() <= blackList.Length() &&
-        // If start of the black list or next to ","?
-        (!index || blackList[index - 1] == ',')) {
-      // If end of the black list or immediately before ","?
-      size_t indexAfterHost = index + host.Length();
-      if (indexAfterHost == blackList.Length() ||
-          blackList[indexAfterHost] == ',') {
-        return true;
-      }
-      // If next character is '/', we need to check the path too.
-      // We assume the path in blacklist means "/foo" + "*".
-      if (blackList[indexAfterHost] == '/') {
-        int32_t endOfPath = blackList.Find(",", false, indexAfterHost);
-        nsDependentCSubstring::size_type length =
-          endOfPath < 0 ? static_cast<nsDependentCSubstring::size_type>(-1) :
-                          endOfPath - indexAfterHost;
-        nsDependentCSubstring pathInBlackList(blackList,
-                                              indexAfterHost, length);
-        nsAutoCString filePath;
-        aURI->GetFilePath(filePath);
-        if (StringBeginsWith(filePath, pathInBlackList)) {
-          return true;
-        }
-      }
-    }
-    int32_t startIndexOfCurrentLevel = host[0] == '*' ? 1 : 0;
-    int32_t startIndexOfNextLevel =
-      host.Find(".", false, startIndexOfCurrentLevel + 1);
-    if (startIndexOfNextLevel <= 0) {
-      return false;
-    }
-    host = NS_LITERAL_CSTRING("*") +
-             nsDependentCSubstring(host, startIndexOfNextLevel);
-  }
-}
 #endif // #ifdef NIGHTLY_BUILD
 
 nsresult
@@ -7959,9 +7944,9 @@ PresShell::DispatchEventToDOM(WidgetEvent* aEvent,
              GetContentForEvent(aEvent, getter_AddRefs(targetContent));
     }
     if (NS_SUCCEEDED(rv) && targetContent) {
-      eventTarget = do_QueryInterface(targetContent);
+      eventTarget = targetContent;
     } else if (mDocument) {
-      eventTarget = do_QueryInterface(mDocument);
+      eventTarget = mDocument;
       // If we don't have any content, the callback wouldn't probably
       // do nothing.
       eventCBPtr = nullptr;
@@ -7971,8 +7956,7 @@ PresShell::DispatchEventToDOM(WidgetEvent* aEvent,
     if (aEvent->IsBlockedForFingerprintingResistance()) {
       aEvent->mFlags.mOnlySystemGroupDispatchInContent = true;
 #ifdef NIGHTLY_BUILD
-    } else if (aEvent->mMessage == eKeyPress &&
-               aEvent->mFlags.mOnlySystemGroupDispatchInContent) {
+    } else if (aEvent->mMessage == eKeyPress) {
       // If eKeyPress event is marked as not dispatched in the default event
       // group in web content, it's caused by non-printable key or key
       // combination.  In this case, UI Events declares that browsers
@@ -7980,14 +7964,25 @@ PresShell::DispatchEventToDOM(WidgetEvent* aEvent,
       // broken with this strict behavior due to historical issue.
       // Therefore, we need to keep dispatching keypress event for such keys
       // even with breaking the standard.
-      if (!mInitializedForceDispatchKeyPressEventsForNonPrintableKeys) {
-        mInitializedForceDispatchKeyPressEventsForNonPrintableKeys = true;
+      // Similarly, the other browsers sets non-zero value of keyCode or
+      // charCode of keypress event to the other.  Therefore, we should
+      // behave so, however, some web apps may be broken.  On such web apps,
+      // we should keep using legacy our behavior.
+      if (!mInitializedWithKeyPressEventDispatchingBlacklist) {
+        mInitializedWithKeyPressEventDispatchingBlacklist = true;
         nsCOMPtr<nsIURI> uri = GetDocumentURIToCompareWithBlacklist(*this);
         mForceDispatchKeyPressEventsForNonPrintableKeys =
-          DispatchKeyPressEventsEvenForNonPrintableKeys(uri);
+          nsContentUtils::IsURIInPrefList(uri,
+            "dom.keyboardevent.keypress.hack.dispatch_non_printable_keys");
+        mForceUseLegacyKeyCodeAndCharCodeValues =
+          nsContentUtils::IsURIInPrefList(uri,
+            "dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode");
       }
       if (mForceDispatchKeyPressEventsForNonPrintableKeys) {
         aEvent->mFlags.mOnlySystemGroupDispatchInContent = false;
+      }
+      if (mForceUseLegacyKeyCodeAndCharCodeValues) {
+        aEvent->AsKeyboardEvent()->mUseLegacyKeyCodeAndCharCodeValues = true;
       }
 #endif // #ifdef NIGHTLY_BUILD
     }
@@ -8733,7 +8728,7 @@ PresShell::FireOrClearDelayedEvents(bool aFireEvents)
     nsCOMPtr<nsIDocument> doc = mDocument;
     while (!mIsDestroying && mDelayedEvents.Length() &&
            !doc->EventHandlingSuppressed()) {
-      nsAutoPtr<DelayedEvent> ev(mDelayedEvents[0].forget());
+      UniquePtr<DelayedEvent> ev = std::move(mDelayedEvents[0]);
       mDelayedEvents.RemoveElementAt(0);
       if (ev->IsKeyPressEvent() && mIsLastKeyDownCanceled) {
         continue;
@@ -8934,8 +8929,12 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
   }
 
 #ifdef MOZ_GECKO_PROFILER
-  AutoProfilerTracing tracingLayoutFlush("Paint", "Reflow",
-                                          std::move(mReflowCause));
+  DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
+  AutoProfilerTracing tracingLayoutFlush("Paint",
+                                         "Reflow",
+                                         std::move(mReflowCause),
+                                         docShellId,
+                                         docShellHistoryId);
   mReflowCause = nullptr;
 #endif
 
@@ -9398,8 +9397,11 @@ nsIPresShell::AddRefreshObserver(nsARefreshObserver* aObserver,
                                  FlushType aFlushType)
 {
   nsPresContext* presContext = GetPresContext();
-  return presContext &&
-      presContext->RefreshDriver()->AddRefreshObserver(aObserver, aFlushType);
+  if (MOZ_UNLIKELY(!presContext)) {
+    return false;
+  }
+  presContext->RefreshDriver()->AddRefreshObserver(aObserver, aFlushType);
+  return true;
 }
 
 bool
@@ -10505,6 +10507,49 @@ PresShell::SetIsActive(bool aIsActive)
   return rv;
 }
 
+void
+PresShell::UpdateViewportOverridden(bool aAfterInitialization)
+{
+  // Determine if we require a MobileViewportManager.
+  bool needMVM = nsLayoutUtils::ShouldHandleMetaViewport(mDocument) ||
+                 gfxPrefs::APZAllowZooming();
+
+  if (needMVM == !!mMobileViewportManager) {
+    // Either we've need one and we've already got it, or we don't need one
+    // and don't have it. Either way, we're done.
+    return;
+  }
+
+  if (needMVM) {
+    if (mPresContext->IsRootContentDocument()) {
+      mMobileViewportManager = new MobileViewportManager(this, mDocument);
+
+      if (aAfterInitialization) {
+        // Setting the initial viewport will trigger a reflow.
+        mMobileViewportManager->SetInitialViewport();
+      }
+    }
+    return;
+  }
+
+  MOZ_ASSERT(mMobileViewportManager, "Shouldn't reach this without a "
+                                     "MobileViewportManager.");
+  mMobileViewportManager->Destroy();
+  mMobileViewportManager = nullptr;
+
+  if (aAfterInitialization) {
+    // Force a reflow to our correct size by going back to the docShell
+    // and asking it to reassert its size. This is necessary because
+    // everything underneath the docShell, like the ViewManager, has been
+    // altered by the MobileViewportManager in an irreversible way.
+    nsDocShell* docShell =
+      static_cast<nsDocShell*>(GetPresContext()->GetDocShell());
+    int32_t width, height;
+    docShell->GetSize(&width, &height);
+    docShell->SetSize(width, height, false);
+  }
+}
+
 /*
  * Determines the current image locking state. Called when one of the
  * dependent factors changes.
@@ -10610,6 +10655,16 @@ nsIPresShell::SetVisualViewportSize(nscoord aWidth, nscoord aHeight)
     }
     MarkFixedFramesForReflow(nsIPresShell::eResize);
   }
+}
+
+nsPoint
+nsIPresShell::GetVisualViewportOffsetRelativeToLayoutViewport() const
+{
+   nsPoint result;
+   if (nsIScrollableFrame* sf = GetRootScrollFrameAsScrollable()) {
+     result = GetVisualViewportOffset() - sf->GetScrollPosition();
+   }
+   return result;
 }
 
 void

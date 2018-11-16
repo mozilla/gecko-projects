@@ -114,8 +114,8 @@ const PROP_JSON_FIELDS = ["id", "syncGUID", "version", "type",
                           "softDisabled", "foreignInstall",
                           "strictCompatibility", "locales", "targetApplications",
                           "targetPlatforms", "signedState",
-                          "seen", "dependencies", "hasEmbeddedWebExtension",
-                          "userPermissions", "icons", "iconURL", "icon64URL",
+                          "seen", "dependencies",
+                          "userPermissions", "icons", "iconURL",
                           "blocklistState", "blocklistURL", "startupData",
                           "previewImage", "hidden", "installTelemetryInfo"];
 
@@ -301,7 +301,6 @@ class AddonInternal {
      *   add-ons is not installed and enabled.
      */
     this.dependencies = EMPTY_ARRAY;
-    this.hasEmbeddedWebExtension = false;
 
     if (addonData) {
       copyProperties(addonData, PROP_JSON_FIELDS, this);
@@ -347,7 +346,7 @@ class AddonInternal {
      */
     const locales = [].concat(...this.locales.map(loc => loc.locales));
 
-    let requestedLocales = Services.locale.getRequestedLocales();
+    let requestedLocales = Services.locale.requestedLocales;
 
     /**
      * If en-US is not in the list, add it as the last fallback.
@@ -534,13 +533,8 @@ class AddonInternal {
   }
 
   async updateBlocklistState(options = {}) {
-    let {applySoftBlock = true, oldAddon = null, updateDatabase = true} = options;
+    let {applySoftBlock = true, updateDatabase = true} = options;
 
-    if (oldAddon) {
-      this.userDisabled = oldAddon.userDisabled;
-      this.softDisabled = oldAddon.softDisabled;
-      this.blocklistState = oldAddon.blocklistState;
-    }
     let oldState = this.blocklistState;
 
     let entry = await this.findBlocklistEntry();
@@ -685,6 +679,14 @@ class AddonInternal {
 
     return permissions;
   }
+
+  propagateDisabledState(oldAddon) {
+    if (oldAddon) {
+      this.userDisabled = oldAddon.userDisabled;
+      this.softDisabled = oldAddon.softDisabled;
+      this.blocklistState = oldAddon.blocklistState;
+    }
+  }
 }
 
 /**
@@ -705,10 +707,6 @@ AddonWrapper = class {
 
   get seen() {
     return addonFor(this).seen;
-  }
-
-  get hasEmbeddedWebExtension() {
-    return addonFor(this).hasEmbeddedWebExtension;
   }
 
   markAsSeen() {
@@ -754,7 +752,7 @@ AddonWrapper = class {
 
     let addon = addonFor(this);
     if (addon.optionsURL) {
-      if (this.isWebExtension || this.hasEmbeddedWebExtension) {
+      if (this.isWebExtension) {
         // The internal object's optionsURL property comes from the addons
         // DB and should be a relative URL.  However, extensions with
         // options pages installed before bug 1293721 was fixed got absolute
@@ -804,10 +802,6 @@ AddonWrapper = class {
     return AddonManager.getPreferredIconURL(this, 48);
   }
 
-  get icon64URL() {
-    return AddonManager.getPreferredIconURL(this, 64);
-  }
-
   get icons() {
     let addon = addonFor(this);
     let icons = {};
@@ -828,10 +822,6 @@ AddonWrapper = class {
     if (canUseIconURLs && addon.iconURL) {
       icons[32] = addon.iconURL;
       icons[48] = addon.iconURL;
-    }
-
-    if (canUseIconURLs && addon.icon64URL) {
-      icons[64] = addon.icon64URL;
     }
 
     Object.freeze(icons);
@@ -2449,6 +2439,11 @@ this.XPIDatabaseReconcile = {
     // appDisabled depends on whether the add-on is a foreignInstall so update
     aNewAddon.appDisabled = !XPIDatabase.isUsableAddon(aNewAddon);
 
+    if (aLocation.isSystem) {
+      const pref = `extensions.${aId.split("@")[0]}.enabled`;
+      aNewAddon.userDisabled = !Services.prefs.getBoolPref(pref, true);
+    }
+
     if (isDetectedInstall && aNewAddon.foreignInstall) {
       // Add the installation source info for the sideloaded extension.
       aNewAddon.installTelemetryInfo = {
@@ -2737,7 +2732,7 @@ this.XPIDatabaseReconcile = {
       for (let [id, oldAddon] of dbAddons) {
         // Check if the add-on is still installed
         let xpiState = location.get(id);
-        if (xpiState) {
+        if (xpiState && !xpiState.missing) {
           let newAddon = this.updateExistingAddon(oldAddon, xpiState,
                                                   findManifest(location, id),
                                                   aUpdateCompatibility, aSchemaChange);
@@ -2755,7 +2750,7 @@ this.XPIDatabaseReconcile = {
       }
 
       for (let [id, xpiState] of location) {
-        if (locationAddons.has(id))
+        if (locationAddons.has(id) || xpiState.missing)
           continue;
         let newAddon = findManifest(location, id);
         let addon = this.addMetadata(location, id, xpiState, newAddon,

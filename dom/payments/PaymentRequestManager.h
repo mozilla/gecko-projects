@@ -69,16 +69,20 @@ public:
   nsresult ChangeShippingOption(PaymentRequest* aRequest,
                                 const nsAString& aOption);
 
+  nsresult ChangePayerDetail(PaymentRequest* aRequest,
+                             const nsAString& aPayerName,
+                             const nsAString& aPayerEmail,
+                             const nsAString& aPayerPhone);
+
+  bool IsRegionSupported(const nsAString& region) const;
+
   // Called to ensure that we don't "leak" aRequest if we shut down while it had
   // an active request to the parent.
   void RequestIPCOver(PaymentRequest* aRequest);
 
 private:
-  PaymentRequestManager() = default;
-  ~PaymentRequestManager()
-  {
-    MOZ_ASSERT(mActivePayments.Count() == 0);
-  }
+  PaymentRequestManager();
+  ~PaymentRequestManager();
 
   PaymentRequestChild* GetPaymentChild(PaymentRequest* aRequest);
 
@@ -90,7 +94,8 @@ private:
 
   // Strong pointer to requests with ongoing IPC messages to the parent.
   nsDataHashtable<nsRefPtrHashKey<PaymentRequest>, uint32_t> mActivePayments;
-  RefPtr<PaymentRequest> mShowingRequest;
+
+  nsTArray<nsString> mSupportedRegions;
 };
 
 } // end of namespace dom

@@ -6,7 +6,7 @@ use app_units::Au;
 use clap;
 use euclid::SideOffsets2D;
 use image;
-use image::GenericImage;
+use image::GenericImageView;
 use parse_function::parse_function;
 use premultiply::premultiply;
 use std::collections::HashMap;
@@ -72,12 +72,18 @@ fn broadcast<T: Clone>(base_vals: &[T], num_items: usize) -> Vec<T> {
     vals
 }
 
+enum CheckerboardKind {
+    BlackGrey,
+    BlackTransparent,
+}
+
 fn generate_checkerboard_image(
     border: u32,
     tile_x_size: u32,
     tile_y_size: u32,
     tile_x_count: u32,
     tile_y_count: u32,
+    kind: CheckerboardKind,
 ) -> (ImageDescriptor, ImageData) {
     let width = 2 * border + tile_x_size * tile_x_count;
     let height = 2 * border + tile_y_size * tile_y_count;
@@ -94,11 +100,22 @@ fn generate_checkerboard_image(
             } else {
                 let xon = ((x - border) % (2 * tile_x_size)) < tile_x_size;
                 let yon = ((y - border) % (2 * tile_y_size)) < tile_y_size;
-                let value = if xon ^ yon { 0xff } else { 0x7f };
-                pixels.push(value);
-                pixels.push(value);
-                pixels.push(value);
-                pixels.push(0xff);
+                match kind {
+                    CheckerboardKind::BlackGrey => {
+                        let value = if xon ^ yon { 0xff } else { 0x7f };
+                        pixels.push(value);
+                        pixels.push(value);
+                        pixels.push(value);
+                        pixels.push(0xff);
+                    }
+                    CheckerboardKind::BlackTransparent => {
+                        let value = if xon ^ yon { 0xff } else { 0x00 };
+                        pixels.push(value);
+                        pixels.push(value);
+                        pixels.push(value);
+                        pixels.push(value);
+                    }
+                }
             }
         }
     }
@@ -173,6 +190,7 @@ fn is_image_opaque(format: ImageFormat, bytes: &[u8]) -> bool {
         }
         ImageFormat::RG8 => true,
         ImageFormat::R8 => false,
+        ImageFormat::R16 => false,
         ImageFormat::RGBAF32 |
         ImageFormat::RGBAI32 => unreachable!(),
     }
@@ -404,10 +422,10 @@ impl YamlFrameReader {
     }
 
     pub fn add_or_get_image(
-            &mut self,
-            file: &Path,
-            tiling: Option<i64>,
-            wrench: &mut Wrench,
+        &mut self,
+        file: &Path,
+        tiling: Option<i64>,
+        wrench: &mut Wrench,
     ) -> (ImageKey, LayoutSize) {
         let key = (file.to_owned(), tiling);
         if let Some(k) = self.image_map.get(&key) {
@@ -475,7 +493,8 @@ impl YamlFrameReader {
                         args.get(4).unwrap_or(&"1000").parse::<u32>().unwrap(),
                         args.get(5).unwrap_or(&"1000").parse::<u32>().unwrap(),
                     ),
-                    ("checkerboard", args, _) => {
+                    (name @ "transparent-checkerboard", args, _) |
+                    (name @ "checkerboard", args, _) => {
                         let border = args.get(0).unwrap_or(&"4").parse::<u32>().unwrap();
 
                         let (x_size, y_size, x_count, y_count) = match args.len() {
@@ -496,12 +515,19 @@ impl YamlFrameReader {
                             }
                         };
 
+                        let kind = if name == "transparent-checkerboard" {
+                            CheckerboardKind::BlackTransparent
+                        } else {
+                            CheckerboardKind::BlackGrey
+                        };
+
                         generate_checkerboard_image(
                             border,
                             x_size,
                             y_size,
                             x_count,
                             y_count,
+                            kind,
                         )
                     }
                     _ => {
@@ -599,8 +625,9 @@ impl YamlFrameReader {
             }
         };
 
+        let tiling = item["tile-size"].as_i64();
         let (image_key, image_dims) =
-            self.add_or_get_image(&file, None, wrench);
+            self.add_or_get_image(&file, tiling, wrench);
         let image_rect = item["rect"]
             .as_rect()
             .unwrap_or(LayoutRect::new(LayoutPoint::zero(), image_dims));
@@ -870,12 +897,14 @@ impl YamlFrameReader {
                         color: colors[3],
                         style: styles[3],
                     };
+                    let do_aa = item["do_aa"].as_bool().unwrap_or(true);
                     Some(BorderDetails::Normal(NormalBorder {
                         top,
                         left,
                         bottom,
                         right,
                         radius,
+                        do_aa,
                     }))
                 }
                 "image" | "gradient" | "radial-gradient" => {
@@ -1015,7 +1044,8 @@ impl YamlFrameReader {
         item: &Yaml,
         info: &mut LayoutPrimitiveInfo,
     ) {
-        // TODO(gw): Support other YUV color spaces.
+        // TODO(gw): Support other YUV color depth and spaces.
+        let color_depth = ColorDepth::Color8;
         let color_space = YuvColorSpace::Rec709;
 
         let yuv_data = match item["format"].as_str().expect("no format supplied") {
@@ -1060,6 +1090,7 @@ impl YamlFrameReader {
         dl.push_yuv_image(
             &info,
             yuv_data,
+            color_depth,
             color_space,
             ImageRendering::Auto,
         );
@@ -1545,7 +1576,7 @@ impl YamlFrameReader {
 
         let reference_frame_id = dl.push_reference_frame(info, transform.into(), perspective);
 
-        let numeric_id = yaml["reference-frame-id"].as_i64();
+        let numeric_id = yaml["id"].as_i64();
         if let Some(numeric_id) = numeric_id {
             self.add_clip_id_mapping(numeric_id as u64, reference_frame_id);
         }
@@ -1601,9 +1632,9 @@ impl YamlFrameReader {
         let mix_blend_mode = yaml["mix-blend-mode"]
             .as_mix_blend_mode()
             .unwrap_or(MixBlendMode::Normal);
-        let glyph_raster_space = yaml["glyph-raster-space"]
-            .as_glyph_raster_space()
-            .unwrap_or(GlyphRasterSpace::Screen);
+        let raster_space = yaml["raster-space"]
+            .as_raster_space()
+            .unwrap_or(RasterSpace::Screen);
 
         if is_root {
             if let Some(size) = yaml["scroll-offset"].as_point() {
@@ -1623,8 +1654,8 @@ impl YamlFrameReader {
             clip_node_id,
             transform_style,
             mix_blend_mode,
-            filters,
-            glyph_raster_space,
+            &filters,
+            raster_space,
         );
 
         if !yaml["items"].is_badvalue() {

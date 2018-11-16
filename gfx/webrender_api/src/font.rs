@@ -80,7 +80,13 @@ impl FontKey {
     }
 }
 
-
+/// Container for the raw data describing a font. This might be a stream of
+/// bytes corresponding to a downloaded font, or a handle to a native font from
+/// the operating system.
+///
+/// Note that fonts need to be instantiated before being used, which involves
+/// assigning size and various other options. The word 'template' here is
+/// intended to distinguish this data from instance-specific data.
 #[derive(Clone)]
 pub enum FontTemplate {
     Raw(Arc<Vec<u8>>, u32),
@@ -211,15 +217,15 @@ impl SyntheticItalics {
         SyntheticItalics { angle: (degrees.max(-89.0).min(89.0) * Self::ANGLE_SCALE) as i16 }
     }
 
-    pub fn to_degrees(&self) -> f32 {
+    pub fn to_degrees(self) -> f32 {
         self.angle as f32 / Self::ANGLE_SCALE
     }
 
-    pub fn to_radians(&self) -> f32 {
+    pub fn to_radians(self) -> f32 {
         self.to_degrees().to_radians()
     }
 
-    pub fn to_skew(&self) -> f32 {
+    pub fn to_skew(self) -> f32 {
         self.to_radians().tan()
     }
 
@@ -231,7 +237,7 @@ impl SyntheticItalics {
         SyntheticItalics { angle: 0 }
     }
 
-    pub fn is_enabled(&self) -> bool {
+    pub fn is_enabled(self) -> bool {
         self.angle != 0
     }
 }
@@ -348,6 +354,10 @@ impl FontInstanceKey {
     }
 }
 
+/// Data corresponding to an instantiation of a font, with size and
+/// other options specified.
+///
+/// Note that the actual font is stored out-of-band in `FontTemplate`.
 #[derive(Clone)]
 pub struct FontInstanceData {
     pub font_key: FontKey,
@@ -366,3 +376,13 @@ pub struct GlyphInstance {
     pub point: LayoutPoint,
 }
 
+impl Eq for GlyphInstance {}
+
+impl Hash for GlyphInstance {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Note: this is inconsistent with the Eq impl for -0.0 (don't care).
+        self.index.hash(state);
+        self.point.x.to_bits().hash(state);
+        self.point.y.to_bits().hash(state);
+    }
+}

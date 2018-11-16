@@ -25,9 +25,7 @@ function tamper(inFilePath, outFilePath, modifications, newEntries) {
                    .createInstance(Ci.nsIZipReader);
     reader.open(inFilePath);
     try {
-      let entries = reader.findEntries("");
-      while (entries.hasMore()) {
-        let entryName = entries.getNext();
+      for (let entryName of reader.findEntries("")) {
         let inEntry = reader.getEntry(entryName);
         let entryInput = reader.getInputStream(entryName);
         try {
@@ -462,7 +460,7 @@ add_signature_test(PKCS7WithSHA256,
 
 var cosePolicies = [
   COSEAndPKCS7WithSHA1OrSHA256,
-  COSERequiredAndPKCS7WithSHA1OrSHA256
+  COSERequiredAndPKCS7WithSHA1OrSHA256,
 ];
 
 // PS256 is not yet supported.

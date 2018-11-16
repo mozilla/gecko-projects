@@ -84,7 +84,7 @@ ClassList.prototype = {
   },
   toString() {
     return this[_tokens].join(" ");
-  }
+  },
 };
 
 /**
@@ -163,12 +163,14 @@ exports.createSVGNode = createSVGNode;
  *   attributes.
  * - parent: if provided, the newly created element will be appended to this
  *   node.
+ * - text: if provided, set the text content of the element.
  */
 function createNode(win, options) {
   const type = options.nodeType || "div";
   const namespace = options.namespace || XHTML_NS;
+  const doc = win.document;
 
-  const node = win.document.createElementNS(namespace, type);
+  const node = doc.createElementNS(namespace, type);
 
   for (const name in options.attributes || {}) {
     let value = options.attributes[name];
@@ -180,6 +182,10 @@ function createNode(win, options) {
 
   if (options.parent) {
     options.parent.appendChild(node);
+  }
+
+  if (options.text) {
+    node.appendChild(doc.createTextNode(options.text));
   }
 
   return node;
@@ -442,7 +448,7 @@ CanvasFrameAnonymousContentHelper.prototype = {
           };
         }
         return obj[name];
-      }
+      },
     });
 
     // Start at originalTarget, bubble through ancestors and call handlers when
@@ -496,9 +502,9 @@ CanvasFrameAnonymousContentHelper.prototype = {
         return this.removeEventListenerForElement(id, type, handler);
       },
       computedStyle: {
-        getPropertyValue: property => this.getComputedStylePropertyValue(id, property)
+        getPropertyValue: property => this.getComputedStylePropertyValue(id, property),
       },
-      classList
+      classList,
     };
 
     this.elements.set(id, element);
@@ -554,7 +560,7 @@ CanvasFrameAnonymousContentHelper.prototype = {
     value += `position:absolute; width:${width}px;height:${height}px; overflow:hidden`;
 
     this.setAttributeForElement(id, "style", value);
-  }
+  },
 };
 exports.CanvasFrameAnonymousContentHelper = CanvasFrameAnonymousContentHelper;
 

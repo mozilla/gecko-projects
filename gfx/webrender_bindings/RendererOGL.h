@@ -8,6 +8,7 @@
 #define MOZILLA_LAYERS_RENDEREROGL_H
 
 #include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/gfx/Point.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/webrender/WebRenderTypes.h"
 #include "mozilla/webrender/webrender_ffi.h"
@@ -56,10 +57,13 @@ public:
   void Update();
 
   /// This can be called on the render thread only.
-  bool UpdateAndRender(bool aReadback);
+  bool UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize,
+                       const Maybe<Range<uint8_t>>& aReadbackBuffer,
+                       bool aHadSlowFrame,
+                       RendererStats* aOutStats);
 
   /// This can be called on the render thread only.
-  bool RenderToTarget(gfx::DrawTarget& aTarget);
+  void WaitForGPU();
 
   /// This can be called on the render thread only.
   void SetProfilerEnabled(bool aEnabled);
@@ -83,13 +87,18 @@ public:
   /// This can be called on the render thread only.
   bool Resume();
 
+  /// This can be called on the render thread only.
+  void CheckGraphicsResetStatus();
+
   layers::SyncObjectHost* GetSyncObject() const;
 
   layers::CompositorBridgeParent* GetCompositorBridge() { return mBridge; }
 
-  wr::WrPipelineInfo FlushPipelineInfo();
+  RefPtr<WebRenderPipelineInfo> FlushPipelineInfo();
 
   RenderTextureHost* GetRenderTexture(wr::WrExternalImageId aExternalImageId);
+
+  void AccumulateMemoryReport(MemoryReport* aReport);
 
   wr::Renderer* GetRenderer() { return mRenderer; }
 

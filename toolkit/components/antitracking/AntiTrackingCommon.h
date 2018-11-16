@@ -11,8 +11,11 @@
 #include "mozilla/MozPromise.h"
 #include "mozilla/RefPtr.h"
 
+#define USER_INTERACTION_PERM "storageAccessAPI"
+
 class nsIChannel;
 class nsIHttpChannel;
+class nsIPermission;
 class nsIPrincipal;
 class nsIURI;
 class nsPIDOMWindowInner;
@@ -91,9 +94,20 @@ public:
   //   example.net.
   typedef MozPromise<bool, bool, false> StorageAccessGrantPromise;
   static MOZ_MUST_USE RefPtr<StorageAccessGrantPromise>
-  AddFirstPartyStorageAccessGrantedFor(const nsAString& aOrigin,
+  AddFirstPartyStorageAccessGrantedFor(nsIPrincipal* aPrincipal,
                                        nsPIDOMWindowInner* aParentWindow,
                                        StorageAccessGrantedReason aReason);
+
+  // Returns true if the permission passed in is a storage access permission
+  // for the passed in principal argument.
+  static bool
+  IsStorageAccessPermission(nsIPermission* aPermission, nsIPrincipal* aPrincipal);
+
+  static void
+  StoreUserInteractionFor(nsIPrincipal* aPrincipal);
+
+  static bool
+  HasUserInteraction(nsIPrincipal* aPrincipal);
 
   // For IPC only.
   static void
@@ -102,10 +116,18 @@ public:
                                                              const nsCString& aGrantedOrigin,
                                                              FirstPartyStorageAccessGrantedForOriginResolver&& aResolver);
 
+  enum ContentBlockingAllowListPurpose {
+    eStorageChecks,
+    eTrackingProtection,
+    eTrackingAnnotations,
+  };
 
   // Check whether a top window URI is on the content blocking allow list.
   static nsresult
-  IsOnContentBlockingAllowList(nsIURI* aTopWinURI, bool& aIsAllowListed);
+  IsOnContentBlockingAllowList(nsIURI* aTopWinURI,
+                               bool aIsPrivateBrowsing,
+                               ContentBlockingAllowListPurpose aPurpose,
+                               bool& aIsAllowListed);
 
   // This method can be called on the parent process or on the content process.
   // The notification is propagated to the child channel if aChannel is a parent

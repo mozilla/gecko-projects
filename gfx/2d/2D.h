@@ -31,6 +31,7 @@
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/ThreadSafeWeakPtr.h"
+#include "mozilla/Atomics.h"
 
 #include "mozilla/DebugOnly.h"
 
@@ -62,6 +63,7 @@ struct ID2D1Device;
 struct IDWriteFactory;
 struct IDWriteRenderingParams;
 struct IDWriteFontFace;
+struct IDWriteFontCollection;
 
 class GrContext;
 class SkCanvas;
@@ -420,7 +422,7 @@ public:
   void AddUserData(UserDataKey *key, void *userData, void (*destroy)(void*)) {
     mUserData.Add(key, userData, destroy);
   }
-  void *GetUserData(UserDataKey *key) {
+  void *GetUserData(UserDataKey *key) const {
     return mUserData.Get(key);
   }
   void RemoveUserData(UserDataKey *key) {
@@ -445,14 +447,14 @@ class DataSourceSurface : public SourceSurface
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurface, override)
   DataSourceSurface()
-    : mIsMapped(false)
+    : mMapCount(0)
   {
   }
 
 #ifdef DEBUG
   virtual ~DataSourceSurface()
   {
-    MOZ_ASSERT(!mIsMapped, "Someone forgot to call Unmap()");
+    MOZ_ASSERT(mMapCount == 0);
   }
 #endif
 
@@ -557,19 +559,31 @@ public:
 
   /**
    * The caller is responsible for ensuring aMappedSurface is not null.
+  // Althought Map (and Moz2D in general) isn't normally threadsafe,
+  // we want to allow it for SourceSurfaceRawData since it should
+  // always be fine (for reading at least).
+  //
+  // This is the same as the base class implementation except using
+  // mMapCount instead of mIsMapped since that breaks for multithread.
+  //
+  // Once mfbt supports Monitors we should implement proper read/write
+  // locking to prevent write races.
    */
   virtual bool Map(MapType, MappedSurface *aMappedSurface)
   {
     aMappedSurface->mData = GetData();
     aMappedSurface->mStride = Stride();
-    mIsMapped = !!aMappedSurface->mData;
-    return mIsMapped;
+    bool success = !!aMappedSurface->mData;
+    if (success) {
+      mMapCount++;
+    }
+    return success;
   }
 
   virtual void Unmap()
   {
-    MOZ_ASSERT(mIsMapped);
-    mIsMapped = false;
+    mMapCount--;
+    MOZ_ASSERT(mMapCount >= 0);
   }
 
   /**
@@ -587,7 +601,8 @@ public:
   virtual void AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
                                       size_t& aHeapSizeOut,
                                       size_t& aNonHeapSizeOut,
-                                      size_t& aExtHandlesOut) const
+                                      size_t& aExtHandlesOut,
+                                      uint64_t& aExtIdOut) const
   {
   }
 
@@ -613,7 +628,7 @@ public:
   virtual void Invalidate(const IntRect& aDirtyRect) { }
 
 protected:
-  bool mIsMapped;
+  Atomic<int32_t> mMapCount;
 };
 
 /** This is an abstract object that accepts path segments. */
@@ -1036,6 +1051,12 @@ public:
                            const DrawSurfaceOptions &aSurfOptions = DrawSurfaceOptions(),
                            const DrawOptions &aOptions = DrawOptions()) = 0;
 
+  virtual void DrawDependentSurface(uint64_t aId,
+                                    const Rect &aDest,
+                                    const DrawSurfaceOptions &aSurfOptions = DrawSurfaceOptions(),
+                                    const DrawOptions &aOptions = DrawOptions())
+  { MOZ_CRASH("GFX: DrawDependentSurface"); }
+
   /**
    * Draw the output of a FilterNode to the DrawTarget.
    *
@@ -1353,6 +1374,18 @@ public:
    */
   virtual already_AddRefed<DrawTarget>
     CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const = 0;
+
+  /**
+   * Returns false if CreateSimilarDrawTarget would return null with the same
+   * parameters. May return true even in cases where CreateSimilarDrawTarget
+   * return null (i.e. this function returning false has meaning, but returning
+   * true doesn't guarantee anything).
+   */
+  virtual bool
+    CanCreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const
+  {
+    return true;
+  }
 
   /**
    * Create a draw target optimized for drawing a shadow.
@@ -1840,9 +1873,9 @@ public:
   static RefPtr<ID2D1Device> GetD2D1Device(uint32_t* aOutSeqNo = nullptr);
   static bool HasD2D1Device();
   static RefPtr<IDWriteFactory> GetDWriteFactory();
-  static bool SetDWriteFactory(IDWriteFactory *aFactory);
   static RefPtr<IDWriteFactory> EnsureDWriteFactory();
   static bool SupportsD2D1();
+  static RefPtr<IDWriteFontCollection> GetDWriteSystemFonts(bool aUpdate = false);
 
   static uint64_t GetD2DVRAMUsageDrawTarget();
   static uint64_t GetD2DVRAMUsageSourceSurface();
@@ -1866,6 +1899,7 @@ private:
   static StaticRefPtr<ID3D11Device> mD3D11Device;
   static StaticRefPtr<IDWriteFactory> mDWriteFactory;
   static bool mDWriteFactoryInitialized;
+  static StaticRefPtr<IDWriteFontCollection> mDWriteSystemFonts;
 
 protected:
   // This guards access to the singleton devices above, as well as the

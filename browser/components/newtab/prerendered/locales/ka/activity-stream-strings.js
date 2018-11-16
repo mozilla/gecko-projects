@@ -74,10 +74,10 @@ window.gActivityStreamStrings = {
   "topsites_form_image_validation": "სურათი ვერ ჩაიტვირთა. სცადეთ სხვა URL-ბმული.",
   "pocket_read_more": "პოპულარული თემები:",
   "pocket_read_even_more": "მეტი სიახლის ნახვა",
-  "pocket_more_reccommendations": "More Recommendations",
-  "pocket_learn_more": "Learn More",
-  "pocket_cta_button": "Get Pocket",
-  "pocket_cta_text": "Save the stories you love in Pocket, and fuel your mind with fascinating reads.",
+  "pocket_more_reccommendations": "მეტი შემოთავაზებები",
+  "pocket_how_it_works": "როგორ მუშაობს",
+  "pocket_cta_button": "გამოიყენეთ Pocket",
+  "pocket_cta_text": "გადაინახეთ სასურველი შიგთავსი Pocket-ში და მიეცით გონებას საკვები, შთამბეჭდავი საკითხავი მასალის სახით.",
   "highlights_empty_state": "დაიწყეთ გვერდების დათვალიერება და აქ გამოჩნდება თქვენთვის სასურველი სტატიები, ვიდეოები და ბოლოს მონახულებული ან ჩანიშნული საიტები.",
   "topstories_empty_state": "უკვე ყველაფერი წაკითხული გაქვთ. {provider}-იდან ახალი რჩეული სტატიების მისაღებად, მოგვიანებით შემოიარეთ. თუ ვერ ითმენთ, აირჩიეთ რომელიმე მოთხოვნადი თემა, ახალი საინტერესო სტატიების მოსაძიებლად.",
   "manual_migration_explanation2": "გადმოიტანეთ სხვა ბრაუზერებიდან თქვენი სანიშნები, ისტორია და პაროლები Firefox-ში.",
@@ -106,5 +106,7 @@ window.gActivityStreamStrings = {
   "firstrun_terms_of_service": "გამოყენების პირობებსა",
   "firstrun_privacy_notice": "პირადი მონაცემების დაცვის განაცხადს",
   "firstrun_continue_to_login": "გაგრძელება",
-  "firstrun_skip_login": "გამოტოვება"
+  "firstrun_skip_login": "გამოტოვება",
+  "context_menu_title": "მენიუს გახსნა",
+  "pocket_learn_more": "იხილეთ ვრცლად"
 };

@@ -23,6 +23,7 @@ module.exports = {
     "do_load_child_test_harness": false,
     "do_load_manifest": false,
     "do_load_module": false,
+    "do_note_exception": false,
     "do_parse_document": false,
     "do_report_unexpected_exception": false,
     "do_send_remote_message": false,
@@ -61,7 +62,7 @@ module.exports = {
     // Firefox specific function.
     // eslint-disable-next-line max-len
     // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/uneval
-    "uneval": false
+    "uneval": false,
   },
 
   "overrides": [{
@@ -73,9 +74,9 @@ module.exports = {
     "rules": {
       "no-unused-vars": ["error", {
         "args": "none",
-        "vars": "local"
-      }]
-    }
+        "vars": "local",
+      }],
+    },
   }],
 
   rules: {
@@ -83,6 +84,6 @@ module.exports = {
     "mozilla/mark-test-function-used": "error",
     "mozilla/no-arbitrary-setTimeout": "error",
     "mozilla/no-useless-run-test": "error",
-    "no-shadow": "error"
-  }
+    "no-shadow": "error",
+  },
 };

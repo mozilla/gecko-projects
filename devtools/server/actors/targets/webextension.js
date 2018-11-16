@@ -75,10 +75,16 @@ const webExtensionTargetPrototype = extend({}, parentProcessTargetPrototype);
  *        the addonId of the target WebExtension.
  */
 webExtensionTargetPrototype.initialize = function(conn, chromeGlobal, prefix, addonId) {
-  parentProcessTargetPrototype.initialize.call(this, conn);
+  this.addonId = addonId;
+  this.chromeGlobal = chromeGlobal;
+
+  // Try to discovery an existent extension page to attach (which will provide the initial
+  // URL shown in the window tittle when the addon debugger is opened).
+  const extensionWindow = this._searchForExtensionWindow();
+
+  parentProcessTargetPrototype.initialize.call(this, conn, extensionWindow);
   this._chromeGlobal = chromeGlobal;
   this._prefix = prefix;
-  this.id = addonId;
 
   // Redefine the messageManager getter to return the chromeGlobal
   // as the messageManager for this actor (which is the browser XUL
@@ -89,7 +95,7 @@ webExtensionTargetPrototype.initialize = function(conn, chromeGlobal, prefix, ad
     configurable: true,
     get: () => {
       return this._chromeGlobal;
-    }
+    },
   });
 
   // Bind the _allowSource helper to this, it is used in the
@@ -102,7 +108,7 @@ webExtensionTargetPrototype.initialize = function(conn, chromeGlobal, prefix, ad
   // Set the consoleAPIListener filtering options
   // (retrieved and used in the related webconsole child actor).
   this.consoleAPIListenerOptions = {
-    addonId: this.id,
+    addonId: this.addonId,
   };
 
   this.aps = Cc["@mozilla.org/addons/policy-service;1"]
@@ -115,14 +121,6 @@ webExtensionTargetPrototype.initialize = function(conn, chromeGlobal, prefix, ad
     },
     shouldAddNewGlobalAsDebuggee: this._shouldAddNewGlobalAsDebuggee.bind(this),
   });
-
-  // Try to discovery an existent extension page to attach (which will provide the initial
-  // URL shown in the window tittle when the addon debugger is opened).
-  const extensionWindow = this._searchForExtensionWindow();
-
-  if (extensionWindow) {
-    this._setWindow(extensionWindow);
-  }
 };
 
 // NOTE: This is needed to catch in the webextension webconsole all the
@@ -141,44 +139,36 @@ webExtensionTargetPrototype.exit = function() {
     chromeGlobal.removeMessageListener("debug:webext_parent_exit", this._onParentExit);
 
     chromeGlobal.sendAsyncMessage("debug:webext_child_exit", {
-      actor: this.actorID
+      actor: this.actorID,
     });
   }
 
   this.addon = null;
-  this.id = null;
+  this.addonId = null;
 
   return ParentProcessTargetActor.prototype.exit.apply(this);
 };
 
 // Private helpers.
 
-webExtensionTargetPrototype._createFallbackWindow = function() {
+webExtensionTargetPrototype._searchFallbackWindow = function() {
   if (this.fallbackWindow) {
     // Skip if there is already an existent fallback window.
-    return;
+    return this.fallbackWindow;
   }
 
-  // Create an empty hidden window as a fallback (e.g. the background page could be
-  // not defined for the target add-on or not yet when the actor instance has been
-  // created).
-  this.fallbackWebNav = Services.appShell.createWindowlessBrowser(true);
+  // Set and initialized the fallbackWindow (which initially is a empty
+  // about:blank browser), this window is related to a XUL browser element
+  // specifically created for the devtools server and it is never used
+  // or navigated anywhere else.
+  this.fallbackWindow = this.chromeGlobal.content;
+  this.fallbackWindow.location = "data:text/html,<h1>" + FALLBACK_DOC_MESSAGE;
 
-  // Save the reference to the fallback DOMWindow.
-  this.fallbackWindow = this.fallbackWebNav.document.defaultView;
-
-  // Insert the fallback doc message.
-  this.fallbackWindow.document.body.innerText = FALLBACK_DOC_MESSAGE;
+  return this.fallbackWindow;
 };
 
 webExtensionTargetPrototype._destroyFallbackWindow = function() {
-  if (this.fallbackWebNav) {
-    // Explicitly close the fallback windowless browser to prevent it to leak
-    // (and to prevent it to freeze devtools xpcshell tests).
-    this.fallbackWebNav.loadURI("about:blank", 0, null, null, null);
-    this.fallbackWebNav.close();
-
-    this.fallbackWebNav = null;
+  if (this.fallbackWindow) {
     this.fallbackWindow = null;
   }
 };
@@ -189,12 +179,12 @@ webExtensionTargetPrototype._destroyFallbackWindow = function() {
 // is set later using _onNewExtensionWindow.
 webExtensionTargetPrototype._searchForExtensionWindow = function() {
   for (const window of Services.ww.getWindowEnumerator(null)) {
-    if (window.document.nodePrincipal.addonId == this.id) {
+    if (window.document.nodePrincipal.addonId == this.addonId) {
       return window;
     }
   }
 
-  return undefined;
+  return this._searchFallbackWindow();
 };
 
 // Customized ParentProcessTargetActor/BrowsingContextTargetActor hooks.
@@ -212,9 +202,7 @@ webExtensionTargetPrototype._onDocShellDestroy = function(docShell) {
   // If the destroyed docShell was the current docShell and the actor is
   // currently attached, switch to the fallback window
   if (this.attached && docShell == this.docShell) {
-    // Creates a fallback window if it doesn't exist yet.
-    this._createFallbackWindow();
-    this._changeTopLevelDocument(this.fallbackWindow);
+    this._changeTopLevelDocument(this._searchForExtensionWindow());
   }
 };
 
@@ -229,16 +217,9 @@ webExtensionTargetPrototype._attach = function() {
   // ParentProcessTargetActor.onAttach, or the BrowsingContextTargetActor will not be
   // subscribed to the child doc shell updates.
 
-  if (!this.window || this.window.document.nodePrincipal.addonId !== this.id) {
-    // Discovery an existent extension page to attach.
-    const extensionWindow = this._searchForExtensionWindow();
-
-    if (!extensionWindow) {
-      this._createFallbackWindow();
-      this._setWindow(this.fallbackWindow);
-    } else {
-      this._setWindow(extensionWindow);
-    }
+  if (!this.window || this.window.document.nodePrincipal.addonId !== this.addonId) {
+    // Discovery an existent extension page (or fallback window) to attach.
+    this._setWindow(this._searchForExtensionWindow());
   }
 
   // Call ParentProcessTargetActor's _attach to listen for any new/destroyed chrome
@@ -286,13 +267,13 @@ webExtensionTargetPrototype._docShellsToWindows = function(docshells) {
                     .filter(windowDetails => {
                       // Filter the docShells based on the addon id of the window or
                       // its sameType top level frame.
-                      return windowDetails.addonID === this.id ||
-                             windowDetails.sameTypeRootAddonID === this.id;
+                      return windowDetails.addonID === this.addonId ||
+                             windowDetails.sameTypeRootAddonID === this.addonId;
                     });
 };
 
 webExtensionTargetPrototype.isExtensionWindow = function(window) {
-  return window.document.nodePrincipal.addonId == this.id;
+  return window.document.nodePrincipal.addonId == this.addonId;
 };
 
 webExtensionTargetPrototype.isExtensionWindowDescendent = function(window) {
@@ -341,7 +322,7 @@ webExtensionTargetPrototype._allowSource = function(source) {
   try {
     const addonID = this.aps.extensionURIToAddonId(uri);
 
-    return addonID == this.id;
+    return addonID == this.addonId;
   } catch (err) {
     // extensionURIToAddonId raises an exception on non-extension URLs.
     return false;
@@ -384,7 +365,7 @@ webExtensionTargetPrototype._shouldAddNewGlobalAsDebuggee = function(newGlobal) 
     // This will fail for non-Sandbox objects, hence the try-catch block.
     const metadata = Cu.getSandboxMetadata(global);
     if (metadata) {
-      return metadata.addonID === this.id;
+      return metadata.addonID === this.addonId;
     }
   } catch (e) {
     // Unable to retrieve the sandbox metadata.

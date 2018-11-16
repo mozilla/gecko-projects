@@ -7,7 +7,6 @@
 #ifndef GFX_WEBRENDERTYPES_H
 #define GFX_WEBRENDERTYPES_H
 
-#include "FrameMetrics.h"
 #include "ImageTypes.h"
 #include "mozilla/webrender/webrender_ffi.h"
 #include "mozilla/Maybe.h"
@@ -15,6 +14,7 @@
 #include "mozilla/gfx/Types.h"
 #include "mozilla/gfx/Tools.h"
 #include "mozilla/gfx/Rect.h"
+#include "mozilla/layers/LayersTypes.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
 #include "mozilla/Variant.h"
@@ -43,6 +43,7 @@ typedef wr::WrEpoch Epoch;
 typedef wr::WrExternalImageId ExternalImageId;
 typedef wr::WrDebugFlags DebugFlags;
 
+typedef mozilla::Maybe<mozilla::wr::IdNamespace> MaybeIdNamespace;
 typedef mozilla::Maybe<mozilla::wr::WrImageMask> MaybeImageMask;
 typedef Maybe<ExternalImageId> MaybeExternalImageId;
 
@@ -73,6 +74,8 @@ SurfaceFormatToImageFormat(gfx::SurfaceFormat aFormat) {
       return Some(wr::ImageFormat::BGRA8);
     case gfx::SurfaceFormat::A8:
       return Some(wr::ImageFormat::R8);
+    case gfx::SurfaceFormat::A16:
+      return Some(wr::ImageFormat::R16);
     case gfx::SurfaceFormat::R8G8:
       return Some(wr::ImageFormat::RG8);
     case gfx::SurfaceFormat::UNKNOWN:
@@ -88,6 +91,8 @@ ImageFormatToSurfaceFormat(ImageFormat aFormat) {
       return gfx::SurfaceFormat::B8G8R8A8;
     case ImageFormat::R8:
       return gfx::SurfaceFormat::A8;
+    case ImageFormat::R16:
+      return gfx::SurfaceFormat::A16;
     default:
       return gfx::SurfaceFormat::UNKNOWN;
   }
@@ -101,7 +106,7 @@ struct ImageDescriptor: public wr::WrImageDescriptor {
     width = 0;
     height = 0;
     stride = 0;
-    is_opaque = false;
+    opacity = OpacityType::HasAlphaChannel;
   }
 
   ImageDescriptor(const gfx::IntSize& aSize, gfx::SurfaceFormat aFormat)
@@ -110,7 +115,8 @@ struct ImageDescriptor: public wr::WrImageDescriptor {
     width = aSize.width;
     height = aSize.height;
     stride = 0;
-    is_opaque = gfx::IsOpaqueFormat(aFormat);
+    opacity = gfx::IsOpaque(aFormat) ? OpacityType::Opaque
+                                     : OpacityType::HasAlphaChannel;
   }
 
   ImageDescriptor(const gfx::IntSize& aSize, uint32_t aByteStride, gfx::SurfaceFormat aFormat)
@@ -119,16 +125,20 @@ struct ImageDescriptor: public wr::WrImageDescriptor {
     width = aSize.width;
     height = aSize.height;
     stride = aByteStride;
-    is_opaque = gfx::IsOpaqueFormat(aFormat);
+    opacity = gfx::IsOpaque(aFormat) ? OpacityType::Opaque
+                                     : OpacityType::HasAlphaChannel;
   }
 
-  ImageDescriptor(const gfx::IntSize& aSize, uint32_t aByteStride, gfx::SurfaceFormat aFormat, bool opaque)
+  ImageDescriptor(const gfx::IntSize& aSize,
+                  uint32_t aByteStride,
+                  gfx::SurfaceFormat aFormat,
+                  OpacityType aOpacity)
   {
     format = wr::SurfaceFormatToImageFormat(aFormat).value();
     width = aSize.width;
     height = aSize.height;
     stride = aByteStride;
-    is_opaque = opaque;
+    opacity = aOpacity;
   }
 
 };
@@ -287,6 +297,13 @@ static inline wr::LayoutPoint ToLayoutPoint(const mozilla::LayoutDevicePoint& po
 static inline wr::LayoutPoint ToLayoutPoint(const mozilla::LayoutDeviceIntPoint& point)
 {
   return ToLayoutPoint(LayoutDevicePoint(point));
+}
+
+static inline wr::LayoutPoint ToRoundedLayoutPoint(const mozilla::LayoutDevicePoint& point)
+{
+  mozilla::LayoutDevicePoint rounded = point;
+  rounded.Round();
+  return ToLayoutPoint(rounded);
 }
 
 static inline wr::WorldPoint ToWorldPoint(const mozilla::ScreenPoint& point)
@@ -484,6 +501,31 @@ static inline wr::BorderRadius ToBorderRadius(const mozilla::LayoutDeviceSize& t
   br.bottom_left = ToLayoutSize(bottomLeft);
   br.bottom_right = ToLayoutSize(bottomRight);
   return br;
+}
+
+static inline wr::ComplexClipRegion ToComplexClipRegion(
+  const nsRect& aRect,
+  const nscoord* aRadii,
+  int32_t aAppUnitsPerDevPixel)
+{
+  wr::ComplexClipRegion ret;
+  ret.rect = ToRoundedLayoutRect(
+    LayoutDeviceRect::FromAppUnits(aRect, aAppUnitsPerDevPixel));
+  ret.radii = ToBorderRadius(
+    LayoutDeviceSize::FromAppUnits(
+      nsSize(aRadii[eCornerTopLeftX], aRadii[eCornerTopLeftY]),
+      aAppUnitsPerDevPixel),
+    LayoutDeviceSize::FromAppUnits(
+      nsSize(aRadii[eCornerTopRightX], aRadii[eCornerTopRightY]),
+      aAppUnitsPerDevPixel),
+    LayoutDeviceSize::FromAppUnits(
+      nsSize(aRadii[eCornerBottomLeftX], aRadii[eCornerBottomLeftY]),
+      aAppUnitsPerDevPixel),
+    LayoutDeviceSize::FromAppUnits(
+      nsSize(aRadii[eCornerBottomRightX], aRadii[eCornerBottomRightY]),
+      aAppUnitsPerDevPixel));
+  ret.mode = ClipMode::Clip;
+  return ret;
 }
 
 static inline wr::LayoutSideOffsets ToBorderWidths(float top, float right, float bottom, float left)
@@ -837,6 +879,22 @@ static inline wr::WrYuvColorSpace ToWrYuvColorSpace(YUVColorSpace aYUVColorSpace
       MOZ_ASSERT_UNREACHABLE("Tried to convert invalid YUVColorSpace.");
   }
   return wr::WrYuvColorSpace::Rec601;
+}
+
+static inline wr::WrColorDepth ToWrColorDepth(gfx::ColorDepth aColorDepth) {
+  switch (aColorDepth) {
+    case gfx::ColorDepth::COLOR_8:
+      return wr::WrColorDepth::Color8;
+    case gfx::ColorDepth::COLOR_10:
+      return wr::WrColorDepth::Color10;
+    case gfx::ColorDepth::COLOR_12:
+      return wr::WrColorDepth::Color12;
+    case gfx::ColorDepth::COLOR_16:
+      return wr::WrColorDepth::Color16;
+    default:
+      MOZ_ASSERT_UNREACHABLE("Tried to convert invalid color depth value.");
+  }
+  return wr::WrColorDepth::Color8;
 }
 
 static inline wr::SyntheticItalics DegreesToSyntheticItalics(float aDegrees) {

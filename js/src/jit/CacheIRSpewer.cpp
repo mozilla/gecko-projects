@@ -155,8 +155,31 @@ CacheIRSpewer::valueProperty(const char* name, const Value& v)
             j.endStringProperty();
         }
     } else if (v.isObject()) {
-        j.formatProperty("value", "%p (shape: %p)", &v.toObject(),
-                         v.toObject().maybeShape());
+        JSObject& object = v.toObject();
+        j.formatProperty("value", "%p (shape: %p)", &object, object.maybeShape());
+        if (NativeObject* nobj = object.isNative() ? &object.as<NativeObject>() : nullptr) {
+            j.beginListProperty("flags");
+            {
+                if (nobj->isIndexed()) {
+                    j.value("indexed");
+                }
+                if (nobj->inDictionaryMode()) {
+                    j.value("dictionaryMode");
+                }
+            }
+            j.endList();
+            if (nobj->isIndexed()) {
+                j.beginObjectProperty("indexed");
+                {
+                    j.property("denseInitializedLength", nobj->getDenseInitializedLength());
+                    j.property("denseCapacity", nobj->getDenseCapacity());
+                    j.property("denseElementsAreSealed", nobj->denseElementsAreSealed());
+                    j.property("denseElementsAreCopyOnWrite", nobj->denseElementsAreCopyOnWrite());
+                    j.property("denseElementsAreFrozen", nobj->denseElementsAreFrozen());
+                }
+                j.endObject();
+            }
+        }
     }
 
     j.endObject();

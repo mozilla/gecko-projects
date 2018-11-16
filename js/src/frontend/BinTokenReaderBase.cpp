@@ -30,10 +30,8 @@ BinTokenReaderBase::updateLatestKnownGood()
 ErrorResult<JS::Error&>
 BinTokenReaderBase::raiseError(const char* description)
 {
-    MOZ_ASSERT(!cx_->isExceptionPending());
-    TokenPos pos = this->pos();
-    JS_ReportErrorASCII(cx_, "BinAST parsing error: %s at offsets %u => %u",
-                        description, pos.begin, pos.end);
+    MOZ_ASSERT(!hasRaisedError());
+    errorReporter_->reportErrorNoOffset(JSMSG_BINAST, description);
     return cx_->alreadyReportedError();
 }
 
@@ -63,13 +61,17 @@ BinTokenReaderBase::raiseInvalidField(const char* kind, const BinField field)
     return raiseError(out.string());
 }
 
-#ifdef DEBUG
 bool
 BinTokenReaderBase::hasRaisedError() const
 {
+    if (cx_->helperThread()) {
+        // When performing off-main-thread parsing, we don't set a pending
+        // exception but instead add a pending compile error.
+        return cx_->isCompileErrorPending();
+    }
+
     return cx_->isExceptionPending();
 }
-#endif
 
 size_t
 BinTokenReaderBase::offset() const
@@ -93,10 +95,18 @@ BinTokenReaderBase::pos(size_t start)
     return pos;
 }
 
+void
+BinTokenReaderBase::seek(size_t offset)
+{
+    MOZ_ASSERT(start_ + offset >= start_ &&
+               start_ + offset < stop_);
+    current_ = start_ + offset;
+}
+
 JS::Result<Ok>
 BinTokenReaderBase::readBuf(uint8_t* bytes, uint32_t len)
 {
-    MOZ_ASSERT(!cx_->isExceptionPending());
+    MOZ_ASSERT(!hasRaisedError());
     MOZ_ASSERT(len > 0);
 
     if (stop_ < current_ + len) {

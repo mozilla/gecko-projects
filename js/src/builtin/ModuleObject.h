@@ -12,6 +12,7 @@
 #include "jsapi.h"
 
 #include "builtin/SelfHostingDefines.h"
+#include "frontend/EitherParser.h"
 #include "gc/Zone.h"
 #include "js/GCVector.h"
 #include "js/Id.h"
@@ -29,7 +30,6 @@ namespace frontend {
 class BinaryNode;
 class ListNode;
 class ParseNode;
-class TokenStreamAnyChars;
 } /* namespace frontend */
 
 typedef Rooted<ModuleObject*> RootedModuleObject;
@@ -260,6 +260,7 @@ class ModuleObject : public NativeObject
         StatusSlot,
         EvaluationErrorSlot,
         MetaObjectSlot,
+        ScriptSourceObjectSlot,
         RequestedModulesSlot,
         ImportEntriesSlot,
         LocalExportEntriesSlot,
@@ -301,6 +302,7 @@ class ModuleObject : public NativeObject
 #endif
     void fixEnvironmentsAfterCompartmentMerge();
 
+    JSScript* maybeScript() const;
     JSScript* script() const;
     Scope* enclosingScope() const;
     ModuleEnvironmentObject& initialEnvironment() const;
@@ -310,6 +312,7 @@ class ModuleObject : public NativeObject
     bool hadEvaluationError() const;
     Value evaluationError() const;
     JSObject* metaObject() const;
+    ScriptSourceObject* scriptSourceObject() const;
     ArrayObject& requestedModules() const;
     ArrayObject& importEntries() const;
     ArrayObject& localExportEntries() const;
@@ -344,7 +347,6 @@ class ModuleObject : public NativeObject
     static void trace(JSTracer* trc, JSObject* obj);
     static void finalize(js::FreeOp* fop, JSObject* obj);
 
-    bool hasScript() const;
     bool hasImportBindings() const;
     FunctionDeclarationVector* functionDeclarations();
 };
@@ -353,9 +355,14 @@ class ModuleObject : public NativeObject
 // creating a ModuleObject.
 class MOZ_STACK_CLASS ModuleBuilder
 {
-  public:
     explicit ModuleBuilder(JSContext* cx, HandleModuleObject module,
-                           const frontend::TokenStreamAnyChars& tokenStream);
+                           const frontend::EitherParser& eitherParser);
+
+  public:
+    template<class Parser>
+    explicit ModuleBuilder(JSContext* cx, HandleModuleObject module, Parser* parser)
+      : ModuleBuilder(cx, module, frontend::EitherParser(parser))
+    {}
 
     bool processImport(frontend::BinaryNode* importNode);
     bool processExport(frontend::ParseNode* exportNode);
@@ -382,7 +389,7 @@ class MOZ_STACK_CLASS ModuleBuilder
 
     JSContext* cx_;
     RootedModuleObject module_;
-    const frontend::TokenStreamAnyChars& tokenStream_;
+    frontend::EitherParser eitherParser_;
     RootedAtomSet requestedModuleSpecifiers_;
     RootedRequestedModuleVector requestedModules_;
     RootedImportEntryMap importEntries_;
@@ -415,7 +422,17 @@ class MOZ_STACK_CLASS ModuleBuilder
 };
 
 JSObject*
-GetOrCreateModuleMetaObject(JSContext* cx, HandleScript script);
+GetOrCreateModuleMetaObject(JSContext* cx, HandleObject module);
+
+JSObject*
+CallModuleResolveHook(JSContext* cx, HandleValue referencingPrivate, HandleString specifier);
+
+JSObject*
+StartDynamicModuleImport(JSContext* cx, HandleValue referencingPrivate, HandleValue specifier);
+
+bool
+FinishDynamicModuleImport(JSContext* cx, HandleValue referencingPrivate, HandleString specifier,
+                          HandleObject promise);
 
 } // namespace js
 

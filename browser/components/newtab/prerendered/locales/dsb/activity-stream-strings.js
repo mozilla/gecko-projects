@@ -74,10 +74,10 @@ window.gActivityStreamStrings = {
   "topsites_form_image_validation": "Wobraz njedajo se zacytaś. Wopytajśo drugi URL.",
   "pocket_read_more": "Woblubowane temy:",
   "pocket_read_even_more": "Dalšne powěźeńki se woglědaś",
-  "pocket_more_reccommendations": "More Recommendations",
-  "pocket_learn_more": "Learn More",
-  "pocket_cta_button": "Get Pocket",
-  "pocket_cta_text": "Save the stories you love in Pocket, and fuel your mind with fascinating reads.",
+  "pocket_more_reccommendations": "Dalšne pórucenja",
+  "pocket_how_it_works": "Kak funkcioněrujo",
+  "pocket_cta_button": "Pocket wobstaraś",
+  "pocket_cta_text": "Składujśo tšojeńka, kótarež se wam spódobuju, w Pocket a žywśo swój duch z fasciněrujucymi cytańkami.",
   "highlights_empty_state": "Zachopśo pśeglědowaś, a pokažomy někotare wjelicne nastawki, wideo a druge boki, kótarež sćo se njedawno woglědał abo how ako cytańske znamjenja składował.",
   "topstories_empty_state": "To jo nachylu wšykno. Wrośćo se pózdźej wjelicnych tšojeńkow dla wót {provider}. Njamóžośo cakaś? Wubjeŕśo woblubowanu temu, aby dalšne wjelicne tšojeńka we webje namakał.",
   "manual_migration_explanation2": "Wopytajśo Firefox z cytanskimi znamjenjami, historiju a gronidłami z drugego wobglědowaka.",
@@ -106,5 +106,7 @@ window.gActivityStreamStrings = {
   "firstrun_terms_of_service": "Wužywańske wuměnjenja",
   "firstrun_privacy_notice": "Powěźeńka priwatnosći",
   "firstrun_continue_to_login": "Dalej",
-  "firstrun_skip_login": "Toś ten kšac pśeskócyś"
+  "firstrun_skip_login": "Toś ten kšac pśeskócyś",
+  "context_menu_title": "Meni wócyniś",
+  "pocket_learn_more": "Dalšne informacije"
 };

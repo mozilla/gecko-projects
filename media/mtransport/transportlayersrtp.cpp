@@ -56,40 +56,6 @@ TransportLayerSrtp::Setup()
   return true;
 }
 
-static bool IsRtp(const unsigned char* data, size_t len)
-{
-  if (len < 2)
-    return false;
-
-  // Check if this is a RTCP packet. Logic based on the types listed in
-  // media/webrtc/trunk/src/modules/rtp_rtcp/source/rtp_utility.cc
-
-  // Anything outside this range is RTP.
-  if ((data[1] < 192) || (data[1] > 207))
-    return true;
-
-  if (data[1] == 192) // FIR
-    return false;
-
-  if (data[1] == 193) // NACK, but could also be RTP. This makes us sad
-    return true;      // but it's how webrtc.org behaves.
-
-  if (data[1] == 194)
-    return true;
-
-  if (data[1] == 195) // IJ.
-    return false;
-
-  if ((data[1] > 195) && (data[1] < 200)) // the > 195 is redundant
-    return true;
-
-  if ((data[1] >= 200) && (data[1] <= 207)) // SR, RR, SDES, BYE,
-    return false;                           // APP, RTPFB, PSFB, XR
-
-  MOZ_ASSERT(false); // Not reached, belt and suspenders.
-  return true;
-}
-
 TransportResult
 TransportLayerSrtp::SendPacket(MediaPacket& packet)
 {
@@ -104,12 +70,12 @@ TransportLayerSrtp::SendPacket(MediaPacket& packet)
   nsresult res;
   switch (packet.type()) {
     case MediaPacket::RTP:
-      MOZ_MTLOG(ML_INFO, "Attempting to protect RTP...");
       res = mSendSrtp->ProtectRtp(packet.data(), packet.len(), packet.capacity(), &out_len);
+      packet.SetType(MediaPacket::SRTP);
       break;
     case MediaPacket::RTCP:
-      MOZ_MTLOG(ML_INFO, "Attempting to protect RTCP...");
       res = mSendSrtp->ProtectRtcp(packet.data(), packet.len(), packet.capacity(), &out_len);
+      packet.SetType(MediaPacket::SRTCP);
       break;
     default:
       MOZ_CRASH("SRTP layer asked to send packet that is neither RTP or RTCP");
@@ -117,7 +83,9 @@ TransportLayerSrtp::SendPacket(MediaPacket& packet)
 
   if (NS_FAILED(res)) {
     MOZ_MTLOG(ML_ERROR,
-                "Error protecting RTP/RTCP len=" << packet.len()
+                "Error protecting "
+                << (packet.type() == MediaPacket::RTP ? "RTP" : "RTCP")
+                << " len=" << packet.len()
                 << "[" << std::hex
                 << packet.data()[0] << " "
                 << packet.data()[1] << " "
@@ -227,12 +195,8 @@ TransportLayerSrtp::PacketReceived(TransportLayer* layer, MediaPacket& packet)
     return;
   }
 
-  if (packet.len() < 4) {
-    return;
-  }
-
-  // not RTP/RTCP per RFC 7983
-  if (packet.data()[0] <= 127 || packet.data()[0] >= 192) {
+  if (packet.type() != MediaPacket::SRTP &&
+      packet.type() != MediaPacket::SRTCP) {
     return;
   }
 
@@ -241,13 +205,11 @@ TransportLayerSrtp::PacketReceived(TransportLayer* layer, MediaPacket& packet)
   int outLen;
   nsresult res;
 
-  if (IsRtp(packet.data(), packet.len())) {
+  if (packet.type() == MediaPacket::SRTP) {
     packet.SetType(MediaPacket::RTP);
-    MOZ_MTLOG(ML_INFO, "Attempting to unprotect RTP...");
     res = mRecvSrtp->UnprotectRtp(packet.data(), packet.len(), packet.len(), &outLen);
   } else {
     packet.SetType(MediaPacket::RTCP);
-    MOZ_MTLOG(ML_INFO, "Attempting to unprotect RTCP...");
     res = mRecvSrtp->UnprotectRtcp(packet.data(), packet.len(), packet.len(), &outLen);
   }
 
@@ -258,7 +220,9 @@ TransportLayerSrtp::PacketReceived(TransportLayer* layer, MediaPacket& packet)
     // TODO: What do we do wrt packet dumping here? Maybe signal an empty
     // packet? Signal the still-encrypted packet?
     MOZ_MTLOG(ML_ERROR,
-                "Error unprotecting RTP/RTCP len=" << packet.len()
+                "Error unprotecting "
+                << (packet.type() == MediaPacket::RTP ? "RTP" : "RTCP")
+                << " len=" << packet.len()
                 << "[" << std::hex
                 << packet.data()[0] << " "
                 << packet.data()[1] << " "

@@ -7,9 +7,12 @@
 #ifndef MOZILLA_GFX_RENDERCOMPOSITOR_ANGLE_H
 #define MOZILLA_GFX_RENDERCOMPOSITOR_ANGLE_H
 
+#include <queue>
+
 #include "GLTypes.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/webrender/RenderCompositor.h"
+#include "mozilla/webrender/RenderThread.h"
 
 struct ID3D11DeviceContext;
 struct ID3D11Device;
@@ -35,14 +38,19 @@ public:
 
   bool BeginFrame() override;
   void EndFrame() override;
+  void WaitForGPU() override;
   void Pause() override;
   bool Resume() override;
 
-  gl::GLContext* gl() const override { return mGL; }
+  gl::GLContext* gl() const override { return RenderThread::Get()->SharedGL(); }
+
+  bool MakeCurrent() override;
 
   bool UseANGLE() const override { return true; }
 
   bool UseDComp() const override { return !!mCompositionDevice; }
+
+  bool UseTripleBuffering() const { return mUseTripleBuffering; }
 
   LayoutDeviceIntSize GetBufferSize() override;
 
@@ -54,10 +62,12 @@ protected:
   ID3D11Device* GetDeviceOfEGLDisplay();
   void CreateSwapChainForDCompIfPossible(IDXGIFactory2* aDXGIFactory2);
   bool SutdownEGLLibraryIfNecessary();
+  RefPtr<ID3D11Query> GetD3D11Query();
 
-  RefPtr<gl::GLContext> mGL;
   EGLConfig mEGLConfig;
   EGLSurface mEGLSurface;
+
+  int mUseTripleBuffering;
 
   RefPtr<ID3D11Device> mDevice;
   RefPtr<ID3D11DeviceContext> mCtx;
@@ -67,8 +77,8 @@ protected:
   RefPtr<IDCompositionTarget> mCompositionTarget;
   RefPtr<IDCompositionVisual> mVisual;
 
-  RefPtr<ID3D11Query> mWaitForPresentQuery;
-  RefPtr<ID3D11Query> mNextWaitForPresentQuery;
+  std::queue<RefPtr<ID3D11Query>> mWaitForPresentQueries;
+  RefPtr<ID3D11Query> mRecycledQuery;
 
   Maybe<LayoutDeviceIntSize> mBufferSize;
 };

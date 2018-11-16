@@ -12,6 +12,7 @@
 #include "Layers.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/net/HttpBaseChannel.h"
 
 using namespace mozilla;
 
@@ -43,6 +44,12 @@ ProfilerMarkerPayload::StreamCommonProps(const char* aMarkerType,
   StreamType(aMarkerType, aWriter);
   WriteTime(aWriter, aProcessStartTime, mStartTime, "startTime");
   WriteTime(aWriter, aProcessStartTime, mEndTime, "endTime");
+  if (mDocShellId) {
+    aWriter.StringProperty("docShellId", nsIDToCString(*mDocShellId).get());
+  }
+  if (mDocShellHistoryId) {
+    aWriter.DoubleProperty("docshellHistoryId", mDocShellHistoryId.ref());
+  }
   if (mStack) {
     aWriter.StartObjectProperty("stack");
     {
@@ -112,7 +119,6 @@ DOMEventMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
 
   WriteTime(aWriter, aProcessStartTime, mTimeStamp, "timeStamp");
   aWriter.StringProperty("eventType", NS_ConvertUTF16toUTF8(mEventType).get());
-  aWriter.IntProperty("phase", mPhase);
 }
 
 void
@@ -136,8 +142,6 @@ VsyncMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
                                   UniqueStacks& aUniqueStacks)
 {
   StreamType("VsyncTimestamp", aWriter);
-  aWriter.DoubleProperty("vsync",
-                         (mVsyncTimestamp - aProcessStartTime).ToMilliseconds());
 }
 
 static const char *GetNetworkState(NetworkLoadType aType)
@@ -153,6 +157,25 @@ static const char *GetNetworkState(NetworkLoadType aType)
   return "";
 }
 
+static const char *GetCacheState(mozilla::net::CacheDisposition aCacheDisposition)
+{
+  switch (aCacheDisposition) {
+    case mozilla::net::kCacheUnresolved:
+      return "Unresolved";
+    case mozilla::net::kCacheHit:
+      return "Hit";
+    case mozilla::net::kCacheHitViaReval:
+      return "HitViaReval";
+    case mozilla::net::kCacheMissedViaReval:
+      return "MissedViaReval";
+    case mozilla::net::kCacheMissed:
+      return "Missed";
+    case mozilla::net::kCacheUnknown:
+    default:
+      return nullptr;
+  }
+  return nullptr;
+}
 
 void
 NetworkMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
@@ -162,8 +185,12 @@ NetworkMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
   StreamCommonProps("Network", aWriter, aProcessStartTime, aUniqueStacks);
   aWriter.IntProperty("id", mID);
   const char *typeString = GetNetworkState(mType);
+  const char *cacheString = GetCacheState(mCacheDisposition);
   // want to use aUniqueStacks.mUniqueStrings->WriteElement(aWriter, typeString);
   aWriter.StringProperty("status", typeString);
+  if (cacheString) {
+    aWriter.StringProperty("cache", cacheString);
+  }
   aWriter.IntProperty("pri", mPri);
   if (mCount > 0) {
     aWriter.IntProperty("count", mCount);
@@ -264,4 +291,13 @@ StyleMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
   aWriter.IntProperty("elementsMatched", mStats.mElementsMatched);
   aWriter.IntProperty("stylesShared", mStats.mStylesShared);
   aWriter.IntProperty("stylesReused", mStats.mStylesReused);
+}
+
+void
+LongTaskMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
+                                     const TimeStamp& aProcessStartTime,
+                                     UniqueStacks& aUniqueStacks)
+{
+  StreamCommonProps("MainThreadLongTask", aWriter, aProcessStartTime, aUniqueStacks);
+  aWriter.StringProperty("category", "LongTask");
 }

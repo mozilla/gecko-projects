@@ -39,16 +39,18 @@ class TraceableFifo : public js::Fifo<T, MinInlineCapacity, AllocPolicy>
     explicit TraceableFifo(AllocPolicy alloc = AllocPolicy()) : Base(alloc) {}
 
     TraceableFifo(TraceableFifo&& rhs) : Base(std::move(rhs)) { }
-    TraceableFifo& operator=(TraceableFifo&& rhs) { return Base::operator=(std::move(rhs)); }
+    TraceableFifo& operator=(TraceableFifo&& rhs) = default;
 
     TraceableFifo(const TraceableFifo&) = delete;
     TraceableFifo& operator=(const TraceableFifo&) = delete;
 
     void trace(JSTracer* trc) {
-        for (size_t i = 0; i < this->front_.length(); ++i)
+        for (size_t i = 0; i < this->front_.length(); ++i) {
             JS::GCPolicy<T>::trace(trc, &this->front_[i], "fifo element");
-        for (size_t i = 0; i < this->rear_.length(); ++i)
+        }
+        for (size_t i = 0; i < this->rear_.length(); ++i) {
             JS::GCPolicy<T>::trace(trc, &this->rear_[i], "fifo element");
+        }
     }
 };
 

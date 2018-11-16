@@ -111,7 +111,7 @@ WrapperFactory::WaiveXray(JSContext* cx, JSObject* objArg)
 WrapperFactory::AllowWaiver(JS::Compartment* target, JS::Compartment* origin)
 {
     return CompartmentPrivate::Get(target)->allowWaivers &&
-           AccessCheck::subsumes(target, origin);
+           CompartmentOriginInfo::Subsumes(target, origin);
 }
 
 /* static */ bool
@@ -147,12 +147,12 @@ ShouldWaiveXray(JSContext* cx, JSObject* originalObj)
     bool sameOrigin = false;
     if (OriginAttributes::IsRestrictOpenerAccessForFPI()) {
         sameOrigin =
-            AccessCheck::subsumesConsideringDomain(oldCompartment, newCompartment) &&
-            AccessCheck::subsumesConsideringDomain(newCompartment, oldCompartment);
+            CompartmentOriginInfo::Subsumes(oldCompartment, newCompartment) &&
+            CompartmentOriginInfo::Subsumes(newCompartment, oldCompartment);
     } else {
         sameOrigin =
-            AccessCheck::subsumesConsideringDomainIgnoringFPD(oldCompartment, newCompartment) &&
-            AccessCheck::subsumesConsideringDomainIgnoringFPD(newCompartment, oldCompartment);
+            CompartmentOriginInfo::SubsumesIgnoringFPD(oldCompartment, newCompartment) &&
+            CompartmentOriginInfo::SubsumesIgnoringFPD(newCompartment, oldCompartment);
     }
     return sameOrigin;
 }
@@ -311,8 +311,8 @@ WrapperFactory::PrepareForWrapping(JSContext* cx, HandleObject scope,
             // the correct (opaque) wrapper for the object below given the security
             // characteristics of the two compartments.
             if (!AccessCheck::isChrome(js::GetObjectCompartment(wrapScope)) &&
-                 AccessCheck::subsumes(js::GetObjectCompartment(wrapScope),
-                                       js::GetObjectCompartment(obj)))
+                 CompartmentOriginInfo::Subsumes(js::GetObjectCompartment(wrapScope),
+                                                 js::GetObjectCompartment(obj)))
             {
                 retObj.set(waive ? WaiveXray(cx, obj) : obj);
                 return;

@@ -96,7 +96,8 @@ WebRenderBridgeChild::BeginTransaction()
 }
 
 void
-WebRenderBridgeChild::UpdateResources(wr::IpcResourceUpdateQueue& aResources)
+WebRenderBridgeChild::UpdateResources(wr::IpcResourceUpdateQueue& aResources,
+                                      bool aScheduleComposite /* = false */)
 {
   if (!IPCOpen()) {
     aResources.Clear();
@@ -112,7 +113,8 @@ WebRenderBridgeChild::UpdateResources(wr::IpcResourceUpdateQueue& aResources)
   nsTArray<ipc::Shmem> largeShmems;
   aResources.Flush(resourceUpdates, smallShmems, largeShmems);
 
-  this->SendUpdateResources(resourceUpdates, std::move(smallShmems), largeShmems);
+  this->SendUpdateResources(resourceUpdates, smallShmems,
+                            largeShmems, aScheduleComposite);
 }
 
 void
@@ -122,6 +124,7 @@ WebRenderBridgeChild::EndTransaction(const wr::LayoutSize& aContentSize,
                                      const gfx::IntSize& aSize,
                                      TransactionId aTransactionId,
                                      const WebRenderScrollData& aScrollData,
+                                     bool aContainsSVGGroup,
                                      const mozilla::TimeStamp& aRefreshStartTime,
                                      const mozilla::TimeStamp& aTxnStartTime)
 {
@@ -145,8 +148,8 @@ WebRenderBridgeChild::EndTransaction(const wr::LayoutSize& aContentSize,
   this->SendSetDisplayList(aSize, mParentCommands, mDestroyedActors,
                            GetFwdTransactionId(), aTransactionId,
                            aContentSize, dlData, aDL.dl_desc, aScrollData,
-                           std::move(resourceUpdates), std::move(smallShmems), largeShmems,
-                           mIdNamespace, aRefreshStartTime, aTxnStartTime, fwdTime);
+                           resourceUpdates, smallShmems, largeShmems,
+                           mIdNamespace, aContainsSVGGroup, aRefreshStartTime, aTxnStartTime, fwdTime);
 
   mParentCommands.Clear();
   mDestroyedActors.Clear();
@@ -156,6 +159,7 @@ WebRenderBridgeChild::EndTransaction(const wr::LayoutSize& aContentSize,
 void
 WebRenderBridgeChild::EndEmptyTransaction(const FocusTarget& aFocusTarget,
                                           const ScrollUpdatesMap& aUpdates,
+                                          Maybe<wr::IpcResourceUpdateQueue>& aResources,
                                           uint32_t aPaintSequenceNumber,
                                           TransactionId aTransactionId,
                                           const mozilla::TimeStamp& aRefreshStartTime,
@@ -169,9 +173,18 @@ WebRenderBridgeChild::EndEmptyTransaction(const FocusTarget& aFocusTarget,
   fwdTime = TimeStamp::Now();
 #endif
 
+  nsTArray<OpUpdateResource> resourceUpdates;
+  nsTArray<RefCountedShmem> smallShmems;
+  nsTArray<ipc::Shmem> largeShmems;
+  if (aResources) {
+    aResources->Flush(resourceUpdates, smallShmems, largeShmems);
+    aResources.reset();
+  }
+
   this->SendEmptyTransaction(aFocusTarget, aUpdates, aPaintSequenceNumber,
                              mParentCommands, mDestroyedActors,
                              GetFwdTransactionId(), aTransactionId,
+                             resourceUpdates, smallShmems, largeShmems,
                              mIdNamespace, aRefreshStartTime, aTxnStartTime, fwdTime);
   mParentCommands.Clear();
   mDestroyedActors.Clear();
@@ -219,13 +232,6 @@ WebRenderBridgeChild::GetNextExternalImageId()
   wr::MaybeExternalImageId id = GetCompositorBridgeChild()->GetNextExternalImageId();
   MOZ_RELEASE_ASSERT(id.isSome());
   return id.value();
-}
-
-void
-WebRenderBridgeChild::DeallocExternalImageId(const wr::ExternalImageId& aImageId)
-{
-  AddWebRenderParentCommand(
-    OpRemoveExternalImageId(aImageId));
 }
 
 void

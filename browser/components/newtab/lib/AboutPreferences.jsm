@@ -19,21 +19,21 @@ const PREFS_BEFORE_SECTIONS = [
     id: "search",
     pref: {
       feed: "showSearch",
-      titleString: "prefs_search_header"
+      titleString: "prefs_search_header",
     },
-    icon: "chrome://browser/skin/search-glass.svg"
+    icon: "chrome://browser/skin/search-glass.svg",
   },
   {
     id: "topsites",
     pref: {
       feed: "feeds.topsites",
       titleString: "settings_pane_topsites_header",
-      descString: "prefs_topsites_description"
+      descString: "prefs_topsites_description",
     },
     icon: "topsites",
     maxRows: 4,
-    rowsPref: "topSitesRows"
-  }
+    rowsPref: "topSitesRows",
+  },
 ];
 const PREFS_AFTER_SECTIONS = [
   {
@@ -41,10 +41,10 @@ const PREFS_AFTER_SECTIONS = [
     pref: {
       feed: "feeds.snippets",
       titleString: "settings_pane_snippets_header",
-      descString: "prefs_snippets_description"
+      descString: "prefs_snippets_description",
     },
-    icon: "info"
-  }
+    icon: "info",
+  },
 ];
 
 // This CSS is added to the whole about:preferences page
@@ -163,7 +163,8 @@ this.AboutPreferences = class AboutPreferences {
     contentsGroup.id = "homeContentsGroup";
     contentsGroup.setAttribute("data-subcategory", "contents");
     const caption = createAppend("caption", contentsGroup);
-    caption.setAttribute("label", formatString("prefs_home_header"));
+    const captionLabel = createAppend("label", caption);
+    captionLabel.setAttribute("value", formatString("prefs_home_header"));
     const description = createAppend("description", contentsGroup);
     description.textContent = formatString("prefs_home_description");
 
@@ -175,13 +176,13 @@ this.AboutPreferences = class AboutPreferences {
         icon = "webextension",
         maxRows,
         rowsPref,
-        shouldHidePref
+        shouldHidePref,
       } = sectionData;
       const {
         feed: name,
         titleString,
         descString,
-        nestedPrefs = []
+        nestedPrefs = [],
       } = prefData || {};
 
       // Don't show any sections that we don't want to expose in preferences UI

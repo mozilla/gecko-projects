@@ -41,9 +41,7 @@ struct TableRowGroupReflowInput {
                         nsTableFrame*            aTableFrame)
       : reflowInput(aReflowInput)
       , tableFrame(aTableFrame)
-      , availSize(aReflowInput.GetWritingMode(),
-                  aReflowInput.AvailableISize(),
-                  aReflowInput.AvailableBSize())
+      , availSize(aReflowInput.AvailableSize())
       , bCoord(0)
   {
   }
@@ -1632,7 +1630,7 @@ nsTableRowGroupFrame::HasInternalBreakBefore() const
  nsIFrame* firstChild = mFrames.FirstChild();
   if (!firstChild)
     return false;
-  return firstChild->StyleDisplay()->mBreakBefore;
+  return firstChild->StyleDisplay()->BreakBefore();
 }
 
 /** find page break after the last row **/
@@ -1642,7 +1640,7 @@ nsTableRowGroupFrame::HasInternalBreakAfter() const
   nsIFrame* lastChild = mFrames.LastChild();
   if (!lastChild)
     return false;
-  return lastChild->StyleDisplay()->mBreakAfter;
+  return lastChild->StyleDisplay()->BreakAfter();
 }
 /* ----- global methods ----- */
 

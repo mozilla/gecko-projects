@@ -12,7 +12,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   FormHistory: "resource://gre/modules/FormHistory.jsm",
-  TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
   ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
 });
 
@@ -683,12 +682,23 @@ async function sanitizeOnShutdown(progress) {
   // the permission explicitly set to ACCEPT_SESSION need to be wiped.  There
   // are also other ways to think about and accomplish this, but this is what
   // the logic below currently does!
-  await sanitizeSessionPrincipals();
+  if (Services.prefs.getIntPref(PREF_COOKIE_LIFETIME,
+                                Ci.nsICookieService.ACCEPT_NORMALLY) == Ci.nsICookieService.ACCEPT_SESSION) {
+    let principals = await getAllPrincipals();
+    await maybeSanitizeSessionPrincipals(principals);
+  }
+
 
   // Let's see if we have to forget some particular site.
   for (let permission of Services.perms.enumerator) {
     if (permission.type == "cookie" && permission.capability == Ci.nsICookiePermission.ACCESS_SESSION) {
-      await sanitizeSessionPrincipal(permission.principal);
+      // We use just the URI here, because permissions ignore OriginAttributes.
+      let principals = await getAllPrincipals(permission.principal.URI);
+      let promises = [];
+      principals.forEach(principal => {
+        promises.push(sanitizeSessionPrincipal(principal));
+      });
+      await Promise.all(promises);
     }
   }
 
@@ -705,12 +715,10 @@ async function sanitizeOnShutdown(progress) {
   }
 }
 
-async function sanitizeSessionPrincipals() {
-  if (Services.prefs.getIntPref(PREF_COOKIE_LIFETIME,
-                                Ci.nsICookieService.ACCEPT_NORMALLY) != Ci.nsICookieService.ACCEPT_SESSION) {
-    return;
-  }
-
+// Retrieve the list of nsIPrincipals with site data. If matchUri is not null,
+// it returns only the principals matching that URI, ignoring the
+// OriginAttributes.
+async function getAllPrincipals(matchUri = null) {
   let principals = await new Promise(resolve => {
     quotaManagerService.getUsage(request => {
       if (request.resultCode != Cr.NS_OK) {
@@ -724,7 +732,8 @@ async function sanitizeSessionPrincipals() {
       for (let item of request.result) {
         let principal = Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(item.origin);
         let uri = principal.URI;
-        if (uri.scheme == "http" || uri.scheme == "https" || uri.scheme == "file") {
+        if ((!matchUri || Services.eTLD.hasRootDomain(matchUri.host, uri.host)) &&
+            (uri.scheme == "http" || uri.scheme == "https" || uri.scheme == "file")) {
           list.push(principal);
         }
       }
@@ -735,33 +744,80 @@ async function sanitizeSessionPrincipals() {
   let serviceWorkers = serviceWorkerManager.getAllRegistrations();
   for (let i = 0; i < serviceWorkers.length; i++) {
     let sw = serviceWorkers.queryElementAt(i, Ci.nsIServiceWorkerRegistrationInfo);
-    principals.push(sw.principal);
-  }
-
-  await maybeSanitizeSessionPrincipals(principals);
-}
-
-// This method receives a list of principals and it checks if some of them need
-// to be sanitize.
-async function maybeSanitizeSessionPrincipals(principals) {
-  let promises = [];
-
-  for (let i = 0; i < principals.length; ++i) {
-    let p = Services.perms.testPermissionFromPrincipal(principals[i], "cookie");
-    if (p != Ci.nsICookiePermission.ACCESS_ALLOW &&
-        p != Ci.nsICookiePermission.ACCESS_ALLOW_FIRST_PARTY_ONLY &&
-        p != Ci.nsICookiePermission.ACCESS_LIMIT_THIRD_PARTY) {
-      promises.push(sanitizeSessionPrincipal(principals[i]));
+    let uri = sw.principal.URI;
+    if (!matchUri || Services.eTLD.hasRootDomain(matchUri.host, uri.host)) {
+      principals.push(sw.principal);
     }
   }
 
+  // Let's take the list of unique hosts+OA from cookies.
+  let enumerator = Services.cookies.enumerator;
+  let hosts = new Set();
+  for (let cookie of enumerator) {
+    if (!matchUri || Services.eTLD.hasRootDomain(matchUri.host, cookie.rawHost)) {
+      hosts.add(cookie.rawHost + ChromeUtils.originAttributesToSuffix(cookie.originAttributes));
+    }
+  }
+
+  hosts.forEach(host => {
+    // Cookies and permissions are handled by origin/host. Doesn't matter if we
+    // use http: or https: schema here.
+    principals.push(
+      Services.scriptSecurityManager.createCodebasePrincipalFromOrigin("https://" + host));
+  });
+
+  return principals;
+}
+
+// This method receives a list of principals and it checks if some of them or
+// some of their sub-domain need to be sanitize.
+async function maybeSanitizeSessionPrincipals(principals) {
+  let promises = [];
+
+  principals.forEach(principal => {
+    if (!cookiesAllowedForDomainOrSubDomain(principal)) {
+      promises.push(sanitizeSessionPrincipal(principal));
+    }
+  });
+
   return Promise.all(promises);
+}
+
+function cookiesAllowedForDomainOrSubDomain(principal) {
+  // If we have the 'cookie' permission for this principal, let's return
+  // immediately.
+  let p = Services.perms.testPermissionFromPrincipal(principal, "cookie");
+  if (p == Ci.nsICookiePermission.ACCESS_ALLOW ||
+      p == Ci.nsICookiePermission.ACCESS_ALLOW_FIRST_PARTY_ONLY ||
+      p == Ci.nsICookiePermission.ACCESS_LIMIT_THIRD_PARTY) {
+    return true;
+  }
+
+  if (p == Ci.nsICookiePermission.ACCESS_DENY ||
+      p == Ci.nsICookiePermission.ACCESS_SESSION) {
+    return false;
+  }
+
+  for (let perm of Services.perms.enumerator) {
+    if (perm.type != "cookie") {
+      continue;
+    }
+
+    // We don't care about scheme, port, and anything else.
+    if (Services.eTLD.hasRootDomain(perm.principal.URI.host,
+                                    principal.URI.host)) {
+      return cookiesAllowedForDomainOrSubDomain(perm.principal);
+    }
+  }
+
+  return false;
 }
 
 async function sanitizeSessionPrincipal(principal) {
   await new Promise(resolve => {
     Services.clearData.deleteDataFromPrincipal(principal, true /* user request */,
-                                               Ci.nsIClearDataService.CLEAR_DOM_STORAGES,
+                                               Ci.nsIClearDataService.CLEAR_DOM_STORAGES |
+                                               Ci.nsIClearDataService.CLEAR_COOKIES,
                                                resolve);
   });
 }

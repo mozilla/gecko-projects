@@ -238,19 +238,14 @@ ObjectGroup::useSingletonForAllocationSite(JSScript* script, jsbytecode* pc, JSP
         return SingletonObject;
     }
 
-    unsigned offset = script->pcToOffset(pc);
+    uint32_t offset = script->pcToOffset(pc);
 
-    JSTryNote* tn = script->trynotes()->vector;
-    JSTryNote* tnlimit = tn + script->trynotes()->length;
-    for (; tn < tnlimit; tn++) {
-        if (tn->kind != JSTRY_FOR_IN && tn->kind != JSTRY_FOR_OF && tn->kind != JSTRY_LOOP) {
+    for (const JSTryNote& tn : script->trynotes()) {
+        if (tn.kind != JSTRY_FOR_IN && tn.kind != JSTRY_FOR_OF && tn.kind != JSTRY_LOOP) {
             continue;
         }
 
-        unsigned startOffset = script->mainOffset() + tn->start;
-        unsigned endOffset = startOffset + tn->length;
-
-        if (offset >= startOffset && offset < endOffset) {
+        if (tn.start <= offset && offset < tn.start + tn.length) {
             return GenericObject;
         }
     }
@@ -526,14 +521,7 @@ ObjectGroup::defaultNewGroup(JSContext* cx, const Class* clasp,
         if (associated->is<JSFunction>()) {
 
             // Canonicalize new functions to use the original one associated with its script.
-            JSFunction* fun = &associated->as<JSFunction>();
-            if (fun->hasScript()) {
-                associated = fun->nonLazyScript()->functionNonDelazifying();
-            } else if (fun->isInterpretedLazy() && !fun->isSelfHostedBuiltin()) {
-                associated = fun->lazyScript()->functionNonDelazifying();
-            } else {
-                associated = nullptr;
-            }
+            associated = associated->as<JSFunction>().maybeCanonicalFunction();
 
             // If we have previously cleared the 'new' script information for this
             // function, don't try to construct another one.

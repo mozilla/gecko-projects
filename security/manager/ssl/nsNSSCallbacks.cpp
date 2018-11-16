@@ -20,6 +20,7 @@
 #include "nsICertOverrideService.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIPrompt.h"
+#include "nsIProtocolProxyService.h"
 #include "nsISupportsPriority.h"
 #include "nsIStreamLoader.h"
 #include "nsITokenDialogs.h"
@@ -33,7 +34,7 @@
 #include "nsProtectedAuthThread.h"
 #include "nsProxyRelease.h"
 #include "nsStringStream.h"
-#include "pkix/pkixtypes.h"
+#include "mozpkix/pkixtypes.h"
 #include "ssl.h"
 #include "sslproto.h"
 
@@ -234,6 +235,24 @@ OCSPRequest::Run()
   }
   if (!scheme.LowerCaseEqualsLiteral("http")) {
     return NotifyDone(NS_ERROR_MALFORMED_URI, lock);
+  }
+
+  // See bug 1219935.
+  // We should not send OCSP request if the PAC is still loading.
+  nsCOMPtr<nsIProtocolProxyService> pps =
+    do_GetService(NS_PROTOCOLPROXYSERVICE_CONTRACTID, &rv);
+  if (NS_FAILED(rv)) {
+    return NotifyDone(rv, lock);
+  }
+
+  bool isPACLoading = false;
+  rv = pps->GetIsPACLoading(&isPACLoading);
+  if (NS_FAILED(rv)) {
+    return NotifyDone(rv, lock);
+  }
+
+  if (isPACLoading) {
+    return NotifyDone(NS_ERROR_FAILURE, lock);
   }
 
   nsCOMPtr<nsIChannel> channel;
@@ -503,41 +522,28 @@ ShowProtectedAuthPrompt(PK11SlotInfo* slot, nsIInterfaceRequestor *ir)
                                 NS_TOKENDIALOGS_CONTRACTID);
   if (NS_SUCCEEDED(nsrv))
   {
-    nsProtectedAuthThread* protectedAuthRunnable = new nsProtectedAuthThread();
-    if (protectedAuthRunnable)
-    {
-      NS_ADDREF(protectedAuthRunnable);
+    RefPtr<nsProtectedAuthThread> protectedAuthRunnable = new nsProtectedAuthThread();
+    protectedAuthRunnable->SetParams(slot);
 
-      protectedAuthRunnable->SetParams(slot);
+    nsrv = dialogs->DisplayProtectedAuth(ir, protectedAuthRunnable);
 
-      nsCOMPtr<nsIProtectedAuthThread> runnable = do_QueryInterface(protectedAuthRunnable);
-      if (runnable)
-      {
-        nsrv = dialogs->DisplayProtectedAuth(ir, runnable);
+    // We call join on the thread,
+    // so we can be sure that no simultaneous access will happen.
+    protectedAuthRunnable->Join();
 
-        // We call join on the thread,
-        // so we can be sure that no simultaneous access will happen.
-        protectedAuthRunnable->Join();
-
-        if (NS_SUCCEEDED(nsrv))
-        {
-          SECStatus rv = protectedAuthRunnable->GetResult();
-          switch (rv)
-          {
-              case SECSuccess:
-                  protAuthRetVal = ToNewCString(nsDependentCString(PK11_PW_AUTHENTICATED));
-                  break;
-              case SECWouldBlock:
-                  protAuthRetVal = ToNewCString(nsDependentCString(PK11_PW_RETRY));
-                  break;
-              default:
-                  protAuthRetVal = nullptr;
-                  break;
-          }
-        }
+    if (NS_SUCCEEDED(nsrv)) {
+      SECStatus rv = protectedAuthRunnable->GetResult();
+      switch (rv) {
+        case SECSuccess:
+          protAuthRetVal = ToNewCString(nsDependentCString(PK11_PW_AUTHENTICATED));
+          break;
+        case SECWouldBlock:
+          protAuthRetVal = ToNewCString(nsDependentCString(PK11_PW_RETRY));
+          break;
+        default:
+          protAuthRetVal = nullptr;
+          break;
       }
-
-      NS_RELEASE(protectedAuthRunnable);
     }
   }
 

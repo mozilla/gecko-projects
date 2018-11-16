@@ -17,7 +17,7 @@ async function onModifyRequest() {
       let httpChannel = subject.QueryInterface(Ci.nsIHttpChannel);
       let spec = httpChannel.URI.spec;
       info("Observed channel for " + spec);
-      if (httpChannel.URI.prePath + "/" != TEST_3RD_PARTY_DOMAIN_TP) {
+      if (httpChannel.URI.prePath != TEST_3RD_PARTY_DOMAIN_TP) {
         return;
       }
       if (spec.endsWith("empty.js")) {
@@ -47,7 +47,8 @@ add_task(async function() {
 
   await SpecialPowers.flushPrefEnv();
   await SpecialPowers.pushPrefEnv({"set": [
-    ["browser.contentblocking.enabled", true],
+    ["browser.contentblocking.allowlist.annotations.enabled", true],
+    ["browser.contentblocking.allowlist.storage.enabled", true],
     ["browser.fastblock.enabled", false],
     ["privacy.trackingprotection.enabled", true],
     // the test doesn't open a private window, so we don't care about this pref's value

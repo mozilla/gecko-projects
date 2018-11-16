@@ -21,6 +21,7 @@
 #include <chrono>
 #include <thread>
 
+#include "builtin/TypedObject.h"
 #include "jit/JitOptions.h"
 #include "threading/LockGuard.h"
 #include "util/NSPR.h"
@@ -54,6 +55,7 @@ class Module::Tier2GeneratorTaskImpl : public Tier2GeneratorTask
     {}
 
     ~Tier2GeneratorTaskImpl() override {
+        module_->tier2Listener_ = nullptr;
         module_->testingTier2Active_ = false;
     }
 
@@ -66,8 +68,17 @@ class Module::Tier2GeneratorTaskImpl : public Tier2GeneratorTask
     }
 };
 
+Module::~Module()
+{
+    // Note: Modules can be destroyed on any thread.
+    MOZ_ASSERT(!tier2Listener_);
+    MOZ_ASSERT(!testingTier2Active_);
+}
+
 void
-Module::startTier2(const CompileArgs& args, const ShareableBytes& bytecode)
+Module::startTier2(const CompileArgs& args,
+                   const ShareableBytes& bytecode,
+                   JS::OptimizedEncodingListener* listener)
 {
     MOZ_ASSERT(!testingTier2Active_);
 
@@ -76,8 +87,9 @@ Module::startTier2(const CompileArgs& args, const ShareableBytes& bytecode)
         return;
     }
 
-    // This flag will be cleared asynchronously by ~Tier2GeneratorTaskImpl()
-    // on success or failure.
+    // These will be cleared asynchronously by ~Tier2GeneratorTaskImpl() if not
+    // sooner by finishTier2().
+    tier2Listener_ = listener;
     testingTier2Active_ = true;
 
     StartOffThreadWasmTier2Generator(std::move(task));
@@ -86,7 +98,7 @@ Module::startTier2(const CompileArgs& args, const ShareableBytes& bytecode)
 bool
 Module::finishTier2(const LinkData& linkData2, UniqueCodeTier code2) const
 {
-    MOZ_ASSERT(code().bestTier() == Tier::Baseline && code2->tier() == Tier::Ion);
+    MOZ_ASSERT(code().bestTier() == Tier::Baseline && code2->tier() == Tier::Optimized);
 
     // Install the data in the data structures. They will not be visible
     // until commitTier2().
@@ -107,7 +119,7 @@ Module::finishTier2(const LinkData& linkData2, UniqueCodeTier code2) const
         const MetadataTier& metadataTier1 = metadata(Tier::Baseline);
 
         auto stubs1 = code().codeTier(Tier::Baseline).lazyStubs().lock();
-        auto stubs2 = code().codeTier(Tier::Ion).lazyStubs().lock();
+        auto stubs2 = code().codeTier(Tier::Optimized).lazyStubs().lock();
 
         MOZ_ASSERT(stubs2->empty());
 
@@ -126,7 +138,7 @@ Module::finishTier2(const LinkData& linkData2, UniqueCodeTier code2) const
         }
 
         HasGcTypes gcTypesConfigured = code().metadata().temporaryGcTypesConfigured;
-        const CodeTier& tier2 = code().codeTier(Tier::Ion);
+        const CodeTier& tier2 = code().codeTier(Tier::Optimized);
 
         Maybe<size_t> stub2Index;
         if (!stubs2->createTier2(gcTypesConfigured, funcExportIndices, tier2, &stub2Index)) {
@@ -143,8 +155,8 @@ Module::finishTier2(const LinkData& linkData2, UniqueCodeTier code2) const
 
     // And we update the jump vector.
 
-    uint8_t* base = code().segment(Tier::Ion).base();
-    for (const CodeRange& cr : metadata(Tier::Ion).codeRanges) {
+    uint8_t* base = code().segment(Tier::Optimized).base();
+    for (const CodeRange& cr : metadata(Tier::Optimized).codeRanges) {
         // These are racy writes that we just want to be visible, atomically,
         // eventually.  All hardware we care about will do this right.  But
         // we depend on the compiler not splitting the stores hidden inside the
@@ -155,6 +167,16 @@ Module::finishTier2(const LinkData& linkData2, UniqueCodeTier code2) const
             code().setJitEntry(cr.funcIndex(), base + cr.begin());
         }
     }
+
+    // Tier-2 is done; let everyone know. Mark tier-2 active for testing
+    // purposes so that wasmHasTier2CompilationCompleted() only returns true
+    // after tier-2 has been fully cached.
+
+    if (tier2Listener_) {
+        serialize(linkData2, *tier2Listener_);
+        tier2Listener_ = nullptr;
+    }
+    testingTier2Active_ = false;
 
     return true;
 }
@@ -170,10 +192,18 @@ Module::testingBlockOnTier2Complete() const
 /* virtual */ size_t
 Module::serializedSize(const LinkData& linkData) const
 {
-    return linkData.serializedSize() +
+    JS::BuildIdCharVector buildId;
+    {
+        AutoEnterOOMUnsafeRegion oom;
+        if (!GetOptimizedEncodingBuildId(&buildId)) {
+            oom.crash("getting build id");
+        }
+    }
+
+    return SerializedPodVectorSize(buildId) +
+           linkData.serializedSize() +
            SerializedVectorSize(imports_) +
            SerializedVectorSize(exports_) +
-           SerializedVectorSize(structTypes_) +
            SerializedVectorSize(dataSegments_) +
            SerializedVectorSize(elemSegments_) +
            SerializedVectorSize(customSections_) +
@@ -183,15 +213,22 @@ Module::serializedSize(const LinkData& linkData) const
 /* virtual */ void
 Module::serialize(const LinkData& linkData, uint8_t* begin, size_t size) const
 {
-    MOZ_RELEASE_ASSERT(!testingTier2Active_);
     MOZ_RELEASE_ASSERT(!metadata().debugEnabled);
     MOZ_RELEASE_ASSERT(code_->hasTier(Tier::Serialized));
 
+    JS::BuildIdCharVector buildId;
+    {
+        AutoEnterOOMUnsafeRegion oom;
+        if (!GetOptimizedEncodingBuildId(&buildId)) {
+            oom.crash("getting build id");
+        }
+    }
+
     uint8_t* cursor = begin;
+    cursor = SerializePodVector(cursor, buildId);
     cursor = linkData.serialize(cursor);
     cursor = SerializeVector(cursor, imports_);
     cursor = SerializeVector(cursor, exports_);
-    cursor = SerializeVector(cursor, structTypes_);
     cursor = SerializeVector(cursor, dataSegments_);
     cursor = SerializeVector(cursor, elemSegments_);
     cursor = SerializeVector(cursor, customSections_);
@@ -212,6 +249,19 @@ Module::deserialize(const uint8_t* begin, size_t size, Metadata* maybeMetadata)
 
     const uint8_t* cursor = begin;
 
+    JS::BuildIdCharVector currentBuildId;
+    if (!GetOptimizedEncodingBuildId(&currentBuildId)) {
+        return nullptr;
+    }
+
+    JS::BuildIdCharVector deserializedBuildId;
+    cursor = DeserializePodVector(cursor, &deserializedBuildId);
+    if (!cursor) {
+        return nullptr;
+    }
+
+    MOZ_RELEASE_ASSERT(EqualContainers(currentBuildId, deserializedBuildId));
+
     LinkData linkData(Tier::Serialized);
     cursor = linkData.deserialize(cursor);
     if (!cursor) {
@@ -226,12 +276,6 @@ Module::deserialize(const uint8_t* begin, size_t size, Metadata* maybeMetadata)
 
     ExportVector exports;
     cursor = DeserializeVector(cursor, &exports);
-    if (!cursor) {
-        return nullptr;
-    }
-
-    StructTypeVector structTypes;
-    cursor = DeserializeVector(cursor, &structTypes);
     if (!cursor) {
         return nullptr;
     }
@@ -273,10 +317,22 @@ Module::deserialize(const uint8_t* begin, size_t size, Metadata* maybeMetadata)
     return js_new<Module>(*code,
                           std::move(imports),
                           std::move(exports),
-                          std::move(structTypes),
                           std::move(dataSegments),
                           std::move(elemSegments),
                           std::move(customSections));
+}
+
+void
+Module::serialize(const LinkData& linkData, JS::OptimizedEncodingListener& listener) const
+{
+    Vector<uint8_t, 0, SystemAllocPolicy> bytes;
+    if (!bytes.resize(serializedSize(linkData))) {
+        return;
+    }
+
+    serialize(linkData, bytes.begin(), bytes.length());
+
+    listener.storeOptimizedEncoding(bytes.begin(), bytes.length());
 }
 
 /* virtual */ JSObject*
@@ -288,6 +344,33 @@ Module::createObject(JSContext* cx)
 
     RootedObject proto(cx, &cx->global()->getPrototype(JSProto_WasmModule).toObject());
     return WasmModuleObject::create(cx, *this, proto);
+}
+
+bool
+wasm::GetOptimizedEncodingBuildId(JS::BuildIdCharVector* buildId)
+{
+    // From a JS API perspective, the "build id" covers everything that can
+    // cause machine code to become invalid, so include both the actual build-id
+    // and cpu-id.
+
+    if (!GetBuildId || !GetBuildId(buildId)) {
+        return false;
+    }
+
+    uint32_t cpu = ObservedCPUFeatures();
+
+    if (!buildId->reserve(buildId->length() + 10 /* "()" + 8 nibbles */)) {
+        return false;
+    }
+
+    buildId->infallibleAppend('(');
+    while (cpu) {
+        buildId->infallibleAppend('0' + (cpu & 0xf));
+        cpu >>= 4;
+    }
+    buildId->infallibleAppend(')');
+
+    return true;
 }
 
 struct MemUnmap
@@ -381,7 +464,6 @@ Module::addSizeOfMisc(MallocSizeOf mallocSizeOf,
     *data += mallocSizeOf(this) +
              SizeOfVectorExcludingThis(imports_, mallocSizeOf) +
              SizeOfVectorExcludingThis(exports_, mallocSizeOf) +
-             SizeOfVectorExcludingThis(structTypes_, mallocSizeOf) +
              SizeOfVectorExcludingThis(dataSegments_, mallocSizeOf) +
              SizeOfVectorExcludingThis(elemSegments_, mallocSizeOf) +
              SizeOfVectorExcludingThis(customSections_, mallocSizeOf);
@@ -418,7 +500,8 @@ Module::extractCode(JSContext* cx, Tier tier, MutableHandleValue vp) const
         return false;
     }
 
-    memcpy(code->as<TypedArrayObject>().viewDataUnshared(), moduleSegment.base(), moduleSegment.length());
+    memcpy(code->as<TypedArrayObject>().dataPointerUnshared(), moduleSegment.base(),
+           moduleSegment.length());
 
     RootedValue value(cx, ObjectValue(*code));
     if (!JS_DefineProperty(cx, result, "code", value, JSPROP_ENUMERATE)) {
@@ -509,8 +592,9 @@ Module::initSegments(JSContext* cx,
     // partial initialization if an error is reported.
 
     for (const ElemSegment* seg : elemSegments_) {
-        if (!seg->active())
+        if (!seg->active()) {
             continue;
+        }
 
         uint32_t tableLength = tables[seg->tableIndex]->length();
         uint32_t offset = EvaluateInitExpr(globalImportValues, seg->offset());
@@ -525,8 +609,9 @@ Module::initSegments(JSContext* cx,
     if (memoryObj) {
         uint32_t memoryLength = memoryObj->volatileMemoryLength();
         for (const DataSegment* seg : dataSegments_) {
-            if (!seg->active())
+            if (!seg->active()) {
                 continue;
+            }
 
             uint32_t offset = EvaluateInitExpr(globalImportValues, seg->offset());
 
@@ -546,7 +631,7 @@ Module::initSegments(JSContext* cx,
     for (const ElemSegment* seg : elemSegments_) {
         if (seg->active()) {
             uint32_t offset = EvaluateInitExpr(globalImportValues, seg->offset());
-            instance.initElems(*seg, offset, 0, seg->length());
+            instance.initElems(seg->tableIndex, *seg, offset, 0, seg->length());
         }
     }
 
@@ -554,8 +639,9 @@ Module::initSegments(JSContext* cx,
         uint8_t* memoryBase = memoryObj->buffer().dataPointerEither().unwrap(/* memcpy */);
 
         for (const DataSegment* seg : dataSegments_) {
-            if (!seg->active())
+            if (!seg->active()) {
                 continue;
+            }
 
             // But apply active segments right now.
             uint32_t offset = EvaluateInitExpr(globalImportValues, seg->offset());
@@ -717,53 +803,85 @@ Module::instantiateMemory(JSContext* cx, MutableHandleWasmMemoryObject memory) c
 }
 
 bool
-Module::instantiateTable(JSContext* cx, MutableHandleWasmTableObject tableObj,
-                         SharedTableVector* tables) const
+Module::instantiateImportedTable(JSContext* cx, const TableDesc& td, Handle<WasmTableObject*> tableObj,
+                                 WasmTableObjectVector* tableObjs, SharedTableVector* tables) const
 {
-    if (tableObj) {
-        MOZ_ASSERT(!metadata().isAsmJS());
+    MOZ_ASSERT(tableObj);
+    MOZ_ASSERT(!metadata().isAsmJS());
 
-        MOZ_ASSERT(metadata().tables.length() == 1);
-        const TableDesc& td = metadata().tables[0];
-        MOZ_ASSERT(td.external);
+    Table& table = tableObj->table();
+    if (!CheckLimits(cx, td.limits.initial, td.limits.maximum, table.length(), table.maximum(),
+                     metadata().isAsmJS(), "Table"))
+    {
+        return false;
+    }
 
-        Table& table = tableObj->table();
-        if (!CheckLimits(cx, td.limits.initial, td.limits.maximum, table.length(), table.maximum(),
-                         metadata().isAsmJS(), "Table")) {
+    if (!tables->append(&table)) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    if (!tableObjs->append(tableObj)) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    return true;
+}
+
+bool
+Module::instantiateLocalTable(JSContext* cx, const TableDesc& td, WasmTableObjectVector* tableObjs,
+                              SharedTableVector* tables) const
+{
+    SharedTable table;
+    Rooted<WasmTableObject*> tableObj(cx);
+    if (td.importedOrExported) {
+        tableObj.set(WasmTableObject::create(cx, td.limits, td.kind));
+        if (!tableObj) {
             return false;
         }
-
-        if (!tables->append(&table)) {
-            ReportOutOfMemory(cx);
-            return false;
-        }
+        table = &tableObj->table();
     } else {
-        for (const TableDesc& td : metadata().tables) {
-            SharedTable table;
-            if (td.external) {
-                MOZ_ASSERT(!tableObj);
-                MOZ_ASSERT(td.kind == TableKind::AnyFunction);
-
-                tableObj.set(WasmTableObject::create(cx, td.limits));
-                if (!tableObj) {
-                    return false;
-                }
-
-                table = &tableObj->table();
-            } else {
-                table = Table::create(cx, td, /* HandleWasmTableObject = */ nullptr);
-                if (!table) {
-                    return false;
-                }
-            }
-
-            if (!tables->emplaceBack(table)) {
-                ReportOutOfMemory(cx);
-                return false;
-            }
+        table = Table::create(cx, td, /* HandleWasmTableObject = */ nullptr);
+        if (!table) {
+            return false;
         }
     }
 
+    // Note, appending a null pointer for non-exported local tables.
+    if (!tableObjs->append(tableObj.get())) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    if (!tables->emplaceBack(table)) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    return true;
+}
+
+bool
+Module::instantiateTables(JSContext* cx,
+                          WasmTableObjectVector& tableImports,
+                          MutableHandle<WasmTableObjectVector> tableObjs,
+                          SharedTableVector* tables) const
+{
+    uint32_t tableIndex = 0;
+    for (const TableDesc& td : metadata().tables) {
+        if (tableIndex < tableImports.length()) {
+            Rooted<WasmTableObject*> tableObj(cx, tableImports[tableIndex]);
+            if (!instantiateImportedTable(cx, td, tableObj, &tableObjs.get(), tables)) {
+                return false;
+            }
+        } else {
+            if (!instantiateLocalTable(cx, td, &tableObjs.get(), tables)) {
+                return false;
+            }
+        }
+        tableIndex++;
+    }
     return true;
 }
 
@@ -901,7 +1019,17 @@ Module::getDebugEnabledCode() const
         return nullptr;
     }
 
-    MutableCode debugCode = js_new<Code>(std::move(codeTier), metadata(), std::move(jumpTables));
+    StructTypeVector structTypes;
+    if (!structTypes.resize(code_->structTypes().length())) {
+        return nullptr;
+    }
+    for (uint32_t i = 0; i < code_->structTypes().length(); i++) {
+        if (!structTypes[i].copyFrom(code_->structTypes()[i])) {
+            return nullptr;
+        }
+    }
+    MutableCode debugCode = js_new<Code>(std::move(codeTier), metadata(), std::move(jumpTables),
+                                         std::move(structTypes));
     if (!debugCode || !debugCode->initialize(*debugLinkData_)) {
         return nullptr;
     }
@@ -936,7 +1064,7 @@ static bool
 CreateExportObject(JSContext* cx,
                    HandleWasmInstanceObject instanceObj,
                    Handle<FunctionVector> funcImports,
-                   HandleWasmTableObject tableObj,
+                   const WasmTableObjectVector& tableObjs,
                    HandleWasmMemoryObject memoryObj,
                    const WasmGlobalObjectVector& globalObjs,
                    const ExportVector& exports)
@@ -978,7 +1106,7 @@ CreateExportObject(JSContext* cx,
             }
             break;
           case DefinitionKind::Table:
-            val = ObjectValue(*tableObj);
+            val = ObjectValue(*tableObjs[exp.tableIndex()]);
             break;
           case DefinitionKind::Memory:
             val = ObjectValue(*memoryObj);
@@ -1003,16 +1131,162 @@ CreateExportObject(JSContext* cx,
     return true;
 }
 
+static bool
+MakeStructField(JSContext* cx, const ValType& v, bool isMutable, const char* format,
+                uint32_t fieldNo, AutoIdVector* ids, AutoValueVector* fieldTypeObjs,
+                Vector<StructFieldProps>* fieldProps)
+{
+    char buf[20];
+    sprintf(buf, format, fieldNo);
+    RootedString str(cx, JS_AtomizeAndPinString(cx, buf));
+    if (!str) {
+        return false;
+    }
+
+    StructFieldProps props;
+    props.isMutable = isMutable;
+
+    Rooted<TypeDescr*> t(cx);
+    switch (v.code()) {
+      case ValType::I32:
+        t = GlobalObject::getOrCreateScalarTypeDescr(cx, cx->global(), Scalar::Int32);
+        break;
+      case ValType::I64:
+        // Align for int64 but allocate only an int32, another int32 allocation
+        // will follow immediately.  JS will see two immutable int32 values but
+        // wasm knows it's a single int64.  See makeStructTypeDescrs(), below.
+        props.alignAsInt64 = true;
+        t = GlobalObject::getOrCreateScalarTypeDescr(cx, cx->global(), Scalar::Int32);
+        break;
+      case ValType::F32:
+        t = GlobalObject::getOrCreateScalarTypeDescr(cx, cx->global(), Scalar::Float32);
+        break;
+      case ValType::F64:
+        t = GlobalObject::getOrCreateScalarTypeDescr(cx, cx->global(), Scalar::Float64);
+        break;
+      case ValType::Ref:
+      case ValType::AnyRef:
+        t = GlobalObject::getOrCreateReferenceTypeDescr(cx, cx->global(),
+                                                        ReferenceType::TYPE_OBJECT);
+        break;
+      default:
+        MOZ_CRASH("Bad field type");
+    }
+    MOZ_ASSERT(t != nullptr);
+
+    if (!ids->append(INTERNED_STRING_TO_JSID(cx, str))) {
+        return false;
+    }
+
+    if (!fieldTypeObjs->append(ObjectValue(*t))) {
+        return false;
+    }
+
+    if (!fieldProps->append(props)) {
+        return false;
+    }
+
+    return true;
+}
+
+
+bool
+Module::makeStructTypeDescrs(JSContext* cx,
+                             MutableHandle<StructTypeDescrVector> structTypeDescrs) const
+{
+    // Not just any prototype object will do, we must have the actual StructTypePrototype.
+    RootedObject typedObjectModule(cx, GlobalObject::getOrCreateTypedObjectModule(cx,
+                                                                                  cx->global()));
+    if (!typedObjectModule) {
+       return false;
+    }
+
+    RootedNativeObject toModule(cx, &typedObjectModule->as<NativeObject>());
+    RootedObject prototype(cx, &toModule->getReservedSlot(
+                                   TypedObjectModuleObject::StructTypePrototype).toObject());
+
+    for (const StructType& structType : structTypes()) {
+        AutoIdVector ids(cx);
+        AutoValueVector fieldTypeObjs(cx);
+        Vector<StructFieldProps> fieldProps(cx);
+        bool allowConstruct = true;
+
+        uint32_t k = 0;
+        for (StructField sf : structType.fields_) {
+            const ValType& v = sf.type;
+            if (v.code() == ValType::I64) {
+                // TypedObjects don't yet have a notion of int64 fields.  Thus
+                // we handle int64 by allocating two adjacent int32 fields, the
+                // first of them aligned as for int64.  We mark these fields as
+                // immutable for JS and render the object non-constructible
+                // from JS.  Wasm however sees one i64 field with appropriate
+                // mutability.
+                sf.isMutable = false;
+                allowConstruct = false;
+
+                if (!MakeStructField(cx, ValType::I64, sf.isMutable, "_%d_low", k, &ids,
+                                     &fieldTypeObjs, &fieldProps))
+                {
+                    return false;
+                }
+                if (!MakeStructField(cx, ValType::I32, sf.isMutable, "_%d_high", k++, &ids,
+                                     &fieldTypeObjs, &fieldProps))
+                {
+                    return false;
+                }
+            } else {
+                // TypedObjects don't yet have a sufficient notion of type
+                // constraints on TypedObject properties.  Thus we handle fields
+                // of type (ref T) by marking them as immutable for JS and by
+                // rendering the objects non-constructible from JS.  Wasm
+                // however sees properly-typed (ref T) fields with appropriate
+                // mutability.
+                if (v.isRef()) {
+                    sf.isMutable = false;
+                    allowConstruct = false;
+                }
+
+                if (!MakeStructField(cx, v, sf.isMutable, "_%d", k++, &ids, &fieldTypeObjs,
+                                     &fieldProps))
+                {
+                    return false;
+                }
+            }
+        }
+
+        // Types must be opaque, which we ensure here, and sealed, which is true
+        // for every TypedObject.  If they contain fields of type Ref T then we
+        // prevent JS from constructing instances of them.
+
+        Rooted<StructTypeDescr*>
+            structTypeDescr(cx, StructMetaTypeDescr::createFromArrays(cx,
+                                                                      prototype,
+                                                                      /* opaque= */ true,
+                                                                      allowConstruct,
+                                                                      ids,
+                                                                      fieldTypeObjs,
+                                                                      fieldProps));
+
+        if (!structTypeDescr || !structTypeDescrs.append(structTypeDescr)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool
 Module::instantiate(JSContext* cx,
                     Handle<FunctionVector> funcImports,
-                    HandleWasmTableObject tableImport,
+                    WasmTableObjectVector& tableImports,
                     HandleWasmMemoryObject memoryImport,
                     HandleValVector globalImportValues,
                     WasmGlobalObjectVector& globalObjs,
                     HandleObject instanceProto,
                     MutableHandleWasmInstanceObject instance) const
 {
+    MOZ_RELEASE_ASSERT(metadata().isAsmJS() || cx->wasmHaveSignalHandlers);
+
     if (!instantiateFunctions(cx, funcImports)) {
         return false;
     }
@@ -1022,9 +1296,12 @@ Module::instantiate(JSContext* cx,
         return false;
     }
 
-    RootedWasmTableObject table(cx, tableImport);
+    // Note that tableObjs is sparse: it will be null in slots that contain
+    // tables that are neither exported nor imported.
+
+    Rooted<WasmTableObjectVector> tableObjs(cx);
     SharedTableVector tables;
-    if (!instantiateTable(cx, &table, &tables)) {
+    if (!instantiateTables(cx, tableImports, &tableObjs, &tables)) {
         return false;
     }
 
@@ -1056,6 +1333,13 @@ Module::instantiate(JSContext* cx,
         code = code_;
     }
 
+    // Create type descriptors for any struct types that the module has.
+
+    Rooted<StructTypeDescrVector> structTypeDescrs(cx);
+    if (!makeStructTypeDescrs(cx, &structTypeDescrs)) {
+        return false;
+    }
+
     instance.set(WasmInstanceObject::create(cx,
                                             code,
                                             dataSegments_,
@@ -1063,6 +1347,7 @@ Module::instantiate(JSContext* cx,
                                             std::move(tlsData),
                                             memory,
                                             std::move(tables),
+                                            std::move(structTypeDescrs.get()),
                                             funcImports,
                                             metadata().globals,
                                             globalImportValues,
@@ -1073,7 +1358,7 @@ Module::instantiate(JSContext* cx,
         return false;
     }
 
-    if (!CreateExportObject(cx, instance, funcImports, table, memory, globalObjs, exports_)) {
+    if (!CreateExportObject(cx, instance, funcImports, tableObjs.get(), memory, globalObjs, exports_)) {
         return false;
     }
 

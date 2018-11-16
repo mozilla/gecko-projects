@@ -38,7 +38,7 @@ public:
     return mDrawTarget->GetSize();
   }
   virtual IntRect GetRect() const override {
-    return mDrawTarget->GetRect();
+    return IntRect(mOrigin, GetSize());
   }
 
   virtual void Flush() override;
@@ -137,6 +137,12 @@ public:
     CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const override
   {
     return mDrawTarget->CreateSimilarDrawTarget(aSize, aFormat);
+  }
+
+  virtual bool
+    CanCreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const override
+  {
+    return mDrawTarget->CanCreateSimilarDrawTarget(aSize, aFormat);
   }
 
   virtual already_AddRefed<PathBuilder> CreatePathBuilder(FillRule aFillRule = FillRule::FILL_WINDING) const override

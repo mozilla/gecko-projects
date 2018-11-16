@@ -83,9 +83,15 @@ function init_all() {
   window.addEventListener("hashchange", onHashChange);
   gotoPref();
 
-  let helpButton = document.querySelector(".help-button > .text-link");
+  let helpButton = document.getElementById("helpButton");
   let helpUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "preferences";
   helpButton.setAttribute("href", helpUrl);
+
+  document.getElementById("addonsButton")
+    .addEventListener("click", () => {
+      let mainWindow = window.docShell.rootTreeItem.domWindow;
+      mainWindow.BrowserOpenAddonsMgr();
+    });
 
   document.dispatchEvent(new CustomEvent("Initialized", {
     "bubbles": true,
@@ -182,10 +188,6 @@ function gotoPref(aCategory) {
   mainContent.scrollTop = 0;
 
   spotlight(subcategory);
-
-  Services.telemetry
-          .getHistogramById("FX_PREFERENCES_CATEGORY_OPENED_V2")
-          .add(telemetryBucketForCategory(friendlyName));
 }
 
 function search(aQuery, aAttribute) {

@@ -14,8 +14,10 @@ import traceback
 import urllib
 
 import mozhttpd
+import mozinfo
 import mozversion
-import utils
+
+from talos import utils
 from mozlog import get_proxy_logger
 from talos.config import get_configs, ConfigurationError
 from talos.mitmproxy import mitmproxy
@@ -122,7 +124,10 @@ def run_tests(config, browser_config):
         if not test.get('profile', False):
             test['profile'] = config.get('profile')
 
-    browser_config['extra_args'] = []
+    if mozinfo.os == 'win':
+        browser_config['extra_args'] = ['-wait-for-browser', '-no-deelevate']
+    else:
+        browser_config['extra_args'] = []
 
     # pass --no-remote to firefox launch, if --develop is specified
     # we do that to allow locally the user to have another running firefox
@@ -334,8 +339,8 @@ def run_tests(config, browser_config):
     # when running talos locally with gecko profiling on, use the view-gecko-profile
     # tool to automatically load the latest gecko profile in perf-html.io
     if config['gecko_profile'] and browser_config['develop']:
-        if os.environ.get('TALOS_DISABLE_PROFILE_LAUNCH', '0') == '1':
-            LOG.info("Not launching perf-html.io because TALOS_DISABLE_PROFILE_LAUNCH=1")
+        if os.environ.get('DISABLE_PROFILE_LAUNCH', '0') == '1':
+            LOG.info("Not launching perf-html.io because DISABLE_PROFILE_LAUNCH=1")
         else:
             view_gecko_profile(config['browser_path'])
 
@@ -346,6 +351,9 @@ def run_tests(config, browser_config):
 
 def view_gecko_profile(ffox_bin):
     # automatically load the latest talos gecko-profile archive in perf-html.io
+    if sys.platform.startswith('win') and not ffox_bin.endswith(".exe"):
+        ffox_bin = ffox_bin + ".exe"
+
     if not os.path.exists(ffox_bin):
         LOG.info("unable to find Firefox bin, cannot launch view-gecko-profile")
         return

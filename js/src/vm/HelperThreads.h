@@ -25,7 +25,7 @@
 #include "ds/Fifo.h"
 #include "jit/Ion.h"
 #include "js/CompileOptions.h"
-#include "js/SourceBufferHolder.h"
+#include "js/SourceText.h"
 #include "js/TypeDecls.h"
 #include "threading/ConditionVariable.h"
 #include "vm/JSContext.h"
@@ -302,7 +302,7 @@ class GlobalHelperThreadState
     JSScript* finishScriptParseTask(JSContext* cx, JS::OffThreadToken* token);
     JSScript* finishScriptDecodeTask(JSContext* cx, JS::OffThreadToken* token);
     bool finishMultiScriptsDecodeTask(JSContext* cx, JS::OffThreadToken* token, MutableHandle<ScriptVector> scripts);
-    JSScript* finishModuleParseTask(JSContext* cx, JS::OffThreadToken* token);
+    JSObject* finishModuleParseTask(JSContext* cx, JS::OffThreadToken* token);
 
 #if defined(JS_BUILD_BINAST)
     JSScript* finishBinASTDecodeTask(JSContext* cx, JS::OffThreadToken* token);
@@ -314,6 +314,8 @@ class GlobalHelperThreadState
 
     template <typename T>
     bool checkTaskThreadLimit(size_t maxThreads, bool isMaster = false) const;
+
+    void triggerFreeUnusedMemory();
 
   private:
     /*
@@ -363,6 +365,12 @@ struct HelperThread
      */
     bool terminate;
 
+    /*
+     * Indicates that this thread should free its unused memory when it is next
+     * idle.
+     */
+    bool shouldFreeUnusedMemory;
+
     /* The current task being executed by this thread, if any. */
     mozilla::Maybe<HelperTaskUnion> currentTask;
 
@@ -404,8 +412,6 @@ struct HelperThread
     static void ThreadMain(void* arg);
     void threadLoop();
 
-    static void WakeupAll();
-
     void ensureRegisteredWithProfiler();
     void unregisterWithProfilerIfNeeded();
 
@@ -413,7 +419,6 @@ struct HelperThread
     struct AutoProfilerLabel
     {
         AutoProfilerLabel(HelperThread* helperThread, const char* label,
-                          uint32_t line,
                           ProfilingStackFrame::Category category);
         ~AutoProfilerLabel();
 
@@ -451,6 +456,8 @@ struct HelperThread
 
         return nullptr;
     }
+
+    void maybeFreeUnusedMemory(JSContext* cx);
 
     void handleWasmWorkload(AutoLockHelperThreadState& locked, wasm::CompileMode mode);
 
@@ -601,12 +608,12 @@ CancelOffThreadParses(JSRuntime* runtime);
  */
 bool
 StartOffThreadParseScript(JSContext* cx, const JS::ReadOnlyCompileOptions& options,
-                          JS::SourceBufferHolder& srcBuf,
+                          JS::SourceText<char16_t>& srcBuf,
                           JS::OffThreadCompileCallback callback, void* callbackData);
 
 bool
 StartOffThreadParseModule(JSContext* cx, const JS::ReadOnlyCompileOptions& options,
-                          JS::SourceBufferHolder& srcBuf,
+                          JS::SourceText<char16_t>& srcBuf,
                           JS::OffThreadCompileCallback callback, void* callbackData);
 
 bool
@@ -729,18 +736,18 @@ struct ParseTask : public mozilla::LinkedListElement<ParseTask>, public JS::OffT
 
 struct ScriptParseTask : public ParseTask
 {
-    JS::SourceBufferHolder data;
+    JS::SourceText<char16_t> data;
 
-    ScriptParseTask(JSContext* cx, JS::SourceBufferHolder& srcBuf,
+    ScriptParseTask(JSContext* cx, JS::SourceText<char16_t>& srcBuf,
                     JS::OffThreadCompileCallback callback, void* callbackData);
     void parse(JSContext* cx) override;
 };
 
 struct ModuleParseTask : public ParseTask
 {
-    JS::SourceBufferHolder data;
+    JS::SourceText<char16_t> data;
 
-    ModuleParseTask(JSContext* cx, JS::SourceBufferHolder& srcBuf,
+    ModuleParseTask(JSContext* cx, JS::SourceText<char16_t>& srcBuf,
                     JS::OffThreadCompileCallback callback, void* callbackData);
     void parse(JSContext* cx) override;
 };
@@ -838,6 +845,15 @@ class SourceCompressionTask
 
     void work();
     void complete();
+
+  private:
+    struct PerformTaskWork;
+    friend struct PerformTaskWork;
+
+    // The work algorithm, aware whether it's compressing one-byte UTF-8 source
+    // text or UTF-16, for CharT either Utf8Unit or char16_t.  Invoked by
+    // work() after doing a type-test of the ScriptSource*.
+    template<typename CharT> void workEncodingSpecific();
 };
 
 // A PromiseHelperTask is an OffThreadPromiseTask that executes a single job on

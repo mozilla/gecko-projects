@@ -21,7 +21,7 @@ function defer() {
   return {
     resolve: resolve,
     reject: reject,
-    promise: promise
+    promise: promise,
   };
 }
 
@@ -168,7 +168,7 @@ types.addType = function(name, typeObject = {}, options = {}) {
     name: name,
     primitive: !(typeObject.read || typeObject.write),
     read: identityWrite,
-    write: identityWrite
+    write: identityWrite,
   }, typeObject);
 
   registeredTypes.set(name, type);
@@ -226,7 +226,7 @@ types.addArrayType = function(subtype) {
         v = [...v];
       }
       return v.map(i => subtype.write(i, ctx));
-    }
+    },
   });
 };
 
@@ -279,7 +279,7 @@ types.addDictType = function(name, specializations) {
         }
       }
       return ret;
-    }
+    },
   });
 };
 
@@ -371,7 +371,7 @@ types.addActorType = function(name) {
       }
 
       return type.actorSpec[formAttr];
-    }
+    },
   });
   return type;
 };
@@ -391,7 +391,7 @@ types.addNullableType = function(subtype) {
         return value;
       }
       return subtype.write(value, ctx);
-    }
+    },
   });
 };
 
@@ -419,7 +419,7 @@ types.addActorDetail = function(name, actorType, detail) {
     _actor: true,
     category: "detail",
     read: (v, ctx) => actorType.read(v, ctx, detail),
-    write: (v, ctx) => actorType.write(v, ctx, detail)
+    write: (v, ctx) => actorType.write(v, ctx, detail),
   });
 };
 
@@ -469,7 +469,7 @@ types.addLifetimeType = function(lifetime, subtype) {
   return types.addType(lifetime + ":" + subtype.name, {
     category: "lifetime",
     read: (value, ctx) => subtype.read(value, ctx[prop]),
-    write: (value, ctx) => subtype.write(value, ctx[prop])
+    write: (value, ctx) => subtype.write(value, ctx[prop]),
   });
 };
 
@@ -523,7 +523,7 @@ Arg.prototype = {
       _arg: this.index,
       type: this.type.name,
     };
-  }
+  },
 };
 
 // Outside of protocol.js, Arg is called as factory method, without the new keyword.
@@ -576,7 +576,7 @@ Option.prototype = extend(Arg.prototype, {
       _option: this.index,
       type: this.type.name,
     };
-  }
+  },
 });
 
 // Outside of protocol.js, Option is called as factory method, without the new keyword.
@@ -608,9 +608,9 @@ RetVal.prototype = {
 
   describe: function() {
     return {
-      _retval: this.type.name
+      _retval: this.type.name,
     };
-  }
+  },
 };
 
 // Outside of protocol.js, RetVal is called as factory method, without the new keyword.
@@ -726,7 +726,7 @@ Request.prototype = {
 
   describe: function() {
     return describeTemplate(this.template);
-  }
+  },
 };
 
 /**
@@ -795,7 +795,7 @@ Response.prototype = {
 
   describe: function() {
     return describeTemplate(this.template);
-  }
+  },
 };
 
 /**
@@ -824,6 +824,10 @@ Pool.prototype = extend(EventEmitter.prototype, {
    */
   parent: function() {
     return this.conn.poolFor(this.actorID);
+  },
+
+  poolFor: function(actorID) {
+    return this.conn.poolFor(actorID);
   },
 
   /**
@@ -855,10 +859,19 @@ Pool.prototype = extend(EventEmitter.prototype, {
   manage: function(actor) {
     if (!actor.actorID) {
       actor.actorID = this.conn.allocID(actor.actorPrefix || actor.typeName);
-    }
+    } else {
+      // If the actor is already registerd in a pool, remove it without destroying it.
+      // This happens for example when an addon is reloaded. To see this behavior, take a
+      // look at devtools/server/tests/unit/test_addon_reload.js
 
+      // TODO: not all actors have been moved to protocol.js, so they do not all have
+      // a parent field. Remove the check for the parent once the conversion is finished
+      const parent = this.poolFor(actor.actorID);
+      if (parent) {
+        parent.unmanage(actor);
+      }
+    }
     this._poolMap.set(actor.actorID, actor);
-    return actor;
   },
 
   /**
@@ -875,13 +888,19 @@ Pool.prototype = extend(EventEmitter.prototype, {
 
   // The actor for a given actor id stored in this pool
   actor: function(actorID) {
-    return this.__poolMap ? this._poolMap.get(actorID) : null;
+    if (this.__poolMap) {
+      return this._poolMap.get(actorID);
+    }
+    return null;
   },
 
   // Same as actor, should update debugger connection to use 'actor'
   // and then remove this.
   get: function(actorID) {
-    return this.__poolMap ? this._poolMap.get(actorID) : null;
+    if (this.__poolMap) {
+      return this._poolMap.get(actorID);
+    }
+    return null;
   },
 
   // True if this pool has no children.
@@ -940,7 +959,7 @@ Pool.prototype = extend(EventEmitter.prototype, {
    */
   cleanup: function() {
     this.destroy();
-  }
+  },
 });
 exports.Pool = Pool;
 
@@ -1026,7 +1045,7 @@ Actor.prototype = extend(Pool.prototype, {
     this.conn.send({
       from: this.actorID,
       error: error.error || "unknownError",
-      message: error.message
+      message: error.message,
     });
   },
 
@@ -1048,7 +1067,7 @@ Actor.prototype = extend(Pool.prototype, {
     const err = new Error(message);
     err.error = error;
     throw err;
-  }
+  },
 });
 exports.Actor = Actor;
 
@@ -1080,7 +1099,7 @@ exports.method = function(fn, spec = {}) {
 var generateActorSpec = function(actorDesc) {
   const actorSpec = {
     typeName: actorDesc.typeName,
-    methods: []
+    methods: [],
   };
 
   // Find method and form specifications attached to properties.
@@ -1266,6 +1285,10 @@ var Front = function(conn = null, form = null, detail = null, context = null) {
   Pool.call(this, conn);
   this._requests = [];
 
+  // Front listener functions registered via `onFront` get notified
+  // of new fronts via this dedicated EventEmitter object.
+  this._frontListeners = new EventEmitter();
+
   // protocol.js no longer uses this data in the constructor, only external
   // uses do.  External usage of manually-constructed fronts will be
   // drastically reduced if we convert the root and target actors to
@@ -1295,6 +1318,7 @@ Front.prototype = extend(Pool.prototype, {
     }
     Pool.prototype.destroy.call(this);
     this.actorID = null;
+    this._frontListeners = null;
   },
 
   manage: function(front) {
@@ -1302,15 +1326,23 @@ Front.prototype = extend(Pool.prototype, {
       throw new Error("Can't manage front without an actor ID.\n" +
                       "Ensure server supports " + front.typeName + ".");
     }
-    return Pool.prototype.manage.call(this, front);
+    Pool.prototype.manage.call(this, front);
+
+    // Call listeners registered via `onFront` method
+    this._frontListeners.emit(front.typeName, front);
   },
 
-  /**
-   * @returns a promise that will resolve to the actorID this front
-   * represents.
-   */
-  actor: function() {
-    return Promise.resolve(this.actorID);
+  // Run callback on every front of this type that currently exists, and on every
+  // instantiation of front type in the future.
+  onFront(typeName, callback) {
+    // First fire the callback on already instantiated fronts
+    for (const front of this.poolChildren()) {
+      if (front.typeName == typeName) {
+        callback(front);
+      }
+    }
+    // Then register the callback for fronts instantiated in the future
+    this._frontListeners.on(typeName, callback);
   },
 
   toString: function() {
@@ -1330,10 +1362,11 @@ Front.prototype = extend(Pool.prototype, {
     if (packet.to) {
       this.conn._transport.send(packet);
     } else {
-      this.actor().then(actorID => {
-        packet.to = actorID;
+      packet.to = this.actorID;
+      // The connection might be closed during the promise resolution
+      if (this.conn._transport) {
         this.conn._transport.send(packet);
-      }).catch(console.error);
+      }
     }
   },
 
@@ -1558,7 +1591,7 @@ var generateRequestMethods = function(actorSpec, frontProto) {
       frontProto._clientSpec.events.set(request.type, {
         name: name,
         request: request,
-        pre: preHandlers.get(name)
+        pre: preHandlers.get(name),
       });
     }
   }
@@ -1581,7 +1614,13 @@ var FrontClassWithSpec = function(actorSpec, frontProto) {
   // Existing Fronts are relying on the initialize instead of constructor methods.
   const cls = function() {
     const instance = Object.create(cls.prototype);
-    instance.initialize.apply(instance, arguments);
+    const initializer = instance.initialize.apply(instance, arguments);
+
+    // Async Initialization
+    // return a promise that resolves with the instance if the initializer is async
+    if (initializer && typeof initializer.then === "function") {
+      return initializer.then(resolve => instance);
+    }
     return instance;
   };
   cls.prototype = extend(Front.prototype, generateRequestMethods(actorSpec, frontProto));
@@ -1601,7 +1640,7 @@ exports.dumpActorSpec = function(type) {
     category: "actor",
     typeName: type.name,
     methods: [],
-    events: {}
+    events: {},
   };
 
   for (const method of actorSpec.methods) {
@@ -1610,7 +1649,7 @@ exports.dumpActorSpec = function(type) {
       release: method.release || undefined,
       oneway: method.oneway || undefined,
       request: method.request.describe(),
-      response: method.response.describe()
+      response: method.response.describe(),
     });
   }
 
@@ -1638,7 +1677,7 @@ exports.dumpProtocolSpec = function() {
       ret.types[name] = {
         category: "dict",
         typeName: name,
-        specializations: type.specializations
+        specializations: type.specializations,
       };
     } else if (category === "actor") {
       ret.types[name] = exports.dumpActorSpec(type);

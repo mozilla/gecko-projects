@@ -109,6 +109,7 @@
 #include "nsMixedContentBlocker.h"
 #include "CacheStorageService.h"
 #include "HttpChannelParent.h"
+#include "HttpChannelParentListener.h"
 #include "InterceptedHttpChannel.h"
 #include "nsIBufferedStreams.h"
 #include "nsIFileStreams.h"
@@ -116,8 +117,10 @@
 #include "nsIMultiplexInputStream.h"
 #include "../../cache2/CacheFileUtils.h"
 #include "nsINetworkLinkService.h"
+#include "nsIRedirectProcessChooser.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/ServiceWorkerUtils.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -127,7 +130,11 @@
 #include "ProfilerMarkerPayload.h"
 #endif
 
-namespace mozilla { namespace net {
+namespace mozilla {
+
+using namespace dom;
+
+namespace net {
 
 namespace {
 
@@ -155,19 +162,13 @@ static uint32_t sRCWNMaxWaitMs = 500;
 
 static NS_DEFINE_CID(kStreamListenerTeeCID, NS_STREAMLISTENERTEE_CID);
 
-enum CacheDisposition {
-    kCacheHit = 1,
-    kCacheHitViaReval = 2,
-    kCacheMissedViaReval = 3,
-    kCacheMissed = 4
-};
-
 using mozilla::Telemetry::LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED;
 
 static const struct {
   LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED mTelemetryLabel;
   const char* mHostName;
 } gFastBlockAnalyticsProviders[] = {
+  // clang-format off
   { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::googleanalytics, "google-analytics.com" },
   { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::scorecardresearch, "scorecardresearch.com" },
   { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::hotjar, "hotjar.com" },
@@ -178,6 +179,7 @@ static const struct {
   { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::yahooanalytics, "analytics.yahoo.com" },
   { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::statcounter, "statcounter.com" },
   { LABELS_DOCUMENT_ANALYTICS_TRACKER_FASTBLOCKED::v12group, "v12group.com" }
+  // clang-format on
 };
 
 void
@@ -322,6 +324,7 @@ AutoRedirectVetoNotifier::ReportRedirectResult(bool succeeded)
 
 nsHttpChannel::nsHttpChannel()
     : HttpAsyncAborter<nsHttpChannel>(this)
+    , mCacheDisposition(kCacheUnresolved)
     , mLogicalOffset(0)
     , mPostID(0)
     , mRequestTime(0)
@@ -357,6 +360,7 @@ nsHttpChannel::nsHttpChannel()
     , mUsedNetwork(0)
     , mAuthConnectionRestartable(0)
     , mTrackingProtectionCancellationPending(0)
+    , mAsyncResumePending(0)
     , mPushedStream(nullptr)
     , mLocalBlocklist(false)
     , mOnTailUnblock(nullptr)
@@ -417,17 +421,6 @@ nsHttpChannel::Init(nsIURI *uri,
                                         proxyResolveFlags, proxyURI, channelId);
     if (NS_FAILED(rv))
         return rv;
-
-#ifdef MOZ_GECKO_PROFILER
-    mLastStatusReported = TimeStamp::Now(); // in case we enable the profiler after Init()
-    if (profiler_is_active()) {
-        int32_t priority = PRIORITY_NORMAL;
-        GetPriority(&priority);
-        profiler_add_network_marker(uri, priority, channelId, NetworkLoadType::LOAD_START,
-                                    mChannelCreationTimestamp, mLastStatusReported,
-                                    0);
-    }
-#endif
 
     LOG(("nsHttpChannel::Init [this=%p]\n", this));
 
@@ -594,7 +587,17 @@ nsHttpChannel::OnBeforeConnect()
         return NS_ERROR_UNKNOWN_HOST;
 
     if (mUpgradeProtocolCallback) {
-        mCaps |=  NS_HTTP_DISALLOW_SPDY;
+        // Websockets can run over HTTP/2, but other upgrades can't.
+        if (mUpgradeProtocol.EqualsLiteral("websocket") &&
+            gHttpHandler->IsH2WebsocketsEnabled()) {
+            // Need to tell the conn manager that we're ok with http/2 even with
+            // the allow keepalive bit not set. That bit needs to stay off,
+            // though, in case we end up having to fallback to http/1.1 (where
+            // we absolutely do want to disable keepalive).
+            mCaps |= NS_HTTP_ALLOW_SPDY_WITHOUT_KEEPALIVE;
+        } else {
+            mCaps |=  NS_HTTP_DISALLOW_SPDY;
+        }
     }
 
     if (mTRR) {
@@ -713,7 +716,8 @@ IsContentPolicyTypeWhitelistedForFastBlock(nsILoadInfo* aLoadInfo)
 bool
 nsHttpChannel::CheckFastBlocked()
 {
-    LOG(("nsHttpChannel::CheckFastBlocked [this=%p]\n", this));
+    LOG(("nsHttpChannel::CheckFastBlocked [this=%p, url=%s]",
+         this, mSpec.get()));
     MOZ_ASSERT(mIsThirdPartyTrackingResource);
 
     static bool sFastBlockInited = false;
@@ -726,8 +730,7 @@ nsHttpChannel::CheckFastBlocked()
         Preferences::AddUintVarCache(&sFastBlockLimit, "browser.fastblock.limit");
     }
 
-    if (!StaticPrefs::browser_contentblocking_enabled() ||
-        !StaticPrefs::browser_fastblock_enabled()) {
+    if (!StaticPrefs::browser_fastblock_enabled()) {
         LOG(("FastBlock disabled by pref [this=%p]\n", this));
 
         return false;
@@ -742,14 +745,19 @@ nsHttpChannel::CheckFastBlocked()
 
     bool engageFastBlock = false;
 
-    if (IsContentPolicyTypeWhitelistedForFastBlock(mLoadInfo) ||
-        // If the user has interacted with the document, we disable fastblock.
-        (mLoadInfo && mLoadInfo->GetDocumentHasUserInteracted())) {
-
-        LOG(("FastBlock passed (invalid) [this=%p]\n", this));
+    TimeDuration duration = TimeStamp::NowLoRes() - timestamp;
+    if (IsContentPolicyTypeWhitelistedForFastBlock(mLoadInfo)) {
+        LOG(("FastBlock passed (whitelisted content type %u) (%lf) [this=%p]\n",
+             mLoadInfo ? mLoadInfo->GetExternalContentPolicyType() : nsIContentPolicy::TYPE_OTHER,
+             duration.ToMilliseconds(), this));
+    } else if (mLoadInfo && mLoadInfo->GetDocumentHasUserInteracted()) {
+        LOG(("FastBlock passed (user interaction) (%lf) [this=%p]\n",
+             duration.ToMilliseconds(), this));
+    } else if (mLoadInfo && mLoadInfo->GetDocumentHasLoaded()) {
+        LOG(("FastBlock passed (document loaded) (%lf) [this=%p]\n",
+             duration.ToMilliseconds(), this));
     } else {
-        TimeDuration duration = TimeStamp::NowLoRes() - timestamp;
-        bool hasFastBlockStarted = duration.ToMilliseconds() >= sFastBlockTimeout;
+            bool hasFastBlockStarted = duration.ToMilliseconds() >= sFastBlockTimeout;
         bool hasFastBlockStopped = false;
         if ((sFastBlockLimit != 0) && (sFastBlockLimit > sFastBlockTimeout)) {
             hasFastBlockStopped = duration.ToMilliseconds() > sFastBlockLimit;
@@ -928,6 +936,7 @@ nsHttpChannel::ContinueConnect()
             }
 
             AccumulateCacheHitTelemetry(kCacheHit);
+            mCacheDisposition = kCacheHit;
 
             return rv;
         }
@@ -966,8 +975,14 @@ nsHttpChannel::ContinueConnect()
     if (NS_FAILED(rv)) return rv;
 
     uint32_t suspendCount = mSuspendCount;
-    while (suspendCount--)
+    if (mAsyncResumePending) {
+        LOG(("  Suspend()'ing transaction pump once because of async resume pending"
+             ", sc=%u, pump=%p, this=%p", suspendCount, mTransactionPump.get(), this));
+        ++suspendCount;
+    }
+    while (suspendCount--) {
         mTransactionPump->Suspend();
+    }
 
     return NS_OK;
 }
@@ -1463,7 +1478,7 @@ ProcessXCTO(nsIURI* aURI, nsHttpResponseHead* aResponseHead, nsILoadInfo* aLoadI
     }
     // b) let's trim all surrounding whitespace
     //    e.g. "   NoSniFF   " -> "NoSniFF"
-    contentTypeOptionsHeader.StripWhitespace();
+    nsHttp::TrimHTTPWhitespace(contentTypeOptionsHeader, contentTypeOptionsHeader);
     // c) let's compare the header (ignoring case)
     //    e.g. "NoSniFF" -> "nosniff"
     //    if it's not 'nosniff' then there is nothing to do here
@@ -1535,7 +1550,8 @@ EnsureMIMEOfScript(nsIURI* aURI, nsHttpResponseHead* aResponseHead, nsILoadInfo*
     aLoadInfo->LoadingPrincipal()->GetURI(getter_AddRefs(requestURI));
 
     nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-    nsresult rv = ssm->CheckSameOriginURI(requestURI, aURI, false);
+    bool isPrivateWin = aLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+    nsresult rv = ssm->CheckSameOriginURI(requestURI, aURI, false, isPrivateWin);
     if (NS_SUCCEEDED(rv)) {
         //same origin
         AccumulateCategorical(Telemetry::LABELS_SCRIPT_BLOCK_INCORRECT_MIME_2::same_origin);
@@ -1550,7 +1566,8 @@ EnsureMIMEOfScript(nsIURI* aURI, nsHttpResponseHead* aResponseHead, nsILoadInfo*
                 nsCOMPtr<nsIURI> corsOriginURI;
                 rv = NS_NewURI(getter_AddRefs(corsOriginURI), corsOrigin);
                 if (NS_SUCCEEDED(rv)) {
-                    rv = ssm->CheckSameOriginURI(requestURI, corsOriginURI, false);
+                    bool isPrivateWin = aLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+                    rv = ssm->CheckSameOriginURI(requestURI, corsOriginURI, false, isPrivateWin);
                     if (NS_SUCCEEDED(rv)) {
                         cors = true;
                     }
@@ -2727,6 +2744,7 @@ nsHttpChannel::ContinueProcessResponse2(nsresult rv)
             cacheDisposition = kCacheMissedViaReval;
         }
         AccumulateCacheHitTelemetry(cacheDisposition);
+        mCacheDisposition = cacheDisposition;
 
         Telemetry::Accumulate(Telemetry::HTTP_RESPONSE_VERSION,
                               static_cast<uint32_t>(mResponseHead->Version()));
@@ -3976,7 +3994,8 @@ nsHttpChannel::OpenCacheEntryInternal(bool isHttps,
         extension.Append("TRR");
     }
 
-    if (!AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(this, mURI, nullptr)) {
+    if (mIsThirdPartyTrackingResource &&
+        !AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(this, mURI, nullptr)) {
         nsCOMPtr<nsIURI> topWindowURI;
         rv = GetTopWindowURI(getter_AddRefs(topWindowURI));
         bool isDocument = false;
@@ -4996,12 +5015,31 @@ nsHttpChannel::OpenCacheInputStream(nsICacheEntry* cacheEntry, bool startBufferi
         altDataFromChild = !value.IsEmpty();
     }
 
-    if (!mPreferredCachedAltDataType.IsEmpty() && (altDataFromChild == mAltDataForChild)) {
-        rv = cacheEntry->OpenAlternativeInputStream(mPreferredCachedAltDataType,
+    nsAutoCString altDataType;
+    Unused << cacheEntry->GetAltDataType(altDataType);
+
+    nsAutoCString contentType;
+    mCachedResponseHead->ContentType(contentType);
+
+    bool foundAltData = false;
+    if (!altDataType.IsEmpty() &&
+        !mPreferredCachedAltDataTypes.IsEmpty() &&
+        altDataFromChild == mAltDataForChild) {
+        for (auto& pref : mPreferredCachedAltDataTypes) {
+            if (mozilla::Get<0>(pref) == altDataType &&
+                (mozilla::Get<1>(pref).IsEmpty() || mozilla::Get<1>(pref) == contentType)) {
+                foundAltData = true;
+                break;
+            }
+        }
+    }
+    if (foundAltData) {
+        rv = cacheEntry->OpenAlternativeInputStream(altDataType,
                                                     getter_AddRefs(stream));
         if (NS_SUCCEEDED(rv)) {
+            LOG(("Opened alt-data input stream type=%s", altDataType.get()));
             // We have succeeded.
-            mAvailableCachedAltDataType = mPreferredCachedAltDataType;
+            mAvailableCachedAltDataType = altDataType;
             // Set the correct data size on the channel.
             int64_t altDataSize;
             if (NS_SUCCEEDED(cacheEntry->GetAltDataSize(&altDataSize))) {
@@ -5009,6 +5047,7 @@ nsHttpChannel::OpenCacheInputStream(nsICacheEntry* cacheEntry, bool startBufferi
             }
         }
     }
+
 
     if (!stream) {
         rv = cacheEntry->OpenInputStream(0, getter_AddRefs(stream));
@@ -5206,8 +5245,14 @@ nsHttpChannel::ReadFromCache(bool alreadyMarkedValid)
         mCacheReadStart = TimeStamp::Now();
 
     uint32_t suspendCount = mSuspendCount;
-    while (suspendCount--)
+    if (mAsyncResumePending) {
+        LOG(("  Suspend()'ing cache pump once because of async resume pending"
+             ", sc=%u, pump=%p, this=%p", suspendCount, mCachePump.get(), this));
+        ++suspendCount;
+    }
+    while (suspendCount--) {
         mCachePump->Suspend();
+    }
 
     return NS_OK;
 }
@@ -5844,7 +5889,7 @@ nsHttpChannel::ContinueProcessRedirectionAfterFallback(nsresult rv)
         GetPriority(&priority);
         profiler_add_network_marker(mURI, priority, mChannelId, NetworkLoadType::LOAD_REDIRECT,
                                     mLastStatusReported, TimeStamp::Now(),
-                                    mLogicalOffset, nullptr,
+                                    mLogicalOffset, mCacheDisposition, nullptr,
                                     mRedirectURI);
     }
 #endif
@@ -6288,11 +6333,18 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
         uint64_t sourceEventId, parentTaskId;
         tasktracer::SourceEventType sourceEventType;
         GetCurTraceInfo(&sourceEventId, &parentTaskId, &sourceEventType);
-        nsCOMPtr<nsIURI> uri;
-        GetURI(getter_AddRefs(uri));
         nsAutoCString urispec;
-        uri->GetSpec(urispec);
+        mURI->GetSpec(urispec);
         tasktracer::AddLabel("nsHttpChannel::AsyncOpen %s", urispec.get());
+    }
+#endif
+
+#ifdef MOZ_GECKO_PROFILER
+    mLastStatusReported = TimeStamp::Now(); // in case we enable the profiler after AsyncOpen()
+    if (profiler_is_active()) {
+        profiler_add_network_marker(mURI, mPriority, mChannelId, NetworkLoadType::LOAD_START,
+                                    mChannelCreationTimestamp, mLastStatusReported,
+                                    0, mCacheDisposition);
     }
 #endif
 
@@ -6387,6 +6439,21 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
     mListener = listener;
     mListenerContext = context;
 
+    // PauseTask/DelayHttpChannel queuing
+    if (!DelayHttpChannelQueue::AttemptQueueChannel(this)) {
+        // If fuzzyfox is disabled; or adding to the queue failed, the channel must continue.
+        AsyncOpenFinal(TimeStamp::Now());
+    }
+
+    return NS_OK;
+}
+
+nsresult
+nsHttpChannel::AsyncOpenFinal(TimeStamp aTimeStamp)
+{
+    // Added due to PauseTask/DelayHttpChannel
+    nsresult rv;
+
     if (mLoadGroup)
         mLoadGroup->AddRequest(this, nullptr);
 
@@ -6395,7 +6462,7 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
     // that to complete would mean we don't include proxy resolution in the
     // timing.
     if (!mAsyncOpenTimeOverriden) {
-      mAsyncOpenTime = TimeStamp::Now();
+      mAsyncOpenTime = aTimeStamp;
     }
 
     // Remember we have Authorization header set here.  We need to check on it
@@ -6502,6 +6569,11 @@ nsHttpChannel::BeginConnect()
     OriginAttributes originAttributes;
     NS_GetOriginAttributes(this, originAttributes);
 
+    RefPtr<nsHttpConnectionInfo> connInfo =
+        new nsHttpConnectionInfo(host, port, EmptyCString(), mUsername,
+                                 proxyInfo, originAttributes, isHttps);
+    mAllowAltSvc = (mAllowAltSvc && !gHttpHandler->IsSpdyBlacklisted(connInfo));
+
     RefPtr<AltSvcMapping> mapping;
     if (!mConnectionInfo && mAllowAltSvc && // per channel
         !(mLoadFlags & LOAD_FRESH_CONNECTION) &&
@@ -6555,9 +6627,16 @@ nsHttpChannel::BeginConnect()
     } else {
         LOG(("nsHttpChannel %p Using default connection info", this));
 
-        mConnectionInfo = new nsHttpConnectionInfo(host, port, EmptyCString(), mUsername, proxyInfo,
-                                                   originAttributes, isHttps);
+        mConnectionInfo = connInfo;
         Telemetry::Accumulate(Telemetry::HTTP_TRANSACTION_USE_ALTSVC, false);
+    }
+
+    // Need to re-ask the handler, since mConnectionInfo may not be the connInfo
+    // we used earlier
+    if (gHttpHandler->IsSpdyBlacklisted(mConnectionInfo)) {
+        mAllowSpdy = 0;
+        mCaps |= NS_HTTP_DISALLOW_SPDY;
+        mConnectionInfo->SetNoSpdy(true);
     }
 
     mAuthProvider = new nsHttpChannelAuthProvider();
@@ -6627,6 +6706,7 @@ nsHttpChannel::BeginConnect()
     }
 
     if (!(mLoadFlags & LOAD_CLASSIFY_URI)) {
+        MaybeStartDNSPrefetch();
         return ContinueBeginConnectWithResult();
     }
 
@@ -6661,21 +6741,9 @@ nsHttpChannel::BeginConnect()
     return NS_OK;
 }
 
-nsresult
-nsHttpChannel::BeginConnectActual()
+void
+nsHttpChannel::MaybeStartDNSPrefetch()
 {
-    if (mCanceled) {
-        return mStatus;
-    }
-
-    if (mTrackingProtectionCancellationPending) {
-        LOG(("Waiting for tracking protection cancellation in BeginConnectActual [this=%p]\n", this));
-        MOZ_ASSERT(!mCallOnResume ||
-                   mCallOnResume == &nsHttpChannel::HandleContinueCancelledByTrackingProtection,
-                   "We should be paused waiting for cancellation from tracking protection");
-        return NS_OK;
-    }
-
     if (!mConnectionInfo->UsingHttpProxy() &&
         !(mLoadFlags & (LOAD_NO_NETWORK_IO | LOAD_ONLY_FROM_CACHE))) {
         // Start a DNS lookup very early in case the real open is queued the DNS can
@@ -6691,7 +6759,7 @@ nsHttpChannel::BeginConnectActual()
         // be correct, and even when it isn't, the timing still represents _a_
         // valid DNS lookup timing for the site, even if it is not _the_
         // timing we used.
-        LOG(("nsHttpChannel::BeginConnect [this=%p] prefetching%s\n",
+        LOG(("nsHttpChannel::MaybeStartDNSPrefetch [this=%p] prefetching%s\n",
              this, mCaps & NS_HTTP_REFRESH_DNS ? ", refresh requested" : ""));
         OriginAttributes originAttributes;
         NS_GetOriginAttributes(this, originAttributes);
@@ -6699,6 +6767,24 @@ nsHttpChannel::BeginConnectActual()
                                          this, mTimingEnabled);
         mDNSPrefetch->PrefetchHigh(mCaps & NS_HTTP_REFRESH_DNS);
     }
+}
+
+nsresult
+nsHttpChannel::BeginConnectActual()
+{
+    if (mCanceled) {
+        return mStatus;
+    }
+
+    if (mTrackingProtectionCancellationPending) {
+        LOG(("Waiting for tracking protection cancellation in BeginConnectActual [this=%p]\n", this));
+        MOZ_ASSERT(!mCallOnResume ||
+                   mCallOnResume == &nsHttpChannel::HandleContinueCancelledByTrackingProtection,
+                   "We should be paused waiting for cancellation from tracking protection");
+        return NS_OK;
+    }
+
+    MaybeStartDNSPrefetch();
 
     nsresult rv = ContinueBeginConnectWithResult();
     if (NS_FAILED(rv)) {
@@ -6770,7 +6856,7 @@ nsHttpChannel::ProcessId()
 }
 
 bool
-nsHttpChannel::AttachStreamFilter(ipc::Endpoint<extensions::PStreamFilterParent>&& aEndpoint)
+nsHttpChannel::AttachStreamFilter(mozilla::ipc::Endpoint<extensions::PStreamFilterParent>&& aEndpoint)
 
 {
   nsCOMPtr<nsIParentChannel> parentChannel;
@@ -7648,7 +7734,7 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
             profiler_add_network_marker(uri, priority, mChannelId, NetworkLoadType::LOAD_STOP,
                                         mLastStatusReported, TimeStamp::Now(),
                                         mLogicalOffset,
-                                        &mTransactionTimings);
+                                        mCacheDisposition, &mTransactionTimings, nullptr);
         }
 #endif
 
@@ -7686,8 +7772,16 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
             return NS_OK;
         }
 
-        if (mUpgradeProtocolCallback && stickyConn &&
-            mResponseHead && mResponseHead->Status() == 101) {
+        bool upgradeWebsocket = mUpgradeProtocolCallback && stickyConn &&
+            mResponseHead &&
+            ((mResponseHead->Status() == 101 && mResponseHead->Version() == HttpVersion::v1_1) ||
+             (mResponseHead->Status() == 200 && mResponseHead->Version() == HttpVersion::v2_0));
+
+        bool upgradeConnect = mUpgradeProtocolCallback && stickyConn &&
+            (mCaps & NS_HTTP_CONNECT_ONLY) && mResponseHead &&
+            mResponseHead->Status() == 200;
+
+        if (upgradeWebsocket || upgradeConnect) {
             nsresult rv =
                 gHttpHandler->ConnMgr()->CompleteUpgrade(stickyConn,
                                                          mUpgradeProtocolCallback);
@@ -7850,7 +7944,7 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
     // interested in reading and/or writing the alt-data representation.
     // We need to hold a reference to the cache entry in case the listener calls
     // openAlternativeOutputStream() after CloseCacheEntry() clears mCacheEntry.
-    if (!mPreferredCachedAltDataType.IsEmpty()) {
+    if (!mPreferredCachedAltDataTypes.IsEmpty()) {
         mAltDataCacheEntry = mCacheEntry;
     }
 
@@ -8272,18 +8366,18 @@ nsHttpChannel::GetAllowStaleCacheContent(bool *aAllowStaleCacheContent)
 }
 
 NS_IMETHODIMP
-nsHttpChannel::PreferAlternativeDataType(const nsACString & aType)
+nsHttpChannel::PreferAlternativeDataType(const nsACString& aType,
+                                         const nsACString& aContentType)
 {
     ENSURE_CALLED_BEFORE_ASYNC_OPEN();
-    mPreferredCachedAltDataType = aType;
+    mPreferredCachedAltDataTypes.AppendElement(MakePair(nsCString(aType), nsCString(aContentType)));
     return NS_OK;
 }
 
-NS_IMETHODIMP
-nsHttpChannel::GetPreferredAlternativeDataType(nsACString & aType)
+const nsTArray<mozilla::Tuple<nsCString, nsCString>>&
+nsHttpChannel::PreferredAlternativeDataTypes()
 {
-  aType = mPreferredCachedAltDataType;
-  return NS_OK;
+    return mPreferredCachedAltDataTypes;
 }
 
 NS_IMETHODIMP
@@ -8313,6 +8407,23 @@ nsHttpChannel::OpenAlternativeOutputStream(const nsACString & type, int64_t pred
         cacheEntry->SetMetaDataElement("alt-data-from-child", nullptr);
     }
     return rv;
+}
+
+NS_IMETHODIMP
+nsHttpChannel::GetOriginalInputStream(nsIInputStreamReceiver *aReceiver)
+{
+    if (aReceiver == nullptr) {
+        return NS_ERROR_INVALID_ARG;
+    }
+    nsCOMPtr<nsIInputStream> inputStream;
+
+    nsCOMPtr<nsICacheEntry> cacheEntry = mCacheEntry ? mCacheEntry
+                                                     : mAltDataCacheEntry;
+    if (cacheEntry) {
+        cacheEntry->OpenInputStream(0, getter_AddRefs(inputStream));
+    }
+    aReceiver->OnInputStreamReady(inputStream);
+    return NS_OK;
 }
 
 //-----------------------------------------------------------------------------
@@ -8515,8 +8626,14 @@ nsHttpChannel::DoAuthRetry(nsAHttpConnection *conn)
     if (NS_FAILED(rv)) return rv;
 
     uint32_t suspendCount = mSuspendCount;
-    while (suspendCount--)
+    if (mAsyncResumePending) {
+        LOG(("  Suspend()'ing transaction pump once because of async resume pending"
+             ", sc=%u, pump=%p, this=%p", suspendCount, mTransactionPump.get(), this));
+        ++suspendCount;
+    }
+    while (suspendCount--) {
         mTransactionPump->Suspend();
+    }
 
     return NS_OK;
 }
@@ -8778,6 +8895,14 @@ nsHttpChannel::OnLookupComplete(nsICancelable *request,
         }
     }
 
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsHttpChannel::OnLookupByTypeComplete(nsICancelable      *aRequest,
+                                      nsIDNSByTypeRecord *aRes,
+                                      nsresult            aStatus)
+{
     return NS_OK;
 }
 
@@ -9124,28 +9249,72 @@ nsHttpChannel::ResumeInternal()
         if (mCallOnResume) {
             // Resume the interrupted procedure first, then resume
             // the pump to continue process the input stream.
-            RefPtr<nsRunnableMethod<nsHttpChannel>> callOnResume=
-                NewRunnableMethod("CallOnResume", this, mCallOnResume);
-            // Should not resume pump that created after resumption.
+            // Any newly created pump MUST be suspended to prevent calling
+            // its OnStartRequest before OnStopRequest of any pre-existing
+            // pump.  mAsyncResumePending ensures that.
+            MOZ_ASSERT(!mAsyncResumePending);
+            mAsyncResumePending = 1;
+
+            auto const callOnResume = mCallOnResume;
+            mCallOnResume = nullptr;
+
+            RefPtr<nsHttpChannel> self(this);
             RefPtr<nsInputStreamPump> transactionPump = mTransactionPump;
             RefPtr<nsInputStreamPump> cachePump = mCachePump;
 
             nsresult rv =
                 NS_DispatchToCurrentThread(NS_NewRunnableFunction(
                     "nsHttpChannel::CallOnResume",
-                    [callOnResume, transactionPump, cachePump]() {
-                        callOnResume->Run();
+                    [callOnResume,
+                     self{std::move(self)},
+                     transactionPump{std::move(transactionPump)},
+                     cachePump{std::move(cachePump)}]() {
+                        MOZ_ASSERT(self->mAsyncResumePending);
+                        (self->*callOnResume)();
+                        MOZ_ASSERT(self->mAsyncResumePending);
 
+                        self->mAsyncResumePending = 0;
+
+                        // And now actually resume the previously existing pumps.
                         if (transactionPump) {
+                            LOG(("nsHttpChannel::CallOnResume resuming previous transaction pump %p, this=%p",
+                                 transactionPump.get(), self.get()));
                             transactionPump->Resume();
                         }
-
                         if (cachePump) {
+                            LOG(("nsHttpChannel::CallOnResume resuming previous cache pump %p, this=%p",
+                                 cachePump.get(), self.get()));
                             cachePump->Resume();
+                        }
+
+                        // Any newly created pumps were suspended once because of mAsyncResumePending.
+                        // Problem is that the stream listener notification is already pending in the
+                        // queue right now, because AsyncRead doesn't (regardless if called after Suspend)
+                        // respect the suspend coutner and the right order would not be preserved.
+                        // Hence, we do another dispatch round to actually Resume after the notification
+                        // from the original pump.
+                        if (transactionPump != self->mTransactionPump && self->mTransactionPump) {
+                            LOG(("nsHttpChannel::CallOnResume async-resuming new transaction pump %p, this=%p",
+                                 self->mTransactionPump.get(), self.get()));
+
+                            RefPtr<nsInputStreamPump> pump = self->mTransactionPump;
+                            NS_DispatchToCurrentThread(NS_NewRunnableFunction(
+                                "nsHttpChannel::CallOnResume new transaction",
+                                [pump{std::move(pump)}]() { pump->Resume(); }
+                            ));
+                        }
+                        if (cachePump != self->mCachePump && self->mCachePump) {
+                            LOG(("nsHttpChannel::CallOnResume async-resuming new cache pump %p, this=%p",
+                                 self->mCachePump.get(), self.get()));
+
+                            RefPtr<nsInputStreamPump> pump = self->mCachePump;
+                            NS_DispatchToCurrentThread(NS_NewRunnableFunction(
+                                "nsHttpChannel::CallOnResume new pump",
+                                [pump{std::move(pump)}]() { pump->Resume(); }
+                            ));
                         }
                     })
                 );
-            mCallOnResume = nullptr;
             NS_ENSURE_SUCCESS(rv, rv);
             return rv;
         }
@@ -9267,13 +9436,26 @@ nsHttpChannel::SetOriginHeader()
         nsContentUtils::GetASCIIOrigin(referrer, origin);
     }
 
-    // Restrict Origin to same-origin loads if requested by user
+    // Restrict Origin to same-origin loads if requested by user or leaving from
+    // .onion
     if (sSendOriginHeader == 1) {
         nsAutoCString currentOrigin;
         nsContentUtils::GetASCIIOrigin(mURI, currentOrigin);
         if (!origin.EqualsIgnoreCase(currentOrigin.get())) {
             // Origin header suppressed by user setting
             return;
+        }
+    } else if (gHttpHandler->HideOnionReferrerSource()) {
+        nsAutoCString host;
+        if (referrer &&
+            NS_SUCCEEDED(referrer->GetAsciiHost(host)) &&
+            StringEndsWith(host, NS_LITERAL_CSTRING(".onion"))) {
+            nsAutoCString currentOrigin;
+            nsContentUtils::GetASCIIOrigin(mURI, currentOrigin);
+            if (!origin.EqualsIgnoreCase(currentOrigin.get())) {
+                // Origin header is suppressed by .onion
+                return;
+            }
         }
     }
 

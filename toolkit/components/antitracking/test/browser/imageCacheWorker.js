@@ -1,8 +1,8 @@
 /* import-globals-from head.js */
-/* import-globals-from browser_imageCache1.js */
+/* import-globals-from browser_imageCache4.js */
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-AntiTracking.runTest("Image cache - should load the image twice.",
+AntiTracking.runTest("Image cache - should load the image three times.",
   // blocking callback
   async _ => {
     // Let's load the image twice here.
@@ -23,7 +23,7 @@ AntiTracking.runTest("Image cache - should load the image twice.",
   {
     runExtraTests: false,
     cookieBehavior,
-    blockingByContentBlocking,
+    blockingByContentBlockingRTUI,
     blockingByAllowList,
     callback: async _ => {
       // Let's load the image twice here as well.
@@ -47,7 +47,7 @@ AntiTracking.runTest("Image cache - should load the image twice.",
   expectedBlockingNotifications
 );
 
-// We still want to see just 2 requests.
+// We still want to see just expected requests.
 add_task(async _ => {
   await fetch("https://tracking.example.org/browser/toolkit/components/antitracking/test/browser/image.sjs?result")
     .then(r => r.text())

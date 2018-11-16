@@ -33,7 +33,7 @@ MOZ_BEGIN_EXTERN_C
 extern MFBT_DATA const char* gMozCrashReason;
 MOZ_END_EXTERN_C
 
-#if !defined(DEBUG) && (defined(MOZ_HAS_MOZGLUE) || defined(MOZILLA_INTERNAL_API))
+#if defined(MOZ_HAS_MOZGLUE) || defined(MOZILLA_INTERNAL_API)
 static inline void
 AnnotateMozCrashReason(const char* reason)
 {
@@ -221,16 +221,33 @@ MOZ_NoReturn(int aLine)
        MOZ_NoReturn(line); \
      } while (false)
 #else
+
+/*
+ * MOZ_CRASH_WRITE_ADDR is the address to be used when performing a forced
+ * crash. NULL is preferred however if for some reason NULL cannot be used
+ * this makes choosing another value possible.
+ *
+ * In the case of UBSan certain checks, bounds specifically, cause the compiler
+ * to emit the 'ud2' instruction when storing to 0x0. This causes forced
+ * crashes to manifest as ILL (at an arbitrary address) instead of the expected
+ * SEGV at 0x0.
+ */
+#  ifdef MOZ_UBSAN
+#    define MOZ_CRASH_WRITE_ADDR 0x1
+#  else
+#    define MOZ_CRASH_WRITE_ADDR NULL
+#  endif
+
 #  ifdef __cplusplus
 #    define MOZ_REALLY_CRASH(line) \
        do { \
-         *((volatile int*) NULL) = line; \
+         *((volatile int*) MOZ_CRASH_WRITE_ADDR) = line; \
          ::abort(); \
        } while (false)
 #  else
 #    define MOZ_REALLY_CRASH(line) \
        do { \
-         *((volatile int*) NULL) = line; \
+         *((volatile int*) MOZ_CRASH_WRITE_ADDR) = line; \
          abort(); \
        } while (false)
 #  endif
@@ -284,15 +301,16 @@ MOZ_NoReturn(int aLine)
  * to crash-stats and are publicly visible. Firefox data stewards must do data
  * review on usages of this macro.
  */
-#ifndef DEBUG
-MFBT_API MOZ_COLD MOZ_NORETURN MOZ_NEVER_INLINE void
-MOZ_CrashOOL(int aLine, const char* aReason);
-#  define MOZ_CRASH_UNSAFE_OOL(reason) MOZ_CrashOOL(__LINE__, reason)
-#else
-MFBT_API MOZ_COLD MOZ_NORETURN MOZ_NEVER_INLINE void
-MOZ_CrashOOL(const char* aFilename, int aLine, const char* aReason);
-#  define MOZ_CRASH_UNSAFE_OOL(reason) MOZ_CrashOOL(__FILE__, __LINE__, reason)
+static inline MOZ_COLD MOZ_NORETURN void
+MOZ_CrashOOL(const char* aFilename, int aLine, const char* aReason)
+{
+#ifdef DEBUG
+  MOZ_ReportCrash(aReason, aFilename, aLine);
 #endif
+  MOZ_CRASH_ANNOTATE(aReason);
+  MOZ_REALLY_CRASH(aLine);
+}
+#define MOZ_CRASH_UNSAFE_OOL(reason) MOZ_CrashOOL(__FILE__, __LINE__, reason)
 
 static const size_t sPrintfMaxArgs = 4;
 static const size_t sPrintfCrashReasonSize = 1024;

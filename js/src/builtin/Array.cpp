@@ -223,7 +223,7 @@ GetLengthProperty(JSContext* cx, HandleObject obj, uint64_t* lengthp)
  */
 template <typename CharT>
 static bool
-StringIsArrayIndex(const CharT* s, uint32_t length, uint32_t* indexp)
+StringIsArrayIndexHelper(const CharT* s, uint32_t length, uint32_t* indexp)
 {
     const CharT* end = s + length;
 
@@ -265,8 +265,20 @@ js::StringIsArrayIndex(JSLinearString* str, uint32_t* indexp)
 {
     AutoCheckCannotGC nogc;
     return str->hasLatin1Chars()
-           ? ::StringIsArrayIndex(str->latin1Chars(nogc), str->length(), indexp)
-           : ::StringIsArrayIndex(str->twoByteChars(nogc), str->length(), indexp);
+           ? StringIsArrayIndexHelper(str->latin1Chars(nogc), str->length(), indexp)
+           : StringIsArrayIndexHelper(str->twoByteChars(nogc), str->length(), indexp);
+}
+
+JS_FRIEND_API(bool)
+js::StringIsArrayIndex(const char16_t* str, uint32_t length, uint32_t* indexp)
+{
+    return StringIsArrayIndexHelper(str, length, indexp);
+}
+
+JS_FRIEND_API(bool)
+js::StringIsArrayIndex(const char* str, uint32_t length, uint32_t* indexp)
+{
+    return StringIsArrayIndexHelper(str, length, indexp);
 }
 
 template <typename T>
@@ -411,9 +423,6 @@ js::GetElementsWithAdder(JSContext* cx, HandleObject obj, HandleObject receiver,
 
     return true;
 }
-
-static bool
-ObjectMayHaveExtraIndexedProperties(JSObject* obj);
 
 static inline bool
 IsPackedArrayOrNoExtraIndexedProperties(JSObject* obj, uint64_t length)
@@ -1050,8 +1059,8 @@ ObjectMayHaveExtraIndexedOwnProperties(JSObject* obj)
  * elements. This includes other indexed properties in its shape hierarchy, and
  * indexed properties or elements along its prototype chain.
  */
-static bool
-ObjectMayHaveExtraIndexedProperties(JSObject* obj)
+bool
+js::ObjectMayHaveExtraIndexedProperties(JSObject* obj)
 {
     MOZ_ASSERT_IF(obj->hasDynamicPrototype(), !obj->isNative());
 
@@ -1439,7 +1448,9 @@ js::array_join(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    AutoGeckoProfilerEntry pseudoFrame(cx, "Array.prototype.join");
+    AutoGeckoProfilerEntry pseudoFrame(
+        cx, "Array.prototype.join", ProfilingStackFrame::Category::JS,
+        uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
     CallArgs args = CallArgsFromVp(argc, vp);
 
     // Step 1.
@@ -1717,7 +1728,9 @@ ArrayReverseDenseKernel(JSContext* cx, HandleNativeObject obj, uint32_t length)
 bool
 js::array_reverse(JSContext* cx, unsigned argc, Value* vp)
 {
-    AutoGeckoProfilerEntry pseudoFrame(cx, "Array.prototype.reverse");
+    AutoGeckoProfilerEntry pseudoFrame(
+        cx, "Array.prototype.reverse", ProfilingStackFrame::Category::JS,
+        uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
     CallArgs args = CallArgsFromVp(argc, vp);
 
     // Step 1.
@@ -2466,7 +2479,9 @@ js::NewbornArrayPush(JSContext* cx, HandleObject obj, const Value& v)
 bool
 js::array_push(JSContext* cx, unsigned argc, Value* vp)
 {
-    AutoGeckoProfilerEntry pseudoFrame(cx, "Array.prototype.push");
+    AutoGeckoProfilerEntry pseudoFrame(
+        cx, "Array.prototype.push", ProfilingStackFrame::Category::JS,
+        uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
     CallArgs args = CallArgsFromVp(argc, vp);
 
     // Step 1.
@@ -2526,7 +2541,9 @@ js::array_push(JSContext* cx, unsigned argc, Value* vp)
 bool
 js::array_pop(JSContext* cx, unsigned argc, Value* vp)
 {
-    AutoGeckoProfilerEntry pseudoFrame(cx, "Array.prototype.pop");
+    AutoGeckoProfilerEntry pseudoFrame(
+        cx, "Array.prototype.pop", ProfilingStackFrame::Category::JS,
+        uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
     CallArgs args = CallArgsFromVp(argc, vp);
 
     // Step 1.
@@ -2648,7 +2665,9 @@ ArrayShiftDenseKernel(JSContext* cx, HandleObject obj, MutableHandleValue rval)
 bool
 js::array_shift(JSContext* cx, unsigned argc, Value* vp)
 {
-    AutoGeckoProfilerEntry pseudoFrame(cx, "Array.prototype.shift");
+    AutoGeckoProfilerEntry pseudoFrame(
+        cx, "Array.prototype.shift", ProfilingStackFrame::Category::JS,
+        uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
     CallArgs args = CallArgsFromVp(argc, vp);
 
     // Step 1.
@@ -2734,7 +2753,9 @@ js::array_shift(JSContext* cx, unsigned argc, Value* vp)
 bool
 js::array_unshift(JSContext* cx, unsigned argc, Value* vp)
 {
-    AutoGeckoProfilerEntry pseudoFrame(cx, "Array.prototype.unshift");
+    AutoGeckoProfilerEntry pseudoFrame(
+        cx, "Array.prototype.unshift", ProfilingStackFrame::Category::JS,
+        uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
     CallArgs args = CallArgsFromVp(argc, vp);
 
     // Step 1.
@@ -2994,7 +3015,9 @@ CopyArrayElements(JSContext* cx, HandleObject obj, uint64_t begin, uint64_t coun
 static bool
 array_splice_impl(JSContext* cx, unsigned argc, Value* vp, bool returnValueIsUsed)
 {
-    AutoGeckoProfilerEntry pseudoFrame(cx, "Array.prototype.splice");
+    AutoGeckoProfilerEntry pseudoFrame(
+        cx, "Array.prototype.splice", ProfilingStackFrame::Category::JS,
+        uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
     CallArgs args = CallArgsFromVp(argc, vp);
 
     /* Step 1. */
@@ -3589,7 +3612,9 @@ ArraySliceOrdinary(JSContext* cx, HandleObject obj, uint64_t begin, uint64_t end
 bool
 js::array_slice(JSContext* cx, unsigned argc, Value* vp)
 {
-    AutoGeckoProfilerEntry pseudoFrame(cx, "Array.prototype.slice");
+    AutoGeckoProfilerEntry pseudoFrame(
+        cx, "Array.prototype.slice", ProfilingStackFrame::Category::JS,
+        uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
     CallArgs args = CallArgsFromVp(argc, vp);
 
     /* Step 1. */

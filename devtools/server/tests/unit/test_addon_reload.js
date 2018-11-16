@@ -14,7 +14,7 @@ function promiseAddonEvent(event) {
       [event]: function(...args) {
         AddonManager.removeAddonListener(listener);
         resolve(args);
-      }
+      },
     };
 
     AddonManager.addAddonListener(listener);
@@ -54,9 +54,11 @@ function getSupportFile(path) {
 }
 
 add_task(async function testReloadExitedAddon() {
-  const client = await new Promise(resolve => {
-    get_parent_process_actors(client => resolve(client));
-  });
+  DebuggerServer.init();
+  DebuggerServer.registerAllActors();
+
+  const client = new DebuggerClient(DebuggerServer.connectPipe());
+  await client.connect();
 
   // Install our main add-on to trigger reloads on.
   const addonFile = getSupportFile("addons/web-extension");
@@ -92,12 +94,7 @@ add_task(async function testReloadExitedAddon() {
   // The actor id should be the same after the reload
   equal(newAddonActor.actor, addonTargetActor.actor);
 
-  const onAddonListChanged = new Promise((resolve) => {
-    client.addListener("addonListChanged", function listener() {
-      client.removeListener("addonListChanged", listener);
-      resolve();
-    });
-  });
+  const onAddonListChanged = client.mainRoot.once("addonListChanged");
 
   // Install an upgrade version of the first add-on.
   const addonUpgradeFile = getSupportFile("addons/web-extension-upgrade");

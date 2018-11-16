@@ -67,12 +67,14 @@ EXPORTS.mozilla += [
     'TaskCategory.h',
     'TaskDispatcher.h',
     'TaskQueue.h',
+    'ThreadBound.h',
     'ThreadEventQueue.h',
     'ThrottledEventQueue.h',
 ]
 
 SOURCES += [
     'IdleTaskRunner.cpp',
+    'ThreadDelay.cpp',
 ]
 
 UNIFIED_SOURCES += [

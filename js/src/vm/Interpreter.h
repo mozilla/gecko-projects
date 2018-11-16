@@ -345,16 +345,17 @@ UnwindAllEnvironmentsInFrame(JSContext* cx, EnvironmentIter& ei);
 // Compute the pc needed to unwind the scope to the beginning of the block
 // pointed to by the try note.
 extern jsbytecode*
-UnwindEnvironmentToTryPc(JSScript* script, JSTryNote* tn);
+UnwindEnvironmentToTryPc(JSScript* script, const JSTryNote* tn);
 
 template <class StackDepthOp>
 class MOZ_STACK_CLASS TryNoteIter
 {
     RootedScript script_;
     uint32_t pcOffset_;
-    JSTryNote* tn_;
-    JSTryNote* tnEnd_;
     StackDepthOp getStackDepth_;
+
+    const JSTryNote* tn_;
+    const JSTryNote* tnEnd_;
 
     void settle() {
         for (; tn_ != tnEnd_; ++tn_) {
@@ -392,12 +393,15 @@ class MOZ_STACK_CLASS TryNoteIter
     TryNoteIter(JSContext* cx, JSScript* script, jsbytecode* pc,
                 StackDepthOp getStackDepth)
       : script_(cx, script),
-        pcOffset_(pc - script->main()),
+        pcOffset_(script->pcToOffset(pc)),
         getStackDepth_(getStackDepth)
     {
         if (script->hasTrynotes()) {
-            tn_ = script->trynotes()->vector;
-            tnEnd_ = tn_ + script->trynotes()->length;
+            // NOTE: The Span is a temporary so we can't use begin()/end()
+            // here or the iterator will outlive the span.
+            auto trynotes = script->trynotes();
+            tn_ = trynotes.data();
+            tnEnd_ = tn_ + trynotes.size();
         } else {
             tn_ = tnEnd_ = nullptr;
         }
@@ -410,7 +414,7 @@ class MOZ_STACK_CLASS TryNoteIter
     }
 
     bool done() const { return tn_ == tnEnd_; }
-    JSTryNote* operator*() const { return tn_; }
+    const JSTryNote* operator*() const { return tn_; }
 };
 
 bool
@@ -420,9 +424,6 @@ HandleClosingGeneratorReturn(JSContext* cx, AbstractFramePtr frame, bool ok);
 
 bool
 Throw(JSContext* cx, HandleValue v);
-
-bool
-ThrowingOperation(JSContext* cx, HandleValue v);
 
 bool
 GetProperty(JSContext* cx, HandleValue value, HandlePropertyName name, MutableHandleValue vp);

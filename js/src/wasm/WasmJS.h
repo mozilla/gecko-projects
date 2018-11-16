@@ -26,6 +26,7 @@
 namespace js {
 
 class GlobalObject;
+class StructTypeDescr;
 class TypedArrayObject;
 class WasmFunctionScope;
 class WasmInstanceScope;
@@ -40,10 +41,21 @@ namespace wasm {
 bool
 HasCompilerSupport(JSContext* cx);
 
-// Return whether WebAssembly is enabled on this platform.
+// Return whether WebAssembly is supported on this platform. This determines
+// whether the WebAssembly object is exposed to JS and takes into account
+// configuration options that disable various modes.
 
 bool
 HasSupport(JSContext* cx);
+
+// Return whether WebAssembly streaming/caching is supported on this platform.
+// This takes into account prefs and necessary embedding callbacks.
+
+bool
+HasStreamingSupport(JSContext* cx);
+
+bool
+HasCachingSupport(JSContext* cx);
 
 // Compiles the given binary wasm module given the ArrayBufferObject
 // and links the module's imports with the given import object.
@@ -51,6 +63,18 @@ HasSupport(JSContext* cx);
 MOZ_MUST_USE bool
 Eval(JSContext* cx, Handle<TypedArrayObject*> code, HandleObject importObj,
      MutableHandleWasmInstanceObject instanceObj);
+
+// For testing cross-process (de)serialization, this pair of functions are
+// responsible for, in the child process, compiling the given wasm bytecode
+// to a wasm::Module that is serialized into the given byte array, and, in
+// the parent process, deserializing the given byte array into a
+// WebAssembly.Module object.
+
+MOZ_MUST_USE bool
+CompileAndSerialize(const ShareableBytes& bytecode, Bytes* serialized);
+
+MOZ_MUST_USE bool
+DeserializeModule(JSContext* cx, const Bytes& serialized, MutableHandleObject module);
 
 // These accessors can be used to probe JS values for being an exported wasm
 // function.
@@ -219,6 +243,7 @@ class WasmInstanceObject : public NativeObject
                                       wasm::UniqueTlsData tlsData,
                                       HandleWasmMemoryObject memory,
                                       Vector<RefPtr<wasm::Table>, 0, SystemAllocPolicy>&& tables,
+                                      GCVector<HeapPtr<StructTypeDescr*>, 0, SystemAllocPolicy>&& structTypeDescrs,
                                       Handle<FunctionVector> funcImports,
                                       const wasm::GlobalDescVector& globals,
                                       wasm::HandleValVector globalImportValues,
@@ -334,7 +359,8 @@ class WasmTableObject : public NativeObject
     // Note that, after creation, a WasmTableObject's table() is not initialized
     // and must be initialized before use.
 
-    static WasmTableObject* create(JSContext* cx, const wasm::Limits& limits);
+    static WasmTableObject* create(JSContext* cx, const wasm::Limits& limits,
+                                   wasm::TableKind tableKind);
     wasm::Table& table() const;
 };
 

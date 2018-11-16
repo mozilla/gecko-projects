@@ -10,16 +10,17 @@ class Atom():
         self.ty = ty
         self.atom_type = self.__class__.__name__
         self.hash = hash_string(string)
+        self.is_ascii_lowercase = is_ascii_lowercase(string)
 
 
 class PseudoElementAtom(Atom):
     def __init__(self, ident, string):
-        Atom.__init__(self, ident, string, ty="nsICSSPseudoElement")
+        Atom.__init__(self, ident, string, ty="nsCSSPseudoElementStaticAtom")
 
 
 class AnonBoxAtom(Atom):
     def __init__(self, ident, string):
-        Atom.__init__(self, ident, string, ty="nsICSSAnonBoxPseudo")
+        Atom.__init__(self, ident, string, ty="nsCSSAnonBoxPseudoStaticAtom")
 
 
 class NonInheritingAnonBoxAtom(AnonBoxAtom):
@@ -52,3 +53,12 @@ def hash_string(s):
     for c in s:
         h = wrapping_multiply(GOLDEN_RATIO_U32, rotate_left_5(h) ^ ord(c))
     return h
+
+
+# Returns true if lowercasing this string in an ascii-case-insensitive way
+# would leave the string unchanged.
+def is_ascii_lowercase(s):
+    for c in s:
+        if c >= 'A' and c <= 'Z':
+            return False
+    return True

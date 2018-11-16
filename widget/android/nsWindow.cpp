@@ -17,6 +17,7 @@
 #include "mozilla/WeakPtr.h"
 #include "mozilla/WheelHandlingHelper.h"    // for WheelDeltaAdjustmentStrategy
 
+#include "mozilla/a11y/SessionAccessibility.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/MouseEventBinding.h"
@@ -192,9 +193,9 @@ namespace {
 } // namespace
 
 template<class Impl>
-template<class Instance, typename... Args> void
-nsWindow::NativePtr<Impl>::Attach(Instance aInstance, nsWindow* aWindow,
-                                  Args&&... aArgs)
+template<class Cls, typename... Args> void
+nsWindow::NativePtr<Impl>::Attach(const jni::LocalRef<Cls>& aInstance,
+                                  nsWindow* aWindow, Args&&... aArgs)
 {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(!mPtr && !mImpl);
@@ -204,16 +205,67 @@ nsWindow::NativePtr<Impl>::Attach(Instance aInstance, nsWindow* aWindow,
     mImpl = impl;
 
     // CallAttachNative transfers ownership of impl.
-    CallAttachNative<Instance, Impl>(aInstance, impl);
+    CallAttachNative<>(aInstance, impl);
 }
 
-template<class Impl> void
-nsWindow::NativePtr<Impl>::Detach()
+template<class Impl>
+template<class Cls, typename T> void
+nsWindow::NativePtr<Impl>::Detach(const jni::Ref<Cls, T>& aInstance)
 {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(mPtr && mImpl);
 
-    mImpl->OnDetach();
+    // nsIRunnable that takes care of disposing the native object attached to
+    // the Java object in a safe manner.
+    class ImplDisposer : public Runnable {
+        const typename Cls::GlobalRef mInstance;
+        const uintptr_t mOldImpl;
+
+    public:
+        ImplDisposer(const typename Cls::LocalRef& aInstance)
+            : Runnable("nsWindow::NativePtr::Detach")
+            , mInstance(aInstance.Env(), aInstance)
+            , mOldImpl(aInstance ? jni::GetNativeHandle(aInstance.Env(),
+                                                        aInstance.Get()) : 0)
+        {
+            MOZ_CATCH_JNI_EXCEPTION(aInstance.Env());
+        }
+
+        NS_IMETHOD Run() override
+        {
+            if (!mInstance) {
+                return NS_OK;
+            }
+
+            if (!NS_IsMainThread()) {
+                NS_DispatchToMainThread(this);
+                return NS_OK;
+            }
+
+            typename Cls::LocalRef instance(jni::GetGeckoThreadEnv(),
+                                            mInstance);
+            auto newImpl = jni::GetNativeHandle(instance.Env(), instance.Get());
+            MOZ_CATCH_JNI_EXCEPTION(instance.Env());
+
+            if (mOldImpl == newImpl) {
+                // Only dispose the object if the native object has not changed.
+                Impl::DisposeNative(instance);
+            }
+            return NS_OK;
+        }
+    };
+
+    // Objects that use nsWindow::NativePtr are expected to implement a public
+    // member function with signature "void OnDetach(
+    // already_AddRefed<Runnable> aDisposer)".  This function should perform
+    // necessary cleanups for the native/Java objects, as well as mark the Java
+    // object as being disposed, so no native methods are called after that
+    // point. After this disposal step, the function must call "aDisposer->
+    // Run()" to finish disposing the native object. The disposer is
+    // thread-safe and may be called on any thread as necessary.
+    mImpl->OnDetach(do_AddRef(new ImplDisposer(
+            {jni::GetGeckoThreadEnv(), aInstance})));
+
     {
         Locked implLock(*this);
         mImpl = nullptr;
@@ -245,7 +297,12 @@ class nsWindow::GeckoViewSupport final
     , public SupportsWeakPtr<GeckoViewSupport>
 {
     nsWindow& window;
-    GeckoSession::Window::GlobalRef mGeckoViewWindow;
+
+    // We hold a WeakRef because we want to allow the
+    // GeckoSession.Window to be garbage collected.
+    // Callers need to create a LocalRef from this
+    // before calling methods.
+    GeckoSession::Window::WeakRef mGeckoViewWindow;
 
 public:
     typedef GeckoSession::Window::Natives<GeckoViewSupport> Base;
@@ -285,6 +342,7 @@ public:
                      jni::Object::Param aQueue,
                      jni::Object::Param aCompositor,
                      jni::Object::Param aDispatcher,
+                     jni::Object::Param aSessionAccessibility,
                      jni::Object::Param aInitData,
                      jni::String::Param aId,
                      jni::String::Param aChromeURI,
@@ -299,11 +357,14 @@ public:
                   jni::Object::Param aQueue,
                   jni::Object::Param aCompositor,
                   jni::Object::Param aDispatcher,
+                  jni::Object::Param aSessionAccessibility,
                   jni::Object::Param aInitData);
 
     void AttachEditable(const GeckoSession::Window::LocalRef& inst,
-                        jni::Object::Param aEditableParent,
-                        jni::Object::Param aEditableChild);
+                        jni::Object::Param aEditableParent);
+
+    void AttachAccessibility(const GeckoSession::Window::LocalRef& inst,
+                             jni::Object::Param aSessionAccessibility);
 
     void OnReady(jni::Object::Param aQueue = nullptr);
 };
@@ -320,7 +381,7 @@ class nsWindow::NPZCSupport final
     static bool sNegateWheelScroll;
 
     WindowPtr<NPZCSupport> mWindow;
-    PanZoomController::GlobalRef mNPZC;
+    PanZoomController::WeakRef mNPZC;
     int mPreviousButtons;
 
     template<typename Lambda>
@@ -393,7 +454,7 @@ public:
     using Base::AttachNative;
     using Base::DisposeNative;
 
-    void OnDetach()
+    void OnDetach(already_AddRefed<Runnable> aDisposer)
     {
         // There are several considerations when shutting down NPZC. 1) The
         // Gecko thread may destroy NPZC at any time when nsWindow closes. 2)
@@ -427,20 +488,19 @@ public:
         // release mWindow until the UI thread is done using it, thus avoiding
         // the race condition.
 
-        typedef PanZoomController::GlobalRef NPZCRef;
-        auto callDestroy = [] (const NPZCRef& npzc) {
-            npzc->SetAttached(false);
-        };
+        if (RefPtr<nsThread> uiThread = GetAndroidUiThread()) {
+            auto npzc = PanZoomController::GlobalRef(mNPZC);
+            if (!npzc) {
+                return;
+            }
 
-        PanZoomController::GlobalRef npzc = mNPZC;
-        RefPtr<nsThread> uiThread = GetAndroidUiThread();
-        if (!uiThread) {
-            return;
+            uiThread->Dispatch(NS_NewRunnableFunction(
+                        "NPZCSupport::OnDetach",
+                        [npzc, disposer = RefPtr<Runnable>(aDisposer)] {
+                            npzc->SetAttached(false);
+                            disposer->Run();
+                        }));
         }
-        uiThread->Dispatch(NewRunnableFunction(
-                "OnDetachRunnable",
-                static_cast<void(*)(const NPZCRef&)>(callDestroy),
-                std::move(npzc)), nsIThread::DISPATCH_NORMAL);
     }
 
     const PanZoomController::Ref& GetJavaNPZC() const
@@ -779,12 +839,12 @@ nsWindow::AndroidView::GetInitData(JSContext* aCx, JS::MutableHandleValue aOut)
  * separate from GeckoViewSupport.
  */
 class nsWindow::LayerViewSupport final
-    : public LayerSession::Compositor::Natives<LayerViewSupport>
+    : public GeckoSession::Compositor::Natives<LayerViewSupport>
 {
     using LockedWindowPtr = WindowPtr<LayerViewSupport>::Locked;
 
     WindowPtr<LayerViewSupport> mWindow;
-    LayerSession::Compositor::GlobalRef mCompositor;
+    GeckoSession::Compositor::WeakRef mCompositor;
     Atomic<bool, ReleaseAcquire> mCompositorPaused;
     jni::Object::GlobalRef mSurface;
 
@@ -822,16 +882,16 @@ class nsWindow::LayerViewSupport final
     };
 
 public:
-    typedef LayerSession::Compositor::Natives<LayerViewSupport> Base;
+    typedef GeckoSession::Compositor::Natives<LayerViewSupport> Base;
 
     static LayerViewSupport*
-    FromNative(const LayerSession::Compositor::LocalRef& instance)
+    FromNative(const GeckoSession::Compositor::LocalRef& instance)
     {
         return GetNative(instance);
     }
 
     LayerViewSupport(NativePtr<LayerViewSupport>* aPtr, nsWindow* aWindow,
-                     const LayerSession::Compositor::LocalRef& aInstance)
+                     const GeckoSession::Compositor::LocalRef& aInstance)
         : mWindow(aPtr, aWindow)
         , mCompositor(aInstance)
         , mCompositorPaused(true)
@@ -845,19 +905,25 @@ public:
     using Base::AttachNative;
     using Base::DisposeNative;
 
-    void OnDetach()
+    void OnDetach(already_AddRefed<Runnable> aDisposer)
     {
         if (RefPtr<nsThread> uiThread = GetAndroidUiThread()) {
-            LayerSession::Compositor::GlobalRef compositor(mCompositor);
+            GeckoSession::Compositor::GlobalRef compositor(mCompositor);
+            if (!compositor) {
+                return;
+            }
+
             uiThread->Dispatch(NS_NewRunnableFunction(
                     "LayerViewSupport::OnDetach",
-                    [compositor] {
+                    [compositor,
+                     disposer = RefPtr<Runnable>(aDisposer)] {
                         compositor->OnCompositorDetached();
+                        disposer->Run();
                     }));
         }
     }
 
-    const LayerSession::Compositor::Ref& GetJavaCompositor() const
+    const GeckoSession::Compositor::Ref& GetJavaCompositor() const
     {
         return mCompositor;
     }
@@ -938,8 +1004,8 @@ public:
         }
     }
 
-    void SyncResumeResizeCompositor(const LayerSession::Compositor::LocalRef& aObj,
-                                    int32_t aWidth, int32_t aHeight,
+    void SyncResumeResizeCompositor(const GeckoSession::Compositor::LocalRef& aObj,
+                                    int32_t aX, int32_t aY, int32_t aWidth, int32_t aHeight,
                                     jni::Object::Param aSurface)
     {
         MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
@@ -947,17 +1013,17 @@ public:
         mSurface = aSurface;
 
         if (RefPtr<UiCompositorControllerChild> child = GetUiCompositorControllerChild()) {
-            child->ResumeAndResize(aWidth, aHeight);
+            child->ResumeAndResize(aX, aY, aWidth, aHeight);
         }
 
         mCompositorPaused = false;
 
         class OnResumedEvent : public nsAppShell::Event
         {
-            LayerSession::Compositor::GlobalRef mCompositor;
+            GeckoSession::Compositor::GlobalRef mCompositor;
 
         public:
-            explicit OnResumedEvent(LayerSession::Compositor::GlobalRef&& aCompositor)
+            explicit OnResumedEvent(GeckoSession::Compositor::GlobalRef&& aCompositor)
                 : mCompositor(std::move(aCompositor))
             {}
 
@@ -967,7 +1033,7 @@ public:
 
                 JNIEnv* const env = jni::GetGeckoThreadEnv();
                 LayerViewSupport* const lvs = GetNative(
-                        LayerSession::Compositor::LocalRef(env, mCompositor));
+                        GeckoSession::Compositor::LocalRef(env, mCompositor));
 
                 if (!lvs || !lvs->mWindow) {
                     env->ExceptionClear();
@@ -1062,7 +1128,10 @@ public:
 
     void RecvToolbarAnimatorMessage(int32_t aMessage)
     {
-        mCompositor->RecvToolbarAnimatorMessage(aMessage);
+        auto compositor = GeckoSession::Compositor::LocalRef(mCompositor);
+        if (compositor) {
+            compositor->RecvToolbarAnimatorMessage(aMessage);
+        }
     }
 
     void SetDefaultClearColor(int32_t aColor)
@@ -1086,7 +1155,10 @@ public:
         MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
 
         auto pixels = mozilla::jni::IntArray::New(aMem.get<int>(), aMem.Size<int>());
-        mCompositor->RecvScreenPixels(aSize.width, aSize.height, pixels);
+        auto compositor = GeckoSession::Compositor::LocalRef(mCompositor);
+        if (compositor) {
+            compositor->RecvScreenPixels(aSize.width, aSize.height, pixels);
+        }
 
         // Pixels have been copied, so Dealloc Shmem
         if (RefPtr<UiCompositorControllerChild> child = GetUiCompositorControllerChild()) {
@@ -1124,16 +1196,23 @@ nsWindow::GeckoViewSupport::~GeckoViewSupport()
 {
     // Disassociate our GeckoEditable instance with our native object.
     if (window.mEditableSupport) {
-        window.mEditableSupport.Detach();
+        window.mEditableSupport.Detach(
+                window.mEditableSupport->GetJavaEditable());
         window.mEditableParent = nullptr;
     }
 
     if (window.mNPZCSupport) {
-        window.mNPZCSupport.Detach();
+        window.mNPZCSupport.Detach(window.mNPZCSupport->GetJavaNPZC());
     }
 
     if (window.mLayerViewSupport) {
-        window.mLayerViewSupport.Detach();
+        window.mLayerViewSupport.Detach(
+                window.mLayerViewSupport->GetJavaCompositor());
+    }
+
+    if (window.mSessionAccessibility) {
+        window.mSessionAccessibility.Detach(
+                window.mSessionAccessibility->GetJavaAccessibility());
     }
 }
 
@@ -1143,6 +1222,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
                                  jni::Object::Param aQueue,
                                  jni::Object::Param aCompositor,
                                  jni::Object::Param aDispatcher,
+                                 jni::Object::Param aSessionAccessibility,
                                  jni::Object::Param aInitData,
                                  jni::String::Param aId,
                                  jni::String::Param aChromeURI,
@@ -1198,7 +1278,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
 
     // Attach other session support objects.
     window->mGeckoViewSupport->Transfer(
-            sessionWindow, aQueue, aCompositor, aDispatcher, aInitData);
+            sessionWindow, aQueue, aCompositor, aDispatcher, aSessionAccessibility, aInitData);
 
     if (window->mWidgetListener) {
         nsCOMPtr<nsIXULWindow> xulWindow(
@@ -1232,18 +1312,20 @@ nsWindow::GeckoViewSupport::Transfer(const GeckoSession::Window::LocalRef& inst,
                                      jni::Object::Param aQueue,
                                      jni::Object::Param aCompositor,
                                      jni::Object::Param aDispatcher,
+                                     jni::Object::Param aSessionAccessibility,
                                      jni::Object::Param aInitData)
 {
     if (window.mNPZCSupport) {
         MOZ_ASSERT(window.mLayerViewSupport);
-        window.mNPZCSupport.Detach();
+        window.mNPZCSupport.Detach(window.mNPZCSupport->GetJavaNPZC());
     }
 
-    auto compositor = LayerSession::Compositor::LocalRef(
-            inst.Env(), LayerSession::Compositor::Ref::From(aCompositor));
+    auto compositor = GeckoSession::Compositor::LocalRef(
+            inst.Env(), GeckoSession::Compositor::Ref::From(aCompositor));
     if (window.mLayerViewSupport &&
             window.mLayerViewSupport->GetJavaCompositor() != compositor) {
-        window.mLayerViewSupport.Detach();
+        window.mLayerViewSupport.Detach(
+                window.mLayerViewSupport->GetJavaCompositor());
     }
     if (!window.mLayerViewSupport) {
         window.mLayerViewSupport.Attach(compositor, &window, compositor);
@@ -1252,6 +1334,14 @@ nsWindow::GeckoViewSupport::Transfer(const GeckoSession::Window::LocalRef& inst,
     MOZ_ASSERT(window.mAndroidView);
     window.mAndroidView->mEventDispatcher->Attach(
             java::EventDispatcher::Ref::From(aDispatcher), mDOMWindow);
+
+    if (window.mSessionAccessibility) {
+        window.mSessionAccessibility.Detach(
+                window.mSessionAccessibility->GetJavaAccessibility());
+    }
+    if (aSessionAccessibility) {
+        AttachAccessibility(inst, aSessionAccessibility);
+    }
 
     if (mIsReady) {
         // We're in a transfer; update init-data and notify JS code.
@@ -1264,25 +1354,43 @@ nsWindow::GeckoViewSupport::Transfer(const GeckoSession::Window::LocalRef& inst,
 
     DispatchToUiThread(
             "GeckoViewSupport::Transfer",
-            [compositor = LayerSession::Compositor::GlobalRef(compositor)] {
+            [compositor = GeckoSession::Compositor::GlobalRef(compositor)] {
                 compositor->OnCompositorAttached();
             });
 }
 
 void
 nsWindow::GeckoViewSupport::AttachEditable(const GeckoSession::Window::LocalRef& inst,
-                                           jni::Object::Param aEditableParent,
-                                           jni::Object::Param aEditableChild)
+                                           jni::Object::Param aEditableParent)
 {
-    java::GeckoEditableChild::LocalRef editableChild(inst.Env());
-    editableChild = java::GeckoEditableChild::Ref::From(aEditableChild);
-
-    if (window.mEditableSupport) {
-        window.mEditableSupport.Detach();
+    if (!window.mEditableSupport) {
+        auto editableChild = java::GeckoEditableChild::New(aEditableParent,
+                                                           /* default */ true);
+        window.mEditableSupport.Attach(editableChild, &window, editableChild);
+    } else {
+        window.mEditableSupport->TransferParent(aEditableParent);
     }
 
-    window.mEditableSupport.Attach(editableChild, &window, editableChild);
     window.mEditableParent = aEditableParent;
+}
+
+void
+nsWindow::GeckoViewSupport::AttachAccessibility(const GeckoSession::Window::LocalRef& inst,
+                                                jni::Object::Param aSessionAccessibility)
+{
+    MOZ_ASSERT(!window.mSessionAccessibility);
+    java::SessionAccessibility::NativeProvider::LocalRef sessionAccessibility(
+      inst.Env());
+    sessionAccessibility = java::SessionAccessibility::NativeProvider::Ref::From(
+      aSessionAccessibility);
+
+    if (window.mSessionAccessibility) {
+        window.mSessionAccessibility.Detach(
+                window.mSessionAccessibility->GetJavaAccessibility());
+    }
+
+    window.mSessionAccessibility.Attach(
+      sessionAccessibility, &window, sessionAccessibility);
 }
 
 void
@@ -1293,6 +1401,7 @@ nsWindow::InitNatives()
     nsWindow::NPZCSupport::Init();
 
     GeckoEditableSupport::Init();
+    a11y::SessionAccessibility::Init();
 }
 
 nsWindow*
@@ -1919,7 +2028,7 @@ nsWindow::UpdateOverscrollVelocity(const float aX, const float aY)
 
         DispatchToUiThread(
                 "nsWindow::UpdateOverscrollVelocity",
-                [compositor = LayerSession::Compositor::GlobalRef(compositor),
+                [compositor = GeckoSession::Compositor::GlobalRef(compositor),
                  aX, aY] {
                     compositor->UpdateOverscrollVelocity(aX, aY);
                 });
@@ -1938,7 +2047,7 @@ nsWindow::UpdateOverscrollOffset(const float aX, const float aY)
 
         DispatchToUiThread(
                 "nsWindow::UpdateOverscrollOffset",
-                [compositor = LayerSession::Compositor::GlobalRef(compositor),
+                [compositor = GeckoSession::Compositor::GlobalRef(compositor),
                  aX, aY] {
                     compositor->UpdateOverscrollOffset(aX, aY);
                 });
@@ -2035,10 +2144,11 @@ nsWindow::GetEventTimeStamp(int64_t aEventTime)
 void
 nsWindow::GeckoViewSupport::OnReady(jni::Object::Param aQueue)
 {
-    if (!mGeckoViewWindow) {
+    GeckoSession::Window::LocalRef window(mGeckoViewWindow);
+    if (!window) {
         return;
     }
-    mGeckoViewWindow->OnReady(aQueue);
+    window->OnReady(aQueue);
     mIsReady = true;
 }
 
@@ -2247,7 +2357,7 @@ nsWindow::GetMaxTouchPoints() const
 
 void
 nsWindow::UpdateZoomConstraints(const uint32_t& aPresShellId,
-                                const FrameMetrics::ViewID& aViewId,
+                                const ScrollableLayerGuid::ViewID& aViewId,
                                 const mozilla::Maybe<ZoomConstraints>& aConstraints)
 {
     nsBaseWidget::UpdateZoomConstraints(aPresShellId, aViewId, aConstraints);
@@ -2342,4 +2452,3 @@ nsIWidget::CreateChildWindow()
   nsCOMPtr<nsIWidget> window = new nsWindow();
   return window.forget();
 }
-

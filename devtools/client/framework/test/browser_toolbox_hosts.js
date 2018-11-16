@@ -14,7 +14,7 @@ const URL = "data:text/html;charset=utf8,test for opening toolbox in different h
 add_task(async function runTest() {
   info("Create a test tab and open the toolbox");
   const tab = await addTab(URL);
-  target = TargetFactory.forTab(tab);
+  target = await TargetFactory.forTab(tab);
   toolbox = await gDevTools.showToolbox(target, "webconsole");
 
   await testBottomHost();
@@ -36,8 +36,8 @@ function testBottomHost() {
   checkHostType(toolbox, BOTTOM);
 
   // test UI presence
-  const nbox = gBrowser.getNotificationBox();
-  const iframe = document.getAnonymousElementByAttribute(nbox, "class", "devtools-toolbox-bottom-iframe");
+  const panel = gBrowser.getPanel();
+  const iframe = panel.querySelector(".devtools-toolbox-bottom-iframe");
   ok(iframe, "toolbox bottom iframe exists");
 
   checkToolboxLoaded(iframe);
@@ -48,11 +48,11 @@ async function testLeftHost() {
   checkHostType(toolbox, LEFT);
 
   // test UI presence
-  const nbox = gBrowser.getNotificationBox();
-  const bottom = document.getAnonymousElementByAttribute(nbox, "class", "devtools-toolbox-bottom-iframe");
+  const panel = gBrowser.getPanel();
+  const bottom = panel.querySelector(".devtools-toolbox-bottom-iframe");
   ok(!bottom, "toolbox bottom iframe doesn't exist");
 
-  const iframe = document.getAnonymousElementByAttribute(nbox, "class", "devtools-toolbox-side-iframe");
+  const iframe = panel.querySelector(".devtools-toolbox-side-iframe");
   ok(iframe, "toolbox side iframe exists");
 
   checkToolboxLoaded(iframe);
@@ -63,11 +63,11 @@ async function testRightHost() {
   checkHostType(toolbox, RIGHT);
 
   // test UI presence
-  const nbox = gBrowser.getNotificationBox();
-  const bottom = document.getAnonymousElementByAttribute(nbox, "class", "devtools-toolbox-bottom-iframe");
+  const panel = gBrowser.getPanel();
+  const bottom = panel.querySelector(".devtools-toolbox-bottom-iframe");
   ok(!bottom, "toolbox bottom iframe doesn't exist");
 
-  const iframe = document.getAnonymousElementByAttribute(nbox, "class", "devtools-toolbox-side-iframe");
+  const iframe = panel.querySelector(".devtools-toolbox-side-iframe");
   ok(iframe, "toolbox side iframe exists");
 
   checkToolboxLoaded(iframe);
@@ -77,8 +77,8 @@ async function testWindowHost() {
   await toolbox.switchHost(WINDOW);
   checkHostType(toolbox, WINDOW);
 
-  const nbox = gBrowser.getNotificationBox();
-  const sidebar = document.getAnonymousElementByAttribute(nbox, "class", "devtools-toolbox-side-iframe");
+  const panel = gBrowser.getPanel();
+  const sidebar = panel.querySelector(".devtools-toolbox-side-iframe");
   ok(!sidebar, "toolbox sidebar iframe doesn't exist");
 
   const win = Services.wm.getMostRecentWindow("devtools:toolbox");
@@ -95,7 +95,7 @@ async function testToolSelect() {
 
 async function testDestroy() {
   await toolbox.destroy();
-  target = TargetFactory.forTab(gBrowser.selectedTab);
+  target = await TargetFactory.forTab(gBrowser.selectedTab);
   toolbox = await gDevTools.showToolbox(target);
 }
 

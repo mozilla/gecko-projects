@@ -4,22 +4,26 @@
 
 #![allow(unsafe_code)]
 
+// This is needed for the constants in atom_macro.rs, because we have some
+// atoms whose names differ only by case, e.g. datetime and dateTime.
+#![allow(non_upper_case_globals)]
+
 //! A drop-in replacement for string_cache, but backed by Gecko `nsAtom`s.
 
-use gecko_bindings::bindings::Gecko_AddRefAtom;
-use gecko_bindings::bindings::Gecko_Atomize;
-use gecko_bindings::bindings::Gecko_Atomize16;
-use gecko_bindings::bindings::Gecko_ReleaseAtom;
-use gecko_bindings::structs::{nsAtom, nsAtom_AtomKind, nsDynamicAtom, nsStaticAtom};
+use crate::gecko_bindings::bindings::Gecko_AddRefAtom;
+use crate::gecko_bindings::bindings::Gecko_Atomize;
+use crate::gecko_bindings::bindings::Gecko_Atomize16;
+use crate::gecko_bindings::bindings::Gecko_ReleaseAtom;
+use crate::gecko_bindings::structs::{nsAtom, nsDynamicAtom, nsStaticAtom};
 use nsstring::{nsAString, nsStr};
 use precomputed_hash::PrecomputedHash;
-use std::{mem, slice, str};
 use std::borrow::{Borrow, Cow};
 use std::char::{self, DecodeUtf16};
 use std::fmt::{self, Write};
 use std::hash::{Hash, Hasher};
 use std::iter::Cloned;
 use std::ops::Deref;
+use std::{mem, slice, str};
 use style_traits::SpecifiedValueInfo;
 
 #[macro_use]
@@ -171,13 +175,19 @@ impl WeakAtom {
     /// Returns whether this atom is static.
     #[inline]
     pub fn is_static(&self) -> bool {
-        unsafe { (*self.as_ptr()).mKind() == nsAtom_AtomKind::Static as u32 }
+        self.0.mIsStatic() != 0
+    }
+
+    /// Returns whether this atom is ascii lowercase.
+    #[inline]
+    fn is_ascii_lowercase(&self) -> bool {
+        self.0.mIsAsciiLowercase() != 0
     }
 
     /// Returns the length of the atom string.
     #[inline]
     pub fn len(&self) -> u32 {
-        unsafe { (*self.as_ptr()).mLength() }
+        self.0.mLength()
     }
 
     /// Returns whether this atom is the empty string.
@@ -195,54 +205,60 @@ impl WeakAtom {
 
     /// Convert this atom to ASCII lower-case
     pub fn to_ascii_lowercase(&self) -> Atom {
-        let slice = self.as_slice();
-        match slice
-            .iter()
-            .position(|&char16| (b'A' as u16) <= char16 && char16 <= (b'Z' as u16))
-        {
-            None => self.clone(),
-            Some(i) => {
-                let mut buffer: [u16; 64] = unsafe { mem::uninitialized() };
-                let mut vec;
-                let mutable_slice = if let Some(buffer_prefix) = buffer.get_mut(..slice.len()) {
-                    buffer_prefix.copy_from_slice(slice);
-                    buffer_prefix
-                } else {
-                    vec = slice.to_vec();
-                    &mut vec
-                };
-                for char16 in &mut mutable_slice[i..] {
-                    if *char16 <= 0x7F {
-                        *char16 = (*char16 as u8).to_ascii_lowercase() as u16
-                    }
-                }
-                Atom::from(&*mutable_slice)
-            },
+        if self.is_ascii_lowercase() {
+            return self.clone();
         }
+
+        let slice = self.as_slice();
+        let mut buffer: [u16; 64] = unsafe { mem::uninitialized() };
+        let mut vec;
+        let mutable_slice = if let Some(buffer_prefix) = buffer.get_mut(..slice.len()) {
+            buffer_prefix.copy_from_slice(slice);
+            buffer_prefix
+        } else {
+            vec = slice.to_vec();
+            &mut vec
+        };
+        for char16 in &mut *mutable_slice {
+            if *char16 <= 0x7F {
+                *char16 = (*char16 as u8).to_ascii_lowercase() as u16
+            }
+        }
+        Atom::from(&*mutable_slice)
     }
 
     /// Return whether two atoms are ASCII-case-insensitive matches
+    #[inline]
     pub fn eq_ignore_ascii_case(&self, other: &Self) -> bool {
         if self == other {
             return true;
         }
 
+        // If we know both atoms are ascii-lowercase, then we can stick with
+        // pointer equality.
+        if self.is_ascii_lowercase() && other.is_ascii_lowercase() {
+            debug_assert!(!self.eq_ignore_ascii_case_slow(other));
+            return false;
+        }
+
+        self.eq_ignore_ascii_case_slow(other)
+    }
+
+    fn eq_ignore_ascii_case_slow(&self, other: &Self) -> bool {
         let a = self.as_slice();
         let b = other.as_slice();
-        a.len() == b.len() && a.iter().zip(b).all(|(&a16, &b16)| {
+
+        if a.len() != b.len() {
+            return false;
+        }
+
+        a.iter().zip(b).all(|(&a16, &b16)| {
             if a16 <= 0x7F && b16 <= 0x7F {
                 (a16 as u8).eq_ignore_ascii_case(&(b16 as u8))
             } else {
                 a16 == b16
             }
         })
-    }
-
-    /// Return whether this atom is an ASCII-case-insensitive match for the given string
-    pub fn eq_str_ignore_ascii_case(&self, other: &str) -> bool {
-        self.chars()
-            .map(|r| r.map(|c: char| c.to_ascii_lowercase()))
-            .eq(other.chars().map(|c: char| Ok(c.to_ascii_lowercase())))
     }
 }
 
@@ -280,7 +296,7 @@ impl Atom {
     /// that way, now we have sugar for is_static, creating atoms using
     /// Atom::from_raw should involve almost no overhead.
     #[inline]
-    pub unsafe fn from_static(ptr: *mut nsStaticAtom) -> Self {
+    pub unsafe fn from_static(ptr: *const nsStaticAtom) -> Self {
         let atom = Atom(ptr as *mut WeakAtom);
         debug_assert!(
             atom.is_static(),

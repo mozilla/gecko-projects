@@ -37,11 +37,6 @@ CanDoOffThread(JSContext* cx, const ReadOnlyCompileOptions& options, size_t leng
     static const size_t HUGE_BC_LENGTH = 367 * 1000;
     static const size_t HUGE_BINAST_LENGTH = 70 * 1000;
 
-    // TODO: We can't decode BinAST off main thread until bug 1459555 is fixed.
-    if (what == OffThread::DecodeBinAST) {
-        return false;
-    }
-
     // These are heuristics which the caller may choose to ignore (e.g., for
     // testing purposes).
     if (!options.forceAsync) {
@@ -94,7 +89,7 @@ JS::CanDecodeBinASTOffThread(JSContext* cx, const ReadOnlyCompileOptions& option
 
 JS_PUBLIC_API(bool)
 JS::CompileOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
-                     JS::SourceBufferHolder& srcBuf,
+                     JS::SourceText<char16_t>& srcBuf,
                      OffThreadCompileCallback callback, void* callbackData)
 {
     MOZ_ASSERT(CanCompileOffThread(cx, options, srcBuf.length()));
@@ -119,14 +114,14 @@ JS::CancelOffThreadScript(JSContext* cx, JS::OffThreadToken* token)
 
 JS_PUBLIC_API(bool)
 JS::CompileOffThreadModule(JSContext* cx, const ReadOnlyCompileOptions& options,
-                           JS::SourceBufferHolder& srcBuf,
+                           JS::SourceText<char16_t>& srcBuf,
                            OffThreadCompileCallback callback, void* callbackData)
 {
     MOZ_ASSERT(CanCompileOffThread(cx, options, srcBuf.length()));
     return StartOffThreadParseModule(cx, options, srcBuf, callback, callbackData);
 }
 
-JS_PUBLIC_API(JSScript*)
+JS_PUBLIC_API(JSObject*)
 JS::FinishOffThreadModule(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);

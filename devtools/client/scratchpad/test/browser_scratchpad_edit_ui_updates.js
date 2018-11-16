@@ -16,7 +16,7 @@ function test() {
     openScratchpad(runTests);
   });
 
-  gBrowser.loadURI("data:text/html,test Edit menu updates Scratchpad - bug 699130");
+  BrowserTestUtils.loadURI(gBrowser, "data:text/html,test Edit menu updates Scratchpad - bug 699130");
 }
 
 function runTests() {
@@ -61,7 +61,7 @@ function runTests() {
     // Self xss prevention tests (bug 994134)
     info("Self xss paste tests");
     is(WebConsoleUtils.usageCount, 0, "Test for usage count getter");
-    const notificationbox = doc.getElementById("scratchpad-notificationbox");
+    const notificationbox = sp.notificationBox;
     const notification = notificationbox.getNotificationWithValue("selfxss-notification");
     ok(notification, "Self-xss notification shown");
     is(oldVal, sp.editor.getText(), "Paste blocked by self-xss prevention");

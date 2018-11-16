@@ -21,7 +21,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 
-#include "webrtc/config.h"
+#include "webrtc/api/rtpparameters.h"
 
 #include "signaling/src/jsep/JsepTrack.h"
 #include "signaling/src/jsep/JsepTransport.h"
@@ -55,6 +55,24 @@ static std::bitset<128> GetForbiddenSdpPayloadTypes() {
   return forbidden;
 }
 
+static std::string GetRandomHex(size_t words)
+{
+  std::ostringstream os;
+
+  for (size_t i = 0; i < words; ++i) {
+    uint32_t rand;
+    SECStatus rv =
+      PK11_GenerateRandom(reinterpret_cast<unsigned char*>(&rand), sizeof(rand));
+    if (rv != SECSuccess) {
+      MOZ_CRASH();
+      return "";
+    }
+
+    os << std::hex << std::setfill('0') << std::setw(8) << rand;
+  }
+  return os.str();
+}
+
 nsresult
 JsepSessionImpl::Init()
 {
@@ -73,6 +91,11 @@ JsepSessionImpl::Init()
   mRunSdpComparer = Preferences::GetBool("media.peerconnection.sdp.rust.compare",
                                          false);
 
+  mEncodeTrackId =
+    Preferences::GetBool("media.peerconnection.sdp.encode_track_id", true);
+
+  mIceUfrag = GetRandomHex(1);
+  mIcePwd = GetRandomHex(4);
   return NS_OK;
 }
 
@@ -102,24 +125,18 @@ JsepSessionImpl::AddTransceiver(RefPtr<JsepTransceiver> transceiver)
     // Datachannel transceivers should always be sendrecv. Just set it instead
     // of asserting.
     transceiver->mJsDirection = SdpDirectionAttribute::kSendrecv;
+#ifdef DEBUG
+    for (auto& transceiver : mTransceivers) {
+      MOZ_ASSERT(transceiver->GetMediaType() != SdpMediaSection::kApplication);
+    }
+#endif
   }
 
-  transceiver->mSendTrack.PopulateCodecs(mSupportedCodecs.values);
-  transceiver->mRecvTrack.PopulateCodecs(mSupportedCodecs.values);
+  transceiver->mSendTrack.PopulateCodecs(mSupportedCodecs);
+  transceiver->mRecvTrack.PopulateCodecs(mSupportedCodecs);
   // We do not set mLevel yet, we do that either on createOffer, or setRemote
 
   mTransceivers.push_back(transceiver);
-  return NS_OK;
-}
-
-nsresult
-JsepSessionImpl::SetIceCredentials(const std::string& ufrag,
-                                   const std::string& pwd)
-{
-  mLastError.clear();
-  mIceUfrag = ufrag;
-  mIcePwd = pwd;
-
   return NS_OK;
 }
 
@@ -219,11 +236,8 @@ JsepSessionImpl::CreateOfferMsection(const JsepOfferOptions& options,
                                      JsepTransceiver& transceiver,
                                      Sdp* local)
 {
-  JsepTrack& sendTrack(transceiver.mSendTrack);
-  JsepTrack& recvTrack(transceiver.mRecvTrack);
-
   SdpMediaSection::Protocol protocol(
-      SdpHelper::GetProtocolForMediaType(sendTrack.GetMediaType()));
+      SdpHelper::GetProtocolForMediaType(transceiver.GetMediaType()));
 
   const Sdp* answer(GetAnswer());
   const SdpMediaSection* lastAnswerMsection = nullptr;
@@ -238,7 +252,7 @@ JsepSessionImpl::CreateOfferMsection(const JsepOfferOptions& options,
   }
 
   SdpMediaSection* msection = &local->AddMediaSection(
-      sendTrack.GetMediaType(),
+      transceiver.GetMediaType(),
       transceiver.mJsDirection,
       0,
       protocol,
@@ -247,6 +261,7 @@ JsepSessionImpl::CreateOfferMsection(const JsepOfferOptions& options,
 
   // Some of this stuff (eg; mid) sticks around even if disabled
   if (lastAnswerMsection) {
+    MOZ_ASSERT(lastAnswerMsection->GetMediaType() == transceiver.GetMediaType());
     nsresult rv = mSdpHelper.CopyStickyParams(*lastAnswerMsection, msection);
     NS_ENSURE_SUCCESS(rv, rv);
   }
@@ -269,8 +284,8 @@ JsepSessionImpl::CreateOfferMsection(const JsepOfferOptions& options,
   nsresult rv = AddTransportAttributes(msection, SdpSetupAttribute::kActpass);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  sendTrack.AddToOffer(mSsrcGenerator, msection);
-  recvTrack.AddToOffer(mSsrcGenerator, msection);
+  transceiver.mSendTrack.AddToOffer(mSsrcGenerator, mEncodeTrackId, msection);
+  transceiver.mRecvTrack.AddToOffer(mSsrcGenerator, mEncodeTrackId, msection);
 
   AddExtmap(msection);
 
@@ -420,12 +435,14 @@ JsepSessionImpl::CreateOffer(const JsepOfferOptions& options,
                              std::string* offer)
 {
   mLastError.clear();
-  mLocalIceIsRestarting = options.mIceRestart.isSome() && *(options.mIceRestart);
 
   if (mState != kJsepStateStable) {
     JSEP_SET_ERROR("Cannot create offer in state " << GetStateStr(mState));
     return NS_ERROR_UNEXPECTED;
   }
+
+  // This is one of those places where CreateOffer sets some state.
+  SetIceRestarting(options.mIceRestart.isSome() && *(options.mIceRestart));
 
   UniquePtr<Sdp> sdp;
 
@@ -621,6 +638,7 @@ JsepSessionImpl::CreateAnswerMsection(const JsepAnswerOptions& options,
                                       const SdpMediaSection& remoteMsection,
                                       Sdp* sdp)
 {
+  MOZ_ASSERT(transceiver.GetMediaType() == remoteMsection.GetMediaType());
   SdpDirectionAttribute::Direction direction =
     reverse(remoteMsection.GetDirection()) & transceiver.mJsDirection;
   SdpMediaSection& msection =
@@ -641,6 +659,15 @@ JsepSessionImpl::CreateAnswerMsection(const JsepAnswerOptions& options,
     return NS_OK;
   }
 
+  MOZ_ASSERT(transceiver.IsAssociated());
+  if (msection.GetAttributeList().GetMid().empty()) {
+    msection.GetAttributeList().SetAttribute(
+        new SdpStringAttribute(SdpAttribute::kMidAttribute,
+          transceiver.GetMid()));
+  }
+
+  MOZ_ASSERT(transceiver.GetMid() == msection.GetAttributeList().GetMid());
+
   SdpSetupAttribute::Role role;
   rv = DetermineAnswererSetupRole(remoteMsection, &role);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -648,8 +675,8 @@ JsepSessionImpl::CreateAnswerMsection(const JsepAnswerOptions& options,
   rv = AddTransportAttributes(&msection, role);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  transceiver.mSendTrack.AddToAnswer(remoteMsection, mSsrcGenerator, &msection);
-  transceiver.mRecvTrack.AddToAnswer(remoteMsection, mSsrcGenerator, &msection);
+  transceiver.mSendTrack.AddToAnswer(remoteMsection, mSsrcGenerator, mEncodeTrackId, &msection);
+  transceiver.mRecvTrack.AddToAnswer(remoteMsection, mSsrcGenerator, mEncodeTrackId, &msection);
 
   // Add extmap attributes. This logic will probably be moved to the track,
   // since it can be specified on a per-sender basis in JS.
@@ -948,6 +975,11 @@ JsepSessionImpl::SetRemoteDescription(JsepSdpType type, const std::string& sdp)
   if (type == kJsepSdpOffer) {
     mOldTransceivers.clear();
     for (const auto& transceiver : mTransceivers) {
+      if (!transceiver->IsNegotiated()) {
+        // We chose a level for this transceiver, but never negotiated it.
+        // Discard this state.
+        transceiver->ClearLevel();
+      }
       mOldTransceivers.push_back(new JsepTransceiver(*transceiver));
     }
   }
@@ -976,7 +1008,7 @@ JsepSessionImpl::SetRemoteDescription(JsepSdpType type, const std::string& sdp)
   if (NS_SUCCEEDED(rv)) {
     mRemoteIsIceLite = iceLite;
     mIceOptions = iceOptions;
-    mRemoteIceIsRestarting = iceRestarting;
+    SetIceRestarting(iceRestarting);
   }
 
   return rv;
@@ -986,6 +1018,10 @@ nsresult
 JsepSessionImpl::HandleNegotiatedSession(const UniquePtr<Sdp>& local,
                                          const UniquePtr<Sdp>& remote)
 {
+  // local ufrag/pwd has been negotiated; we will never go back to the old ones
+  mOldIceUfrag.clear();
+  mOldIcePwd.clear();
+
   bool remoteIceLite =
       remote->GetAttributeList().HasAttribute(SdpAttribute::kIceLiteAttribute);
 
@@ -1136,12 +1172,13 @@ JsepSessionImpl::EnsureHasOwnTransport(const SdpMediaSection& msection,
 {
   JsepTransport& transport = transceiver->mTransport;
 
-  // TODO: Detect ICE restart on a per-msection basis.
-  if (mLocalIceIsRestarting || mRemoteIceIsRestarting ||
-      !transceiver->HasOwnTransport()) {
+  if (!transceiver->HasOwnTransport()) {
     // Transceiver didn't own this transport last time, it won't now either
     transport.Close();
   }
+
+  transport.mLocalUfrag = msection.GetAttributeList().GetIceUfrag();
+  transport.mLocalPwd = msection.GetAttributeList().GetIcePwd();
 
   transceiver->ClearBundleLevel();
 
@@ -1169,7 +1206,9 @@ JsepSessionImpl::FinalizeTransport(const SdpAttributeList& remote,
     return NS_OK;
   }
 
-  if (!transport->mIce) {
+  if (!transport->mIce ||
+      transport->mIce->mUfrag != remote.GetIceUfrag() ||
+      transport->mIce->mPwd != remote.GetIcePwd()) {
     UniquePtr<JsepIceTransport> ice = MakeUnique<JsepIceTransport>();
 
     // We do sanity-checking for these in ParseSdp
@@ -1254,8 +1293,7 @@ JsepSessionImpl::CopyPreviousTransportParams(const Sdp& oldAnswer,
         mSdpHelper.AreOldTransportParamsValid(oldAnswer,
                                               offerersPreviousSdp,
                                               newOffer,
-                                              i) &&
-        !mRemoteIceIsRestarting
+                                              i)
        ) {
       // If newLocal is an offer, this will be the number of components we used
       // last time, and if it is an answer, this will be the number of
@@ -1466,7 +1504,9 @@ JsepTransceiver*
 JsepSessionImpl::GetTransceiverForLocal(size_t level)
 {
   if (JsepTransceiver* transceiver = GetTransceiverForLevel(level)) {
-    if (WasMsectionDisabledLastNegotiation(level) && transceiver->IsStopped()) {
+    if (WasMsectionDisabledLastNegotiation(level) &&
+        transceiver->IsStopped() &&
+        transceiver->GetMediaType() != SdpMediaSection::kApplication) {
       // Attempt to recycle. If this fails, the old transceiver stays put.
       transceiver->Disassociate();
       JsepTransceiver* newTransceiver = FindUnassociatedTransceiver(
@@ -1571,6 +1611,7 @@ JsepSessionImpl::UpdateTransceiversFromRemoteDescription(const Sdp& remote)
         mUsedMids.insert(transceiver->GetMid());
       }
     } else {
+      transceiver->mTransport.Close();
       transceiver->Disassociate();
       // This cannot be rolled back.
       transceiver->Stop();
@@ -1618,6 +1659,11 @@ JsepSessionImpl::FindUnassociatedTransceiver(
 {
   // Look through transceivers that are not mapped to an m-section
   for (RefPtr<JsepTransceiver>& transceiver : mTransceivers) {
+    if (type == SdpMediaSection::kApplication &&
+        type == transceiver->GetMediaType()) {
+      transceiver->RestartDatachannelTransceiver();
+      return transceiver.get();
+    }
     if (!transceiver->IsStopped() &&
         !transceiver->HasLevel() &&
         (!magic || transceiver->HasAddTrackMagic()) &&
@@ -1798,8 +1844,7 @@ JsepSessionImpl::ValidateRemoteDescription(const Sdp& description)
 
     bool differ = mSdpHelper.IceCredentialsDiffer(newMsection, oldMsection);
 
-    // Detect bad answer ICE restart when offer doesn't request ICE restart
-    if (mIsOfferer && differ && !mLocalIceIsRestarting) {
+    if (mIsOfferer && differ && !IsIceRestarting()) {
       JSEP_SET_ERROR("Remote description indicates ICE restart but offer did not "
                      "request ICE restart (new remote description changes either "
                      "the ice-ufrag or ice-pwd)");
@@ -2035,7 +2080,7 @@ JsepSessionImpl::SetupDefaultCodecs()
   // 9KHz tone.  This should be adaptive when we're at the low-end of video
   // bandwidth (say <100Kbps), and if we're audio-only, down to 8 or
   // 12Kbps.
-  mSupportedCodecs.values.push_back(new JsepAudioCodecDescription(
+  mSupportedCodecs.emplace_back(new JsepAudioCodecDescription(
       "109",
       "opus",
       48000,
@@ -2045,7 +2090,7 @@ JsepSessionImpl::SetupDefaultCodecs()
       40000
       ));
 
-  mSupportedCodecs.values.push_back(new JsepAudioCodecDescription(
+  mSupportedCodecs.emplace_back(new JsepAudioCodecDescription(
       "9",
       "G722",
       8000,
@@ -2055,7 +2100,7 @@ JsepSessionImpl::SetupDefaultCodecs()
 
   // packet size and bitrate values below copied from sipcc.
   // May need reevaluation from a media expert.
-  mSupportedCodecs.values.push_back(
+  mSupportedCodecs.emplace_back(
       new JsepAudioCodecDescription("0",
                                     "PCMU",
                                     8000,
@@ -2064,7 +2109,7 @@ JsepSessionImpl::SetupDefaultCodecs()
                                     8 * 8000 * 1 // 8 * frequency * channels
                                     ));
 
-  mSupportedCodecs.values.push_back(
+  mSupportedCodecs.emplace_back(
       new JsepAudioCodecDescription("8",
                                     "PCMA",
                                     8000,
@@ -2076,7 +2121,7 @@ JsepSessionImpl::SetupDefaultCodecs()
   // note: because telephone-event is effectively a marker codec that indicates
   // that dtmf rtp packets may be passed, the packetSize and bitRate fields
   // don't make sense here.  For now, use zero. (mjf)
-  mSupportedCodecs.values.push_back(
+  mSupportedCodecs.emplace_back(
       new JsepAudioCodecDescription("101",
                                     "telephone-event",
                                     8000,
@@ -2087,70 +2132,69 @@ JsepSessionImpl::SetupDefaultCodecs()
 
   // Supported video codecs.
   // Note: order here implies priority for building offers!
-  JsepVideoCodecDescription* vp8 = new JsepVideoCodecDescription(
+  UniquePtr<JsepVideoCodecDescription> vp8(new JsepVideoCodecDescription(
       "120",
       "VP8",
       90000
-      );
+      ));
   // Defaults for mandatory params
   vp8->mConstraints.maxFs = 12288; // Enough for 2048x1536
   vp8->mConstraints.maxFps = 60;
-  mSupportedCodecs.values.push_back(vp8);
+  mSupportedCodecs.push_back(std::move(vp8));
 
-  JsepVideoCodecDescription* vp9 = new JsepVideoCodecDescription(
+  UniquePtr<JsepVideoCodecDescription> vp9(new JsepVideoCodecDescription(
       "121",
       "VP9",
       90000
-      );
+      ));
   // Defaults for mandatory params
   vp9->mConstraints.maxFs = 12288; // Enough for 2048x1536
   vp9->mConstraints.maxFps = 60;
-  mSupportedCodecs.values.push_back(vp9);
+  mSupportedCodecs.push_back(std::move(vp9));
 
-  JsepVideoCodecDescription* h264_1 = new JsepVideoCodecDescription(
+  UniquePtr<JsepVideoCodecDescription> h264_1(new JsepVideoCodecDescription(
       "126",
       "H264",
       90000
-      );
+      ));
   h264_1->mPacketizationMode = 1;
   // Defaults for mandatory params
   h264_1->mProfileLevelId = 0x42E00D;
-  mSupportedCodecs.values.push_back(h264_1);
+  mSupportedCodecs.push_back(std::move(h264_1));
 
-  JsepVideoCodecDescription* h264_0 = new JsepVideoCodecDescription(
+  UniquePtr<JsepVideoCodecDescription> h264_0(new JsepVideoCodecDescription(
       "97",
       "H264",
       90000
-      );
+      ));
   h264_0->mPacketizationMode = 0;
   // Defaults for mandatory params
   h264_0->mProfileLevelId = 0x42E00D;
-  mSupportedCodecs.values.push_back(h264_0);
+  mSupportedCodecs.push_back(std::move(h264_0));
 
-  JsepVideoCodecDescription* red = new JsepVideoCodecDescription(
-      "122", // payload type
-      "red", // codec name
-      90000  // clock rate (match other video codecs)
-      );
-  mSupportedCodecs.values.push_back(red);
-
-  JsepVideoCodecDescription* ulpfec = new JsepVideoCodecDescription(
+  UniquePtr<JsepVideoCodecDescription> ulpfec(new JsepVideoCodecDescription(
       "123",    // payload type
       "ulpfec", // codec name
       90000     // clock rate (match other video codecs)
-      );
-  mSupportedCodecs.values.push_back(ulpfec);
+      ));
+  mSupportedCodecs.push_back(std::move(ulpfec));
 
-  mSupportedCodecs.values.push_back(new JsepApplicationCodecDescription(
+  mSupportedCodecs.emplace_back(new JsepApplicationCodecDescription(
       "webrtc-datachannel",
       WEBRTC_DATACHANNEL_STREAMS_DEFAULT,
       WEBRTC_DATACHANNEL_PORT_DEFAULT,
       WEBRTC_DATACHANNEL_MAX_MESSAGE_SIZE_LOCAL
       ));
 
+  UniquePtr<JsepVideoCodecDescription> red(new JsepVideoCodecDescription(
+      "122", // payload type
+      "red", // codec name
+      90000  // clock rate (match other video codecs)
+      ));
   // Update the redundant encodings for the RED codec with the supported
   // codecs.  Note: only uses the video codecs.
-  red->UpdateRedundantEncodings(mSupportedCodecs.values);
+  red->UpdateRedundantEncodings(mSupportedCodecs);
+  mSupportedCodecs.push_back(std::move(red));
 }
 
 void
@@ -2182,7 +2226,7 @@ JsepSessionImpl::SetState(JsepSignalingState state)
 nsresult
 JsepSessionImpl::AddRemoteIceCandidate(const std::string& candidate,
                                        const std::string& mid,
-                                       uint16_t level,
+                                       const Maybe<uint16_t>& level,
                                        std::string* transportId)
 {
   mLastError.clear();
@@ -2195,10 +2239,14 @@ JsepSessionImpl::AddRemoteIceCandidate(const std::string& candidate,
   }
 
   JsepTransceiver* transceiver;
-  if (mid.empty()) {
-    transceiver = GetTransceiverForLevel(level);
-  } else {
+  if (!mid.empty()) {
     transceiver = GetTransceiverForMid(mid);
+  } else if (level.isSome()) {
+    transceiver = GetTransceiverForLevel(level.value());
+  } else {
+    JSEP_SET_ERROR("ICE candidate: \'" << candidate
+                   << "\' is missing MID and MLineIndex");
+    return NS_ERROR_TYPE_ERR;
   }
 
   if (!transceiver) {
@@ -2207,15 +2255,15 @@ JsepSessionImpl::AddRemoteIceCandidate(const std::string& candidate,
     return NS_ERROR_INVALID_ARG;
   }
 
-  if (transceiver->GetLevel() != level) {
-    JSEP_SET_ERROR("Mismatch between mid and level - \"" << mid
+  if (level.isSome() &&
+      transceiver->GetLevel() != level.value()) {
+    MOZ_MTLOG(ML_WARNING, "Mismatch between mid and level - \"" << mid
                    << "\" is not the mid for level " << level);
-    return NS_ERROR_INVALID_ARG;
   }
 
   *transportId = transceiver->mTransport.mTransportId;
 
-  return mSdpHelper.AddCandidateToSdp(sdp, candidate, level);
+  return mSdpHelper.AddCandidateToSdp(sdp, candidate, transceiver->GetLevel());
 }
 
 nsresult
@@ -2364,6 +2412,28 @@ JsepSessionImpl::GetAnswer() const
 {
   return mWasOffererLastTime ? mCurrentRemoteDescription.get()
                              : mCurrentLocalDescription.get();
+}
+
+void
+JsepSessionImpl::SetIceRestarting(bool restarting)
+{
+  if (restarting) {
+    // not restarting -> restarting
+    if (!IsIceRestarting()) {
+      // We don't set this more than once, so the old ufrag/pwd is preserved
+      // even if we CreateOffer({iceRestart:true}) multiple times in a row.
+      mOldIceUfrag = mIceUfrag;
+      mOldIcePwd = mIcePwd;
+    }
+    mIceUfrag = GetRandomHex(1);
+    mIcePwd = GetRandomHex(4);
+  } else if (IsIceRestarting()) {
+    // restarting -> not restarting, restore old ufrag/pwd
+    mIceUfrag = mOldIceUfrag;
+    mIcePwd = mOldIcePwd;
+    mOldIceUfrag.clear();
+    mOldIcePwd.clear();
+  }
 }
 
 nsresult

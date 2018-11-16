@@ -86,19 +86,6 @@ nsHtml5Portability::newCharArrayFromString(nsHtml5String string)
   return arr;
 }
 
-nsAtom*
-nsHtml5Portability::newLocalFromLocal(nsAtom* local, nsHtml5AtomTable* interner)
-{
-  MOZ_ASSERT(local, "Atom was null.");
-  MOZ_ASSERT(interner, "Atom table was null");
-  if (!local->IsStatic()) {
-    nsAutoString str;
-    local->ToString(str);
-    local = interner->GetAtom(str);
-  }
-  return local;
-}
-
 bool
 nsHtml5Portability::localEqualsBuffer(nsAtom* local,
                                       char16_t* buf,

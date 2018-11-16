@@ -332,24 +332,24 @@ ToolSidebar.prototype = {
       return;
     }
 
+    const sessionId = this._toolPanel._toolbox.sessionId;
+
     currentToolId = this.getTelemetryPanelNameOrOther(currentToolId);
 
     if (previousToolId) {
-      const sessionId = this._toolPanel._toolbox.sessionId;
-
       previousToolId = this.getTelemetryPanelNameOrOther(previousToolId);
-      this._telemetry.toolClosed(previousToolId, sessionId);
+      this._telemetry.toolClosed(previousToolId, sessionId, this);
 
-      this._telemetry.recordEvent("devtools.main", "sidepanel_changed", "inspector", null,
+      this._telemetry.recordEvent("sidepanel_changed", "inspector", null,
         {
           "oldpanel": previousToolId,
           "newpanel": currentToolId,
           "os": this._telemetry.osNameAndVersion,
-          "session_id": sessionId
+          "session_id": sessionId,
         }
       );
     }
-    this._telemetry.toolOpened(currentToolId);
+    this._telemetry.toolOpened(currentToolId, sessionId, this);
   },
 
   /**
@@ -446,7 +446,8 @@ ToolSidebar.prototype = {
     }
 
     if (this._currentTool && this._telemetry) {
-      this._telemetry.toolClosed(this._currentTool);
+      const sessionId = this._toolPanel._toolbox.sessionId;
+      this._telemetry.toolClosed(this._currentTool, sessionId, this);
     }
 
     this._toolPanel.emit("sidebar-destroyed", this);
@@ -456,5 +457,5 @@ ToolSidebar.prototype = {
     this._telemetry = null;
     this._panelDoc = null;
     this._toolPanel = null;
-  }
+  },
 };

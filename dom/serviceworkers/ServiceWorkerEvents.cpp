@@ -161,6 +161,7 @@ FetchEvent::Constructor(const GlobalObject& aGlobal,
   e->SetComposed(aOptions.mComposed);
   e->mRequest = aOptions.mRequest;
   e->mClientId = aOptions.mClientId;
+  e->mResultingClientId = aOptions.mResultingClientId;
   e->mIsReload = aOptions.mIsReload;
   return e.forget();
 }
@@ -343,8 +344,9 @@ public:
     // Get the preferred alternative data type of outter channel
     nsAutoCString preferredAltDataType(EmptyCString());
     nsCOMPtr<nsICacheInfoChannel> outerChannel = do_QueryInterface(underlyingChannel);
-    if (outerChannel) {
-      outerChannel->GetPreferredAlternativeDataType(preferredAltDataType);
+    if (outerChannel && !outerChannel->PreferredAlternativeDataTypes().IsEmpty()) {
+      // TODO: handle multiple types properly.
+      preferredAltDataType.Assign(mozilla::Get<0>(outerChannel->PreferredAlternativeDataTypes()[0]));
     }
 
     // Get the alternative data type saved in the InternalResponse
@@ -674,10 +676,19 @@ RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValu
     return;
   }
 
-  if (NS_WARN_IF(response->BodyUsed())) {
-    autoCancel.SetCancelMessage(
-      NS_LITERAL_CSTRING("InterceptedUsedResponseWithURL"), mRequestURL);
-    return;
+  {
+    ErrorResult error;
+    bool bodyUsed = response->GetBodyUsed(error);
+    error.WouldReportJSException();
+    if (NS_WARN_IF(error.Failed())) {
+      autoCancel.SetCancelErrorResult(aCx, error);
+      return;
+    }
+    if (NS_WARN_IF(bodyUsed)) {
+      autoCancel.SetCancelMessage(
+        NS_LITERAL_CSTRING("InterceptedUsedResponseWithURL"), mRequestURL);
+      return;
+    }
   }
 
   RefPtr<InternalResponse> ir = response->GetInternalResponse();
@@ -750,6 +761,7 @@ RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValu
   if (body) {
     ErrorResult error;
     response->SetBodyUsed(aCx, error);
+    error.WouldReportJSException();
     if (NS_WARN_IF(error.Failed())) {
       autoCancel.SetCancelErrorResult(aCx, error);
       return;

@@ -14,6 +14,7 @@
 #include "jit/JitRealm.h"
 #include "vm/Debugger.h"
 #include "vm/Runtime.h"
+#include "wasm/WasmInstance.h"
 
 #include "gc/GC-inl.h"
 #include "gc/Marking-inl.h"
@@ -118,9 +119,9 @@ Zone::setNeedsIncrementalBarrier(bool needs)
 }
 
 void
-Zone::beginSweepTypes(bool releaseTypes)
+Zone::beginSweepTypes()
 {
-    types.beginSweep(releaseTypes);
+    types.beginSweep();
 }
 
 Zone::DebuggerVector*
@@ -186,6 +187,18 @@ Zone::sweepBreakpoints(FreeOp* fop)
             }
         }
     }
+
+    for (RealmsInZoneIter realms(this); !realms.done(); realms.next()) {
+        for (wasm::Instance* instance : realms->wasm.instances()) {
+            if (!instance->debugEnabled()) {
+                continue;
+            }
+            if (!IsAboutToBeFinalized(&instance->object_)) {
+                continue;
+            }
+            instance->debug().clearAllBreakpoints(fop, instance->objectUnbarriered());
+        }
+    }
 }
 
 void
@@ -196,7 +209,7 @@ Zone::sweepWeakMaps()
 }
 
 void
-Zone::discardJitCode(FreeOp* fop, bool discardBaselineCode)
+Zone::discardJitCode(FreeOp* fop, bool discardBaselineCode, bool releaseTypes)
 {
     if (!jitZone()) {
         return;
@@ -245,6 +258,12 @@ Zone::discardJitCode(FreeOp* fop, bool discardBaselineCode)
          */
         if (script->hasBaselineScript()) {
             script->baselineScript()->setControlFlowGraph(nullptr);
+        }
+
+        // Try to release the script's TypeScript. This should happen last
+        // because we can't do this when the script still has JIT code.
+        if (releaseTypes) {
+            script->maybeReleaseTypes();
         }
     }
 

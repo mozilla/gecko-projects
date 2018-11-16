@@ -20,6 +20,7 @@
 #include "jsapi.h"
 #include "jsfriendapi.h"
 #include "js/Conversions.h"
+#include "js/SourceText.h"
 #include "js/StableStringChars.h"
 #include "nsString.h"
 
@@ -107,8 +108,7 @@ public:
    public:
 
     // Enter compartment in which the code would be executed.  The JSContext
-    // must come from an AutoEntryScript that has had
-    // TakeOwnershipOfErrorReporting() called on it.
+    // must come from an AutoEntryScript.
     ExecutionContext(JSContext* aCx, JS::Handle<JSObject*> aGlobal);
 
     ExecutionContext(const ExecutionContext&) = delete;
@@ -158,9 +158,9 @@ public:
     MOZ_MUST_USE nsresult JoinAndExec(JS::OffThreadToken** aOffThreadToken,
                                       JS::MutableHandle<JSScript*> aScript);
 
-    // Compile a script contained in a SourceBuffer, and execute it.
+    // Compile a script contained in a SourceText, and execute it.
     nsresult CompileAndExec(JS::CompileOptions& aCompileOptions,
-                            JS::SourceBufferHolder& aSrcBuf,
+                            JS::SourceText<char16_t>& aSrcBuf,
                             JS::MutableHandle<JSScript*> aScript);
 
     // Compile a script contained in a string, and execute it.
@@ -187,20 +187,20 @@ public:
   };
 
   static nsresult CompileModule(JSContext* aCx,
-                                JS::SourceBufferHolder& aSrcBuf,
+                                JS::SourceText<char16_t>& aSrcBuf,
                                 JS::Handle<JSObject*> aEvaluationGlobal,
                                 JS::CompileOptions &aCompileOptions,
-                                JS::MutableHandle<JSScript*> aScript);
+                                JS::MutableHandle<JSObject*> aModule);
 
   static nsresult InitModuleSourceElement(JSContext* aCx,
-                                          JS::Handle<JSScript*> aScript,
+                                          JS::Handle<JSObject*> aModule,
                                           nsIScriptElement* aElement);
 
   static nsresult ModuleInstantiate(JSContext* aCx,
-                                    JS::Handle<JSScript*> aScript);
+                                    JS::Handle<JSObject*> aModule);
 
   static nsresult ModuleEvaluate(JSContext* aCx,
-                                 JS::Handle<JSScript*> aScript);
+                                 JS::Handle<JSObject*> aModule);
 
   // Returns false if an exception got thrown on aCx.  Passing a null
   // aElement is allowed; that wil produce an empty aScopeChain.

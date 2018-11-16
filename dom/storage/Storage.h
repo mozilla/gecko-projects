@@ -11,7 +11,7 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Maybe.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsWeakReference.h"
+#include "nsCOMPtr.h"
 #include "nsWrapperCache.h"
 #include "nsISupports.h"
 
@@ -35,6 +35,7 @@ public:
   enum StorageType {
     eSessionStorage,
     eLocalStorage,
+    ePartitionedLocalStorage,
   };
 
   virtual StorageType Type() const = 0;

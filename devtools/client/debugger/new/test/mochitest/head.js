@@ -46,12 +46,6 @@ Services.scriptloader.loadSubScript(
 const EXAMPLE_URL =
   "http://example.com/browser/devtools/client/debugger/new/test/mochitest/examples/";
 
-Services.prefs.setBoolPref("devtools.debugger.new-debugger-frontend", true);
-
-registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("devtools.debugger.new-debugger-frontend");
-});
-
 // NOTE: still experimental, the screenshots might not be exactly correct
 async function takeScreenshot(dbg) {
   let canvas = dbg.win.document.createElementNS(
@@ -69,7 +63,7 @@ async function takeScreenshot(dbg) {
 // Attach a debugger to a tab, returning a promise that resolves with the
 // debugger's toolbox.
 async function attachDebugger(tab) {
-  let target = TargetFactory.forTab(tab);
+  let target = await TargetFactory.forTab(tab);
   let toolbox = await gDevTools.showToolbox(target, "jsdebugger");
   return toolbox;
 }

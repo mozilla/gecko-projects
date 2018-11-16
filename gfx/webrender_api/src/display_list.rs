@@ -9,14 +9,15 @@ use serde::de::Deserializer;
 #[cfg(feature = "serialize")]
 use serde::ser::{Serializer, SerializeSeq};
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
+use std::io::{Read, stdout, Write};
 use std::marker::PhantomData;
+use std::ops::Range;
 use std::{io, mem, ptr, slice};
 use time::precise_time_ns;
 use {AlphaType, BorderDetails, BorderDisplayItem, BorderRadius, BoxShadowClipMode};
 use {BoxShadowDisplayItem, ClipAndScrollInfo, ClipChainId, ClipChainItem, ClipDisplayItem, ClipId};
 use {ColorF, ComplexClipRegion, DisplayItem, ExtendMode, ExternalScrollId, FilterOp};
-use {FontInstanceKey, GlyphInstance, GlyphOptions, GlyphRasterSpace, Gradient, GradientBuilder};
+use {FontInstanceKey, GlyphInstance, GlyphOptions, RasterSpace, Gradient, GradientBuilder};
 use {GradientDisplayItem, GradientStop, IframeDisplayItem, ImageDisplayItem, ImageKey, ImageMask};
 use {ImageRendering, LayoutPoint, LayoutPrimitiveInfo, LayoutRect, LayoutSideOffsets, LayoutSize};
 use {LayoutTransform, LayoutVector2D, LineDisplayItem, LineOrientation, LineStyle, MixBlendMode};
@@ -24,7 +25,7 @@ use {PipelineId, PropertyBinding, PushReferenceFrameDisplayListItem};
 use {PushStackingContextDisplayItem, RadialGradient, RadialGradientDisplayItem};
 use {RectangleDisplayItem, ReferenceFrame, ScrollFrameDisplayItem, ScrollSensitivity, Shadow};
 use {SpecificDisplayItem, StackingContext, StickyFrameDisplayItem, StickyOffsetBounds};
-use {TextDisplayItem, TransformStyle, YuvColorSpace, YuvData, YuvImageDisplayItem};
+use {TextDisplayItem, TransformStyle, YuvColorSpace, YuvData, YuvImageDisplayItem, ColorDepth};
 
 // We don't want to push a long text-run. If a text-run is too long, split it into several parts.
 // This needs to be set to (renderer::MAX_VERTEX_TEXTURE_WIDTH - VECS_PER_TEXT_RUN) * 2
@@ -88,6 +89,8 @@ pub struct BuiltDisplayListDescriptor {
     total_clip_nodes: usize,
     /// The amount of spatial nodes created while building this display list.
     total_spatial_nodes: usize,
+    /// An estimate of the number of primitives that will be created by this display list.
+    prim_count_estimate: usize,
 }
 
 pub struct BuiltDisplayListIter<'a> {
@@ -143,6 +146,10 @@ impl BuiltDisplayList {
 
     pub fn descriptor(&self) -> &BuiltDisplayListDescriptor {
         &self.descriptor
+    }
+
+    pub fn prim_count_estimate(&self) -> usize {
+        self.descriptor.prim_count_estimate
     }
 
     pub fn times(&self) -> (u64, u64, u64) {
@@ -603,6 +610,7 @@ impl<'de> Deserialize<'de> for BuiltDisplayList {
                 send_start_time: 0,
                 total_clip_nodes,
                 total_spatial_nodes,
+                prim_count_estimate: 0,
             },
         })
     }
@@ -647,7 +655,7 @@ impl Write for UnsafeVecWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         unsafe {
             ptr::copy_nonoverlapping(buf.as_ptr(), self.0, buf.len());
-            self.0 = self.0.offset(buf.len() as isize);
+            self.0 = self.0.add(buf.len());
         }
         Ok(buf.len())
     }
@@ -656,7 +664,7 @@ impl Write for UnsafeVecWriter {
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         unsafe {
             ptr::copy_nonoverlapping(buf.as_ptr(), self.0, buf.len());
-            self.0 = self.0.offset(buf.len() as isize);
+            self.0 = self.0.add(buf.len());
         }
         Ok(())
     }
@@ -697,7 +705,7 @@ fn serialize_fast<T: Serialize>(vec: &mut Vec<u8>, e: &T) {
     vec.reserve(size.0);
 
     let old_len = vec.len();
-    let ptr = unsafe { vec.as_mut_ptr().offset(old_len as isize) };
+    let ptr = unsafe { vec.as_mut_ptr().add(old_len) };
     let mut w = UnsafeVecWriter(ptr);
     bincode::serialize_into(&mut w, e).unwrap();
 
@@ -714,7 +722,7 @@ fn serialize_fast<T: Serialize>(vec: &mut Vec<u8>, e: &T) {
 /// * The ExactSizeIterator impl is stable and correct across a Clone
 /// * The Serialize impl has a stable size across two invocations
 ///
-/// If the first is incorrect, webrender will be very slow. If the other two are
+/// If the first is incorrect, WebRender will be very slow. If the other two are
 /// incorrect, the result will be Undefined Behaviour! The ExactSizeIterator
 /// bound would ideally be replaced with a TrustedLen bound to protect us a bit
 /// better, but that trait isn't stable (and won't be for a good while, if ever).
@@ -737,7 +745,7 @@ where I: ExactSizeIterator + Clone,
     vec.reserve(size.0);
 
     let old_len = vec.len();
-    let ptr = unsafe { vec.as_mut_ptr().offset(old_len as isize) };
+    let ptr = unsafe { vec.as_mut_ptr().add(old_len) };
     let mut w = UnsafeVecWriter(ptr);
     let mut count2 = 0;
 
@@ -770,7 +778,7 @@ impl<'a, 'b> UnsafeReader<'a, 'b> {
     #[inline(always)]
     fn new(buf: &'b mut &'a [u8]) -> UnsafeReader<'a, 'b> {
         unsafe {
-            let end = buf.as_ptr().offset(buf.len() as isize);
+            let end = buf.as_ptr().add(buf.len());
             let start = buf.as_ptr();
             UnsafeReader { start, end, slice: buf }
         }
@@ -790,9 +798,9 @@ impl<'a, 'b> UnsafeReader<'a, 'b> {
     fn read_internal(&mut self, buf: &mut [u8]) {
         // this is safe because we panic if start + buf.len() > end
         unsafe {
-            assert!(self.start.offset(buf.len() as isize) <= self.end, "UnsafeReader: read past end of target");
+            assert!(self.start.add(buf.len()) <= self.end, "UnsafeReader: read past end of target");
             ptr::copy_nonoverlapping(self.start, buf.as_mut_ptr(), buf.len());
-            self.start = self.start.offset(buf.len() as isize);
+            self.start = self.start.add(buf.len());
         }
     }
 }
@@ -839,6 +847,7 @@ pub struct DisplayListBuilder {
     clip_stack: Vec<ClipAndScrollInfo>,
     next_clip_index: usize,
     next_spatial_index: usize,
+    prim_count_estimate: usize,
     next_clip_chain_id: u64,
     builder_start_time: u64,
 
@@ -868,6 +877,7 @@ impl DisplayListBuilder {
             ],
             next_clip_index: FIRST_CLIP_NODE_INDEX,
             next_spatial_index: FIRST_SPATIAL_NODE_INDEX,
+            prim_count_estimate: 0,
             next_clip_chain_id: 0,
             builder_start_time: start_time,
             content_size,
@@ -915,20 +925,31 @@ impl DisplayListBuilder {
         self.save_state.take().expect("No save to clear in DisplayListBuilder");
     }
 
-    /// Print the display items in the list to stderr. If the start parameter
-    /// is specified, only display items starting at that index (inclusive) will
-    /// be printed. If the end parameter is specified, only display items before
-    /// that index (exclusive) will be printed. Calling this function with
-    /// end <= start is allowed but is just a waste of CPU cycles.
-    /// This function returns the total number of items in the display list, which
-    /// allows the caller to subsequently invoke this function to only dump the
-    /// newly-added items.
-    pub fn print_display_list(
+    /// Print the display items in the list to stdout.
+    pub fn print_display_list(&mut self) {
+        self.emit_display_list(0, Range { start: None, end: None }, stdout());
+    }
+
+    /// Emits a debug representation of display items in the list, for debugging
+    /// purposes. If the range's start parameter is specified, only display
+    /// items starting at that index (inclusive) will be printed. If the range's
+    /// end parameter is specified, only display items before that index
+    /// (exclusive) will be printed. Calling this function with end <= start is
+    /// allowed but is just a waste of CPU cycles. The function emits the
+    /// debug representation of the selected display items, one per line, with
+    /// the given indent, to the provided sink object. The return value is
+    /// the total number of items in the display list, which allows the
+    /// caller to subsequently invoke this function to only dump the newly-added
+    /// items.
+    pub fn emit_display_list<W>(
         &mut self,
         indent: usize,
-        start: Option<usize>,
-        end: Option<usize>,
-    ) -> usize {
+        range: Range<Option<usize>>,
+        mut sink: W,
+    ) -> usize
+    where
+        W: Write
+    {
         let mut temp = BuiltDisplayList::default();
         mem::swap(&mut temp.data, &mut self.data);
 
@@ -936,8 +957,8 @@ impl DisplayListBuilder {
         {
             let mut iter = BuiltDisplayListIter::new(&temp);
             while let Some(item) = iter.next_raw() {
-                if index >= start.unwrap_or(0) && end.map_or(true, |e| index < e) {
-                    eprintln!("{}{:?}", "  ".repeat(indent), item.display_item());
+                if index >= range.start.unwrap_or(0) && range.end.map_or(true, |e| index < e) {
+                    writeln!(sink, "{}{:?}", "  ".repeat(indent), item.display_item());
                 }
                 index += 1;
             }
@@ -953,6 +974,7 @@ impl DisplayListBuilder {
     /// display items. Pushing unexpected or invalid items here may
     /// result in WebRender panicking or behaving in unexpected ways.
     pub fn push_item(&mut self, item: SpecificDisplayItem, info: &LayoutPrimitiveInfo) {
+        self.prim_count_estimate += 1;
         serialize_fast(
             &mut self.data,
             &DisplayItem {
@@ -969,6 +991,7 @@ impl DisplayListBuilder {
         info: &LayoutPrimitiveInfo,
         scrollinfo: ClipAndScrollInfo
     ) {
+        self.prim_count_estimate += 1;
         serialize_fast(
             &mut self.data,
             &DisplayItem {
@@ -1090,11 +1113,13 @@ impl DisplayListBuilder {
         &mut self,
         info: &LayoutPrimitiveInfo,
         yuv_data: YuvData,
+        color_depth: ColorDepth,
         color_space: YuvColorSpace,
         image_rendering: ImageRendering,
     ) {
         let item = SpecificDisplayItem::YuvImage(YuvImageDisplayItem {
             yuv_data,
+            color_depth,
             color_space,
             image_rendering,
         });
@@ -1263,20 +1288,20 @@ impl DisplayListBuilder {
         clip_node_id: Option<ClipId>,
         transform_style: TransformStyle,
         mix_blend_mode: MixBlendMode,
-        filters: Vec<FilterOp>,
-        glyph_raster_space: GlyphRasterSpace,
+        filters: &[FilterOp],
+        raster_space: RasterSpace,
     ) {
         let item = SpecificDisplayItem::PushStackingContext(PushStackingContextDisplayItem {
             stacking_context: StackingContext {
                 transform_style,
                 mix_blend_mode,
                 clip_node_id,
-                glyph_raster_space,
+                raster_space,
             },
         });
 
         self.push_item(item, info);
-        self.push_iter(&filters);
+        self.push_iter(filters);
     }
 
     pub fn pop_stacking_context(&mut self) {
@@ -1501,6 +1526,7 @@ impl DisplayListBuilder {
                     send_start_time: 0,
                     total_clip_nodes: self.next_clip_index,
                     total_spatial_nodes: self.next_spatial_index,
+                    prim_count_estimate: self.prim_count_estimate,
                 },
                 data: self.data,
             },

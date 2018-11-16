@@ -183,9 +183,8 @@ XPCWrappedNative::WrapNewGlobal(xpcObjectHelper& nativeHelper,
 
     // Create the global.
     aOptions.creationOptions().setTrace(XPCWrappedNative::Trace);
-    if (xpc::SharedMemoryEnabled()) {
-        aOptions.creationOptions().setSharedMemoryAndAtomicsEnabled(true);
-    }
+    xpc::SetPrefableRealmOptions(aOptions);
+
     RootedObject global(cx, xpc::CreateGlobalObject(cx, clasp, principal, aOptions));
     if (!global) {
         return NS_ERROR_FAILURE;
@@ -1892,11 +1891,9 @@ static void DEBUG_CheckClassInfoClaims(XPCWrappedNative* wrapper)
         nsIClassInfo* clsInfo = wrapper->GetClassInfo();
         XPCNativeInterface* iface = set->GetInterfaceAt(i);
         const nsXPTInterfaceInfo* info = iface->GetInterfaceInfo();
-        const nsIID* iid;
         nsISupports* ptr;
 
-        info->GetIIDShared(&iid);
-        nsresult rv = obj->QueryInterface(*iid, (void**)&ptr);
+        nsresult rv = obj->QueryInterface(info->IID(), (void**)&ptr);
         if (NS_SUCCEEDED(rv)) {
             NS_RELEASE(ptr);
             continue;
@@ -1909,9 +1906,8 @@ static void DEBUG_CheckClassInfoClaims(XPCWrappedNative* wrapper)
 
         char* className = nullptr;
         char* contractID = nullptr;
-        const char* interfaceName;
+        const char* interfaceName = info->Name();
 
-        info->GetNameShared(&interfaceName);
         clsInfo->GetContractID(&contractID);
         if (wrapper->GetScriptable()) {
             wrapper->GetScriptable()->GetClassName(&className);

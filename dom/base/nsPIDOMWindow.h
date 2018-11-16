@@ -31,7 +31,7 @@ class nsIChannel;
 class nsIContent;
 class nsICSSDeclaration;
 class nsIDocShell;
-class nsDocShellLoadInfo;
+class nsDocShellLoadState;
 class nsIDocument;
 class nsIPrincipal;
 class nsIScriptTimeoutHandler;
@@ -45,10 +45,10 @@ class nsXBLPrototypeHandler;
 typedef uint32_t SuspendTypes;
 
 namespace mozilla {
-class ThrottledEventQueue;
 class AutoplayPermissionManager;
 namespace dom {
 class AudioContext;
+class BrowsingContext;
 class ClientInfo;
 class ClientState;
 class ContentFrameMessageManager;
@@ -58,6 +58,9 @@ class Element;
 class MozIdleObserver;
 class Navigator;
 class Performance;
+class Report;
+class ReportBody;
+class ReportingObserver;
 class Selection;
 class ServiceWorker;
 class ServiceWorkerDescriptor;
@@ -254,6 +257,16 @@ public:
   void SetHasPointerEnterLeaveEventListeners()
   {
     mMayHavePointerEnterLeaveEventListener = true;
+  }
+
+  /**
+   * Call this to indiate that some node (this window, its document,
+   * or content in that document) has a text event listener in the default
+   * group.
+   */
+  void SetHasTextEventListenerInDefaultGroup()
+  {
+    mMayHaveTextEventListenerInDefaultGroup = true;
   }
 
   // Sets the event for window.event. Does NOT take ownership, so
@@ -618,6 +631,19 @@ public:
   already_AddRefed<mozilla::AutoplayPermissionManager>
   GetAutoplayPermissionManager();
 
+  void
+  RegisterReportingObserver(mozilla::dom::ReportingObserver* aObserver,
+                            bool aBuffered);
+
+  void
+  UnregisterReportingObserver(mozilla::dom::ReportingObserver* aObserver);
+
+  void
+  BroadcastReport(mozilla::dom::Report* aReport);
+
+  void
+  NotifyReportingObservers();
+
 protected:
   void CreatePerformanceObjectIfNeeded();
 
@@ -661,6 +687,9 @@ protected:
   bool mMayHaveSelectionChangeEventListener;
   bool mMayHaveMouseEnterLeaveEventListener;
   bool mMayHavePointerEnterLeaveEventListener;
+  // Only for telemetry probe so that you can remove this after the
+  // telemetry stops working.
+  bool mMayHaveTextEventListenerInDefaultGroup;
 
   bool mAudioCaptured;
 
@@ -709,6 +738,10 @@ protected:
   // The event dispatch code sets and unsets this while keeping
   // the event object alive.
   mozilla::dom::Event* mEvent;
+
+  // List of Report objects for ReportingObservers.
+  nsTArray<RefPtr<mozilla::dom::ReportingObserver>> mReportingObservers;
+  nsTArray<RefPtr<mozilla::dom::Report>> mReportRecords;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsPIDOMWindowInner, NS_PIDOMWINDOWINNER_IID)
@@ -716,7 +749,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsPIDOMWindowInner, NS_PIDOMWINDOWINNER_IID)
 class nsPIDOMWindowOuter : public mozIDOMWindowProxy
 {
 protected:
-  explicit nsPIDOMWindowOuter();
+  explicit nsPIDOMWindowOuter(uint64_t aWindowID);
 
   ~nsPIDOMWindowOuter();
 
@@ -930,6 +963,8 @@ public:
    */
   inline nsIDocShell *GetDocShell() const;
 
+  mozilla::dom::BrowsingContext* GetBrowsingContext() const;
+
   /**
    * Set a new document in the window. Calling this method will in most cases
    * create a new inner window. This may be called with a pointer to the current
@@ -1094,7 +1129,9 @@ public:
 
   virtual void
   NotifyContentBlockingState(unsigned aState,
-                             nsIChannel* aChannel) = 0;
+                             nsIChannel* aChannel,
+                             bool aBlocked,
+                             nsIURI* aURIHint) = 0;
 
   // WebIDL-ish APIs
   void MarkUncollectableForCCGeneration(uint32_t aGeneration)
@@ -1119,12 +1156,12 @@ public:
 
   virtual nsDOMWindowList* GetFrames() = 0;
 
-  // aLoadInfo will be passed on through to the windowwatcher.
+  // aLoadState will be passed on through to the windowwatcher.
   // aForceNoOpener will act just like a "noopener" feature in aOptions except
   //                will not affect any other window features.
   virtual nsresult Open(const nsAString& aUrl, const nsAString& aName,
                         const nsAString& aOptions,
-                        nsDocShellLoadInfo* aLoadInfo,
+                        nsDocShellLoadState* aLoadState,
                         bool aForceNoOpener,
                         nsPIDOMWindowOuter **_retval) = 0;
   virtual nsresult OpenDialog(const nsAString& aUrl, const nsAString& aName,

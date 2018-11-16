@@ -7,6 +7,7 @@
 const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
+const { getStr } = require("devtools/client/inspector/layout/utils/l10n");
 
 const FlexItem = createFactory(require(("./FlexItem")));
 
@@ -16,23 +17,31 @@ class FlexItemList extends PureComponent {
   static get propTypes() {
     return {
       flexItems: PropTypes.arrayOf(PropTypes.shape(Types.flexItem)).isRequired,
-      onToggleFlexItemShown: PropTypes.func.isRequired,
+      onHideBoxModelHighlighter: PropTypes.func.isRequired,
+      onShowBoxModelHighlighterForNode: PropTypes.func.isRequired,
+      setSelectedNode: PropTypes.func.isRequired,
     };
   }
 
   render() {
     const {
       flexItems,
-      onToggleFlexItemShown,
+      onHideBoxModelHighlighter,
+      onShowBoxModelHighlighterForNode,
+      setSelectedNode,
     } = this.props;
 
     return (
-      dom.ol(
+      dom.div(
         { className: "flex-item-list" },
-        flexItems.map(flexItem => FlexItem({
+        dom.div({ className: "flex-item-list-header" }, getStr("flexbox.flexItems")),
+        flexItems.map((flexItem, index) => FlexItem({
           key: flexItem.actorID,
           flexItem,
-          onToggleFlexItemShown,
+          index: index + 1,
+          onHideBoxModelHighlighter,
+          onShowBoxModelHighlighterForNode,
+          setSelectedNode,
         }))
       )
     );

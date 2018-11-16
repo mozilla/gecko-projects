@@ -16,7 +16,6 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/UniquePtr.h"
-#include "nsAutoPtr.h"
 #include "nsContentUtils.h" // For AddScriptBlocker().
 #include "nsCRT.h"
 #include "nsIObserver.h"
@@ -173,8 +172,6 @@ public:
                                  nsIContent** aTargetContent = nullptr,
                                  nsIContent* aOverrideClickTarget = nullptr)
                                  override;
-  already_AddRefed<nsIContent>
-    GetEventTargetContent(WidgetEvent* aEvent) override;
 
   void NotifyCounterStylesAreDirty() override;
 
@@ -273,6 +270,7 @@ public:
   NS_IMETHOD WordExtendForDelete(bool aForward) override;
   NS_IMETHOD LineMove(bool aForward, bool aExtend) override;
   NS_IMETHOD IntraLineMove(bool aForward, bool aExtend) override;
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD PageMove(bool aForward, bool aExtend) override;
   NS_IMETHOD ScrollPage(bool aForward) override;
   NS_IMETHOD ScrollLine(bool aForward) override;
@@ -344,6 +342,12 @@ public:
   bool GetIsViewportOverridden() override {
     return (mMobileViewportManager != nullptr);
   }
+
+  RefPtr<MobileViewportManager> GetMobileViewportManager() const override {
+    return mMobileViewportManager;
+  }
+
+  void UpdateViewportOverridden(bool aAfterInitialization) override;
 
   bool IsLayoutFlushObserver() override
   {
@@ -655,12 +659,9 @@ private:
 
   bool InZombieDocument(nsIContent *aContent);
   already_AddRefed<nsIPresShell> GetParentPresShellForEventHandling();
-  nsIContent* GetCurrentEventContent();
-  nsIFrame* GetCurrentEventFrame() override;
   MOZ_CAN_RUN_SCRIPT nsresult
   RetargetEventToParent(WidgetGUIEvent* aEvent, nsEventStatus* aEventStatus);
-  void PushCurrentEventInfo(nsIFrame* aFrame, nsIContent* aContent);
-  void PopCurrentEventInfo();
+
   /**
    * @param aIsHandlingNativeEvent      true when the caller (perhaps) handles
    *                                    an event which is caused by native
@@ -759,7 +760,7 @@ private:
 #endif
 
 #ifdef MOZ_REFLOW_PERF
-  ReflowCountMgr* mReflowCountMgr;
+  UniquePtr<ReflowCountMgr> mReflowCountMgr;
 #endif
 
   // This is used for synthetic mouse events that are sent when what is under
@@ -783,12 +784,8 @@ private:
   // we finish reflowing mCurrentReflowRoot.
   nsTHashtable<nsPtrHashKey<nsIFrame> > mFramesToDirty;
 
-  nsTArray<nsAutoPtr<DelayedEvent> > mDelayedEvents;
+  nsTArray<UniquePtr<DelayedEvent>> mDelayedEvents;
 private:
-  nsIFrame* mCurrentEventFrame;
-  nsCOMPtr<nsIContent> mCurrentEventContent;
-  nsTArray<nsIFrame*> mCurrentEventFrameStack;
-  nsCOMArray<nsIContent> mCurrentEventContentStack;
   nsRevocableEventPtr<nsSynthMouseMoveEvent> mSynthMouseMoveEvent;
   nsCOMPtr<nsIContent> mLastAnchorScrolledTo;
   RefPtr<nsCaret> mCaret;
@@ -873,8 +870,14 @@ private:
   // Whether we should dispatch keypress events even for non-printable keys
   // for keeping backward compatibility.
   bool mForceDispatchKeyPressEventsForNonPrintableKeys : 1;
-  // Whether mForceDispatchKeyPressEventsForNonPrintableKeys is initialized.
-  bool mInitializedForceDispatchKeyPressEventsForNonPrintableKeys : 1;
+  // Whether we should set keyCode or charCode value of keypress events whose
+  // value is zero to the other value or not.  When this is set to true, we
+  // should keep using legacy keyCode and charCode values (i.e., one of them
+  // is always 0).
+  bool mForceUseLegacyKeyCodeAndCharCodeValues : 1;
+  // Whether mForceDispatchKeyPressEventsForNonPrintableKeys and
+  // mForceUseLegacyKeyCodeAndCharCodeValues are initialized.
+  bool mInitializedWithKeyPressEventDispatchingBlacklist : 1;
 #endif // #ifdef NIGHTLY_BUILD
 
   static bool sDisableNonTestMouseEvents;

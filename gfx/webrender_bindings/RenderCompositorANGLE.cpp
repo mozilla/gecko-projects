@@ -10,6 +10,7 @@
 #include "GLContextEGL.h"
 #include "GLContextProvider.h"
 #include "mozilla/gfx/DeviceManagerDx.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/layers/HelpersD3D11.h"
 #include "mozilla/layers/SyncObject.h"
@@ -42,6 +43,7 @@ RenderCompositorANGLE::RenderCompositorANGLE(RefPtr<widget::CompositorWidget>&& 
   : RenderCompositor(std::move(aWidget))
   , mEGLConfig(nullptr)
   , mEGLSurface(nullptr)
+  , mUseTripleBuffering(false)
 {
 }
 
@@ -93,6 +95,7 @@ RenderCompositorANGLE::SutdownEGLLibraryIfNecessary()
   if (device.get() != GetDeviceOfEGLDisplay() &&
       RenderThread::Get()->RendererCount() == 0) {
     // Shutdown GLLibraryEGL for updating EGLDisplay.
+    RenderThread::Get()->ClearSharedGL();
     egl->Shutdown();
   }
   return true;
@@ -110,24 +113,21 @@ RenderCompositorANGLE::Initialize()
   if (!SutdownEGLLibraryIfNecessary()) {
     return false;
   }
-
-  nsCString discardFailureId;
-  if (!gl::GLLibraryEGL::EnsureInitialized(/* forceAccel */ true, &discardFailureId)) {
-    gfxCriticalNote << "Failed to load EGL library: " << discardFailureId.get();
+  if (!RenderThread::Get()->SharedGL()) {
+    gfxCriticalNote << "[WR] failed to get shared GL context.";
     return false;
   }
 
-  auto* egl = gl::GLLibraryEGL::Get();
   mDevice = GetDeviceOfEGLDisplay();
 
   if (!mDevice) {
-    gfxCriticalNote << "[D3D11] failed to get compositor device.";
+    gfxCriticalNote << "[WR] failed to get compositor device.";
     return false;
   }
 
   mDevice->GetImmediateContext(getter_AddRefs(mCtx));
   if (!mCtx) {
-    gfxCriticalNote << "[D3D11] failed to get immediate context.";
+    gfxCriticalNote << "[WR] failed to get immediate context.";
     return false;
   }
 
@@ -214,21 +214,6 @@ RenderCompositorANGLE::Initialize()
     return false;
   }
 
-  const auto flags = gl::CreateContextFlags::PREFER_ES3;
-
-  // Create GLContext with dummy EGLSurface, the EGLSurface is not used.
-  // Instread we override it with EGLSurface of SwapChain's back buffer.
-  mGL = gl::GLContextProviderEGL::CreateHeadless(flags, &discardFailureId);
-  if (!mGL || !mGL->IsANGLE()) {
-    gfxCriticalNote << "Failed ANGLE GL context creation for WebRender: " << gfx::hexa(mGL.get());
-    return false;
-  }
-
-  if (!mGL->MakeCurrent()) {
-    gfxCriticalNote << "Failed GL context creation for WebRender: " << gfx::hexa(mGL.get());
-    return false;
-  }
-
   // Force enable alpha channel to make sure ANGLE use correct framebuffer formart
   if (!gl::CreateConfig(&mEGLConfig, /* bpp */ 32, /* enableDepthBuffer */ true)) {
     gfxCriticalNote << "Failed to create EGLConfig for WebRender";
@@ -284,6 +269,7 @@ RenderCompositorANGLE::CreateSwapChainForDCompIfPossible(IDXGIFactory2* aDXGIFac
   }
 
   RefPtr<IDXGISwapChain1> swapChain1;
+  bool useTripleBuffering = gfx::gfxVars::UseWebRenderDCompWinTripleBuffering();
 
   DXGI_SWAP_CHAIN_DESC1 desc{};
   // DXGI does not like 0x0 swapchains. Swap chain creation failed when 0x0 was set.
@@ -293,7 +279,11 @@ RenderCompositorANGLE::CreateSwapChainForDCompIfPossible(IDXGIFactory2* aDXGIFac
   desc.SampleDesc.Count = 1;
   desc.SampleDesc.Quality = 0;
   desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-  desc.BufferCount = 2;
+  if (useTripleBuffering) {
+    desc.BufferCount = 3;
+  } else {
+    desc.BufferCount = 2;
+  }
   // DXGI_SCALING_NONE caused swap chain creation failure.
   desc.Scaling     = DXGI_SCALING_STRETCH;
   desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
@@ -308,6 +298,7 @@ RenderCompositorANGLE::CreateSwapChainForDCompIfPossible(IDXGIFactory2* aDXGIFac
     mVisual->SetContent(swapChain1);
     mCompositionTarget->SetRoot(mVisual);
     mCompositionDevice = dCompDevice;
+    mUseTripleBuffering = useTripleBuffering;
   }
 }
 
@@ -325,13 +316,13 @@ RenderCompositorANGLE::BeginFrame()
     return false;
   }
 
-  if (!mGL->MakeCurrent()) {
+  if (!MakeCurrent()) {
     gfxCriticalNote << "Failed to make render context current, can't draw.";
     return false;
   }
 
   if (mSyncObject) {
-    if (!mSyncObject->Synchronize()) {
+    if (!mSyncObject->Synchronize(/* aFallible */ true)) {
       // It's timeout or other error. Handle the device-reset here.
       RenderThread::Get()->HandleDeviceReset("SyncObject", /* aNotify */ true);
       return false;
@@ -350,7 +341,11 @@ RenderCompositorANGLE::EndFrame()
   if (mCompositionDevice) {
     mCompositionDevice->Commit();
   }
+}
 
+void
+RenderCompositorANGLE::WaitForGPU()
+{
   // Note: this waits on the query we inserted in the previous frame,
   // not the one we just inserted now. Example:
   //   Insert query #1
@@ -435,8 +430,6 @@ RenderCompositorANGLE::ResizeBufferIfNeeded()
     return false;
   }
 
-  gl::GLContextEGL::Cast(mGL)->SetEGLSurfaceOverride(surface);
-
   mEGLSurface = surface;
   mBufferSize = Some(size);
 
@@ -450,7 +443,7 @@ RenderCompositorANGLE::DestroyEGLSurface()
 
   // Release EGLSurface of back buffer before calling ResizeBuffers().
   if (mEGLSurface) {
-    gl::GLContextEGL::Cast(mGL)->SetEGLSurfaceOverride(EGL_NO_SURFACE);
+    gl::GLContextEGL::Cast(gl())->SetEGLSurfaceOverride(EGL_NO_SURFACE);
     egl->fDestroySurface(egl->Display(), mEGLSurface);
     mEGLSurface = nullptr;
   }
@@ -467,6 +460,13 @@ RenderCompositorANGLE::Resume()
   return true;
 }
 
+bool
+RenderCompositorANGLE::MakeCurrent()
+{
+  gl::GLContextEGL::Cast(gl())->SetEGLSurfaceOverride(mEGLSurface);
+  return gl()->MakeCurrent();
+}
+
 LayoutDeviceIntSize
 RenderCompositorANGLE::GetBufferSize()
 {
@@ -477,27 +477,52 @@ RenderCompositorANGLE::GetBufferSize()
   return mBufferSize.ref();
 }
 
+RefPtr<ID3D11Query>
+RenderCompositorANGLE::GetD3D11Query()
+{
+  RefPtr<ID3D11Query> query;
+
+  if (mRecycledQuery) {
+    query = mRecycledQuery.forget();
+    return query;
+  }
+
+  CD3D11_QUERY_DESC desc(D3D11_QUERY_EVENT);
+  HRESULT hr = mDevice->CreateQuery(&desc, getter_AddRefs(query));
+  if (FAILED(hr) || !query) {
+    gfxWarning() << "Could not create D3D11_QUERY_EVENT: " << gfx::hexa(hr);
+    return nullptr;
+  }
+  return query;
+}
+
 void
 RenderCompositorANGLE::InsertPresentWaitQuery()
 {
-  CD3D11_QUERY_DESC desc(D3D11_QUERY_EVENT);
-  HRESULT hr = mDevice->CreateQuery(&desc, getter_AddRefs(mNextWaitForPresentQuery));
-  if (FAILED(hr) || !mNextWaitForPresentQuery) {
-    gfxWarning() << "Could not create D3D11_QUERY_EVENT: " << gfx::hexa(hr);
+  RefPtr<ID3D11Query> query;
+  query = GetD3D11Query();
+  if (!query) {
     return;
   }
 
-  mCtx->End(mNextWaitForPresentQuery);
+  mCtx->End(query);
+  mWaitForPresentQueries.emplace(query);
 }
 
 void
 RenderCompositorANGLE::WaitForPreviousPresentQuery()
 {
-  if (mWaitForPresentQuery) {
+  size_t waitLatency = mUseTripleBuffering ? 3 : 2;
+
+  while (mWaitForPresentQueries.size() >= waitLatency) {
+    RefPtr<ID3D11Query>& query = mWaitForPresentQueries.front();
     BOOL result;
-    layers::WaitForGPUQuery(mDevice, mCtx, mWaitForPresentQuery, &result);
+    layers::WaitForGPUQuery(mDevice, mCtx, query, &result);
+
+    // Recycle query for later use.
+    mRecycledQuery = query;
+    mWaitForPresentQueries.pop();
   }
-  mWaitForPresentQuery = mNextWaitForPresentQuery.forget();
 }
 
 

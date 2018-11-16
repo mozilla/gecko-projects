@@ -32,6 +32,8 @@ const {
 const MessageState = overrides => Object.freeze(Object.assign({
   // List of all the messages added to the console.
   messagesById: new Map(),
+  // When recording or replaying, all progress values in messagesById.
+  replayProgressMessages: new Set(),
   // Array of the visible messages.
   visibleMessages: [],
   // Object for the filtered messages.
@@ -55,11 +57,13 @@ const MessageState = overrides => Object.freeze(Object.assign({
   // Map of the form {messageId : networkInformation}
   // `networkInformation` holds request, response, totalTime, ...
   networkMessagesUpdateById: {},
+  pausedExecutionPoint: null,
 }, overrides));
 
 function cloneState(state) {
   return {
     messagesById: new Map(state.messagesById),
+    replayProgressMessages: new Set(state.replayProgressMessages),
     visibleMessages: [...state.visibleMessages],
     filteredMessagesCount: {...state.filteredMessagesCount},
     messagesUiById: [...state.messagesUiById],
@@ -69,12 +73,14 @@ function cloneState(state) {
     removedActors: [...state.removedActors],
     repeatById: {...state.repeatById},
     networkMessagesUpdateById: {...state.networkMessagesUpdateById},
+    pausedExecutionPoint: state.pausedExecutionPoint,
   };
 }
 
 function addMessage(state, filtersState, prefsState, newMessage) {
   const {
     messagesById,
+    replayProgressMessages,
     groupsById,
     currentGroup,
     repeatById,
@@ -83,6 +89,16 @@ function addMessage(state, filtersState, prefsState, newMessage) {
   if (newMessage.type === constants.MESSAGE_TYPE.NULL_MESSAGE) {
     // When the message has a NULL type, we don't add it.
     return state;
+  }
+
+  if (newMessage.executionPoint) {
+    // When replaying old behaviors in a tab, we might see the same messages
+    // multiple times. Ignore duplicate messages with the same progress values.
+    const progress = newMessage.executionPoint.progress;
+    if (replayProgressMessages.has(progress)) {
+      return state;
+    }
+    state.replayProgressMessages.add(progress);
   }
 
   if (newMessage.type === constants.MESSAGE_TYPE.END_GROUP) {
@@ -126,7 +142,7 @@ function addMessage(state, filtersState, prefsState, newMessage) {
 
   const {
     visible,
-    cause
+    cause,
   } = getMessageVisibility(addedMessage, state, filtersState);
 
   if (visible) {
@@ -159,6 +175,8 @@ function messages(state = MessageState(), action, filtersState, prefsState) {
 
   let newState;
   switch (action.type) {
+    case constants.PAUSED_EXCECUTION_POINT:
+      return { ...state, pausedExecutionPoint: action.executionPoint };
     case constants.MESSAGES_ADD:
       // Preemptively remove messages that will never be rendered
       const list = [];
@@ -200,7 +218,7 @@ function messages(state = MessageState(), action, filtersState, prefsState) {
         removedActors: [...state.messagesById.values()].reduce((res, msg) => {
           res.push(...getAllActorsInMessage(msg));
           return res;
-        }, [])
+        }, []),
       });
 
     case constants.PRIVATE_MESSAGES_CLEAR:
@@ -262,7 +280,7 @@ function messages(state = MessageState(), action, filtersState, prefsState) {
         openState.messagesById = (new Map(messagesById)).set(
           action.id, {
             ...currMessage,
-            openedOnce: true
+            openedOnce: true,
           });
       }
       return openState;
@@ -289,7 +307,7 @@ function messages(state = MessageState(), action, filtersState, prefsState) {
 
       return {
         ...state,
-        messagesTableDataById: (new Map(messagesTableDataById)).set(id, data)
+        messagesTableDataById: (new Map(messagesTableDataById)).set(id, data),
       };
 
     case constants.NETWORK_MESSAGE_UPDATE:
@@ -297,8 +315,8 @@ function messages(state = MessageState(), action, filtersState, prefsState) {
         ...state,
         networkMessagesUpdateById: {
           ...networkMessagesUpdateById,
-          [action.message.id]: action.message
-        }
+          [action.message.id]: action.message,
+        },
       };
 
     case UPDATE_REQUEST:
@@ -315,8 +333,8 @@ function messages(state = MessageState(), action, filtersState, prefsState) {
           [action.id]: {
             ...request,
             ...processNetworkUpdates(action.data, request),
-          }
-        }
+          },
+        },
       };
     }
 
@@ -336,7 +354,7 @@ function messages(state = MessageState(), action, filtersState, prefsState) {
       messagesById.forEach((message, msgId) => {
         const {
           visible,
-          cause
+          cause,
         } = getMessageVisibility(message, state, filtersState);
         if (visible) {
           messagesToShow.push(msgId);
@@ -544,7 +562,7 @@ function getAllActorsInMessage(message) {
   const actors = [];
   if (Array.isArray(parameters)) {
     message.parameters.forEach(parameter => {
-      if (parameter.actor) {
+      if (parameter && parameter.actor) {
         actors.push(parameter.actor);
       }
     });
@@ -587,7 +605,7 @@ function getMessageVisibility(message, messagesState, filtersState, checkGroup =
   ) {
     return {
       visible: false,
-      cause: "closedGroup"
+      cause: "closedGroup",
     };
   }
 
@@ -595,14 +613,14 @@ function getMessageVisibility(message, messagesState, filtersState, checkGroup =
   // So, always return visible: true for those.
   if (isUnfilterable(message)) {
     return {
-      visible: true
+      visible: true,
     };
   }
 
   if (!passSearchFilters(message, filtersState)) {
     return {
       visible: false,
-      cause: FILTERS.TEXT
+      cause: FILTERS.TEXT,
     };
   }
 
@@ -611,33 +629,33 @@ function getMessageVisibility(message, messagesState, filtersState, checkGroup =
   if (!passLevelFilters(message, filtersState)) {
     return {
       visible: false,
-      cause: message.level
+      cause: message.level,
     };
   }
 
   if (!passCssFilters(message, filtersState)) {
     return {
       visible: false,
-      cause: FILTERS.CSS
+      cause: FILTERS.CSS,
     };
   }
 
   if (!passNetworkFilter(message, filtersState)) {
     return {
       visible: false,
-      cause: FILTERS.NET
+      cause: FILTERS.NET,
     };
   }
 
   if (!passXhrFilter(message, filtersState)) {
     return {
       visible: false,
-      cause: FILTERS.NETXHR
+      cause: FILTERS.NETXHR,
     };
   }
 
   return {
-    visible: true
+    visible: true,
   };
 }
 
@@ -780,7 +798,7 @@ function isTextInFrame(text, frame) {
     functionName,
     line,
     column,
-    source
+    source,
   } = frame;
   const { short } = getSourceNames(source);
   const unicodeShort = getUnicodeUrlPath(short);
@@ -835,7 +853,7 @@ function isTextInStackTrace(text, stacktrace) {
     functionName: frame.functionName || l10n.getStr("stacktrace.anonymousFunction"),
     source: frame.filename,
     lineNumber: frame.lineNumber,
-    columnNumber: frame.columnNumber
+    columnNumber: frame.columnNumber,
   }));
 }
 

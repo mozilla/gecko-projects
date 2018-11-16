@@ -73,10 +73,11 @@ struct CompilerEnvironment
 
         // Value in the other two states.
         struct {
-            CompileMode    mode_;
-            Tier           tier_;
-            DebugEnabled   debug_;
-            HasGcTypes     gcTypes_;
+            CompileMode      mode_;
+            Tier             tier_;
+            OptimizedBackend optimizedBackend_;
+            DebugEnabled     debug_;
+            HasGcTypes       gcTypes_;
         };
     };
 
@@ -90,6 +91,7 @@ struct CompilerEnvironment
     // value of gcTypes.
     CompilerEnvironment(CompileMode mode,
                         Tier tier,
+                        OptimizedBackend optimizedBackend,
                         DebugEnabled debugEnabled,
                         HasGcTypes gcTypesConfigured);
 
@@ -111,6 +113,10 @@ struct CompilerEnvironment
     Tier tier() const {
         MOZ_ASSERT(isComputed());
         return tier_;
+    }
+    OptimizedBackend optimizedBackend() const {
+        MOZ_ASSERT(isComputed());
+        return optimizedBackend_;
     }
     DebugEnabled debug() const {
         MOZ_ASSERT(isComputed());
@@ -165,6 +171,7 @@ struct ModuleEnvironment
     MemoryUsage               memoryUsage;
     uint32_t                  minMemoryLength;
     Maybe<uint32_t>           maxMemoryLength;
+    uint32_t                  numStructTypes;
     TypeDefVector             types;
     FuncTypeWithIdPtrVector   funcTypes;
     Uint32Vector              funcImportGlobalDataOffsets;
@@ -196,11 +203,15 @@ struct ModuleEnvironment
         gcFeatureOptIn(HasGcTypes::False),
 #endif
         memoryUsage(MemoryUsage::None),
-        minMemoryLength(0)
+        minMemoryLength(0),
+        numStructTypes(0)
     {}
 
     Tier tier() const {
         return compilerEnv->tier();
+    }
+    OptimizedBackend optimizedBackend() const {
+        return compilerEnv->optimizedBackend();
     }
     CompileMode mode() const {
         return compilerEnv->mode();
@@ -701,6 +712,9 @@ class Decoder
             if (!readVarU32(refTypeIndex)) {
                 return false;
             }
+            if (*refTypeIndex > MaxTypes) {
+                return false;
+            }
         } else {
             *refTypeIndex = NoRefTypeIndex;
         }
@@ -904,6 +918,11 @@ ConvertMemoryPagesToBytes(Limits* memory);
 
 MOZ_MUST_USE bool
 Validate(JSContext* cx, const ShareableBytes& bytecode, UniqueChars* error);
+
+// Same, but don't require a JSContext.
+MOZ_MUST_USE bool
+ValidateForCranelift(const ShareableBytes& bytecode, UniqueChars* error);
+
 
 }  // namespace wasm
 }  // namespace js

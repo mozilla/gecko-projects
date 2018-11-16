@@ -57,6 +57,7 @@
 
 #if defined(MOZ_WAYLAND)
 #include <gdk/gdkwayland.h>
+#include "nsView.h"
 #endif
 
 #include "nsGkAtoms.h"
@@ -832,13 +833,44 @@ nsWindow::GetDesktopToDeviceScale()
 {
 #ifdef MOZ_WAYLAND
     GdkDisplay* gdkDisplay = gdk_display_get_default();
-    if (GDK_IS_WAYLAND_DISPLAY(gdkDisplay)) {
+    if (!GDK_IS_X11_DISPLAY(gdkDisplay)) {
         return DesktopToLayoutDeviceScale(GdkScaleFactor());
     }
 #endif
 
     // In Gtk/X11, we manage windows using device pixels.
     return DesktopToLayoutDeviceScale(1.0);
+}
+
+DesktopToLayoutDeviceScale
+nsWindow::GetDesktopToDeviceScaleByScreen()
+{
+#ifdef MOZ_WAYLAND
+    GdkDisplay* gdkDisplay = gdk_display_get_default();
+    // In Wayland there's no way to get absolute position of the window and use it to
+    // determine the screen factor of the monitor on which the window is placed.
+    // The window is notified of the current scale factor but not at this point,
+    // so the GdkScaleFactor can return wrong value which can lead to wrong popup
+    // placement.
+    // We need to use parent's window scale factor for the new one.
+    if (!GDK_IS_X11_DISPLAY(gdkDisplay)) {
+        nsView* view = nsView::GetViewFor(this);
+        if (view) {
+            nsView* parentView = view->GetParent();
+            if (parentView) {
+                nsIWidget* parentWidget = parentView->GetNearestWidget(nullptr);
+                if (parentWidget) {
+                    return DesktopToLayoutDeviceScale(parentWidget->RoundsWidgetCoordinatesTo());
+                } else {
+                    NS_WARNING("Widget has no parent");
+                }
+            }
+        } else {
+            NS_WARNING("Cannot find widget view");
+        }
+    }
+#endif
+    return nsBaseWidget::GetDesktopToDeviceScale();
 }
 
 void
@@ -1573,7 +1605,6 @@ nsWindow::GetClientOffset()
 
 gboolean
 nsWindow::OnPropertyNotifyEvent(GtkWidget* aWidget, GdkEventProperty* aEvent)
-
 {
   if (aEvent->atom == gdk_atom_intern("_NET_FRAME_EXTENTS", FALSE)) {
     UpdateClientOffset();
@@ -3725,18 +3756,25 @@ nsWindow::Create(nsIWidget* aParent,
         }
         mShell = gtk_window_new(type);
 
+        bool isSetVisual = false;
 #ifdef MOZ_X11
         // Ensure gfxPlatform is initialized, since that is what initializes
         // gfxVars, used below.
         Unused << gfxPlatform::GetPlatform();
 
         bool useWebRender = gfx::gfxVars::UseWebRender() &&
-            AllowWebRenderForThisWindow();
+             AllowWebRenderForThisWindow();
+
+        bool shouldAccelerate = ComputeShouldAccelerate();
+        MOZ_ASSERT(shouldAccelerate | !useWebRender);
 
         // If using WebRender on X11, we need to select a visual with a depth buffer,
         // as well as an alpha channel if transparency is requested. This must be done
         // before the widget is realized.
-        if (mIsX11Display && useWebRender) {
+
+        // Use GL/WebRender compatible visual only when it is necessary, since
+        // the visual consumes more memory.
+        if (mIsX11Display && shouldAccelerate) {
             auto display =
                 GDK_DISPLAY_XDISPLAY(gtk_widget_get_display(mShell));
             auto screen = gtk_widget_get_screen(mShell);
@@ -3751,20 +3789,20 @@ nsWindow::Create(nsIWidget* aParent,
                                       gdk_x11_screen_lookup_visual(screen,
                                                                    visualId));
                 mHasAlphaVisual = needsAlphaVisual;
+                isSetVisual = true;
             } else {
-                NS_WARNING("We're missing X11 Visual for WebRender!");
+                NS_WARNING("We're missing X11 Visual!");
             }
-        } else
+        }
 #endif // MOZ_X11
-        {
-            if (needsAlphaVisual) {
-                GdkScreen *screen = gtk_widget_get_screen(mShell);
-                if (gdk_screen_is_composited(screen)) {
-                    GdkVisual *visual = gdk_screen_get_rgba_visual(screen);
-                    if (visual) {
-                        gtk_widget_set_visual(mShell, visual);
-                        mHasAlphaVisual = true;
-                    }
+
+        if (!isSetVisual && needsAlphaVisual) {
+            GdkScreen *screen = gtk_widget_get_screen(mShell);
+            if (gdk_screen_is_composited(screen)) {
+                GdkVisual *visual = gdk_screen_get_rgba_visual(screen);
+                if (visual) {
+                    gtk_widget_set_visual(mShell, visual);
+                    mHasAlphaVisual = true;
                 }
             }
         }
@@ -4579,7 +4617,6 @@ nsWindow::UpdateWindowDraggingRegion(const LayoutDeviceIntRegion& aRegion)
   }
 }
 
-#if (MOZ_WIDGET_GTK >= 3)
 void nsWindow::UpdateOpaqueRegion(const LayoutDeviceIntRegion& aOpaqueRegion)
 {
     // Available as of GTK 3.10+
@@ -4604,7 +4641,6 @@ void nsWindow::UpdateOpaqueRegion(const LayoutDeviceIntRegion& aOpaqueRegion)
         }
     }
 }
-#endif
 
 nsresult
 nsWindow::ConfigureChildren(const nsTArray<Configuration>& aConfigurations)
@@ -6864,13 +6900,11 @@ nsWindow::SetDrawsInTitlebar(bool aState)
 gint
 nsWindow::GdkScaleFactor()
 {
-#if (MOZ_WIDGET_GTK >= 3)
     // Available as of GTK 3.10+
     static auto sGdkWindowGetScaleFactorPtr = (gint (*)(GdkWindow*))
         dlsym(RTLD_DEFAULT, "gdk_window_get_scale_factor");
     if (sGdkWindowGetScaleFactorPtr && mGdkWindow)
         return (*sGdkWindowGetScaleFactorPtr)(mGdkWindow);
-#endif
     return ScreenHelperGTK::GetGTKMonitorScaleFactor();
 }
 
@@ -7442,5 +7476,10 @@ nsWindow::GetTopLevelWindowActiveState(nsIFrame *aFrame)
       }
   }
 
-  return (gFocusWindow == window);
+  GtkWidget* widget = window->GetGtkWidget();
+  if (widget) {
+      return !(gtk_widget_get_state_flags(widget) & GTK_STATE_FLAG_BACKDROP);
+  }
+
+  return false;
 }

@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ImageDocument.h"
+#include "mozilla/AutoRestore.h"
 #include "mozilla/ComputedStyle.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
@@ -161,6 +162,8 @@ ImageDocument::ImageDocument()
   , mShouldResize(false)
   , mFirstResize(false)
   , mObservingImageLoader(false)
+  , mTitleUpdateInProgress(false)
+  , mHasCustomTitle(false)
   , mOriginalZoomLevel(1.0)
 #if defined(MOZ_WIDGET_ANDROID)
   , mOriginalResolution(1.0)
@@ -200,7 +203,11 @@ ImageDocument::Init()
 JSObject*
 ImageDocument::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return ImageDocument_Binding::Wrap(aCx, this, aGivenProto);
+  JSObject* obj = ImageDocument_Binding::Wrap(aCx, this, aGivenProto);
+  if (!obj) {
+      MOZ_CRASH("Looks like bug 1488480/1405521, with ImageDocument::WrapNode failing");
+  }
+  return obj;
 }
 
 nsresult
@@ -236,7 +243,7 @@ ImageDocument::Destroy()
 {
   if (mImageContent) {
     // Remove our event listener from the image content.
-    nsCOMPtr<EventTarget> target = do_QueryInterface(mImageContent);
+    nsCOMPtr<EventTarget> target = mImageContent;
     target->RemoveEventListener(NS_LITERAL_STRING("load"), this, false);
     target->RemoveEventListener(NS_LITERAL_STRING("click"), this, false);
 
@@ -282,7 +289,7 @@ ImageDocument::SetScriptGlobalObject(nsIScriptGlobalObject* aScriptGlobalObject)
         CreateSyntheticDocument();
       NS_ASSERTION(NS_SUCCEEDED(rv), "failed to create synthetic document");
 
-      target = do_QueryInterface(mImageContent);
+      target = mImageContent;
       target->AddEventListener(NS_LITERAL_STRING("load"), this, false);
       target->AddEventListener(NS_LITERAL_STRING("click"), this, false);
     }
@@ -514,6 +521,17 @@ ImageDocument::DOMToggleImageSize()
   ToggleImageSize();
   return NS_OK;
 }
+
+void
+ImageDocument::NotifyPossibleTitleChange(bool aBoundTitleElement)
+{
+  if (!mHasCustomTitle && !mTitleUpdateInProgress) {
+    mHasCustomTitle = true;
+  }
+
+  nsIDocument::NotifyPossibleTitleChange(aBoundTitleElement);
+}
+
 
 NS_IMETHODIMP
 ImageDocument::Notify(imgIRequest* aRequest, int32_t aType, const nsIntRect* aData)
@@ -789,6 +807,13 @@ ImageDocument::CheckOverflowing(bool changeState)
 void
 ImageDocument::UpdateTitleAndCharset()
 {
+  if (mHasCustomTitle) {
+    return;
+  }
+
+  AutoRestore<bool> restore(mTitleUpdateInProgress);
+  mTitleUpdateInProgress = true;
+
   nsAutoCString typeStr;
   nsCOMPtr<imgIRequest> imageRequest;
   nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(mImageContent);

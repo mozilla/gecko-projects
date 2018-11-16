@@ -37,14 +37,19 @@ public:
 
   virtual bool BeginFrame() = 0;
   virtual void EndFrame() = 0;
+  virtual void WaitForGPU() = 0;
   virtual void Pause() = 0;
   virtual bool Resume() = 0;
 
   virtual gl::GLContext* gl() const { return nullptr; }
 
+  virtual bool MakeCurrent();
+
   virtual bool UseANGLE() const { return false; }
 
   virtual bool UseDComp() const { return false; }
+
+  virtual bool UseTripleBuffering() const { return false; }
 
   virtual LayoutDeviceIntSize GetBufferSize() = 0;
 

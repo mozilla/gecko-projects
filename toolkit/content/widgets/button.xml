@@ -25,8 +25,8 @@
 
       <property name="open" onget="return this.hasAttribute('open');">
         <setter><![CDATA[
-          if (this.boxObject instanceof MenuBoxObject) {
-            this.boxObject.openMenu(val);
+          if (this.hasMenu()) {
+            this.openMenu(val);
           } else if (val) {
             // Fall back to just setting the attribute
             this.setAttribute("open", "true");
@@ -128,7 +128,7 @@
 
       <handler event="keypress">
       <![CDATA[
-        if (this.boxObject instanceof MenuBoxObject) {
+        if (this.hasMenu()) {
           if (this.open)
             return;
         } else {
@@ -192,10 +192,6 @@
 
   <binding id="button" display="xul:button"
            extends="chrome://global/content/bindings/button.xml#button-base">
-    <resources>
-      <stylesheet src="chrome://global/skin/button.css"/>
-    </resources>
-
     <content>
       <children includes="observes|template|menupopup|panel|tooltip"/>
       <xul:hbox class="box-inherit button-box" xbl:inherits="align,dir,pack,orient"

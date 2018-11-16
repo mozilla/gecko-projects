@@ -116,6 +116,10 @@ function scriptFrameForIndex(index) {
   return frame;
 }
 
+function isNonNullObject(obj) {
+  return obj && (typeof obj == "object" || typeof obj == "function");
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Persistent Script State
 ///////////////////////////////////////////////////////////////////////////////
@@ -149,9 +153,9 @@ function addScriptSource(source) {
 }
 
 function considerScript(script) {
-  return script.url
-      && !script.url.startsWith("resource:")
-      && !script.url.startsWith("chrome:");
+  // The set of scripts which is exposed to the debugger server is the same as
+  // the scripts for which the progress counter is updated.
+  return RecordReplayControl.shouldUpdateProgressCounter(script.url);
 }
 
 dbg.onNewScript = function(script) {
@@ -178,6 +182,26 @@ dbg.onNewScript = function(script) {
   // created.
   installPendingHandlers();
 };
+
+const gConsoleObjectProperties = new Map();
+
+function shouldSaveConsoleProperty({ desc }) {
+  // When logging an object to the console, only properties captured here will
+  // be shown. We limit this to non-object data properties, as more complex
+  // properties have two problems: A) to inspect them we will need to switch to
+  // a replaying child process, which is very slow when there are many console
+  // messages, and B) trying to access objects transitively referred to by
+  // logged console objects will fail when unpaused, and depends on the current
+  // state of the process otherwise.
+  return "value" in desc && !isNonNullObject(desc.value);
+}
+
+function saveConsoleObjectProperties(obj) {
+  if (obj instanceof Debugger.Object) {
+    const properties = getObjectProperties(obj).filter(shouldSaveConsoleProperty);
+    gConsoleObjectProperties.set(obj, properties);
+  }
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Console Message State
@@ -250,6 +274,7 @@ Services.obs.addObserver({
     // Message arguments are preserved as debuggee values.
     if (apiMessage.arguments) {
       contents.arguments = apiMessage.arguments.map(makeDebuggeeValue);
+      contents.arguments.forEach(saveConsoleObjectProperties);
     }
 
     newConsoleMessage("ConsoleAPI", null, contents);
@@ -388,7 +413,7 @@ function EnsurePositionHandler(position) {
           offset: position.offset,
           frameIndex: countScriptFrames() - 1,
         });
-      }
+      },
     });
     break;
   case "OnPop":
@@ -465,7 +490,7 @@ function convertCompletionValue(value) {
 }
 
 function makeDebuggeeValue(value) {
-  if (value && typeof value == "object") {
+  if (isNonNullObject(value)) {
     assert(!(value instanceof Debugger.Object));
     const global = Cu.getGlobalForObject(value);
     const dbgGlobal = dbg.makeGlobalObjectReference(global);
@@ -497,8 +522,42 @@ function getScriptData(id) {
   };
 }
 
+function getSourceData(id) {
+  const source = gScriptSources.getObject(id);
+  const introductionScript = gScripts.getId(source.introductionScript);
+  return {
+    id: id,
+    text: source.text,
+    url: source.url,
+    displayURL: source.displayURL,
+    elementAttributeName: source.elementAttributeName,
+    introductionScript,
+    introductionOffset: introductionScript ? source.introductionOffset : undefined,
+    introductionType: source.introductionType,
+    sourceMapURL: source.sourceMapURL,
+  };
+}
+
 function forwardToScript(name) {
   return request => gScripts.getObject(request.id)[name](request.value);
+}
+
+function getObjectProperties(object) {
+  const names = object.getOwnPropertyNames();
+
+  return names.map(name => {
+    const desc = object.getOwnPropertyDescriptor(name);
+    if ("value" in desc) {
+      desc.value = convertValue(desc.value);
+    }
+    if ("get" in desc) {
+      desc.get = getObjectId(desc.get);
+    }
+    if ("set" in desc) {
+      desc.set = getObjectId(desc.set);
+    }
+    return { name, desc };
+  });
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -507,10 +566,30 @@ function forwardToScript(name) {
 
 const gRequestHandlers = {
 
+  repaint() {
+    if (!RecordReplayControl.maybeDivergeFromRecording()) {
+      return {};
+    }
+    return RecordReplayControl.repaint();
+  },
+
   findScripts(request) {
+    const query = Object.assign({}, request.query);
+    if ("global" in query) {
+      query.global = gPausedObjects.getObject(query.global);
+    }
+    if ("source" in query) {
+      query.source = gScriptSources.getObject(query.source);
+      if (!query.source) {
+        return [];
+      }
+    }
+    const scripts = dbg.findScripts(query);
     const rv = [];
-    gScripts.forEach((id) => {
-      rv.push(getScriptData(id));
+    scripts.forEach(script => {
+      if (considerScript(script)) {
+        rv.push(getScriptData(gScripts.getId(script)));
+      }
     });
     return rv;
   },
@@ -527,20 +606,16 @@ const gRequestHandlers = {
     return RecordReplayControl.getContent(request.url);
   },
 
+  findSources(request) {
+    const sources = [];
+    gScriptSources.forEach((id) => {
+      sources.push(getSourceData(id));
+    });
+    return sources;
+  },
+
   getSource(request) {
-    const source = gScriptSources.getObject(request.id);
-    const introductionScript = gScripts.getId(source.introductionScript);
-    return {
-      id: request.id,
-      text: source.text,
-      url: source.url,
-      displayURL: source.displayURL,
-      elementAttributeName: source.elementAttributeName,
-      introductionScript,
-      introductionOffset: introductionScript ? source.introductionOffset : undefined,
-      introductionType: source.introductionType,
-      sourceMapURL: source.sourceMapURL,
-    };
+    return getSourceData(request.id);
   },
 
   getObject(request) {
@@ -588,27 +663,22 @@ const gRequestHandlers = {
         name: "Unknown properties",
         desc: {
           value: "Recording divergence in getObjectProperties",
-          enumerable: true
+          enumerable: true,
         },
       }];
     }
 
     const object = gPausedObjects.getObject(request.id);
-    const names = object.getOwnPropertyNames();
+    return getObjectProperties(object);
+  },
 
-    return names.map(name => {
-      const desc = object.getOwnPropertyDescriptor(name);
-      if ("value" in desc) {
-        desc.value = convertValue(desc.value);
-      }
-      if ("get" in desc) {
-        desc.get = getObjectId(desc.get);
-      }
-      if ("set" in desc) {
-        desc.set = getObjectId(desc.set);
-      }
-      return { name, desc };
-    });
+  getObjectPropertiesForConsole(request) {
+    const object = gPausedObjects.getObject(request.id);
+    const properties = gConsoleObjectProperties.get(object);
+    if (!properties) {
+      throw new Error("Console object properties not saved");
+    }
+    return properties;
   },
 
   getEnvironmentNames(request) {
@@ -685,6 +755,14 @@ const gRequestHandlers = {
   getNewConsoleMessage(request) {
     return convertConsoleMessage(gConsoleMessages[gConsoleMessages.length - 1]);
   },
+
+  currentExecutionPoint(request) {
+    return RecordReplayControl.currentExecutionPoint();
+  },
+
+  recordingEndpoint(request) {
+    return RecordReplayControl.recordingEndpoint();
+  },
 };
 
 // eslint-disable-next-line no-unused-vars
@@ -695,8 +773,14 @@ function ProcessRequest(request) {
     }
     return { exception: "No handler for " + request.type };
   } catch (e) {
-    RecordReplayControl.dump("ReplayDebugger Record/Replay Error: " + e + "\n");
-    return { exception: "" + e };
+    let msg;
+    try {
+      msg = "" + e;
+    } catch (ee) {
+      msg = "Unknown";
+    }
+    RecordReplayControl.dump("ReplayDebugger Record/Replay Error: " + msg + "\n");
+    return { exception: msg };
   }
 }
 

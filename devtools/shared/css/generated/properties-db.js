@@ -41,7 +41,6 @@ exports.CSS_PROPERTIES = {
       "ease-in-out",
       "ease-out",
       "forwards",
-      "frames",
       "infinite",
       "inherit",
       "initial",
@@ -167,7 +166,6 @@ exports.CSS_PROPERTIES = {
       "ease-in",
       "ease-in-out",
       "ease-out",
-      "frames",
       "inherit",
       "initial",
       "linear",
@@ -247,14 +245,15 @@ exports.CSS_PROPERTIES = {
       "menupopup",
       "menuradio",
       "menuseparator",
+      "meter",
       "meterbar",
       "meterchunk",
       "none",
       "number-input",
+      "progress-bar",
       "progressbar",
       "progressbar-vertical",
       "progresschunk",
-      "progresschunk-vertical",
       "radio",
       "radio-container",
       "radio-label",
@@ -1230,7 +1229,6 @@ exports.CSS_PROPERTIES = {
       "ease-in",
       "ease-in-out",
       "ease-out",
-      "frames",
       "inherit",
       "initial",
       "linear",
@@ -1293,7 +1291,6 @@ exports.CSS_PROPERTIES = {
       "ease-in",
       "ease-in-out",
       "ease-out",
-      "frames",
       "inherit",
       "initial",
       "linear",
@@ -1359,19 +1356,14 @@ exports.CSS_PROPERTIES = {
     ],
     "supports": [],
     "values": [
-      "-moz-all",
       "-moz-none",
       "-moz-text",
       "all",
       "auto",
-      "element",
-      "elements",
       "inherit",
       "initial",
       "none",
       "text",
-      "toggle",
-      "tri-state",
       "unset"
     ]
   },
@@ -1496,7 +1488,6 @@ exports.CSS_PROPERTIES = {
       "ease-in-out",
       "ease-out",
       "forwards",
-      "frames",
       "infinite",
       "inherit",
       "initial",
@@ -1622,7 +1613,6 @@ exports.CSS_PROPERTIES = {
       "ease-in",
       "ease-in-out",
       "ease-out",
-      "frames",
       "inherit",
       "initial",
       "linear",
@@ -1702,14 +1692,15 @@ exports.CSS_PROPERTIES = {
       "menupopup",
       "menuradio",
       "menuseparator",
+      "meter",
       "meterbar",
       "meterchunk",
       "none",
       "number-input",
+      "progress-bar",
       "progressbar",
       "progressbar-vertical",
       "progresschunk",
-      "progresschunk-vertical",
       "radio",
       "radio-container",
       "radio-label",
@@ -2678,7 +2669,6 @@ exports.CSS_PROPERTIES = {
       "ease-in",
       "ease-in-out",
       "ease-out",
-      "frames",
       "inherit",
       "initial",
       "linear",
@@ -2741,7 +2731,6 @@ exports.CSS_PROPERTIES = {
       "ease-in",
       "ease-in-out",
       "ease-out",
-      "frames",
       "inherit",
       "initial",
       "linear",
@@ -2758,19 +2747,14 @@ exports.CSS_PROPERTIES = {
     ],
     "supports": [],
     "values": [
-      "-moz-all",
       "-moz-none",
       "-moz-text",
       "all",
       "auto",
-      "element",
-      "elements",
       "inherit",
       "initial",
       "none",
       "text",
-      "toggle",
-      "tri-state",
       "unset"
     ]
   },
@@ -3203,7 +3187,6 @@ exports.CSS_PROPERTIES = {
       "ease-in-out",
       "ease-out",
       "forwards",
-      "frames",
       "infinite",
       "inherit",
       "initial",
@@ -3329,7 +3312,6 @@ exports.CSS_PROPERTIES = {
       "ease-in",
       "ease-in-out",
       "ease-out",
-      "frames",
       "inherit",
       "initial",
       "linear",
@@ -6356,6 +6338,7 @@ exports.CSS_PROPERTIES = {
     "values": [
       "-moz-crisp-edges",
       "auto",
+      "crisp-edges",
       "inherit",
       "initial",
       "optimizequality",
@@ -7565,8 +7548,8 @@ exports.CSS_PROPERTIES = {
   "overflow": {
     "isInherited": false,
     "subproperties": [
-      "overflow-y",
-      "overflow-x"
+      "overflow-x",
+      "overflow-y"
     ],
     "supports": [],
     "values": [
@@ -7587,6 +7570,7 @@ exports.CSS_PROPERTIES = {
     ],
     "supports": [],
     "values": [
+      "anywhere",
       "break-word",
       "inherit",
       "initial",
@@ -8214,6 +8198,43 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "scrollbar-color": {
+    "isInherited": true,
+    "subproperties": [
+      "scrollbar-color"
+    ],
+    "supports": [
+      2
+    ],
+    "values": [
+      "COLOR",
+      "auto",
+      "currentColor",
+      "hsl",
+      "hsla",
+      "inherit",
+      "initial",
+      "rgb",
+      "rgba",
+      "transparent",
+      "unset"
+    ]
+  },
+  "scrollbar-width": {
+    "isInherited": false,
+    "subproperties": [
+      "scrollbar-width"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "none",
+      "thin",
+      "unset"
+    ]
+  },
   "shape-image-threshold": {
     "isInherited": false,
     "subproperties": [
@@ -8814,6 +8835,7 @@ exports.CSS_PROPERTIES = {
     "supports": [],
     "values": [
       "capitalize",
+      "full-size-kana",
       "full-width",
       "inherit",
       "initial",
@@ -8953,7 +8975,6 @@ exports.CSS_PROPERTIES = {
       "ease-in",
       "ease-in-out",
       "ease-out",
-      "frames",
       "inherit",
       "initial",
       "linear",
@@ -9016,7 +9037,6 @@ exports.CSS_PROPERTIES = {
       "ease-in",
       "ease-in-out",
       "ease-out",
-      "frames",
       "inherit",
       "initial",
       "linear",
@@ -9177,6 +9197,7 @@ exports.CSS_PROPERTIES = {
     ],
     "supports": [],
     "values": [
+      "anywhere",
       "break-word",
       "inherit",
       "initial",
@@ -9336,10 +9357,6 @@ exports.PREFERENCES = [
     "layout.css.scroll-snap.enabled"
   ],
   [
-    "shape-image-threshold",
-    "layout.css.shape-outside.enabled"
-  ],
-  [
     "background-blend-mode",
     "layout.css.background-blend-mode.enabled"
   ],
@@ -9365,11 +9382,7 @@ exports.PREFERENCES = [
   ],
   [
     "scrollbar-color",
-    "layout.css.scrollbar-colors.enabled"
-  ],
-  [
-    "shape-outside",
-    "layout.css.shape-outside.enabled"
+    "layout.css.scrollbar-color.enabled"
   ],
   [
     "translate",
@@ -9386,10 +9399,6 @@ exports.PREFERENCES = [
   [
     "scroll-snap-destination",
     "layout.css.scroll-snap.enabled"
-  ],
-  [
-    "shape-margin",
-    "layout.css.shape-outside.enabled"
   ],
   [
     "-webkit-text-stroke-width",

@@ -57,6 +57,8 @@ public:
 
   static bool SupportsAsyncUpdate(nsIFrame* aFrame);
 
+  static bool ProcessInvalidateForImage(nsIFrame* aFrame, DisplayItemType aType);
+
   NS_INLINE_DECL_REFCOUNTING(WebRenderUserData)
 
   WebRenderUserData(WebRenderLayerManager* aWRManager, nsDisplayItem* aItem);
@@ -149,6 +151,8 @@ public:
     return mPipelineId.isSome();
   }
 
+  bool IsAsyncAnimatedImage() const;
+
 protected:
   void ClearImageKey();
 
@@ -228,7 +232,7 @@ struct WebRenderUserDataProperty {
 };
 
 template<class T> already_AddRefed<T>
-GetWebRenderUserData(nsIFrame* aFrame, uint32_t aPerFrameKey)
+GetWebRenderUserData(const nsIFrame* aFrame, uint32_t aPerFrameKey)
 {
   MOZ_ASSERT(aFrame);
   WebRenderUserDataTable* userDataTable =

@@ -18,12 +18,8 @@ menulist > menupopup {
   -moz-binding: url("chrome://global/content/bindings/popup.xml#popup-scrollbars");
 }
 
-progressmeter[mode="undetermined"] {
-  -moz-binding: url("chrome://global/content/bindings/progressmeter.xml#progressmeter-undetermined");
-}
-
 @media (-moz-menubar-drag) {
-  toolbar[type="menubar"]:not([autohide="true"]) {
+  toolbar[type="menubar"] {
     -moz-binding: url("chrome://global/content/bindings/toolbar.xml#toolbar-drag");
   }
 }
@@ -261,7 +257,7 @@ label[disabled="true"] {
   outline: 1px dotted;
 }
 
-notification > button {
+notification > hbox > button {
   margin-top: 0;
   margin-bottom: 0;
 }

@@ -354,7 +354,9 @@ ImageEncoder::GetInputStream(int32_t aWidth,
                            nsDependentString(aEncoderOptions));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return CallQueryInterface(aEncoder, aStream);
+  nsCOMPtr<imgIEncoder> encoder(aEncoder);
+  encoder.forget(aStream);
+  return NS_OK;
 }
 
 /* static */
@@ -455,7 +457,7 @@ ImageEncoder::ExtractDataInternal(const nsAString& aType,
     }
 
     if (NS_SUCCEEDED(rv)) {
-      imgStream = do_QueryInterface(aEncoder);
+      imgStream = aEncoder;
     }
   } else {
     if (BufferSizeFromDimensions(aSize.width, aSize.height, 4) == 0) {
@@ -491,7 +493,7 @@ ImageEncoder::ExtractDataInternal(const nsAString& aType,
                                 aOptions);
     emptyCanvas->Unmap();
     if (NS_SUCCEEDED(rv)) {
-      imgStream = do_QueryInterface(aEncoder);
+      imgStream = aEncoder;
     }
   }
   NS_ENSURE_SUCCESS(rv, rv);

@@ -62,10 +62,6 @@ var snapshotFormatters = {
       case 8:
         statusText = strings.GetStringFromName("multiProcessStatus." + data.autoStartStatus);
         break;
-
-      case 10:
-        statusText = (Services.appinfo.OS == "Darwin" ? "OS X 10.6 - 10.8" : "Windows XP");
-        break;
     }
 
     $("multiprocess-box").textContent = strings.formatStringFromName("multiProcessWindows",
@@ -81,6 +77,7 @@ var snapshotFormatters = {
 
     if (Services.policies) {
       let policiesText = "";
+      let aboutPolicies = "about:policies";
       switch (data.policiesStatus) {
         case Services.policies.INACTIVE:
           policiesText = strings.GetStringFromName("policies.inactive");
@@ -88,15 +85,17 @@ var snapshotFormatters = {
 
         case Services.policies.ACTIVE:
           policiesText = strings.GetStringFromName("policies.active");
+          aboutPolicies += "#active";
           break;
 
         default:
           policiesText = strings.GetStringFromName("policies.error");
+          aboutPolicies += "#errors";
           break;
       }
 
       if (data.policiesStatus != Services.policies.INACTIVE) {
-        let activePolicies = $.new("a", policiesText, null, {href: "about:policies"});
+        let activePolicies = $.new("a", policiesText, null, {href: aboutPolicies});
         $("policies-status").appendChild(activePolicies);
       } else {
         $("policies-status").textContent = policiesText;
@@ -1186,22 +1185,32 @@ function safeModeRestart() {
  * Set up event listeners for buttons.
  */
 function setupEventListeners() {
-  if (AppConstants.platform !== "android") {
-    $("show-update-history-button").addEventListener("click", function(event) {
+  let button = $("show-update-history-button");
+  if (button) {
+    button.addEventListener("click", function(event) {
       var prompter = Cc["@mozilla.org/updates/update-prompt;1"].createInstance(Ci.nsIUpdatePrompt);
       prompter.showUpdateHistory(window);
     });
-    $("reset-box-button").addEventListener("click", function(event) {
+  }
+  button = $("reset-box-button");
+  if (button) {
+    button.addEventListener("click", function(event) {
       ResetProfile.openConfirmationDialog(window);
     });
-    $("restart-in-safe-mode-button").addEventListener("click", function(event) {
+  }
+  button = $("restart-in-safe-mode-button");
+  if (button) {
+    button.addEventListener("click", function(event) {
       if (Services.obs.enumerateObservers("restart-in-safe-mode").hasMoreElements()) {
         Services.obs.notifyObservers(null, "restart-in-safe-mode");
       } else {
         safeModeRestart();
       }
     });
-    $("verify-place-integrity-button").addEventListener("click", function(event) {
+  }
+  button = $("verify-place-integrity-button");
+  if (button) {
+    button.addEventListener("click", function(event) {
       PlacesDBUtils.checkAndFixDatabase().then((tasksStatusMap) => {
         let logs = [];
         for (let [key, value] of tasksStatusMap) {

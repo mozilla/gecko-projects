@@ -77,7 +77,7 @@ LIRGeneratorShared::ReorderCommutative(MDefinition** lhsp, MDefinition** rhsp, M
 }
 
 void
-LIRGeneratorShared::defineTypedPhi(MPhi* phi, size_t lirIndex)
+LIRGeneratorShared::definePhiOneRegister(MPhi* phi, size_t lirIndex)
 {
     LPhi* lir = current->getPhi(lirIndex);
 
@@ -87,6 +87,26 @@ LIRGeneratorShared::defineTypedPhi(MPhi* phi, size_t lirIndex)
     lir->setDef(0, LDefinition(vreg, LDefinition::TypeFrom(phi->type())));
     annotate(lir);
 }
+
+#ifdef JS_NUNBOX32
+void
+LIRGeneratorShared::definePhiTwoRegisters(MPhi* phi, size_t lirIndex)
+{
+    LPhi* type = current->getPhi(lirIndex + VREG_TYPE_OFFSET);
+    LPhi* payload = current->getPhi(lirIndex + VREG_DATA_OFFSET);
+
+    uint32_t typeVreg = getVirtualRegister();
+    phi->setVirtualRegister(typeVreg);
+
+    uint32_t payloadVreg = getVirtualRegister();
+    MOZ_ASSERT(typeVreg + 1 == payloadVreg);
+
+    type->setDef(0, LDefinition(typeVreg, LDefinition::TYPE));
+    payload->setDef(0, LDefinition(payloadVreg, LDefinition::PAYLOAD));
+    annotate(type);
+    annotate(payload);
+}
+#endif
 
 void
 LIRGeneratorShared::lowerTypedPhiInput(MPhi* phi, uint32_t inputPosition, LBlock* block, size_t lirIndex)
@@ -252,11 +272,12 @@ LIRGeneratorShared::assignSnapshot(LInstruction* ins, BailoutKind kind)
     MOZ_ASSERT(ins->id() == 0);
 
     LSnapshot* snapshot = buildSnapshot(ins, lastResumePoint_, kind);
-    if (snapshot) {
-        ins->assignSnapshot(snapshot);
-    } else {
+    if (!snapshot) {
         abort(AbortReason::Alloc, "buildSnapshot failed");
+        return;
     }
+
+    ins->assignSnapshot(snapshot);
 }
 
 void
@@ -278,6 +299,7 @@ LIRGeneratorShared::assignSafepoint(LInstruction* ins, MInstruction* mir, Bailou
 
     if (!lirGraph_.noteNeedsSafepoint(ins)) {
         abort(AbortReason::Alloc, "noteNeedsSafepoint failed");
+        return;
     }
 }
 

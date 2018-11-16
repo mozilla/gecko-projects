@@ -6,8 +6,11 @@
 
 #include "vm/BigIntType.h"
 
+#include "mozilla/Casting.h"
+#include "mozilla/CheckedInt.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/HashFunctions.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Range.h"
 #include "mozilla/RangedPtr.h"
@@ -25,9 +28,16 @@
 #include "vm/JSContext.h"
 #include "vm/SelfHosting.h"
 
+#include "vm/JSContext-inl.h"
+
 using namespace js;
 
+using mozilla::Abs;
+using mozilla::BitwiseCast;
+using mozilla::CheckedInt;
 using mozilla::Maybe;
+using mozilla::Some;
+using mozilla::Nothing;
 using mozilla::Range;
 using mozilla::RangedPtr;
 
@@ -129,6 +139,35 @@ BigInt::createFromBytes(JSContext* cx, int sign, void* bytes, size_t nbytes)
         mpz_neg(x->num_, x->num_);
     }
     return x;
+}
+
+
+BigInt*
+BigInt::createFromInt64(JSContext* cx, int64_t n)
+{
+    BigInt* res = createFromUint64(cx, Abs(n));
+    if (!res) {
+        return nullptr;
+    }
+
+    if (n < 0) {
+        mpz_neg(res->num_, res->num_);
+    }
+
+    return res;
+}
+
+BigInt*
+BigInt::createFromUint64(JSContext* cx, uint64_t n)
+{
+    BigInt* res = create(cx);
+    if (!res) {
+        return nullptr;
+    }
+
+    // cf. mpz_import parameters in createFromBytes, above.
+    mpz_import(res->num_, 1, 1, sizeof(uint64_t), 0, 0, &n);
+    return res;
 }
 
 // BigInt proposal section 5.1.1
@@ -384,6 +423,104 @@ BigInt::bitNot(JSContext* cx, HandleBigInt x)
     mpz_neg(z->num_, x->num_);
     mpz_sub_ui(z->num_, z->num_, 1);
     return z;
+}
+
+int64_t
+BigInt::toInt64(BigInt* x)
+{
+    return BitwiseCast<int64_t>(toUint64(x));
+}
+
+uint64_t
+BigInt::toUint64(BigInt* x)
+{
+    static_assert(GMP_LIMB_BITS == 32 || GMP_LIMB_BITS == 64,
+                  "limbs must be either 32 or 64 bits");
+
+    uint64_t digit;
+
+    if (GMP_LIMB_BITS == 32) {
+        uint64_t lo = mpz_getlimbn(x->num_, 0);
+        uint64_t hi = mpz_getlimbn(x->num_, 1);
+        digit = hi << 32 | lo;
+    } else {
+        digit = mpz_getlimbn(x->num_, 0);
+    }
+
+    // Return the two's complement if x is negative.
+    if (mpz_sgn(x->num_) < 0) {
+        return ~(digit - 1);
+    }
+
+    return digit;
+}
+
+BigInt*
+BigInt::asUintN(JSContext* cx, HandleBigInt x, uint64_t bits)
+{
+    if (bits == 64) {
+        return createFromUint64(cx, toUint64(x));
+    }
+
+    if (bits == 0) {
+        return create(cx);
+    }
+
+    // Throw a RangeError if the bits argument is too large to represent using a
+    // GMP bit count.
+    CheckedInt<mp_bitcnt_t> bitCount = bits;
+    if (!bitCount.isValid()) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                  JSMSG_BIGINT_TOO_LARGE);
+        return nullptr;
+    }
+
+    BigInt* res = create(cx);
+    if (!res) {
+        return nullptr;
+    }
+
+    mpz_fdiv_r_2exp(res->num_, x->num_, bitCount.value());
+    return res;
+}
+
+BigInt*
+BigInt::asIntN(JSContext* cx, HandleBigInt x, uint64_t bits)
+{
+    if (bits == 64) {
+        return createFromInt64(cx, toInt64(x));
+    }
+
+    if (bits == 0) {
+        return create(cx);
+    }
+
+    // Throw a RangeError if the bits argument is too large to represent using a
+    // GMP bit count.
+    CheckedInt<mp_bitcnt_t> bitCount = bits;
+    if (!bitCount.isValid()) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                  JSMSG_BIGINT_TOO_LARGE);
+        return nullptr;
+    }
+
+    CheckedInt<mp_bitcnt_t> bitIndex = bitCount - 1;
+    MOZ_ASSERT(bitIndex.isValid());
+
+    BigInt* res = create(cx);
+    if (!res) {
+        return nullptr;
+    }
+
+    // Choose the rounding mode based on x's sign bit. mpz_tstbit will simulate
+    // sign extension if the requested index is larger than the bit length of x.
+    if (mpz_tstbit(x->num_, bitIndex.value())) {
+        mpz_cdiv_r_2exp(res->num_, x->num_, bitCount.value());
+    } else {
+        mpz_fdiv_r_2exp(res->num_, x->num_, bitCount.value());
+    }
+
+    return res;
 }
 
 static bool
@@ -730,6 +867,89 @@ BigInt::looselyEqual(JSContext* cx, HandleBigInt lhs, HandleValue rhs)
     return false;
 }
 
+// BigInt proposal section 1.1.12. BigInt::lessThan ( x, y )
+bool
+BigInt::lessThan(BigInt* x, BigInt* y)
+{
+    return mpz_cmp(x->num_, y->num_) < 0;
+}
+
+Maybe<bool>
+BigInt::lessThan(BigInt* lhs, double rhs)
+{
+    if (mozilla::IsNaN(rhs)) {
+        return Maybe<bool>(Nothing());
+    }
+    return Some(mpz_cmp_d(lhs->num_, rhs) < 0);
+}
+
+Maybe<bool>
+BigInt::lessThan(double lhs, BigInt* rhs)
+{
+    if (mozilla::IsNaN(lhs)) {
+        return Maybe<bool>(Nothing());
+    }
+    return Some(-mpz_cmp_d(rhs->num_, lhs) < 0);
+}
+
+bool
+BigInt::lessThan(JSContext* cx, HandleBigInt lhs, HandleString rhs, Maybe<bool>& res)
+{
+    RootedBigInt rhsBigInt(cx);
+    JS_TRY_VAR_OR_RETURN_FALSE(cx, rhsBigInt, StringToBigInt(cx, rhs, 0));
+    if (!rhsBigInt) {
+        res = Nothing();
+        return true;
+    }
+    res = Some(lessThan(lhs, rhsBigInt));
+    return true;
+}
+
+bool
+BigInt::lessThan(JSContext* cx, HandleString lhs, HandleBigInt rhs, Maybe<bool>& res)
+{
+    RootedBigInt lhsBigInt(cx);
+    JS_TRY_VAR_OR_RETURN_FALSE(cx, lhsBigInt, StringToBigInt(cx, lhs, 0));
+    if (!lhsBigInt) {
+        res = Nothing();
+        return true;
+    }
+    res = Some(lessThan(lhsBigInt, rhs));
+    return true;
+}
+
+bool
+BigInt::lessThan(JSContext* cx, HandleValue lhs, HandleValue rhs, Maybe<bool>& res)
+{
+    if (lhs.isBigInt()) {
+        if (rhs.isString()) {
+            RootedBigInt lhsBigInt(cx, lhs.toBigInt());
+            RootedString rhsString(cx, rhs.toString());
+            return lessThan(cx, lhsBigInt, rhsString, res);
+        }
+
+        if (rhs.isNumber()) {
+            res = lessThan(lhs.toBigInt(), rhs.toNumber());
+            return true;
+        }
+
+        MOZ_ASSERT(rhs.isBigInt());
+        res = Some(lessThan(lhs.toBigInt(), rhs.toBigInt()));
+        return true;
+    }
+
+    MOZ_ASSERT(rhs.isBigInt());
+    if (lhs.isString()) {
+        RootedString lhsString(cx, lhs.toString());
+        RootedBigInt rhsBigInt(cx, rhs.toBigInt());
+        return lessThan(cx, lhsString, rhsBigInt, res);
+    }
+
+    MOZ_ASSERT(lhs.isNumber());
+    res = lessThan(lhs.toNumber(), rhs.toBigInt());
+    return true;
+}
+
 JSLinearString*
 BigInt::toString(JSContext* cx, BigInt* x, uint8_t radix)
 {
@@ -846,6 +1066,22 @@ js::StringToBigInt(JSContext* cx, HandleString str, uint8_t radix)
     return nullptr;
 }
 
+BigInt*
+js::StringToBigInt(JSContext* cx, const Range<const char16_t>& chars)
+{
+    RootedBigInt res(cx, BigInt::create(cx));
+    if (!res) {
+        return nullptr;
+    }
+
+    uint8_t radix = 0;
+    if (StringToBigIntImpl(chars, radix, res)) {
+        return res.get();
+    }
+
+    return nullptr;
+}
+
 size_t
 BigInt::byteLength(BigInt* x)
 {
@@ -929,3 +1165,58 @@ JS::ubi::Concrete<BigInt>::size(mozilla::MallocSizeOf mallocSizeOf) const
     size += bi.sizeOfExcludingThis(mallocSizeOf);
     return size;
 }
+
+template<XDRMode mode>
+XDRResult
+js::XDRBigInt(XDRState<mode>* xdr, MutableHandleBigInt bi)
+{
+    JSContext* cx = xdr->cx();
+
+    uint8_t sign;
+    uint32_t length;
+
+    if (mode == XDR_ENCODE) {
+        cx->check(bi);
+        sign = static_cast<uint8_t>(bi->sign());
+        uint64_t sz = BigInt::byteLength(bi);
+        // As the maximum source code size is currently UINT32_MAX code units
+        // (see BytecodeCompiler::checkLength), any bigint literal's length in
+        // word-sized digits will be less than UINT32_MAX as well.  That could
+        // change or FoldConstants could start creating these though, so leave
+        // this as a release-enabled assert.
+        MOZ_RELEASE_ASSERT(sz <= UINT32_MAX);
+        length = static_cast<uint32_t>(sz);
+    }
+
+    MOZ_TRY(xdr->codeUint8(&sign));
+    MOZ_TRY(xdr->codeUint32(&length));
+    
+    UniquePtr<uint8_t> buf(cx->pod_malloc<uint8_t>(length));
+    if (!buf) {
+        ReportOutOfMemory(cx);
+        return xdr->fail(JS::TranscodeResult_Throw);
+    }
+
+    if (mode == XDR_ENCODE) {
+        BigInt::writeBytes(bi, RangedPtr<uint8_t>(buf.get(), length));
+    }
+
+    MOZ_TRY(xdr->codeBytes(buf.get(), length));
+
+    if (mode == XDR_DECODE) {
+        BigInt* res = BigInt::createFromBytes(cx, static_cast<int8_t>(sign),
+                                              buf.get(), length);
+        if (!res) {
+            return xdr->fail(JS::TranscodeResult_Throw);
+        }
+        bi.set(res);
+    }
+
+    return Ok();
+}
+
+template XDRResult
+js::XDRBigInt(XDRState<XDR_ENCODE>* xdr, MutableHandleBigInt bi);
+
+template XDRResult
+js::XDRBigInt(XDRState<XDR_DECODE>* xdr, MutableHandleBigInt bi);

@@ -19,10 +19,10 @@ class DateTimePickerChild extends ActorChild {
    * On init, just listen for the event to open the picker, once the picker is
    * opened, we'll listen for update and close events.
    */
-  constructor(global) {
-    super(global);
+  constructor(dispatcher) {
+    super(dispatcher);
+
     this._inputElement = null;
-    this._global = global;
   }
 
   /**
@@ -30,7 +30,22 @@ class DateTimePickerChild extends ActorChild {
    */
   close() {
     this.removeListeners();
-    this._inputElement.setDateTimePickerState(false);
+    let dateTimeBoxElement = this._inputElement.dateTimeBoxElement;
+    if (!dateTimeBoxElement) {
+      this._inputElement = null;
+      return;
+    }
+
+    if (dateTimeBoxElement instanceof Ci.nsIDateTimeInputArea) {
+      dateTimeBoxElement.wrappedJSObject.setPickerState(false);
+    } else if (this._inputElement.openOrClosedShadowRoot) {
+      // dateTimeBoxElement is within UA Widget Shadow DOM.
+      // An event dispatch to it can't be accessed by document.
+      let win = this._inputElement.ownerGlobal;
+      dateTimeBoxElement.dispatchEvent(
+        new win.CustomEvent("MozSetDateTimePickerState", { detail: false }));
+    }
+
     this._inputElement = null;
   }
 
@@ -39,24 +54,24 @@ class DateTimePickerChild extends ActorChild {
    * events.
    */
   addListeners() {
-    this._global.addEventListener("MozUpdateDateTimePicker", this);
-    this._global.addEventListener("MozCloseDateTimePicker", this);
-    this._global.addEventListener("pagehide", this);
+    this.mm.addEventListener("MozUpdateDateTimePicker", this);
+    this.mm.addEventListener("MozCloseDateTimePicker", this);
+    this.mm.addEventListener("pagehide", this);
 
-    this._global.addMessageListener("FormDateTime:PickerValueChanged", this);
-    this._global.addMessageListener("FormDateTime:PickerClosed", this);
+    this.mm.addMessageListener("FormDateTime:PickerValueChanged", this);
+    this.mm.addMessageListener("FormDateTime:PickerClosed", this);
   }
 
   /**
    * Stop listeneing for events when picker is closed.
    */
   removeListeners() {
-    this._global.removeEventListener("MozUpdateDateTimePicker", this);
-    this._global.removeEventListener("MozCloseDateTimePicker", this);
-    this._global.removeEventListener("pagehide", this);
+    this.mm.removeEventListener("MozUpdateDateTimePicker", this);
+    this.mm.removeEventListener("MozCloseDateTimePicker", this);
+    this.mm.removeEventListener("pagehide", this);
 
-    this._global.removeMessageListener("FormDateTime:PickerValueChanged", this);
-    this._global.removeMessageListener("FormDateTime:PickerClosed", this);
+    this.mm.removeMessageListener("FormDateTime:PickerValueChanged", this);
+    this.mm.removeMessageListener("FormDateTime:PickerClosed", this);
   }
 
   /**
@@ -89,7 +104,22 @@ class DateTimePickerChild extends ActorChild {
         break;
       }
       case "FormDateTime:PickerValueChanged": {
-        this._inputElement.updateDateTimeInputBox(aMessage.data);
+        let dateTimeBoxElement = this._inputElement.dateTimeBoxElement;
+        if (!dateTimeBoxElement) {
+          return;
+        }
+
+        let win = this._inputElement.ownerGlobal;
+
+        if (dateTimeBoxElement instanceof Ci.nsIDateTimeInputArea) {
+          dateTimeBoxElement.wrappedJSObject.setValueFromPicker(Cu.cloneInto(aMessage.data, win));
+        } else if (this._inputElement.openOrClosedShadowRoot) {
+          // dateTimeBoxElement is within UA Widget Shadow DOM.
+          // An event dispatch to it can't be accessed by document.
+          dateTimeBoxElement.dispatchEvent(
+            new win.CustomEvent("MozPickerValueChanged",
+              { detail: Cu.cloneInto(aMessage.data, win) }));
+        }
         break;
       }
       default:
@@ -118,11 +148,27 @@ class DateTimePickerChild extends ActorChild {
         }
 
         this._inputElement = aEvent.originalTarget;
-        this._inputElement.setDateTimePickerState(true);
+
+        let dateTimeBoxElement = this._inputElement.dateTimeBoxElement;
+        if (!dateTimeBoxElement) {
+          throw new Error("How do we get this event without a UA Widget or XBL binding?");
+        }
+
+        if (dateTimeBoxElement instanceof Ci.nsIDateTimeInputArea) {
+          dateTimeBoxElement.wrappedJSObject.setPickerState(true);
+        } else if (this._inputElement.openOrClosedShadowRoot) {
+          // dateTimeBoxElement is within UA Widget Shadow DOM.
+          // An event dispatch to it can't be accessed by document, because
+          // the event is not composed.
+          let win = this._inputElement.ownerGlobal;
+          dateTimeBoxElement.dispatchEvent(
+            new win.CustomEvent("MozSetDateTimePickerState", { detail: true }));
+        }
+
         this.addListeners();
 
         let value = this._inputElement.getDateTimeInputBoxValue();
-        this._global.sendAsyncMessage("FormDateTime:OpenPicker", {
+        this.mm.sendAsyncMessage("FormDateTime:OpenPicker", {
           rect: this.getBoundingContentRect(this._inputElement),
           dir: this.getComputedDirection(this._inputElement),
           type: this._inputElement.type,
@@ -142,18 +188,18 @@ class DateTimePickerChild extends ActorChild {
       case "MozUpdateDateTimePicker": {
         let value = this._inputElement.getDateTimeInputBoxValue();
         value.type = this._inputElement.type;
-        this._global.sendAsyncMessage("FormDateTime:UpdatePicker", { value });
+        this.mm.sendAsyncMessage("FormDateTime:UpdatePicker", { value });
         break;
       }
       case "MozCloseDateTimePicker": {
-        this._global.sendAsyncMessage("FormDateTime:ClosePicker");
+        this.mm.sendAsyncMessage("FormDateTime:ClosePicker");
         this.close();
         break;
       }
       case "pagehide": {
         if (this._inputElement &&
             this._inputElement.ownerDocument == aEvent.target) {
-          this._global.sendAsyncMessage("FormDateTime:ClosePicker");
+          this.mm.sendAsyncMessage("FormDateTime:ClosePicker");
           this.close();
         }
         break;

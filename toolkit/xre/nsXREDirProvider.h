@@ -9,12 +9,20 @@
 #include "nsIDirectoryService.h"
 #include "nsIProfileMigrator.h"
 #include "nsIFile.h"
+#include "nsIXREDirProvider.h"
 
 #include "nsCOMPtr.h"
 #include "nsCOMArray.h"
 #include "mozilla/Attributes.h"
 
+// {5573967d-f6cf-4c63-8e0e-9ac06e04d62b}
+#define NS_XREDIRPROVIDER_CID \
+  { 0x5573967d, 0xf6cf, 0x4c63, \
+    { 0x8e, 0x0e, 0x9a, 0xc0, 0x6e, 0x04, 0xd6, 0x2b } }
+#define NS_XREDIRPROVIDER_CONTRACTID "@mozilla.org/xre/directory-provider;1"
+
 class nsXREDirProvider final : public nsIDirectoryServiceProvider2,
+                               public nsIXREDirProvider,
                                public nsIProfileStartup
 {
 public:
@@ -25,6 +33,7 @@ public:
 
   NS_DECL_NSIDIRECTORYSERVICEPROVIDER
   NS_DECL_NSIDIRECTORYSERVICEPROVIDER2
+  NS_DECL_NSIXREDIRPROVIDER
   NS_DECL_NSIPROFILESTARTUP
 
   nsXREDirProvider();
@@ -35,7 +44,7 @@ public:
                       nsIDirectoryServiceProvider* aAppProvider = nullptr);
   ~nsXREDirProvider();
 
-  static nsXREDirProvider* GetSingleton();
+  static already_AddRefed<nsXREDirProvider> GetSingleton();
 
   nsresult GetUserProfilesRootDir(nsIFile** aResult);
   nsresult GetUserProfilesLocalDir(nsIFile** aResult);
@@ -70,17 +79,18 @@ public:
   }
 
   /**
-   * Get a hash for the install directory.
-   */
-  nsresult GetInstallHash(nsAString & aPathHash,
-                          bool aUseCompatibilityMode = false);
-
-  /**
    * Get the directory under which update directory is created.
    * This method may be called before XPCOM is started. aResult
    * is a clone, it may be modified.
+   *
+   * If aGetOldLocation is true, this function will return the location of
+   * the update directory before it was moved from the user profile directory
+   * to a per-installation directory. This functionality is only meant to be
+   * used for migration of the update directory to the new location. It is only
+   * valid to request the old update location on Windows, since that is the only
+   * platform on which the update directory was migrated.
    */
-  nsresult GetUpdateRootDir(nsIFile* *aResult);
+  nsresult GetUpdateRootDir(nsIFile** aResult, bool aGetOldLocation = false);
 
   /**
    * Get the profile startup directory as determined by this class or by
@@ -121,6 +131,9 @@ protected:
   // Load the temp directory for sandboxed content processes
   nsresult LoadContentProcessTempDir();
 #endif
+#if defined(MOZ_SANDBOX)
+  nsresult LoadPluginProcessTempDir();
+#endif
 
   void Append(nsIFile* aDirectory);
 
@@ -138,6 +151,10 @@ protected:
 #if defined(MOZ_CONTENT_SANDBOX)
   nsCOMPtr<nsIFile>      mContentTempDir;
   nsCOMPtr<nsIFile>      mContentProcessSandboxTempDir;
+#endif
+#if defined(MOZ_SANDBOX)
+  nsCOMPtr<nsIFile>      mPluginTempDir;
+  nsCOMPtr<nsIFile>      mPluginProcessSandboxTempDir;
 #endif
   nsCOMArray<nsIFile>    mAppBundleDirectories;
 };

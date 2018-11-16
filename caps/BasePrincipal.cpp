@@ -166,8 +166,8 @@ BasePrincipal::CheckMayLoad(nsIURI* aURI, bool aReport, bool aAllowIfInheritsPri
     nsCOMPtr<nsIURI> prinURI;
     rv = GetURI(getter_AddRefs(prinURI));
     if (NS_SUCCEEDED(rv) && prinURI) {
-      nsScriptSecurityManager::ReportError(nullptr, "CheckSameOriginError",
-                                           prinURI, aURI);
+      nsScriptSecurityManager::ReportError("CheckSameOriginError", prinURI, aURI,
+                                           mOriginAttributes.mPrivateBrowsingId > 0);
     }
   }
 
@@ -497,7 +497,7 @@ BasePrincipal::ContentScriptAddonPolicy()
   }
 
   auto expanded = As<ExpandedPrincipal>();
-  for (auto& prin : expanded->WhiteList()) {
+  for (auto& prin : expanded->AllowList()) {
     if (auto policy = BasePrincipal::Cast(prin)->AddonPolicy()) {
       return policy;
     }

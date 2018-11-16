@@ -22,6 +22,7 @@ var contentPage2 = "http://example.com/tests/toolkit/components/url-classifier/t
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://testing-common/UrlClassifierTestUtils.jsm");
+ChromeUtils.import("resource://testing-common/BrowserTestUtils.jsm");
 ChromeUtils.import("resource://testing-common/TestUtils.jsm");
 
 function testOnWindow(contentPage) {
@@ -32,7 +33,7 @@ function testOnWindow(contentPage) {
                               subject => subject == win).then(() => {
         win.addEventListener("DOMContentLoaded", function onInnerLoad() {
           if (win.content.location.href != contentPage) {
-            win.gBrowser.loadURI(contentPage);
+            BrowserTestUtils.loadURI(win.gBrowser, contentPage);
             return;
           }
           win.removeEventListener("DOMContentLoaded", onInnerLoad, true);
@@ -45,7 +46,7 @@ function testOnWindow(contentPage) {
           }, false, true);
         }, true);
         SimpleTest.executeSoon(function() {
-          win.gBrowser.loadURI(contentPage);
+          BrowserTestUtils.loadURI(win.gBrowser, contentPage);
         });
       });
     }, {capture: true, once: true});
@@ -115,13 +116,13 @@ async function test() {
   SimpleTest.registerCleanupFunction(UrlClassifierTestUtils.cleanupTestTrackers);
   await UrlClassifierTestUtils.addTestTrackers();
 
-  // Load the test from a URL that's NOT on the whitelist with content blocking disabled
-  await SpecialPowers.setBoolPref("browser.contentblocking.enabled", false);
+  // Load the test from a URL that's NOT on the whitelist with tracking protection disabled
+  await SpecialPowers.setBoolPref("privacy.trackingprotection.enabled", false);
   await testOnWindow(contentPage2).then(function(aWindow) {
     checkLoads(aWindow, false, false);
     aWindow.close();
   });
-  await SpecialPowers.clearUserPref("browser.contentblocking.enabled");
+  await SpecialPowers.setBoolPref("privacy.trackingprotection.enabled", true);
 
   // Load the test from a URL that's NOT on the whitelist
   await testOnWindow(contentPage2).then(function(aWindow) {
@@ -142,6 +143,7 @@ async function test() {
     aWindow.close();
   });
   await SpecialPowers.clearUserPref("urlclassifier.trackingWhitelistTable");
+  await SpecialPowers.clearUserPref("privacy.trackingprotection.enabled");
 
   SimpleTest.finish();
 }

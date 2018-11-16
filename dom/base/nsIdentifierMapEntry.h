@@ -147,10 +147,8 @@ public:
   Element* GetImageIdElement();
   /**
    * This can fire ID change callbacks.
-   * @return true if the content could be added, false if we failed due
-   * to OOM.
    */
-  bool AddIdElement(Element* aElement);
+  void AddIdElement(Element* aElement);
   /**
    * This can fire ID change callbacks.
    */
@@ -182,8 +180,9 @@ public:
 
     explicit ChangeCallbackEntry(const ChangeCallback* aKey) :
       mKey(*aKey) { }
-    ChangeCallbackEntry(const ChangeCallbackEntry& toCopy) :
-      mKey(toCopy.mKey) { }
+    ChangeCallbackEntry(ChangeCallbackEntry&& aOther) :
+      PLDHashEntryHdr(std::move(aOther)),
+      mKey(std::move(aOther.mKey)) { }
 
     KeyType GetKey() const { return mKey; }
     bool KeyEquals(KeyTypePointer aKey) const {

@@ -402,15 +402,14 @@ ProxyMessenger = {
       }
     }
 
-
-    if (!(extension.isEmbedded || recipient.toProxyScript) || !extension.remote) {
+    if (!(recipient.toProxyScript && extension.remote)) {
       return promise1;
     }
 
-    // If we have a proxy script sandbox or a remote, embedded extension, where
-    // the legacy side is running in a different process than the WebExtension
-    // side. As a result, we need to dispatch the message to both the parent and
-    // extension processes, and manually merge the results.
+    // Proxy scripts run in the parent process so we need to dispatch
+    // the message to both the parent and extension process and merge
+    // the results.
+    // Once proxy scripts are gone (bug 1443259) we can remove this
     let promise2 = MessageChannel.sendMessage(Services.ppmm.getChildAt(0), messageName, data, {
       sender,
       recipient,
@@ -744,24 +743,24 @@ class DevToolsExtensionPageContextParent extends ExtensionPageContextParent {
     return this._devToolsToolbox;
   }
 
-  set devToolsTarget(contextDevToolsTarget) {
-    if (this._devToolsTarget) {
+  set devToolsTargetPromise(promise) {
+    if (this._devToolsTargetPromise) {
       throw new Error("Cannot set the context DevTools target twice");
     }
 
-    this._devToolsTarget = contextDevToolsTarget;
+    this._devToolsTargetPromise = promise;
 
-    return contextDevToolsTarget;
+    return promise;
   }
 
-  get devToolsTarget() {
-    return this._devToolsTarget;
+  get devToolsTargetPromise() {
+    return this._devToolsTargetPromise;
   }
 
   shutdown() {
-    if (this._devToolsTarget) {
-      this._devToolsTarget.destroy();
-      this._devToolsTarget = null;
+    if (this._devToolsTargetPromise) {
+      this._devToolsTargetPromise.then(target => target.destroy());
+      this._devToolsTargetPromise = null;
     }
 
     this._devToolsToolbox = null;
@@ -1112,7 +1111,7 @@ class HiddenXULWindow {
     let system = Services.scriptSecurityManager.getSystemPrincipal();
     this.chromeShell.createAboutBlankContentViewer(system);
     this.chromeShell.useGlobalHistory = false;
-    this.chromeShell.loadURI("chrome://extensions/content/dummy.xul", 0, null, null, null);
+    this.chromeShell.loadURI("chrome://extensions/content/dummy.xul", 0, null, null, null, system);
 
     await promiseObserved("chrome-document-global-created",
                           win => win.document == this.chromeShell.document);

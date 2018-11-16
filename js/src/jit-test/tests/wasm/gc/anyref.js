@@ -1,8 +1,5 @@
+// |jit-test| skip-if: !wasmGcEnabled()
 // Ensure that if gc types aren't enabled, test cases properly fail.
-
-if (!wasmGcEnabled()) {
-    quit(0);
-}
 
 // Dummy constructor.
 function Baguette(calories) {
@@ -93,11 +90,25 @@ let { exports } = wasmEvalText(`(module
         get_local 0
         ref.is_null
     )
-)`);
+
+    (func (export "ref_eq") (param $a anyref) (param $b anyref) (result i32)
+	  (ref.eq (get_local $a) (get_local $b)))
+
+    (func (export "ref_eq_for_control") (param $a anyref) (param $b anyref) (result f64)
+	  (if f64 (ref.eq (get_local $a) (get_local $b))
+	      (f64.const 5.0)
+	      (f64.const 3.0)))
+    )`);
 
 assertEq(exports.is_null(), 1);
 assertEq(exports.is_null_spill(), 1);
 assertEq(exports.is_null_local(), 1);
+assertEq(exports.ref_eq(null, null), 1);
+assertEq(exports.ref_eq(null, {}), 0);
+assertEq(exports.ref_eq(this, this), 1);
+assertEq(exports.ref_eq_for_control(null, null), 5);
+assertEq(exports.ref_eq_for_control(null, {}), 3);
+assertEq(exports.ref_eq_for_control(this, this), 5);
 
 // Anyref param and result in wasm functions.
 

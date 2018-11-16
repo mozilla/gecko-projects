@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Generated with cbindgen:0.6.3 */
+/* Generated with cbindgen:0.6.7 */
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
@@ -17,9 +17,13 @@
 namespace mozilla {
 namespace wr {
 
-static const uint32_t MAX_CACHED_PROGRAM_COUNT = 15;
+// Whether a border should be antialiased.
+enum class AntialiasBorder {
+  No = 0,
+  Yes,
 
-static const uint64_t MAX_LOAD_TIME_MS = 400;
+  Sentinel /* this must be last for serialization purposes. */
+};
 
 enum class BorderStyle : uint32_t {
   None = 0,
@@ -43,9 +47,35 @@ enum class BoxShadowClipMode : uint32_t {
   Sentinel /* this must be last for serialization purposes. */
 };
 
+enum class Checkpoint : uint32_t {
+  SceneBuilt,
+  FrameBuilt,
+  FrameTexturesUpdated,
+  FrameRendered,
+  // NotificationRequests get notified with this if they get dropped without having been
+  // notified. This provides the guarantee that if a request is created it will get notified.
+  TransactionDropped,
+
+  Sentinel /* this must be last for serialization purposes. */
+};
+
 enum class ClipMode {
   Clip,
   ClipOut,
+
+  Sentinel /* this must be last for serialization purposes. */
+};
+
+// Specifies the color depth of an image. Currently only used for YUV images.
+enum class ColorDepth : uint8_t {
+  // 8 bits image (most common)
+  Color8,
+  // 10 bits image
+  Color10,
+  // 12 bits image
+  Color12,
+  // 16 bits image
+  Color16,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -88,11 +118,22 @@ enum class FontRenderMode : uint32_t {
   Sentinel /* this must be last for serialization purposes. */
 };
 
+// Specifies the format of a series of pixels, in driver terms.
 enum class ImageFormat : uint32_t {
+  // One-channel, byte storage. The "red" doesn't map to the color
+  // red per se, and is just the way that OpenGL has historically referred
+  // to single-channel buffers.
   R8 = 1,
+  // One-channel, short storage
+  R16 = 2,
+  // Four channels, byte storage.
   BGRA8 = 3,
+  // Four channels, float storage.
   RGBAF32 = 4,
+  // Two-channels, byte storage. Similar to `R8`, this just means
+  // "two channels" rather than "red and green".
   RG8 = 5,
+  // Four channels, signed integer storage.
   RGBAI32 = 6,
 
   Sentinel /* this must be last for serialization purposes. */
@@ -139,6 +180,14 @@ enum class MixBlendMode : uint32_t {
   Saturation = 13,
   Color = 14,
   Luminosity = 15,
+
+  Sentinel /* this must be last for serialization purposes. */
+};
+
+// Used to indicate if an image is opaque, or has an alpha channel.
+enum class OpacityType : uint8_t {
+  Opaque = 0,
+  HasAlphaChannel = 1,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -204,6 +253,8 @@ enum class WrFilterOpType : uint32_t {
   Sepia = 8,
   DropShadow = 9,
   ColorMatrix = 10,
+  SrgbToLinear = 11,
+  LinearToSrgb = 12,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -218,6 +269,8 @@ enum class YuvColorSpace : uint32_t {
 template<typename T>
 struct Arc;
 
+struct Device;
+
 // Geometry in the coordinate system of the render target (screen or intermediate
 // surface) in physical pixels.
 struct DevicePixel;
@@ -227,11 +280,11 @@ struct DocumentHandle;
 // Geometry in a stacking context's local coordinate space (logical pixels).
 struct LayoutPixel;
 
-// Coordinates in normalized space (between zero and one).
-struct NormalizedCoordinates;
-
 // The renderer is responsible for submitting to the GPU the work prepared by the
 // RenderBackend.
+//
+// We have a separate `Renderer` instance for each instance of WebRender (generally
+// one per OS window), and all instances share the same thread.
 struct Renderer;
 
 // Offset in number of tiles.
@@ -250,6 +303,8 @@ struct Vec;
 struct WorldPixel;
 
 struct WrProgramCache;
+
+struct WrShaders;
 
 struct WrState;
 
@@ -479,6 +534,16 @@ struct MemoryReport {
   uintptr_t gpu_cache_cpu_mirror;
   uintptr_t render_tasks;
   uintptr_t hit_testers;
+  uintptr_t fonts;
+  uintptr_t images;
+  uintptr_t rasterized_blobs;
+  uintptr_t gpu_cache_textures;
+  uintptr_t vertex_data_textures;
+  uintptr_t render_target_textures;
+  uintptr_t texture_cache_textures;
+  uintptr_t depth_target_textures;
+  uintptr_t swap_chain;
+  uintptr_t total_gpu_bytes_allocated;
 
   bool operator==(const MemoryReport& aOther) const {
     return primitive_stores == aOther.primitive_stores &&
@@ -486,7 +551,17 @@ struct MemoryReport {
            gpu_cache_metadata == aOther.gpu_cache_metadata &&
            gpu_cache_cpu_mirror == aOther.gpu_cache_cpu_mirror &&
            render_tasks == aOther.render_tasks &&
-           hit_testers == aOther.hit_testers;
+           hit_testers == aOther.hit_testers &&
+           fonts == aOther.fonts &&
+           images == aOther.images &&
+           rasterized_blobs == aOther.rasterized_blobs &&
+           gpu_cache_textures == aOther.gpu_cache_textures &&
+           vertex_data_textures == aOther.vertex_data_textures &&
+           render_target_textures == aOther.render_target_textures &&
+           texture_cache_textures == aOther.texture_cache_textures &&
+           depth_target_textures == aOther.depth_target_textures &&
+           swap_chain == aOther.swap_chain &&
+           total_gpu_bytes_allocated == aOther.total_gpu_bytes_allocated;
   }
 };
 
@@ -520,13 +595,16 @@ struct BuiltDisplayListDescriptor {
   uintptr_t total_clip_nodes;
   // The amount of spatial nodes created while building this display list.
   uintptr_t total_spatial_nodes;
+  // An estimate of the number of primitives that will be created by this display list.
+  uintptr_t prim_count_estimate;
 
   bool operator==(const BuiltDisplayListDescriptor& aOther) const {
     return builder_start_time == aOther.builder_start_time &&
            builder_finish_time == aOther.builder_finish_time &&
            send_start_time == aOther.send_start_time &&
            total_clip_nodes == aOther.total_clip_nodes &&
-           total_spatial_nodes == aOther.total_spatial_nodes;
+           total_spatial_nodes == aOther.total_spatial_nodes &&
+           prim_count_estimate == aOther.prim_count_estimate;
   }
 };
 
@@ -600,6 +678,9 @@ struct ComplexClipRegion {
   }
 };
 
+// An opaque identifier describing an image registered with WebRender.
+// This is used as a handle to reference images, and is used as the
+// hash map key for the actual image storage in the `ResourceCache`.
 struct ImageKey {
   IdNamespace mNamespace;
   uint32_t mHandle;
@@ -802,7 +883,13 @@ struct WrFilterOp {
   float matrix[20];
 };
 
-union GlyphRasterSpace {
+// Configure whether the contents of a stacking context
+// should be rasterized in local space or screen space.
+// Local space rasterized pictures are typically used
+// when we want to cache the output, and performance is
+// important. Note that this is a performance hint only,
+// which WR may choose to ignore.
+union RasterSpace {
   enum class Tag : uint32_t {
     Local,
     Screen,
@@ -824,15 +911,15 @@ union GlyphRasterSpace {
   };
   Local_Body local;
 
-  static GlyphRasterSpace Local(float const& a0) {
-    GlyphRasterSpace result;
+  static RasterSpace Local(float const& a0) {
+    RasterSpace result;
     result.local._0 = a0;
     result.tag = Tag::Local;
     return result;
   }
 
-  static GlyphRasterSpace Screen() {
-    GlyphRasterSpace result;
+  static RasterSpace Screen() {
+    RasterSpace result;
     result.tag = Tag::Screen;
     return result;
   }
@@ -845,7 +932,7 @@ union GlyphRasterSpace {
     return tag == Tag::Screen;
   }
 
-  bool operator==(const GlyphRasterSpace& aOther) const {
+  bool operator==(const RasterSpace& aOther) const {
     if (tag != aOther.tag) {
       return false;
     }
@@ -878,6 +965,8 @@ struct GlyphOptions {
   }
 };
 
+using WrColorDepth = ColorDepth;
+
 using WrYuvColorSpace = YuvColorSpace;
 
 struct ByteSlice {
@@ -890,7 +979,7 @@ struct ByteSlice {
   }
 };
 
-using TileOffset = TypedPoint2D<uint16_t, Tiles>;
+using TileOffset = TypedPoint2D<uint32_t, Tiles>;
 
 using DeviceUintRect = TypedRect<uint32_t, DevicePixel>;
 
@@ -909,6 +998,24 @@ struct WrDebugFlags {
 
   bool operator==(const WrDebugFlags& aOther) const {
     return mBits == aOther.mBits;
+  }
+};
+
+struct RendererStats {
+  uintptr_t total_draw_calls;
+  uintptr_t alpha_target_count;
+  uintptr_t color_target_count;
+  uintptr_t texture_upload_kb;
+  uint64_t resource_upload_time;
+  uint64_t gpu_cache_upload_time;
+
+  bool operator==(const RendererStats& aOther) const {
+    return total_draw_calls == aOther.total_draw_calls &&
+           alpha_target_count == aOther.alpha_target_count &&
+           color_target_count == aOther.color_target_count &&
+           texture_upload_kb == aOther.texture_upload_kb &&
+           resource_upload_time == aOther.resource_upload_time &&
+           gpu_cache_upload_time == aOther.gpu_cache_upload_time;
   }
 };
 
@@ -963,18 +1070,16 @@ struct WrImageDescriptor {
   uint32_t width;
   uint32_t height;
   uint32_t stride;
-  bool is_opaque;
+  OpacityType opacity;
 
   bool operator==(const WrImageDescriptor& aOther) const {
     return format == aOther.format &&
            width == aOther.width &&
            height == aOther.height &&
            stride == aOther.stride &&
-           is_opaque == aOther.is_opaque;
+           opacity == aOther.opacity;
   }
 };
-
-using NormalizedRect = TypedRect<float, NormalizedCoordinates>;
 
 struct WrTransformProperty {
   uint64_t id;
@@ -1023,6 +1128,12 @@ extern void DeleteBlobFont(WrFontInstanceKey aKey);
 
 extern void DeleteFontData(WrFontKey aKey);
 
+#if defined(ANDROID)
+extern int __android_log_write(int aPrio,
+                               const char *aTag,
+                               const char *aText);
+#endif
+
 extern void apz_deregister_sampler(WrWindowId aWindowId);
 
 extern void apz_deregister_updater(WrWindowId aWindowId);
@@ -1041,7 +1152,11 @@ extern void apz_run_updater(WrWindowId aWindowId);
 extern void apz_sample_transforms(WrWindowId aWindowId,
                                   Transaction *aTransaction);
 
+extern void gecko_profiler_end_marker(const char *aName);
+
 extern void gecko_profiler_register_thread(const char *aName);
+
+extern void gecko_profiler_start_marker(const char *aName);
 
 extern void gecko_profiler_unregister_thread();
 
@@ -1164,6 +1279,10 @@ void wr_dec_ref_arc(const VecU8 *aArc)
 WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
+void wr_device_delete(Device *aDevice)
+WR_DESTRUCTOR_SAFE_FUNC;
+
+WR_INLINE
 void wr_dp_clear_save(WrState *aState)
 WR_FUNC;
 
@@ -1229,6 +1348,7 @@ void wr_dp_push_border(WrState *aState,
                        LayoutRect aRect,
                        LayoutRect aClip,
                        bool aIsBackfaceVisible,
+                       AntialiasBorder aDoAa,
                        LayoutSideOffsets aWidths,
                        BorderSide aTop,
                        BorderSide aRight,
@@ -1409,7 +1529,7 @@ void wr_dp_push_stacking_context(WrState *aState,
                                  const WrFilterOp *aFilters,
                                  uintptr_t aFilterCount,
                                  bool aIsBackfaceVisible,
-                                 GlyphRasterSpace aGlyphRasterSpace,
+                                 RasterSpace aGlyphRasterSpace,
                                  bool *aOutIsReferenceFrame,
                                  uintptr_t *aOutReferenceFrameId)
 WR_FUNC;
@@ -1434,6 +1554,7 @@ void wr_dp_push_yuv_NV12_image(WrState *aState,
                                bool aIsBackfaceVisible,
                                WrImageKey aImageKey0,
                                WrImageKey aImageKey1,
+                               WrColorDepth aColorDepth,
                                WrYuvColorSpace aColorSpace,
                                ImageRendering aImageRendering)
 WR_FUNC;
@@ -1445,6 +1566,7 @@ void wr_dp_push_yuv_interleaved_image(WrState *aState,
                                       LayoutRect aClip,
                                       bool aIsBackfaceVisible,
                                       WrImageKey aImageKey0,
+                                      WrColorDepth aColorDepth,
                                       WrYuvColorSpace aColorSpace,
                                       ImageRendering aImageRendering)
 WR_FUNC;
@@ -1458,6 +1580,7 @@ void wr_dp_push_yuv_planar_image(WrState *aState,
                                  WrImageKey aImageKey0,
                                  WrImageKey aImageKey1,
                                  WrImageKey aImageKey2,
+                                 WrColorDepth aColorDepth,
                                  WrYuvColorSpace aColorSpace,
                                  ImageRendering aImageRendering)
 WR_FUNC;
@@ -1542,7 +1665,9 @@ WR_FUNC;
 WR_INLINE
 bool wr_renderer_render(Renderer *aRenderer,
                         uint32_t aWidth,
-                        uint32_t aHeight)
+                        uint32_t aHeight,
+                        bool aHadSlowFrame,
+                        RendererStats *aOutStats)
 WR_FUNC;
 
 WR_INLINE
@@ -1633,7 +1758,7 @@ WR_FUNC;
 WR_INLINE
 void wr_resource_updates_set_image_visible_area(Transaction *aTxn,
                                                 WrImageKey aKey,
-                                                const NormalizedRect *aArea)
+                                                const DeviceUintRect *aArea)
 WR_FUNC;
 
 WR_INLINE
@@ -1683,6 +1808,16 @@ void wr_set_item_tag(WrState *aState,
 WR_FUNC;
 
 WR_INLINE
+void wr_shaders_delete(WrShaders *aShaders,
+                       void *aGlContext)
+WR_DESTRUCTOR_SAFE_FUNC;
+
+WR_INLINE
+WrShaders *wr_shaders_new(void *aGlContext,
+                          WrProgramCache *aProgramCache)
+WR_FUNC;
+
+WR_INLINE
 void wr_state_delete(WrState *aState)
 WR_DESTRUCTOR_SAFE_FUNC;
 
@@ -1698,6 +1833,10 @@ WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
 WrThreadPool *wr_thread_pool_new()
+WR_FUNC;
+
+WR_INLINE
+uintptr_t wr_total_gpu_bytes_allocated()
 WR_FUNC;
 
 WR_INLINE
@@ -1721,11 +1860,29 @@ void wr_transaction_generate_frame(Transaction *aTxn)
 WR_FUNC;
 
 WR_INLINE
+void wr_transaction_invalidate_rendered_frame(Transaction *aTxn)
+WR_FUNC;
+
+WR_INLINE
 bool wr_transaction_is_empty(const Transaction *aTxn)
 WR_FUNC;
 
 WR_INLINE
 Transaction *wr_transaction_new(bool aDoAsync)
+WR_FUNC;
+
+extern void wr_transaction_notification_notified(uintptr_t aHandler,
+                                                 Checkpoint aWhen);
+
+WR_INLINE
+void wr_transaction_notify(Transaction *aTxn,
+                           Checkpoint aWhen,
+                           uintptr_t aEvent)
+WR_FUNC;
+
+WR_INLINE
+void wr_transaction_pinch_zoom(Transaction *aTxn,
+                               float aPinchZoom)
 WR_FUNC;
 
 WR_INLINE
@@ -1801,6 +1958,8 @@ bool wr_window_new(WrWindowId aWindowId,
                    uint32_t aWindowHeight,
                    bool aSupportLowPriorityTransactions,
                    void *aGlContext,
+                   WrProgramCache *aProgramCache,
+                   WrShaders *aShaders,
                    WrThreadPool *aThreadPool,
                    VoidPtrToSizeFn aSizeOfOp,
                    DocumentHandle **aOutHandle,

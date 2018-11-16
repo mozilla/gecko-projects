@@ -212,6 +212,13 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False,
             emulator.wait_for_start()
             device_verified = True
 
+    if device_verified and "DEVICE_SERIAL" not in os.environ:
+        devices = adbhost.devices(timeout=10)
+        for d in devices:
+            if d['state'] == 'device':
+                os.environ["DEVICE_SERIAL"] = d['device_serial']
+                break
+
     if device_verified and install:
         # Determine if Firefox is installed on the device; if not,
         # prompt to install. This feature allows a test command to
@@ -507,7 +514,7 @@ class AndroidEmulator(object):
         env['ANDROID_AVD_HOME'] = os.path.join(EMULATOR_HOME_DIR, "avd")
         command = [self.emulator_path, "-avd", self.avd_info.name]
         if self.gpu:
-            command += ['-gpu', 'swiftshader']
+            command += ['-gpu', 'swiftshader_indirect']
         if self.avd_info.extra_args:
             # -enable-kvm option is not valid on OSX
             if _get_host_platform() == 'macosx64' and '-enable-kvm' in self.avd_info.extra_args:

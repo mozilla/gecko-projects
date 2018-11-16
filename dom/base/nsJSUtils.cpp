@@ -16,7 +16,7 @@
 #include "jsfriendapi.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/OffThreadScriptCompilation.h"
-#include "js/SourceBufferHolder.h"
+#include "js/SourceText.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptElement.h"
 #include "nsIScriptGlobalObject.h"
@@ -96,9 +96,16 @@ nsJSUtils::CompileFunction(AutoJSAPI& jsapi,
   }
 
   // Compile.
+  const nsPromiseFlatString& flatBody = PromiseFlatString(aBody);
+
+  JS::SourceText<char16_t> source;
+  if (!source.init(cx, flatBody.get(), flatBody.Length(),
+                   JS::SourceOwnership::Borrowed))
+  {
+    return NS_ERROR_FAILURE;
+  }
+
   JS::Rooted<JSFunction*> fun(cx);
-  JS::SourceBufferHolder source(PromiseFlatString(aBody).get(), aBody.Length(),
-                                JS::SourceBufferHolder::NoOwnership);
   if (!JS::CompileFunction(cx, aScopeChain, aOptions,
                            PromiseFlatCString(aName).get(),
                            aArgCount, aArgArray,
@@ -125,7 +132,7 @@ nsJSUtils::ExecutionContext::ExecutionContext(JSContext* aCx,
   :
 #ifdef MOZ_GECKO_PROFILER
     mAutoProfilerLabel("nsJSUtils::ExecutionContext", /* dynamicStr */ nullptr,
-                       __LINE__, js::ProfilingStackFrame::Category::JS),
+                       js::ProfilingStackFrame::Category::JS),
 #endif
     mCx(aCx)
   , mRealm(aCx, aGlobal)
@@ -217,7 +224,7 @@ nsJSUtils::ExecutionContext::JoinAndExec(JS::OffThreadToken** aOffThreadToken,
 
 nsresult
 nsJSUtils::ExecutionContext::CompileAndExec(JS::CompileOptions& aCompileOptions,
-                                            JS::SourceBufferHolder& aSrcBuf,
+                                            JS::SourceText<char16_t>& aSrcBuf,
                                             JS::MutableHandle<JSScript*> aScript)
 {
   if (mSkip) {
@@ -270,8 +277,15 @@ nsJSUtils::ExecutionContext::CompileAndExec(JS::CompileOptions& aCompileOptions,
   }
 
   const nsPromiseFlatString& flatScript = PromiseFlatString(aScript);
-  JS::SourceBufferHolder srcBuf(flatScript.get(), aScript.Length(),
-                                JS::SourceBufferHolder::NoOwnership);
+  JS::SourceText<char16_t> srcBuf;
+  if (!srcBuf.init(mCx, flatScript.get(), flatScript.Length(),
+                   JS::SourceOwnership::Borrowed))
+  {
+    mSkip = true;
+    mRv = EvaluationExceptionToNSResult(mCx);
+    return mRv;
+  }
+
   JS::Rooted<JSScript*> script(mCx);
   return CompileAndExec(aCompileOptions, srcBuf, &script);
 }
@@ -473,10 +487,10 @@ nsJSUtils::ExecutionContext::ExtractReturnValue(JS::MutableHandle<JS::Value> aRe
 
 nsresult
 nsJSUtils::CompileModule(JSContext* aCx,
-                       JS::SourceBufferHolder& aSrcBuf,
+                       JS::SourceText<char16_t>& aSrcBuf,
                        JS::Handle<JSObject*> aEvaluationGlobal,
                        JS::CompileOptions &aCompileOptions,
-                       JS::MutableHandle<JSScript*> aScript)
+                       JS::MutableHandle<JSObject*> aModule)
 {
   AUTO_PROFILER_LABEL("nsJSUtils::CompileModule", JS);
 
@@ -490,7 +504,7 @@ nsJSUtils::CompileModule(JSContext* aCx,
 
   NS_ENSURE_TRUE(xpc::Scriptability::Get(aEvaluationGlobal).Allowed(), NS_OK);
 
-  if (!JS::CompileModule(aCx, aCompileOptions, aSrcBuf, aScript)) {
+  if (!JS::CompileModule(aCx, aCompileOptions, aSrcBuf, aModule)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -499,7 +513,7 @@ nsJSUtils::CompileModule(JSContext* aCx,
 
 nsresult
 nsJSUtils::InitModuleSourceElement(JSContext* aCx,
-                                   JS::Handle<JSScript*> aScript,
+                                   JS::Handle<JSObject*> aModule,
                                    nsIScriptElement* aElement)
 {
   JS::Rooted<JS::Value> value(aCx);
@@ -512,7 +526,8 @@ nsJSUtils::InitModuleSourceElement(JSContext* aCx,
   MOZ_ASSERT(value.isObject());
   JS::Rooted<JSObject*> object(aCx, &value.toObject());
 
-  if (!JS::InitScriptSourceElement(aCx, aScript, object, nullptr)) {
+  JS::Rooted<JSScript*> script(aCx, JS::GetModuleScript(aModule));
+  if (!JS::InitScriptSourceElement(aCx, script, object, nullptr)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -520,7 +535,7 @@ nsJSUtils::InitModuleSourceElement(JSContext* aCx,
 }
 
 nsresult
-nsJSUtils::ModuleInstantiate(JSContext* aCx, JS::Handle<JSScript*> aScript)
+nsJSUtils::ModuleInstantiate(JSContext* aCx, JS::Handle<JSObject*> aModule)
 {
   AUTO_PROFILER_LABEL("nsJSUtils::ModuleInstantiate", JS);
 
@@ -529,9 +544,9 @@ nsJSUtils::ModuleInstantiate(JSContext* aCx, JS::Handle<JSScript*> aScript)
   MOZ_ASSERT(CycleCollectedJSContext::Get() &&
              CycleCollectedJSContext::Get()->MicroTaskLevel());
 
-  NS_ENSURE_TRUE(xpc::Scriptability::Get(aScript).Allowed(), NS_OK);
+  NS_ENSURE_TRUE(xpc::Scriptability::Get(aModule).Allowed(), NS_OK);
 
-  if (!JS::ModuleInstantiate(aCx, aScript)) {
+  if (!JS::ModuleInstantiate(aCx, aModule)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -539,7 +554,7 @@ nsJSUtils::ModuleInstantiate(JSContext* aCx, JS::Handle<JSScript*> aScript)
 }
 
 nsresult
-nsJSUtils::ModuleEvaluate(JSContext* aCx, JS::Handle<JSScript*> aScript)
+nsJSUtils::ModuleEvaluate(JSContext* aCx, JS::Handle<JSObject*> aModule)
 {
   AUTO_PROFILER_LABEL("nsJSUtils::ModuleEvaluate", JS);
 
@@ -548,9 +563,9 @@ nsJSUtils::ModuleEvaluate(JSContext* aCx, JS::Handle<JSScript*> aScript)
   MOZ_ASSERT(CycleCollectedJSContext::Get() &&
              CycleCollectedJSContext::Get()->MicroTaskLevel());
 
-  NS_ENSURE_TRUE(xpc::Scriptability::Get(aScript).Allowed(), NS_OK);
+  NS_ENSURE_TRUE(xpc::Scriptability::Get(aModule).Allowed(), NS_OK);
 
-  if (!JS::ModuleEvaluate(aCx, aScript)) {
+  if (!JS::ModuleEvaluate(aCx, aModule)) {
     return NS_ERROR_FAILURE;
   }
 

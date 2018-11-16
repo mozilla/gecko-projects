@@ -69,7 +69,8 @@ static const char* sEGLExtensionNames[] = {
     "EGL_ANGLE_device_creation",
     "EGL_ANGLE_device_creation_d3d11",
     "EGL_KHR_surfaceless_context",
-    "EGL_KHR_create_context_no_error"
+    "EGL_KHR_create_context_no_error",
+    "EGL_MOZ_create_context_provoking_vertex_dont_care"
 };
 
 #if defined(ANDROID)
@@ -773,7 +774,7 @@ GLLibraryEGL::CreateDisplay(bool forceAccel, const nsCOMPtr<nsIGfxInfo>& gfxInfo
 #ifdef MOZ_WAYLAND
         // Some drivers doesn't support EGL_DEFAULT_DISPLAY
         GdkDisplay *gdkDisplay = gdk_display_get_default();
-        if (GDK_IS_WAYLAND_DISPLAY(gdkDisplay)) {
+        if (!GDK_IS_X11_DISPLAY(gdkDisplay)) {
             static auto sGdkWaylandDisplayGetWlDisplay =
                 (wl_display *(*)(GdkDisplay *))
                 dlsym(RTLD_DEFAULT, "gdk_wayland_display_get_wl_display");

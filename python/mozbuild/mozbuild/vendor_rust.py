@@ -52,7 +52,7 @@ class VendorRust(MozbuildObject):
             m = re.match('cargo-vendor v((\d+\.)*\d+)', l)
             if m:
                 version = m.group(1)
-                return LooseVersion(version) >= b'0.1.14'
+                return LooseVersion(version) >= b'0.1.21'
         return False
 
     def check_modified_files(self):
@@ -119,7 +119,7 @@ Please commit or stash these changes before vendoring, or re-run with `--ignore-
             self.run_process(args=[cargo, 'install', 'cargo-vendor'],
                              append_env=env)
         elif not self.check_cargo_vendor_version(cargo):
-            self.log(logging.INFO, 'cargo_vendor', {}, 'cargo-vendor >= 0.1.14 required; force-reinstalling (this may take a few minutes)...')
+            self.log(logging.INFO, 'cargo_vendor', {}, 'cargo-vendor >= 0.1.21 required; force-reinstalling (this may take a few minutes)...')
             env = self.check_openssl()
             self.run_process(args=[cargo, 'install', '--force', 'cargo-vendor'],
                              append_env=env)
@@ -144,6 +144,7 @@ Please commit or stash these changes before vendoring, or re-run with `--ignore-
     # adding anything to this list.
     RUNTIME_LICENSE_WHITELIST = [
         'Apache-2.0',
+        'Apache-2.0 WITH LLVM-exception',
         'BSD-2-Clause',
         'CC0-1.0',
         'ISC',

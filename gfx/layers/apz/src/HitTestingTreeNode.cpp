@@ -18,6 +18,9 @@ namespace mozilla {
 namespace layers {
 
 using gfx::CompositorHitTestInfo;
+using gfx::CompositorHitTestFlags;
+using gfx::CompositorHitTestTouchActionMask;
+using gfx::CompositorHitTestInvisibleToHit;
 
 HitTestingTreeNode::HitTestingTreeNode(AsyncPanZoomController* aApzc,
                                        bool aIsPrimaryHolder,
@@ -27,7 +30,7 @@ HitTestingTreeNode::HitTestingTreeNode(AsyncPanZoomController* aApzc,
   , mLockCount(0)
   , mLayersId(aLayersId)
   , mScrollbarAnimationId(0)
-  , mFixedPosTarget(FrameMetrics::NULL_SCROLL_ID)
+  , mFixedPosTarget(ScrollableLayerGuid::NULL_SCROLL_ID)
   , mIsBackfaceHidden(false)
   , mOverride(EventRegionsOverride::NoOverride)
 {
@@ -132,7 +135,7 @@ HitTestingTreeNode::GetScrollbarDirection() const
   return *mScrollbarData.mDirection;
 }
 
-FrameMetrics::ViewID
+ScrollableLayerGuid::ViewID
 HitTestingTreeNode::GetScrollTargetId() const
 {
   return mScrollbarData.mTargetViewId;
@@ -151,12 +154,12 @@ HitTestingTreeNode::GetScrollbarData() const
 }
 
 void
-HitTestingTreeNode::SetFixedPosData(FrameMetrics::ViewID aFixedPosTarget)
+HitTestingTreeNode::SetFixedPosData(ScrollableLayerGuid::ViewID aFixedPosTarget)
 {
   mFixedPosTarget = aFixedPosTarget;
 }
 
-FrameMetrics::ViewID
+ScrollableLayerGuid::ViewID
 HitTestingTreeNode::GetFixedPosTarget() const
 {
   return mFixedPosTarget;
@@ -291,7 +294,7 @@ HitTestingTreeNode::Untransform(const ParentLayerPoint& aPoint,
 CompositorHitTestInfo
 HitTestingTreeNode::HitTest(const LayerPoint& aPoint) const
 {
-  CompositorHitTestInfo result = CompositorHitTestInfo::eInvisibleToHitTest;
+  CompositorHitTestInfo result = CompositorHitTestInvisibleToHit;
 
   if (mOverride & EventRegionsOverride::ForceEmptyHitRegion) {
     return result;
@@ -311,36 +314,36 @@ HitTestingTreeNode::HitTest(const LayerPoint& aPoint) const
     return result;
   }
 
-  result |= CompositorHitTestInfo::eVisibleToHitTest;
+  result = CompositorHitTestFlags::eVisibleToHitTest;
 
   if ((mOverride & EventRegionsOverride::ForceDispatchToContent) ||
       mEventRegions.mDispatchToContentHitRegion.Contains(point.x, point.y))
   {
-    result |= CompositorHitTestInfo::eDispatchToContent;
+    result += CompositorHitTestFlags::eDispatchToContent;
     if (mEventRegions.mDTCRequiresTargetConfirmation) {
-      result |= CompositorHitTestInfo::eRequiresTargetConfirmation;
+      result += CompositorHitTestFlags::eRequiresTargetConfirmation;
     }
   } else if (gfxPrefs::TouchActionEnabled()) {
     if (mEventRegions.mNoActionRegion.Contains(point.x, point.y)) {
       // set all the touch-action flags as disabled
-      result |= CompositorHitTestInfo::eTouchActionMask;
+      result += CompositorHitTestTouchActionMask;
     } else {
       bool panX = mEventRegions.mHorizontalPanRegion.Contains(point.x, point.y);
       bool panY = mEventRegions.mVerticalPanRegion.Contains(point.x, point.y);
       if (panX && panY) {
         // touch-action: pan-x pan-y
-        result |= CompositorHitTestInfo::eTouchActionDoubleTapZoomDisabled
-                | CompositorHitTestInfo::eTouchActionPinchZoomDisabled;
+        result += CompositorHitTestFlags::eTouchActionDoubleTapZoomDisabled;
+        result += CompositorHitTestFlags::eTouchActionPinchZoomDisabled;
       } else if (panX) {
         // touch-action: pan-x
-        result |= CompositorHitTestInfo::eTouchActionPanYDisabled
-                | CompositorHitTestInfo::eTouchActionPinchZoomDisabled
-                | CompositorHitTestInfo::eTouchActionDoubleTapZoomDisabled;
+        result += CompositorHitTestFlags::eTouchActionPanYDisabled;
+        result += CompositorHitTestFlags::eTouchActionPinchZoomDisabled;
+        result += CompositorHitTestFlags::eTouchActionDoubleTapZoomDisabled;
       } else if (panY) {
         // touch-action: pan-y
-        result |= CompositorHitTestInfo::eTouchActionPanXDisabled
-                | CompositorHitTestInfo::eTouchActionPinchZoomDisabled
-                | CompositorHitTestInfo::eTouchActionDoubleTapZoomDisabled;
+        result += CompositorHitTestFlags::eTouchActionPanXDisabled;
+        result += CompositorHitTestFlags::eTouchActionPinchZoomDisabled;
+        result += CompositorHitTestFlags::eTouchActionDoubleTapZoomDisabled;
       } // else we're in the touch-action: auto or touch-action: manipulation
         // cases and we'll allow all actions. Technically we shouldn't allow
         // double-tap zooming in the manipulation case but apparently this has
@@ -385,7 +388,7 @@ HitTestingTreeNode::Dump(const char* aPrefix) const
     mApzc ? Stringify(mApzc->GetGuid()).c_str() : nsPrintfCString("l=0x%" PRIx64, uint64_t(mLayersId)).get(),
     (mOverride & EventRegionsOverride::ForceDispatchToContent) ? "fdtc " : "",
     (mOverride & EventRegionsOverride::ForceEmptyHitRegion) ? "fehr " : "",
-    (mFixedPosTarget != FrameMetrics::NULL_SCROLL_ID) ? nsPrintfCString("fixed=%" PRIu64 " ", mFixedPosTarget).get() : "",
+    (mFixedPosTarget != ScrollableLayerGuid::NULL_SCROLL_ID) ? nsPrintfCString("fixed=%" PRIu64 " ", mFixedPosTarget).get() : "",
     Stringify(mEventRegions).c_str(), Stringify(mTransform).c_str(),
     mClipRegion ? Stringify(mClipRegion.ref()).c_str() : "none",
     mScrollbarData.mDirection.isSome() ? " scrollbar" : "",

@@ -60,7 +60,7 @@ function clearMigrationHistogram() {
 function assertMigrationHistogramCount(category, expectedCount) {
   const histogram = Services.telemetry.getHistogramById(IDB_MIGRATE_RESULT_HISTOGRAM);
 
-  equal(histogram.snapshot().counts[CATEGORIES.indexOf(category)], expectedCount,
+  equal(histogram.snapshot().values[CATEGORIES.indexOf(category)], expectedCount,
         `Got the expected count on category "${category}" for histogram ${IDB_MIGRATE_RESULT_HISTOGRAM}`);
 }
 
@@ -205,7 +205,9 @@ add_task(async function test_storage_local_data_migration() {
 
   // No new telemetry events recorded for the extension.
   const snapshot = Services.telemetry.snapshotEvents(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN, true);
-  ok(!snapshot.parent || snapshot.parent.length === 0,
+  const filterByCategory = ([timestamp, category]) => category === EVENT_CATEGORY;
+
+  ok(!snapshot.parent || snapshot.parent.filter(filterByCategory).length === 0,
      "No telemetry events should be recorded for an already migrated extension");
 
   Services.prefs.setBoolPref(LEAVE_STORAGE_PREF, false);

@@ -12,6 +12,7 @@
 #ifndef nsXULElement_h__
 #define nsXULElement_h__
 
+#include "js/SourceText.h"
 #include "js/TracingAPI.h"
 #include "mozilla/Attributes.h"
 #include "nsIServiceManager.h"
@@ -51,10 +52,6 @@ class HTMLIFrameElement;
 enum class CallerType : uint32_t;
 } // namespace dom
 } // namespace mozilla
-
-namespace JS {
-class SourceBufferHolder;
-} // namespace JS
 
 ////////////////////////////////////////////////////////////////////////
 
@@ -218,12 +215,8 @@ public:
     nsresult DeserializeOutOfLine(nsIObjectInputStream* aInput,
                                   nsXULPrototypeDocument* aProtoDoc);
 
-    nsresult Compile(JS::SourceBufferHolder& aSrcBuf,
-                     nsIURI* aURI, uint32_t aLineNo,
-                     nsIDocument* aDocument,
-                     nsIOffThreadScriptReceiver *aOffThreadReceiver = nullptr);
-
-    nsresult Compile(const char16_t* aText, int32_t aTextLength,
+    nsresult Compile(const char16_t* aText, size_t aTextLength,
+                     JS::SourceOwnership aOwnership,
                      nsIURI* aURI, uint32_t aLineNo,
                      nsIDocument* aDocument,
                      nsIOffThreadScriptReceiver *aOffThreadReceiver = nullptr);
@@ -335,7 +328,7 @@ class nsXULElement : public nsStyledElement
 {
 protected:
     // Use Construct to construct elements instead of this constructor.
-    explicit nsXULElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
+    explicit nsXULElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
 
 public:
     using Element::Blur;
@@ -374,6 +367,9 @@ public:
     {
     }
 #endif
+
+    bool HasMenu();
+    MOZ_CAN_RUN_SCRIPT void OpenMenu(bool aOpenFlag);
 
     virtual bool PerformAccesskey(bool aKeyCausesActivation,
                                   bool aIsTrustedEvent) override;
@@ -415,6 +411,11 @@ public:
                     mozilla::ErrorResult& aError)
     {
         SetAttr(aName, aValue, aError);
+    }
+    bool GetXULBoolAttr(nsAtom* aName) const
+    {
+        return AttrValueIs(kNameSpaceID_None, aName,
+                           NS_LITERAL_STRING("true"), eCaseMatters);
     }
     void SetXULBoolAttr(nsAtom* aName, bool aValue)
     {
@@ -684,8 +685,6 @@ protected:
     void SetDrawsInTitlebar(bool aState);
     void SetDrawsTitle(bool aState);
     void UpdateBrightTitlebarForeground(nsIDocument* aDocument);
-
-    void RemoveBroadcaster(const nsAString & broadcasterId);
 
 protected:
     void AddTooltipSupport();

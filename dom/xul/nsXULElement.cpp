@@ -19,7 +19,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/DeclarationBlock.h"
 #include "js/CompilationAndEvaluation.h"
-#include "js/SourceBufferHolder.h"
+#include "js/SourceText.h"
 #include "nsFocusManager.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsNameSpaceManager.h"
@@ -75,11 +75,13 @@
 #include "nsICSSDeclaration.h"
 #include "nsLayoutUtils.h"
 #include "XULFrameElement.h"
+#include "XULMenuElement.h"
 #include "XULPopupElement.h"
 #include "XULScrollElement.h"
 
 #include "mozilla/dom/XULElementBinding.h"
 #include "mozilla/dom/BoxObject.h"
+#include "mozilla/dom/XULBroadcastManager.h"
 #include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/MutationEventBinding.h"
 #include "mozilla/dom/XULCommandEvent.h"
@@ -102,8 +104,8 @@ uint32_t             nsXULPrototypeAttribute::gNumCacheFills;
 // nsXULElement
 //
 
-nsXULElement::nsXULElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-    : nsStyledElement(aNodeInfo),
+nsXULElement::nsXULElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
+    : nsStyledElement(std::move(aNodeInfo)),
       mBindingParent(nullptr)
 {
     XUL_PROTOTYPE_ATTRIBUTE_METER(gNumElements);
@@ -138,30 +140,41 @@ nsXULElement::MaybeUpdatePrivateLifetime()
 /* static */
 nsXULElement* NS_NewBasicXULElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
 {
-  return new nsXULElement(aNodeInfo);
+    return new nsXULElement(std::move(aNodeInfo));
 }
 
  /* static */
 nsXULElement* nsXULElement::Construct(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
 {
   RefPtr<mozilla::dom::NodeInfo> nodeInfo = aNodeInfo;
+  if (nodeInfo->Equals(nsGkAtoms::label) ||
+      nodeInfo->Equals(nsGkAtoms::description)) {
+    return new XULTextElement(nodeInfo.forget());
+  }
+
   if (nodeInfo->Equals(nsGkAtoms::menupopup) ||
       nodeInfo->Equals(nsGkAtoms::popup) ||
-      nodeInfo->Equals(nsGkAtoms::panel) ||
-      nodeInfo->Equals(nsGkAtoms::tooltip)) {
+      nodeInfo->Equals(nsGkAtoms::panel)) {
     return NS_NewXULPopupElement(nodeInfo.forget());
+  }
+
+  if (nodeInfo->Equals(nsGkAtoms::tooltip)) {
+    return NS_NewXULTooltipElement(nodeInfo.forget());
   }
 
   if (nodeInfo->Equals(nsGkAtoms::iframe) ||
       nodeInfo->Equals(nsGkAtoms::browser) ||
       nodeInfo->Equals(nsGkAtoms::editor)) {
-    already_AddRefed<mozilla::dom::NodeInfo> frameni = nodeInfo.forget();
-    return new XULFrameElement(frameni);
+    return new XULFrameElement(nodeInfo.forget());
+  }
+
+  if (nodeInfo->Equals(nsGkAtoms::menu) ||
+      nodeInfo->Equals(nsGkAtoms::menulist)) {
+    return new XULMenuElement(nodeInfo.forget());
   }
 
   if (nodeInfo->Equals(nsGkAtoms::scrollbox)) {
-    already_AddRefed<mozilla::dom::NodeInfo> scrollni = nodeInfo.forget();
-    return new XULScrollElement(scrollni);
+    return new XULScrollElement(nodeInfo.forget());
   }
 
   return NS_NewBasicXULElement(nodeInfo.forget());
@@ -304,7 +317,17 @@ NS_IMPL_RELEASE_INHERITED(nsXULElement, nsStyledElement)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(nsXULElement)
     NS_ELEMENT_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_INTERFACE_MAP_END_INHERITING(nsStyledElement)
+
+    nsCOMPtr<nsISupports> iface =
+      CustomElementRegistry::CallGetCustomInterface(this, aIID);
+    if (iface) {
+      iface->QueryInterface(aIID, aInstancePtr);
+      if (*aInstancePtr) {
+        return NS_OK;
+      }
+    }
+
+NS_INTERFACE_MAP_END_INHERITING(Element)
 
 //----------------------------------------------------------------------
 // nsINode interface
@@ -494,6 +517,33 @@ nsXULElement::IsFocusableInternal(int32_t *aTabIndex, bool aWithMouse)
   }
 
   return shouldFocus;
+}
+
+bool
+nsXULElement::HasMenu()
+{
+  nsMenuFrame* menu = do_QueryFrame(GetPrimaryFrame());
+  return menu != nullptr;
+}
+
+void
+nsXULElement::OpenMenu(bool aOpenFlag)
+{
+  nsMenuFrame* menu = do_QueryFrame(GetPrimaryFrame(FlushType::Frames));
+
+  nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
+  if (pm) {
+    if (aOpenFlag) {
+      // Nothing will happen if this element isn't a menu.
+      pm->ShowMenu(this, false, false);
+    }
+    else if (menu) {
+      nsMenuPopupFrame* popupFrame = menu->GetPopup();
+      if (popupFrame) {
+        pm->HidePopup(popupFrame->GetContent(), false, true, false, false);
+      }
+    }
+  }
 }
 
 bool
@@ -696,8 +746,21 @@ nsXULElement::BindToTree(nsIDocument* aDocument,
   }
 #endif
 
+  if (doc && NodeInfo()->Equals(nsGkAtoms::keyset, kNameSpaceID_XUL)) {
+    // Create our XUL key listener and hook it up.
+    nsXBLService::AttachGlobalKeyHandler(this);
+  }
+
   if (doc && NeedTooltipSupport(*this)) {
       AddTooltipSupport();
+  }
+
+  if (doc && XULBroadcastManager::MayNeedListener(*this)) {
+    if (!doc->HasXULBroadcastManager()) {
+      doc->InitializeXULBroadcastManager();
+    }
+    XULBroadcastManager* broadcastManager = doc->GetXULBroadcastManager();
+    broadcastManager->AddListener(this);
   }
 
   return rv;
@@ -706,8 +769,19 @@ nsXULElement::BindToTree(nsIDocument* aDocument,
 void
 nsXULElement::UnbindFromTree(bool aDeep, bool aNullParent)
 {
+    if (NodeInfo()->Equals(nsGkAtoms::keyset, kNameSpaceID_XUL)) {
+        nsXBLService::DetachGlobalKeyHandler(this);
+    }
+
     if (NeedTooltipSupport(*this)) {
         RemoveTooltipSupport();
+    }
+
+    nsIDocument* doc = GetComposedDoc();
+    if (doc && doc->HasXULBroadcastManager() &&
+        XULBroadcastManager::MayNeedListener(*this)) {
+        RefPtr<XULBroadcastManager> broadcastManager = doc->GetXULBroadcastManager();
+        broadcastManager->RemoveListener(this);
     }
 
     // mControllers can own objects that are implemented
@@ -772,14 +846,18 @@ nsXULElement::BeforeSetAttr(int32_t aNamespaceID, nsAtom* aName,
                (aName == nsGkAtoms::command || aName == nsGkAtoms::observes) &&
                IsInUncomposedDoc()) {
 //         XXX sXBL/XBL2 issue! Owner or current document?
+        // XXX Why does this not also remove broadcast listeners if the
+        // "element" attribute was changed on an <observer>?
         nsAutoString oldValue;
         GetAttr(kNameSpaceID_None, nsGkAtoms::observes, oldValue);
         if (oldValue.IsEmpty()) {
           GetAttr(kNameSpaceID_None, nsGkAtoms::command, oldValue);
         }
 
-        if (!oldValue.IsEmpty()) {
-          RemoveBroadcaster(oldValue);
+        nsIDocument* doc = GetUncomposedDoc();
+        if (!oldValue.IsEmpty() && doc->HasXULBroadcastManager()) {
+            RefPtr<XULBroadcastManager> broadcastManager = doc->GetXULBroadcastManager();
+            broadcastManager->RemoveListener(this);
         }
     } else if (aNamespaceID == kNameSpaceID_None &&
                aValue &&
@@ -907,6 +985,19 @@ nsXULElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
                 }
             }
         }
+        nsIDocument* doc = GetComposedDoc();
+        if (doc && doc->HasXULBroadcastManager()) {
+            RefPtr<XULBroadcastManager> broadcastManager = doc->GetXULBroadcastManager();
+            broadcastManager->AttributeChanged(this, aNamespaceID, aName);
+        }
+        if (doc && XULBroadcastManager::MayNeedListener(*this)) {
+            if (!doc->HasXULBroadcastManager()) {
+                doc->InitializeXULBroadcastManager();
+            }
+            XULBroadcastManager* broadcastManager = doc->GetXULBroadcastManager();
+            broadcastManager->AddListener(this);
+        }
+
         // XXX need to check if they're changing an event handler: if
         // so, then we need to unhook the old one.  Or something.
     }
@@ -952,19 +1043,6 @@ nsXULElement::ParseAttribute(int32_t aNamespaceID,
     }
 
     return true;
-}
-
-void
-nsXULElement::RemoveBroadcaster(const nsAString & broadcasterId)
-{
-    nsIDocument* doc = OwnerDoc();
-    if (!doc->IsXULDocument()) {
-      return;
-    }
-    if (Element* broadcaster = doc->GetElementById(broadcasterId)) {
-        doc->AsXULDocument()->RemoveBroadcastListenerFor(
-           *broadcaster, *this, NS_LITERAL_STRING("*"));
-    }
 }
 
 void
@@ -2200,7 +2278,9 @@ OffThreadScriptReceiverCallback(JS::OffThreadToken* aToken, void* aCallbackData)
 }
 
 nsresult
-nsXULPrototypeScript::Compile(JS::SourceBufferHolder& aSrcBuf,
+nsXULPrototypeScript::Compile(const char16_t* aText,
+                              size_t aTextLength,
+                              JS::SourceOwnership aOwnership,
                               nsIURI* aURI, uint32_t aLineNo,
                               nsIDocument* aDocument,
                               nsIOffThreadScriptReceiver *aOffThreadReceiver /* = nullptr */)
@@ -2208,13 +2288,23 @@ nsXULPrototypeScript::Compile(JS::SourceBufferHolder& aSrcBuf,
     // We'll compile the script in the compilation scope.
     AutoJSAPI jsapi;
     if (!jsapi.Init(xpc::CompilationScope())) {
+        if (aOwnership == JS::SourceOwnership::TakeOwnership) {
+            // In this early-exit case -- before the |srcBuf.init| call will
+            // own |aText| -- we must relinquish ownership manually.
+            js_free(const_cast<char16_t*>(aText));
+        }
+
         return NS_ERROR_UNEXPECTED;
     }
     JSContext* cx = jsapi.cx();
 
-    nsresult rv;
+    JS::SourceText<char16_t> srcBuf;
+    if (NS_WARN_IF(!srcBuf.init(cx, aText, aTextLength, aOwnership))) {
+        return NS_ERROR_FAILURE;
+    }
+
     nsAutoCString urlspec;
-    nsContentUtils::GetWrapperSafeScriptFilename(aDocument, aURI, urlspec, &rv);
+    nsresult rv = aURI->GetSpec(urlspec);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -2232,9 +2322,8 @@ nsXULPrototypeScript::Compile(JS::SourceBufferHolder& aSrcBuf,
       JS::ExposeObjectToActiveJS(scope);
     }
 
-    if (aOffThreadReceiver && JS::CanCompileOffThread(cx, options, aSrcBuf.length())) {
-        if (!JS::CompileOffThread(cx, options,
-                                  aSrcBuf,
+    if (aOffThreadReceiver && JS::CanCompileOffThread(cx, options, aTextLength)) {
+        if (!JS::CompileOffThread(cx, options, srcBuf,
                                   OffThreadScriptReceiverCallback,
                                   static_cast<void*>(aOffThreadReceiver))) {
             return NS_ERROR_OUT_OF_MEMORY;
@@ -2242,24 +2331,11 @@ nsXULPrototypeScript::Compile(JS::SourceBufferHolder& aSrcBuf,
         NotifyOffThreadScriptCompletedRunnable::NoteReceiver(aOffThreadReceiver);
     } else {
         JS::Rooted<JSScript*> script(cx);
-        if (!JS::Compile(cx, options, aSrcBuf, &script))
+        if (!JS::Compile(cx, options, srcBuf, &script))
             return NS_ERROR_OUT_OF_MEMORY;
         Set(script);
     }
     return NS_OK;
-}
-
-nsresult
-nsXULPrototypeScript::Compile(const char16_t* aText,
-                              int32_t aTextLength,
-                              nsIURI* aURI,
-                              uint32_t aLineNo,
-                              nsIDocument* aDocument,
-                              nsIOffThreadScriptReceiver *aOffThreadReceiver /* = nullptr */)
-{
-  JS::SourceBufferHolder srcBuf(aText, aTextLength,
-                                JS::SourceBufferHolder::NoOwnership);
-  return Compile(srcBuf, aURI, aLineNo, aDocument, aOffThreadReceiver);
 }
 
 void

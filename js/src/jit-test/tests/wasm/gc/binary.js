@@ -1,6 +1,4 @@
-if (!wasmGcEnabled()) {
-    quit(0);
-}
+// |jit-test| skip-if: !wasmGcEnabled()
 
 load(libdir + "wasm-binary.js");
 
@@ -30,7 +28,7 @@ const invalidRefNullBody = funcBody({locals:[], body:[
     SelectCode,
     DropCode
 ]});
-checkInvalid(invalidRefNullBody, /invalid nullref type/);
+checkInvalid(invalidRefNullBody, /invalid reference type for ref.null/);
 
 const invalidRefBlockType = funcBody({locals:[], body:[
     BlockCode,

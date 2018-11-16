@@ -48,9 +48,9 @@ impl<'a> FirefoxCapabilities<'a> {
             .get("moz:firefoxOptions")
             .and_then(|x| x.get("binary"))
             .and_then(|x| x.as_str())
-            .map(|x| PathBuf::from(x))
+            .map(PathBuf::from)
             .or_else(|| self.fallback_binary.map(|x| x.clone()))
-            .or_else(|| firefox_default_path())
+            .or_else(firefox_default_path)
     }
 
     fn version(&mut self) -> Option<String> {
@@ -154,6 +154,10 @@ impl<'a> BrowserCapabilities for FirefoxCapabilities<'a> {
         try!(Version::from_str(version).or_else(|x| Err(convert_version_error(x))))
             .matches(comparison)
             .or_else(|x| Err(convert_version_error(x)))
+    }
+
+    fn strict_file_interactability(&mut self, _: &Capabilities) -> WebDriverResult<bool> {
+        Ok(true)
     }
 
     fn accept_proxy(&mut self, _: &Capabilities, _: &Capabilities) -> WebDriverResult<bool> {

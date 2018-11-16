@@ -117,10 +117,10 @@ public:
   virtual void ApplyAsyncProperties(LayerTransactionParent* aLayerTree,
                                     TransformsToSkip aSkip) = 0;
   virtual void SetTestAsyncScrollOffset(const LayersId& aLayersId,
-                                        const FrameMetrics::ViewID& aScrollId,
+                                        const ScrollableLayerGuid::ViewID& aScrollId,
                                         const CSSPoint& aPoint) = 0;
   virtual void SetTestAsyncZoom(const LayersId& aLayersId,
-                                const FrameMetrics::ViewID& aScrollId,
+                                const ScrollableLayerGuid::ViewID& aScrollId,
                                 const LayerToParentLayerScale& aZoom) = 0;
   virtual void FlushApzRepaints(const LayersId& aLayersId) = 0;
   virtual void GetAPZTestData(const LayersId& aLayersId,
@@ -164,7 +164,7 @@ public:
                            CrossProcessMutexHandle aMutexHandle,
                            LayersId aLayersId,
                            uint32_t aApzcId) override;
-  bool StopSharingMetrics(FrameMetrics::ViewID aScrollId,
+  bool StopSharingMetrics(ScrollableLayerGuid::ViewID aScrollId,
                           uint32_t aApzcId) override;
 
   virtual bool IsRemote() const {
@@ -255,10 +255,10 @@ public:
                             TransformsToSkip aSkip) override;
   CompositorAnimationStorage* GetAnimationStorage();
   void SetTestAsyncScrollOffset(const LayersId& aLayersId,
-                                const FrameMetrics::ViewID& aScrollId,
+                                const ScrollableLayerGuid::ViewID& aScrollId,
                                 const CSSPoint& aPoint) override;
   void SetTestAsyncZoom(const LayersId& aLayersId,
-                        const FrameMetrics::ViewID& aScrollId,
+                        const ScrollableLayerGuid::ViewID& aScrollId,
                         const LayerToParentLayerScale& aZoom) override;
   void FlushApzRepaints(const LayersId& aLayersId) override;
   void GetAPZTestData(const LayersId& aLayersId,
@@ -284,7 +284,8 @@ public:
   void NotifyPipelineRendered(const wr::PipelineId& aPipelineId,
                               const wr::Epoch& aEpoch,
                               TimeStamp& aCompositeStart,
-                              TimeStamp& aCompositeEnd);
+                              TimeStamp& aCompositeEnd,
+                              wr::RendererStats* aStats = nullptr);
   RefPtr<AsyncImagePipelineManager> GetAsyncImagePipelineManager() const;
 
   PCompositorWidgetParent* AllocPCompositorWidgetParent(const CompositorWidgetInitData& aInitData) override;
@@ -316,7 +317,7 @@ public:
    * otherwise.
    */
   bool ScheduleResumeOnCompositorThread();
-  bool ScheduleResumeOnCompositorThread(int width, int height);
+  bool ScheduleResumeOnCompositorThread(int x, int y, int width, int height);
 
   void ScheduleComposition();
   void NotifyShadowTreeTransaction(LayersId aId, bool aIsFirstPaint,
@@ -481,15 +482,13 @@ public:
     return mOptions;
   }
 
-  TimeDuration GetVsyncInterval() const {
+  TimeDuration GetVsyncInterval() const override {
     // the variable is called "rate" but really it's an interval
     return mVsyncRate;
   }
 
   PWebRenderBridgeParent* AllocPWebRenderBridgeParent(const wr::PipelineId& aPipelineId,
-                                                      const LayoutDeviceIntSize& aSize,
-                                                      TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                                      wr::IdNamespace* aIdNamespace) override;
+                                                      const LayoutDeviceIntSize& aSize) override;
   bool DeallocPWebRenderBridgeParent(PWebRenderBridgeParent* aActor) override;
   RefPtr<WebRenderBridgeParent> GetWebRenderBridgeParent() const;
   Maybe<TimeStamp> GetTestingTimeStamp() const;
@@ -540,14 +539,14 @@ protected:
   bool DeallocPLayerTransactionParent(PLayerTransactionParent* aLayers) override;
   virtual void ScheduleTask(already_AddRefed<CancelableRunnable>, int);
 
-  void SetEGLSurfaceSize(int width, int height);
+  void SetEGLSurfaceRect(int x, int y, int width, int height);
 
   void InitializeLayerManager(const nsTArray<LayersBackend>& aBackendHints);
 
 public:
   void PauseComposition();
   void ResumeComposition();
-  void ResumeCompositionAndResize(int width, int height);
+  void ResumeCompositionAndResize(int x, int y, int width, int height);
   void Invalidate();
 
 protected:

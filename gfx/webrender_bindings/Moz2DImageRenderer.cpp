@@ -15,6 +15,7 @@
 #include "mozilla/layers/WebRenderDrawEventRecorder.h"
 #include "WebRenderTypes.h"
 #include "webrender_ffi.h"
+#include "GeckoProfiler.h"
 
 #include <unordered_map>
 
@@ -224,6 +225,7 @@ AddBlobFont(WrFontInstanceKey aInstanceKey,
       font.mPlatformOptions = Some(*aPlatformOptions);
     }
     if (aNumVariations) {
+      font.mNumVariations = aNumVariations;
       font.mVariations.reset(new gfx::FontVariation[aNumVariations]);
       PodCopy(font.mVariations.get(), reinterpret_cast<const gfx::FontVariation*>(aVariations), aNumVariations);
     }
@@ -324,6 +326,7 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
                                 const mozilla::wr::DeviceUintRect *aDirtyRect,
                                 Range<uint8_t> aOutput)
 {
+  AUTO_PROFILER_TRACING("WebRender", "RasterizeSingleBlob");
   MOZ_ASSERT(aSize.width > 0 && aSize.height > 0);
   if (aSize.width <= 0 || aSize.height <= 0) {
     return false;
@@ -415,7 +418,7 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
   // them because of CompositorHitTestInfo and merging.
   MOZ_RELEASE_ASSERT(aBlob.length() >= sizeof(size_t));
   size_t indexOffset = *(size_t*)(aBlob.end().get()-sizeof(size_t));
-  MOZ_RELEASE_ASSERT(indexOffset + sizeof(size_t) <= aBlob.length());
+  MOZ_RELEASE_ASSERT(indexOffset <= aBlob.length() - sizeof(size_t));
   Reader reader(aBlob.begin().get()+indexOffset, aBlob.length()-sizeof(size_t)-indexOffset);
 
   bool ret = true;
@@ -444,7 +447,10 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
 
     Range<const uint8_t> blob(aBlob.begin() + offset, aBlob.begin() + end);
     ret = translator.TranslateRecording((char*)blob.begin().get(), blob.length());
-    MOZ_RELEASE_ASSERT(ret);
+    if (!ret) {
+      gfxCriticalNote << "Replay failure: " << translator.GetError();
+      MOZ_RELEASE_ASSERT(false);
+    }
     offset = extra_end;
   }
 

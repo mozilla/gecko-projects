@@ -8,19 +8,20 @@
 var EXPORTED_SYMBOLS = ["PopupBlockingChild"];
 
 ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 class PopupBlockingChild extends ActorChild {
-  constructor(mm) {
-    super(mm);
+  constructor(dispatcher) {
+    super(dispatcher);
 
     this.popupData = null;
     this.popupDataInternal = null;
 
-    mm.addEventListener("pageshow", this, true);
-    mm.addEventListener("pagehide", this, true);
+    this.mm.addEventListener("pageshow", this, true);
+    this.mm.addEventListener("pagehide", this, true);
 
-    mm.addMessageListener("PopupBlocking:UnblockPopup", this);
-    mm.addMessageListener("PopupBlocking:GetBlockedPopupList", this);
+    this.mm.addMessageListener("PopupBlocking:UnblockPopup", this);
+    this.mm.addMessageListener("PopupBlocking:GetBlockedPopupList", this);
   }
 
   receiveMessage(msg) {
@@ -86,6 +87,11 @@ class PopupBlockingChild extends ActorChild {
       this.popupDataInternal = [];
     }
 
+    // Avoid spamming the parent process with too many blocked popups.
+    if (this.popupData.length >= PopupBlockingChild.maxReportedPopups) {
+      return;
+    }
+
     let obj = {
       popupWindowURIspec: ev.popupWindowURI ? ev.popupWindowURI.spec : "about:blank",
       popupWindowFeatures: ev.popupWindowFeatures,
@@ -135,3 +141,6 @@ class PopupBlockingChild extends ActorChild {
       });
   }
 }
+
+XPCOMUtils.defineLazyPreferenceGetter(PopupBlockingChild, "maxReportedPopups",
+  "privacy.popups.maxReported");

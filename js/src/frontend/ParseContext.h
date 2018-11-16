@@ -11,6 +11,7 @@
 
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/ErrorReporter.h"
+#include "frontend/NameCollections.h"
 #include "frontend/SharedContext.h"
 
 namespace js {
@@ -18,6 +19,16 @@ namespace js {
 namespace frontend {
 
 class ParserBase;
+
+const char*
+DeclarationKindString(DeclarationKind kind);
+
+// Returns true if the declaration is `var` or equivalent.
+bool
+DeclarationKindIsVar(DeclarationKind kind);
+
+bool
+DeclarationKindIsParameter(DeclarationKind kind);
 
 // A data structure for tracking used names per parsing session in order to
 // compute which bindings are closed over. Scripts and scopes are numbered

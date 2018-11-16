@@ -15,7 +15,7 @@ add_task(async function() {
   await pushPref("devtools.testing", false);
 
   let tab = await addTab(URL_ROOT + "doc_viewsource.html");
-  let target = TargetFactory.forTab(tab);
+  let target = await TargetFactory.forTab(tab);
   let toolbox = await gDevTools.showToolbox(target, "styleeditor");
   let panel = toolbox.getPanel("styleeditor");
 
@@ -26,7 +26,7 @@ add_task(async function() {
 
   is(store.getState().requests.requests.size, 0, "No network requests appear in the network panel");
 
-  await gDevTools.closeToolbox(target);
+  await toolbox.destroy();
   tab = target = toolbox = panel = null;
   gBrowser.removeCurrentTab();
 });

@@ -7,6 +7,9 @@
 #include "ProcessRedirect.h"
 
 #include "InfallibleVector.h"
+#include "MiddlemanCall.h"
+#include "ipc/ChildInternal.h"
+#include "ipc/ParentInternal.h"
 #include "mozilla/Sprintf.h"
 
 #include <dlfcn.h>
@@ -24,6 +27,272 @@ namespace mozilla {
 namespace recordreplay {
 
 ///////////////////////////////////////////////////////////////////////////////
+// Redirection Skeleton
+///////////////////////////////////////////////////////////////////////////////
+
+static bool
+CallPreambleHook(PreambleFn aPreamble, size_t aCallId, CallArguments* aArguments)
+{
+  PreambleResult result = aPreamble(aArguments);
+  switch (result) {
+  case PreambleResult::Veto:
+    return true;
+  case PreambleResult::PassThrough: {
+    AutoEnsurePassThroughThreadEvents pt;
+    RecordReplayInvokeCall(aCallId, aArguments);
+    return true;
+  }
+  case PreambleResult::Redirect:
+    return false;
+  }
+  Unreachable();
+}
+
+extern "C" {
+
+__attribute__((used)) int
+RecordReplayInterceptCall(int aCallId, CallArguments* aArguments)
+{
+  Redirection& redirection = gRedirections[aCallId];
+
+  // Call the preamble to see if this call needs special handling, even when
+  // events have been passed through.
+  if (redirection.mPreamble) {
+    if (CallPreambleHook(redirection.mPreamble, aCallId, aArguments)) {
+      return 0;
+    }
+  }
+
+  Thread* thread = Thread::Current();
+  Maybe<RecordingEventSection> res;
+  res.emplace(thread);
+
+  if (!res.ref().CanAccessEvents()) {
+    // When events are passed through, invoke the call with the original stack
+    // and register state.
+    if (!thread || thread->PassThroughEvents()) {
+      // RecordReplayRedirectCall will load the function to call from the
+      // return value slot.
+      aArguments->Rval<uint8_t*>() = redirection.mOriginalFunction;
+      return 1;
+    }
+
+    MOZ_RELEASE_ASSERT(thread->HasDivergedFromRecording());
+
+    // After we have diverged from the recording, we can't access the thread's
+    // recording anymore.
+
+    // If the redirection has a middleman preamble hook, call it to see if it
+    // can handle this call. The middleman preamble hook is separate from the
+    // normal preamble hook because entering the RecordingEventSection can
+    // cause the current thread to diverge from the recording; testing for
+    // HasDivergedFromRecording() does not work reliably in the normal preamble.
+    if (redirection.mMiddlemanPreamble) {
+      if (CallPreambleHook(redirection.mMiddlemanPreamble, aCallId, aArguments)) {
+        return 0;
+      }
+    }
+
+    // If the redirection has a middleman call hook, try to perform the call in
+    // the middleman instead.
+    if (redirection.mMiddlemanCall) {
+      if (SendCallToMiddleman(aCallId, aArguments, /* aPopulateOutput = */ true)) {
+        return 0;
+      }
+    }
+
+    if (child::CurrentRepaintCannotFail()) {
+      // EnsureNotDivergedFromRecording is going to force us to crash, so fail
+      // earlier with a more helpful error message.
+      child::ReportFatalError(Nothing(), "Could not perform middleman call: %s\n",
+                              redirection.mName);
+    }
+
+    // Calling any redirection which performs the standard steps will cause
+    // debugger operations that have diverged from the recording to fail.
+    EnsureNotDivergedFromRecording();
+    Unreachable();
+  }
+
+  if (IsRecording()) {
+    // Call the original function, passing through events while we do so.
+    // Destroy the RecordingEventSection so that we don't prevent the file
+    // from being flushed in case we end up blocking.
+    res.reset();
+    thread->SetPassThrough(true);
+    RecordReplayInvokeCall(aCallId, aArguments);
+    thread->SetPassThrough(false);
+    res.emplace(thread);
+  }
+
+  // Save any system error in case we want to record/replay it.
+  ErrorType error = SaveError();
+
+  // Add an event for the thread.
+  thread->Events().RecordOrReplayThreadEvent(CallIdToThreadEvent(aCallId));
+
+  // Save any output produced by the call.
+  if (redirection.mSaveOutput) {
+    redirection.mSaveOutput(thread->Events(), aArguments, &error);
+  }
+
+  // Save information about any potential middleman calls encountered if we
+  // haven't diverged from the recording, in case we diverge and later calls
+  // access data produced by this one.
+  if (IsReplaying() && redirection.mMiddlemanCall) {
+    (void) SendCallToMiddleman(aCallId, aArguments, /* aDiverged = */ false);
+  }
+
+  RestoreError(error);
+  return 0;
+}
+
+// Entry point for all redirections. When generated code jumps here, %rax holds
+// the CallEvent being invoked, and all other registers and stack contents are
+// the same as when the call was originally invoked. This fills in a
+// CallArguments structure with information about the call, before invoking
+// RecordReplayInterceptCall.
+extern size_t
+RecordReplayRedirectCall(...);
+
+__asm(
+"_RecordReplayRedirectCall:"
+
+  // Make space for a CallArguments struct on the stack.
+  "subq $616, %rsp;"
+
+  // Fill in the structure's contents.
+  "movq %rdi, 0(%rsp);"
+  "movq %rsi, 8(%rsp);"
+  "movq %rdx, 16(%rsp);"
+  "movq %rcx, 24(%rsp);"
+  "movq %r8, 32(%rsp);"
+  "movq %r9, 40(%rsp);"
+  "movsd %xmm0, 48(%rsp);"
+  "movsd %xmm1, 56(%rsp);"
+  "movsd %xmm2, 64(%rsp);"
+
+  // Count how many stack arguments we need to save.
+  "movq $64, %rsi;"
+
+  // Enter the loop below. The compiler might not place this block of code
+  // adjacent to the loop, so perform the jump explicitly.
+  "jmp _RecordReplayRedirectCall_Loop;"
+
+  // Save stack arguments into the structure.
+"_RecordReplayRedirectCall_Loop:"
+  "subq $1, %rsi;"
+  "movq 624(%rsp, %rsi, 8), %rdx;" // Ignore the return ip on the stack.
+  "movq %rdx, 104(%rsp, %rsi, 8);"
+  "testq %rsi, %rsi;"
+  "jne _RecordReplayRedirectCall_Loop;"
+
+  // Place the CallEvent being made into the first argument register.
+  "movq %rax, %rdi;"
+
+  // Place the structure's address into the second argument register.
+  "movq %rsp, %rsi;"
+
+  // Determine how to handle this call.
+  "call _RecordReplayInterceptCall;"
+
+  "testq %rax, %rax;"
+  "je RecordReplayRedirectCall_done;"
+
+  // Events are passed through. The function to call has been stored in rval0.
+  // Call the function with the original stack and register state.
+  "movq 0(%rsp), %rdi;"
+  "movq 8(%rsp), %rsi;"
+  "movq 16(%rsp), %rdx;"
+  "movq 24(%rsp), %rcx;"
+  "movq 32(%rsp), %r8;"
+  "movq 40(%rsp), %r9;"
+  "movsd 48(%rsp), %xmm0;"
+  "movsd 56(%rsp), %xmm1;"
+  "movsd 64(%rsp), %xmm2;"
+  "movq 72(%rsp), %rax;"
+  "addq $616, %rsp;"
+  "jmpq *%rax;"
+
+  // The message has been recorded/replayed.
+"RecordReplayRedirectCall_done:"
+  // Restore scalar and floating point return values.
+  "movq 72(%rsp), %rax;"
+  "movq 80(%rsp), %rdx;"
+  "movsd 88(%rsp), %xmm0;"
+  "movsd 96(%rsp), %xmm1;"
+
+  // Pop the structure from the stack.
+  "addq $616, %rsp;"
+
+  // Return to caller.
+  "ret;"
+);
+
+// Call a function address with the specified arguments.
+extern void
+RecordReplayInvokeCallRaw(CallArguments* aArguments, void* aFnPtr);
+
+__asm(
+"_RecordReplayInvokeCallRaw:"
+
+  // Save function pointer in rax.
+  "movq %rsi, %rax;"
+
+  // Save arguments on the stack. This also aligns the stack.
+  "push %rdi;"
+
+  // Count how many stack arguments we need to copy.
+  "movq $64, %rsi;"
+
+  // Enter the loop below. The compiler might not place this block of code
+  // adjacent to the loop, so perform the jump explicitly.
+  "jmp _RecordReplayInvokeCallRaw_Loop;"
+
+  // Copy each stack argument to the stack.
+"_RecordReplayInvokeCallRaw_Loop:"
+  "subq $1, %rsi;"
+  "movq 104(%rdi, %rsi, 8), %rdx;"
+  "push %rdx;"
+  "testq %rsi, %rsi;"
+  "jne _RecordReplayInvokeCallRaw_Loop;"
+
+  // Copy each register argument into the appropriate register.
+  "movq 8(%rdi), %rsi;"
+  "movq 16(%rdi), %rdx;"
+  "movq 24(%rdi), %rcx;"
+  "movq 32(%rdi), %r8;"
+  "movq 40(%rdi), %r9;"
+  "movsd 48(%rdi), %xmm0;"
+  "movsd 56(%rdi), %xmm1;"
+  "movsd 64(%rdi), %xmm2;"
+  "movq 0(%rdi), %rdi;"
+
+  // Call the saved function pointer.
+  "callq *%rax;"
+
+  // Pop the copied stack arguments.
+  "addq $512, %rsp;"
+
+  // Save any return values to the arguments.
+  "pop %rdi;"
+  "movq %rax, 72(%rdi);"
+  "movq %rdx, 80(%rdi);"
+  "movsd %xmm0, 88(%rdi);"
+  "movsd %xmm1, 96(%rdi);"
+
+  "ret;"
+);
+
+} // extern "C"
+
+MOZ_NEVER_INLINE void
+RecordReplayInvokeCall(size_t aCallId, CallArguments* aArguments)
+{
+  RecordReplayInvokeCallRaw(aArguments, OriginalFunction(aCallId));
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Library API Redirections
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -38,6 +307,21 @@ namespace recordreplay {
 // arbitrary symbol within an arbitrary block of code. We are doing a best
 // effort sort of thing, and any failures will be noted for reporting and
 // without touching the original code at all.
+
+static void
+PrintRedirectSpew(const char* aFormat, ...)
+{
+  static bool spewEnabled = TestEnv("MOZ_RECORD_REPLAY_REDIRECT_SPEW");
+
+  if (spewEnabled) {
+    va_list ap;
+    va_start(ap, aFormat);
+    char buf[4096];
+    VsprintfLiteral(buf, aFormat, ap);
+    va_end(ap);
+    Print("%s", buf);
+  }
+}
 
 // Keep track of the jumps we know about which could affect the validity if a
 // code patch.
@@ -63,8 +347,25 @@ static StaticInfallibleVector<JumpPatch> gJumpPatches;
 static void
 AddJumpPatch(uint8_t* aStart, uint8_t* aTarget, bool aShort)
 {
+  PrintRedirectSpew("Adding jump patch: %p -> %p [Short %d]\n", aStart, aTarget, aShort);
   gInternalJumps.emplaceBack(aStart, aTarget);
   gJumpPatches.emplaceBack(aStart, aTarget, aShort);
+}
+
+static void
+AddLongJumpPatch(uint8_t* aStart, uint8_t* aTarget)
+{
+  AddJumpPatch(aStart, aTarget, /* aShort = */ false);
+}
+
+static bool
+AddShortJumpPatch(uint8_t* aStart, uint8_t* aTarget)
+{
+  if (!Assembler::CanPatchShortJump(aStart, aTarget)) {
+    return false;
+  }
+  AddJumpPatch(aStart, aTarget, /* aShort = */ true);
+  return true;
 }
 
 // A range of instructions to clobber at the end of redirecting.
@@ -83,6 +384,7 @@ static void
 AddClobberPatch(uint8_t* aStart, uint8_t* aEnd)
 {
   if (aStart < aEnd) {
+    PrintRedirectSpew("Adding clobber patch: [%p, %p]\n", aStart, aEnd);
     gClobberPatches.emplaceBack(aStart, aEnd);
   }
 }
@@ -116,12 +418,16 @@ DecodeInstruction(uint8_t* aIp, ud_t* aUd)
 static uint8_t*
 MaybeInternalJumpTarget(uint8_t* aIpStart, uint8_t* aIpEnd)
 {
+  PrintRedirectSpew("Checking for internal jump targets: [%p, %p]\n", aIpStart, aIpEnd);
+
   // The start and end have to be associated with the same symbol, as otherwise
   // a jump could come into the start of the later symbol.
   const char* startName = SymbolNameRaw(aIpStart);
   const char* endName = SymbolNameRaw(aIpEnd - 1);
   if (strcmp(startName, endName)) {
-    return SymbolBase(aIpEnd - 1);
+    uint8_t* target = SymbolBase(aIpEnd - 1);
+    PrintRedirectSpew("Failed [%p]: Different symbol names: %s %s\n", target, startName, endName);
+    return target;
   }
 
   // Look for any internal jumps from outside the patch range into the middle
@@ -129,6 +435,7 @@ MaybeInternalJumpTarget(uint8_t* aIpStart, uint8_t* aIpEnd)
   for (auto jump : gInternalJumps) {
     if (!(jump.first >= aIpStart && jump.first < aIpEnd) &&
         jump.second > aIpStart && jump.second < aIpEnd) {
+      PrintRedirectSpew("Failed [%p]: Internal jump target\n", jump.second);
       return jump.second;
     }
   }
@@ -137,11 +444,13 @@ MaybeInternalJumpTarget(uint8_t* aIpStart, uint8_t* aIpEnd)
   for (auto patch : gJumpPatches) {
     uint8_t* end = patch.mStart + (patch.mShort ? ShortJumpBytes : JumpBytesClobberRax);
     if (MemoryIntersects(aIpStart, aIpEnd - aIpStart, patch.mStart, end - patch.mStart)) {
+      PrintRedirectSpew("Failed [%p]: Patched region\n", end);
       return end;
     }
   }
   for (auto patch : gClobberPatches) {
     if (MemoryIntersects(aIpStart, aIpEnd - aIpStart, patch.mStart, patch.mEnd - patch.mStart)) {
+      PrintRedirectSpew("Failed [%p]: Clobbered region\n", patch.mEnd);
       return patch.mEnd;
     }
   }
@@ -159,15 +468,20 @@ MaybeInternalJumpTarget(uint8_t* aIpStart, uint8_t* aIpEnd)
          !strstr(startName, "CTRunGetPositionsPtr")) ||
         (strstr(startName, "CTRunGetStringIndices") &&
          !strstr(startName, "CTRunGetStringIndicesPtr")) ||
-        strstr(startName, "CGColorSpaceCreateDeviceRGB") ||
+        (strstr(startName, "CGColorSpaceCreateDeviceGray") &&
+         !strstr(startName, "CGColorSpaceCreateDeviceGray_block_invoke")) ||
+        (strstr(startName, "CGColorSpaceCreateDeviceRGB") &&
+         !strstr(startName, "CGColorSpaceCreateDeviceRGB_block_invoke")) ||
         // For these functions, there is a syscall near the beginning which
         // other system threads might be inside.
         strstr(startName, "__workq_kernreturn") ||
         strstr(startName, "kevent64")) {
+      PrintRedirectSpew("Failed [%p]: Vetoed by annotation\n", aIpEnd - 1);
       return aIpEnd - 1;
     }
   }
 
+  PrintRedirectSpew("Success!\n");
   return nullptr;
 }
 
@@ -183,18 +497,18 @@ RedirectFailure(const char* aFormat, ...)
   VsprintfLiteral(buf, aFormat, ap);
   va_end(ap);
   gRedirectFailures.emplaceBack(strdup(buf));
+
+  PrintRedirectSpew("Redirection failure: %s\n", buf);
 }
 
 static void
 UnknownInstruction(const char* aName, uint8_t* aIp, size_t aNbytes)
 {
-  char buf[4096];
-  char* ptr = buf;
+  nsCString byteData;
   for (size_t i = 0; i < aNbytes; i++) {
-    int written = snprintf(ptr, sizeof(buf) - (ptr - buf), " %d", (int) aIp[i]);
-    ptr += written;
+    byteData.AppendPrintf(" %d", (int) aIp[i]);
   }
-  RedirectFailure("Unknown instruction in %s:%s", aName, buf);
+  RedirectFailure("Unknown instruction in %s:%s", aName, byteData.get());
 }
 
 // Try to emit instructions to |aAssembler| with equivalent behavior to any
@@ -324,6 +638,35 @@ CopySpecialInstruction(uint8_t* aIp, ud_t* aUd, size_t aNbytes, Assembler& aAsse
     }
   }
 
+  if (mnemonic == UD_Ixchg) {
+    const ud_operand* dst = ud_insn_opr(aUd, 0);
+    const ud_operand* src = ud_insn_opr(aUd, 1);
+    if (src->type == UD_OP_REG && src->size == 8 &&
+        dst->type == UD_OP_MEM && dst->base == UD_R_RIP && !dst->index && dst->offset == 32) {
+      // xchgb reg, $offset32(%rip)
+      int reg = Assembler::NormalizeRegister(src->base);
+      if (!reg) {
+        return false;
+      }
+      uint8_t* addr = aIp + aNbytes + dst->lval.sdword;
+      if (reg == UD_R_RBX) {
+        aAssembler.PushRax();
+        aAssembler.MoveImmediateToRax(addr);
+        aAssembler.ExchangeByteRbxWithAddressAtRax();
+        aAssembler.PopRax();
+      } else {
+        aAssembler.PushRbx();
+        aAssembler.PushRax();
+        aAssembler.MoveImmediateToRax(addr);
+        aAssembler.MoveRaxToRegister(UD_R_RBX);
+        aAssembler.PopRax();
+        aAssembler.ExchangeByteRegisterWithAddressAtRbx(reg);
+        aAssembler.PopRbx();
+      }
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -388,8 +731,6 @@ static uint8_t*
 CopyInstructions(const char* aName, uint8_t* aIpStart, uint8_t* aIpEnd,
                  Assembler& aAssembler)
 {
-  MOZ_RELEASE_ASSERT(!MaybeInternalJumpTarget(aIpStart, aIpEnd));
-
   uint8_t* ip = aIpStart;
   while (ip < aIpEnd) {
     ip += CopyInstruction(aName, ip, aAssembler);
@@ -413,12 +754,22 @@ FunctionStartAddress(Redirection& aRedirection)
   return addr;
 }
 
+// Generate code to set %rax and enter RecordReplayRedirectCall.
+static uint8_t*
+GenerateRedirectStub(Assembler& aAssembler, size_t aCallId)
+{
+  uint8_t* newFunction = aAssembler.Current();
+  aAssembler.MoveImmediateToRax((void*) aCallId);
+  aAssembler.Jump(BitwiseCast<void*>(RecordReplayRedirectCall));
+  return newFunction;
+}
+
 // Setup a redirection: overwrite the machine code for its base function, and
 // fill in its original function, to satisfy the function pointer behaviors
 // described in the Redirection structure. aCursor and aCursorEnd are used to
 // allocate executable memory for use in the redirection.
 static void
-Redirect(Redirection& aRedirection, Assembler& aAssembler, bool aFirstPass)
+Redirect(size_t aCallId, Redirection& aRedirection, Assembler& aAssembler, bool aFirstPass)
 {
   // The patching we do here might fail: it isn't possible to redirect an
   // arbitrary instruction pointer within an arbitrary block of code. This code
@@ -440,6 +791,9 @@ Redirect(Redirection& aRedirection, Assembler& aAssembler, bool aFirstPass)
     MOZ_RELEASE_ASSERT(!aFirstPass);
     return;
   }
+
+  PrintRedirectSpew("Redirecting [FirstPass %d] %s: %p\n",
+                    aFirstPass, aRedirection.mName, functionStart);
 
   // First, see if we can overwrite JumpBytesClobberRax bytes of instructions
   // at the base function with a direct jump to the new function. Rax is never
@@ -475,7 +829,8 @@ Redirect(Redirection& aRedirection, Assembler& aAssembler, bool aFirstPass)
     aAssembler.Jump(ro);
 
     // Emit jump J0.
-    AddJumpPatch(functionStart, aRedirection.mNewFunction, /* aShort = */ false);
+    uint8_t* newFunction = GenerateRedirectStub(aAssembler, aCallId);
+    AddLongJumpPatch(functionStart, newFunction);
     AddClobberPatch(functionStart + JumpBytesClobberRax, ro);
     return;
   }
@@ -508,8 +863,9 @@ Redirect(Redirection& aRedirection, Assembler& aAssembler, bool aFirstPass)
     return;
   }
 
-  // The original symbol must have enough bytes to insert a short jump.
-  MOZ_RELEASE_ASSERT(!MaybeInternalJumpTarget(ro, ro + ShortJumpBytes));
+  if (MaybeInternalJumpTarget(ro, ro + ShortJumpBytes)) {
+    RedirectFailure("Can't patch short jump for %s", aRedirection.mName);
+  }
 
   // Copy AA into generated code.
   aRedirection.mOriginalFunction = aAssembler.Current();
@@ -539,14 +895,17 @@ Redirect(Redirection& aRedirection, Assembler& aAssembler, bool aFirstPass)
   aAssembler.Jump(afterip);
 
   // Emit jump J1.
-  AddJumpPatch(ro, firstJumpTarget, /* aShort = */ false);
+  AddLongJumpPatch(ro, firstJumpTarget);
 
   // Emit jump J2.
-  AddJumpPatch(ro + JumpBytesClobberRax, aRedirection.mNewFunction, /* aShort = */ false);
+  uint8_t* newFunction = GenerateRedirectStub(aAssembler, aCallId);
+  AddLongJumpPatch(ro + JumpBytesClobberRax, newFunction);
   AddClobberPatch(ro + 2 * JumpBytesClobberRax, afterip);
 
   // Emit jump J0.
-  AddJumpPatch(functionStart, ro + JumpBytesClobberRax, /* aShort = */ true);
+  if (!AddShortJumpPatch(functionStart, ro + JumpBytesClobberRax)) {
+    RedirectFailure("Short jump distance too long for %s", aRedirection.mName);
+  }
   AddClobberPatch(functionStart + ShortJumpBytes, nro);
 }
 
@@ -558,9 +917,8 @@ EarlyInitializeRedirections()
     if (!redirection.mName) {
       break;
     }
-    MOZ_ASSERT(!redirection.mBaseFunction);
-    MOZ_ASSERT(redirection.mNewFunction);
-    MOZ_ASSERT(!redirection.mOriginalFunction);
+    MOZ_RELEASE_ASSERT(!redirection.mBaseFunction);
+    MOZ_RELEASE_ASSERT(!redirection.mOriginalFunction);
 
     redirection.mBaseFunction = FunctionStartAddress(redirection);
     redirection.mOriginalFunction = redirection.mBaseFunction;
@@ -582,7 +940,7 @@ EarlyInitializeRedirections()
 bool
 InitializeRedirections()
 {
-  MOZ_ASSERT(IsRecordingOrReplaying());
+  MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
 
   {
     Assembler assembler;
@@ -592,7 +950,7 @@ InitializeRedirections()
       if (!redirection.mName) {
         break;
       }
-      Redirect(redirection, assembler, /* aFirstPass = */ true);
+      Redirect(i, redirection, assembler, /* aFirstPass = */ true);
     }
 
     for (size_t i = 0;; i++) {
@@ -600,26 +958,18 @@ InitializeRedirections()
       if (!redirection.mName) {
         break;
       }
-      Redirect(redirection, assembler, /* aFirstPass = */ false);
+      Redirect(i, redirection, assembler, /* aFirstPass = */ false);
     }
   }
 
   // Don't install redirections if we had any failures.
   if (!gRedirectFailures.empty()) {
-    size_t len = 4096;
-    gInitializationFailureMessage = new char[4096];
-    gInitializationFailureMessage[--len] = 0;
-
-    char* ptr = gInitializationFailureMessage;
+    nsCString data;
     for (char* reason : gRedirectFailures) {
-      size_t n = snprintf(ptr, len, "%s\n", reason);
-      if (n >= len) {
-        break;
-      }
-      ptr += n;
-      len -= n;
+      data.AppendPrintf("%s\n", reason);
     }
 
+    gInitializationFailureMessage = strdup(data.get());
     return false;
   }
 

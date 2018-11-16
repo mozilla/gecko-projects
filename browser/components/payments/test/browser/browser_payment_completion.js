@@ -15,6 +15,10 @@ async function setup() {
 }
 
 add_task(async function test_complete_success() {
+  if (!OSKeyStoreTestUtils.canTestOSKeyStoreLogin()) {
+    todo(false, "Cannot test OS key store login on official builds.");
+    return;
+  }
   await setup();
   await BrowserTestUtils.withNewTab({
     gBrowser,
@@ -28,7 +32,11 @@ add_task(async function test_complete_success() {
       }
     );
 
-    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.completePayment);
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.setSecurityCode, {
+      securityCode: "123",
+    });
+
+    await loginAndCompletePayment(frame);
 
     // Add a handler to complete the payment above.
     info("acknowledging the completion from the merchant page");
@@ -43,6 +51,10 @@ add_task(async function test_complete_success() {
 });
 
 add_task(async function test_complete_fail() {
+  if (!OSKeyStoreTestUtils.canTestOSKeyStoreLogin()) {
+    todo(false, "Cannot test OS key store login on official builds.");
+    return;
+  }
   await setup();
   await BrowserTestUtils.withNewTab({
     gBrowser,
@@ -56,8 +68,12 @@ add_task(async function test_complete_fail() {
       }
     );
 
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.setSecurityCode, {
+      securityCode: "456",
+    });
+
     info("clicking pay");
-    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.completePayment);
+    await loginAndCompletePayment(frame);
 
     info("acknowledging the completion from the merchant page");
     let {completeException} = await ContentTask.spawn(browser,
@@ -73,6 +89,10 @@ add_task(async function test_complete_fail() {
 });
 
 add_task(async function test_complete_timeout() {
+  if (!OSKeyStoreTestUtils.canTestOSKeyStoreLogin()) {
+    todo(false, "Cannot test OS key store login on official builds.");
+    return;
+  }
   await setup();
   await BrowserTestUtils.withNewTab({
     gBrowser,
@@ -89,8 +109,12 @@ add_task(async function test_complete_timeout() {
       }
     );
 
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.setSecurityCode, {
+      securityCode: "789",
+    });
+
     info("clicking pay");
-    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.completePayment);
+    await loginAndCompletePayment(frame);
 
     info("acknowledging the completion from the merchant page after a delay");
     let {completeException} = await ContentTask.spawn(browser,

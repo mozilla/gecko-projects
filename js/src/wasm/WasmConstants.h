@@ -39,9 +39,7 @@ enum class SectionId
     Elem                                 = 9,
     Code                                 = 10,
     Data                                 = 11,
-#ifdef ENABLE_WASM_GC
     GcFeatureOptIn                       = 42 // Arbitrary, but fits in 7 bits
-#endif
 };
 
 enum class TypeCode
@@ -104,6 +102,8 @@ enum class Trap
     IndirectCallToNull,
     // call_indirect signature mismatch.
     IndirectCallBadSig,
+    // Dereference null pointer in operation on (Ref T)
+    NullPointerDereference,
 
     // The internal stack space was exhausted. For compatibility, this throws
     // the same over-recursed error as JS.
@@ -141,7 +141,8 @@ enum class MemoryTableFlags
 {
     Default                              = 0x0,
     HasMaximum                           = 0x1,
-    IsShared                             = 0x2
+    IsShared                             = 0x2,
+    HasTableIndex                        = 0x4, // UNOFFICIAL.  There will be a separate flag for memory.
 };
 
 enum class MemoryMasks
@@ -153,7 +154,8 @@ enum class MemoryMasks
 enum class InitializerKind
 {
     Active                               = 0x00,
-    Passive                              = 0x01
+    Passive                              = 0x01,
+    ActiveWithIndex                      = 0x02
 };
 
 enum class Op
@@ -360,6 +362,7 @@ enum class Op
     // GC ops
     RefNull                              = 0xd0,
     RefIsNull                            = 0xd1,
+    RefEq                                = 0xd2, // Unofficial
 
     FirstPrefix                          = 0xfc,
     MiscPrefix                           = 0xfc,
@@ -397,6 +400,18 @@ enum class MiscOp
     TableInit                            = 0x0c,
     TableDrop                            = 0x0d,
     TableCopy                            = 0x0e,
+
+    // Generalized tables (reftypes proposal).  Note, these are unofficial.
+    TableGrow                            = 0x0f,
+    TableGet                             = 0x10,
+    TableSet                             = 0x11,
+    TableSize                            = 0x12,
+
+    // Structure operations.  Note, these are unofficial.
+    StructNew                            = 0x50,
+    StructGet                            = 0x51,
+    StructSet                            = 0x52,
+    StructNarrow                         = 0x53,
 
     Limit
 };
@@ -574,6 +589,7 @@ enum class FieldFlags {
 
 static const unsigned MaxTypes               =  1000000;
 static const unsigned MaxFuncs               =  1000000;
+static const unsigned MaxTables              =   100000;  // TODO: get this into the shared limits spec
 static const unsigned MaxImports             =   100000;
 static const unsigned MaxExports             =   100000;
 static const unsigned MaxGlobals             =  1000000;

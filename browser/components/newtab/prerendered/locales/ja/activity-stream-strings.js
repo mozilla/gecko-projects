@@ -74,10 +74,10 @@ window.gActivityStreamStrings = {
   "topsites_form_image_validation": "画像を読み込めませんでした。別の URL を試してください。",
   "pocket_read_more": "人気のトピック:",
   "pocket_read_even_more": "他の記事を見る",
-  "pocket_more_reccommendations": "More Recommendations",
-  "pocket_learn_more": "Learn More",
-  "pocket_cta_button": "Get Pocket",
-  "pocket_cta_text": "Save the stories you love in Pocket, and fuel your mind with fascinating reads.",
+  "pocket_more_reccommendations": "他のおすすめ",
+  "pocket_how_it_works": "How it works",
+  "pocket_cta_button": "Pocket を入手",
+  "pocket_cta_text": "お気に入りに記事を Pocket に保存して、魅力的な読み物を思う存分楽しみましょう。",
   "highlights_empty_state": "ブラウジング中にあなたが最近訪れたりブックマークしたりした、優れた記事、動画、その他ページの一部をここに表示します。",
   "topstories_empty_state": "すべて既読です。また後で戻って {provider} からのおすすめ記事をチェックしてください。もし待ちきれないなら、人気のトピックを選択すれば、他にもウェブ上の優れた記事を見つけられます。",
   "manual_migration_explanation2": "他のブラウザーからブックマークや履歴、パスワードをインポートして Firefox を使ってみましょう。",
@@ -106,5 +106,7 @@ window.gActivityStreamStrings = {
   "firstrun_terms_of_service": "サービス利用規約",
   "firstrun_privacy_notice": "プライバシーに関する通知",
   "firstrun_continue_to_login": "続ける",
-  "firstrun_skip_login": "この手順をスキップ"
+  "firstrun_skip_login": "この手順をスキップ",
+  "context_menu_title": "Open menu",
+  "pocket_learn_more": "詳細"
 };

@@ -141,7 +141,7 @@ this.HighlightsFeed = class HighlightsFeed {
       numItems: MANY_EXTRA_LENGTH,
       excludeBookmarks: !this.store.getState().Prefs.values["section.highlights.includeBookmarks"],
       excludeHistory: !this.store.getState().Prefs.values["section.highlights.includeVisited"],
-      excludePocket: !this.store.getState().Prefs.values["section.highlights.includePocket"]
+      excludePocket: !this.store.getState().Prefs.values["section.highlights.includePocket"],
     });
 
     if (this.store.getState().Prefs.values["section.highlights.includeDownloads"]) {
@@ -149,8 +149,10 @@ this.HighlightsFeed = class HighlightsFeed {
       let results = await this.downloadsManager.getDownloads(RECENT_DOWNLOAD_THRESHOLD, {numItems: 1, onlySucceeded: true, onlyExists: true});
       if (results.length) {
         // We only want 1 download, the most recent one
-        results = NewTabUtils.activityStreamProvider._processHighlights(results, {numItems: 1}, "download");
-        manyPages.push(...results);
+        manyPages.push({
+          ...results[0],
+          type: "download",
+        });
       }
     }
 
@@ -191,7 +193,7 @@ this.HighlightsFeed = class HighlightsFeed {
         hasImage: page.type !== "download", // Downloads do not have an image - all else types fall back to a screenshot
         hostname,
         type: page.type,
-        pocket_id: page.pocket_id
+        pocket_id: page.pocket_id,
       });
 
       // Add the "bookmark", "pocket", or not-skipped "history"

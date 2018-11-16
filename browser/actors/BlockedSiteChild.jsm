@@ -8,6 +8,8 @@ ChromeUtils.import("resource://gre/modules/Services.jsm");
 var EXPORTED_SYMBOLS = ["BlockedSiteChild"];
 
 ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
+ChromeUtils.defineModuleGetter(this, "Utils",
+  "resource://gre/modules/sessionstore/Utils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "SafeBrowsing",
                                "resource://gre/modules/SafeBrowsing.jsm");
@@ -29,7 +31,9 @@ function getSiteBlockedErrorDetails(docShell) {
                              .finalize();
       }
 
+      let triggeringPrincipal = docShell.failedChannel.loadInfo ? Utils.serializePrincipal(docShell.failedChannel.loadInfo.triggeringPrincipal) : null;
       blockedInfo = { list: classifiedChannel.matchedList,
+                      triggeringPrincipal,
                       provider: classifiedChannel.matchedProvider,
                       uri: reportUri.asciiSpec };
     }
@@ -71,7 +75,7 @@ class BlockedSiteChild extends ActorChild {
     let desc = Services.prefs.getCharPref(
       "browser.safebrowsing.provider." + provider + ".reportURL", "");
     if (desc) {
-      doc.getElementById("error_desc_link").setAttribute("href", desc + aEvent.detail.url);
+      doc.getElementById("error_desc_link").setAttribute("href", desc + encodeURIComponent(aEvent.detail.url));
     }
 
     // Set other links in error details.

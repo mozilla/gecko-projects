@@ -588,7 +588,7 @@ class CodeTier
         if (tier == Tier::Baseline) {
             return mutexid::WasmLazyStubsTier1;
         }
-        MOZ_ASSERT(tier == Tier::Ion);
+        MOZ_ASSERT(tier == Tier::Optimized);
         return mutexid::WasmLazyStubsTier2;
     }
 
@@ -686,11 +686,13 @@ class Code : public ShareableBase<Code>
     SharedMetadata                      metadata_;
     ExclusiveData<CacheableCharsVector> profilingLabels_;
     JumpTables                          jumpTables_;
+    StructTypeVector                    structTypes_;
 
   public:
     Code(UniqueCodeTier tier1,
          const Metadata& metadata,
-         JumpTables&& maybeJumpTables);
+         JumpTables&& maybeJumpTables,
+         StructTypeVector&& structTypes);
     bool initialized() const { return tier1_->initialized(); }
 
     bool initialize(const LinkData& linkData);
@@ -714,6 +716,7 @@ class Code : public ShareableBase<Code>
 
     const CodeTier& codeTier(Tier tier) const;
     const Metadata& metadata() const { return *metadata_; }
+    const StructTypeVector& structTypes() const { return structTypes_; }
 
     const ModuleSegment& segment(Tier iter) const {
         return codeTier(iter).segment();

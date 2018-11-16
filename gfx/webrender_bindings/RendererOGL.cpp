@@ -8,6 +8,7 @@
 #include "GLContext.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/gfxVars.h"
+#include "mozilla/gfx/Types.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/LayersTypes.h"
@@ -67,7 +68,7 @@ RendererOGL::RendererOGL(RefPtr<RenderThread>&& aThread,
 RendererOGL::~RendererOGL()
 {
   MOZ_COUNT_DTOR(RendererOGL);
-  if (!mCompositor->gl()->MakeCurrent()) {
+  if (!mCompositor->MakeCurrent()) {
     gfxCriticalNote << "Failed to make render context current during destroying.";
     // Leak resources!
     return;
@@ -94,7 +95,7 @@ RendererOGL::Update()
     wr_renderer_set_debug_flags(mRenderer, mDebugFlags);
   }
 
-  if (gl()->MakeCurrent()) {
+  if (mCompositor->MakeCurrent()) {
     wr_renderer_update(mRenderer);
   }
 }
@@ -106,11 +107,14 @@ DoNotifyWebRenderContextPurge(layers::CompositorBridgeParent* aBridge)
 }
 
 bool
-RendererOGL::UpdateAndRender(bool aReadback)
+RendererOGL::UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize,
+                             const Maybe<Range<uint8_t>>& aReadbackBuffer,
+                             bool aHadSlowFrame,
+                             RendererStats* aOutStats)
 {
   uint32_t flags = gfx::gfxVars::WebRenderDebugFlags();
   // Disable debug flags during readback
-  if (aReadback) {
+  if (aReadbackBuffer.isSome()) {
     flags = 0;
   }
 
@@ -143,8 +147,16 @@ RendererOGL::UpdateAndRender(bool aReadback)
 
   auto size = mCompositor->GetBufferSize();
 
-  if (!wr_renderer_render(mRenderer, size.width, size.height)) {
+  if (!wr_renderer_render(mRenderer, size.width, size.height, aHadSlowFrame, aOutStats)) {
     NotifyWebRenderError(WebRenderError::RENDER);
+  }
+
+  if (aReadbackBuffer.isSome()) {
+    MOZ_ASSERT(aReadbackSize.isSome());
+    wr_renderer_readback(mRenderer,
+                         aReadbackSize.ref().width, aReadbackSize.ref().height,
+                         &aReadbackBuffer.ref()[0],
+                         aReadbackBuffer.ref().length());
   }
 
   mCompositor->EndFrame();
@@ -160,6 +172,19 @@ RendererOGL::UpdateAndRender(bool aReadback)
   mFrameStartTime = TimeStamp();
 #endif
 
+  // TODO: Flush pending actions such as texture deletions/unlocks and
+  //       textureHosts recycling.
+
+  return true;
+}
+
+void
+RendererOGL::CheckGraphicsResetStatus()
+{
+  if (!mCompositor || !mCompositor->gl()) {
+    return;
+  }
+
   gl::GLContext* gl = mCompositor->gl();
   if (gl->IsSupported(gl::GLFeature::robustness)) {
     GLenum resetStatus = gl->fGetGraphicsResetStatus();
@@ -171,11 +196,12 @@ RendererOGL::UpdateAndRender(bool aReadback)
       ));
     }
   }
+}
 
-  // TODO: Flush pending actions such as texture deletions/unlocks and
-  //       textureHosts recycling.
-
-  return true;
+void
+RendererOGL::WaitForGPU()
+{
+  mCompositor->WaitForGPU();
 }
 
 void
@@ -213,16 +239,33 @@ RendererOGL::SetFrameStartTime(const TimeStamp& aTime)
   mFrameStartTime = aTime;
 }
 
-wr::WrPipelineInfo
+RefPtr<WebRenderPipelineInfo>
 RendererOGL::FlushPipelineInfo()
 {
-  return wr_renderer_flush_pipeline_info(mRenderer);
+  auto info = wr_renderer_flush_pipeline_info(mRenderer);
+  return new WebRenderPipelineInfo(info);
 }
 
 RenderTextureHost*
 RendererOGL::GetRenderTexture(wr::WrExternalImageId aExternalImageId)
 {
   return mThread->GetRenderTexture(aExternalImageId);
+}
+
+void
+RendererOGL::AccumulateMemoryReport(MemoryReport* aReport)
+{
+  wr_renderer_accumulate_memory_report(GetRenderer(), aReport);
+
+  LayoutDeviceIntSize size = mCompositor->GetBufferSize();
+
+  // Assume BGRA8 for the format since it's not exposed anywhere,
+  // and all compositor backends should be using that.
+  uintptr_t swapChainSize = size.width * size.height * 
+                            BytesPerPixel(SurfaceFormat::B8G8R8A8) *
+                            (mCompositor->UseTripleBuffering() ? 3 : 2);
+  aReport->swap_chain += swapChainSize;
+  aReport->total_gpu_bytes_allocated += swapChainSize;
 }
 
 static void

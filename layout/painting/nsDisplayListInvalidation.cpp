@@ -125,12 +125,14 @@ nsDisplaySolidColorRegionGeometry::MoveBy(const nsPoint& aOffset)
 }
 
 nsDisplaySVGEffectGeometry::nsDisplaySVGEffectGeometry(
-  nsDisplaySVGEffects* aItem,
+  nsDisplayEffectsBase* aItem,
   nsDisplayListBuilder* aBuilder)
   : nsDisplayItemGeometry(aItem, aBuilder)
   , mBBox(aItem->BBoxInUserSpace())
   , mUserSpaceOffset(aItem->UserSpaceOffset())
   , mFrameOffsetToReferenceFrame(aItem->ToReferenceFrame())
+  , mOpacity(aItem->Frame()->StyleEffects()->mOpacity)
+  , mHandleOpacity(aItem->ShouldHandleOpacity())
 {
 }
 
@@ -141,18 +143,17 @@ nsDisplaySVGEffectGeometry::MoveBy(const nsPoint& aOffset)
   mFrameOffsetToReferenceFrame += aOffset;
 }
 
-nsDisplayMaskGeometry::nsDisplayMaskGeometry(nsDisplayMask* aItem,
-                                             nsDisplayListBuilder* aBuilder)
+nsDisplayMasksAndClipPathsGeometry::nsDisplayMasksAndClipPathsGeometry(
+                                      nsDisplayMasksAndClipPaths* aItem,
+                                      nsDisplayListBuilder* aBuilder)
   : nsDisplaySVGEffectGeometry(aItem, aBuilder)
   , nsImageGeometryMixin(aItem, aBuilder)
   , mDestRects(aItem->GetDestRects())
-  , mOpacity(aItem->Frame()->StyleEffects()->mOpacity)
-  , mHandleOpacity(aItem->ShouldHandleOpacity())
 {
 }
 
-nsDisplayFilterGeometry::nsDisplayFilterGeometry(nsDisplayFilter* aItem,
-                                                 nsDisplayListBuilder* aBuilder)
+nsDisplayFiltersGeometry::nsDisplayFiltersGeometry(nsDisplayFilters* aItem,
+                                                   nsDisplayListBuilder* aBuilder)
   : nsDisplaySVGEffectGeometry(aItem, aBuilder)
   , nsImageGeometryMixin(aItem, aBuilder)
 {

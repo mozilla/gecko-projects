@@ -84,6 +84,8 @@
 #include "mozilla/layers/CompositorSession.h"
 #include "VRManagerChild.h"
 #include "gfxConfig.h"
+#include "nsView.h"
+#include "nsViewManager.h"
 
 #ifdef DEBUG
 #include "nsIObserver.h"
@@ -1023,7 +1025,7 @@ nsBaseWidget::SetConfirmedTargetAPZC(uint64_t aInputBlockId,
 
 void
 nsBaseWidget::UpdateZoomConstraints(const uint32_t& aPresShellId,
-                                    const FrameMetrics::ViewID& aViewId,
+                                    const ScrollableLayerGuid::ViewID& aViewId,
                                     const Maybe<ZoomConstraints>& aConstraints)
 {
   if (!mCompositorSession || !mAPZC) {
@@ -1313,6 +1315,12 @@ nsBaseWidget::CreateCompositorSession(int aWidth,
   do {
     CreateCompositorVsyncDispatcher();
 
+    gfx::GPUProcessManager* gpu = gfx::GPUProcessManager::Get();
+    // Make sure GPU process is ready for use.
+    // If it failed to connect to GPU process, GPU process usage is disabled in EnsureGPUReady().
+    // It could update gfxVars and gfxConfigs.
+    gpu->EnsureGPUReady();
+
     // If widget type does not supports acceleration, we use ClientLayerManager
     // even when gfxVars::UseWebRender() is true. WebRender could coexist only
     // with BasicCompositor.
@@ -1338,7 +1346,6 @@ nsBaseWidget::CreateCompositorSession(int aWidth,
     }
 
     bool retry = false;
-    gfx::GPUProcessManager* gpu = gfx::GPUProcessManager::Get();
     mCompositorSession = gpu->CreateTopLevelCompositor(
       this,
       lm,
@@ -1974,7 +1981,7 @@ nsBaseWidget::GetNativeTextEventDispatcherListener()
 
 void
 nsBaseWidget::ZoomToRect(const uint32_t& aPresShellId,
-                         const FrameMetrics::ViewID& aViewId,
+                         const ScrollableLayerGuid::ViewID& aViewId,
                          const CSSRect& aRect,
                          const uint32_t& aFlags)
 {
@@ -2074,6 +2081,12 @@ nsBaseWidget::GetWidgetScreen()
                                deskBounds.Width(), deskBounds.Height(),
                                getter_AddRefs(screen));
   return screen.forget();
+}
+
+mozilla::DesktopToLayoutDeviceScale
+nsBaseWidget::GetDesktopToDeviceScaleByScreen()
+{
+  return (nsView::GetViewFor(this)->GetViewManager()->GetDeviceContext())->GetDesktopToDeviceScale();
 }
 
 nsresult

@@ -1783,6 +1783,7 @@ function setupPageHeader() {
     "https://docs.telemetry.mozilla.org/",
     "https://firefox-source-docs.mozilla.org/toolkit/components/telemetry/telemetry/index.html",
     "https://telemetry.mozilla.org/",
+    "https://telemetry.mozilla.org/probe-dictionary/",
   ];
   let htmlLink = document.querySelectorAll("#home-section > ul > li > a");
   htmlLink.forEach((a, index) => {
@@ -2074,10 +2075,11 @@ function onLoad() {
 
   adjustHeaderState();
 
+  urlStateRestore();
+
   // Update ping data when async Telemetry init is finished.
   Telemetry.asyncFetchTelemetryData(async () => {
     await PingPicker.update();
-    urlStateRestore();
   });
 }
 

@@ -8,6 +8,7 @@
 #define FRAMELAYERBUILDER_H_
 
 #include "nsAutoPtr.h"
+#include "nsCSSPropertyIDSet.h"
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
 #include "nsTArray.h"
@@ -27,7 +28,7 @@ class nsDisplayList;
 class nsDisplayItem;
 class gfxContext;
 class nsDisplayItemGeometry;
-class nsDisplayMask;
+class nsDisplayMasksAndClipPaths;
 
 namespace mozilla {
 struct ActiveScrolledRoot;
@@ -53,7 +54,8 @@ enum class DisplayItemEntryType
   PUSH_OPACITY_WITH_BG,
   POP_OPACITY,
   PUSH_TRANSFORM,
-  POP_TRANSFORM
+  POP_TRANSFORM,
+  HIT_TEST_INFO
 };
 
 /**
@@ -507,6 +509,24 @@ public:
    */
   static Layer* GetDedicatedLayer(nsIFrame* aFrame,
                                   DisplayItemType aDisplayItemType);
+
+  using CompositorAnimatableDisplayItemTypes =
+    Array<DisplayItemType, nsCSSPropertyIDSet::CompositorAnimatableCount()>;
+  using AnimationGenerationCallback =
+    std::function<bool(const Maybe<uint64_t>& aGeneration,
+                       DisplayItemType aDisplayItemType)>;
+  /**
+   * Enumerates layers for the given display item types and calls |aCallback|
+   * with the animation generation for the layer.  If there is no corresponding
+   * layer for the display item or the layer has no animation, the animation
+   * generation is Nothing().
+   *
+   * The enumeration stops if |aCallback| returns false.
+   */
+  static void EnumerateGenerationForDedicatedLayers(
+    const nsIFrame* aFrame,
+    const CompositorAnimatableDisplayItemTypes& aDisplayItemTypes,
+    const AnimationGenerationCallback& aCallback);
 
   /**
    * This callback must be provided to EndTransaction. The callback data

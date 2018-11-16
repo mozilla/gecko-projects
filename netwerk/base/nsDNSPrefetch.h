@@ -6,7 +6,7 @@
 #ifndef nsDNSPrefetch_h___
 #define nsDNSPrefetch_h___
 
-#include "nsWeakReference.h"
+#include "nsIWeakReferenceUtils.h"
 #include "nsString.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Attributes.h"
@@ -44,6 +44,7 @@ public:
 
 private:
     nsCString mHostname;
+    bool mIsHttps;
     mozilla::OriginAttributes mOriginAttributes;
     bool mStoreTiming;
     mozilla::TimeStamp mStartTimestamp;

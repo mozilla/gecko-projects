@@ -20,7 +20,7 @@ var { Toolbox } = require("devtools/client/framework/toolbox");
 
 var { require: browserRequire } = BrowserLoader({
   baseURI: "resource://devtools/client/shared/",
-  window
+  window,
 });
 
 const React = browserRequire("devtools/client/shared/vendor/react");
@@ -132,7 +132,7 @@ var TEST_TREE = {
     L: [],
     M: ["N"],
     N: ["O"],
-    O: []
+    O: [],
   },
   parent: {
     A: null,
@@ -149,7 +149,7 @@ var TEST_TREE = {
     L: "E",
     M: null,
     N: "M",
-    O: "N"
+    O: "N",
   },
   expanded: new Set(),
 };
@@ -158,7 +158,7 @@ var TEST_TREE = {
  * Frame
  */
 function checkFrameString({
-  el, file, line, column, source, functionName, shouldLink, tooltip
+  el, file, line, column, source, functionName, shouldLink, tooltip,
 }) {
   const $ = selector => el.querySelector(selector);
 
@@ -189,6 +189,21 @@ function checkFrameString({
     ok(!$line, "Should not have an element for `line`");
   }
 
+  if (functionName != null) {
+    is($func.textContent, functionName, "Correct function name");
+  } else {
+    ok(!$func, "Should not have an element for `functionName`");
+  }
+}
+
+function checkSmartFrameString({ el, location, functionName, tooltip }) {
+  const $ = selector => el.querySelector(selector);
+
+  const $func = $(".title");
+  const $location = $(".location");
+
+  is($location.textContent, location, "Correct filename");
+  is(el.getAttribute("title"), tooltip, "Correct tooltip");
   if (functionName != null) {
     is($func.textContent, functionName, "Correct function name");
   } else {
@@ -233,4 +248,14 @@ async function createComponentTest(factory, props) {
     component,
     $: (s) => container.querySelector(s),
   };
+}
+
+async function waitFor(condition = () => true, delay = 50) {
+  do {
+    const res = condition();
+    if (res) {
+      return res;
+    }
+    await new Promise(resolve => setTimeout(resolve, delay));
+  } while (true);
 }

@@ -1,6 +1,4 @@
-if (!wasmGcEnabled()) {
-    quit(0);
-}
+// |jit-test| skip-if: !wasmGcEnabled()
 
 // Encoding.  If the section is present it must be first.
 
@@ -20,7 +18,11 @@ assertErrorMessage(() => new WebAssembly.Module(bad_order),
                    WebAssembly.CompileError,
                    /expected custom section/);
 
-// Version numbers.  Version 1 is good, version 2 is bad.
+// Version numbers.  Version 1 and 2 are good, version 3 is bad.
+
+new WebAssembly.Module(wasmTextToBinary(
+    `(module
+      (gc_feature_opt_in 1))`));
 
 new WebAssembly.Module(wasmTextToBinary(
     `(module
@@ -28,7 +30,7 @@ new WebAssembly.Module(wasmTextToBinary(
 
 assertErrorMessage(() => new WebAssembly.Module(wasmTextToBinary(
     `(module
-      (gc_feature_opt_in 2))`)),
+      (gc_feature_opt_in 3))`)),
                    WebAssembly.CompileError,
                    /unsupported version of the gc feature/);
 
@@ -116,5 +118,35 @@ assertErrorMessage(() => new WebAssembly.Module(wasmTextToBinary(
 assertErrorMessage(() => new WebAssembly.Module(wasmTextToBinary(
     `(module
       (func ref.is_null))`)),
+                   WebAssembly.CompileError,
+                   /unrecognized opcode/);
+
+assertErrorMessage(() => new WebAssembly.Module(wasmTextToBinary(
+    `(module
+      (func ref.eq))`)),
+                   WebAssembly.CompileError,
+                   /unrecognized opcode/);
+
+assertErrorMessage(() => new WebAssembly.Module(wasmTextToBinary(
+    `(module
+      (func (struct.new 0)))`)),
+                   WebAssembly.CompileError,
+                   /unrecognized opcode/);
+
+assertErrorMessage(() => new WebAssembly.Module(wasmTextToBinary(
+    `(module
+      (func (struct.get 0 0)))`)),
+                   WebAssembly.CompileError,
+                   /unrecognized opcode/);
+
+assertErrorMessage(() => new WebAssembly.Module(wasmTextToBinary(
+    `(module
+      (func (struct.set 0 0)))`)),
+                   WebAssembly.CompileError,
+                   /unrecognized opcode/);
+
+assertErrorMessage(() => new WebAssembly.Module(wasmTextToBinary(
+    `(module
+      (func (struct.narrow anyref anyref)))`)),
                    WebAssembly.CompileError,
                    /unrecognized opcode/);

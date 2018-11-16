@@ -25,7 +25,7 @@ public:
   using nsIConstraintValidation::GetValidationMessage;
   using nsIConstraintValidation::SetCustomValidity;
 
-  explicit HTMLFieldSetElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
+  explicit HTMLFieldSetElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
 
   NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLFieldSetElement, fieldset)
 
@@ -47,7 +47,7 @@ public:
   // nsIFormControl
   NS_IMETHOD Reset() override;
   NS_IMETHOD SubmitNamesValues(HTMLFormSubmission* aFormSubmission) override;
-  virtual bool IsDisabledForEvents(EventMessage aMessage) override;
+  virtual bool IsDisabledForEvents(WidgetEvent* aEvent) override;
   virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 
   const nsIContent* GetFirstLegend() const { return mFirstLegend; }

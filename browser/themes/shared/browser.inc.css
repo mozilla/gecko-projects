@@ -19,10 +19,6 @@
   --space-above-tabbar: 8px;
 }
 
-:root[sessionrestored]:-moz-lwtheme {
-  transition: @themeTransition@;
-}
-
 /* Increase contrast of UI links on dark themes */
 
 :root[lwt-popup-brighttext] panel .text-link {
@@ -162,16 +158,21 @@
   --arrowpanel-border-color: var(--default-arrowpanel-border-color);
 }
 
+#DateTimePickerPanel[side="top"],
+#DateTimePickerPanel[side="bottom"] {
+  margin-left: 0;
+  margin-right: 0;
+}
+
 #widget-overflow .webextension-popup-browser {
   background: #fff;
 }
 
-/* Contextual Feature Recommendation popup-notification */
-
-:root {
-  --cfr-notification-header-image: url(resource://activity-stream/data/content/assets/glyph-help-24.svg);
-  --cfr-notification-footer-star: url(resource://activity-stream/data/content/assets/glyph-star-17.svg);
+#addon-progress-notification-progressmeter {
+  margin: 2px 4px;
 }
+
+/* Contextual Feature Recommendation popup-notification */
 
 #cfr-notification-header {
   width: 100%;
@@ -191,7 +192,7 @@
 
 #cfr-notification-header-link {
   margin: 7px;
-  color: var(--lwt-text-color);
+  color: inherit;
   cursor: default;
 }
 
@@ -202,7 +203,7 @@
   -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
   fill-opacity: 0.6;
-  list-style-image: var(--cfr-notification-header-image);
+  list-style-image: url(resource://activity-stream/data/content/assets/glyph-help-24.svg);
 }
 
 #cfr-notification-header-image:hover {
@@ -246,9 +247,9 @@
 #cfr-notification-footer-filled-stars,
 #cfr-notification-footer-empty-stars {
   -moz-context-properties: fill, fill-opacity;
-  background-image: var(--cfr-notification-footer-star);
+  background-image: url(resource://activity-stream/data/content/assets/glyph-star-17.svg);
   background-size: 17px;
-  fill: var(--lwt-text-color);
+  fill: currentColor;
   fill-opacity: 0.7;
   height: 16px;
 }

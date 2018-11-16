@@ -11,6 +11,7 @@
 #include "mozilla/ComputedStyle.h"
 #include "mozilla/ComputedStyleInlines.h"
 #include "mozilla/DocumentStyleRootIterator.h"
+#include "mozilla/GeckoBindings.h"
 #include "mozilla/LayerAnimationInfo.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoStyleSetInlines.h"
@@ -730,7 +731,9 @@ RecomputePosition(nsIFrame* aFrame)
   // needs to be repositioned properly as well.
   if (aFrame->HasView() ||
       (aFrame->GetStateBits() & NS_FRAME_HAS_CHILD_WITH_VIEW)) {
-    StyleChangeReflow(aFrame, nsChangeHint_NeedReflow);
+    StyleChangeReflow(aFrame,
+                      nsChangeHint_NeedReflow |
+                      nsChangeHint_ReflowChangesSizeOrPosition);
     return false;
   }
 
@@ -739,7 +742,9 @@ RecomputePosition(nsIFrame* aFrame)
   if (aFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW)) {
     nsIFrame* ph = aFrame->GetPlaceholderFrame();
     if (ph && ph->HasAnyStateBits(PLACEHOLDER_STATICPOS_NEEDS_CSSALIGN)) {
-      StyleChangeReflow(aFrame, nsChangeHint_NeedReflow);
+      StyleChangeReflow(aFrame,
+                        nsChangeHint_NeedReflow |
+                        nsChangeHint_ReflowChangesSizeOrPosition);
       return false;
     }
   }
@@ -904,7 +909,9 @@ RecomputePosition(nsIFrame* aFrame)
   }
 
   // Fall back to a reflow
-  StyleChangeReflow(aFrame, nsChangeHint_NeedReflow);
+  StyleChangeReflow(aFrame,
+                    nsChangeHint_NeedReflow |
+                    nsChangeHint_ReflowChangesSizeOrPosition);
   return false;
 }
 
@@ -1587,11 +1594,9 @@ RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
         hint &= ~nsChangeHint_UpdateTransformLayer;
       }
 
-      if (hint & nsChangeHint_UpdateEffects) {
-        for (nsIFrame* cont = frame; cont;
-             cont = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(cont)) {
-          SVGObserverUtils::UpdateEffects(cont);
-        }
+      if ((hint & nsChangeHint_UpdateEffects) &&
+          frame == nsLayoutUtils::FirstContinuationOrIBSplitSibling(frame)) {
+        SVGObserverUtils::UpdateEffects(frame);
       }
       if ((hint & nsChangeHint_InvalidateRenderingObservers) ||
           ((hint & nsChangeHint_UpdateOpacityLayer) &&
@@ -1796,13 +1801,12 @@ RestyleManager::AddLayerChangesForAnimation(nsIFrame* aFrame,
   uint64_t frameGeneration =
     RestyleManager::GetAnimationGenerationForFrame(aFrame);
 
+  Maybe<nsCSSPropertyIDSet> effectiveAnimationProperties;
+
   nsChangeHint hint = nsChangeHint(0);
-  for (const LayerAnimationInfo::Record& layerInfo :
-         LayerAnimationInfo::sRecords) {
-    Maybe<uint64_t> generation =
-      layers::AnimationInfo::GetGenerationFromFrame(aFrame,
-                                                    layerInfo.mLayerType);
-    if (generation && frameGeneration != *generation) {
+  auto maybeApplyChangeHint = [&](const Maybe<uint64_t>& aGeneration,
+                                  DisplayItemType aDisplayItemType) -> bool {
+    if (aGeneration && frameGeneration != *aGeneration) {
       // If we have a transform layer bug don't have any transform style, we
       // probably just removed the transform but haven't destroyed the layer
       // yet. In this case we will typically add the appropriate change hint
@@ -1822,7 +1826,7 @@ RestyleManager::AddLayerChangesForAnimation(nsIFrame* aFrame,
       // Note that we *don't* add nsChangeHint_UpdateTransformLayer since if we
       // did, ApplyRenderingChangeToTree would complain that we're updating a
       // transform layer without a transform.
-      if (layerInfo.mLayerType == DisplayItemType::TYPE_TRANSFORM &&
+      if (aDisplayItemType == DisplayItemType::TYPE_TRANSFORM &&
           !aFrame->StyleDisplay()->HasTransformStyle()) {
         // Add all the hints for a removing a transform if they are not already
         // set for this frame.
@@ -1831,9 +1835,9 @@ RestyleManager::AddLayerChangesForAnimation(nsIFrame* aFrame,
                 aHintForThisFrame))) {
           hint |= nsChangeHint_ComprehensiveAddOrRemoveTransform;
         }
-        continue;
+        return true;
       }
-      hint |= layerInfo.mChangeHint;
+      hint |= LayerAnimationInfo::GetChangeHintFor(aDisplayItemType);
     }
 
     // We consider it's the first paint for the frame if we have an animation
@@ -1849,11 +1853,26 @@ RestyleManager::AddLayerChangesForAnimation(nsIFrame* aFrame,
     // not have those properies just before. e.g, setting transform by
     // setKeyframes or changing target element from other target which prevents
     // running on the compositor, etc.
-    if (!generation &&
-        nsLayoutUtils::HasEffectiveAnimation(aFrame, layerInfo.mProperty)) {
-      hint |= layerInfo.mChangeHint;
+    if (!aGeneration) {
+      if (!effectiveAnimationProperties) {
+        effectiveAnimationProperties.emplace(
+          nsLayoutUtils::GetAnimationPropertiesForCompositor(aFrame));
+      }
+      const nsCSSPropertyIDSet& propertiesForDisplayItem =
+        LayerAnimationInfo::GetCSSPropertiesFor(aDisplayItemType);
+      if (effectiveAnimationProperties->Intersects(propertiesForDisplayItem)) {
+        hint |=
+          LayerAnimationInfo::GetChangeHintFor(aDisplayItemType);
+      }
     }
-  }
+    return true;
+  };
+
+  AnimationInfo::EnumerateGenerationOnFrame(
+    aFrame,
+    aContent,
+    LayerAnimationInfo::sDisplayItemTypes,
+    maybeApplyChangeHint);
 
   if (hint) {
     aChangeListToProcess.AppendChange(aFrame, aContent, hint);
@@ -1921,9 +1940,9 @@ RestyleManager::AnimationsWithDestroyedFrame
 
 #ifdef DEBUG
 static bool
-IsAnonBox(const nsIFrame& aFrame)
+IsAnonBox(const nsIFrame* aFrame)
 {
-  return aFrame.Style()->IsAnonBox();
+  return aFrame->Style()->IsAnonBox();
 }
 
 static const nsIFrame*
@@ -1937,15 +1956,15 @@ FirstContinuationOrPartOfIBSplit(const nsIFrame* aFrame)
 }
 
 static const nsIFrame*
-ExpectedOwnerForChild(const nsIFrame& aFrame)
+ExpectedOwnerForChild(const nsIFrame* aFrame)
 {
-  const nsIFrame* parent = aFrame.GetParent();
-  if (aFrame.IsTableFrame()) {
+  const nsIFrame* parent = aFrame->GetParent();
+  if (aFrame->IsTableFrame()) {
     MOZ_ASSERT(parent->IsTableWrapperFrame());
     parent = parent->GetParent();
   }
 
-  if (IsAnonBox(aFrame) && !aFrame.IsTextFrame()) {
+  if (IsAnonBox(aFrame) && !aFrame->IsTextFrame()) {
     if (parent->IsLineFrame()) {
       parent = parent->GetParent();
     }
@@ -1953,11 +1972,11 @@ ExpectedOwnerForChild(const nsIFrame& aFrame)
       nullptr : FirstContinuationOrPartOfIBSplit(parent);
   }
 
-  if (aFrame.IsBulletFrame()) {
+  if (aFrame->IsBulletFrame()) {
     return FirstContinuationOrPartOfIBSplit(parent);
   }
 
-  if (aFrame.IsLineFrame()) {
+  if (aFrame->IsLineFrame()) {
     // A ::first-line always ends up here via its block, which is therefore the
     // right expected owner.  That block can be an
     // anonymous box.  For example, we could have a ::first-line on a columnated
@@ -1967,7 +1986,7 @@ ExpectedOwnerForChild(const nsIFrame& aFrame)
     return parent;
   }
 
-  if (aFrame.IsLetterFrame()) {
+  if (aFrame->IsLetterFrame()) {
     // Ditto for ::first-letter. A first-letter always arrives here via its
     // direct parent, except when it's parented to a ::first-line.
     if (parent->IsLineFrame()) {
@@ -1987,13 +2006,13 @@ ExpectedOwnerForChild(const nsIFrame& aFrame)
   // We've handled already anon boxes and bullet frames, so now we're looking at
   // a frame of a DOM element or pseudo. Hop through anon and line-boxes
   // generated by our DOM parent, and go find the owner frame for it.
-  while (parent && (IsAnonBox(*parent) || parent->IsLineFrame())) {
+  while (parent && (IsAnonBox(parent) || parent->IsLineFrame())) {
     auto* pseudo = parent->Style()->GetPseudo();
     if (pseudo == nsCSSAnonBoxes::tableWrapper()) {
       const nsIFrame* tableFrame = parent->PrincipalChildList().FirstChild();
       MOZ_ASSERT(tableFrame->IsTableFrame());
       // Handle :-moz-table and :-moz-inline-table.
-      parent = IsAnonBox(*tableFrame) ? parent->GetParent() : tableFrame;
+      parent = IsAnonBox(tableFrame) ? parent->GetParent() : tableFrame;
     } else {
       // We get the in-flow parent here so that we can handle the OOF anonymous
       // boxed to get the correct parent.
@@ -2010,18 +2029,18 @@ ServoRestyleState::AssertOwner(const ServoRestyleState& aParent) const
 {
   MOZ_ASSERT(mOwner);
   MOZ_ASSERT(!mOwner->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW));
+  MOZ_ASSERT(!mOwner->IsColumnSpanInMulticolSubtree());
   // We allow aParent.mOwner to be null, for cases when we're not starting at
   // the root of the tree.  We also allow aParent.mOwner to be somewhere up our
   // expected owner chain not our immediate owner, which allows us creating long
   // chains of ServoRestyleStates in some cases where it's just not worth it.
-#ifdef DEBUG
   if (aParent.mOwner) {
-    const nsIFrame* owner = ExpectedOwnerForChild(*mOwner);
+    const nsIFrame* owner = ExpectedOwnerForChild(mOwner);
     if (owner != aParent.mOwner) {
-      MOZ_ASSERT(IsAnonBox(*owner),
+      MOZ_ASSERT(IsAnonBox(owner),
                  "Should only have expected owner weirdness when anon boxes are involved");
       bool found = false;
-      for (; owner; owner = ExpectedOwnerForChild(*owner)) {
+      for (; owner; owner = ExpectedOwnerForChild(owner)) {
         if (owner == aParent.mOwner) {
           found = true;
           break;
@@ -2030,11 +2049,10 @@ ServoRestyleState::AssertOwner(const ServoRestyleState& aParent) const
       MOZ_ASSERT(found, "Must have aParent.mOwner on our expected owner chain");
     }
   }
-#endif
 }
 
 nsChangeHint
-ServoRestyleState::ChangesHandledFor(const nsIFrame& aFrame) const
+ServoRestyleState::ChangesHandledFor(const nsIFrame* aFrame) const
 {
   if (!mOwner) {
     MOZ_ASSERT(!mChangesHandled);
@@ -2399,7 +2417,7 @@ public:
       uint32_t equalStructs;
       mComputedHint = oldStyle->CalcStyleDifference(&aNewStyle, &equalStructs);
       mComputedHint = NS_RemoveSubsumedHints(
-        mComputedHint, mParentRestyleState.ChangesHandledFor(*aTextFrame));
+        mComputedHint, mParentRestyleState.ChangesHandledFor(aTextFrame));
     }
 
     if (mComputedHint) {
@@ -2515,7 +2533,7 @@ UpdateOneAdditionalComputedStyle(nsIFrame* aFrame,
     aOldContext.CalcStyleDifference(newStyle, &equalStructs);
   if (!aFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW)) {
     childHint = NS_RemoveSubsumedHints(
-        childHint, aRestyleState.ChangesHandledFor(*aFrame));
+        childHint, aRestyleState.ChangesHandledFor(aFrame));
   }
 
   if (childHint) {
@@ -2657,6 +2675,13 @@ RestyleManager::ProcessPostTraversal(
     primaryFrame &&
     primaryFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW);
 
+  // We need this because any column-spanner's parent frame is not its DOM
+  // parent's primary frame. We need some special check similar to out-of-flow
+  // frames.
+  const bool isColumnSpan =
+    primaryFrame &&
+    primaryFrame->IsColumnSpanInMulticolSubtree();
+
   // Grab the change hint from Servo.
   bool wasRestyled;
   nsChangeHint changeHint =
@@ -2684,8 +2709,11 @@ RestyleManager::ProcessPostTraversal(
       maybeAnonBoxChild = primaryFrame->GetPlaceholderFrame();
     } else {
       maybeAnonBoxChild = primaryFrame;
-      changeHint = NS_RemoveSubsumedHints(
-        changeHint, aRestyleState.ChangesHandledFor(*styleFrame));
+      // Do not subsume change hints for the column-spanner.
+      if (!isColumnSpan) {
+        changeHint = NS_RemoveSubsumedHints(
+          changeHint, aRestyleState.ChangesHandledFor(styleFrame));
+      }
     }
 
     // If the parent wasn't restyled, the styles of our anon box parents won't
@@ -2740,7 +2768,7 @@ RestyleManager::ProcessPostTraversal(
 
   Maybe<ServoRestyleState> thisFrameRestyleState;
   if (styleFrame) {
-    auto type = isOutOfFlow
+    auto type = isOutOfFlow || isColumnSpan
       ? ServoRestyleState::Type::OutOfFlow
       : ServoRestyleState::Type::InFlow;
 

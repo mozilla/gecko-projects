@@ -14,7 +14,6 @@
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/gfx/DrawEventRecorder.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
-#include "mozilla/layers/IpcResourceUpdateQueue.h"
 #include "mozilla/layers/StackingContextHelper.h"
 #include "mozilla/layers/TextureClient.h"
 #include "mozilla/layers/WebRenderBridgeChild.h"
@@ -61,12 +60,8 @@ WebRenderLayerManager::Initialize(PCompositorBridgeChild* aCBChild,
   MOZ_ASSERT(aTextureFactoryIdentifier);
 
   LayoutDeviceIntSize size = mWidget->GetClientSize();
-  TextureFactoryIdentifier textureFactoryIdentifier;
-  wr::IdNamespace id_namespace;
   PWebRenderBridgeChild* bridge = aCBChild->SendPWebRenderBridgeConstructor(aLayersId,
-                                                                            size,
-                                                                            &textureFactoryIdentifier,
-                                                                            &id_namespace);
+                                                                            size);
   if (!bridge) {
     // This should only fail if we attempt to access a layer we don't have
     // permission for, or more likely, the GPU process crashed again during
@@ -76,11 +71,20 @@ WebRenderLayerManager::Initialize(PCompositorBridgeChild* aCBChild,
     return false;
   }
 
+  TextureFactoryIdentifier textureFactoryIdentifier;
+  wr::MaybeIdNamespace idNamespace;
+  // Sync ipc
+  bridge->SendEnsureConnected(&textureFactoryIdentifier, &idNamespace);
+  if (textureFactoryIdentifier.mParentBackend == LayersBackend::LAYERS_NONE ||
+      idNamespace.isNothing()) {
+    gfxCriticalNote << "Failed to connect WebRenderBridgeChild.";
+    return false;
+  }
+
   mWrChild = static_cast<WebRenderBridgeChild*>(bridge);
   WrBridge()->SetWebRenderLayerManager(this);
-  WrBridge()->SendCreate(size.ToUnknownSize());
   WrBridge()->IdentifyTextureHost(textureFactoryIdentifier);
-  WrBridge()->SetNamespace(id_namespace);
+  WrBridge()->SetNamespace(idNamespace.ref());
   *aTextureFactoryIdentifier = textureFactoryIdentifier;
   return true;
 }
@@ -214,11 +218,15 @@ WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
   // Since we don't do repeat transactions right now, just set the time
   mAnimationReadyTime = TimeStamp::Now();
 
-  if (aFlags & EndTransactionFlags::END_NO_COMPOSITE && 
+  mLatestTransactionId = mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
+
+  if (aFlags & EndTransactionFlags::END_NO_COMPOSITE &&
       !mWebRenderCommandBuilder.NeedsEmptyTransaction() &&
       mPendingScrollUpdates.empty()) {
     MOZ_ASSERT(!mTarget);
     WrBridge()->SendSetFocusTarget(mFocusTarget);
+    // Revoke TransactionId to trigger next paint.
+    mTransactionIdAllocator->RevokeTransactionId(mLatestTransactionId);
     return true;
   }
 
@@ -227,7 +235,6 @@ WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
 
   mWebRenderCommandBuilder.EmptyTransaction();
 
-  mLatestTransactionId = mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
   TimeStamp refreshStart = mTransactionIdAllocator->GetTransactionStart();
 
   // Skip the synchronization for buffer since we also skip the painting during
@@ -240,7 +247,8 @@ WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
   }
 
   WrBridge()->EndEmptyTransaction(mFocusTarget, mPendingScrollUpdates,
-      mPaintSequenceNumber, mLatestTransactionId, refreshStart, mTransactionStart);
+      mAsyncResourceUpdates, mPaintSequenceNumber, mLatestTransactionId,
+      refreshStart, mTransactionStart);
   ClearPendingScrollInfoUpdate();
 
   mTransactionStart = TimeStamp();
@@ -277,7 +285,8 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   wr::DisplayListBuilder builder(WrBridge()->GetPipeline(), contentSize, mLastDisplayListSize);
   wr::IpcResourceUpdateQueue resourceUpdates(WrBridge());
   wr::usize builderDumpIndex = 0;
-  bool dumpEnabled = mWebRenderCommandBuilder.ShouldDumpDisplayList();
+  bool containsSVGGroup = false;
+  bool dumpEnabled = mWebRenderCommandBuilder.ShouldDumpDisplayList(aDisplayListBuilder);
   if (dumpEnabled) {
     printf_stderr("-- WebRender display list build --\n");
   }
@@ -296,6 +305,7 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
                                                     contentSize,
                                                     aFilters);
     builderDumpIndex = mWebRenderCommandBuilder.GetBuilderDumpIndex();
+    containsSVGGroup = mWebRenderCommandBuilder.GetContainsSVGGroup();
   } else {
     // ViewToPaint does not have frame yet, then render only background clolor.
     MOZ_ASSERT(!aDisplayListBuilder && aBackground);
@@ -333,6 +343,19 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   mLatestTransactionId = mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
   TimeStamp refreshStart = mTransactionIdAllocator->GetTransactionStart();
 
+  if (mAsyncResourceUpdates) {
+    if (resourceUpdates.IsEmpty()) {
+      resourceUpdates = std::move(mAsyncResourceUpdates.ref());
+    } else {
+      // If we can't just swap the queue, we need to take the slow path and
+      // send the update as a separate message. We don't need to schedule a
+      // composite however because that will happen with EndTransaction.
+      WrBridge()->UpdateResources(mAsyncResourceUpdates.ref(),
+                                  /* aScheduleComposite */ false);
+    }
+    mAsyncResourceUpdates.reset();
+  }
+
   for (const auto& key : mImageKeysToDelete) {
     resourceUpdates.DeleteImage(key);
   }
@@ -356,7 +379,8 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   {
     AUTO_PROFILER_TRACING("Paint", "ForwardDPTransaction");
     WrBridge()->EndTransaction(contentSize, dl, resourceUpdates, size.ToUnknownSize(),
-                               mLatestTransactionId, mScrollData, refreshStart, mTransactionStart);
+                               mLatestTransactionId, mScrollData, containsSVGGroup,
+                               refreshStart, mTransactionStart);
   }
 
   mTransactionStart = TimeStamp();
@@ -559,6 +583,12 @@ WebRenderLayerManager::WrUpdated()
 {
   mWebRenderCommandBuilder.ClearCachedResources();
   DiscardLocalImages();
+
+  if (mWidget) {
+    if (dom::TabChild* tabChild = mWidget->GetOwningTabChild()) {
+      tabChild->SchedulePaint();
+    }
+  }
 }
 
 dom::TabGroup*
@@ -687,6 +717,40 @@ WebRenderLayerManager::CreatePersistentBufferProvider(const gfx::IntSize& aSize,
     }
   }
   return LayerManager::CreatePersistentBufferProvider(aSize, aFormat);
+}
+
+wr::IpcResourceUpdateQueue&
+WebRenderLayerManager::AsyncResourceUpdates()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (!mAsyncResourceUpdates) {
+    mAsyncResourceUpdates.emplace(WrBridge());
+
+    RefPtr<Runnable> task = NewRunnableMethod(
+      "WebRenderLayerManager::FlushAsyncResourceUpdates",
+      this, &WebRenderLayerManager::FlushAsyncResourceUpdates);
+    NS_DispatchToMainThread(task.forget());
+  }
+
+  return mAsyncResourceUpdates.ref();
+}
+
+void
+WebRenderLayerManager::FlushAsyncResourceUpdates()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (!mAsyncResourceUpdates) {
+    return;
+  }
+
+  if (!IsDestroyed() && WrBridge()) {
+    WrBridge()->UpdateResources(mAsyncResourceUpdates.ref(),
+                                /* aScheduleComposite */ true);
+  }
+
+  mAsyncResourceUpdates.reset();
 }
 
 } // namespace layers

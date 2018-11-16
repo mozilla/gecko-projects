@@ -817,6 +817,12 @@ IonBuilder::inlineArrayPush(CallInfo& callInfo)
         return InliningStatus_NotInlined;
     }
 
+    // XXX bug 1493903.
+    if (callInfo.argc() != 1) {
+        trackOptimizationOutcome(TrackedOutcome::CantInlineNativeBadForm);
+        return InliningStatus_NotInlined;
+    }
+
     MDefinition* obj = convertUnboxedObjects(callInfo.thisArg());
     for (uint32_t i = 0; i < callInfo.argc(); i++) {
         MDefinition* value = callInfo.getArg(i);
@@ -2327,7 +2333,7 @@ IonBuilder::inlineRegExpSearcher(CallInfo& callInfo)
     JSContext* cx = TlsContext.get();
     if (!cx->realm()->jitRealm()->ensureRegExpSearcherStubExists(cx)) {
         cx->clearPendingException(); // OOM or overrecursion.
-        return abort(AbortReason::Error);
+        return InliningStatus_NotInlined;
     }
 
     callInfo.setImplicitlyUsedUnchecked();

@@ -5,9 +5,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-MARKUPMAP(a,
-          New_HTMLLink,
-          roles::LINK)
+MARKUPMAP(
+  a,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     // Only some roles truly enjoy life as HTMLLinkAccessibles, for details
+     // see closed bug 494807.
+     const nsRoleMapEntry* roleMapEntry = aria::GetRoleMap(aElement);
+     if (roleMapEntry && roleMapEntry->role != roles::NOTHING &&
+         roleMapEntry->role != roles::LINK) {
+       return new HyperTextAccessibleWrap(aElement, aContext->Document());
+     }
+
+     return new HTMLLinkAccessible(aElement, aContext->Document());
+  },
+  roles::LINK
+)
 
 MARKUPMAP(abbr,
           New_HyperText,
@@ -24,7 +36,7 @@ MARKUPMAP(article,
 
 MARKUPMAP(aside,
           New_HyperText,
-          roles::NOTE)
+          roles::LANDMARK)
 
 MARKUPMAP(blockquote,
           New_HyperText,
@@ -46,34 +58,58 @@ MARKUPMAP(div,
           nullptr,
           roles::SECTION)
 
-MARKUPMAP(dl,
-          New_HTMLList,
-          roles::DEFINITION_LIST)
+MARKUPMAP(
+  dl,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLListAccessible(aElement, aContext->Document());
+  },
+  roles::DEFINITION_LIST
+)
 
 MARKUPMAP(dt,
           New_HTMLDtOrDd<HTMLLIAccessible>,
           roles::TERM)
 
-MARKUPMAP(figcaption,
-          New_HTMLFigcaption,
-          roles::CAPTION)
+MARKUPMAP(
+  figcaption,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLFigcaptionAccessible(aElement, aContext->Document());
+  },
+  roles::CAPTION
+)
 
-MARKUPMAP(figure,
-          New_HTMLFigure,
-          roles::FIGURE,
-          Attr(xmlroles, figure))
+MARKUPMAP(
+  figure,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLFigureAccessible(aElement, aContext->Document());
+  },
+  roles::FIGURE,
+  Attr(xmlroles, figure)
+)
 
-MARKUPMAP(form,
-          New_HyperText,
-          roles::FORM)
+MARKUPMAP(
+  form,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLFormAccessible(aElement, aContext->Document());
+  },
+  0
+)
 
-MARKUPMAP(footer,
-          New_HTMLHeaderOrFooter,
-          0)
+MARKUPMAP(
+  footer,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLHeaderOrFooterAccessible(aElement, aContext->Document());
+  },
+  0
+)
 
-MARKUPMAP(header,
-          New_HTMLHeaderOrFooter,
-          0)
+MARKUPMAP(
+  header,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLHeaderOrFooterAccessible(aElement, aContext->Document());
+  },
+  0
+)
 
 MARKUPMAP(h1,
           New_HyperText,
@@ -99,25 +135,68 @@ MARKUPMAP(h6,
           New_HyperText,
           roles::HEADING)
 
-MARKUPMAP(input,
-          New_HTMLInput,
-          0)
+MARKUPMAP(
+  input,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     if (aElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                              nsGkAtoms::checkbox, eIgnoreCase)) {
+       return new CheckboxAccessible(aElement, aContext->Document());
+     }
+     if (aElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                              nsGkAtoms::radio, eIgnoreCase)) {
+       return new HTMLRadioButtonAccessible(aElement, aContext->Document());
+     }
+     if (aElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                              nsGkAtoms::time, eIgnoreCase)) {
+       return new EnumRoleAccessible<roles::GROUPING>(aElement, aContext->Document());
+     }
+     if (aElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                              nsGkAtoms::date, eIgnoreCase)) {
+    return new EnumRoleAccessible<roles::DATE_EDITOR>(aElement, aContext->Document());
+     }
+     return nullptr;
+  },
+  0
+)
 
 MARKUPMAP(ins,
           New_HyperText,
           roles::CONTENT_INSERTION)
 
-MARKUPMAP(label,
-          New_HTMLLabel,
-          roles::LABEL)
+MARKUPMAP(
+  label,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLLabelAccessible(aElement, aContext->Document());
+  },
+  roles::LABEL
+)
 
-MARKUPMAP(legend,
-          New_HTMLLegend,
-          roles::LABEL)
+MARKUPMAP(
+  legend,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLLegendAccessible(aElement, aContext->Document());
+  },
+  roles::LABEL
+)
 
-MARKUPMAP(li,
-          New_HTMLListitem,
-          0)
+MARKUPMAP(
+  li,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     // If list item is a child of accessible list then create an accessible for
+     // it unconditionally by tag name. nsBlockFrame creates the list item
+     // accessible for other elements styled as list items.
+     if (aContext->IsList() && aContext->GetContent() == aElement->GetParent()) {
+       return new HTMLLIAccessible(aElement, aContext->Document());
+     }
+
+     return nullptr;
+  },
+  0
+)
+
+MARKUPMAP(main,
+          New_HyperText,
+          roles::LANDMARK)
 
 MARKUPMAP(map,
           nullptr,
@@ -224,24 +303,40 @@ MARKUPMAP(mmultiscripts_,
           New_HyperText,
           roles::MATHML_MULTISCRIPTS)
 
-MARKUPMAP(mtable_,
-          New_HTMLTableAccessible,
-          roles::MATHML_TABLE,
-          AttrFromDOM(align, align),
-          AttrFromDOM(columnlines_, columnlines_),
-          AttrFromDOM(rowlines_, rowlines_))
+MARKUPMAP(
+  mtable_,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLTableAccessible(aElement, aContext->Document());
+  },
+  roles::MATHML_TABLE,
+  AttrFromDOM(align, align),
+  AttrFromDOM(columnlines_, columnlines_),
+  AttrFromDOM(rowlines_, rowlines_)
+)
 
-MARKUPMAP(mlabeledtr_,
-          New_HTMLTableRowAccessible,
-          roles::MATHML_LABELED_ROW)
+MARKUPMAP(
+  mlabeledtr_,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLTableRowAccessible(aElement, aContext->Document());
+  },
+  roles::MATHML_LABELED_ROW
+)
 
-MARKUPMAP(mtr_,
-          New_HTMLTableRowAccessible,
-          roles::MATHML_TABLE_ROW)
+MARKUPMAP(
+  mtr_,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLTableRowAccessible(aElement, aContext->Document());
+  },
+  roles::MATHML_TABLE_ROW
+)
 
-MARKUPMAP(mtd_,
-          New_HTMLTableCellAccessible,
-          roles::MATHML_CELL)
+MARKUPMAP(
+  mtd_,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLTableCellAccessible(aElement, aContext->Document());
+  },
+  roles::MATHML_CELL
+)
 
 MARKUPMAP(maction_,
           New_HyperText,
@@ -293,44 +388,72 @@ MARKUPMAP(msline_,
 
 MARKUPMAP(nav,
           New_HyperText,
-          roles::SECTION)
+          roles::LANDMARK)
 
-MARKUPMAP(ol,
-          New_HTMLList,
-          roles::LIST)
+MARKUPMAP(
+  ol,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLListAccessible(aElement, aContext->Document());
+  },
+  roles::LIST
+)
 
-MARKUPMAP(option,
-          New_HTMLOption,
-          0)
+MARKUPMAP(
+  option,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLSelectOptionAccessible(aElement, aContext->Document());
+  },
+  0
+)
 
-MARKUPMAP(optgroup,
-          New_HTMLOptgroup,
-          0)
+MARKUPMAP(
+  optgroup,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLSelectOptGroupAccessible(aElement, aContext->Document());
+  },
+  0
+)
 
-MARKUPMAP(output,
-          New_HTMLOutput,
-          roles::SECTION,
-          Attr(live, polite))
+MARKUPMAP(
+  output,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLOutputAccessible(aElement, aContext->Document());
+  },
+  roles::SECTION,
+  Attr(live, polite)
+)
 
 MARKUPMAP(p,
           nullptr,
           roles::PARAGRAPH)
 
-MARKUPMAP(progress,
-          New_HTMLProgress,
-          0)
+MARKUPMAP(
+  progress,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLProgressMeterAccessible(aElement, aContext->Document());
+  },
+  0
+)
 
 MARKUPMAP(q,
           New_HyperText,
           0)
 
-MARKUPMAP(section,
-          New_HyperText,
-          roles::SECTION)
+MARKUPMAP(
+  section,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLSectionAccessible(aElement, aContext->Document());
+  },
+  0
+)
 
-MARKUPMAP(summary,
-          New_HTMLSummary,
-          roles::SUMMARY)
+MARKUPMAP(
+  summary,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLSummaryAccessible(aElement, aContext->Document());
+  },
+  roles::SUMMARY
+)
 
 MARKUPMAP(
   table,
@@ -358,7 +481,10 @@ MARKUPMAP(
        // display style other than 'table', then create a generic table cell
        // accessible, because there's no underlying table layout and thus native
        // HTML table cell class doesn't work.
-       if (!aContext->IsHTMLTableRow()) {
+       // The same is true if the cell itself has CSS display:block;.
+       if (!aContext->IsHTMLTableRow() ||
+           (aElement->GetPrimaryFrame() &&
+            aElement->GetPrimaryFrame()->AccessibleType() != eHTMLTableCellType)) {
          return new ARIAGridCellAccessibleWrap(aElement, aContext->Document());
        }
        if (aElement->HasAttr(kNameSpaceID_None, nsGkAtoms::scope)) {
@@ -415,6 +541,10 @@ MARKUPMAP(
   0
 )
 
-MARKUPMAP(ul,
-          New_HTMLList,
-          roles::LIST)
+MARKUPMAP(
+  ul,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     return new HTMLListAccessible(aElement, aContext->Document());
+  },
+  roles::LIST
+)

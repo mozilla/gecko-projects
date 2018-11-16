@@ -41,11 +41,11 @@ class SourceSurface;
 namespace dom {
 class HTMLImageElementOrSVGImageElementOrHTMLCanvasElementOrHTMLVideoElementOrImageBitmap;
 typedef HTMLImageElementOrSVGImageElementOrHTMLCanvasElementOrHTMLVideoElementOrImageBitmap CanvasImageSource;
+class ImageBitmap;
 class ImageData;
 class StringOrCanvasGradientOrCanvasPattern;
 class OwningStringOrCanvasGradientOrCanvasPattern;
 class TextMetrics;
-class SVGFilterObserverListForCanvas;
 class CanvasPath;
 
 extern const mozilla::gfx::Float SIGMA_MAX;
@@ -562,6 +562,13 @@ public:
   // Check the global setup, as well as the compositor type:
   bool AllowOpenGLCanvas() const;
 
+  /**
+   * Update CurrentState().filter with the filter description for
+   * CurrentState().filterChain.
+   * Flushes the PresShell, so the world can change if you call this function.
+   */
+  void UpdateFilter();
+
 protected:
   nsresult GetImageDataArray(JSContext* aCx, int32_t aX, int32_t aY,
                              uint32_t aWidth, uint32_t aHeight,
@@ -727,13 +734,6 @@ protected:
    * Usefull to know if we can discard the content below in certain situations.
    */
   bool PatternIsOpaque(Style aStyle) const;
-
-  /**
-   * Update CurrentState().filter with the filter description for
-   * CurrentState().filterChain.
-   * Flushes the PresShell, so the world can change if you call this function.
-   */
-  void UpdateFilter();
 
   nsLayoutUtils::SurfaceFromElementResult
     CachedSurfaceFromElement(Element* aElement);
@@ -1052,7 +1052,7 @@ protected:
           lineJoin(aOther.lineJoin),
           filterString(aOther.filterString),
           filterChain(aOther.filterChain),
-          filterObserverList(aOther.filterObserverList),
+          autoSVGFiltersObserver(aOther.autoSVGFiltersObserver),
           filter(aOther.filter),
           filterAdditionalImages(aOther.filterAdditionalImages),
           filterSourceGraphicTainted(aOther.filterSourceGraphicTainted),
@@ -1130,7 +1130,9 @@ protected:
 
     nsString filterString;
     nsTArray<nsStyleFilter> filterChain;
-    RefPtr<SVGFilterObserverList> filterObserverList;
+    // RAII object that we obtain when we start to observer SVG filter elements
+    // for rendering changes.  When released we stop observing the SVG elements.
+    nsCOMPtr<nsISupports> autoSVGFiltersObserver;
     mozilla::gfx::FilterDescription filter;
     nsTArray<RefPtr<mozilla::gfx::SourceSurface>> filterAdditionalImages;
 
@@ -1162,7 +1164,6 @@ protected:
   }
 
   friend class CanvasGeneralPattern;
-  friend class SVGFilterObserverListForCanvas;
   friend class AdjustedTarget;
   friend class AdjustedTargetForShadow;
   friend class AdjustedTargetForFilter;
@@ -1192,6 +1193,19 @@ protected:
 
   friend struct CanvasBidiProcessor;
   friend class CanvasDrawObserver;
+  friend class ImageBitmap;
+
+  void SetWriteOnly()
+  {
+    mWriteOnly = true;
+  }
+
+  bool IsWriteOnly() const
+  {
+    return mWriteOnly;
+  }
+
+  bool mWriteOnly;
 };
 
 size_t BindingJSObjectMallocBytes(CanvasRenderingContext2D* aContext);

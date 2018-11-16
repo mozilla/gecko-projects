@@ -7,7 +7,7 @@ add_task(async function() {
   let notificationValue = "Protocol Registration: web+testprotocol";
   let testURI = TEST_PATH + "browser_registerProtocolHandler_notification.html";
 
-  window.gBrowser.selectedBrowser.loadURI(testURI);
+  BrowserTestUtils.loadURI(window.gBrowser.selectedBrowser, testURI);
   await TestUtils.waitForCondition(function() {
     // Do not start until the notification is up
     let notificationBox = window.gBrowser.getNotificationBox();
@@ -22,13 +22,12 @@ add_task(async function() {
     finish();
     return;
   }
-  is(notification.type, "info", "We expect this notification to have the type of 'info'.");
-  isnot(notification.image, null, "We expect this notification to have an icon.");
+  is(notification.getAttribute("type"), "info",
+     "We expect this notification to have the type of 'info'.");
+  ok(notification.messageImage.getAttribute("src"),
+     "We expect this notification to have an icon.");
 
-  let buttons = notification.getElementsByClassName("notification-button-default");
-  is(buttons.length, 1, "We expect see one default button.");
-
-  buttons = notification.getElementsByClassName("notification-button");
+  let buttons = notification.getElementsByClassName("notification-button");
   is(buttons.length, 1, "We expect see one button.");
 
   let button = buttons[0];

@@ -122,16 +122,20 @@ class EditAddress extends EditAutofillForm {
    * @param {object} config
    * @param {string[]} config.DEFAULT_REGION
    * @param {function} config.getFormFormat Function to return form layout info for a given country.
-   * @param {string[]} config.supportedCountries
+   * @param {string[]} config.countries
+   * @param {boolean} [config.noValidate=undefined] Whether to validate the form
    */
   constructor(elements, record, config) {
     super(elements);
 
     Object.assign(this, config);
+    let {form} = this._elements;
     Object.assign(this._elements, {
-      addressLevel1Label: this._elements.form.querySelector("#address-level1-container > span"),
-      postalCodeLabel: this._elements.form.querySelector("#postal-code-container > span"),
-      country: this._elements.form.querySelector("#country"),
+      addressLevel3Label: form.querySelector("#address-level3-container > .label-text"),
+      addressLevel2Label: form.querySelector("#address-level2-container > .label-text"),
+      addressLevel1Label: form.querySelector("#address-level1-container > .label-text"),
+      postalCodeLabel: form.querySelector("#postal-code-container > .label-text"),
+      country: form.querySelector("#country"),
     });
 
     this.populateCountries();
@@ -140,16 +144,14 @@ class EditAddress extends EditAutofillForm {
     this.loadRecord(record);
     this.attachEventListeners();
 
-    if (config.novalidate) {
-      this.form.setAttribute("novalidate", "true");
-    }
+    form.noValidate = !!config.noValidate;
   }
 
   loadRecord(record) {
     this._record = record;
     if (!record) {
       record = {
-        country: this.supportedCountries.find(supported => supported == this.DEFAULT_REGION),
+        country: this.DEFAULT_REGION,
       };
     }
     super.loadRecord(record);
@@ -160,10 +162,10 @@ class EditAddress extends EditAutofillForm {
    * `mailing-address` is a special attribute token to indicate mailing fields + country.
    *
    * @param {object[]} mailingFieldsOrder - `fieldsOrder` from `getFormFormat`
+   * @param {string} addressFields - white-space-separated string of requested address fields to show
    * @returns {object[]} in the same structure as `mailingFieldsOrder` but including non-mail fields
    */
-  computeVisibleFields(mailingFieldsOrder) {
-    let addressFields = this._elements.form.dataset.addressFields;
+  static computeVisibleFields(mailingFieldsOrder, addressFields) {
     if (addressFields) {
       let requestedFieldClasses = addressFields.trim().split(/\s+/);
       let fieldClasses = [];
@@ -205,15 +207,28 @@ class EditAddress extends EditAutofillForm {
    */
   formatForm(country) {
     const {
+      addressLevel3Label,
+      addressLevel2Label,
       addressLevel1Label,
       postalCodeLabel,
       fieldsOrder: mailingFieldsOrder,
       postalCodePattern,
+      countryRequiredFields,
     } = this.getFormFormat(country);
+    this._elements.addressLevel3Label.dataset.localization = addressLevel3Label;
+    this._elements.addressLevel2Label.dataset.localization = addressLevel2Label;
     this._elements.addressLevel1Label.dataset.localization = addressLevel1Label;
     this._elements.postalCodeLabel.dataset.localization = postalCodeLabel;
-    let fieldClasses = this.computeVisibleFields(mailingFieldsOrder);
-    this.arrangeFields(fieldClasses);
+    let addressFields = this._elements.form.dataset.addressFields;
+    let extraRequiredFields = this._elements.form.dataset.extraRequiredFields;
+    let fieldClasses = EditAddress.computeVisibleFields(mailingFieldsOrder, addressFields);
+    let requiredFields = new Set(countryRequiredFields);
+    if (extraRequiredFields) {
+      for (let extraRequiredField of extraRequiredFields.trim().split(/\s+/)) {
+        requiredFields.add(extraRequiredField);
+      }
+    }
+    this.arrangeFields(fieldClasses, requiredFields);
     this.updatePostalCodeValidation(postalCodePattern);
   }
 
@@ -221,12 +236,14 @@ class EditAddress extends EditAutofillForm {
    * Update address field visibility and order based on libaddressinput data.
    *
    * @param {object[]} fieldsOrder array of objects with `fieldId` and optional `newLine` properties
+   * @param {Set} requiredFields Set of `fieldId` strings that mark which fields are required
    */
-  arrangeFields(fieldsOrder) {
+  arrangeFields(fieldsOrder, requiredFields) {
     let fields = [
       "name",
       "organization",
       "street-address",
+      "address-level3",
       "address-level2",
       "address-level1",
       "postal-code",
@@ -237,9 +254,18 @@ class EditAddress extends EditAutofillForm {
     let inputs = [];
     for (let i = 0; i < fieldsOrder.length; i++) {
       let {fieldId, newLine} = fieldsOrder[i];
+
       let container = this._elements.form.querySelector(`#${fieldId}-container`);
       let containerInputs = [...container.querySelectorAll("input, textarea, select")];
-      containerInputs.forEach(function(input) { input.disabled = false; });
+      containerInputs.forEach(function(input) {
+        input.disabled = false;
+        // libaddressinput doesn't list 'country' or 'name' as required.
+        // The additional-name field should never get marked as required.
+        input.required = (fieldId == "country" ||
+                          fieldId == "name" ||
+                          requiredFields.has(fieldId)) &&
+                         input.id != "additional-name";
+      });
       inputs.push(...containerInputs);
       container.style.display = "flex";
       container.style.order = i;
@@ -272,10 +298,12 @@ class EditAddress extends EditAutofillForm {
 
   populateCountries() {
     let fragment = document.createDocumentFragment();
-    for (let country of this.supportedCountries) {
+    // Sort countries by their visible names.
+    let countries = [...this.countries.entries()].sort((e1, e2) => e1[1].localeCompare(e2[1]));
+    for (let country of countries) {
       let option = new Option();
-      option.value = country;
-      option.dataset.localizationRegion = country.toLowerCase();
+      option.value = country[0];
+      option.dataset.localizationRegion = country[0].toLowerCase();
       fragment.appendChild(option);
     }
     this._elements.country.appendChild(fragment);
@@ -326,7 +354,7 @@ class EditCreditCard extends EditAutofillForm {
     // _record must be updated before generateYears and generateBillingAddressOptions are called.
     this._record = record;
     this._addresses = addresses;
-    this.generateBillingAddressOptions();
+    this.generateBillingAddressOptions(preserveFieldValues);
     if (!preserveFieldValues) {
       // Re-populating the networks will reset the selected option.
       this.populateNetworks();
@@ -384,8 +412,13 @@ class EditCreditCard extends EditAutofillForm {
     this._elements.ccType.appendChild(frag);
   }
 
-  generateBillingAddressOptions() {
-    let billingAddressGUID = this._record && this._record.billingAddressGUID;
+  generateBillingAddressOptions(preserveFieldValues) {
+    let billingAddressGUID;
+    if (preserveFieldValues && this._elements.billingAddress.value) {
+      billingAddressGUID = this._elements.billingAddress.value;
+    } else if (this._record) {
+      billingAddressGUID = this._record.billingAddressGUID;
+    }
 
     this._elements.billingAddress.textContent = "";
 

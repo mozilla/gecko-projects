@@ -206,6 +206,7 @@ public class GeckoAppShell
     static private int sDensityDpi;
     static private Float sDensity;
     static private int sScreenDepth;
+    static private boolean sUseMaxScreenDepth;
 
     /* Is the value in sVibrationEndTime valid? */
     private static boolean sVibrationMaybePlaying;
@@ -1045,9 +1046,13 @@ public class GeckoAppShell
         return HardwareUtils.getMemSize() > HIGH_MEMORY_DEVICE_THRESHOLD_MB;
     }
 
+    public static synchronized void useMaxScreenDepth(final boolean enable) {
+        sUseMaxScreenDepth = enable;
+    }
+
     /**
      * Returns the colour depth of the default screen. This will either be
-     * 24 or 16.
+     * 32, 24 or 16.
      */
     @WrapForJNI(calledFrom = "gecko")
     public static synchronized int getScreenDepth() {
@@ -1058,7 +1063,7 @@ public class GeckoAppShell
                     getApplicationContext().getSystemService(Context.WINDOW_SERVICE);
             PixelFormat.getPixelFormatInfo(wm.getDefaultDisplay().getPixelFormat(), info);
             if (info.bitsPerPixel >= 24 && isHighMemoryDevice()) {
-                sScreenDepth = 24;
+                sScreenDepth = sUseMaxScreenDepth ? info.bitsPerPixel : 24;
             }
         }
 
@@ -1107,7 +1112,11 @@ public class GeckoAppShell
     private static void vibrate(long milliseconds) {
         sVibrationEndTime = System.nanoTime() + milliseconds * 1000000;
         sVibrationMaybePlaying = true;
-        vibrator().vibrate(milliseconds);
+        try {
+            vibrator().vibrate(milliseconds);
+        } catch (final SecurityException ignore) {
+            Log.w(LOGTAG, "No VIBRATE permission");
+        }
     }
 
     @WrapForJNI(calledFrom = "gecko")
@@ -1122,14 +1131,22 @@ public class GeckoAppShell
 
         sVibrationEndTime = System.nanoTime() + vibrationDuration * 1000000;
         sVibrationMaybePlaying = true;
-        vibrator().vibrate(pattern, repeat);
+        try {
+            vibrator().vibrate(pattern, repeat);
+        } catch (final SecurityException ignore) {
+            Log.w(LOGTAG, "No VIBRATE permission");
+        }
     }
 
     @WrapForJNI(calledFrom = "gecko")
     private static void cancelVibrate() {
         sVibrationMaybePlaying = false;
         sVibrationEndTime = 0;
-        vibrator().cancel();
+        try {
+            vibrator().cancel();
+        } catch (final SecurityException ignore) {
+            Log.w(LOGTAG, "No VIBRATE permission");
+        }
     }
 
     @WrapForJNI(calledFrom = "gecko")

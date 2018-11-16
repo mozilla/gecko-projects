@@ -21,9 +21,7 @@ class nsDynamicAtom;
 // This class encompasses both static and dynamic atoms.
 //
 // - In places where static and dynamic atoms can be used, use RefPtr<nsAtom>.
-//   This is by far the most common case. (The exception to this is the HTML5
-//   parser, which does its own weird thing, and uses non-refcounted dynamic
-//   atoms.)
+//   This is by far the most common case.
 //
 // - In places where only static atoms can appear, use nsStaticAtom* to avoid
 //   unnecessary refcounting. This is a moderately common case.
@@ -38,16 +36,6 @@ public:
   void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
                               mozilla::AtomsSizes& aSizes) const;
 
-  // Dynamic HTML5 atoms are just like vanilla dynamic atoms, but we disallow
-  // various operations, the most important of which is AddRef/Release.
-  // XXX: we'd like to get rid of dynamic HTML5 atoms. See bug 1392185 for
-  // details.
-  enum class AtomKind : uint8_t {
-    Static = 0,
-    DynamicNormal = 1,
-    DynamicHTML5 = 2,
-  };
-
   bool Equals(char16ptr_t aString, uint32_t aLength) const
   {
     return mLength == aLength &&
@@ -59,18 +47,8 @@ public:
     return Equals(aString.BeginReading(), aString.Length());
   }
 
-  AtomKind Kind() const { return static_cast<AtomKind>(mKind); }
-
-  bool IsStatic() const { return Kind() == AtomKind::Static; }
-  bool IsDynamic() const
-  {
-    return Kind() == AtomKind::DynamicNormal ||
-           Kind() == AtomKind::DynamicHTML5;
-  }
-  bool IsDynamicHTML5() const
-  {
-    return Kind() == AtomKind::DynamicHTML5;
-  }
+  bool IsStatic() const { return mIsStatic; }
+  bool IsDynamic() const { return !IsStatic(); }
 
   const nsStaticAtom* AsStatic() const;
   const nsDynamicAtom* AsDynamic() const;
@@ -93,10 +71,13 @@ public:
   // rather than Hash() so we can use mozilla::BloomFilter<N, nsAtom>, because
   // BloomFilter requires elements to implement a function called hash().
   //
-  uint32_t hash() const
+  uint32_t hash() const { return mHash; }
+
+  // This function returns true if ToLowercaseASCII would return the string
+  // unchanged.
+  bool IsAsciiLowercase() const
   {
-    MOZ_ASSERT(!IsDynamicHTML5());
-    return mHash;
+    return mIsAsciiLowercase;
   }
 
   // We can't use NS_INLINE_DECL_THREADSAFE_REFCOUNTING because the refcounting
@@ -108,32 +89,35 @@ public:
 
 protected:
   // Used by nsStaticAtom.
-  constexpr nsAtom(const char16_t* aStr, uint32_t aLength, uint32_t aHash)
+  constexpr nsAtom(uint32_t aLength, uint32_t aHash, bool aIsAsciiLowercase)
     : mLength(aLength)
-    , mKind(static_cast<uint32_t>(nsAtom::AtomKind::Static))
+    , mIsStatic(true)
+    , mIsAsciiLowercase(aIsAsciiLowercase)
     , mHash(aHash)
   {}
 
   // Used by nsDynamicAtom.
-  nsAtom(AtomKind aKind, const nsAString& aString, uint32_t aHash)
+  nsAtom(const nsAString& aString,
+         uint32_t aHash,
+         bool aIsAsciiLowercase)
     : mLength(aString.Length())
-    , mKind(static_cast<uint32_t>(aKind))
+    , mIsStatic(false)
+    , mIsAsciiLowercase(aIsAsciiLowercase)
     , mHash(aHash)
   {
-    MOZ_ASSERT(aKind == AtomKind::DynamicNormal ||
-               aKind == AtomKind::DynamicHTML5);
   }
 
   ~nsAtom() = default;
 
   const uint32_t mLength:30;
-  const uint32_t mKind:2; // nsAtom::AtomKind
+  const uint32_t mIsStatic:1;
+  const uint32_t mIsAsciiLowercase:1;
   const uint32_t mHash;
 };
 
-// This class would be |final| if it wasn't for nsICSSAnonBoxPseudo and
-// nsICSSPseudoElement, which are trivial subclasses used to ensure only
-// certain static atoms are passed to certain functions.
+// This class would be |final| if it wasn't for nsCSSAnonBoxPseudoStaticAtom
+// and nsCSSPseudoElementStaticAtom, which are trivial subclasses used to
+// ensure only certain static atoms are passed to certain functions.
 class nsStaticAtom : public nsAtom
 {
 public:
@@ -147,9 +131,9 @@ public:
   // which is what we use when atomizing strings. We compute this hash in
   // Atom.py and assert in nsAtomTable::RegisterStaticAtoms that the two
   // hashes match.
-  constexpr nsStaticAtom(const char16_t* aStr, uint32_t aLength,
-                         uint32_t aHash, uint32_t aStringOffset)
-    : nsAtom(aStr, aLength, aHash)
+  constexpr nsStaticAtom(uint32_t aLength, uint32_t aHash,
+                         uint32_t aStringOffset, bool aIsAsciiLowercase)
+    : nsAtom(aLength, aHash, aIsAsciiLowercase)
     , mStringOffset(aStringOffset)
   {}
 
@@ -189,19 +173,13 @@ public:
 private:
   friend class nsAtomTable;
   friend class nsAtomSubTable;
-  // XXX: we'd like to remove nsHtml5AtomEntry. See bug 1392185.
-  friend class nsHtml5AtomEntry;
 
   // These shouldn't be used directly, even by friend classes. The
   // Create()/Destroy() methods use them.
-  static nsDynamicAtom* CreateInner(const nsAString& aString, uint32_t aHash);
-  nsDynamicAtom(const nsAString& aString, uint32_t aHash);
+  nsDynamicAtom(const nsAString& aString, uint32_t aHash, bool aIsAsciiLowercase);
   ~nsDynamicAtom() {}
 
-  // Creation/destruction is done by friend classes. The first Create() is for
-  // dynamic normal atoms, the second is for dynamic HTML5 atoms.
   static nsDynamicAtom* Create(const nsAString& aString, uint32_t aHash);
-  static nsDynamicAtom* Create(const nsAString& aString);
   static void Destroy(nsDynamicAtom* aAtom);
 
   mozilla::ThreadSafeAutoRefCnt mRefCnt;

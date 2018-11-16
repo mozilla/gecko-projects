@@ -25,6 +25,7 @@ namespace a11y {
 
 class HyperTextAccessible;
 class DocAccessible;
+class Attribute;
 
 class nsAccUtils
 {
@@ -101,7 +102,16 @@ public:
   /**
    * Return atomic value of ARIA attribute of boolean or NMTOKEN type.
    */
-  static nsAtom* GetARIAToken(mozilla::dom::Element* aElement, nsAtom* aAttr);
+  static nsStaticAtom* GetARIAToken(mozilla::dom::Element* aElement,
+                                    nsAtom* aAttr);
+
+  /**
+   * If the given ARIA attribute has a specific known token value, return it.
+   * If the specification demands for a fallback value for unknown attribute 
+   * values, return that. For all others, return a nullptr.
+   */
+  static nsStaticAtom* NormalizeARIAToken(mozilla::dom::Element* aElement,
+                                          nsAtom* aAttr);
 
   /**
    * Return document accessible for the given DOM node.
@@ -252,6 +262,10 @@ public:
    * to platform accessibility APIs, should the children be pruned off?
    */
   static bool MustPrune(Accessible* aAccessible);
+
+  static bool PersistentPropertiesToArray(nsIPersistentProperties* aProps,
+                                          nsTArray<Attribute>* aAttributes);
+
 };
 
 } // namespace a11y

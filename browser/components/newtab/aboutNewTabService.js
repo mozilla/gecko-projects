@@ -20,7 +20,7 @@ const TOPIC_CONTENT_DOCUMENT_INTERACTIVE = "content-document-interactive";
 
 // Automated tests ensure packaged locales are in this list. Copied output of:
 // https://github.com/mozilla/activity-stream/blob/master/bin/render-activity-stream-html.js
-const ACTIVITY_STREAM_BCP47 = "en-US ach an ar ast az be bg bn-BD bn-IN br bs ca cak crh cs cy da de dsb el en-CA en-GB eo es-AR es-CL es-ES es-MX et eu fa ff fi fr fy-NL ga-IE gd gl gn gu-IN he hi-IN hr hsb hu hy-AM ia id it ja ja-JP-macos ka kab kk km kn ko lij lo lt ltg lv mai mk ml mr ms my nb-NO ne-NP nl nn-NO oc pa-IN pl pt-BR pt-PT rm ro ru si sk sl sq sr sv-SE ta te th tl tr uk ur uz vi zh-CN zh-TW".split(" ");
+const ACTIVITY_STREAM_BCP47 = "en-US ach an ar ast az be bg bn-BD bn-IN br bs ca cak crh cs cy da de dsb el en-CA en-GB eo es-AR es-CL es-ES es-MX et eu fa ff fi fr fy-NL ga-IE gd gl gn gu-IN he hi-IN hr hsb hu hy-AM ia id is it ja ja-JP-macos ka kab kk km kn ko lij lo lt ltg lv mai mk ml mr ms my nb-NO ne-NP nl nn-NO oc pa-IN pl pt-BR pt-PT rm ro ru si sk sl sq sr sv-SE ta te th tl tr uk ur uz vi zh-CN zh-TW".split(" ");
 
 const ABOUT_URL = "about:newtab";
 const BASE_URL = "resource://activity-stream/";
@@ -100,7 +100,7 @@ AboutNewTabService.prototype = {
   classID: Components.ID("{dfcd2adc-7867-4d3a-ba70-17501f208142}"),
   QueryInterface: ChromeUtils.generateQI([
     Ci.nsIAboutNewTabService,
-    Ci.nsIObserver
+    Ci.nsIObserver,
   ]),
 
   observe(subject, topic, data) {
@@ -108,6 +108,7 @@ AboutNewTabService.prototype = {
       case "nsPref:changed":
         if (data === PREF_SEPARATE_PRIVILEGED_CONTENT_PROCESS) {
           this._privilegedContentProcess = Services.prefs.getBoolPref(PREF_SEPARATE_PRIVILEGED_CONTENT_PROCESS);
+          this.notifyChange();
         } else if (data === PREF_ACTIVITY_STREAM_PRERENDER_ENABLED) {
           this._activityStreamPrerender = Services.prefs.getBoolPref(PREF_ACTIVITY_STREAM_PRERENDER_ENABLED);
           this.notifyChange();
@@ -153,7 +154,7 @@ AboutNewTabService.prototype = {
             `${BASE_URL}vendor/redux.js`,
             `${BASE_URL}vendor/react-redux.js`,
             `${BASE_URL}prerendered/${this.activityStreamLocale}/activity-stream-strings.js`,
-            `${BASE_URL}data/content/activity-stream.bundle.js`
+            `${BASE_URL}data/content/activity-stream.bundle.js`,
           ];
 
           if (this._activityStreamPrerender) {
@@ -251,7 +252,7 @@ AboutNewTabService.prototype = {
       this._activityStreamPrerender ? "-prerendered" : "",
       this._activityStreamDebug ? "-debug" : "",
       this._privilegedContentProcess ? "-noscripts" : "",
-      ".html"
+      ".html",
     ].join("");
   },
 
@@ -310,7 +311,7 @@ AboutNewTabService.prototype = {
     return Services.locale.negotiateLanguages(
       // Fix up incorrect BCP47 that are actually lang tags as a workaround for
       // bug 1479606 returning the wrong values in the content process
-      Services.locale.getAppLocalesAsBCP47().map(l => l.replace(/^(ja-JP-mac)$/, "$1os")),
+      Services.locale.appLocalesAsBCP47.map(l => l.replace(/^(ja-JP-mac)$/, "$1os")),
       ACTIVITY_STREAM_BCP47,
       // defaultLocale's strings aren't necessarily packaged, but en-US' are
       "en-US",
@@ -339,7 +340,7 @@ AboutNewTabService.prototype = {
       Services.prefs.removeObserver(PREF_ACTIVITY_STREAM_DEBUG, this);
     }
     this.initialized = false;
-  }
+  },
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([AboutNewTabService]);

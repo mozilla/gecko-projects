@@ -4,9 +4,12 @@
 
 "use strict";
 
-const { PureComponent } = require("devtools/client/shared/vendor/react");
+const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
+
+const FluentReact = require("devtools/client/shared/vendor/fluent-react");
+const Localized = createFactory(FluentReact.Localized);
 
 const Actions = require("../../actions/index");
 
@@ -20,7 +23,7 @@ class NetworkLocationsForm extends PureComponent {
   constructor(props) {
     super(props);
     this.state = {
-      value: ""
+      value: "",
     };
   }
 
@@ -35,22 +38,41 @@ class NetworkLocationsForm extends PureComponent {
             this.setState({ value: "" });
           }
           e.preventDefault();
-        }
+        },
       },
-      dom.span({}, "Host:port"),
+      Localized(
+        {
+          id: "about-debugging-network-locations-host-input-label",
+        },
+        dom.label(
+          {
+            htmlFor: "about-debugging-network-locations-host-input",
+          },
+          "Host",
+        )
+      ),
       dom.input({
-        className: "connect-page__network-form__input js-network-form-input",
+        id: "about-debugging-network-locations-host-input",
+        className: "default-input js-network-form-input",
         placeholder: "localhost:6080",
         type: "text",
         value: this.state.value,
         onChange: (e) => {
           const value = e.target.value;
           this.setState({ value });
-        }
+        },
       }),
-      dom.button({
-        className: "aboutdebugging-button js-network-form-submit-button"
-      }, "Add")
+      Localized(
+        {
+          id: "about-debugging-network-locations-add-button",
+        },
+        dom.button(
+          {
+            className: "default-button js-network-form-submit-button",
+          },
+          "Add"
+        )
+      )
     );
   }
 }

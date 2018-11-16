@@ -487,7 +487,6 @@ protected:
     // load the bad underline blacklist from pref.
     void LoadBadUnderlineList();
 
-    void GenerateFontListKey(const nsAString& aKeyName, nsAString& aResult);
     void GenerateFontListKey(const nsACString& aKeyName, nsACString& aResult);
 
     virtual void GetFontFamilyNames(nsTArray<nsCString>& aFontFamilyNames);
@@ -598,7 +597,8 @@ protected:
     // on pages with lots of problems
     RefPtr<gfxFontFamily> mReplacementCharFallbackFamily;
 
-    nsTHashtable<nsCStringHashKey> mBadUnderlineFamilyNames;
+    // Sorted array of lowercased family names; use ContainsSorted to test
+    nsTArray<nsCString> mBadUnderlineFamilyNames;
 
     // character map data shared across families
     // contains weak ptrs to cmaps shared by font entry objects

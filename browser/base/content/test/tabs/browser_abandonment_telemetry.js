@@ -77,7 +77,7 @@ const PROBE_TESTS = [
     category: "back",
 
     async prepare(browser) {
-      browser.loadURI(PAGE_2);
+      BrowserTestUtils.loadURI(browser, PAGE_2);
       await BrowserTestUtils.browserLoaded(browser);
     },
 
@@ -96,7 +96,7 @@ const PROBE_TESTS = [
     category: "forward",
 
     async prepare(browser) {
-      browser.loadURI(PAGE_2);
+      BrowserTestUtils.loadURI(browser, PAGE_2);
       await BrowserTestUtils.browserLoaded(browser);
       let pageShow =
         BrowserTestUtils.waitForContentEvent(browser, "pageshow");
@@ -119,9 +119,9 @@ const PROBE_TESTS = [
     category: "historyNavigation",
 
     async prepare(browser) {
-      browser.loadURI(PAGE_2);
+      BrowserTestUtils.loadURI(browser, PAGE_2);
       await BrowserTestUtils.browserLoaded(browser);
-      browser.loadURI("http://example.com");
+      BrowserTestUtils.loadURI(browser, "http://example.com");
       await BrowserTestUtils.browserLoaded(browser);
       await TabStateFlusher.flush(browser);
     },
@@ -141,9 +141,9 @@ const PROBE_TESTS = [
     category: "historyNavigation",
 
     async prepare(browser) {
-      browser.loadURI(PAGE_2);
+      BrowserTestUtils.loadURI(browser, PAGE_2);
       await BrowserTestUtils.browserLoaded(browser);
-      browser.loadURI("http://example.com");
+      BrowserTestUtils.loadURI(browser, "http://example.com");
       await BrowserTestUtils.browserLoaded(browser);
       let pageShow =
         BrowserTestUtils.waitForContentEvent(browser, "pageshow");
@@ -206,11 +206,11 @@ const PROBE_TESTS = [
  */
 function assertOnlyOneTypeSet(snapshot, category) {
   let categoryIndex = CATEGORIES.indexOf(category);
-  Assert.equal(snapshot.counts[categoryIndex], 1,
+  Assert.equal(snapshot.values[categoryIndex], 1,
                `Should have seen the ${category} count increment.`);
   // Use Array.prototype.reduce to sum up all of the
   // snapshot.count entries
-  Assert.equal(snapshot.counts.reduce((a, b) => a + b), 1,
+  Assert.equal(Object.values(snapshot.values).reduce((a, b) => a + b, 0), 1,
                "Should only be 1 collected value.");
 }
 

@@ -19,6 +19,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
 import android.content.res.Configuration;
+import android.graphics.Typeface;
 import android.os.Bundle;
 import android.preference.CheckBoxPreference;
 import android.preference.EditTextPreference;
@@ -37,8 +38,12 @@ import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.ActionBar;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.Spannable;
+import android.text.SpannableString;
+import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.text.style.StyleSpan;
 import android.util.Log;
 import android.view.MenuItem;
 import android.view.View;
@@ -459,6 +464,9 @@ public class GeckoPreferences
                 } else if (header.id == R.id.pref_header_clear_private_data
                            && !Restrictions.isAllowed(this, Restrictable.CLEAR_HISTORY)) {
                     iterator.remove();
+                } else if (header.id == R.id.pref_header_notifications
+                        && !haveNotificationsPreferences(this)) {
+                    iterator.remove();
                 }
             }
 
@@ -851,6 +859,33 @@ public class GeckoPreferences
                     if (!isHealthReportEnabled) {
                         ((SwitchPreference) pref).setChecked(isHealthReportEnabled);
                         pref.setEnabled(isHealthReportEnabled);
+
+                        // Instruct the user on how to enable Health Report
+                        final String healthReportSettingPath =
+                                getString(R.string.pref_feature_tips_notification_enabling_path);
+                        final String enableHealthReportHint =
+                                getString(R.string.pref_feature_tips_notification_enabling_hint);
+
+                        final int healthReportPathFirstCharIndex =
+                                enableHealthReportHint.indexOf(healthReportSettingPath);
+                        if (healthReportPathFirstCharIndex < 0) {
+                            return;
+                        }
+                        final int healthReportPathLastCharIndex =
+                                healthReportPathFirstCharIndex + healthReportSettingPath.length();
+
+                        final SpannableString enableHealthReportBoldedHint =
+                                new SpannableString(enableHealthReportHint);
+                        enableHealthReportBoldedHint.setSpan(new StyleSpan(Typeface.BOLD),
+                                healthReportPathFirstCharIndex, healthReportPathLastCharIndex,
+                                Spannable.SPAN_INCLUSIVE_INCLUSIVE);
+
+                        SpannableStringBuilder summaryTextBuilder = new SpannableStringBuilder()
+                                .append(enableHealthReportBoldedHint)
+                                .append("\n\n")
+                                .append(getString(R.string.pref_feature_tips_notification_summary));
+
+                        pref.setSummary(summaryTextBuilder);
                     }
                 }
 

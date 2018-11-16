@@ -1,4 +1,4 @@
-52914
+52944
 0/nm
 0th/pt
 1/n1
@@ -13628,7 +13628,7 @@ accordion/MS
 accordionist/MS
 accost/GMDS
 account/MDSBG
-accountability/M
+accountability/MS
 accountable/U
 accountancy/M
 accountant/MS
@@ -13669,6 +13669,8 @@ acerbate/DSG
 acerbic
 acerbically
 acerbity/M
+acetabular
+acetabulum
 acetaminophen/M
 acetate/MS
 acetic
@@ -14028,6 +14030,7 @@ affluent/Y
 afford/GDSB
 affordability
 affordably
+affordance/S
 afforest/EGSD
 afforestation/M
 affray/MS
@@ -15245,6 +15248,7 @@ arras/MS
 array/EGMDS
 arrears/M
 arrest/AGMDS
+arrestee/S
 arrhythmia/M
 arrhythmic
 arrhythmical
@@ -15273,6 +15277,7 @@ artful/PY
 artfulness/M
 arthritic/MS
 arthritis/M
+arthroplasty
 arthropod/MS
 arthroscope/SM
 arthroscopic
@@ -16212,6 +16217,7 @@ bashing/M
 basic/MS
 basically
 basil/M
+basilar
 basilica/MS
 basilisk/MS
 basin/MS
@@ -17328,6 +17334,7 @@ bonito/MS
 bonk/SZGD
 bonnet/MS
 bonny/TR
+bono
 bonobo/MS
 bonsai/M
 bonus/MS
@@ -21964,7 +21971,7 @@ customary/U
 customer/M
 customhouse/SM
 customization/M
-customize/DSG
+customize/DSGB
 cut/TSMR
 cutaneous
 cutaway/MS
@@ -22030,6 +22037,11 @@ cypress/MS
 cyst/MS
 cysteine/SM
 cystic
+cysticerci
+cysticercoid/S
+cysticercoses
+cysticercosis
+cysticercus
 cystitis
 cytokine/SM
 cytologist/SM
@@ -22324,6 +22336,7 @@ decimeter/MS
 decipherable/UI
 decision/IM
 decisions
+decisis
 decisive/IPY
 decisiveness/IM
 deck/SGMD
@@ -25122,6 +25135,8 @@ erelong
 eremite/MS
 erg/SM
 ergo
+ergodic
+ergodicity
 ergonomic/S
 ergonomically
 ergonomics/M
@@ -25353,6 +25368,9 @@ evict/SDG
 eviction/MS
 evidence/MGDS
 evident/Y
+evidential/Y
+evidentiality
+evidentiary
 evil/MRYTSP
 evildoer/SM
 evildoing/M
@@ -26365,7 +26383,7 @@ financial/YS
 financier/MS
 financing/M
 finch/MS
-find/JMRZGS
+find/JMRZGSB
 finder/M
 finding/M
 findings/M
@@ -29132,7 +29150,6 @@ hangmen
 hangnail/MS
 hangout/SM
 hangover/MS
-hangry/TR
 hangup/MS
 hank/MRZS
 hanker/GJD
@@ -29373,6 +29390,7 @@ headship/SM
 headshrinker/SM
 headsman/M
 headsmen
+headspace
 headstall/SM
 headstand/SM
 headstone/SM
@@ -30497,6 +30515,8 @@ iamb/MS
 iambi
 iambic/SM
 iambus/MS
+iatrogenesis
+iatrogenic
 ibex/MS
 ibid
 ibidem
@@ -32585,6 +32605,7 @@ kleptocracy
 kleptomania/M
 kleptomaniac/SM
 kludge/GDS
+kludgy
 kluge/DS
 klutz/MS
 klutziness/M
@@ -34437,6 +34458,7 @@ masquerader/M
 mass/MDSGV
 massacre/MGDS
 massage/DSMG
+masse
 masseur/SM
 masseuse/MS
 massif/MS
@@ -36458,6 +36480,8 @@ neurasthenia/M
 neurasthenic/MS
 neuritic/MS
 neuritis/M
+neurocysticercoses
+neurocysticercosis
 neurological/Y
 neurologist/SM
 neurology/M
@@ -38004,6 +38028,7 @@ overbook/DGS
 overbore
 overborne
 overbought
+overbroad
 overbuild/SG
 overbuilt
 overburden/GSD
@@ -40320,7 +40345,7 @@ position/CKEMS
 positional/KE
 positioned/K
 positioning/AK
-positive/MYPS
+positive/MYPSE
 positiveness/M
 positivism
 positivist/S
@@ -42647,6 +42672,7 @@ reputational
 repute/DSMGB
 reputed/Y
 request/GDR
+requestor
 requiem/SM
 require/LDG
 requirement/MS
@@ -47690,6 +47716,7 @@ superscribe/GDS
 superscript/MS
 superscription/M
 supersede/GDS
+superset
 supersize/GDS
 supersonic
 superstar/MS
@@ -48739,7 +48766,7 @@ theistic
 them
 thematic
 thematically
-theme/DSM
+theme/DSMG
 themselves
 then/M
 thence
@@ -50338,6 +50365,7 @@ uncontrollably
 uncontroversial
 uncool
 uncooperative
+uncopyrightable
 uncouth/Y
 uncrushable
 unction/SM
@@ -50495,6 +50523,7 @@ uneasy/T
 uneatable
 uneconomic
 unemployed/M
+unencrypted
 unending
 unenterprising
 unequal/DY
@@ -51164,6 +51193,7 @@ vertebrae
 vertebral
 vertebrata
 vertebrate/IMS
+vertebrobasilar
 vertex/MS
 vertical/MYS
 vertices

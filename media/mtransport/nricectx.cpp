@@ -44,6 +44,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <string>
 #include <vector>
 
+#include "nr_socket_proxy_config.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
@@ -79,7 +80,6 @@ extern "C" {
 #include "nr_crypto.h"
 #include "nr_socket.h"
 #include "nr_socket_local.h"
-#include "nr_proxy_tunnel.h"
 #include "stun_client_ctx.h"
 #include "stun_reg.h"
 #include "stun_server_ctx.h"
@@ -100,6 +100,8 @@ extern "C" {
 
 namespace mozilla {
 
+using std::shared_ptr;
+
 TimeStamp nr_socket_short_term_violation_time() {
   return NrSocketBase::short_term_violation_time();
 }
@@ -115,6 +117,15 @@ const char kNrIceTransportTcp[] = "tcp";
 const char kNrIceTransportTls[] = "tls";
 
 static bool initialized = false;
+
+static int noop(void** obj) {
+  return 0;
+}
+
+static nr_socket_factory_vtbl ctx_socket_factory_vtbl = {
+  nr_socket_local_create,
+  noop
+};
 
 // Implement NSPR-based crypto algorithms
 static int nr_crypto_nss_random_bytes(UCHAR *buf, size_t len) {
@@ -288,7 +299,54 @@ NrIceCtx::NrIceCtx(const std::string& name, Policy policy)
     ice_handler_(nullptr),
     trickle_(true),
     policy_(policy),
-    nat_ (nullptr) {
+    nat_ (nullptr),
+    proxy_config_(nullptr) {
+}
+
+/* static */
+RefPtr<NrIceCtx>
+NrIceCtx::Create(const std::string& name,
+                 bool allow_loopback,
+                 bool tcp_enabled,
+                 bool allow_link_local,
+                 Policy policy)
+{
+  // InitializeGlobals only executes once
+  NrIceCtx::InitializeGlobals(allow_loopback, tcp_enabled, allow_link_local);
+
+  RefPtr<NrIceCtx> ctx = new NrIceCtx(name, policy);
+
+  if (!ctx->Initialize()) {
+    return nullptr;
+  }
+
+  return ctx;
+}
+
+RefPtr<NrIceMediaStream>
+NrIceCtx::CreateStream(const std::string& id,
+                       const std::string& name,
+                       int components)
+{
+  if (streams_.count(id)) {
+    MOZ_ASSERT(false);
+    return nullptr;
+  }
+
+  RefPtr<NrIceMediaStream> stream =
+    new NrIceMediaStream(this, id, name, components);
+  streams_[id] = stream;
+  return stream;
+}
+
+void
+NrIceCtx::DestroyStream(const std::string& id) {
+  auto it = streams_.find(id);
+  if (it != streams_.end()) {
+    auto preexisting_stream = it->second;
+    streams_.erase(it);
+    preexisting_stream->Close();
+  }
 }
 
 // Handler callbacks
@@ -297,12 +355,16 @@ int NrIceCtx::select_pair(void *obj,nr_ice_media_stream *stream,
                    int potential_ct) {
   MOZ_MTLOG(ML_DEBUG, "select pair called: potential_ct = "
             << potential_ct);
+  MOZ_ASSERT(stream->local_stream);
+  MOZ_ASSERT(!stream->local_stream->obsolete);
 
   return 0;
 }
 
 int NrIceCtx::stream_ready(void *obj, nr_ice_media_stream *stream) {
   MOZ_MTLOG(ML_DEBUG, "stream_ready called");
+  MOZ_ASSERT(!stream->local_stream);
+  MOZ_ASSERT(!stream->obsolete);
 
   // Get the ICE ctx.
   NrIceCtx *ctx = static_cast<NrIceCtx *>(obj);
@@ -319,6 +381,8 @@ int NrIceCtx::stream_ready(void *obj, nr_ice_media_stream *stream) {
 
 int NrIceCtx::stream_failed(void *obj, nr_ice_media_stream *stream) {
   MOZ_MTLOG(ML_DEBUG, "stream_failed called");
+  MOZ_ASSERT(!stream->local_stream);
+  MOZ_ASSERT(!stream->obsolete);
 
   // Get the ICE ctx
   NrIceCtx *ctx = static_cast<NrIceCtx *>(obj);
@@ -328,7 +392,7 @@ int NrIceCtx::stream_failed(void *obj, nr_ice_media_stream *stream) {
   MOZ_ASSERT(s);
 
   ctx->SetConnectionState(ICE_CTX_FAILED);
-  s -> SignalFailed(s);
+  s -> Failed();
   return 0;
 }
 
@@ -387,6 +451,7 @@ void NrIceCtx::trickle_cb(void *arg, nr_ice_ctx *ice_ctx,
                           nr_ice_media_stream *stream,
                           int component_id,
                           nr_ice_candidate *candidate) {
+  MOZ_ASSERT(!stream->obsolete);
   // Get the ICE ctx
   NrIceCtx *ctx = static_cast<NrIceCtx *>(arg);
   RefPtr<NrIceMediaStream> s = ctx->FindStream(stream);
@@ -488,40 +553,6 @@ NrIceCtx::InitializeGlobals(bool allow_loopback,
   }
 }
 
-std::string
-NrIceCtx::GetNewUfrag()
-{
-  char* ufrag;
-  int r;
-
-  if ((r=nr_ice_get_new_ice_ufrag(&ufrag))) {
-    MOZ_CRASH("Unable to get new ice ufrag");
-    return "";
-  }
-
-  std::string ufragStr = ufrag;
-  RFREE(ufrag);
-
-  return ufragStr;
-}
-
-std::string
-NrIceCtx::GetNewPwd()
-{
-  char* pwd;
-  int r;
-
-  if ((r=nr_ice_get_new_ice_pwd(&pwd))) {
-    MOZ_CRASH("Unable to get new ice pwd");
-    return "";
-  }
-
-  std::string pwdStr = pwd;
-  RFREE(pwd);
-
-  return pwdStr;
-}
-
 #define MAXADDRS 100 // mirrors setting in ice_ctx.c
 
 /* static */
@@ -570,22 +601,6 @@ NrIceCtx::SetStunAddrs(const nsTArray<NrIceStunAddr>& addrs)
 bool
 NrIceCtx::Initialize()
 {
-  std::string ufrag = GetNewUfrag();
-  std::string pwd = GetNewPwd();
-
-  return Initialize(ufrag, pwd);
-}
-
-bool
-NrIceCtx::Initialize(const std::string& ufrag,
-                     const std::string& pwd)
-{
-  MOZ_ASSERT(!ufrag.empty());
-  MOZ_ASSERT(!pwd.empty());
-  if (ufrag.empty() || pwd.empty()) {
-    return false;
-  }
-
   // Create the ICE context
   int r;
 
@@ -601,18 +616,25 @@ NrIceCtx::Initialize(const std::string& ufrag,
       break;
   }
 
-  r = nr_ice_ctx_create_with_credentials(const_cast<char *>(name_.c_str()),
-                                         flags,
-                                         const_cast<char *>(ufrag.c_str()),
-                                         const_cast<char *>(pwd.c_str()),
-                                         &ctx_);
-  MOZ_ASSERT(ufrag == ctx_->ufrag);
-  MOZ_ASSERT(pwd == ctx_->pwd);
+  r = nr_ice_ctx_create(const_cast<char *>(name_.c_str()), flags, &ctx_);
 
   if (r) {
     MOZ_MTLOG(ML_ERROR, "Couldn't create ICE ctx for '" << name_ << "'");
     return false;
   }
+
+  // override default factory to capture optional proxy config when creating
+  // sockets.
+  nr_socket_factory* factory;
+  r = nr_socket_factory_create_int(this,
+                                   &ctx_socket_factory_vtbl,
+                                   &factory);
+
+  if (r) {
+    MOZ_MTLOG(LogLevel::Error, "Couldn't create ctx socket factory.");
+    return false;
+  }
+  nr_ice_ctx_set_socket_factory(ctx_, factory);
 
   nr_interface_prioritizer *prioritizer = CreateInterfacePrioritizer();
   if (!prioritizer) {
@@ -783,36 +805,13 @@ NrIceStats NrIceCtx::Destroy() {
 
   ice_handler_vtbl_ = nullptr;
   ice_handler_ = nullptr;
+  proxy_config_ = nullptr;
   streams_.clear();
 
   return stats;
 }
 
 NrIceCtx::~NrIceCtx() {
-  Destroy();
-}
-
-void
-NrIceCtx::SetStream(const std::string& id, NrIceMediaStream* stream) {
-  auto it = streams_.find(id);
-  if (it != streams_.end()) {
-    MOZ_ASSERT(!stream, "Transport ids should be unique, and set only once");
-    auto preexisting_stream = it->second;
-    streams_.erase(it);
-    preexisting_stream->Close();
-  }
-
-  if (stream) {
-    streams_[id] = stream;
-  }
-}
-
-std::string NrIceCtx::ufrag() const {
-  return ctx_->ufrag;
-}
-
-std::string NrIceCtx::pwd() const {
-  return ctx_->pwd;
 }
 
 void NrIceCtx::destroy_peer_ctx() {
@@ -902,43 +901,8 @@ nsresult NrIceCtx::SetResolver(nr_resolver *resolver) {
   return NS_OK;
 }
 
-nsresult NrIceCtx::SetProxyServer(const NrIceProxyServer& proxy_server) {
-  int r,_status;
-  nr_proxy_tunnel_config *config = nullptr;
-  nr_socket_wrapper_factory *wrapper = nullptr;
-
-  if ((r = nr_proxy_tunnel_config_create(&config))) {
-    ABORT(r);
-  }
-
-  if ((r = nr_proxy_tunnel_config_set_proxy(config,
-                                            proxy_server.host().c_str(),
-                                            proxy_server.port()))) {
-    ABORT(r);
-  }
-
-  if ((r = nr_proxy_tunnel_config_set_resolver(config, ctx_->resolver))) {
-    ABORT(r);
-  }
-
-  if ((r = nr_socket_wrapper_factory_proxy_tunnel_create(config, &wrapper))) {
-    MOZ_MTLOG(LogLevel::Error, "Couldn't create proxy tunnel wrapper.");
-    ABORT(r);
-  }
-
-  // nr_ice_ctx will own the wrapper after this call
-  if ((r = nr_ice_ctx_set_turn_tcp_socket_wrapper(ctx_, wrapper))) {
-    MOZ_MTLOG(ML_ERROR, "Couldn't set proxy for '" << name_ << "': " << r);
-    ABORT(r);
-  }
-
-  _status = 0;
-abort:
-  nr_proxy_tunnel_config_destroy(&config);
-  if (_status) {
-    nr_socket_wrapper_factory_destroy(&wrapper);
-    return NS_ERROR_FAILURE;
-  }
+nsresult NrIceCtx::SetProxyServer(NrSocketProxyConfig&& config) {
+  proxy_config_.reset(new NrSocketProxyConfig(std::move(config)));
   return NS_OK;
 }
 
@@ -992,7 +956,7 @@ nsresult NrIceCtx::StartGathering(bool default_route_only, bool proxy_only) {
 
 RefPtr<NrIceMediaStream> NrIceCtx::FindStream(nr_ice_media_stream *stream) {
   for (auto& idAndStream : streams_) {
-    if (idAndStream.second->stream() == stream) {
+    if (idAndStream.second->HasStream(stream)) {
       return idAndStream.second;
     }
   }
@@ -1196,4 +1160,41 @@ void nr_ice_compute_codeword(char *buf, int len,char *codeword) {
 
     PL_Base64Encode(reinterpret_cast<char*>(&c), 3, codeword);
     codeword[4] = 0;
+}
+
+int nr_socket_local_create(void *obj,
+                            nr_transport_addr *addr,
+                            nr_socket **sockp)
+{
+  using namespace mozilla;
+
+  RefPtr<NrSocketBase> sock;
+  int r, _status;
+  shared_ptr<NrSocketProxyConfig> config = nullptr;
+
+  if (obj) {
+    config = static_cast<NrIceCtx*>(obj)->GetProxyConfig();
+  }
+
+  r = NrSocketBase::CreateSocket(addr, &sock, config);
+  if (r) {
+    ABORT(r);
+  }
+
+  r = nr_socket_create_int(static_cast<void *>(sock),
+                           sock->vtbl(), sockp);
+  if (r)
+    ABORT(r);
+
+  _status = 0;
+
+  {
+    // We will release this reference in destroy(), not exactly the normal
+    // ownership model, but it is what it is.
+    NrSocketBase* dummy = sock.forget().take();
+    (void)dummy;
+  }
+
+abort:
+  return _status;
 }

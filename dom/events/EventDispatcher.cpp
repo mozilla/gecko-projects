@@ -6,6 +6,7 @@
 
 #include "nsPresContext.h"
 #include "nsContentUtils.h"
+#include "nsDocShell.h"
 #include "nsError.h"
 #include <new>
 #include "nsIContent.h"
@@ -64,6 +65,10 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/Likely.h"
 using namespace mozilla::tasktracer;
+#endif
+
+#ifdef MOZ_GECKO_PROFILER
+#include "ProfilerMarkerPayload.h"
 #endif
 
 namespace mozilla {
@@ -867,7 +872,7 @@ EventDispatcher::Dispatch(nsISupports* aTarget,
     nsCOMPtr<nsIContent> content = do_QueryInterface(target);
     if (content && content->IsInNativeAnonymousSubtree()) {
       nsCOMPtr<EventTarget> newTarget =
-        do_QueryInterface(content->FindFirstNonChromeOnlyAccessContent());
+        content->FindFirstNonChromeOnlyAccessContent();
       NS_ENSURE_STATE(newTarget);
 
       aEvent->mOriginalTarget = target;
@@ -1109,8 +1114,56 @@ EventDispatcher::Dispatch(nsISupports* aTarget,
         EventChainPostVisitor postVisitor(preVisitor);
         MOZ_RELEASE_ASSERT(!aEvent->mPath);
         aEvent->mPath = &chain;
-        EventTargetChainItem::HandleEventTargetChain(chain, postVisitor,
-                                                     aCallback, cd);
+
+#ifdef MOZ_GECKO_PROFILER
+        if (profiler_is_active()) {
+          // Add a profiler label and a profiler marker for the actual
+          // dispatch of the event.
+          // This is a very hot code path, so we need to make sure not to
+          // do this extra work when we're not profiling.
+          if (!postVisitor.mDOMEvent) {
+            // This is tiny bit slow, but happens only once per event.
+            // Similar code also in EventListenerManager.
+            nsCOMPtr<EventTarget> et = aEvent->mOriginalTarget;
+            RefPtr<Event> event = EventDispatcher::CreateEvent(et, aPresContext,
+                                                               aEvent,
+                                                               EmptyString());
+            event.swap(postVisitor.mDOMEvent);
+          }
+          nsAutoString typeStr;
+          postVisitor.mDOMEvent->GetType(typeStr);
+          AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING(
+            "EventDispatcher::Dispatch", OTHER, typeStr);
+
+          nsCOMPtr<nsIDocShell> docShell;
+          docShell = nsContentUtils::GetDocShellForEventTarget(aEvent->mTarget);
+          DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
+          profiler_add_marker(
+            "DOMEvent",
+            MakeUnique<DOMEventMarkerPayload>(typeStr,
+                                              aEvent->mTimeStamp,
+                                              "DOMEvent",
+                                              TRACING_INTERVAL_START,
+                                              docShellId,
+                                              docShellHistoryId));
+
+          EventTargetChainItem::HandleEventTargetChain(chain, postVisitor,
+                                                       aCallback, cd);
+
+          profiler_add_marker(
+            "DOMEvent",
+            MakeUnique<DOMEventMarkerPayload>(typeStr,
+                                              aEvent->mTimeStamp,
+                                              "DOMEvent",
+                                              TRACING_INTERVAL_END,
+                                              docShellId,
+                                              docShellHistoryId));
+        } else
+#endif
+        {
+          EventTargetChainItem::HandleEventTargetChain(chain, postVisitor,
+                                                       aCallback, cd);
+        }
         aEvent->mPath = nullptr;
 
         preVisitor.mEventStatus = postVisitor.mEventStatus;

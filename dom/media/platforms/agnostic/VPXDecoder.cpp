@@ -5,10 +5,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "VPXDecoder.h"
+#include "BitReader.h"
 #include "TimeUnits.h"
 #include "gfx2DGlue.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/SyncRunnable.h"
+#include "mozilla/Unused.h"
 #include "ImageContainer.h"
 #include "nsError.h"
 #include "prsystem.h"
@@ -38,7 +40,8 @@ static VPXDecoder::Codec MimeTypeToCodec(const nsACString& aMimeType)
 static nsresult
 InitContext(vpx_codec_ctx_t* aCtx,
             const VideoInfo& aInfo,
-            const VPXDecoder::Codec aCodec)
+            const VPXDecoder::Codec aCodec,
+            bool aLowLatency)
 {
   int decode_threads = 2;
 
@@ -58,7 +61,7 @@ InitContext(vpx_codec_ctx_t* aCtx,
   decode_threads = std::min(decode_threads, PR_GetNumberOfProcessors());
 
   vpx_codec_dec_cfg_t config;
-  config.threads = decode_threads;
+  config.threads = aLowLatency ? 1 : decode_threads;
   config.w = config.h = 0; // set after decode
 
   if (!dx || vpx_codec_dec_init(aCtx, dx, &config, 0)) {
@@ -73,6 +76,8 @@ VPXDecoder::VPXDecoder(const CreateDecoderParams& aParams)
   , mTaskQueue(aParams.mTaskQueue)
   , mInfo(aParams.VideoConfig())
   , mCodec(MimeTypeToCodec(aParams.VideoConfig().mMimeType))
+  , mLowLatency(
+      aParams.mOptions.contains(CreateDecoderParams::Option::LowLatency))
 {
   MOZ_COUNT_CTOR(VPXDecoder);
   PodZero(&mVPX);
@@ -98,12 +103,12 @@ VPXDecoder::Shutdown()
 RefPtr<MediaDataDecoder::InitPromise>
 VPXDecoder::Init()
 {
-  if (NS_FAILED(InitContext(&mVPX, mInfo, mCodec))) {
+  if (NS_FAILED(InitContext(&mVPX, mInfo, mCodec, mLowLatency))) {
     return VPXDecoder::InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR,
                                                     __func__);
   }
   if (mInfo.HasAlpha()) {
-    if (NS_FAILED(InitContext(&mVPXAlpha, mInfo, mCodec))) {
+    if (NS_FAILED(InitContext(&mVPXAlpha, mInfo, mCodec, mLowLatency))) {
       return VPXDecoder::InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR,
                                                       __func__);
     }
@@ -306,36 +311,212 @@ VPXDecoder::IsVP9(const nsACString& aMimeType)
 bool
 VPXDecoder::IsKeyframe(Span<const uint8_t> aBuffer, Codec aCodec)
 {
-  vpx_codec_stream_info_t si;
-  PodZero(&si);
-  si.sz = sizeof(si);
-
-  if (aCodec == Codec::VP8) {
-    vpx_codec_peek_stream_info(vpx_codec_vp8_dx(), aBuffer.Elements(), aBuffer.Length(), &si);
-    return bool(si.is_kf);
-  } else if (aCodec == Codec::VP9) {
-    vpx_codec_peek_stream_info(vpx_codec_vp9_dx(), aBuffer.Elements(), aBuffer.Length(), &si);
-    return bool(si.is_kf);
-  }
-
-  return false;
+  VPXStreamInfo info;
+  return GetStreamInfo(aBuffer, info, aCodec) && info.mKeyFrame;
 }
 
 /* static */
 gfx::IntSize
 VPXDecoder::GetFrameSize(Span<const uint8_t> aBuffer, Codec aCodec)
 {
-  vpx_codec_stream_info_t si;
-  PodZero(&si);
-  si.sz = sizeof(si);
+  VPXStreamInfo info;
+  if (!GetStreamInfo(aBuffer, info, aCodec)) {
+    return gfx::IntSize();
+  }
+  return info.mImage;
+}
 
-  if (aCodec == Codec::VP8) {
-    vpx_codec_peek_stream_info(vpx_codec_vp8_dx(), aBuffer.Elements(), aBuffer.Length(), &si);
-  } else if (aCodec == Codec::VP9) {
-    vpx_codec_peek_stream_info(vpx_codec_vp9_dx(), aBuffer.Elements(), aBuffer.Length(), &si);
+/* static */
+gfx::IntSize
+VPXDecoder::GetDisplaySize(Span<const uint8_t> aBuffer, Codec aCodec)
+{
+  VPXStreamInfo info;
+  if (!GetStreamInfo(aBuffer, info, aCodec)) {
+    return gfx::IntSize();
+  }
+  return info.mDisplay;
+}
+
+/* static */
+int
+VPXDecoder::GetVP9Profile(Span<const uint8_t> aBuffer)
+{
+  VPXStreamInfo info;
+  if (!GetStreamInfo(aBuffer, info, Codec::VP9)) {
+    return -1;
+  }
+  return info.mProfile;
+}
+
+/* static */
+bool
+VPXDecoder::GetStreamInfo(Span<const uint8_t> aBuffer,
+                          VPXDecoder::VPXStreamInfo& aInfo,
+                          Codec aCodec)
+{
+  if (aBuffer.IsEmpty()) {
+    // Can't be good.
+    return false;
   }
 
-  return gfx::IntSize(si.w, si.h);
+  aInfo = VPXStreamInfo();
+
+  if (aCodec == Codec::VP8) {
+    aInfo.mKeyFrame =
+      (aBuffer[0] & 1) == 0; // frame type (0 for key frames, 1 for interframes)
+    if (!aInfo.mKeyFrame) {
+      // We can't retrieve the required information from interframes.
+      return true;
+    }
+    if (aBuffer.Length() < 10) {
+      return false;
+    }
+    uint8_t version = (aBuffer[0] >> 1) & 0x7;
+    if (version > 3) {
+      return false;
+    }
+    uint8_t start_code_byte_0 = aBuffer[3];
+    uint8_t start_code_byte_1 = aBuffer[4];
+    uint8_t start_code_byte_2 = aBuffer[5];
+    if (start_code_byte_0 != 0x9d || start_code_byte_1 != 0x01 ||
+        start_code_byte_2 != 0x2a) {
+      return false;
+    }
+    uint16_t width = (aBuffer[6] | aBuffer[7] << 8) & 0x3fff;
+    uint16_t height = (aBuffer[8] | aBuffer[9] << 8) & 0x3fff;
+
+    // aspect ratio isn't found in the VP8 frame header.
+    aInfo.mImage = aInfo.mDisplay = gfx::IntSize(width, height);
+    return true;
+  }
+
+  BitReader br(aBuffer.Elements(), aBuffer.Length() * 8);
+  uint32_t frameMarker = br.ReadBits(2); // frame_marker
+  if (frameMarker != 2) {
+    // That's not a valid vp9 header.
+    return false;
+  }
+  uint32_t profile = br.ReadBits(1); // profile_low_bit
+  profile |= br.ReadBits(1) << 1;    // profile_high_bit
+  if (profile == 3) {
+    profile += br.ReadBits(1); // reserved_zero
+    if (profile > 3) {
+      // reserved_zero wasn't zero.
+      return false;
+    }
+  }
+
+  aInfo.mProfile = profile;
+
+  bool show_existing_frame = br.ReadBits(1);
+  if (show_existing_frame) {
+    if (profile == 3 && aBuffer.Length() < 2) {
+      return false;
+    }
+    Unused << br.ReadBits(3); // frame_to_show_map_idx
+    return true;
+  }
+
+  if (aBuffer.Length() < 10) {
+    // Header too small;
+    return false;
+  }
+
+  aInfo.mKeyFrame = !br.ReadBits(1);
+  bool show_frame = br.ReadBits(1);
+  bool error_resilient_mode = br.ReadBits(1);
+
+  auto frame_sync_code = [&]() -> bool {
+    uint8_t frame_sync_byte_1 = br.ReadBits(8);
+    uint8_t frame_sync_byte_2 = br.ReadBits(8);
+    uint8_t frame_sync_byte_3 = br.ReadBits(8);
+    return frame_sync_byte_1 == 0x49 && frame_sync_byte_2 == 0x83 &&
+           frame_sync_byte_3 == 0x42;
+  };
+
+  auto color_config = [&]() -> bool {
+    aInfo.mBitDepth = 8;
+    if (profile >= 2) {
+      bool ten_or_twelve_bit = br.ReadBits(1);
+      aInfo.mBitDepth = ten_or_twelve_bit ? 12 : 10;
+    }
+    aInfo.mColorSpace = br.ReadBits(3);
+    if (aInfo.mColorSpace != 7 /* CS_RGB */) {
+      aInfo.mFullRange = br.ReadBits(1);
+      if (profile == 1 || profile == 3) {
+        aInfo.mSubSampling_x = br.ReadBits(1);
+        aInfo.mSubSampling_y = br.ReadBits(1);
+        if (br.ReadBits(1)) { // reserved_zero
+          return false;
+        };
+      } else {
+        aInfo.mSubSampling_x = true;
+        aInfo.mSubSampling_y = true;
+      }
+    } else {
+      aInfo.mFullRange = true;
+      if (profile == 1 || profile == 3) {
+        aInfo.mSubSampling_x = false;
+        aInfo.mSubSampling_y = false;
+        if (br.ReadBits(1)) { // reserved_zero
+          return false;
+        };
+      } else {
+        // sRGB color space is only available with VP9 profile 1.
+        return false;
+      }
+    }
+    return true;
+  };
+
+  auto frame_size = [&]() {
+    aInfo.mImage = gfx::IntSize(br.ReadBits(16) + 1, br.ReadBits(16) + 1);
+  };
+
+  auto render_size = [&]() {
+    bool render_and_frame_size_different = br.ReadBits(1);
+    if (render_and_frame_size_different) {
+      aInfo.mDisplay = gfx::IntSize(br.ReadBits(16) + 1, br.ReadBits(16) + 1);
+    } else {
+      aInfo.mDisplay = aInfo.mImage;
+    }
+  };
+
+  if (aInfo.mKeyFrame) {
+    if (!frame_sync_code()) {
+      return false;
+    }
+    if (!color_config()) {
+      return false;
+    }
+    frame_size();
+    render_size();
+  } else {
+    bool intra_only = show_frame ? false : br.ReadBit();
+    if (!error_resilient_mode) {
+      Unused << br.ReadBits(2); // reset_frame_context
+    }
+    if (intra_only) {
+      if (!frame_sync_code()) {
+        return false;
+      }
+      if (profile > 0) {
+        if (!color_config()) {
+          return false;
+        }
+      } else {
+        aInfo.mColorSpace = 1; // CS_BT_601
+        aInfo.mSubSampling_x = 1;
+        aInfo.mSubSampling_y = 1;
+        aInfo.mBitDepth = 8;
+      }
+      Unused << br.ReadBits(8); // refresh_frame_flags
+      frame_size();
+      render_size();
+    }
+  }
+  return true;
 }
+
 } // namespace mozilla
 #undef LOG

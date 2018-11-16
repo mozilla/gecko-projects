@@ -43,6 +43,9 @@ pub trait BrowserCapabilities {
     /// repositioning commands.
     fn set_window_rect(&mut self, &Capabilities) -> WebDriverResult<bool>;
 
+    /// Indicates that interactability checks will be applied to `<input type=file>`.
+    fn strict_file_interactability(&mut self, &Capabilities) -> WebDriverResult<bool>;
+
     fn accept_proxy(
         &mut self,
         proxy_settings: &Map<String, Value>,
@@ -123,7 +126,7 @@ impl SpecNewSessionParameters {
 
         for (key, value) in &capabilities {
             match &**key {
-                x @ "acceptInsecureCerts" | x @ "setWindowRect" => if !value.is_boolean() {
+                x @ "acceptInsecureCerts" | x @ "setWindowRect" | x @ "strictFileInteractability" => if !value.is_boolean() {
                     return Err(WebDriverError::new(
                         ErrorStatus::InvalidArgument,
                         format!("{} is not boolean: {}", x, value),
@@ -482,6 +485,15 @@ impl CapabilitiesMatching for SpecNewSessionParameters {
                                 return None;
                             }
                         }
+                        "strictFileInteractability" => {
+                            if value.as_bool().unwrap_or(false)
+                                && !browser_capabilities
+                                    .strict_file_interactability(merged)
+                                    .unwrap_or(false)
+                            {
+                                return None;
+                            }
+                        }
                         "proxy" => {
                             let default = Map::new();
                             let proxy = value.as_object().unwrap_or(&default);
@@ -517,9 +529,9 @@ impl CapabilitiesMatching for SpecNewSessionParameters {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct LegacyNewSessionParameters {
-    #[serde(default = "Capabilities::default")]
+    #[serde(rename = "desiredCapabilities", default = "Capabilities::default")]
     pub desired: Capabilities,
-    #[serde(default = "Capabilities::default")]
+    #[serde(rename = "requiredCapabilities", default = "Capabilities::default")]
     pub required: Capabilities,
 }
 
@@ -635,7 +647,7 @@ mod tests {
 
     #[test]
     fn test_json_spec_legacy_new_session_parameters_desired_only() {
-        let json = r#"{"desired":{}}"#;
+        let json = r#"{"desiredCapabilities":{}}"#;
         let data = LegacyNewSessionParameters {
             desired: Capabilities::new(),
             required: Capabilities::new(),
@@ -646,7 +658,7 @@ mod tests {
 
     #[test]
     fn test_json_spec_legacy_new_session_parameters_required_only() {
-        let json = r#"{"required":{}}"#;
+        let json = r#"{"requiredCapabilities":{}}"#;
         let data = LegacyNewSessionParameters {
             desired: Capabilities::new(),
             required: Capabilities::new(),
@@ -657,21 +669,21 @@ mod tests {
 
     #[test]
     fn test_json_spec_legacy_new_session_parameters_desired_null() {
-        let json = r#"{"desired":null,"required":{}}"#;
+        let json = r#"{"desiredCapabilities":null,"requiredCapabilities":{}}"#;
 
         assert!(serde_json::from_str::<LegacyNewSessionParameters>(&json).is_err());
     }
 
     #[test]
     fn test_json_spec_legacy_new_session_parameters_required_null() {
-        let json = r#"{"desired":{}, "required":null}"#;
+        let json = r#"{"desiredCapabilities":{}, "requiredCapabilities":null}"#;
 
         assert!(serde_json::from_str::<LegacyNewSessionParameters>(&json).is_err());
     }
 
     #[test]
     fn test_json_spec_legacy_new_session_parameters_both_empty() {
-        let json = r#"{"desired":{},"required":{}}"#;
+        let json = r#"{"desiredCapabilities":{},"requiredCapabilities":{}}"#;
         let data = LegacyNewSessionParameters {
             desired: Capabilities::new(),
             required: Capabilities::new(),
@@ -682,7 +694,10 @@ mod tests {
 
     #[test]
     fn test_json_spec_legacy_new_session_parameters_both_with_capabilities() {
-        let json = r#"{"desired":{"foo":"bar"},"required":{"foo2":"bar2"}}"#;
+        let json = r#"{
+            "desiredCapabilities":{"foo":"bar"},
+            "requiredCapabilities":{"foo2":"bar2"}
+        }"#;
         let mut data = LegacyNewSessionParameters {
             desired: Capabilities::new(),
             required: Capabilities::new(),

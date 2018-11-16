@@ -7,17 +7,23 @@
  * own scope.
  */
 
+/* exported paymentDialogWrapper */
+
 "use strict";
 
 const paymentSrv = Cc["@mozilla.org/dom/payments/payment-request-service;1"]
                      .getService(Ci.nsIPaymentRequestService);
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const paymentUISrv = Cc["@mozilla.org/dom/payments/payment-ui-service;1"]
+                     .getService(Ci.nsIPaymentUIService);
+
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-ChromeUtils.defineModuleGetter(this, "MasterPassword",
-                               "resource://formautofill/MasterPassword.jsm");
+ChromeUtils.defineModuleGetter(this, "BrowserWindowTracker",
+                               "resource:///modules/BrowserWindowTracker.jsm");
+ChromeUtils.defineModuleGetter(this, "OSKeyStore",
+                               "resource://formautofill/OSKeyStore.jsm");
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
                                "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
@@ -71,7 +77,8 @@ class TempCollection {
 
   async add(record) {
     let guid = "temp-" + Math.abs(Math.random() * 0xffffffff|0);
-    let recordToSave = Object.assign({guid}, record);
+    let timeLastModified = Date.now();
+    let recordToSave = Object.assign({guid, timeLastModified}, record);
     await this._formAutofillCollection.computeFields(recordToSave);
     this._data[guid] = recordToSave;
     return guid;
@@ -84,7 +91,7 @@ class TempCollection {
 
 var paymentDialogWrapper = {
   componentsLoaded: new Map(),
-  frame: null,
+  frameWeakRef: null,
   mm: null,
   request: null,
   temporaryStore: null,
@@ -128,18 +135,28 @@ var paymentDialogWrapper = {
     let addressData = this.temporaryStore.addresses.get(guid) ||
                       await formAutofillStorage.addresses.get(guid);
     if (!addressData) {
-      throw new Error(`Shipping address not found: ${guid}`);
+      throw new Error(`Address not found: ${guid}`);
     }
 
     let address = this.createPaymentAddress({
-      country: addressData.country,
       addressLines: addressData["street-address"].split("\n"),
-      region: addressData["address-level1"],
       city: addressData["address-level2"],
-      postalCode: addressData["postal-code"],
+      country: addressData.country,
+      dependentLocality: addressData["address-level3"],
       organization: addressData.organization,
-      recipient: addressData.name,
       phone: addressData.tel,
+      postalCode: addressData["postal-code"],
+      recipient: addressData.name,
+      region: addressData["address-level1"],
+      // TODO (bug 1474905), The regionCode will be available when bug 1474905 is fixed
+      // and the region text box is changed to a dropdown with the regionCode being the
+      // value of the option and the region being the label for the option.
+      // A regionCode should be either the empty string or one to three code points
+      // that represent a region as the code element of an [ISO3166-2] country subdivision
+      // name (i.e., the characters after the hyphen in an ISO3166-2 country subdivision
+      // code element, such as "CA" for the state of California in the USA, or "11" for
+      // the Lisbon district of Portugal).
+      regionCode: "",
     });
 
     return address;
@@ -148,7 +165,7 @@ var paymentDialogWrapper = {
   /**
    * @param {string} guid The GUID of the basic card record from storage.
    * @param {string} cardSecurityCode The associated card security code (CVV/CCV/etc.)
-   * @throws if the user cancels entering their master password or an error decrypting
+   * @throws If there is an error decrypting
    * @returns {nsIBasicCardResponseData?} returns response data or null (if the
    *                                      master password dialog was cancelled);
    */
@@ -161,7 +178,7 @@ var paymentDialogWrapper = {
 
     let cardNumber;
     try {
-      cardNumber = await MasterPassword.decrypt(cardData["cc-number-encrypted"], true);
+      cardNumber = await OSKeyStore.decrypt(cardData["cc-number-encrypted"], true);
     } catch (ex) {
       if (ex.result != Cr.NS_ERROR_ABORT) {
         throw ex;
@@ -195,8 +212,6 @@ var paymentDialogWrapper = {
       throw new Error("Invalid PaymentRequest ID");
     }
 
-    window.addEventListener("unload", this);
-
     // The Request object returned by the Payment Service is live and
     // will automatically get updated if event.updateWith is used.
     this.request = paymentSrv.getPaymentRequestById(requestId);
@@ -205,22 +220,54 @@ var paymentDialogWrapper = {
       throw new Error(`PaymentRequest not found: ${requestId}`);
     }
 
-    this.frame = frame;
-    this.mm = frame.frameLoader.messageManager;
-    this.mm.addMessageListener("paymentContentToChrome", this);
+    this._attachToFrame(frame);
     this.mm.loadFrameScript("chrome://payments/content/paymentDialogFrameScript.js", true);
     // Until we have bug 1446164 and bug 1407418 we use form autofill's temporary
     // shim for data-localization* attributes.
     this.mm.loadFrameScript("chrome://formautofill/content/l10n.js", true);
-    if (AppConstants.platform == "win") {
-      this.frame.setAttribute("selectmenulist", "ContentSelectDropdown-windows");
-    }
-    this.frame.loadURI("resource://payments/paymentRequest.xhtml");
+    frame.setAttribute("src", "resource://payments/paymentRequest.xhtml");
 
     this.temporaryStore = {
       addresses: new TempCollection("addresses"),
       creditCards: new TempCollection("creditCards"),
     };
+  },
+
+  uninit() {
+    try {
+      Services.obs.removeObserver(this, "message-manager-close");
+      Services.obs.removeObserver(this, "formautofill-storage-changed");
+    } catch (ex) {
+      // Observers may not have been added yet
+    }
+  },
+
+  /**
+   * Code here will be re-run at various times, e.g. initial show and
+   * when a tab is detached to a different window.
+   *
+   * Code that should only run once belongs in `init`.
+   * Code to only run upon detaching should be in `changeAttachedFrame`.
+   *
+   * @param {Element} frame
+   */
+  _attachToFrame(frame) {
+    this.frameWeakRef = Cu.getWeakReference(frame);
+    this.mm = frame.frameLoader.messageManager;
+    this.mm.addMessageListener("paymentContentToChrome", this);
+    Services.obs.addObserver(this, "message-manager-close", true);
+  },
+
+  /**
+   * Called only when a frame is changed from one to another.
+   *
+   * @param {Element} frame
+   */
+  changeAttachedFrame(frame) {
+    this.mm.removeMessageListener("paymentContentToChrome", this);
+    this._attachToFrame(frame);
+    // This isn't in `attachToFrame` because we only want to do it once we've sent records.
+    Services.obs.addObserver(this, "formautofill-storage-changed", true);
   },
 
   createShowResponse({
@@ -263,16 +310,17 @@ var paymentDialogWrapper = {
   },
 
   createPaymentAddress({
-    country = "",
     addressLines = [],
-    region = "",
     city = "",
+    country = "",
     dependentLocality = "",
-    postalCode = "",
-    sortingCode = "",
     organization = "",
-    recipient = "",
+    postalCode = "",
     phone = "",
+    recipient = "",
+    region = "",
+    regionCode = "",
+    sortingCode = "",
   }) {
     const paymentAddress = Cc["@mozilla.org/dom/payments/payment-address;1"]
                            .createInstance(Ci.nsIPaymentAddress);
@@ -285,6 +333,7 @@ var paymentDialogWrapper = {
     paymentAddress.init(country,
                         addressLine,
                         region,
+                        regionCode,
                         city,
                         dependentLocality,
                         postalCode,
@@ -446,10 +495,12 @@ var paymentDialogWrapper = {
   },
 
   async initializeFrame() {
+    // We don't do this earlier as it's only necessary once this function sends
+    // the initial saved records.
     Services.obs.addObserver(this, "formautofill-storage-changed", true);
 
     let requestSerialized = this._serializeRequest(this.request);
-    let chromeWindow = Services.wm.getMostRecentWindow("navigator:browser");
+    let chromeWindow = this.frameWeakRef.get().ownerGlobal;
     let isPrivate = PrivateBrowsingUtils.isWindowPrivate(chromeWindow);
 
     let [savedAddresses, savedBasicCards] =
@@ -471,30 +522,43 @@ var paymentDialogWrapper = {
       Cu.reportError("devtools.chrome.enabled must be enabled to debug the frame");
       return;
     }
-    let chromeWindow = Services.wm.getMostRecentWindow(null);
     let {
       gDevToolsBrowser,
     } = ChromeUtils.import("resource://devtools/client/framework/gDevTools.jsm", {});
     gDevToolsBrowser.openContentProcessToolbox({
-      selectedBrowser: chromeWindow.document.getElementById("paymentRequestFrame").frameLoader,
+      selectedBrowser: this.frameWeakRef.get(),
     });
+  },
+
+  onOpenPreferences() {
+    BrowserWindowTracker.getTopWindow().openPreferences("privacy-form-autofill");
   },
 
   onPaymentCancel() {
     const showResponse = this.createShowResponse({
       acceptStatus: Ci.nsIPaymentActionResponse.PAYMENT_REJECTED,
     });
+
     paymentSrv.respondPayment(showResponse);
-    window.close();
+    paymentUISrv.closePayment(this.request.requestId);
   },
 
   async onPay({
     selectedPayerAddressGUID: payerGUID,
     selectedPaymentCardGUID: paymentCardGUID,
     selectedPaymentCardSecurityCode: cardSecurityCode,
+    selectedShippingAddressGUID: shippingGUID,
   }) {
-    let methodData = await this._convertProfileBasicCardToPaymentMethodData(paymentCardGUID,
-                                                                            cardSecurityCode);
+    let methodData;
+    try {
+      methodData = await this._convertProfileBasicCardToPaymentMethodData(paymentCardGUID,
+                                                                          cardSecurityCode);
+    } catch (ex) {
+      // TODO (Bug 1498403): Some kind of "credit card storage error" here, perhaps asking user
+      // to re-enter credit card # from management UI.
+      Cu.reportError(ex);
+      return;
+    }
 
     if (!methodData) {
       // TODO (Bug 1429265/Bug 1429205): Handle when a user hits cancel on the
@@ -503,11 +567,27 @@ var paymentDialogWrapper = {
       return;
     }
 
-    let {
-      payerName,
-      payerEmail,
-      payerPhone,
-    } = await this._convertProfileAddressToPayerData(payerGUID);
+    let payerName = "";
+    let payerEmail = "";
+    let payerPhone = "";
+    if (payerGUID) {
+      let payerData = await this._convertProfileAddressToPayerData(payerGUID);
+      payerName = payerData.payerName;
+      payerEmail = payerData.payerEmail;
+      payerPhone = payerData.payerPhone;
+    }
+
+    // Update the lastUsedTime for the payerAddress and paymentCard. Check if
+    // the record exists in formAutofillStorage because it may be temporary.
+    if (shippingGUID && await formAutofillStorage.addresses.get(shippingGUID)) {
+      formAutofillStorage.addresses.notifyUsed(shippingGUID);
+    }
+    if (payerGUID && await formAutofillStorage.addresses.get(payerGUID)) {
+      formAutofillStorage.addresses.notifyUsed(payerGUID);
+    }
+    if (await formAutofillStorage.creditCards.get(paymentCardGUID)) {
+      formAutofillStorage.creditCards.notifyUsed(paymentCardGUID);
+    }
 
     this.pay({
       methodName: "basic-card",
@@ -557,7 +637,7 @@ var paymentDialogWrapper = {
 
   onCloseDialogMessage() {
     // The PR is complete(), just close the dialog
-    window.close();
+    paymentUISrv.closePayment(this.request.requestId);
   },
 
   async onUpdateAutofillRecord(collectionName, record, guid, messageID) {
@@ -572,7 +652,10 @@ var paymentDialogWrapper = {
                                      formAutofillStorage[collectionName];
 
       if (guid) {
-        let preserveOldProperties = true;
+        // We only care to preserve old properties for credit cards,
+        // because credit cards don't get their full record sent to the
+        // unprivileged frame (the cc-number is excluded).
+        let preserveOldProperties = collectionName == "creditCards";
         await collection.update(guid, record, preserveOldProperties);
       } else {
         responseMessage.guid = await collection.add(record);
@@ -594,26 +677,9 @@ var paymentDialogWrapper = {
       }
     } catch (ex) {
       responseMessage.error = true;
+      Cu.reportError(ex);
     } finally {
       this.sendMessageToContent("updateAutofillRecord:Response", responseMessage);
-    }
-  },
-
-  /**
-   * @implement {nsIDOMEventListener}
-   * @param {Event} event
-   */
-  handleEvent(event) {
-    switch (event.type) {
-      case "unload": {
-        // Remove the observer to avoid message manager errors while the dialog
-        // is closing and tests are cleaning up autofill storage.
-        Services.obs.removeObserver(this, "formautofill-storage-changed");
-        break;
-      }
-      default: {
-        throw new Error("Unexpected event handled");
-      }
     }
   },
 
@@ -630,6 +696,14 @@ var paymentDialogWrapper = {
           break;
         }
         this.onAutofillStorageChange();
+        break;
+      }
+      case "message-manager-close": {
+        if (this.mm && subject == this.mm) {
+          // Remove the observer to avoid message manager errors while the dialog
+          // is closing and tests are cleaning up autofill storage.
+          Services.obs.removeObserver(this, "formautofill-storage-changed");
+        }
         break;
       }
     }
@@ -659,8 +733,18 @@ var paymentDialogWrapper = {
         this.onCloseDialogMessage();
         break;
       }
+      case "openPreferences": {
+        this.onOpenPreferences();
+        break;
+      }
       case "paymentCancel": {
         this.onPaymentCancel();
+        break;
+      }
+      case "paymentDialogReady": {
+        this.frameWeakRef.get().dispatchEvent(new Event("tabmodaldialogready", {
+          bubbles: true,
+        }));
         break;
       }
       case "pay": {
@@ -671,13 +755,9 @@ var paymentDialogWrapper = {
         this.onUpdateAutofillRecord(data.collectionName, data.record, data.guid, data.messageID);
         break;
       }
+      default: {
+        throw new Error(`paymentDialogWrapper: Unexpected messageType: ${messageType}`);
+      }
     }
   },
 };
-
-if ("document" in this) {
-  // Running in a browser, not a unit test
-  let frame = document.getElementById("paymentRequestFrame");
-  let requestId = (new URLSearchParams(window.location.search)).get("requestId");
-  paymentDialogWrapper.init(requestId, frame);
-}

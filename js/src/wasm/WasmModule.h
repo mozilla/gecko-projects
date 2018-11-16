@@ -33,11 +33,18 @@ namespace wasm {
 
 struct CompileArgs;
 
-// Module represents a compiled wasm module and primarily provides two
-// operations: instantiation and serialization. A Module can be instantiated any
-// number of times to produce new Instance objects. A Module can be serialized
-// any number of times such that the serialized bytes can be deserialized later
-// to produce a new, equivalent Module.
+// In the context of wasm, the OptimizedEncodingListener specifically is
+// listening for the completion of tier-2.
+
+typedef RefPtr<JS::OptimizedEncodingListener> Tier2Listener;
+
+// Module represents a compiled wasm module and primarily provides three
+// operations: instantiation, tiered compilation, serialization. A Module can be
+// instantiated any number of times to produce new Instance objects. A Module
+// can have a single tier-2 task initiated to augment a Module's code with a
+// higher tier. A Module can  have its optimized code serialized at any point
+// where the LinkData is also available, which is primarily (1) at the end of
+// module generation, (2) at the end of tier-2 compilation.
 //
 // Fully linked-and-instantiated code (represented by Code and its owned
 // ModuleSegment) can be shared between instances, provided none of those
@@ -51,7 +58,6 @@ class Module : public JS::WasmModule
     const SharedCode          code_;
     const ImportVector        imports_;
     const ExportVector        exports_;
-    const StructTypeVector    structTypes_;
     const DataSegmentVector   dataSegments_;
     const ElemSegmentVector   elemSegments_;
     const CustomSectionVector customSections_;
@@ -69,16 +75,31 @@ class Module : public JS::WasmModule
     const UniqueLinkData    debugLinkData_;
     const SharedBytes       debugBytecode_;
 
-    // This flag is only used for testing purposes and is racily updated as soon
-    // as tier-2 compilation finishes (in success or failure).
+    // This field is set during tier-2 compilation and cleared on success or
+    // failure. These happen on different threads and are serialized by the
+    // control flow of helper tasks.
+
+    mutable Tier2Listener   tier2Listener_;
+
+    // This flag is only used for testing purposes and is cleared on success or
+    // failure. The field is racily polled from various threads.
 
     mutable Atomic<bool>    testingTier2Active_;
 
     bool instantiateFunctions(JSContext* cx, Handle<FunctionVector> funcImports) const;
     bool instantiateMemory(JSContext* cx, MutableHandleWasmMemoryObject memory) const;
-    bool instantiateTable(JSContext* cx,
-                          MutableHandleWasmTableObject table,
-                          SharedTableVector* tables) const;
+    bool instantiateImportedTable(JSContext* cx,
+                                  const TableDesc& td,
+                                  Handle<WasmTableObject*> table,
+                                  WasmTableObjectVector* tableObjs,
+                                  SharedTableVector* tables) const;
+    bool instantiateLocalTable(JSContext* cx,
+                               const TableDesc& td,
+                               WasmTableObjectVector* tableObjs,
+                               SharedTableVector* tables) const;
+    bool instantiateTables(JSContext* cx, WasmTableObjectVector& tableImports,
+                           MutableHandle<WasmTableObjectVector> tableObjs,
+                           SharedTableVector* tables) const;
     bool instantiateGlobals(JSContext* cx, HandleValVector globalImportValues,
                             WasmGlobalObjectVector& globalObjs) const;
     bool initSegments(JSContext* cx,
@@ -87,6 +108,8 @@ class Module : public JS::WasmModule
                       HandleWasmMemoryObject memory,
                       HandleValVector globalImportValues) const;
     SharedCode getDebugEnabledCode() const;
+    bool makeStructTypeDescrs(JSContext* cx,
+                              MutableHandle<StructTypeDescrVector> structTypeDescrs) const;
 
     class Tier2GeneratorTaskImpl;
 
@@ -94,7 +117,6 @@ class Module : public JS::WasmModule
     Module(const Code& code,
            ImportVector&& imports,
            ExportVector&& exports,
-           StructTypeVector&& structTypes,
            DataSegmentVector&& dataSegments,
            ElemSegmentVector&& elemSegments,
            CustomSectionVector&& customSections,
@@ -104,7 +126,6 @@ class Module : public JS::WasmModule
       : code_(&code),
         imports_(std::move(imports)),
         exports_(std::move(exports)),
-        structTypes_(std::move(structTypes)),
         dataSegments_(std::move(dataSegments)),
         elemSegments_(std::move(elemSegments)),
         customSections_(std::move(customSections)),
@@ -116,7 +137,7 @@ class Module : public JS::WasmModule
     {
         MOZ_ASSERT_IF(metadata().debugEnabled, debugUnlinkedCode_ && debugLinkData_);
     }
-    ~Module() override { /* Note: can be called on any thread */ }
+    ~Module() override;
 
     const Code& code() const { return *code_; }
     const ModuleSegment& moduleSegment(Tier t) const { return code_->segment(t); }
@@ -127,12 +148,13 @@ class Module : public JS::WasmModule
     const CustomSectionVector& customSections() const { return customSections_; }
     const Bytes& debugBytecode() const { return debugBytecode_->bytes; }
     uint32_t codeLength(Tier t) const { return code_->segment(t).length(); }
+    const StructTypeVector& structTypes() const { return code_->structTypes(); }
 
     // Instantiate this module with the given imports:
 
     bool instantiate(JSContext* cx,
                      Handle<FunctionVector> funcImports,
-                     HandleWasmTableObject tableImport,
+                     WasmTableObjectVector& tableImport,
                      HandleWasmMemoryObject memoryImport,
                      HandleValVector globalImportValues,
                      WasmGlobalObjectVector& globalObjs,
@@ -144,17 +166,19 @@ class Module : public JS::WasmModule
     // finishTier2() from a helper thread, passing tier-variant data which will
     // be installed and made visible.
 
-    void startTier2(const CompileArgs& args, const ShareableBytes& bytecode);
+    void startTier2(const CompileArgs& args,
+                    const ShareableBytes& bytecode,
+                    JS::OptimizedEncodingListener* listener);
     bool finishTier2(const LinkData& linkData2, UniqueCodeTier code2) const;
 
     void testingBlockOnTier2Complete() const;
     bool testingTier2Active() const { return testingTier2Active_; }
 
-    // Currently dead, but will be ressurrected with shell tests (bug 1330661)
-    // and HTTP cache integration.
+    // Code caching support.
 
     size_t serializedSize(const LinkData& linkData) const;
     void serialize(const LinkData& linkData, uint8_t* begin, size_t size) const;
+    void serialize(const LinkData& linkData, JS::OptimizedEncodingListener& listener) const;
     static RefPtr<Module> deserialize(const uint8_t* begin, size_t size,
                                       Metadata* maybeMetadata = nullptr);
 
@@ -179,6 +203,9 @@ typedef RefPtr<Module> MutableModule;
 typedef RefPtr<const Module> SharedModule;
 
 // JS API implementations:
+
+MOZ_MUST_USE bool
+GetOptimizedEncodingBuildId(JS::BuildIdCharVector* buildId);
 
 RefPtr<JS::WasmModule>
 DeserializeModule(PRFileDesc* bytecode, UniqueChars filename, unsigned line);

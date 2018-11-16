@@ -14,10 +14,17 @@ var EXPORTED_SYMBOLS = ["ActorManagerChild"];
 
 ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+
+ChromeUtils.defineModuleGetter(this, "WebNavigationFrames",
+                               "resource://gre/modules/WebNavigationFrames.jsm");
 
 const {DefaultMap} = ExtensionUtils;
 
 const {sharedData} = Services.cpmm;
+
+XPCOMUtils.defineLazyPreferenceGetter(this, "simulateFission",
+                                      "browser.fission.simulate", false);
 
 function getMessageManager(window) {
   return window.docShell.messageManager;
@@ -37,13 +44,16 @@ class Dispatcher {
 
   init() {
     for (let msg of this.messages.keys()) {
+      // This is directly called on the message manager
+      // because this.addMessageListener is meant to handle
+      // additions after initialization.
       this.mm.addMessageListener(msg, this);
     }
     for (let topic of this.observers.keys()) {
       Services.obs.addObserver(this, topic, true);
     }
     for (let {event, options, actor} of this.events) {
-      this.addEventListener(event, this.handleActorEvent.bind(this, actor), options);
+      this.addEventListener(event, actor, options);
     }
 
     this.mm.addEventListener("unload", this);
@@ -55,8 +65,39 @@ class Dispatcher {
     }
   }
 
-  addEventListener(event, listener, options) {
+  get window() {
+    return this.mm.content;
+  }
+
+  get frameId() {
+    // 0 for top-level windows, outerWindowId otherwise
+    return WebNavigationFrames.getFrameId(this.window);
+  }
+
+  get browsingContextId() {
+    return this.window.docShell.browsingContext.id;
+  }
+
+  addEventListener(event, actor, options) {
+    let listener = this.handleActorEvent.bind(this, actor);
     this.mm.addEventListener(event, listener, options);
+  }
+
+  addMessageListener(msg, actor) {
+    let actors = this.messages.get(msg);
+
+    if (!actors) {
+      actors = [];
+      this.messages.set(msg, actors);
+    }
+
+    if (actors.length == 0) {
+      this.mm.addMessageListener(msg, this);
+    }
+
+    if (!actors.includes(actor)) {
+      actors.push(actor);
+    }
   }
 
   getActor(actorName) {
@@ -67,7 +108,7 @@ class Dispatcher {
       let obj = {};
       ChromeUtils.import(actor.module, obj);
 
-      inst = new obj[actorName](this.mm);
+      inst = new obj[actorName](this);
       this.instances.set(actorName, inst);
     }
     return inst;
@@ -80,20 +121,47 @@ class Dispatcher {
   }
 
   handleActorEvent(actor, event) {
-    return this.getActor(actor).handleEvent(event);
+    let targetWindow = null;
+
+    if (simulateFission) {
+      targetWindow = event.target.ownerGlobal;
+      if (targetWindow != this.window) {
+        // events can't propagate across frame boundaries because the
+        // frames will be hosted on separated processes.
+        return;
+      }
+    }
+    this.getActor(actor).handleEvent(event);
   }
 
   receiveMessage(message) {
     let actors = this.messages.get(message.name);
-    let result;
+
+    if (simulateFission) {
+      let match = false;
+      let data = message.data || {};
+      if (data.hasOwnProperty("frameId")) {
+        match = (data.frameId == this.frameId);
+      } else if (data.hasOwnProperty("browsingContextId")) {
+        match = (data.browsingContextId == this.browsingContextId);
+      } else {
+        // if no specific target was given, just dispatch it to
+        // top-level actors.
+        match = (this.frameId == 0);
+      }
+
+      if (!match) {
+        return;
+      }
+    }
+
     for (let actor of actors) {
       try {
-        result = this.getActor(actor).receiveMessage(message);
+        this.getActor(actor).receiveMessage(message);
       } catch (e) {
         Cu.reportError(e);
       }
     }
-    return result;
   }
 
   observe(subject, topic, data) {
@@ -119,7 +187,7 @@ class SingletonDispatcher extends Dispatcher {
     window.addEventListener("pageshow", this, {mozSystemGroup: true});
     window.addEventListener("pagehide", this, {mozSystemGroup: true});
 
-    this.window = window;
+    this._window = window;
     this.listeners = [];
   }
 
@@ -144,20 +212,22 @@ class SingletonDispatcher extends Dispatcher {
       this.mm.removeMessageListener(msg, this);
     }
     for (let [event, listener, options] of this.listeners) {
-      this.window.removeEventListener(event, listener, options);
+      this.mm.removeEventListener(event, listener, options);
     }
 
     for (let actor of this.instances.values()) {
-      if (typeof actor.cleanup === "function") {
-        try {
-          actor.cleanup();
-        } catch (e) {
-          Cu.reportError(e);
-        }
+      try {
+        actor.cleanup();
+      } catch (e) {
+        Cu.reportError(e);
       }
     }
 
-    this.listeners = null;
+    this.listeners = [];
+  }
+
+  get window() {
+    return this._window;
   }
 
   handleEvent(event) {
@@ -172,9 +242,16 @@ class SingletonDispatcher extends Dispatcher {
     }
   }
 
-  addEventListener(event, listener, options) {
+  handleActorEvent(actor, event) {
+    if (event.target.ownerGlobal == this.window) {
+      this.getActor(actor).handleEvent(event);
+    }
+  }
+
+  addEventListener(event, actor, options) {
+    let listener = this.handleActorEvent.bind(this, actor);
     this.listeners.push([event, listener, options]);
-    this.window.addEventListener(event, listener, options);
+    this.mm.addEventListener(event, listener, options);
   }
 }
 

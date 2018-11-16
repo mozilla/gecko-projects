@@ -15,9 +15,10 @@ namespace dom {
 class HTMLDivElement final : public nsGenericHTMLElement
 {
 public:
-  explicit HTMLDivElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-    : nsGenericHTMLElement(aNodeInfo)
+  explicit HTMLDivElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
+    : nsGenericHTMLElement(std::move(aNodeInfo))
   {
+    MOZ_ASSERT(mNodeInfo->Equals(nsGkAtoms::div), "HTMLDivElement should be a div");
   }
 
   void GetAlign(DOMString& aAlign)

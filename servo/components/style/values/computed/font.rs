@@ -4,14 +4,22 @@
 
 //! Computed values for font properties
 
-use Atom;
 use app_units::Au;
 use byteorder::{BigEndian, ByteOrder};
+#[cfg(feature = "gecko")]
+use crate::gecko_bindings::sugar::refptr::RefPtr;
+#[cfg(feature = "gecko")]
+use crate::gecko_bindings::{bindings, structs};
+use crate::values::animated::{ToAnimatedValue, ToAnimatedZero};
+use crate::values::computed::{Angle, Context, Integer, NonNegativeLength, NonNegativePercentage};
+use crate::values::computed::{Number, Percentage, ToComputedValue};
+use crate::values::generics::font as generics;
+use crate::values::generics::font::{FeatureTagValue, FontSettings, VariationValue};
+use crate::values::specified::font::{self as specified, MAX_FONT_WEIGHT, MIN_FONT_WEIGHT};
+use crate::values::specified::length::{FontBaseSize, NoCalcLength};
+use crate::values::CSSFloat;
+use crate::Atom;
 use cssparser::{serialize_identifier, CssStringWriter, Parser};
-#[cfg(feature = "gecko")]
-use gecko_bindings::{bindings, structs};
-#[cfg(feature = "gecko")]
-use gecko_bindings::sugar::refptr::RefPtr;
 #[cfg(feature = "gecko")]
 use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
 use std::fmt::{self, Write};
@@ -19,16 +27,10 @@ use std::hash::{Hash, Hasher};
 #[cfg(feature = "servo")]
 use std::slice;
 use style_traits::{CssWriter, ParseError, ToCss};
-use values::CSSFloat;
-use values::animated::{ToAnimatedValue, ToAnimatedZero};
-use values::computed::{Angle, Context, Integer, NonNegativeLength, NonNegativePercentage};
-use values::computed::{Number, Percentage, ToComputedValue};
-use values::generics::font::{self as generics, FeatureTagValue, FontSettings, VariationValue};
-use values::specified::font::{self as specified, MIN_FONT_WEIGHT, MAX_FONT_WEIGHT};
-use values::specified::length::{FontBaseSize, NoCalcLength};
 
-pub use values::computed::Length as MozScriptMinSize;
-pub use values::specified::font::{FontSynthesis, MozScriptSizeMultiplier, XLang, XTextZoom};
+pub use crate::values::computed::Length as MozScriptMinSize;
+pub use crate::values::specified::font::{FontSynthesis, MozScriptSizeMultiplier};
+pub use crate::values::specified::font::{XLang, XTextZoom};
 
 /// A value for the font-weight property per:
 ///
@@ -437,7 +439,7 @@ impl SingleFontFamily {
     #[cfg(feature = "gecko")]
     /// Return the generic ID for a given generic font name
     pub fn generic(name: &Atom) -> (structs::FontFamilyType, u8) {
-        use gecko_bindings::structs::FontFamilyType;
+        use crate::gecko_bindings::structs::FontFamilyType;
         if *name == atom!("serif") {
             (FontFamilyType::eFamily_serif, structs::kGenericFont_serif)
         } else if *name == atom!("sans-serif") {
@@ -473,7 +475,7 @@ impl SingleFontFamily {
     #[cfg(feature = "gecko")]
     /// Get the corresponding font-family with family name
     fn from_font_family_name(family: &structs::FontFamilyName) -> SingleFontFamily {
-        use gecko_bindings::structs::FontFamilyType;
+        use crate::gecko_bindings::structs::FontFamilyType;
 
         match family.mType {
             FontFamilyType::eFamily_sans_serif => SingleFontFamily::Generic(atom!("sans-serif")),
@@ -541,7 +543,7 @@ impl Hash for FontFamilyList {
     where
         H: Hasher,
     {
-        use string_cache::WeakAtom;
+        use crate::string_cache::WeakAtom;
 
         for name in self.0.mNames.iter() {
             name.mType.hash(state);
@@ -747,6 +749,7 @@ pub type FontVariationSettings = FontSettings<VariationValue<Number>>;
 /// it and store it as a 32-bit integer
 /// (see http://www.microsoft.com/typography/otspec/languagetags.htm).
 #[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq)]
+#[repr(C)]
 pub struct FontLanguageOverride(pub u32);
 
 impl FontLanguageOverride {
@@ -822,7 +825,7 @@ impl ToComputedValue for specified::MozScriptLevel {
     type ComputedValue = MozScriptLevel;
 
     fn to_computed_value(&self, cx: &Context) -> i8 {
-        use properties::longhands::_moz_math_display::SpecifiedValue as DisplayValue;
+        use crate::properties::longhands::_moz_math_display::SpecifiedValue as DisplayValue;
         use std::{cmp, i8};
 
         let int = match *self {
@@ -865,7 +868,7 @@ impl ToAnimatedValue for FontStyleAngle {
 
     #[inline]
     fn from_animated_value(animated: Self::AnimatedValue) -> Self {
-        FontStyleAngle(Angle::Deg(
+        FontStyleAngle(Angle::from_degrees(
             animated
                 .degrees()
                 .min(specified::FONT_STYLE_OBLIQUE_MAX_ANGLE_DEGREES)
@@ -898,7 +901,7 @@ impl FontStyle {
     /// https://drafts.csswg.org/css-fonts-4/#valdef-font-style-oblique-angle
     #[inline]
     pub fn default_angle() -> FontStyleAngle {
-        FontStyleAngle(Angle::Deg(
+        FontStyleAngle(Angle::from_degrees(
             specified::DEFAULT_FONT_STYLE_OBLIQUE_ANGLE_DEGREES,
         ))
     }
@@ -918,7 +921,7 @@ impl FontStyle {
         if italic {
             return generics::FontStyle::Italic;
         }
-        generics::FontStyle::Oblique(FontStyleAngle(Angle::Deg(angle)))
+        generics::FontStyle::Oblique(FontStyleAngle(Angle::from_degrees(angle)))
     }
 }
 

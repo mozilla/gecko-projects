@@ -2,22 +2,32 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{DevicePoint, DeviceSize, DeviceRect, LayoutRect, LayoutToWorldTransform, LayoutTransform};
-use api::{PremultipliedColorF, LayoutToPictureTransform, PictureToLayoutTransform, PicturePixel, WorldPixel};
+use api::{
+    DevicePoint, DeviceSize, DeviceRect, LayoutRect, LayoutToWorldTransform, LayoutTransform,
+    PremultipliedColorF, LayoutToPictureTransform, PictureToLayoutTransform, PicturePixel,
+    WorldPixel, WorldToLayoutTransform,
+};
 use clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex};
 use gpu_cache::{GpuCacheAddress, GpuDataRequest};
 use internal_types::FastHashMap;
 use prim_store::EdgeAaSegmentMask;
 use render_task::RenderTaskAddress;
+use std::i32;
 use util::{TransformedRectKind, MatrixHelpers};
 
 // Contains type that must exactly match the same structures declared in GLSL.
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(C)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct ZBufferId(i32);
+
+impl ZBufferId {
+    pub fn invalid() -> Self {
+        ZBufferId(i32::MAX)
+    }
+}
 
 #[derive(Debug)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -77,7 +87,16 @@ pub struct BlurInstance {
     pub blur_direction: BlurDirection,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug)]
+#[repr(C)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct ScalingInstance {
+    pub task_address: RenderTaskAddress,
+    pub src_task_address: RenderTaskAddress,
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 #[repr(C)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
@@ -137,7 +156,7 @@ pub struct ClipMaskBorderCornerDotDash {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct PrimitiveInstance {
+pub struct PrimitiveInstanceData {
     data: [i32; 4],
 }
 
@@ -155,8 +174,6 @@ pub struct PrimitiveHeaders {
     pub headers_int: Vec<PrimitiveHeaderI>,
     // The float-type headers for a primitive.
     pub headers_float: Vec<PrimitiveHeaderF>,
-    // Used to generated a unique z-buffer value per primitive.
-    pub z_generator: ZBufferIdGenerator,
 }
 
 impl PrimitiveHeaders {
@@ -164,7 +181,6 @@ impl PrimitiveHeaders {
         PrimitiveHeaders {
             headers_int: Vec::new(),
             headers_float: Vec::new(),
-            z_generator: ZBufferIdGenerator::new(),
         }
     }
 
@@ -172,6 +188,7 @@ impl PrimitiveHeaders {
     pub fn push(
         &mut self,
         prim_header: &PrimitiveHeader,
+        z: ZBufferId,
         user_data: [i32; 3],
     ) -> PrimitiveHeaderIndex {
         debug_assert_eq!(self.headers_int.len(), self.headers_float.len());
@@ -183,7 +200,7 @@ impl PrimitiveHeaders {
         });
 
         self.headers_int.push(PrimitiveHeaderI {
-            z: self.z_generator.next(),
+            z,
             task_address: prim_header.task_address,
             specific_prim_address: prim_header.specific_prim_address.as_int(),
             clip_task_address: prim_header.clip_task_address,
@@ -248,8 +265,8 @@ impl GlyphInstance {
     // TODO(gw): Some of these fields can be moved to the primitive
     //           header since they are constant, and some can be
     //           compressed to a smaller size.
-    pub fn build(&self, data0: i32, data1: i32, data2: i32) -> PrimitiveInstance {
-        PrimitiveInstance {
+    pub fn build(&self, data0: i32, data1: i32, data2: i32) -> PrimitiveInstanceData {
+        PrimitiveInstanceData {
             data: [
                 self.prim_header_index.0 as i32,
                 data0,
@@ -280,9 +297,9 @@ impl SplitCompositeInstance {
     }
 }
 
-impl From<SplitCompositeInstance> for PrimitiveInstance {
+impl From<SplitCompositeInstance> for PrimitiveInstanceData {
     fn from(instance: SplitCompositeInstance) -> Self {
-        PrimitiveInstance {
+        PrimitiveInstanceData {
             data: [
                 instance.prim_header_index.0,
                 instance.polygons_address.as_int(),
@@ -306,6 +323,8 @@ bitflags! {
         const SEGMENT_REPEAT_X = 0x4;
         /// Repeat UVs vertically.
         const SEGMENT_REPEAT_Y = 0x8;
+        /// The extra segment data is a texel rect.
+        const SEGMENT_TEXEL_RECT = 0x10;
     }
 }
 
@@ -319,18 +338,19 @@ pub struct BrushInstance {
     pub segment_index: i32,
     pub edge_flags: EdgeAaSegmentMask,
     pub brush_flags: BrushFlags,
+    pub user_data: i32,
 }
 
-impl From<BrushInstance> for PrimitiveInstance {
+impl From<BrushInstance> for PrimitiveInstanceData {
     fn from(instance: BrushInstance) -> Self {
-        PrimitiveInstance {
+        PrimitiveInstanceData {
             data: [
                 instance.prim_header_index.0,
                 instance.clip_task_address.0 as i32,
                 instance.segment_index |
                 ((instance.edge_flags.bits() as i32) << 16) |
                 ((instance.brush_flags.bits() as i32) << 24),
-                0,
+                instance.user_data,
             ]
         }
     }
@@ -415,12 +435,17 @@ pub struct TransformPalette {
 }
 
 impl TransformPalette {
-    pub fn new(spatial_node_count: usize) -> Self {
+    pub fn new() -> Self {
         TransformPalette {
-            transforms: vec![TransformData::invalid(); spatial_node_count],
-            metadata: vec![TransformMetadata::invalid(); spatial_node_count],
+            transforms: Vec::new(),
+            metadata: Vec::new(),
             map: FastHashMap::default(),
         }
+    }
+
+    pub fn allocate(&mut self, count: usize) {
+        self.transforms = vec![TransformData::invalid(); count];
+        self.metadata = vec![TransformMetadata::invalid(); count];
     }
 
     pub fn set_world_transform(
@@ -485,6 +510,15 @@ impl TransformPalette {
         self.transforms[index.0]
             .transform
             .with_destination::<WorldPixel>()
+    }
+
+    pub fn get_world_inv_transform(
+        &self,
+        index: SpatialNodeIndex,
+    ) -> WorldToLayoutTransform {
+        self.transforms[index.0]
+            .inv_transform
+            .with_source::<WorldPixel>()
     }
 
     // Get a transform palette id for the given spatial node.

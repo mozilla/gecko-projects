@@ -24,16 +24,24 @@ export default class RichSelect extends ObservedPropertiesMixin(HTMLElement) {
   constructor() {
     super();
     this.popupBox = document.createElement("select");
-    this.popupBox.addEventListener("change", this);
   }
 
   connectedCallback() {
+    // the popupBox element may change in between constructor and being connected
+    // so wait until connected before listening to events on it
+    this.popupBox.addEventListener("change", this);
     this.appendChild(this.popupBox);
     this.render();
   }
 
   get selectedOption() {
     return this.getOptionByValue(this.value);
+  }
+
+  get selectedRichOption() {
+    // XXX: Bug 1475684 - This can be removed once `selectedOption` returns a
+    // RichOption which extends HTMLOptionElement.
+    return this.querySelector(":scope > .rich-select-selected-option");
   }
 
   get value() {
@@ -68,12 +76,12 @@ export default class RichSelect extends ObservedPropertiesMixin(HTMLElement) {
 
     if (this.value) {
       let optionType = this.getAttribute("option-type");
-      if (selectedRichOption.localName != optionType) {
+      if (!selectedRichOption || selectedRichOption.localName != optionType) {
         selectedRichOption = document.createElement(optionType);
       }
 
       let option = this.getOptionByValue(this.value);
-      let attributeNames = selectedRichOption.constructor.recordAttributes;
+      let attributeNames = selectedRichOption.constructor.observedAttributes;
       for (let attributeName of attributeNames) {
         let attributeValue = option.getAttribute(attributeName);
         if (attributeValue) {
@@ -84,9 +92,12 @@ export default class RichSelect extends ObservedPropertiesMixin(HTMLElement) {
       }
     } else {
       selectedRichOption = new RichOption();
-      selectedRichOption.textContent = "(None selected)";
+      selectedRichOption.textContent = "(None selected)"; // XXX: bug 1473772
     }
     selectedRichOption.classList.add("rich-select-selected-option");
+    // Hide the rich-option from a11y tools since the native <select> will
+    // already provide the selected option label.
+    selectedRichOption.setAttribute("aria-hidden", "true");
     selectedRichOption = this.appendChild(selectedRichOption);
   }
 }

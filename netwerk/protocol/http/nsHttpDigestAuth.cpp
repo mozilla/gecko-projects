@@ -7,6 +7,7 @@
 // HttpLog.h should generally be included first
 #include "HttpLog.h"
 
+#include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Unused.h"
 
@@ -24,6 +25,23 @@
 
 namespace mozilla {
 namespace net {
+
+StaticRefPtr<nsHttpDigestAuth> nsHttpDigestAuth::gSingleton;
+
+already_AddRefed<nsIHttpAuthenticator>
+nsHttpDigestAuth::GetOrCreate()
+{
+    nsCOMPtr<nsIHttpAuthenticator> authenticator;
+    if (gSingleton) {
+      authenticator = gSingleton;
+    } else {
+      gSingleton = new nsHttpDigestAuth();
+      ClearOnShutdown(&gSingleton);
+      authenticator = gSingleton;
+    }
+
+    return authenticator.forget();
+}
 
 //-----------------------------------------------------------------------------
 // nsHttpDigestAuth::nsISupports
@@ -415,7 +433,7 @@ nsHttpDigestAuth::CalculateResponse(const char * ha1_digest,
   nsAutoCString contents;
   contents.SetCapacity(len);
 
-  contents.Assign(ha1_digest, EXPANDED_DIGEST_LENGTH);
+  contents.Append(ha1_digest, EXPANDED_DIGEST_LENGTH);
   contents.Append(':');
   contents.Append(nonce);
   contents.Append(':');
@@ -479,9 +497,9 @@ nsHttpDigestAuth::CalculateHA1(const nsCString& username,
   }
 
   nsAutoCString contents;
-  contents.SetCapacity(len + 1);
+  contents.SetCapacity(len);
 
-  contents.Assign(username);
+  contents.Append(username);
   contents.Append(':');
   contents.Append(realm);
   contents.Append(':');

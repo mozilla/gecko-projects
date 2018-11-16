@@ -61,9 +61,8 @@ PaymentRequestEnumerator::GetNext(nsISupports** aItem)
   if (!rowRequest) {
     return NS_ERROR_FAILURE;
   }
-  nsCOMPtr<nsIPaymentRequest> request = do_QueryInterface(rowRequest);
   mIndex++;
-  request.forget(aItem);
+  rowRequest.forget(aItem);
   return NS_OK;
 }
 
@@ -114,8 +113,7 @@ PaymentRequestService::GetPaymentRequestById(const nsAString& aRequestId,
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
-  nsCOMPtr<nsIPaymentRequest> request = do_QueryInterface(rowRequest);
-  request.forget(aRequest);
+  rowRequest.forget(aRequest);
   return NS_OK;
 }
 
@@ -236,7 +234,6 @@ PaymentRequestService::RequestPayment(const nsAString& aRequestId,
     case IPCPaymentActionRequest::TIPCPaymentCreateActionRequest: {
       MOZ_ASSERT(!request);
       const IPCPaymentCreateActionRequest& action = aAction;
-      uint64_t tabId = aIPC->GetTabId();
       nsCOMPtr<nsIMutableArray> methodData = do_CreateInstance(NS_ARRAY_CONTRACTID);
       MOZ_ASSERT(methodData);
       for (IPCPaymentMethodData data : action.methodData()) {
@@ -253,7 +250,7 @@ PaymentRequestService::RequestPayment(const nsAString& aRequestId,
       rv = payments::PaymentOptions::Create(action.options(), getter_AddRefs(options));
       NS_ENSURE_SUCCESS(rv, rv);
       RefPtr<payments::PaymentRequest> request =
-        new payments::PaymentRequest(tabId,
+        new payments::PaymentRequest(action.topOuterWindowId(),
                                      aRequestId,
                                      action.topLevelPrincipal(),
                                      methodData,
@@ -282,36 +279,9 @@ PaymentRequestService::RequestPayment(const nsAString& aRequestId,
       break;
     }
     case IPCPaymentActionRequest::TIPCPaymentShowActionRequest: {
-      MOZ_ASSERT(request);
-      request->SetState(payments::PaymentRequest::eInteractive);
-
-      if (mShowingRequest || !CanMakePayment(aRequestId)) {
-        uint32_t responseStatus;
-        if (mShowingRequest) {
-          responseStatus = nsIPaymentActionResponse::PAYMENT_REJECTED;
-        } else {
-          responseStatus = nsIPaymentActionResponse::PAYMENT_NOTSUPPORTED;
-        }
-        nsCOMPtr<nsIPaymentShowActionResponse> showResponse =
-          do_CreateInstance(NS_PAYMENT_SHOW_ACTION_RESPONSE_CONTRACT_ID);
-        MOZ_ASSERT(showResponse);
-        rv = showResponse->Init(aRequestId,
-                                responseStatus,
-                                EmptyString(),
-                                nullptr,
-                                EmptyString(),
-                                EmptyString(),
-                                EmptyString());
-        rv = RespondPayment(showResponse.get());
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-          return rv;
-        }
-      } else {
-        mShowingRequest = request;
-        rv = LaunchUIAction(aRequestId, type);
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-          return rv;
-        }
+      rv = ShowPayment(aRequestId);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
       }
       break;
     }
@@ -346,17 +316,21 @@ PaymentRequestService::RequestPayment(const nsAString& aRequestId,
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
-      if (mShowingRequest) {
-        MOZ_ASSERT(mShowingRequest == request);
+
+      // mShowingRequest exists and it equals to the updated PaymentRequest
+      // Call UI::UpdatePayment
+      if (mShowingRequest && mShowingRequest == request) {
         rv = LaunchUIAction(aRequestId, type);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
       } else {
-        request->SetState(payments::PaymentRequest::eInteractive);
-        mShowingRequest = request;
-        rv = LaunchUIAction(aRequestId,
-                            IPCPaymentActionRequest::TIPCPaymentShowActionRequest);
-      }
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
+        // mShowingRequest does not equal to the updated PaymentRequest, try to
+        // show the updated one.
+        rv = ShowPayment(aRequestId);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
       }
       break;
     }
@@ -460,7 +434,11 @@ PaymentRequestService::RespondPayment(nsIPaymentActionResponse* aResponse)
       rv = response->GetAcceptStatus(&acceptStatus);
       NS_ENSURE_SUCCESS(rv, rv);
       if (acceptStatus != nsIPaymentActionResponse::PAYMENT_ACCEPTED) {
-        mShowingRequest = nullptr;
+        // Check if rejecting the showing PaymentRequest.
+        // If yes, set mShowingRequest as nullptr.
+        if (mShowingRequest == request) {
+          mShowingRequest = nullptr;
+        }
         mRequestQueue.RemoveElement(request);
       }
       break;
@@ -537,6 +515,50 @@ PaymentRequestService::CanMakePayment(const nsAString& aRequestId)
   return IsBasicCardPayment(aRequestId);
 }
 
+nsresult
+PaymentRequestService::ShowPayment(const nsAString& aRequestId)
+{
+  nsresult rv;
+  RefPtr<payments::PaymentRequest> request;
+  rv = GetPaymentRequestById(aRequestId, getter_AddRefs(request));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  MOZ_ASSERT(request);
+  request->SetState(payments::PaymentRequest::eInteractive);
+
+  if (mShowingRequest || !CanMakePayment(aRequestId)) {
+    uint32_t responseStatus;
+    if (mShowingRequest) {
+      responseStatus = nsIPaymentActionResponse::PAYMENT_REJECTED;
+    } else {
+      responseStatus = nsIPaymentActionResponse::PAYMENT_NOTSUPPORTED;
+    }
+    nsCOMPtr<nsIPaymentShowActionResponse> showResponse =
+      do_CreateInstance(NS_PAYMENT_SHOW_ACTION_RESPONSE_CONTRACT_ID);
+    MOZ_ASSERT(showResponse);
+    rv = showResponse->Init(aRequestId,
+                            responseStatus,
+                            EmptyString(),
+                            nullptr,
+                            EmptyString(),
+                            EmptyString(),
+                            EmptyString());
+    rv = RespondPayment(showResponse.get());
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+    }
+  } else {
+    mShowingRequest = request;
+    rv = LaunchUIAction(aRequestId,
+                        IPCPaymentActionRequest::TIPCPaymentShowActionRequest);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+  return NS_OK;
+}
+
 bool
 PaymentRequestService::IsBasicCardPayment(const nsAString& aRequestId)
 {
@@ -562,6 +584,29 @@ PaymentRequestService::IsBasicCardPayment(const nsAString& aRequestId)
     }
   }
   return false;
+}
+
+NS_IMETHODIMP
+PaymentRequestService::ChangePayerDetail(const nsAString& aRequestId,
+                                         const nsAString& aPayerName,
+                                         const nsAString& aPayerEmail,
+                                         const nsAString& aPayerPhone)
+{
+  RefPtr<payments::PaymentRequest> request;
+  nsresult rv = GetPaymentRequestById(aRequestId, getter_AddRefs(request));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  MOZ_ASSERT(request);
+  if (!request->GetIPC()) {
+    return NS_ERROR_FAILURE;
+  }
+  rv = request->GetIPC()->ChangePayerDetail(
+    aRequestId, aPayerName, aPayerEmail, aPayerPhone);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  return NS_OK;
 }
 
 } // end of namespace dom

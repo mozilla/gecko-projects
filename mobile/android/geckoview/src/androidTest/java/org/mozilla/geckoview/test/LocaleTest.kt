@@ -20,12 +20,12 @@ import org.junit.runner.RunWith
 class LocaleTest : BaseSessionTest() {
 
     @Test fun setLocale() {
-        sessionRule.runtime.getSettings().setLocale("en-GB");
+        sessionRule.runtime.getSettings().setLocales(arrayOf("en-GB"));
 
         val index = sessionRule.waitForChromeJS(String.format(
                 "(function() {" +
                 "  return ChromeUtils.import('resource://gre/modules/Services.jsm', {})" +
-                "    .Services.locale.getRequestedLocales().indexOf('en-GB');" +
+                "    .Services.locale.requestedLocales.indexOf('en-GB');" +
                 "})()")) as Double;
 
         assertThat("Requested locale is found", index, greaterThanOrEqualTo(0.0));

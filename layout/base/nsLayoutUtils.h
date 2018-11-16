@@ -17,9 +17,9 @@
 #include "nsChangeHint.h"
 #include "nsFrameList.h"
 #include "mozilla/layout/FrameChildList.h"
+#include "mozilla/layers/ScrollableLayerGuid.h"
 #include "nsThreadUtils.h"
 #include "nsIPrincipal.h"
-#include "FrameMetrics.h"
 #include "nsIWidget.h"
 #include "nsCSSPropertyID.h"
 #include "nsStyleCoord.h"
@@ -92,6 +92,8 @@ struct RectCornerRadii;
 enum class ShapedTextFlags : uint16_t;
 } // namespace gfx
 namespace layers {
+struct FrameMetrics;
+struct ScrollMetadata;
 class Image;
 class StackingContextHelper;
 class Layer;
@@ -177,7 +179,7 @@ class nsLayoutUtils
 public:
   typedef mozilla::layers::FrameMetrics FrameMetrics;
   typedef mozilla::layers::ScrollMetadata ScrollMetadata;
-  typedef FrameMetrics::ViewID ViewID;
+  typedef mozilla::layers::ScrollableLayerGuid::ViewID ViewID;
   typedef mozilla::CSSPoint CSSPoint;
   typedef mozilla::CSSSize CSSSize;
   typedef mozilla::CSSIntSize CSSIntSize;
@@ -592,7 +594,7 @@ public:
    * Get the scroll id for the root scrollframe of the presshell of the given
    * prescontext. Returns NULL_SCROLL_ID if it couldn't be found.
    */
-  static FrameMetrics::ViewID ScrollIdForRootScrollFrame(nsPresContext* aPresContext);
+  static ViewID ScrollIdForRootScrollFrame(nsPresContext* aPresContext);
 
   /**
    * Return true if aPresContext's viewport has a displayport.
@@ -775,6 +777,22 @@ public:
   static nsIFrame* GetPopupFrameForEventCoordinates(
                      nsPresContext* aPresContext,
                      const mozilla::WidgetEvent* aEvent);
+
+  /**
+   * Get container and offset if aEvent collapses Selection.
+   * @param aPresShell      The PresShell handling aEvent.
+   * @param aEvent          The event having coordinates where you want to
+   *                        collapse Selection.
+   * @param aContainer      Returns the container node at the point.
+   *                        Set nullptr if you don't need this.
+   * @param aOffset         Returns offset in the container node at the point.
+   *                        Set nullptr if you don't need this.
+   */
+  MOZ_CAN_RUN_SCRIPT
+  static void GetContainerAndOffsetAtEvent(nsIPresShell* aPresShell,
+                                           const mozilla::WidgetEvent* aEvent,
+                                           nsIContent** aContainer,
+                                           int32_t* aOffset);
 
   /**
    * Translate from widget coordinates to the view's coordinates
@@ -1404,8 +1422,7 @@ public:
    * Is FirstContinuationOrIBSplitSibling(aFrame) going to return
    * aFrame?
    */
-  static bool
-  IsFirstContinuationOrIBSplitSibling(nsIFrame *aFrame);
+  static bool IsFirstContinuationOrIBSplitSibling(const nsIFrame *aFrame);
 
   /**
    * Check whether aFrame is a part of the scrollbar or scrollcorner of
@@ -1506,12 +1523,6 @@ public:
     nscoord result = aCoord.ComputeCoordPercentCalc(aContainingBlockBSize);
     // Clamp calc(), and the subtraction for box-sizing.
     return std::max(0, result - aContentEdgeToBoxSizingBoxEdge);
-  }
-
-  // XXX to be removed
-  static bool IsAutoHeight(const nsStyleCoord &aCoord, nscoord aCBHeight)
-  {
-    return IsAutoBSize(aCoord, aCBHeight);
   }
 
   static bool IsAutoBSize(const nsStyleCoord &aCoord, nscoord aCBBSize)
@@ -2289,8 +2300,16 @@ public:
    */
   static bool NeedsPrintPreviewBackground(nsPresContext* aPresContext);
 
-  typedef nsClassHashtable<nsPtrHashKey<gfxFontEntry>,
-                           mozilla::dom::InspectorFontFace> UsedFontFaceTable;
+  /**
+   * Types used by the helpers for InspectorUtils.getUsedFontFaces.
+   * The API returns an array (UsedFontFaceList) that owns the
+   * InspectorFontFace instances, but during range traversal we also
+   * want to maintain a mapping from gfxFontEntry to InspectorFontFace
+   * records, so use a temporary hashtable for that.
+   */
+  typedef nsTArray<nsAutoPtr<mozilla::dom::InspectorFontFace>> UsedFontFaceList;
+  typedef nsDataHashtable<nsPtrHashKey<gfxFontEntry>,
+                          mozilla::dom::InspectorFontFace*> UsedFontFaceTable;
 
   /**
    * Adds all font faces used in the frame tree starting from aFrame
@@ -2298,7 +2317,8 @@ public:
    * aMaxRanges: maximum number of text ranges to record for each face.
    */
   static nsresult GetFontFacesForFrames(nsIFrame* aFrame,
-                                        UsedFontFaceTable& aResult,
+                                        UsedFontFaceList& aResult,
+                                        UsedFontFaceTable& aFontFaces,
                                         uint32_t aMaxRanges,
                                         bool aSkipCollapsedWhitespace);
 
@@ -2313,7 +2333,8 @@ public:
                                   int32_t aStartOffset,
                                   int32_t aEndOffset,
                                   bool aFollowContinuations,
-                                  UsedFontFaceTable& aResult,
+                                  UsedFontFaceList& aResult,
+                                  UsedFontFaceTable& aFontFaces,
                                   uint32_t aMaxRanges,
                                   bool aSkipCollapsedWhitespace);
 
@@ -2361,6 +2382,14 @@ public:
                                     nsCSSPropertyID aProperty);
 
   /**
+   * Returns all effective animated CSS properties on |aFrame|. That means
+   * properties that can be animated on the compositor and are not overridden by
+   * a higher cascade level.
+   */
+  static nsCSSPropertyIDSet
+  GetAnimationPropertiesForCompositor(const nsIFrame* aFrame);
+
+  /**
    * Checks if off-main-thread animations are enabled.
    */
   static bool AreAsyncAnimationsEnabled();
@@ -2374,6 +2403,8 @@ public:
    * Checks if retained display lists are enabled.
    */
   static bool AreRetainedDisplayListsEnabled();
+
+  static bool DisplayRootHasRetainedDisplayListBuilder(nsIFrame* aFrame);
 
   /**
    * Find a suitable scale for a element (aFrame's content) over the course of any
@@ -2880,7 +2911,7 @@ public:
                                               const nsRect& aViewport,
                                               const mozilla::Maybe<nsRect>& aClipRect,
                                               bool aIsRoot,
-                                              const ContainerLayerParameters& aContainerParameters);
+                                              const mozilla::Maybe<ContainerLayerParameters>& aContainerParameters);
 
   /**
    * Returns the metadata to put onto the root layer of a layer tree, if one is
@@ -3053,6 +3084,12 @@ public:
                                     nsTArray<gfxFontVariation>& aVariationSettings);
 
   static uint32_t ParseFontLanguageOverride(const nsAString& aLangTag);
+
+  /**
+   * Returns true if there are any preferences or overrides that indicate a
+   * need to create a MobileViewportManager.
+   */
+  static bool ShouldHandleMetaViewport(nsIDocument* aDocument);
 
   /**
    * Resolve a CSS <length-percentage> value to a definite size.

@@ -18,6 +18,7 @@
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/EventStateManager.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/Unused.h"
 #include "nsComponentManagerUtils.h"
 #include "nsArrayUtils.h"
@@ -27,7 +28,7 @@
 #include "nsISupportsPrimitives.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIDocument.h"
-#include "nsWeakPtr.h"
+#include "nsIWeakReferenceUtils.h"
 
 using mozilla::Unused;          // <snicker>
 using namespace mozilla::dom;
@@ -98,7 +99,7 @@ VisibilityChangeListener::RemoveListener()
     return;
   }
 
-  nsCOMPtr<EventTarget> target = do_QueryInterface(window->GetExtantDoc());
+  nsCOMPtr<EventTarget> target = window->GetExtantDoc();
   if (target) {
     target->RemoveSystemEventListener(NS_LITERAL_STRING(kVisibilityChange),
                                       /* listener */ this,
@@ -211,11 +212,9 @@ ContentPermissionRequestParent::IsBeingDestroyed()
 NS_IMPL_ISUPPORTS(ContentPermissionType, nsIContentPermissionType)
 
 ContentPermissionType::ContentPermissionType(const nsACString& aType,
-                                             const nsACString& aAccess,
                                              const nsTArray<nsString>& aOptions)
 {
   mType = aType;
-  mAccess = aAccess;
   mOptions = aOptions;
 }
 
@@ -227,13 +226,6 @@ NS_IMETHODIMP
 ContentPermissionType::GetType(nsACString& aType)
 {
   aType = mType;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-ContentPermissionType::GetAccess(nsACString& aAccess)
-{
-  aAccess = mAccess;
   return NS_OK;
 }
 
@@ -276,7 +268,6 @@ nsContentPermissionUtils::ConvertPermissionRequestToArray(nsTArray<PermissionReq
   for (uint32_t i = 0; i < len; i++) {
     RefPtr<ContentPermissionType> cpt =
       new ContentPermissionType(aSrcArray[i].type(),
-                                aSrcArray[i].access(),
                                 aSrcArray[i].options());
     aDesArray->AppendElement(cpt);
   }
@@ -292,9 +283,7 @@ nsContentPermissionUtils::ConvertArrayToPermissionRequest(nsIArray* aSrcArray,
   for (uint32_t i = 0; i < len; i++) {
     nsCOMPtr<nsIContentPermissionType> cpt = do_QueryElementAt(aSrcArray, i);
     nsAutoCString type;
-    nsAutoCString access;
     cpt->GetType(type);
-    cpt->GetAccess(access);
 
     nsCOMPtr<nsIArray> optionArray;
     cpt->GetOptions(getter_AddRefs(optionArray));
@@ -312,7 +301,7 @@ nsContentPermissionUtils::ConvertArrayToPermissionRequest(nsIArray* aSrcArray,
       }
     }
 
-    aDesArray.AppendElement(PermissionRequest(type, access, options));
+    aDesArray.AppendElement(PermissionRequest(type, options));
   }
   return len;
 }
@@ -335,14 +324,12 @@ ContentPermissionRequestChildMap()
 
 /* static */ nsresult
 nsContentPermissionUtils::CreatePermissionArray(const nsACString& aType,
-                                                const nsACString& aAccess,
                                                 const nsTArray<nsString>& aOptions,
                                                 nsIArray** aTypesArray)
 {
   nsCOMPtr<nsIMutableArray> types = do_CreateInstance(NS_ARRAY_CONTRACTID);
   RefPtr<ContentPermissionType> permType = new ContentPermissionType(aType,
-                                                                       aAccess,
-                                                                       aOptions);
+                                                                     aOptions);
   types->AppendElement(permType);
   types.forget(aTypesArray);
 
@@ -523,6 +510,177 @@ nsContentPermissionRequester::GetOnVisibilityChange(nsIContentPermissionRequestC
   nsCOMPtr<nsIContentPermissionRequestCallback> callback = mListener->GetCallback();
   callback.forget(aCallback);
   return NS_OK;
+}
+
+NS_IMPL_CYCLE_COLLECTION(ContentPermissionRequestBase, mPrincipal, mWindow)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ContentPermissionRequestBase)
+  NS_INTERFACE_MAP_ENTRY_CONCRETE(nsISupports)
+  NS_INTERFACE_MAP_ENTRY_CONCRETE(nsIContentPermissionRequest)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(ContentPermissionRequestBase)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(ContentPermissionRequestBase)
+
+ContentPermissionRequestBase::ContentPermissionRequestBase(nsIPrincipal* aPrincipal,
+                                                           bool aIsHandlingUserInput,
+                                                           nsPIDOMWindowInner* aWindow,
+                                                           const nsACString& aPrefName,
+                                                           const nsACString& aType)
+  : mPrincipal(aPrincipal)
+  , mWindow(aWindow)
+  , mRequester(aWindow ?
+                 new nsContentPermissionRequester(aWindow) :
+                 nullptr)
+  , mPrefName(aPrefName)
+  , mType(aType)
+  , mIsHandlingUserInput(aIsHandlingUserInput)
+{
+}
+
+NS_IMETHODIMP
+ContentPermissionRequestBase::GetPrincipal(nsIPrincipal** aRequestingPrincipal)
+{
+  NS_ADDREF(*aRequestingPrincipal = mPrincipal);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+ContentPermissionRequestBase::GetWindow(mozIDOMWindow** aRequestingWindow)
+{
+  NS_ADDREF(*aRequestingWindow = mWindow);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+ContentPermissionRequestBase::GetElement(Element** aElement)
+{
+  NS_ENSURE_ARG_POINTER(aElement);
+  *aElement = nullptr;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+ContentPermissionRequestBase::GetIsHandlingUserInput(bool* aIsHandlingUserInput)
+{
+  *aIsHandlingUserInput = mIsHandlingUserInput;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+ContentPermissionRequestBase::GetRequester(nsIContentPermissionRequester** aRequester)
+{
+  NS_ENSURE_ARG_POINTER(aRequester);
+
+  nsCOMPtr<nsIContentPermissionRequester> requester = mRequester;
+  requester.forget(aRequester);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+ContentPermissionRequestBase::GetTypes(nsIArray** aTypes)
+{
+  nsTArray<nsString> emptyOptions;
+  return nsContentPermissionUtils::CreatePermissionArray(mType,
+                                                         emptyOptions,
+                                                         aTypes);
+}
+
+ContentPermissionRequestBase::PromptResult
+ContentPermissionRequestBase::CheckPromptPrefs()
+{
+  MOZ_ASSERT(!mPrefName.IsEmpty(), "This derived class must support checking pref types");
+
+  nsAutoCString prefName(mPrefName);
+  prefName.AppendLiteral(".prompt.testing");
+  if (Preferences::GetBool(PromiseFlatCString(prefName).get(), false)) {
+    prefName.AppendLiteral(".allow");
+    if (Preferences::GetBool(PromiseFlatCString(prefName).get(), true)) {
+      return PromptResult::Granted;
+    }
+    return PromptResult::Denied;
+  }
+
+  return PromptResult::Pending;
+}
+
+nsresult
+ContentPermissionRequestBase::ShowPrompt(
+    ContentPermissionRequestBase::PromptResult& aResult)
+{
+  aResult = CheckPromptPrefs();
+
+  if (aResult != PromptResult::Pending) {
+    return NS_OK;
+  }
+
+  return nsContentPermissionUtils::AskPermission(this, mWindow);
+}
+
+class RequestPromptEvent : public Runnable
+{
+public:
+  RequestPromptEvent(ContentPermissionRequestBase* aRequest,
+                     nsPIDOMWindowInner* aWindow)
+    : mozilla::Runnable("RequestPromptEvent")
+    , mRequest(aRequest)
+    , mWindow(aWindow)
+  {
+  }
+
+  NS_IMETHOD Run() override
+  {
+    nsContentPermissionUtils::AskPermission(mRequest, mWindow);
+    return NS_OK;
+  }
+
+private:
+  RefPtr<ContentPermissionRequestBase> mRequest;
+  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+};
+
+class RequestAllowEvent : public Runnable
+{
+public:
+  RequestAllowEvent(bool allow, ContentPermissionRequestBase* request)
+    : mozilla::Runnable("RequestAllowEvent")
+    , mAllow(allow)
+    , mRequest(request)
+  {
+  }
+
+  NS_IMETHOD Run() override {
+    if (mAllow) {
+      mRequest->Allow(JS::UndefinedHandleValue);
+    } else {
+      mRequest->Cancel();
+    }
+    return NS_OK;
+  }
+
+private:
+  bool mAllow;
+  RefPtr<ContentPermissionRequestBase> mRequest;
+};
+
+void
+ContentPermissionRequestBase::RequestDelayedTask(nsIEventTarget* aTarget,
+    ContentPermissionRequestBase::DelayedTaskType aType)
+{
+  nsCOMPtr<nsIRunnable> r;
+  switch (aType) {
+  case DelayedTaskType::Allow:
+    r = new RequestAllowEvent(true, this);
+    break;
+  case DelayedTaskType::Deny:
+    r = new RequestAllowEvent(false, this);
+    break;
+  default:
+    r = new RequestPromptEvent(this, mWindow);
+    break;
+  }
+
+  aTarget->Dispatch(r.forget());
 }
 
 } // namespace dom

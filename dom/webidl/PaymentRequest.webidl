@@ -4,7 +4,8 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this WebIDL file is
- *   https://www.w3.org/TR/payment-request/#paymentrequest-interface
+ *   https://w3c.github.io/payment-request/#paymentrequest-interface
+ *   https://w3c.github.io/payment-request/#idl-index
  *
  * Copyright © 2018 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
  * liability, trademark and document use rules apply.
@@ -18,18 +19,12 @@ dictionary PaymentMethodData {
 dictionary PaymentCurrencyAmount {
   required DOMString currency;
   required DOMString value;
-           DOMString currencySystem = "urn:iso:std:iso:4217";
-};
-
-enum PaymentItemType {
-  "tax"
 };
 
 dictionary PaymentItem {
   required DOMString             label;
   required PaymentCurrencyAmount amount;
            boolean               pending = false;
-           PaymentItemType       type;
 };
 
 dictionary PaymentShippingOption {
@@ -72,13 +67,13 @@ dictionary AddressErrors {
 };
 
 dictionary PaymentValidationErrors {
-  PayerErrorFields payer;
+  PayerErrors payer;
   AddressErrors shippingAddress;
   DOMString error;
   object paymentMethod;
 };
 
-dictionary PayerErrorFields {
+dictionary PayerErrors {
   DOMString email;
   DOMString name;
   DOMString phone;
@@ -87,7 +82,7 @@ dictionary PayerErrorFields {
 dictionary PaymentDetailsUpdate : PaymentDetailsBase {
   DOMString     error;
   AddressErrors shippingAddressErrors;
-  PayerErrorFields payerErrors;
+  PayerErrors payerErrors;
   object paymentMethodErrors;
   PaymentItem   total;
 };

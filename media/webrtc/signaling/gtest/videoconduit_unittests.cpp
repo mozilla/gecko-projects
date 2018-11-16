@@ -25,6 +25,11 @@ namespace test {
 class MockVideoSink : public rtc::VideoSinkInterface<webrtc::VideoFrame>
 {
 public:
+  MockVideoSink()
+    : mVideoFrame(nullptr, kVideoRotation_0, 0)
+  {
+  }
+
   ~MockVideoSink() override = default;
 
   void OnFrame(const webrtc::VideoFrame& frame) override
@@ -84,9 +89,8 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecs)
   EncodingConstraints constraints;
 
   // Defaults
-  std::vector<VideoCodecConfig *> codecs;
-  VideoCodecConfig codecConfig(120, "VP8", constraints);
-  codecs.push_back(&codecConfig);
+  std::vector<UniquePtr<mozilla::VideoCodecConfig>> codecs;
+  codecs.emplace_back(new VideoCodecConfig(120, "VP8", constraints));
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
   ASSERT_EQ(mCall->mVideoReceiveConfig.decoders.size(), 1U);
@@ -99,10 +103,9 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecs)
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.remb);
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.tmmbr);
   ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.keyframe_method, webrtc::kKeyFrameReqPliRtcp);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.ulpfec_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_rtx_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx.size(), 0U);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.red_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx_associated_payload_types.size(), 0U);
 
   // No codecs
   codecs.clear();
@@ -117,8 +120,7 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecs)
 
   // empty codec name
   codecs.clear();
-  VideoCodecConfig codecConfigBadName(120, "", constraints);
-  codecs.push_back(&codecConfigBadName);
+  codecs.emplace_back(new VideoCodecConfig(120, "", constraints));
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitMalformedArgument);
 
@@ -128,8 +130,7 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecs)
   char* longName = new char[longNameLength];
   memset(longName, 'A', longNameLength - 2);
   longName[longNameLength - 1] = 0;
-  VideoCodecConfig codecConfigLongName(120, longName, constraints);
-  codecs.push_back(&codecConfigLongName);
+  codecs.emplace_back(new VideoCodecConfig(120, longName, constraints));
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitMalformedArgument);
   delete[] longName;
@@ -139,15 +140,14 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsFEC)
 {
   MediaConduitErrorCode ec;
   EncodingConstraints constraints;
-  std::vector<VideoCodecConfig *> codecs;
+  std::vector<UniquePtr<mozilla::VideoCodecConfig>> codecs;
 
-  VideoCodecConfig codecConfig(120, "VP8", constraints);
-  codecConfig.mFECFbSet = true;
-  codecs.push_back(&codecConfig);
-  VideoCodecConfig codecConfigFEC(1, "ulpfec", constraints);
-  codecs.push_back(&codecConfigFEC);
-  VideoCodecConfig codecConfigRED(2, "red", constraints);
-  codecs.push_back(&codecConfigRED);
+  UniquePtr<VideoCodecConfig> codecConfig(
+      new VideoCodecConfig(120, "VP8", constraints));
+  codecConfig->mFECFbSet = true;
+  codecs.push_back(std::move(codecConfig));
+  codecs.emplace_back(new VideoCodecConfig(1, "ulpfec", constraints));
+  codecs.emplace_back(new VideoCodecConfig(2, "red", constraints));
 
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
@@ -161,10 +161,9 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsFEC)
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.remb);
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.tmmbr);
   ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.keyframe_method, webrtc::kKeyFrameReqPliRtcp);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.ulpfec_payload_type, 1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_payload_type, 2);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_rtx_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx.size(), 0U);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec_payload_type, 1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.red_payload_type, 2);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx_associated_payload_types.size(), 0U);
 }
 
 TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsH264)
@@ -174,12 +173,10 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsH264)
 
   WebrtcGmpPCHandleSetter setter("hi there");
 
-  std::vector<VideoCodecConfig *> codecs;
-  VideoCodecConfig codecConfig(120, "H264", constraints);
-  codecs.push_back(&codecConfig);
-
+  std::vector<UniquePtr<mozilla::VideoCodecConfig>> codecs;
+  codecs.emplace_back(new VideoCodecConfig(120, "H264", constraints));
   // Insert twice to test that only one H264 codec is used at a time
-  codecs.push_back(&codecConfig);
+  codecs.emplace_back(new VideoCodecConfig(120, "H264", constraints));
 
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
@@ -193,23 +190,22 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsH264)
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.remb);
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.tmmbr);
   ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.keyframe_method, webrtc::kKeyFrameReqPliRtcp);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.ulpfec_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_rtx_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx.size(), 0U);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.red_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx_associated_payload_types.size(), 0U);
 }
 
 TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsKeyframeRequestType)
 {
   MediaConduitErrorCode ec;
   EncodingConstraints constraints;
-  std::vector<VideoCodecConfig *> codecs;
+  std::vector<UniquePtr<mozilla::VideoCodecConfig>> codecs;
 
   // PLI should be preferred to FIR
   VideoCodecConfig codecConfig(120, "VP8", constraints);
   codecConfig.mNackFbTypes.push_back("pli");
   codecConfig.mCcmFbTypes.push_back("fir");
-  codecs.push_back(&codecConfig);
+  codecs.emplace_back(new VideoCodecConfig(codecConfig));
 
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
@@ -219,7 +215,7 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsKeyframeRequestType)
   // Just FIR
   codecs.clear();
   codecConfig.mNackFbTypes.clear();
-  codecs.push_back(&codecConfig);
+  codecs.emplace_back(new VideoCodecConfig(codecConfig));
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
   ASSERT_EQ(mCall->mVideoReceiveConfig.decoders.size(), 1U);
@@ -230,11 +226,11 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsNack)
 {
   MediaConduitErrorCode ec;
   EncodingConstraints constraints;
-  std::vector<VideoCodecConfig *> codecs;
+  std::vector<UniquePtr<mozilla::VideoCodecConfig>> codecs;
 
   VideoCodecConfig codecConfig(120, "VP8", constraints);
   codecConfig.mNackFbTypes.push_back("");
-  codecs.push_back(&codecConfig);
+  codecs.emplace_back(new VideoCodecConfig(codecConfig));
 
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
@@ -248,21 +244,20 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsNack)
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.remb);
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.tmmbr);
   ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.keyframe_method, webrtc::kKeyFrameReqPliRtcp);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.ulpfec_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_rtx_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx.size(), 0U);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.red_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx_associated_payload_types.size(), 0U);
 }
 
 TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsRemb)
 {
   MediaConduitErrorCode ec;
   EncodingConstraints constraints;
-  std::vector<VideoCodecConfig *> codecs;
+  std::vector<UniquePtr<mozilla::VideoCodecConfig>> codecs;
 
   VideoCodecConfig codecConfig(120, "VP8", constraints);
   codecConfig.mRembFbSet = true;
-  codecs.push_back(&codecConfig);
+  codecs.emplace_back(new VideoCodecConfig(codecConfig));
 
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
@@ -276,21 +271,20 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsRemb)
   ASSERT_TRUE(mCall->mVideoReceiveConfig.rtp.remb);
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.tmmbr);
   ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.keyframe_method, webrtc::kKeyFrameReqPliRtcp);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.ulpfec_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_rtx_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx.size(), 0U);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.red_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx_associated_payload_types.size(), 0U);
 }
 
 TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsTmmbr)
 {
   MediaConduitErrorCode ec;
   EncodingConstraints constraints;
-  std::vector<VideoCodecConfig *> codecs;
+  std::vector<UniquePtr<mozilla::VideoCodecConfig>> codecs;
 
   VideoCodecConfig codecConfig(120, "VP8", constraints);
   codecConfig.mCcmFbTypes.push_back("tmmbr");
-  codecs.push_back(&codecConfig);
+  codecs.emplace_back(new VideoCodecConfig(codecConfig));
 
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
@@ -304,10 +298,9 @@ TEST_F(VideoConduitTest, TestConfigureReceiveMediaCodecsTmmbr)
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.remb);
   ASSERT_TRUE(mCall->mVideoReceiveConfig.rtp.tmmbr);
   ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.keyframe_method, webrtc::kKeyFrameReqPliRtcp);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.ulpfec_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_rtx_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx.size(), 0U);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.red_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx_associated_payload_types.size(), 0U);
 }
 
 TEST_F(VideoConduitTest, TestConfigureSendMediaCodec)
@@ -329,12 +322,11 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodec)
   ASSERT_NE(mCall->mVideoSendConfig.encoder_settings.encoder, nullptr);
   ASSERT_EQ(mCall->mVideoSendConfig.rtp.rtcp_mode, webrtc::RtcpMode::kCompound);
   ASSERT_EQ(mCall->mVideoSendConfig.rtp.max_packet_size, kVideoMtu);
-  ASSERT_EQ(mCall->mEncoderConfig.content_type,
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.content_type,
             VideoEncoderConfig::ContentType::kRealtimeVideo);
-  ASSERT_EQ(mCall->mEncoderConfig.min_transmit_bitrate_bps, 0);
-  ASSERT_EQ(mCall->mEncoderConfig.max_bitrate_bps, 0);
-  ASSERT_EQ(mCall->mEncoderConfig.number_of_streams, 1U);
-  ASSERT_EQ(mCall->mEncoderConfig.resolution_divisor, 1);
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.min_transmit_bitrate_bps, 0);
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.max_bitrate_bps, 0);
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.number_of_streams, 1U);
   mVideoConduit->StopTransmitting();
 
   // null codec
@@ -370,18 +362,18 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodecMaxFps)
   ASSERT_EQ(ec, kMediaConduitNoError);
   mVideoConduit->StartTransmitting();
   std::vector<webrtc::VideoStream> videoStreams;
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(640, 480, mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(640, 480);
   ASSERT_EQ(videoStreams.size(), 1U);
   ASSERT_EQ(videoStreams[0].max_framerate, 30); // DEFAULT_VIDEO_MAX_FRAMERATE
   mVideoConduit->StopTransmitting();
 
   constraints.maxFps = 42;
   VideoCodecConfig codecConfig2(120, "VP8", constraints);
-  codecConfig.mSimulcastEncodings.push_back(encoding);
+  codecConfig2.mSimulcastEncodings.push_back(encoding);
   ec = mVideoConduit->ConfigureSendMediaCodec(&codecConfig2);
   ASSERT_EQ(ec, kMediaConduitNoError);
   mVideoConduit->StartTransmitting();
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(640, 480, mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(640, 480);
   ASSERT_EQ(videoStreams.size(), 1U);
   ASSERT_EQ(videoStreams[0].max_framerate, 42);
   mVideoConduit->StopTransmitting();
@@ -401,7 +393,7 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodecMaxMbps)
   mVideoConduit->StartTransmitting();
   SendVideoFrame(640, 480, 1);
   std::vector<webrtc::VideoStream> videoStreams;
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(640, 480, mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(640, 480);
   ASSERT_EQ(videoStreams.size(), 1U);
   ASSERT_EQ(videoStreams[0].max_framerate, 30); // DEFAULT_VIDEO_MAX_FRAMERATE
   mVideoConduit->StopTransmitting();
@@ -413,7 +405,7 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodecMaxMbps)
   ASSERT_EQ(ec, kMediaConduitNoError);
   mVideoConduit->StartTransmitting();
   SendVideoFrame(640, 480, 1);
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(640, 480, mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(640, 480);
   ASSERT_EQ(videoStreams.size(), 1U);
   ASSERT_EQ(videoStreams[0].max_framerate, 8);
   mVideoConduit->StopTransmitting();
@@ -431,7 +423,7 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodecDefaults)
   ec = mVideoConduit->ConfigureSendMediaCodec(&codecConfig);
   ASSERT_EQ(ec, kMediaConduitNoError);
   mVideoConduit->StartTransmitting();
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(640, 480, mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(640, 480);
   EXPECT_EQ(videoStreams.size(), 1U);
   EXPECT_EQ(videoStreams[0].min_bitrate_bps, 150000);
   EXPECT_EQ(videoStreams[0].target_bitrate_bps, 500000);
@@ -439,7 +431,7 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodecDefaults)
 
   // SelectBitrates not called until we send a frame
   SendVideoFrame(1280, 720, 1);
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(1280, 720, mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(1280, 720);
   EXPECT_EQ(videoStreams.size(), 1U);
   EXPECT_EQ(videoStreams[0].min_bitrate_bps, 600000);
   EXPECT_EQ(videoStreams[0].target_bitrate_bps, 800000);
@@ -462,7 +454,7 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodecTias)
   ASSERT_EQ(ec, kMediaConduitNoError);
   mVideoConduit->StartTransmitting();
   SendVideoFrame(1280, 720, 1);
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(1280, 720, mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(1280, 720);
   ASSERT_EQ(videoStreams.size(), 1U);
   ASSERT_EQ(videoStreams[0].min_bitrate_bps, 600000);
   ASSERT_EQ(videoStreams[0].target_bitrate_bps, 800000);
@@ -477,7 +469,7 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodecTias)
   ASSERT_EQ(ec, kMediaConduitNoError);
   mVideoConduit->StartTransmitting();
   SendVideoFrame(1280, 720, 1);
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(1280, 720, mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(1280, 720);
   ASSERT_EQ(videoStreams.size(), 1U);
   ASSERT_EQ(videoStreams[0].min_bitrate_bps, 30000);
   ASSERT_EQ(videoStreams[0].target_bitrate_bps, 30000);
@@ -499,7 +491,7 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodecMaxBr)
   ASSERT_EQ(ec, kMediaConduitNoError);
   mVideoConduit->StartTransmitting();
   SendVideoFrame(1280, 720, 1);
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(1280, 720, mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(1280, 720);
   ASSERT_EQ(videoStreams.size(), 1U);
   ASSERT_LE(videoStreams[0].min_bitrate_bps, 50000);
   ASSERT_LE(videoStreams[0].target_bitrate_bps, 50000);
@@ -531,13 +523,13 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodecScaleResolutionBy)
 
   mVideoConduit->StartTransmitting();
   SendVideoFrame(640, 360, 1);
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(
-    sink->mVideoFrame.width(), sink->mVideoFrame.height(), mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(
+    sink->mVideoFrame.width(), sink->mVideoFrame.height());
   ASSERT_EQ(videoStreams.size(), 2U);
   ASSERT_EQ(videoStreams[0].width, 160U);
-  ASSERT_EQ(videoStreams[0].height, 90U);
+  ASSERT_EQ(videoStreams[0].height, 88U);
   ASSERT_EQ(videoStreams[1].width, 320U);
-  ASSERT_EQ(videoStreams[1].height, 180U);
+  ASSERT_EQ(videoStreams[1].height, 176U);
   mVideoConduit->StopTransmitting();
 }
 
@@ -555,7 +547,7 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodecCodecMode)
   ec = mVideoConduit->ConfigureSendMediaCodec(&codecConfig);
   ASSERT_EQ(ec, kMediaConduitNoError);
   mVideoConduit->StartTransmitting();
-  ASSERT_EQ(mCall->mEncoderConfig.content_type,
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.content_type,
             VideoEncoderConfig::ContentType::kScreen);
   mVideoConduit->StopTransmitting();
 }
@@ -673,7 +665,7 @@ TEST_F(VideoConduitTest, TestOnSinkWantsChanged)
   rtc::VideoSinkWants wants;
   mVideoConduit->AddOrUpdateSink(sink.get(), wants);
 
-  wants.max_pixel_count = rtc::Optional<int>(256000);
+  wants.max_pixel_count = 256000;
   EncodingConstraints constraints;
   VideoCodecConfig::SimulcastEncoding encoding;
   VideoCodecConfig codecConfig(120, "VP8", constraints);
@@ -686,8 +678,8 @@ TEST_F(VideoConduitTest, TestOnSinkWantsChanged)
   mVideoConduit->OnSinkWantsChanged(wants);
   SendVideoFrame(1920, 1080, 1);
   EXPECT_LE(sink->mVideoFrame.width() * sink->mVideoFrame.height(), 256000);
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(
-    sink->mVideoFrame.width(), sink->mVideoFrame.height(), mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(
+    sink->mVideoFrame.width(), sink->mVideoFrame.height());
   ASSERT_EQ(videoStreams.size(), 1U);
   EXPECT_EQ(videoStreams[0].width, 480U);
   EXPECT_EQ(videoStreams[0].height, 270U);
@@ -697,8 +689,8 @@ TEST_F(VideoConduitTest, TestOnSinkWantsChanged)
   mVideoConduit->OnSinkWantsChanged(wants);
   SendVideoFrame(1920, 1080, 2);
   EXPECT_LE(sink->mVideoFrame.width() * sink->mVideoFrame.height(), 500 * 16 * 16);
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(
-    sink->mVideoFrame.width(), sink->mVideoFrame.height(), mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(
+    sink->mVideoFrame.width(), sink->mVideoFrame.height());
   ASSERT_EQ(videoStreams.size(), 1U);
   EXPECT_EQ(videoStreams[0].width, 360U);
   EXPECT_EQ(videoStreams[0].height, 201U);
@@ -708,20 +700,20 @@ TEST_F(VideoConduitTest, TestOnSinkWantsChanged)
   mVideoConduit->OnSinkWantsChanged(wants);
   SendVideoFrame(1920, 1080, 3);
   EXPECT_LE(sink->mVideoFrame.width() * sink->mVideoFrame.height(), 1000 * 16 * 16);
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(
-    sink->mVideoFrame.width(), sink->mVideoFrame.height(), mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(
+    sink->mVideoFrame.width(), sink->mVideoFrame.height());
   ASSERT_EQ(videoStreams.size(), 1U);
   EXPECT_EQ(videoStreams[0].width, 480U);
   EXPECT_EQ(videoStreams[0].height, 270U);
 
-  wants.max_pixel_count = rtc::Optional<int>(64000);
+  wants.max_pixel_count = 64000;
   codecConfig.mEncodingConstraints.maxFs = 500;
   mVideoConduit->ConfigureSendMediaCodec(&codecConfig);
   mVideoConduit->OnSinkWantsChanged(wants);
   SendVideoFrame(1920, 1080, 4);
   EXPECT_LE(sink->mVideoFrame.width() * sink->mVideoFrame.height(), 64000);
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(
-    sink->mVideoFrame.width(), sink->mVideoFrame.height(), mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(
+    sink->mVideoFrame.width(), sink->mVideoFrame.height());
   ASSERT_EQ(videoStreams.size(), 1U);
   EXPECT_EQ(videoStreams[0].width, 240U);
   EXPECT_EQ(videoStreams[0].height, 135U);
@@ -748,10 +740,118 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodecSimulcastOddScreen)
   codecConfig.mSimulcastEncodings.push_back(encoding3);
   ec = mVideoConduit->ConfigureSendMediaCodec(&codecConfig);
   ASSERT_EQ(ec, kMediaConduitNoError);
+
+  UniquePtr<MockVideoSink> sink(new MockVideoSink());
+  rtc::VideoSinkWants wants;
+  mVideoConduit->AddOrUpdateSink(sink.get(), wants);
+  mVideoConduit->StartTransmitting();
+
+  // This should crop to 16-alignment to help with scaling
+  SendVideoFrame(26, 24, 1);
+  std::vector<webrtc::VideoStream> videoStreams;
+  videoStreams = mCall->CreateEncoderStreams(
+    sink->mVideoFrame.width(), sink->mVideoFrame.height());
+  ASSERT_EQ(videoStreams.size(), 3U);
+  EXPECT_EQ(videoStreams[2].width, 16U);
+  EXPECT_EQ(videoStreams[2].height, 16U);
+  EXPECT_EQ(videoStreams[1].width, 8U);
+  EXPECT_EQ(videoStreams[1].height, 8U);
+  EXPECT_EQ(videoStreams[0].width, 4U);
+  EXPECT_EQ(videoStreams[0].height, 4U);
+
+  // Test that we are able to remove the 16-alignment cropping (non-simulcast)
+  codecConfig.mSimulcastEncodings.clear();
+  codecConfig.mSimulcastEncodings.push_back(encoding);
+  ec = mVideoConduit->ConfigureSendMediaCodec(&codecConfig);
+  mVideoConduit->SetLocalSSRCs({42});
+  ASSERT_EQ(ec, kMediaConduitNoError);
+  SendVideoFrame(26, 24, 2);
+  videoStreams = mCall->CreateEncoderStreams(
+    sink->mVideoFrame.width(), sink->mVideoFrame.height());
+  ASSERT_EQ(videoStreams.size(), 1U);
+  EXPECT_EQ(videoStreams[0].width, 26U);
+  EXPECT_EQ(videoStreams[0].height, 24U);
+
+  mVideoConduit->StopTransmitting();
+}
+
+TEST_F(VideoConduitTest, TestConfigureSendMediaCodecSimulcastAllScaling)
+{
+  std::vector<unsigned int> ssrcs = {42, 43, 44};
+  mVideoConduit->SetLocalSSRCs(ssrcs);
+
+  MediaConduitErrorCode ec;
+  EncodingConstraints constraints;
+  VideoCodecConfig::SimulcastEncoding encoding;
+  VideoCodecConfig::SimulcastEncoding encoding2;
+  VideoCodecConfig::SimulcastEncoding encoding3;
+  encoding.constraints.scaleDownBy = 2;
+  encoding2.constraints.scaleDownBy = 4;
+  encoding3.constraints.scaleDownBy = 6;
+
+  VideoCodecConfig codecConfig(120, "VP8", constraints);
+  codecConfig.mSimulcastEncodings.push_back(encoding);
+  codecConfig.mSimulcastEncodings.push_back(encoding2);
+  codecConfig.mSimulcastEncodings.push_back(encoding3);
+  ec = mVideoConduit->ConfigureSendMediaCodec(&codecConfig);
+  ASSERT_EQ(ec, kMediaConduitNoError);
+
+  UniquePtr<MockVideoSink> sink(new MockVideoSink());
+  rtc::VideoSinkWants wants;
+  mVideoConduit->AddOrUpdateSink(sink.get(), wants);
+
   mVideoConduit->StartTransmitting();
   std::vector<webrtc::VideoStream> videoStreams;
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(26, 24, mCall->mEncoderConfig);
-  ASSERT_EQ(videoStreams.size(), 2U);
+
+  SendVideoFrame(1281, 721, 1);
+  videoStreams = mCall->CreateEncoderStreams(
+    sink->mVideoFrame.width(), sink->mVideoFrame.height());
+  ASSERT_EQ(videoStreams.size(), 3U);
+  EXPECT_EQ(videoStreams[2].width, 640U);
+  EXPECT_EQ(videoStreams[2].height, 352U);
+  EXPECT_EQ(videoStreams[1].width, 320U);
+  EXPECT_EQ(videoStreams[1].height, 176U);
+  EXPECT_EQ(videoStreams[0].width, 160U);
+  EXPECT_EQ(videoStreams[0].height, 88U);
+
+  SendVideoFrame(1281, 721, 2);
+  videoStreams = mCall->CreateEncoderStreams(
+    sink->mVideoFrame.width(), sink->mVideoFrame.height());
+  ASSERT_EQ(videoStreams.size(), 3U);
+  EXPECT_EQ(videoStreams[2].width, 640U);
+  EXPECT_EQ(videoStreams[2].height, 352U);
+  EXPECT_EQ(videoStreams[1].width, 320U);
+  EXPECT_EQ(videoStreams[1].height, 176U);
+  EXPECT_EQ(videoStreams[0].width, 160U);
+  EXPECT_EQ(videoStreams[0].height, 88U);
+
+  SendVideoFrame(1280, 720, 3);
+  videoStreams = mCall->CreateEncoderStreams(
+    sink->mVideoFrame.width(), sink->mVideoFrame.height());
+  ASSERT_EQ(videoStreams.size(), 3U);
+  EXPECT_EQ(videoStreams[2].width, 640U);
+  EXPECT_EQ(videoStreams[2].height, 352U);
+  EXPECT_EQ(videoStreams[1].width, 320U);
+  EXPECT_EQ(videoStreams[1].height, 176U);
+  EXPECT_EQ(videoStreams[0].width, 160U);
+  EXPECT_EQ(videoStreams[0].height, 88U);
+
+  codecConfig.mSimulcastEncodings[0].constraints.scaleDownBy = 1;
+  codecConfig.mSimulcastEncodings[1].constraints.scaleDownBy = 2;
+  codecConfig.mSimulcastEncodings[2].constraints.scaleDownBy = 4;
+  ec = mVideoConduit->ConfigureSendMediaCodec(&codecConfig);
+  ASSERT_EQ(ec, kMediaConduitNoError);
+  SendVideoFrame(1280, 720, 4);
+  videoStreams = mCall->CreateEncoderStreams(
+    sink->mVideoFrame.width(), sink->mVideoFrame.height());
+  ASSERT_EQ(videoStreams.size(), 3U);
+  EXPECT_EQ(videoStreams[2].width, 1280U);
+  EXPECT_EQ(videoStreams[2].height, 720U);
+  EXPECT_EQ(videoStreams[1].width, 640U);
+  EXPECT_EQ(videoStreams[1].height, 360U);
+  EXPECT_EQ(videoStreams[0].width, 320U);
+  EXPECT_EQ(videoStreams[0].height, 180U);
+
   mVideoConduit->StopTransmitting();
 }
 
@@ -778,7 +878,7 @@ TEST_F(VideoConduitTest, TestConfigureSendMediaCodecSimulcastScreenshare)
   ASSERT_EQ(ec, kMediaConduitNoError);
   mVideoConduit->StartTransmitting();
   std::vector<webrtc::VideoStream> videoStreams;
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(640, 480, mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(640, 480);
   ASSERT_EQ(videoStreams.size(), 1U);
   mVideoConduit->StopTransmitting();
 }
@@ -788,13 +888,12 @@ TEST_F(VideoConduitTest, TestReconfigureReceiveMediaCodecs)
   MediaConduitErrorCode ec;
   EncodingConstraints constraints;
   VideoCodecConfig::SimulcastEncoding encoding;
-  std::vector<VideoCodecConfig*> codecs;
+  std::vector<UniquePtr<mozilla::VideoCodecConfig>> codecs;
 
   WebrtcGmpPCHandleSetter setter("hi there");
 
   // Defaults
-  VideoCodecConfig codecConfig(120, "VP8", constraints);
-  codecs.push_back(&codecConfig);
+  codecs.emplace_back(new VideoCodecConfig(120, "VP8", constraints));
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
   ASSERT_EQ(mCall->mVideoReceiveConfig.decoders.size(), 1U);
@@ -807,20 +906,19 @@ TEST_F(VideoConduitTest, TestReconfigureReceiveMediaCodecs)
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.remb);
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.tmmbr);
   ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.keyframe_method, webrtc::kKeyFrameReqPliRtcp);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.ulpfec_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_rtx_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx.size(), 0U);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.red_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx_associated_payload_types.size(), 0U);
 
   // FEC
   codecs.clear();
   VideoCodecConfig codecConfigFecFb(120, "VP8", constraints);
   codecConfigFecFb.mFECFbSet = true;
-  codecs.push_back(&codecConfigFecFb);
+  codecs.emplace_back(new VideoCodecConfig(codecConfigFecFb));
   VideoCodecConfig codecConfigFEC(1, "ulpfec", constraints);
-  codecs.push_back(&codecConfigFEC);
+  codecs.emplace_back(new VideoCodecConfig(codecConfigFEC));
   VideoCodecConfig codecConfigRED(2, "red", constraints);
-  codecs.push_back(&codecConfigRED);
+  codecs.emplace_back(new VideoCodecConfig(codecConfigRED));
 
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
@@ -834,15 +932,13 @@ TEST_F(VideoConduitTest, TestReconfigureReceiveMediaCodecs)
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.remb);
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.tmmbr);
   ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.keyframe_method, webrtc::kKeyFrameReqPliRtcp);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.ulpfec_payload_type, 1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_payload_type, 2);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_rtx_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx.size(), 0U);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec_payload_type, 1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.red_payload_type, 2);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx_associated_payload_types.size(), 0U);
 
   // H264
   codecs.clear();
-  VideoCodecConfig codecConfigH264(120, "H264", constraints);
-  codecs.push_back(&codecConfigH264);
+  codecs.emplace_back(new VideoCodecConfig(120, "H264", constraints));
 
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
@@ -856,16 +952,15 @@ TEST_F(VideoConduitTest, TestReconfigureReceiveMediaCodecs)
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.remb);
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.tmmbr);
   ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.keyframe_method, webrtc::kKeyFrameReqPliRtcp);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.ulpfec_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_rtx_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx.size(), 0U);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.red_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx_associated_payload_types.size(), 0U);
 
   // Nack
   codecs.clear();
   VideoCodecConfig codecConfigNack(120, "VP8", constraints);
   codecConfigNack.mNackFbTypes.push_back("");
-  codecs.push_back(&codecConfigNack);
+  codecs.emplace_back(new VideoCodecConfig(codecConfigNack));
 
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
@@ -879,16 +974,15 @@ TEST_F(VideoConduitTest, TestReconfigureReceiveMediaCodecs)
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.remb);
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.tmmbr);
   ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.keyframe_method, webrtc::kKeyFrameReqPliRtcp);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.ulpfec_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_rtx_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx.size(), 0U);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.red_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx_associated_payload_types.size(), 0U);
 
   // Remb
   codecs.clear();
   VideoCodecConfig codecConfigRemb(120, "VP8", constraints);
   codecConfigRemb.mRembFbSet = true;
-  codecs.push_back(&codecConfigRemb);
+  codecs.emplace_back(new VideoCodecConfig(codecConfigRemb));
 
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
@@ -902,16 +996,15 @@ TEST_F(VideoConduitTest, TestReconfigureReceiveMediaCodecs)
   ASSERT_TRUE(mCall->mVideoReceiveConfig.rtp.remb);
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.tmmbr);
   ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.keyframe_method, webrtc::kKeyFrameReqPliRtcp);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.ulpfec_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_rtx_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx.size(), 0U);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.red_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx_associated_payload_types.size(), 0U);
 
   // Tmmbr
   codecs.clear();
   VideoCodecConfig codecConfigTmmbr(120, "VP8", constraints);
   codecConfigTmmbr.mCcmFbTypes.push_back("tmmbr");
-  codecs.push_back(&codecConfigTmmbr);
+  codecs.emplace_back(new VideoCodecConfig(codecConfigTmmbr));
 
   ec = mVideoConduit->ConfigureRecvMediaCodecs(codecs);
   ASSERT_EQ(ec, kMediaConduitNoError);
@@ -925,10 +1018,9 @@ TEST_F(VideoConduitTest, TestReconfigureReceiveMediaCodecs)
   ASSERT_FALSE(mCall->mVideoReceiveConfig.rtp.remb);
   ASSERT_TRUE(mCall->mVideoReceiveConfig.rtp.tmmbr);
   ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.keyframe_method, webrtc::kKeyFrameReqPliRtcp);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.ulpfec_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec.red_rtx_payload_type, -1);
-  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx.size(), 0U);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.ulpfec_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.red_payload_type, -1);
+  ASSERT_EQ(mCall->mVideoReceiveConfig.rtp.rtx_associated_payload_types.size(), 0U);
 }
 
 TEST_F(VideoConduitTest, TestReconfigureSendMediaCodec)
@@ -956,12 +1048,11 @@ TEST_F(VideoConduitTest, TestReconfigureSendMediaCodec)
   ASSERT_NE(mCall->mVideoSendConfig.encoder_settings.encoder, nullptr);
   ASSERT_EQ(mCall->mVideoSendConfig.rtp.rtcp_mode, webrtc::RtcpMode::kCompound);
   ASSERT_EQ(mCall->mVideoSendConfig.rtp.max_packet_size, kVideoMtu);
-  ASSERT_EQ(mCall->mEncoderConfig.content_type,
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.content_type,
             VideoEncoderConfig::ContentType::kRealtimeVideo);
-  ASSERT_EQ(mCall->mEncoderConfig.min_transmit_bitrate_bps, 0);
-  ASSERT_EQ(mCall->mEncoderConfig.max_bitrate_bps, 0);
-  ASSERT_EQ(mCall->mEncoderConfig.number_of_streams, 1U);
-  ASSERT_EQ(mCall->mEncoderConfig.resolution_divisor, 1);
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.min_transmit_bitrate_bps, 0);
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.max_bitrate_bps, 0);
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.number_of_streams, 1U);
   mVideoConduit->StopTransmitting();
 
   // FEC
@@ -999,7 +1090,7 @@ TEST_F(VideoConduitTest, TestReconfigureSendMediaCodec)
   mVideoConduit->StartTransmitting();
   SendVideoFrame(1280, 720, 1);
 
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(1280, 720, mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(1280, 720);
   ASSERT_EQ(videoStreams.size(), 1U);
   ASSERT_EQ(videoStreams[0].min_bitrate_bps, 600000);
   ASSERT_EQ(videoStreams[0].target_bitrate_bps, 800000);
@@ -1014,7 +1105,7 @@ TEST_F(VideoConduitTest, TestReconfigureSendMediaCodec)
   ASSERT_EQ(ec, kMediaConduitNoError);
   mVideoConduit->StartTransmitting();
   SendVideoFrame(1280, 720, 1);
-  videoStreams = mCall->mEncoderConfig.video_stream_factory->CreateEncoderStreams(1280, 720, mCall->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(1280, 720);
   ASSERT_EQ(videoStreams.size(), 1U);
   ASSERT_LE(videoStreams[0].min_bitrate_bps, 50000);
   ASSERT_LE(videoStreams[0].target_bitrate_bps, 50000);
@@ -1079,12 +1170,11 @@ TEST_F(VideoConduitTest, TestReconfigureSendMediaCodecWhileTransmitting)
   ASSERT_NE(mCall->mVideoSendConfig.encoder_settings.encoder, nullptr);
   ASSERT_EQ(mCall->mVideoSendConfig.rtp.rtcp_mode, webrtc::RtcpMode::kCompound);
   ASSERT_EQ(mCall->mVideoSendConfig.rtp.max_packet_size, kVideoMtu);
-  ASSERT_EQ(mCall->mEncoderConfig.content_type,
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.content_type,
             VideoEncoderConfig::ContentType::kRealtimeVideo);
-  ASSERT_EQ(mCall->mEncoderConfig.min_transmit_bitrate_bps, 0);
-  ASSERT_EQ(mCall->mEncoderConfig.max_bitrate_bps, 0);
-  ASSERT_EQ(mCall->mEncoderConfig.number_of_streams, 1U);
-  ASSERT_EQ(mCall->mEncoderConfig.resolution_divisor, 1);
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.min_transmit_bitrate_bps, 0);
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.max_bitrate_bps, 0);
+  ASSERT_EQ(mCall->mCurrentVideoSendStream->mEncoderConfig.number_of_streams, 1U);
 
   // Changing these parameters should not require a call to StartTransmitting
   // for the changes to take effect.
@@ -1097,7 +1187,7 @@ TEST_F(VideoConduitTest, TestReconfigureSendMediaCodecWhileTransmitting)
   ASSERT_EQ(ec, kMediaConduitNoError);
   SendVideoFrame(1280, 720, 1);
 
-  videoStreams = mCall->mCurrentVideoSendStream->mEncoderConfig.video_stream_factory->CreateEncoderStreams(1280, 720, mCall->mCurrentVideoSendStream->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(1280, 720);
   ASSERT_EQ(videoStreams.size(), 1U);
   ASSERT_EQ(videoStreams[0].min_bitrate_bps, 600000);
   ASSERT_EQ(videoStreams[0].target_bitrate_bps, 800000);
@@ -1110,7 +1200,7 @@ TEST_F(VideoConduitTest, TestReconfigureSendMediaCodecWhileTransmitting)
   ec = mVideoConduit->ConfigureSendMediaCodec(&codecConfigMaxBr);
   ASSERT_EQ(ec, kMediaConduitNoError);
   SendVideoFrame(1280, 720, 1);
-  videoStreams = mCall->mCurrentVideoSendStream->mEncoderConfig.video_stream_factory->CreateEncoderStreams(1280, 720, mCall->mCurrentVideoSendStream->mEncoderConfig);
+  videoStreams = mCall->CreateEncoderStreams(1280, 720);
   ASSERT_EQ(videoStreams.size(), 1U);
   ASSERT_LE(videoStreams[0].min_bitrate_bps, 50000);
   ASSERT_LE(videoStreams[0].target_bitrate_bps, 50000);
@@ -1145,6 +1235,30 @@ TEST_F(VideoConduitTest, TestReconfigureSendMediaCodecWhileTransmitting)
   ASSERT_EQ(sink->mVideoFrame.height(), 640);
   ASSERT_EQ(sink->mVideoFrame.timestamp_us(), 3000U);
   ASSERT_EQ(sink->mOnFrameCount, 3U);
+
+  // ScaleResolutionDownBy
+  VideoCodecConfig codecConfigScaleDownBy(120, "VP8", constraints);
+  encoding.constraints.maxFs = 0;
+  encoding.constraints.scaleDownBy = 3.7;
+  codecConfigScaleDownBy.mSimulcastEncodings.push_back(encoding);
+  ec = mVideoConduit->ConfigureSendMediaCodec(&codecConfigScaleDownBy);
+  ASSERT_EQ(ec, kMediaConduitNoError);
+
+  SendVideoFrame(1280, 720, 4);
+  ASSERT_EQ(sink->mVideoFrame.width(), 320);
+  ASSERT_EQ(sink->mVideoFrame.height(), 180);
+  ASSERT_EQ(sink->mVideoFrame.timestamp_us(), 4000U);
+  ASSERT_EQ(sink->mOnFrameCount, 4U);
+
+  codecConfigScaleDownBy.mSimulcastEncodings[0].constraints.scaleDownBy = 1.3;
+  ec = mVideoConduit->ConfigureSendMediaCodec(&codecConfigScaleDownBy);
+  ASSERT_EQ(ec, kMediaConduitNoError);
+
+  SendVideoFrame(641, 359, 5);
+  ASSERT_EQ(sink->mVideoFrame.width(), 480);
+  ASSERT_EQ(sink->mVideoFrame.height(), 267);
+  ASSERT_EQ(sink->mVideoFrame.timestamp_us(), 5000U);
+  ASSERT_EQ(sink->mOnFrameCount, 5U);
 
   mVideoConduit->StopTransmitting();
 }
@@ -1226,7 +1340,7 @@ TEST_F(VideoConduitTest, TestVideoEncodeMaxFs)
 
   // maxFs should not force pixel count above what a sink has requested.
   // We set 3600 macroblocks (16x16 pixels), so we request 3500 here.
-  wants.max_pixel_count = rtc::Optional<int>(3500*16*16);
+  wants.max_pixel_count = 3500*16*16;
   mVideoConduit->AddOrUpdateSink(sink.get(), wants);
 
   SendVideoFrame(1280, 720, 4);
@@ -1289,6 +1403,82 @@ TEST_F(VideoConduitTest, DISABLED_TestVideoEncodeMaxWidthAndHeight)
   ASSERT_EQ(sink->mVideoFrame.timestamp_us(), 3000U);
   ASSERT_EQ(sink->mOnFrameCount, 3U);
 
+  mVideoConduit->StopTransmitting();
+  mVideoConduit->RemoveSink(sink.get());
+}
+
+TEST_F(VideoConduitTest, TestVideoEncodeScaleResolutionBy)
+{
+  MediaConduitErrorCode ec;
+  EncodingConstraints constraints;
+  VideoCodecConfig::SimulcastEncoding encoding;
+  encoding.constraints.scaleDownBy = 2;
+  std::vector<webrtc::VideoStream> videoStreams;
+
+  VideoCodecConfig codecConfig(120, "VP8", constraints);
+  codecConfig.mEncodingConstraints.maxFs = 3600;
+  codecConfig.mSimulcastEncodings.push_back(encoding);
+  ec = mVideoConduit->ConfigureSendMediaCodec(&codecConfig);
+  ASSERT_EQ(ec, kMediaConduitNoError);
+
+  UniquePtr<MockVideoSink> sink(new MockVideoSink());
+  rtc::VideoSinkWants wants;
+  mVideoConduit->AddOrUpdateSink(sink.get(), wants);
+
+  mVideoConduit->StartTransmitting();
+  SendVideoFrame(1280, 720, 1);
+  ASSERT_EQ(sink->mVideoFrame.width(), 640);
+  ASSERT_EQ(sink->mVideoFrame.height(), 360);
+  ASSERT_EQ(sink->mVideoFrame.timestamp_us(), 1000U);
+  ASSERT_EQ(sink->mOnFrameCount, 1U);
+
+  SendVideoFrame(640, 360, 2);
+  ASSERT_EQ(sink->mVideoFrame.width(), 320);
+  ASSERT_EQ(sink->mVideoFrame.height(), 180);
+  ASSERT_EQ(sink->mVideoFrame.timestamp_us(), 2000U);
+  ASSERT_EQ(sink->mOnFrameCount, 2U);
+  mVideoConduit->StopTransmitting();
+  mVideoConduit->RemoveSink(sink.get());
+}
+
+TEST_F(VideoConduitTest, TestVideoEncodeSimulcastScaleResolutionBy)
+{
+  std::vector<unsigned int> ssrcs = {42, 43, 44};
+  mVideoConduit->SetLocalSSRCs(ssrcs);
+
+  MediaConduitErrorCode ec;
+  EncodingConstraints constraints;
+  VideoCodecConfig::SimulcastEncoding encoding;
+  VideoCodecConfig::SimulcastEncoding encoding2;
+  VideoCodecConfig::SimulcastEncoding encoding3;
+  encoding.constraints.scaleDownBy = 2;
+  encoding2.constraints.scaleDownBy = 3;
+  encoding3.constraints.scaleDownBy = 4;
+
+  VideoCodecConfig codecConfig(120, "VP8", constraints);
+  codecConfig.mSimulcastEncodings.push_back(encoding);
+  codecConfig.mSimulcastEncodings.push_back(encoding2);
+  codecConfig.mSimulcastEncodings.push_back(encoding3);
+  ec = mVideoConduit->ConfigureSendMediaCodec(&codecConfig);
+  ASSERT_EQ(ec, kMediaConduitNoError);
+
+  UniquePtr<MockVideoSink> sink(new MockVideoSink());
+  rtc::VideoSinkWants wants;
+  mVideoConduit->AddOrUpdateSink(sink.get(), wants);
+
+  mVideoConduit->StartTransmitting();
+  SendVideoFrame(640, 480, 1);
+  // Check actually configured streams in encoder sink.
+  ASSERT_EQ(sink->mVideoFrame.width(), 320);
+  ASSERT_EQ(sink->mVideoFrame.height(), 240);
+  ASSERT_EQ(sink->mVideoFrame.timestamp_us(), 1000U);
+  ASSERT_EQ(sink->mOnFrameCount, 1U);
+
+  SendVideoFrame(1280, 720, 2);
+  ASSERT_EQ(sink->mVideoFrame.width(), 640);
+  ASSERT_EQ(sink->mVideoFrame.height(), 352);
+  ASSERT_EQ(sink->mVideoFrame.timestamp_us(), 2000U);
+  ASSERT_EQ(sink->mOnFrameCount, 2U);
   mVideoConduit->StopTransmitting();
   mVideoConduit->RemoveSink(sink.get());
 }

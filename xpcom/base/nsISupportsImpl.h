@@ -339,7 +339,7 @@ public:
     // first increment on that thread.  The necessary memory
     // synchronization is done by the mechanism that transfers the
     // pointer between threads.
-    detail::AutoRecordAtomicAccess<Recording> record;
+    detail::AutoRecordAtomicAccess<Recording> record(this);
     return mValue.fetch_add(1, std::memory_order_relaxed) + 1;
   }
   MOZ_ALWAYS_INLINE nsrefcnt operator--()
@@ -348,14 +348,21 @@ public:
     // release semantics so that prior writes on this thread are visible
     // to the thread that destroys the object when it reads mValue with
     // acquire semantics.
-    detail::AutoRecordAtomicAccess<Recording> record;
+    detail::AutoRecordAtomicAccess<Recording> record(this);
     nsrefcnt result = mValue.fetch_sub(1, std::memory_order_release) - 1;
     if (result == 0) {
       // We're going to destroy the object on this thread, so we need
       // acquire semantics to synchronize with the memory released by
       // the last release on other threads, that is, to ensure that
       // writes prior to that release are now visible on this thread.
+#ifdef MOZ_TSAN
+      // TSan doesn't understand std::atomic_thread_fence, so in order
+      // to avoid a false positive for every time a refcounted object
+      // is deleted, we replace the fence with an atomic operation.
+      mValue.load(std::memory_order_acquire);
+#else
       std::atomic_thread_fence(std::memory_order_acquire);
+#endif
     }
     return result;
   }
@@ -364,7 +371,7 @@ public:
   {
     // Use release semantics since we're not sure what the caller is
     // doing.
-    detail::AutoRecordAtomicAccess<Recording> record;
+    detail::AutoRecordAtomicAccess<Recording> record(this);
     mValue.store(aValue, std::memory_order_release);
     return aValue;
   }
@@ -373,7 +380,7 @@ public:
   {
     // Use acquire semantics since we're not sure what the caller is
     // doing.
-    detail::AutoRecordAtomicAccess<Recording> record;
+    detail::AutoRecordAtomicAccess<Recording> record(this);
     return mValue.load(std::memory_order_acquire);
   }
 

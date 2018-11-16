@@ -17,9 +17,9 @@ add_task(async function test_address_autofill_section() {
   let doc = gBrowser.contentDocument;
   is(doc.location.hash, "#privacy", "The subcategory should be removed from the URI");
   await TestUtils.waitForCondition(() => doc.querySelector(".spotlight"),
-    "Wait for the ddress-autofill section is spotlighted.");
+    "Wait for the address-autofill section is spotlighted.");
   is(doc.querySelector(".spotlight").getAttribute("data-subcategory"), "address-autofill",
-    "The ddress-autofill section is spotlighted.");
+    "The address-autofill section is spotlighted.");
   BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
@@ -38,11 +38,20 @@ add_task(async function test_credit_card_autofill_section() {
   BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
+add_task(async function test_form_autofill_section() {
+  let prefs = await openPreferencesViaOpenPreferencesAPI("privacy-form-autofill", {leaveOpen: true});
+  is(prefs.selectedPane, "panePrivacy", "Privacy pane is selected by default");
+  let doc = gBrowser.contentDocument;
+  is(doc.location.hash, "#privacy", "The subcategory should be removed from the URI");
+  await TestUtils.waitForCondition(() => doc.querySelector(".spotlight"),
+    "Wait for the form-autofill section is spotlighted.");
+  is(doc.querySelector(".spotlight").getAttribute("data-subcategory"), "form-autofill",
+    "The form-autofill section is spotlighted.");
+  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+});
+
 add_task(async function test_change_cookie_settings() {
   await SpecialPowers.pushPrefEnv({set: [
-    ["browser.contentblocking.enabled", true],
-    ["browser.contentblocking.ui.enabled", true],
-    ["browser.contentblocking.fastblock.ui.enabled", true],
     ["browser.contentblocking.trackingprotection.ui.enabled", true],
     ["browser.contentblocking.rejecttrackers.ui.enabled", true],
   ]});
@@ -63,7 +72,7 @@ add_task(async function test_change_cookie_settings() {
   await TestUtils.waitForCondition(() => doc.querySelector(".spotlight"),
     "Wait for the content-blocking section to be spotlighted.");
   is(doc.querySelector(".spotlight").getAttribute("data-subcategory"), "sitedata",
-    "The ddress-autofill section is spotlighted.");
+    "The sitedata section is spotlighted.");
   is(prefs.selectedPane, "panePrivacy", "Privacy pane is selected by default");
   is(doc.location.hash, "#privacy", "The subcategory should be removed from the URI");
 

@@ -34,6 +34,11 @@ protected:
   virtual bool
     DeallocPStunAddrsRequestChild(PStunAddrsRequestChild* aActor) override;
 
+  virtual PWebrtcProxyChannelChild* AllocPWebrtcProxyChannelChild(
+    const PBrowserOrId& browser) override;
+  virtual bool
+    DeallocPWebrtcProxyChannelChild(PWebrtcProxyChannelChild* aActor) override;
+
   virtual PAltDataOutputStreamChild* AllocPAltDataOutputStreamChild(const nsCString& type, const int64_t& predictedSize, PHttpChannelChild* channel) override;
   virtual bool DeallocPAltDataOutputStreamChild(PAltDataOutputStreamChild* aActor) override;
 
@@ -105,6 +110,15 @@ protected:
                                     const uint64_t& aChannelId,
                                     nsIURI* aOriginalURI,
                                     const uint64_t& aIdentifier) override;
+
+  virtual PTrackingDummyChannelChild*
+    AllocPTrackingDummyChannelChild(nsIURI* aURI,
+                                    nsIURI* aTopWindowURI,
+                                    const nsresult& aTopWindowURIResult,
+                                    const OptionalLoadInfoArgs& aLoadInfo) override;
+
+  virtual bool
+    DeallocPTrackingDummyChannelChild(PTrackingDummyChannelChild* aChannel) override;
 };
 
 /**

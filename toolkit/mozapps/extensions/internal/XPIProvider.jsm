@@ -35,7 +35,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   OS: "resource://gre/modules/osfile.jsm",
   ConsoleAPI: "resource://gre/modules/Console.jsm",
   JSONFile: "resource://gre/modules/JSONFile.jsm",
-  LegacyExtensionsUtils: "resource://gre/modules/LegacyExtensionsUtils.jsm",
   TelemetrySession: "resource://gre/modules/TelemetrySession.jsm",
 
   XPIDatabase: "resource://gre/modules/addons/XPIDatabase.jsm",
@@ -376,7 +375,6 @@ const JSON_FIELDS = Object.freeze([
   "dependencies",
   "enabled",
   "file",
-  "hasEmbeddedWebExtension",
   "lastModifiedTime",
   "path",
   "runInSafeMode",
@@ -407,6 +405,9 @@ class XPIState {
 
     if (saved.currentModifiedTime && saved.currentModifiedTime != this.lastModifiedTime) {
       this.lastModifiedTime = saved.currentModifiedTime;
+      this.changed = true;
+    } else if (saved.currentModifiedTime === null) {
+      this.missing = true;
       this.changed = true;
     }
   }
@@ -457,7 +458,6 @@ class XPIState {
     let json = {
       dependencies: this.dependencies,
       enabled: this.enabled,
-      hasEmbeddedWebExtension: this.hasEmbeddedWebExtension,
       lastModifiedTime: this.lastModifiedTime,
       path: this.relativePath,
       runInSafeMode: this.runInSafeMode,
@@ -537,7 +537,6 @@ class XPIState {
 
     this.telemetryKey = this.getTelemetryKey();
 
-    this.hasEmbeddedWebExtension = aDBAddon.hasEmbeddedWebExtension;
     this.dependencies = aDBAddon.dependencies;
     this.runInSafeMode = canRunInSafeMode(aDBAddon);
     this.signedState = aDBAddon.signedState;
@@ -1491,6 +1490,20 @@ class BootstrapScope {
   }
 
   /**
+   * Returns state information for use by an AsyncShutdown blocker. If
+   * the wrapped bootstrap scope has a fetchState method, it is called,
+   * and its result returned. If not, returns null.
+   *
+   * @returns {Object|null}
+   */
+  fetchState() {
+    if (this.scope && this.scope.fetchState) {
+      return this.scope.fetchState();
+    }
+    return null;
+  }
+
+  /**
    * Calls a bootstrap method for an add-on.
    *
    * @param {string} aMethod
@@ -1561,21 +1574,6 @@ class BootstrapScope {
       }
 
       Object.assign(params, aExtraParams);
-
-      if (addon.hasEmbeddedWebExtension) {
-        let reason = Object.keys(BOOTSTRAP_REASONS).find(
-          key => BOOTSTRAP_REASONS[key] == aReason
-        );
-
-        if (aMethod == "startup") {
-          const webExtension = LegacyExtensionsUtils.getEmbeddedExtensionFor(params);
-          params.webExtension = {
-            startup: () => webExtension.startup(reason),
-          };
-        } else if (aMethod == "shutdown") {
-          LegacyExtensionsUtils.getEmbeddedExtensionFor(params).shutdown(reason);
-        }
-      }
 
       let result;
       if (!method) {
@@ -2189,9 +2187,12 @@ var XPIProvider = {
               }
             }
 
-            let promise = BootstrapScope.get(addon).shutdown(reason);
+            let scope = BootstrapScope.get(addon);
+            let promise = scope.shutdown(reason);
             AsyncShutdown.profileChangeTeardown.addBlocker(
-              `Extension shutdown: ${addon.id}`, promise);
+              `Extension shutdown: ${addon.id}`, promise, {
+                fetchState: scope.fetchState.bind(scope),
+              });
           }
         });
 

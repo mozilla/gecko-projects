@@ -25,8 +25,10 @@ const Services = require("Services");
 // Enable remote debugging for the relevant tests.
 Services.prefs.setBoolPref("devtools.debugger.remote-enabled", true);
 
+const { ActorRegistry } = require("devtools/server/actors/utils/actor-registry");
 const { DebuggerServer } = require("devtools/server/main");
 const { DebuggerClient } = require("devtools/shared/client/debugger-client");
+const { SocketListener } = require("devtools/shared/security/socket");
 
 // Convert an nsIScriptError 'flags' value into an appropriate string.
 function scriptErrorFlagsToKind(flags) {
@@ -81,7 +83,7 @@ var listener = {
     if (!(message.flags & Ci.nsIScriptError.strictFlag)) {
       do_throw("head_dbg.js got console message: " + string + "\n");
     }
-  }
+  },
 };
 
 Services.console.registerListener(listener);
@@ -90,10 +92,10 @@ Services.console.registerListener(listener);
  * Initialize the testing debugger server.
  */
 function initTestDebuggerServer() {
-  DebuggerServer.registerModule("devtools/server/actors/thread", {
+  ActorRegistry.registerModule("devtools/server/actors/thread", {
     prefix: "script",
     constructor: "ScriptActor",
-    type: { global: true, target: true }
+    type: { global: true, target: true },
   });
   const { createRootActor } = require("xpcshell-test/testactors");
   DebuggerServer.setRootActor(createRootActor);
@@ -136,9 +138,11 @@ var socket_transport = async function() {
     authenticator.allowConnection = () => {
       return DebuggerServer.AuthenticationResult.ALLOW;
     };
-    const debuggerListener = DebuggerServer.createListener();
-    debuggerListener.portOrPath = -1;
-    debuggerListener.authenticator = authenticator;
+    const socketOptions = {
+      authenticator,
+      portOrPath: -1,
+    };
+    const debuggerListener = new SocketListener(DebuggerServer, socketOptions);
     await debuggerListener.open();
   }
   const port = DebuggerServer._listeners[0].port;

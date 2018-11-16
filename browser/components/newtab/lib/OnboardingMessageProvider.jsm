@@ -2,21 +2,29 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
+ChromeUtils.import("resource://gre/modules/Localization.jsm");
+ChromeUtils.import("resource://gre/modules/FxAccountsConfig.jsm");
 
-const ONBOARDING_MESSAGES = [
+const L10N = new Localization([
+  "branding/brand.ftl",
+  "browser/branding/sync-brand.ftl",
+  "browser/newtab/onboarding.ftl",
+]);
+
+const ONBOARDING_MESSAGES = async () => ([
   {
     id: "ONBOARDING_1",
     template: "onboarding",
     bundled: 3,
     order: 2,
     content: {
-      title: "Private Browsing",
-      text: "Browse by yourself. Private Browsing with Tracking Protection blocks online trackers that follow you around the web.",
+      title: {string_id: "onboarding-private-browsing-title"},
+      text: {string_id: "onboarding-private-browsing-text"},
       icon: "privatebrowsing",
-      button_label: "Try It Now",
-      button_action: {type: "OPEN_PRIVATE_BROWSER_WINDOW"}
+      button_label: {string_id: "onboarding-button-label-try-now"},
+      button_action: {type: "OPEN_PRIVATE_BROWSER_WINDOW"},
     },
-    trigger: {id: "firstRun"}
+    trigger: {id: "firstRun"},
   },
   {
     id: "ONBOARDING_2",
@@ -24,16 +32,16 @@ const ONBOARDING_MESSAGES = [
     bundled: 3,
     order: 3,
     content: {
-      title: "Screenshots",
-      text: "Take, save and share screenshots - without leaving Firefox. Capture a region or an entire page as you browse. Then save to the web for easy access and sharing.",
+      title: {string_id: "onboarding-screenshots-title"},
+      text: {string_id: "onboarding-screenshots-text"},
       icon: "screenshots",
-      button_label: "Try It Now",
+      button_label: {string_id: "onboarding-button-label-try-now"},
       button_action: {
         type: "OPEN_URL",
-        data: {url: "https://screenshots.firefox.com/#tour"}
-      }
+        data: {args: "https://screenshots.firefox.com/#tour"},
+      },
     },
-    trigger: {id: "firstRun"}
+    trigger: {id: "firstRun"},
   },
   {
     id: "ONBOARDING_3",
@@ -41,14 +49,17 @@ const ONBOARDING_MESSAGES = [
     bundled: 3,
     order: 1,
     content: {
-      title: "Add-ons",
-      text: "Add even more features that make Firefox work harder for you. Compare prices, check the weather or express your personality with a custom theme.",
+      title: {string_id: "onboarding-addons-title"},
+      text: {string_id: "onboarding-addons-text"},
       icon: "addons",
-      button_label: "Try It Now",
-      button_action: {type: "OPEN_ABOUT_PAGE", data: {page: "addons"}}
+      button_label: {string_id: "onboarding-button-label-try-now"},
+      button_action: {
+        type: "OPEN_ABOUT_PAGE",
+        data: {args: "addons"},
+      },
     },
-    targeting: "isInExperimentCohort == 1",
-    trigger: {id: "firstRun"}
+    targeting: "attributionData.campaign != 'non-fx-button' && attributionData.source != 'addons.mozilla.org'",
+    trigger: {id: "firstRun"},
   },
   {
     id: "ONBOARDING_4",
@@ -56,21 +67,71 @@ const ONBOARDING_MESSAGES = [
     bundled: 3,
     order: 1,
     content: {
-      title: "Block Ads with Ghostery",
-      text: "Browse faster, smarter, or safer with extensions like Ghostery, which lets you block annoying ads.",
+      title: {string_id: "onboarding-ghostery-title"},
+      text: {string_id: "onboarding-ghostery-text"},
       icon: "gift",
-      button_label: "Try It Now",
-      button_action: {type: "OPEN_URL", data: {url: "https://addons.mozilla.org/en-US/firefox/addon/ghostery/"}}
+      button_label: {string_id: "onboarding-button-label-try-now"},
+      button_action: {
+        type: "OPEN_URL",
+        data: {args: "https://addons.mozilla.org/en-US/firefox/addon/ghostery/"},
+      },
     },
-    targeting: "isInExperimentCohort == 2",
-    trigger: {id: "firstRun"}
-  }
-];
+    targeting: "providerCohorts.onboarding == 'ghostery'",
+    trigger: {id: "firstRun"},
+  },
+  {
+    id: "ONBOARDING_5",
+    template: "onboarding",
+    bundled: 3,
+    order: 4,
+    content: {
+      title: {string_id: "onboarding-fxa-title"},
+      text: {string_id: "onboarding-fxa-text"},
+      icon: "sync",
+      button_label: {string_id: "onboarding-button-label-get-started"},
+      button_action: {
+        type: "OPEN_URL",
+        data: {args: await FxAccountsConfig.promiseEmailFirstURI("onboarding")},
+      },
+    },
+    targeting: "attributionData.campaign == 'non-fx-button' && attributionData.source == 'addons.mozilla.org'",
+    trigger: {id: "firstRun"},
+  },
+]);
 
 const OnboardingMessageProvider = {
-  getMessages() {
-    return ONBOARDING_MESSAGES;
-  }
+  async getExtraAttributes() {
+    const [header, button_label] = await L10N.formatMessages([
+      {id: "onboarding-welcome-header"},
+      {id: "onboarding-start-browsing-button-label"},
+    ]);
+    return {header: header.value, button_label: button_label.value};
+  },
+  async getMessages() {
+    const messages = await this.translateMessages(await ONBOARDING_MESSAGES());
+    return messages;
+  },
+  async getUntranslatedMessages() {
+    // This is helpful for jsonSchema testing - since we are localizing in the provider
+    const messages = await ONBOARDING_MESSAGES();
+    return messages;
+  },
+  async translateMessages(messages) {
+    let translatedMessages = [];
+    for (const msg of messages) {
+      let translatedMessage = msg;
+      const [button_string, title_string, text_string] = await L10N.formatMessages([
+        {id: msg.content.button_label.string_id},
+        {id: msg.content.title.string_id},
+        {id: msg.content.text.string_id},
+      ]);
+      translatedMessage.content.button_label = button_string.value;
+      translatedMessage.content.title = title_string.value;
+      translatedMessage.content.text = text_string.value;
+      translatedMessages.push(translatedMessage);
+    }
+    return translatedMessages;
+  },
 };
 this.OnboardingMessageProvider = OnboardingMessageProvider;
 

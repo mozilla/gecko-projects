@@ -41,6 +41,10 @@ add_task(async function test_show_manualAbort_dialog() {
 });
 
 add_task(async function test_show_completePayment() {
+  if (!OSKeyStoreTestUtils.canTestOSKeyStoreLogin()) {
+    todo(false, "Cannot test OS key store login on official builds.");
+    return;
+  }
   let {address1GUID, card1GUID} = await addSampleAddressesAndBasicCard();
 
   let onChanged = TestUtils.topicObserved("formautofill-storage-changed",
@@ -72,7 +76,7 @@ add_task(async function test_show_completePayment() {
       securityCode: "999",
     });
     info("clicking pay");
-    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.completePayment);
+    await loginAndCompletePayment(frame);
 
     // Add a handler to complete the payment above.
     info("acknowledging the completion from the merchant page");
@@ -97,6 +101,11 @@ add_task(async function test_show_completePayment() {
 });
 
 add_task(async function test_show_completePayment2() {
+  if (!OSKeyStoreTestUtils.canTestOSKeyStoreLogin()) {
+    todo(false, "Cannot test OS key store login on official builds.");
+    return;
+  }
+
   await BrowserTestUtils.withNewTab({
     gBrowser,
     url: BLANK_PAGE_URL,
@@ -125,8 +134,13 @@ add_task(async function test_show_completePayment2() {
     info("select the shipping address");
     await selectPaymentDialogShippingAddressByCountry(frame, "US");
 
+    info("entering CSC");
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.setSecurityCode, {
+      securityCode: "123",
+    });
+
     info("clicking pay");
-    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.completePayment);
+    await loginAndCompletePayment(frame);
 
     // Add a handler to complete the payment above.
     info("acknowledging the completion from the merchant page");
@@ -135,31 +149,6 @@ add_task(async function test_show_completePayment2() {
     is(result.response.shippingOption, "1", "Check shipping option");
 
     await BrowserTestUtils.waitForCondition(() => win.closed, "dialog should be closed");
-  });
-});
-
-add_task(async function test_show_closeReject_dialog() {
-  await BrowserTestUtils.withNewTab({
-    gBrowser,
-    url: BLANK_PAGE_URL,
-  }, async browser => {
-    let {win} =
-      await setupPaymentDialog(browser, {
-        methodData,
-        details,
-        merchantTaskFn: PTU.ContentTasks.createAndShowRequest,
-      }
-    );
-    await ContentTask.spawn(browser, null, PTU.ContentTasks.catchShowPromiseRejection);
-
-    info("Closing the dialog to reject the payment request");
-    BrowserTestUtils.closeWindow(win);
-    await BrowserTestUtils.waitForCondition(() => win.closed, "dialog should be closed");
-
-    let result = await ContentTask.spawn(browser, null, async () => content.rqResult);
-    ok(result.showException, "Expected promise rejection from the rq.show() promise");
-    ok(!result.response,
-       "rq.show() shouldn't resolve to a response");
   });
 });
 
@@ -199,6 +188,75 @@ add_task(async function test_localized() {
 
     // abort the payment request
     ContentTask.spawn(browser, null, async () => content.rq.abort());
+    await BrowserTestUtils.waitForCondition(() => win.closed, "dialog should be closed");
+  });
+});
+
+add_task(async function test_supportedNetworks() {
+  await setupFormAutofillStorage();
+  await cleanupFormAutofillStorage();
+
+  let address1GUID = await addAddressRecord(PTU.Addresses.TimBL);
+  let visaCardGUID = await addCardRecord(Object.assign({}, PTU.BasicCards.JohnDoe, {
+    billingAddressGUID: address1GUID,
+  }));
+  let masterCardGUID = await addCardRecord(Object.assign({}, PTU.BasicCards.JaneMasterCard, {
+    billingAddressGUID: address1GUID,
+  }));
+
+  let cardMethod = {
+    supportedMethods: "basic-card",
+    data: {
+      supportedNetworks: ["visa"],
+    },
+  };
+
+  await BrowserTestUtils.withNewTab({
+    gBrowser,
+    url: BLANK_PAGE_URL,
+  }, async browser => {
+    let {win, frame} =
+      await setupPaymentDialog(browser, {
+        methodData: [cardMethod],
+        details,
+        merchantTaskFn: PTU.ContentTasks.createAndShowRequest,
+      }
+    );
+
+    info("entering CSC");
+    await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.setSecurityCode, {
+      securityCode: "789",
+    });
+
+    await spawnPaymentDialogTask(frame, () => {
+      let acceptedCards = content.document.querySelector("accepted-cards");
+      ok(acceptedCards && !content.isHidden(acceptedCards),
+         "accepted-cards element is present and visible");
+      is(Cu.waiveXrays(acceptedCards).acceptedItems.length, 1,
+         "accepted-cards element has 1 item");
+    });
+
+    info("select the mastercard using guid: " + masterCardGUID);
+    await spawnPaymentDialogTask(frame,
+                                 PTU.DialogContentTasks.selectPaymentOptionByGuid,
+                                 masterCardGUID);
+
+    info("spawn task to check pay button with mastercard selected");
+    await spawnPaymentDialogTask(frame, async () => {
+      ok(content.document.getElementById("pay").disabled, "pay button should be disabled");
+    });
+
+    info("select the visa using guid: " + visaCardGUID);
+    await spawnPaymentDialogTask(frame,
+                                 PTU.DialogContentTasks.selectPaymentOptionByGuid,
+                                 visaCardGUID);
+
+    info("spawn task to check pay button");
+    await spawnPaymentDialogTask(frame, async () => {
+      ok(!content.document.getElementById("pay").disabled, "pay button should not be disabled");
+    });
+
+    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.manuallyClickCancel);
     await BrowserTestUtils.waitForCondition(() => win.closed, "dialog should be closed");
   });
 });

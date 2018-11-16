@@ -1,5 +1,7 @@
 "use strict";
 
+/* global info */
+
 var EXPORTED_SYMBOLS = ["PaymentTestUtils"];
 
 var PaymentTestUtils = {
@@ -22,6 +24,7 @@ var PaymentTestUtils = {
       try {
         await response.complete(result);
       } catch (ex) {
+        info(`Complete error: ${ex}`);
         completeException = {
           name: ex.name,
           message: ex.message,
@@ -29,6 +32,34 @@ var PaymentTestUtils = {
       }
       return {
         completeException,
+        response: response.toJSON(),
+        // XXX: Bug NNN: workaround for `details` not being included in `toJSON`.
+        methodDetails: response.details,
+      };
+    },
+
+    /**
+     * Add a retry handler to the existing `showPromise` to call .retry().
+     * @returns {Object} representing the PaymentResponse
+     */
+    addRetryHandler: async ({validationErrors, delayMs = 0}) => {
+      let response = await content.showPromise;
+      let retryException;
+
+      // delay the given # milliseconds
+      await new Promise(resolve => content.setTimeout(resolve, delayMs));
+
+      try {
+        await response.retry(Cu.cloneInto(validationErrors, content));
+      } catch (ex) {
+        info(`Retry error: ${ex}`);
+        retryException = {
+          name: ex.name,
+          message: ex.message,
+        };
+      }
+      return {
+        retryException,
         response: response.toJSON(),
         // XXX: Bug NNN: workaround for `details` not being included in `toJSON`.
         methodDetails: response.details,
@@ -81,6 +112,7 @@ var PaymentTestUtils = {
      * @param {PaymentMethodData[]} methodData
      * @param {PaymentDetailsInit} details
      * @param {PaymentOptions} options
+     * @returns {Object}
      */
     createAndShowRequest: ({methodData, details, options}) => {
       const rq = new content.PaymentRequest(Cu.cloneInto(methodData, content), details, options);
@@ -90,19 +122,9 @@ var PaymentTestUtils = {
       content.showPromise = rq.show();
 
       handle.destruct();
-    },
-
-    /**
-     * Add a rejection handler for the `showPromise` created by createAndShowRequest
-     * and stash details of any eventual exception or response in `rqResult`
-     */
-    catchShowPromiseRejection: () => {
-      content.rqResult = {};
-      content.showPromise.then(res => content.rqResult.response = res)
-                         .catch(ex => content.rqResult.showException = {
-                           name: ex.name,
-                           message: ex.message,
-                         });
+      return {
+        requestId: rq.id,
+      };
     },
   },
 
@@ -154,6 +176,12 @@ var PaymentTestUtils = {
         doc.querySelector("address-picker[selected-state-key='selectedShippingAddress']");
       let select = Cu.waiveXrays(addressPicker).dropdown.popupBox;
       let option = select.querySelector(`[country="${country}"]`);
+      if (Cu.waiveXrays(doc.activeElement) == select) {
+        // If the <select> is already focused, blur and re-focus to reset the
+        // filter-as-you-type timer so that the synthesizeKey below will work
+        // correctly if this method was called recently.
+        select.blur();
+      }
       select.focus();
       // eslint-disable-next-line no-undef
       EventUtils.synthesizeKey(option.label, {}, content.window);
@@ -165,6 +193,12 @@ var PaymentTestUtils = {
         doc.querySelector("address-picker[selected-state-key='selectedShippingAddress']");
       let select = Cu.waiveXrays(addressPicker).dropdown.popupBox;
       let option = select.querySelector(`[guid="${guid}"]`);
+      if (Cu.waiveXrays(doc.activeElement) == select) {
+        // If the <select> is already focused, blur and re-focus to reset the
+        // filter-as-you-type timer so that the synthesizeKey below will work
+        // correctly if this method was called recently.
+        select.blur();
+      }
       select.focus();
       // eslint-disable-next-line no-undef
       EventUtils.synthesizeKey(option.label, {}, content.window);
@@ -176,9 +210,32 @@ var PaymentTestUtils = {
         doc.querySelector("shipping-option-picker");
       let select = Cu.waiveXrays(optionPicker).dropdown.popupBox;
       let option = select.querySelector(`[value="${value}"]`);
+      if (Cu.waiveXrays(doc.activeElement) == select) {
+        // If the <select> is already focused, blur and re-focus to reset the
+        // filter-as-you-type timer so that the synthesizeKey below will work
+        // correctly if this method was called recently.
+        select.blur();
+      }
       select.focus();
       // eslint-disable-next-line no-undef
       EventUtils.synthesizeKey(option.textContent, {}, content.window);
+    },
+
+    selectPaymentOptionByGuid: guid => {
+      let doc = content.document;
+      let methodPicker = doc.querySelector("payment-method-picker");
+      let select = Cu.waiveXrays(methodPicker).dropdown.popupBox;
+      let option = select.querySelector(`[value="${guid}"]`);
+      if (Cu.waiveXrays(doc.activeElement) == select) {
+        // If the <select> is already focused, blur and re-focus to reset the
+        // filter-as-you-type timer so that the synthesizeKey below will work
+        // correctly if this method was called recently.
+        select.blur();
+      }
+      select.focus();
+      // just type the first few characters to select the right option
+      // eslint-disable-next-line no-undef
+      EventUtils.synthesizeKey(option.textContent.substring(0, 4), {}, content.window);
     },
 
     /**
@@ -217,7 +274,9 @@ var PaymentTestUtils = {
      * @returns {undefined}
      */
     completePayment: () => {
-      content.document.getElementById("pay").click();
+      let button = content.document.getElementById("pay");
+      ok(!button.disabled, "Pay button should not be disabled when clicking it");
+      button.click();
     },
 
     setSecurityCode: ({securityCode}) => {
@@ -225,7 +284,7 @@ var PaymentTestUtils = {
       let picker = Cu.waiveXrays(content.document.querySelector("payment-method-picker"));
       // Unwaive to access the ChromeOnly `setUserInput` API.
       // setUserInput dispatches changes events.
-      Cu.unwaiveXrays(picker.securityCodeInput).setUserInput(securityCode);
+      Cu.unwaiveXrays(picker.securityCodeInput).querySelector("input").setUserInput(securityCode);
     },
   },
 
@@ -362,9 +421,7 @@ var PaymentTestUtils = {
             label: "Total due",
             amount: { currency: "USD", value: "2.50" },
           },
-          data: {
-            supportedTypes: "credit",
-          },
+          data: {},
         },
         {
           additionalDisplayItems: [
@@ -410,11 +467,13 @@ var PaymentTestUtils = {
         addressLine: "Can only ship to ROADS, not DRIVES, BOULEVARDS, or STREETS",
         city: "Can only ship to CITIES, not TOWNSHIPS or VILLAGES",
         country: "Can only ship to USA, not CA",
+        dependentLocality: "Can only be SUBURBS, not NEIGHBORHOODS",
         organization: "Can only ship to CORPORATIONS, not CONSORTIUMS",
         phone: "Only allowed to ship to area codes that start with 9",
         postalCode: "Only allowed to ship to postalCodes that start with 0",
         recipient: "Can only ship to names that start with J",
         region: "Can only ship to regions that start with M",
+        regionCode: "Regions must be 1 to 3 characters in length (sometimes ;) )",
       },
     },
   },
@@ -435,6 +494,20 @@ var PaymentTestUtils = {
   },
 
   Addresses: {
+    TimBR: {
+      "given-name": "Timothy",
+      "additional-name": "João",
+      "family-name": "Berners-Lee",
+      organization: "World Wide Web Consortium",
+      "street-address": "Rua Adalberto Pajuaba, 404",
+      "address-level3": "Campos Elísios",
+      "address-level2": "Ribeirão Preto",
+      "address-level1": "SP",
+      "postal-code": "14055-220",
+      country: "BR",
+      tel: "+0318522222222",
+      email: "timbr@example.org",
+    },
     TimBL: {
       "given-name": "Timothy",
       "additional-name": "John",

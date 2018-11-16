@@ -12,6 +12,9 @@
 #include "builtin/Object.h"
 #include "jit/JitFrames.h"
 #include "proxy/Proxy.h"
+#ifdef ENABLE_BIGINT
+#include "vm/BigIntType.h"
+#endif
 #include "vm/HelperThreads.h"
 #include "vm/Interpreter.h"
 #include "vm/Iteration.h"
@@ -45,15 +48,15 @@ class ContextChecks
      * realm/compartment/zone mismatches.
      */
     static void fail(JS::Realm* r1, JS::Realm* r2, int argIndex) {
-        MOZ_CRASH_UNSAFE_PRINTF("*** Realm mismatch %p vs. %p at argument %d\n",
+        MOZ_CRASH_UNSAFE_PRINTF("*** Realm mismatch %p vs. %p at argument %d",
                                 r1, r2, argIndex);
     }
     static void fail(JS::Compartment* c1, JS::Compartment* c2, int argIndex) {
-        MOZ_CRASH_UNSAFE_PRINTF("*** Compartment mismatch %p vs. %p at argument %d\n",
+        MOZ_CRASH_UNSAFE_PRINTF("*** Compartment mismatch %p vs. %p at argument %d",
                                 c1, c2, argIndex);
     }
     static void fail(JS::Zone* z1, JS::Zone* z2, int argIndex) {
-        MOZ_CRASH_UNSAFE_PRINTF("*** Zone mismatch %p vs. %p at argument %d\n",
+        MOZ_CRASH_UNSAFE_PRINTF("*** Zone mismatch %p vs. %p at argument %d",
                                 z1, z2, argIndex);
     }
 
@@ -94,7 +97,7 @@ class ContextChecks
         // zone, see JS_MarkCrossZoneId.
         if (zone()) {
             if (!cx->runtime()->gc.atomMarking.atomIsMarked(zone(), thing)) {
-                MOZ_CRASH_UNSAFE_PRINTF("*** Atom not marked for zone %p at argument %d\n",
+                MOZ_CRASH_UNSAFE_PRINTF("*** Atom not marked for zone %p at argument %d",
                                         zone(), argIndex);
             }
         }
@@ -114,6 +117,12 @@ class ContextChecks
         checkAtom(symbol, argIndex);
     }
 
+#ifdef ENABLE_BIGINT
+    void check(JS::BigInt* bi, int argIndex) {
+        check(bi->zone(), argIndex);
+    }
+#endif
+
     void check(const js::Value& v, int argIndex) {
         if (v.isObject()) {
             check(&v.toObject(), argIndex);
@@ -122,6 +131,11 @@ class ContextChecks
         } else if (v.isSymbol()) {
             check(v.toSymbol(), argIndex);
         }
+#ifdef ENABLE_BIGINT
+        else if (v.isBigInt()) {
+            check(v.toBigInt(), argIndex);
+        }
+#endif
     }
 
     // Check the contents of any container class that supports the C++

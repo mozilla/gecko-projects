@@ -152,7 +152,7 @@ function testOpenDeletedFile() {
      "The missing file was successfully removed from the menu.");
   ok(gScratchpad.notificationBox.currentNotification,
      "The notification was successfully displayed.");
-  is(gScratchpad.notificationBox.currentNotification.label,
+  is(gScratchpad.notificationBox.currentNotification.messageText.textContent,
      gScratchpad.strings.GetStringFromName("fileNoLongerExists.notification"),
      "The notification label is correct.");
 
@@ -237,8 +237,8 @@ var PreferenceObserver = {
     this._initialized = true;
   },
 
-  observe: async function PO_observe(aMessage, aTopic, aData) {
-    if (aTopic != "nsPref:changed") {
+  async observe(message, topic, data) {
+    if (topic != "nsPref:changed") {
       return;
     }
 
@@ -292,7 +292,7 @@ var PreferenceObserver = {
 
   uninit: function PO_uninit() {
     this.branch.removeObserver("", this);
-  }
+  },
 };
 
 function test() {
@@ -327,7 +327,7 @@ function test() {
     openScratchpad(startTest);
   });
 
-  gBrowser.loadURI("data:text/html,<p>test recent files in Scratchpad");
+  BrowserTestUtils.loadURI(gBrowser, "data:text/html,<p>test recent files in Scratchpad");
 }
 
 function finishTest() {

@@ -11,9 +11,6 @@ loader.lazyRequireGetter(this, "NetworkObserver", "devtools/server/actors/networ
 loader.lazyRequireGetter(this, "NetworkEventActor", "devtools/server/actors/network-event", true);
 
 const NetworkMonitorActor = ActorClassWithSpec(networkMonitorSpec, {
-  _netEvents: new Map(),
-  _networkEventActorsByURL: new Map(),
-
   /**
    * NetworkMonitorActor is instanciated from WebConsoleActor.startListeners
    * Either in the same process, for debugging service worker requests or when debugging
@@ -35,6 +32,12 @@ const NetworkMonitorActor = ActorClassWithSpec(networkMonitorSpec, {
    */
   initialize(conn, filters, parentID, messageManager) {
     Actor.prototype.initialize.call(this, conn);
+
+    // Map of all NetworkEventActor indexed by channel ID
+    this._netEvents = new Map();
+
+    // Map of all NetworkEventActor indexed by URL
+    this._networkEventActorsByURL = new Map();
 
     this.parentID = parentID;
     this.messageManager = messageManager;
@@ -173,7 +176,7 @@ const NetworkMonitorActor = ActorClassWithSpec(networkMonitorSpec, {
     const actor = this.getNetworkEventActor(data.channelId);
     this.messageManager.sendAsyncMessage("debug:get-network-event-actor:response", {
       channelId: data.channelId,
-      actor: actor.form()
+      actor: actor.form(),
     });
   },
 
@@ -209,7 +212,7 @@ const NetworkMonitorActor = ActorClassWithSpec(networkMonitorSpec, {
     const packet = {
       from: this.parentID,
       type: "networkEvent",
-      eventActor: actor.form()
+      eventActor: actor.form(),
     };
 
     this.conn.send(packet);

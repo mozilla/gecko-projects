@@ -44,7 +44,7 @@ class HTMLTextAreaElement final : public nsGenericHTMLFormElementWithState,
 public:
   using nsIConstraintValidation::GetValidationMessage;
 
-  explicit HTMLTextAreaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo,
+  explicit HTMLTextAreaElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                                FromParser aFromParser = NOT_FROM_PARSER);
 
   // nsISupports
@@ -65,7 +65,7 @@ public:
   NS_IMETHOD SubmitNamesValues(HTMLFormSubmission* aFormSubmission) override;
   NS_IMETHOD SaveState() override;
   virtual bool RestoreState(PresState* aState) override;
-  virtual bool IsDisabledForEvents(EventMessage aMessage) override;
+  virtual bool IsDisabledForEvents(WidgetEvent* aEvent) override;
 
   virtual void FieldSetDisabledChanged(bool aNotify) override;
 

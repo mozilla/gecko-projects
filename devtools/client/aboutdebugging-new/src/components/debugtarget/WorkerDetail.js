@@ -4,13 +4,18 @@
 
 "use strict";
 
-const { PureComponent } = require("devtools/client/shared/vendor/react");
+const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
+
+const FluentReact = require("devtools/client/shared/vendor/fluent-react");
+const Localized = createFactory(FluentReact.Localized);
 
 const {
   SERVICE_WORKER_FETCH_STATES,
 } = require("../../constants");
+
+const FieldPair = createFactory(require("./FieldPair"));
 
 /**
  * This component displays detail information for worker.
@@ -19,39 +24,68 @@ class WorkerDetail extends PureComponent {
   static get propTypes() {
     return {
       target: PropTypes.object.isRequired,
+      // Provided by wrapping the component with FluentReact.withLocalization.
+      getString: PropTypes.func.isRequired,
     };
   }
 
   renderFetch() {
     const { fetch } = this.props.target.details;
-    const label = fetch === SERVICE_WORKER_FETCH_STATES.LISTENING
-                    ? "Listening for fetch events"
-                    : "Not listening for fetch events";
-    return this.renderField("fetch", "Fetch", label);
+    const status = fetch === SERVICE_WORKER_FETCH_STATES.LISTENING
+                    ? "listening"
+                    : "not-listening";
+
+    return Localized(
+      {
+        id: "about-debugging-worker-fetch",
+        attrs: { label: true, value: true },
+        $status: status,
+      },
+      FieldPair(
+        {
+          slug: "fetch",
+          label: "Fetch",
+          value: status,
+        }
+      )
+    );
   }
 
-  renderField(key, name, value) {
-    return [
-      dom.dt({ key: `${ key }-dt` }, name),
-      dom.dd(
+  renderScope() {
+    const { scope } = this.props.target.details;
+
+    return Localized(
+      {
+        id: "about-debugging-worker-scope",
+        attrs: { label: true },
+      },
+      FieldPair(
         {
-          className: "ellipsis-text",
-          key: `${ key }-dd`,
-          title: value,
-        },
-        value,
+          slug: "scope",
+          label: "Scope",
+          value: scope,
+        }
       ),
-    ];
+    );
   }
 
   renderStatus() {
     const status = this.props.target.details.status.toLowerCase();
 
-    return dom.div(
+    return FieldPair(
       {
-        className: `worker-detail__status worker-detail__status--${ status }`,
-      },
-      status
+        slug: "status",
+        label: Localized(
+          {
+            id: "about-debugging-worker-status",
+            $status: status,
+          },
+          dom.span(
+            { className: `badge ${status === "running" ? "badge--success" : ""}`},
+            status
+          )
+        ),
+      }
     );
   }
 
@@ -63,10 +97,10 @@ class WorkerDetail extends PureComponent {
         className: "worker-detail",
       },
       fetch ? this.renderFetch() : null,
-      scope ? this.renderField("scope", "Scope", scope) : null,
+      scope ? this.renderScope() : null,
       status ? this.renderStatus() : null,
     );
   }
 }
 
-module.exports = WorkerDetail;
+module.exports = FluentReact.withLocalization(WorkerDetail);

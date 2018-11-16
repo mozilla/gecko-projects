@@ -19,7 +19,10 @@ struct gfxFontStyle;
 struct LookAndFeelInt
 {
   int32_t id;
-  int32_t value;
+  union {
+    int32_t value;
+    nscolor colorValue;
+  };
 };
 
 namespace mozilla {
@@ -416,6 +419,12 @@ public:
       * supported by the user's GTK version.
       */
      eIntID_GTKCSDAvailable,
+
+     /*
+      * A boolean value indicating whether client-side decorations should
+      * have transparent background.
+      */
+     eIntID_GTKCSDTransparentBackground,
 
      /*
       * A boolean value indicating whether client-side decorations should

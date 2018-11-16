@@ -23,8 +23,10 @@
 #include "mozilla/dom/network/TCPServerSocketChild.h"
 #include "mozilla/dom/network/UDPSocketChild.h"
 #include "mozilla/net/AltDataOutputStreamChild.h"
+#include "mozilla/net/TrackingDummyChannelChild.h"
 #ifdef MOZ_WEBRTC
 #include "mozilla/net/StunAddrsRequestChild.h"
+#include "mozilla/net/WebrtcProxyChannelChild.h"
 #endif
 
 #include "SerializedLoadContext.h"
@@ -109,6 +111,26 @@ NeckoChild::DeallocPStunAddrsRequestChild(PStunAddrsRequestChild* aActor)
 #ifdef MOZ_WEBRTC
   StunAddrsRequestChild* p = static_cast<StunAddrsRequestChild*>(aActor);
   p->ReleaseIPDLReference();
+#endif
+  return true;
+}
+
+PWebrtcProxyChannelChild*
+NeckoChild::AllocPWebrtcProxyChannelChild(const PBrowserOrId& browser)
+{
+  // We don't allocate here: instead we always use IPDL constructor that takes
+  // an existing object
+  MOZ_ASSERT_UNREACHABLE("AllocPWebrtcProxyChannelChild should not be called on"
+                         " child");
+  return nullptr;
+}
+
+bool
+NeckoChild::DeallocPWebrtcProxyChannelChild(PWebrtcProxyChannelChild* aActor)
+{
+#ifdef MOZ_WEBRTC
+  WebrtcProxyChannelChild* child = static_cast<WebrtcProxyChannelChild*>(aActor);
+  child->ReleaseIPDLReference();
 #endif
   return true;
 }
@@ -532,6 +554,22 @@ NeckoChild::RecvNetworkChangeNotification(nsCString const& type)
                                 NS_ConvertUTF8toUTF16(type).get());
   }
   return IPC_OK();
+}
+
+PTrackingDummyChannelChild*
+NeckoChild::AllocPTrackingDummyChannelChild(nsIURI* aURI,
+                                            nsIURI* aTopWindowURI,
+                                            const nsresult& aTopWindowURIResult,
+                                            const OptionalLoadInfoArgs& aLoadInfo)
+{
+  return new TrackingDummyChannelChild();
+}
+
+bool
+NeckoChild::DeallocPTrackingDummyChannelChild(PTrackingDummyChannelChild* aActor)
+{
+  delete static_cast<TrackingDummyChannelChild*>(aActor);
+  return true;
 }
 
 } // namespace net

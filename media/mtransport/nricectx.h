@@ -50,6 +50,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef nricectx_h__
 #define nricectx_h__
 
+#include <memory>
 #include <string>
 #include <vector>
 #include <map>
@@ -68,6 +69,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "m_cpp_utils.h"
 #include "nricestunaddr.h"
+#include "nricemediastream.h"
 
 typedef struct nr_ice_ctx_ nr_ice_ctx;
 typedef struct nr_ice_peer_ctx_ nr_ice_peer_ctx;
@@ -84,6 +86,8 @@ typedef struct nr_proxy_tunnel_config_ nr_proxy_tunnel_config;
 typedef void* NR_SOCKET;
 
 namespace mozilla {
+
+class NrSocketProxyConfig;
 
 // Timestamps set whenever a packet is dropped due to global rate limiting
 // (see nr_socket_prsock.cpp)
@@ -174,25 +178,6 @@ class NrIceTurnServer : public NrIceStunServer {
   std::vector<unsigned char> password_;
 };
 
-class NrIceProxyServer {
- public:
-  NrIceProxyServer(const std::string& host, uint16_t port,
-                   const std::string& alpn) :
-    host_(host), port_(port), alpn_(alpn) {
-  }
-
-  NrIceProxyServer() : NrIceProxyServer("", 0, "") {}
-
-  const std::string& host() const { return host_; }
-  uint16_t port() const { return port_; }
-  const std::string& alpn() const { return alpn_; }
-
- private:
-  std::string host_;
-  uint16_t port_;
-  std::string alpn_;
-};
-
 class TestNat;
 
 class NrIceStats {
@@ -204,7 +189,6 @@ class NrIceStats {
 };
 
 class NrIceCtx {
- friend class NrIceCtxHandler;
  public:
   enum ConnectionState { ICE_CTX_INIT,
                          ICE_CTX_CHECKING,
@@ -229,12 +213,22 @@ class NrIceCtx {
                 ICE_POLICY_ALL
   };
 
+  static RefPtr<NrIceCtx> Create(const std::string& name,
+                                 bool allow_loopback = false,
+                                 bool tcp_enabled = true,
+                                 bool allow_link_local = false,
+                                 NrIceCtx::Policy policy =
+                                   NrIceCtx::ICE_POLICY_ALL);
+
+  RefPtr<NrIceMediaStream> CreateStream(const std::string& id,
+                                        const std::string& name,
+                                        int components);
+  void DestroyStream(const std::string& id);
+
   // initialize ICE globals, crypto, and logging
   static void InitializeGlobals(bool allow_loopback = false,
                                 bool tcp_enabled = true,
                                 bool allow_link_local = false);
-  static std::string GetNewUfrag();
-  static std::string GetNewPwd();
 
   // static GetStunAddrs for use in parent process to support
   // sandboxing restrictions
@@ -242,7 +236,6 @@ class NrIceCtx {
   void SetStunAddrs(const nsTArray<NrIceStunAddr>& addrs);
 
   bool Initialize();
-  bool Initialize(const std::string& ufrag, const std::string& pwd);
 
   int SetNat(const RefPtr<TestNat>& aNat);
 
@@ -257,8 +250,6 @@ class NrIceCtx {
 
   // Testing only.
   void destroy_peer_ctx();
-
-  void SetStream(const std::string& id, NrIceMediaStream* stream);
 
   RefPtr<NrIceMediaStream> GetStream(const std::string& id) {
     auto it = streams_.find(id);
@@ -280,10 +271,6 @@ class NrIceCtx {
 
   // The name of the ctx
   const std::string& name() const { return name_; }
-
-  // Get ufrag and password.
-  std::string ufrag() const;
-  std::string pwd() const;
 
   // Current state
   ConnectionState connection_state() const {
@@ -328,7 +315,10 @@ class NrIceCtx {
 
   // Provide the proxy address. Must be called before
   // StartGathering.
-  nsresult SetProxyServer(const NrIceProxyServer& proxy_server);
+  nsresult SetProxyServer(NrSocketProxyConfig&& config);
+
+  const std::shared_ptr<NrSocketProxyConfig>& GetProxyConfig()
+    { return proxy_config_; }
 
   void SetCtxFlags(bool default_route_only, bool proxy_only);
 
@@ -412,6 +402,7 @@ private:
   nsCOMPtr<nsIEventTarget> sts_target_; // The thread to run on
   Policy policy_;
   RefPtr<TestNat> nat_;
+  std::shared_ptr<NrSocketProxyConfig> proxy_config_;
 };
 
 

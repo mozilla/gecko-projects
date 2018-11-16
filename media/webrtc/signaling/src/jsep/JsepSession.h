@@ -99,13 +99,8 @@ public:
   }
 
   // Set up the ICE And DTLS data.
-  virtual nsresult SetIceCredentials(const std::string& ufrag,
-                                     const std::string& pwd) = 0;
-  virtual const std::string& GetUfrag() const = 0;
-  virtual const std::string& GetPwd() const = 0;
   virtual nsresult SetBundlePolicy(JsepBundlePolicy policy) = 0;
   virtual bool RemoteIsIceLite() const = 0;
-  virtual bool RemoteIceIsRestarting() const = 0;
   virtual std::vector<std::string> GetIceOptions() const = 0;
 
   virtual nsresult AddDtlsFingerprint(const std::string& algorithm,
@@ -124,7 +119,7 @@ public:
   // alternative is writing a raft of accessor functions that allow arbitrary
   // manipulation (which will be unwieldy), or allowing functors to be injected
   // that manipulate the data structure (still pretty unwieldy).
-  virtual std::vector<JsepCodecDescription*>& Codecs() = 0;
+  virtual std::vector<UniquePtr<JsepCodecDescription>>& Codecs() = 0;
 
   template <class UnaryFunction>
   void ForEachCodec(UnaryFunction& function)
@@ -166,7 +161,7 @@ public:
                                         const std::string& sdp) = 0;
   virtual nsresult AddRemoteIceCandidate(const std::string& candidate,
                                          const std::string& mid,
-                                         uint16_t level,
+                                         const Maybe<uint16_t>& level,
                                          std::string* transportId) = 0;
   virtual nsresult AddLocalIceCandidate(const std::string& candidate,
                                         const std::string& transportId,
@@ -185,6 +180,7 @@ public:
   // ICE controlling or controlled
   virtual bool IsIceControlling() const = 0;
   virtual bool IsOfferer() const = 0;
+  virtual bool IsIceRestarting() const = 0;
 
   virtual const std::string
   GetLastError() const
@@ -212,11 +208,13 @@ public:
     memset(sending, 0, sizeof(sending));
 
     for (const auto& transceiver : GetTransceivers()) {
-      if (!transceiver->mRecvTrack.GetTrackId().empty()) {
+      if (!transceiver->mRecvTrack.GetTrackId().empty() ||
+          transceiver->GetMediaType() == SdpMediaSection::kApplication) {
         receiving[transceiver->mRecvTrack.GetMediaType()]++;
       }
 
-      if (!transceiver->mSendTrack.GetTrackId().empty()) {
+      if (!transceiver->mSendTrack.GetTrackId().empty() ||
+          transceiver->GetMediaType() == SdpMediaSection::kApplication) {
         sending[transceiver->mSendTrack.GetMediaType()]++;
       }
     }

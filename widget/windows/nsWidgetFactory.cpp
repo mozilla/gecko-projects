@@ -27,7 +27,6 @@
 // Desktop
 #include "nsFilePicker.h" // needs to be included before other shobjidl.h includes
 #include "nsColorPicker.h"
-#include "nsNativeThemeWin.h"
 // Content processes
 #include "nsFilePickerProxy.h"
 
@@ -43,6 +42,11 @@
 #include "JumpListBuilder.h"
 #include "JumpListItem.h"
 #include "TaskbarPreview.h"
+// Toast notification support
+#ifndef __MINGW32__
+#include "ToastNotification.h"
+#include "nsToolkitCompsCID.h"
+#endif
 
 #include "WindowsUIUtils.h"
 
@@ -111,6 +115,9 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(WindowsUIUtils)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsTransferable)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsHTMLFormatConverter)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsDragService)
+#ifndef __MINGW32__
+NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(ToastNotification, Init)
+#endif
 NS_GENERIC_FACTORY_CONSTRUCTOR(TaskbarPreviewCallback)
 #ifdef NS_PRINTING
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintDialogServiceWin, Init)
@@ -132,7 +139,6 @@ NS_DEFINE_NAMED_CID(NS_COLORPICKER_CID);
 NS_DEFINE_NAMED_CID(NS_APPSHELL_CID);
 NS_DEFINE_NAMED_CID(NS_SCREENMANAGER_CID);
 NS_DEFINE_NAMED_CID(NS_GFXINFO_CID);
-NS_DEFINE_NAMED_CID(NS_THEMERENDERER_CID);
 NS_DEFINE_NAMED_CID(NS_IDLE_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_CLIPBOARD_CID);
 NS_DEFINE_NAMED_CID(NS_CLIPBOARDHELPER_CID);
@@ -147,6 +153,9 @@ NS_DEFINE_NAMED_CID(NS_WIN_JUMPLISTLINK_CID);
 NS_DEFINE_NAMED_CID(NS_WIN_JUMPLISTSHORTCUT_CID);
 NS_DEFINE_NAMED_CID(NS_WINDOWS_UIUTILS_CID);
 NS_DEFINE_NAMED_CID(NS_DRAGSERVICE_CID);
+#ifndef __MINGW32__
+NS_DEFINE_NAMED_CID(NS_SYSTEMALERTSSERVICE_CID);
+#endif
 NS_DEFINE_NAMED_CID(NS_TASKBARPREVIEWCALLBACK_CID);
 #ifdef NS_PRINTING
 NS_DEFINE_NAMED_CID(NS_PRINTDIALOGSERVICE_CID);
@@ -160,11 +169,10 @@ NS_DEFINE_NAMED_CID(NS_DEVICE_CONTEXT_SPEC_CID);
 static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
   { &kNS_FILEPICKER_CID, false, nullptr, FilePickerConstructor, Module::MAIN_PROCESS_ONLY },
   { &kNS_COLORPICKER_CID, false, nullptr, ColorPickerConstructor, Module::MAIN_PROCESS_ONLY },
-  { &kNS_APPSHELL_CID, false, nullptr, nsAppShellConstructor, Module::ALLOW_IN_GPU_PROCESS },
+  { &kNS_APPSHELL_CID, false, nullptr, nsAppShellConstructor, Module::ALLOW_IN_GPU_AND_VR_PROCESS },
   { &kNS_SCREENMANAGER_CID, false, nullptr, ScreenManagerConstructor,
     Module::MAIN_PROCESS_ONLY },
   { &kNS_GFXINFO_CID, false, nullptr, GfxInfoConstructor, Module::ALLOW_IN_GPU_PROCESS },
-  { &kNS_THEMERENDERER_CID, false, nullptr, NS_NewNativeTheme },
   { &kNS_IDLE_SERVICE_CID, false, nullptr, nsIdleServiceWinConstructor },
   { &kNS_CLIPBOARD_CID, false, nullptr, nsClipboardConstructor, Module::MAIN_PROCESS_ONLY },
   { &kNS_CLIPBOARDHELPER_CID, false, nullptr, nsClipboardHelperConstructor },
@@ -179,6 +187,9 @@ static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
   { &kNS_WIN_JUMPLISTSHORTCUT_CID, false, nullptr, JumpListShortcutConstructor },
   { &kNS_WINDOWS_UIUTILS_CID, false, nullptr, WindowsUIUtilsConstructor },
   { &kNS_DRAGSERVICE_CID, false, nullptr, nsDragServiceConstructor, Module::MAIN_PROCESS_ONLY },
+#ifndef __MINGW32__
+  { &kNS_SYSTEMALERTSSERVICE_CID, false, nullptr, ToastNotificationConstructor, Module::MAIN_PROCESS_ONLY },
+#endif
   { &kNS_TASKBARPREVIEWCALLBACK_CID, false, nullptr, TaskbarPreviewCallbackConstructor },
 #ifdef NS_PRINTING
   { &kNS_PRINTDIALOGSERVICE_CID, false, nullptr, nsPrintDialogServiceWinConstructor, Module::MAIN_PROCESS_ONLY },
@@ -193,10 +204,9 @@ static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
 static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/filepicker;1", &kNS_FILEPICKER_CID, Module::MAIN_PROCESS_ONLY },
   { "@mozilla.org/colorpicker;1", &kNS_COLORPICKER_CID, Module::MAIN_PROCESS_ONLY },
-  { "@mozilla.org/widget/appshell/win;1", &kNS_APPSHELL_CID, Module::ALLOW_IN_GPU_PROCESS },
+  { "@mozilla.org/widget/appshell/win;1", &kNS_APPSHELL_CID, Module::ALLOW_IN_GPU_AND_VR_PROCESS },
   { "@mozilla.org/gfx/screenmanager;1", &kNS_SCREENMANAGER_CID, Module::MAIN_PROCESS_ONLY },
   { "@mozilla.org/gfx/info;1", &kNS_GFXINFO_CID, Module::ALLOW_IN_GPU_PROCESS },
-  { "@mozilla.org/chrome/chrome-native-theme;1", &kNS_THEMERENDERER_CID },
   { "@mozilla.org/widget/idleservice;1", &kNS_IDLE_SERVICE_CID },
   { "@mozilla.org/widget/clipboard;1", &kNS_CLIPBOARD_CID, Module::MAIN_PROCESS_ONLY },
   { "@mozilla.org/widget/clipboardhelper;1", &kNS_CLIPBOARDHELPER_CID },
@@ -211,6 +221,9 @@ static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/windows-jumplistshortcut;1", &kNS_WIN_JUMPLISTSHORTCUT_CID },
   { "@mozilla.org/windows-ui-utils;1", &kNS_WINDOWS_UIUTILS_CID },
   { "@mozilla.org/widget/dragservice;1", &kNS_DRAGSERVICE_CID, Module::MAIN_PROCESS_ONLY },
+#ifndef __MINGW32__
+  { NS_SYSTEMALERTSERVICE_CONTRACTID, &kNS_SYSTEMALERTSSERVICE_CID, Module::MAIN_PROCESS_ONLY },
+#endif
   { "@mozilla.org/widget/taskbar-preview-callback;1", &kNS_TASKBARPREVIEWCALLBACK_CID },
 #ifdef NS_PRINTING
   { NS_PRINTDIALOGSERVICE_CONTRACTID, &kNS_PRINTDIALOGSERVICE_CID },
@@ -243,7 +256,7 @@ static const mozilla::Module kWidgetModule = {
   nullptr,
   nsAppShellInit,
   nsWidgetWindowsModuleDtor,
-  Module::ALLOW_IN_GPU_PROCESS
+  Module::ALLOW_IN_GPU_AND_VR_PROCESS
 };
 
 NSMODULE_DEFN(nsWidgetModule) = &kWidgetModule;

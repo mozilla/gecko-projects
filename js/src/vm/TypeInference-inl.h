@@ -15,6 +15,8 @@
 #include "mozilla/Casting.h"
 #include "mozilla/PodOperations.h"
 
+#include <utility> // for ::std::swap
+
 #include "builtin/Symbol.h"
 #include "gc/GC.h"
 #include "jit/BaselineJIT.h"
@@ -437,7 +439,7 @@ ObjectGroup::hasUnanalyzedPreliminaryObjects()
  * Ensures that GC cannot occur. Does additional sanity checking that inference
  * is not reentrant and that recompilations occur properly.
  */
-struct AutoEnterAnalysis
+struct MOZ_RAII AutoEnterAnalysis
 {
     // For use when initializing an UnboxedLayout.  The UniquePtr's destructor
     // must run when GC is not suppressed.
@@ -446,7 +448,8 @@ struct AutoEnterAnalysis
     // Prevent GC activity in the middle of analysis.
     gc::AutoSuppressGC suppressGC;
 
-    // Allow clearing inference info on OOM during incremental sweeping.
+    // Allow clearing inference info on OOM during incremental sweeping. This is
+    // constructed for the outermost AutoEnterAnalysis on the stack.
     mozilla::Maybe<AutoClearTypeInferenceStateOnOOM> oom;
 
     // Pending recompilations to perform before execution of JIT code can resume.
@@ -493,7 +496,7 @@ struct AutoEnterAnalysis
         this->zone = zone;
 
         if (!zone->types.activeAnalysis) {
-            MOZ_RELEASE_ASSERT(!zone->types.sweepingTypes);
+            oom.emplace(zone);
             zone->types.activeAnalysis = this;
         }
     }
@@ -856,7 +859,7 @@ TypeScript::SetThis(JSContext* cx, JSScript* script, const js::Value& value)
 /* static */ inline void
 TypeScript::SetArgument(JSContext* cx, JSScript* script, unsigned arg, TypeSet::Type type)
 {
-    cx->check(script, type);
+    cx->check(script->compartment(), type);
 
     AutoSweepTypeScript sweep(script);
     StackTypeSet* types = ArgTypes(script, arg);
@@ -1092,6 +1095,101 @@ struct TypeHashSet
         }
 
         return nullptr;
+    }
+
+    template <class T, class U, class Key, typename Fun>
+    static void
+    MapEntries(U**& values, unsigned count, Fun f)
+    {
+        // No element.
+        if (count == 0) {
+            MOZ_RELEASE_ASSERT(!values);
+            return;
+        }
+
+        // When we have a single element it is stored in-place of the function
+        // array pointer.
+        if (count == 1) {
+            values = reinterpret_cast<U**>(f(reinterpret_cast<U*>(values)));
+            return;
+        }
+
+        // When we have SET_ARRAY_SIZE or fewer elements, the values is an
+        // unorderred array.
+        if (count <= SET_ARRAY_SIZE) {
+            for (unsigned i = 0; i < count; i++) {
+                values[i] = f(values[i]);
+            }
+            return;
+        }
+
+        // Simple functions to read and mutate the lowest bit of pointers.
+        auto lowBit = [](U* elem) -> bool {
+            return bool(reinterpret_cast<uintptr_t>(elem) & 1);
+        };
+        auto toggleLowBit = [](U* elem) -> U* {
+            return reinterpret_cast<U*>(reinterpret_cast<uintptr_t>(elem) ^ 1);
+        };
+
+        // This code applies the function f and relocates the values based on
+        // the new pointers.
+        //
+        // To avoid allocations, we reuse the same structure but distinguish the
+        // elements to be rellocated from the rellocated elements with the
+        // lowest bit.
+        unsigned capacity = Capacity(count);
+        MOZ_RELEASE_ASSERT(uintptr_t(values[-1]) == capacity);
+        unsigned found = 0;
+        for (unsigned i = 0; i < capacity; i++) {
+            if (!values[i]) {
+                continue;
+            }
+            MOZ_ASSERT(found <= count);
+            U* elem = f(values[i]);
+            values[i] = nullptr;
+            MOZ_ASSERT(!lowBit(elem));
+            values[found++] = toggleLowBit(elem);
+        }
+        MOZ_ASSERT(found == count);
+
+        // Follow the same rule as InsertTry, except that for each cell we
+        // identify empty cell content with:
+        //
+        //   nullptr    empty cell.
+        //   0b....0    inserted element.
+        //   0b....1    empty cell - element to be inserted.
+        unsigned mask = capacity - 1;
+        for (unsigned i = 0; i < count; i++) {
+            U* elem = values[i];
+            if (!lowBit(elem)) {
+                // If this is a newly inserted element, this implies that one of
+                // the previous objects was moved to this position.
+                continue;
+            }
+            values[i] = nullptr;
+            while (elem) {
+                MOZ_ASSERT(lowBit(elem));
+                elem = toggleLowBit(elem);
+                unsigned pos = HashKey<T,Key>(Key::getKey(elem)) & mask;
+                while (values[pos] != nullptr && !lowBit(values[pos])) {
+                    pos = (pos + 1) & mask;
+                }
+                // The replaced element is either a nullptr, which stops this
+                // loop, or an element to be inserted, which would be inserted
+                // by this loop.
+                std::swap(values[pos], elem);
+            }
+        }
+#ifdef DEBUG
+        unsigned inserted = 0;
+        for (unsigned i = 0; i < capacity; i++) {
+            if (!values[i]) {
+                continue;
+            }
+            inserted++;
+        }
+        MOZ_ASSERT(inserted == count);
+#endif
     }
 };
 
@@ -1442,14 +1540,13 @@ ObjectGroup::getProperty(const AutoSweepObjectGroup& sweep, unsigned i)
 }
 
 inline
-AutoSweepObjectGroup::AutoSweepObjectGroup(ObjectGroup* group,
-                                           AutoClearTypeInferenceStateOnOOM* oom)
+AutoSweepObjectGroup::AutoSweepObjectGroup(ObjectGroup* group)
 #ifdef DEBUG
   : group_(group)
 #endif
 {
     if (group->needsSweep()) {
-        group->sweep(*this, oom);
+        group->sweep(*this);
     }
 }
 
@@ -1463,14 +1560,13 @@ AutoSweepObjectGroup::~AutoSweepObjectGroup()
 #endif
 
 inline
-AutoSweepTypeScript::AutoSweepTypeScript(JSScript* script,
-                                         AutoClearTypeInferenceStateOnOOM* oom)
+AutoSweepTypeScript::AutoSweepTypeScript(JSScript* script)
 #ifdef DEBUG
   : script_(script)
 #endif
 {
     if (script->typesNeedsSweep()) {
-        script->sweepTypes(*this, oom);
+        script->sweepTypes(*this);
     }
 }
 

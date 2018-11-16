@@ -12,7 +12,6 @@ class Repackage(BaseScript):
     def __init__(self, require_config_file=False):
         script_kwargs = {
             'all_actions': [
-                "download_input",
                 "setup",
                 "repackage",
             ],
@@ -31,7 +30,7 @@ class Repackage(BaseScript):
         mar_path = os.path.join(dirs['abs_input_dir'], 'mar')
         if self._is_windows():
             mar_path += '.exe'
-        if mar_path:
+        if mar_path and os.path.exists(mar_path):
             self.chmod(mar_path, 0755)
         if self.config.get("run_configure", True):
             self._get_mozconfig()
@@ -69,8 +68,11 @@ class Repackage(BaseScript):
             'sfx-stub': config['sfx-stub'],
             'installer-tag': config['installer-tag'],
             'stub-installer-tag': config['stub-installer-tag'],
+            'wsx-stub': config['wsx-stub'],
         }
         subst.update(dirs)
+        if config.get('fetch-dir'):
+            subst.update({'fetch-dir': os.path.abspath(config['fetch-dir'])})
 
         # Make sure the upload dir is around.
         self.mkdir_p(dirs['abs_output_dir'])

@@ -4,26 +4,27 @@
 
 //! The main cascading algorithm of the style system.
 
-use context::QuirksMode;
-use custom_properties::CustomPropertiesBuilder;
-use dom::TElement;
-use font_metrics::FontMetricsProvider;
-use logical_geometry::WritingMode;
-use media_queries::Device;
-use properties::{ComputedValues, StyleBuilder};
-use properties::{LonghandId, LonghandIdSet};
-use properties::{PropertyDeclaration, PropertyDeclarationId, DeclarationImportanceIterator};
-use properties::CASCADE_PROPERTY;
-use rule_cache::{RuleCache, RuleCacheConditions};
-use rule_tree::{CascadeLevel, StrongRuleNode};
-use selector_parser::PseudoElement;
+use crate::context::QuirksMode;
+use crate::custom_properties::CustomPropertiesBuilder;
+use crate::dom::TElement;
+use crate::font_metrics::FontMetricsProvider;
+use crate::logical_geometry::WritingMode;
+use crate::media_queries::Device;
+use crate::properties::{ComputedValues, StyleBuilder};
+use crate::properties::{LonghandId, LonghandIdSet};
+use crate::properties::{PropertyDeclaration, PropertyDeclarationId, DeclarationImportanceIterator};
+use crate::properties::CASCADE_PROPERTY;
+use crate::rule_cache::{RuleCache, RuleCacheConditions};
+use crate::rule_tree::{CascadeLevel, StrongRuleNode};
+use crate::selector_parser::PseudoElement;
 use servo_arc::Arc;
-use shared_lock::StylesheetGuards;
+use crate::shared_lock::StylesheetGuards;
 use smallbitvec::SmallBitVec;
+use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cell::RefCell;
-use style_adjuster::StyleAdjuster;
-use values::computed;
+use crate::style_adjuster::StyleAdjuster;
+use crate::values::computed;
 
 /// We split the cascade in two phases: 'early' properties, and 'late'
 /// properties.
@@ -240,10 +241,15 @@ where
 
     let inherited_style = parent_style.unwrap_or(device.default_computed_values());
 
+    let mut declarations = SmallVec::<[(&_, CascadeLevel); 32]>::new();
     let custom_properties = {
-        let mut builder = CustomPropertiesBuilder::new(inherited_style.custom_properties());
+        let mut builder = CustomPropertiesBuilder::new(
+            inherited_style.custom_properties(),
+            device.environment(),
+        );
 
-        for (declaration, _cascade_level) in iter_declarations() {
+        for (declaration, cascade_level) in iter_declarations() {
+            declarations.push((declaration, cascade_level));
             if let PropertyDeclaration::Custom(ref declaration) = *declaration {
                 builder.cascade(&declaration.name, &declaration.value);
             }
@@ -278,7 +284,7 @@ where
         let mut cascade = Cascade::new(&mut context, cascade_mode);
 
         cascade
-            .apply_properties::<EarlyProperties, I>(ApplyResetProperties::Yes, iter_declarations());
+            .apply_properties::<EarlyProperties, _>(ApplyResetProperties::Yes, declarations.iter().cloned());
 
         cascade.compute_visited_style_if_needed(
             element,
@@ -297,7 +303,7 @@ where
             ApplyResetProperties::Yes
         };
 
-        cascade.apply_properties::<LateProperties, I>(apply_reset, iter_declarations());
+        cascade.apply_properties::<LateProperties, _>(apply_reset, declarations.iter().cloned());
 
         using_cached_reset_properties
     };
@@ -417,6 +423,7 @@ impl<'a, 'b: 'a> Cascade<'a, 'b> {
             declaration.id,
             self.context.builder.custom_properties.as_ref(),
             self.context.quirks_mode,
+            self.context.device().environment(),
         ))
     }
 
@@ -738,7 +745,7 @@ impl<'a, 'b: 'a> Cascade<'a, 'b> {
                 let gecko_font = self.context.builder.mutate_font().gecko_mut();
                 gecko_font.mGenericID = generic;
                 unsafe {
-                    ::gecko_bindings::bindings::Gecko_nsStyleFont_PrefillDefaultForGeneric(
+                    crate::gecko_bindings::bindings::Gecko_nsStyleFont_PrefillDefaultForGeneric(
                         gecko_font,
                         pres_context,
                         generic,
@@ -789,7 +796,7 @@ impl<'a, 'b: 'a> Cascade<'a, 'b> {
                     self.seen.contains(LonghandId::MozMinFontSizeRatio) ||
                     self.seen.contains(LonghandId::FontFamily)
                 {
-                    use properties::{CSSWideKeyword, WideKeywordDeclaration};
+                    use crate::properties::{CSSWideKeyword, WideKeywordDeclaration};
 
                     // font-size must be explicitly inherited to handle lang
                     // changes and scriptlevel changes.

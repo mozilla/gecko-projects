@@ -127,22 +127,34 @@ function mergeChanges(collection, localRecords, changes) {
 }
 
 
-async function fetchCollectionMetadata(remote, collection) {
+async function fetchCollectionMetadata(remote, collection, expectedTimestamp) {
   const client = new KintoHttpClient(remote);
+  //
+  // XXX: https://github.com/Kinto/kinto-http.js/issues/307
+  //
   const { signature } = await client.bucket(collection.bucket)
                                     .collection(collection.name)
-                                    .getData();
+                                    .getData({ query: { _expected: expectedTimestamp }});
   return signature;
 }
 
-async function fetchRemoteCollection(collection) {
+async function fetchRemoteCollection(collection, expectedTimestamp) {
   const client = new KintoHttpClient(gServerURL);
   return client.bucket(collection.bucket)
            .collection(collection.name)
-           .listRecords({sort: "id"});
+           .listRecords({ sort: "id", filters: { _expected: expectedTimestamp } });
 }
 
-async function fetchLatestChanges(url, lastEtag) {
+/**
+ * Fetch the list of remote collections and their timestamp.
+ * @param {String} url               The poll URL (eg. `http://${server}{pollingEndpoint}`)
+ * @param {String} lastEtag          (optional) The Etag of the latest poll to be matched
+ *                                    by the server (eg. `"123456789"`).
+ * @param {int}    expectedTimestamp The timestamp that the server is supposed to return.
+ *                                   We obtained it from the Megaphone notification payload,
+ *                                   and we use it only for cache busting (Bug 1497159).
+ */
+async function fetchLatestChanges(url, lastEtag, expectedTimestamp) {
   //
   // Fetch the list of changes objects from the server that looks like:
   // {"data":[
@@ -156,9 +168,16 @@ async function fetchLatestChanges(url, lastEtag) {
   // Use ETag to obtain a `304 Not modified` when no change occurred,
   // and `?_since` parameter to only keep entries that weren't processed yet.
   const headers = {};
+  const params = {};
   if (lastEtag) {
     headers["If-None-Match"] = lastEtag;
-    url += `?_since=${lastEtag}`;
+    params._since = lastEtag;
+  }
+  if (expectedTimestamp) {
+    params._expected = expectedTimestamp;
+  }
+  if (params) {
+    url += "?" + Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
   }
   const response = await fetch(url, {headers});
 
@@ -206,17 +225,29 @@ async function fetchLatestChanges(url, lastEtag) {
 
 /**
  * Load the the JSON file distributed with the release for this collection.
- * @param {String} bucket
- * @param {String} collection
+ * @param {String}  bucket
+ * @param {String}  collection
+ * @param {Object}  options
+ * @param {boolean} options.ignoreMissing Do not throw an error if the file is missing.
  */
-async function loadDumpFile(bucket, collection) {
+async function loadDumpFile(bucket, collection, { ignoreMissing = true } = {}) {
   const fileURI = `resource://app/defaults/settings/${bucket}/${collection}.json`;
-  const response = await fetch(fileURI);
-  if (!response.ok) {
-    throw new Error(`Could not read from '${fileURI}'`);
+  let response;
+  try {
+    // Will throw NetworkError is folder/file is missing.
+    response = await fetch(fileURI);
+    if (!response.ok) {
+      throw new Error(`Could not read from '${fileURI}'`);
+    }
+    // Will throw if JSON is invalid.
+    return response.json();
+  } catch (e) {
+    // A missing file is reported as "NetworError" (see Bug 1493709)
+    if (!ignoreMissing || !/NetworkError/.test(e.message)) {
+      throw e;
+    }
   }
-  // Will be rejected if JSON is invalid.
-  return response.json();
+  return { data: [] };
 }
 
 
@@ -297,21 +328,17 @@ class RemoteSettingsClient {
    */
   async openCollection() {
     if (!this._kinto) {
-      this._kinto = new Kinto();
+      this._kinto = new Kinto({
+        bucket: this.bucketName,
+        adapter: Kinto.adapters.IDB,
+        adapterOptions: { dbName: "remote-settings", migrateOldData: false },
+      });
     }
     const options = {
       localFields: this.localFields,
+      bucket: this.bucketName,
     };
-    // If there is a `signerName` and collection signing is enforced, add a
-    // hook for incoming changes that validates the signature.
-    if (this.signerName && gVerifySignature) {
-      options.hooks = {
-        "incoming-changes": [(payload, collection) => {
-          return this._validateCollectionSignature(payload, collection);
-        }],
-      };
-    }
-    return this._kinto.collection(this.collectionName, { ...options, bucket: this.bucketName });
+    return this._kinto.collection(this.collectionName, options);
   }
 
   /**
@@ -349,14 +376,14 @@ class RemoteSettingsClient {
   /**
    * Synchronize from Kinto server, if necessary.
    *
-   * @param {int}  lastModified       the lastModified date (on the server) for
+   * @param {int}  expectedTimestamp       the lastModified date (on the server) for
                                       the remote collection.
    * @param {Date}   serverTime       the current date return by the server.
    * @param {Object} options          additional advanced options.
    * @param {bool}   options.loadDump load initial dump from disk on first sync (default: true)
    * @return {Promise}                which rejects on sync or process failure.
    */
-  async maybeSync(lastModified, serverTime, options = { loadDump: true }) {
+  async maybeSync(expectedTimestamp, serverTime, options = { loadDump: true }) {
     const {loadDump} = options;
 
     let reportStatus = null;
@@ -382,10 +409,18 @@ class RemoteSettingsClient {
 
       // If the data is up to date, there's no need to sync. We still need
       // to record the fact that a check happened.
-      if (lastModified <= collectionLastModified) {
+      if (expectedTimestamp <= collectionLastModified) {
         this._updateLastCheck(serverTime);
         reportStatus = UptakeTelemetry.STATUS.UP_TO_DATE;
         return;
+      }
+
+      // If there is a `signerName` and collection signing is enforced, add a
+      // hook for incoming changes that validates the signature.
+      if (this.signerName && gVerifySignature) {
+        collection.hooks["incoming-changes"] = [(payload, collection) => {
+          return this._validateCollectionSignature(payload, collection, { expectedTimestamp });
+        }];
       }
 
       // Fetch changes from server.
@@ -393,7 +428,10 @@ class RemoteSettingsClient {
       try {
         // Server changes have priority during synchronization.
         const strategy = Kinto.syncStrategy.SERVER_WINS;
-        syncResult = await collection.sync({ remote: gServerURL, strategy });
+        //
+        // XXX: https://github.com/Kinto/kinto.js/issues/859
+        //
+        syncResult = await collection.sync({ remote: gServerURL, strategy, expectedTimestamp });
         const { ok } = syncResult;
         if (!ok) {
           // Some synchronization conflicts occured.
@@ -408,9 +446,9 @@ class RemoteSettingsClient {
           // local data has been modified in some way.
           // We will attempt to fix this by retrieving the whole
           // remote collection.
-          const payload = await fetchRemoteCollection(collection);
+          const payload = await fetchRemoteCollection(collection, expectedTimestamp);
           try {
-            await this._validateCollectionSignature(payload, collection, { ignoreLocal: true });
+            await this._validateCollectionSignature(payload, collection, { expectedTimestamp, ignoreLocal: true });
           } catch (e) {
             reportStatus = UptakeTelemetry.STATUS.SIGNATURE_RETRY_ERROR;
             throw e;
@@ -508,9 +546,9 @@ class RemoteSettingsClient {
   }
 
   async _validateCollectionSignature(payload, collection, options = {}) {
-    const {ignoreLocal} = options;
+    const { expectedTimestamp, ignoreLocal } = options;
     // this is a content-signature field from an autograph response.
-    const signaturePayload = await fetchCollectionMetadata(gServerURL, collection);
+    const signaturePayload = await fetchCollectionMetadata(gServerURL, collection, expectedTimestamp);
     if (!signaturePayload) {
       throw new Error(MISSING_SIGNATURE);
     }
@@ -570,30 +608,15 @@ class RemoteSettingsClient {
 }
 
 /**
- * Check if an IndexedDB database exists for the specified bucket and collection.
+ * Check if local data exist for the specified client.
  *
- * @param {String} bucket
- * @param {String} collection
+ * @param {RemoteSettingsClient} client
  * @return {bool} Whether it exists or not.
  */
-async function databaseExists(bucket, collection) {
-  // The dbname is chosen by kinto.js from the bucket and collection names.
-  // https://github.com/Kinto/kinto.js/blob/41aa1526e/src/collection.js#L231
-  const dbname = `${bucket}/${collection}`;
-  try {
-    await new Promise((resolve, reject) => {
-      const request = indexedDB.open(dbname, 1);
-      request.onupgradeneeded = event => {
-        event.target.transaction.abort();
-        reject(event.target.error);
-      };
-      request.onerror = event => reject(event.target.error);
-      request.onsuccess = event => resolve(event.target.result);
-    });
-    return true;
-  } catch (e) {
-    return false;
-  }
+async function hasLocalData(client) {
+  const kintoCol = await client.openCollection();
+  const timestamp = await kintoCol.db.getLastModified();
+  return timestamp !== null;
 }
 
 /**
@@ -605,7 +628,7 @@ async function databaseExists(bucket, collection) {
  */
 async function hasLocalDump(bucket, collection) {
   try {
-    await loadDumpFile(bucket, collection);
+    await loadDumpFile(bucket, collection, {ignoreMissing: false});
     return true;
   } catch (e) {
     return false;
@@ -658,25 +681,21 @@ function remoteSettingsFunction() {
     // Check if a client was registered for this bucket/collection. Potentially
     // with some specific options like signer, filter function etc.
     const client = _clients.get(collectionName);
-
-    if (client) {
-      // If the bucket name was changed manually on the client instance and does not
-      // match, don't return it.
-      if (client.bucketName == bucketName) {
-        return client;
-      }
-
-    // There was no client registered for this bucket/collection, but it's the main bucket,
+    if (client && client.bucketName == bucketName) {
+      return client;
+    }
+    // There was no client registered for this collection, but it's the main bucket,
     // therefore we can instantiate a client with the default options.
     // So if we have a local database or if we ship a JSON dump, then it means that
     // this client is known but it was not registered yet (eg. calling module not "imported" yet).
-    } else if (bucketName == Services.prefs.getCharPref(PREF_SETTINGS_DEFAULT_BUCKET)) {
+    if (bucketName == Services.prefs.getCharPref(PREF_SETTINGS_DEFAULT_BUCKET)) {
+      const c = new RemoteSettingsClient(collectionName, defaultOptions);
       const [dbExists, localDump] = await Promise.all([
-        databaseExists(bucketName, collectionName),
+        hasLocalData(c),
         hasLocalDump(bucketName, collectionName),
       ]);
       if (dbExists || localDump) {
-        return new RemoteSettingsClient(collectionName, defaultOptions);
+        return c;
       }
     }
     // Else, we cannot return a client insttance because we are not able to synchronize data in specific buckets.
@@ -689,9 +708,11 @@ function remoteSettingsFunction() {
   /**
    * Main polling method, called by the ping mechanism.
    *
+   * @param {Object} options
+.  * @param {Object} options.expectedTimestamp (optional) The expected timestamp to be received — used by servers for cache busting.
    * @returns {Promise} or throws error if something goes wrong.
    */
-  remoteSettings.pollChanges = async () => {
+  remoteSettings.pollChanges = async ({ expectedTimestamp } = {}) => {
     // Check if the server backoff time is elapsed.
     if (gPrefs.prefHasUserValue(PREF_SETTINGS_SERVER_BACKOFF)) {
       const backoffReleaseTime = gPrefs.getCharPref(PREF_SETTINGS_SERVER_BACKOFF);
@@ -713,7 +734,7 @@ function remoteSettingsFunction() {
 
     let pollResult;
     try {
-      pollResult = await fetchLatestChanges(remoteSettings.pollingEndpoint, lastEtag);
+      pollResult = await fetchLatestChanges(remoteSettings.pollingEndpoint, lastEtag, expectedTimestamp);
     } catch (e) {
       // Report polling error to Uptake Telemetry.
       let report;
@@ -848,6 +869,6 @@ var RemoteSettings = remoteSettingsFunction();
 
 var remoteSettingsBroadcastHandler = {
   async receivedBroadcastMessage(data, broadcastID) {
-    return RemoteSettings.pollChanges();
+    return RemoteSettings.pollChanges({ expectedTimestamp: data });
   },
 };

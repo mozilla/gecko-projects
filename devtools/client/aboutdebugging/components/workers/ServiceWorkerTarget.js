@@ -33,8 +33,8 @@ class ServiceWorkerTarget extends Component {
         scope: PropTypes.string.isRequired,
         // registrationActor can be missing in e10s.
         registrationActor: PropTypes.string,
-        workerTargetActor: PropTypes.string
-      }).isRequired
+        workerTargetFront: PropTypes.object,
+      }).isRequired,
     };
   }
 
@@ -42,7 +42,7 @@ class ServiceWorkerTarget extends Component {
     super(props);
 
     this.state = {
-      pushSubscription: null
+      pushSubscription: null,
     };
 
     this.debug = this.debug.bind(this);
@@ -85,8 +85,8 @@ class ServiceWorkerTarget extends Component {
       return;
     }
 
-    const { client, target } = this.props;
-    gDevToolsBrowser.openWorkerToolbox(client, target.workerTargetActor);
+    const { workerTargetFront } = this.props.target;
+    gDevToolsBrowser.openWorkerToolbox(workerTargetFront);
   }
 
   push() {
@@ -97,11 +97,8 @@ class ServiceWorkerTarget extends Component {
       return;
     }
 
-    const { client, target } = this.props;
-    client.request({
-      to: target.workerTargetActor,
-      type: "push"
-    });
+    const { workerTargetFront } = this.props.target;
+    workerTargetFront.push();
   }
 
   start() {
@@ -113,7 +110,7 @@ class ServiceWorkerTarget extends Component {
     const { client, target } = this.props;
     client.request({
       to: target.registrationActor,
-      type: "start"
+      type: "start",
     });
   }
 
@@ -121,7 +118,7 @@ class ServiceWorkerTarget extends Component {
     const { client, target } = this.props;
     client.request({
       to: target.registrationActor,
-      type: "unregister"
+      type: "unregister",
     });
   }
 
@@ -141,7 +138,7 @@ class ServiceWorkerTarget extends Component {
     const { client, target } = this.props;
     client.request({
       to: target.registrationActor,
-      type: "getPushSubscription"
+      type: "getPushSubscription",
     }, ({ subscription }) => {
       this.setState({ pushSubscription: subscription });
     });
@@ -149,7 +146,7 @@ class ServiceWorkerTarget extends Component {
 
   isRunning() {
     // We know the target is running if it has a worker actor.
-    return !!this.props.target.workerTargetActor;
+    return !!this.props.target.workerTargetFront;
   }
 
   isActive() {
@@ -172,19 +169,19 @@ class ServiceWorkerTarget extends Component {
     const pushButton = dom.button({
       className: "push-button",
       onClick: this.push,
-      disabled: this.props.debugDisabled
+      disabled: this.props.debugDisabled,
     }, Strings.GetStringFromName("push"));
 
     const debugButton = dom.button({
       className: "debug-button",
       onClick: this.debug,
-      disabled: this.props.debugDisabled
+      disabled: this.props.debugDisabled,
     }, Strings.GetStringFromName("debug"));
 
     const startButton = dom.button({
       className: "start-button",
       onClick: this.start,
-      disabled: this.props.debugDisabled
+      disabled: this.props.debugDisabled,
     }, Strings.GetStringFromName("start"));
 
     if (this.isRunning()) {
@@ -221,7 +218,7 @@ class ServiceWorkerTarget extends Component {
       dom.img({
         className: "target-icon",
         role: "presentation",
-        src: target.icon
+        src: target.icon,
       }),
       dom.span({ className: `target-status target-status-${status}` },
         Strings.GetStringFromName(status)),
@@ -233,7 +230,7 @@ class ServiceWorkerTarget extends Component {
               dom.strong(null, Strings.GetStringFromName("pushService")),
               dom.span({
                 className: "service-worker-push-url",
-                title: pushSubscription.endpoint
+                title: pushSubscription.endpoint,
               }, pushSubscription.endpoint)) :
             null
           ),
@@ -241,13 +238,13 @@ class ServiceWorkerTarget extends Component {
             dom.strong(null, Strings.GetStringFromName("fetch")),
             dom.span({
               className: "service-worker-fetch-flag",
-              title: fetch
+              title: fetch,
             }, fetch)),
           dom.li({ className: "target-detail" },
             dom.strong(null, Strings.GetStringFromName("scope")),
             dom.span({
               className: "service-worker-scope",
-              title: target.scope
+              title: target.scope,
             }, target.scope),
             this.renderUnregisterLink()
           )

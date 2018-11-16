@@ -48,7 +48,6 @@ struct nsStyleFilter;
 class nsStyleGradient;
 struct nsStyleImage;
 class nsStyleSides;
-struct nsTimingFunction;
 
 class nsComputedDOMStyle final : public nsDOMCSSDeclaration
                                , public nsStubMutationObserver
@@ -149,10 +148,6 @@ private:
 
   nsMargin GetAdjustedValuesForBoxSizing();
 
-  // Helper method for DoGetTextAlign[Last].
-  already_AddRefed<CSSValue> CreateTextAlignValue(uint8_t aAlign,
-                                                  bool aAlignTrue,
-                                                  const KTableEntry aTable[]);
   // This indicates error by leaving mComputedStyle null.
   void UpdateCurrentStyleSources(bool aNeedsLayoutFlush);
   void ClearCurrentStyleSources();
@@ -235,8 +230,6 @@ private:
                           const nsStyleSides& aCropRect,
                           nsString& aString);
   already_AddRefed<CSSValue> GetScrollSnapPoints(const nsStyleCoord& aCoord);
-  void AppendTimingFunction(nsDOMCSSValueList *aValueList,
-                            const nsTimingFunction& aTimingFunction);
 
   bool ShouldHonorMinSizeAutoInAxis(mozilla::PhysicalAxis aAxis);
 
@@ -255,7 +248,6 @@ private:
   already_AddRefed<CSSValue> DoGetMaxWidth();
   already_AddRefed<CSSValue> DoGetMinHeight();
   already_AddRefed<CSSValue> DoGetMinWidth();
-  already_AddRefed<CSSValue> DoGetObjectPosition();
   already_AddRefed<CSSValue> DoGetLeft();
   already_AddRefed<CSSValue> DoGetTop();
   already_AddRefed<CSSValue> DoGetRight();
@@ -266,7 +258,6 @@ private:
 
   /* Font properties */
   already_AddRefed<CSSValue> DoGetOsxFontSmoothing();
-  already_AddRefed<CSSValue> DoGetFontVariant();
 
   /* Grid properties */
   already_AddRefed<CSSValue> DoGetGridAutoFlow();
@@ -281,29 +272,10 @@ private:
   already_AddRefed<CSSValue> DoGetGridRowEnd();
 
   /* StyleImageLayer properties */
-  already_AddRefed<CSSValue> DoGetImageLayerImage(const nsStyleImageLayers& aLayers);
   already_AddRefed<CSSValue> DoGetImageLayerPosition(const nsStyleImageLayers& aLayers);
-  already_AddRefed<CSSValue> DoGetImageLayerPositionX(const nsStyleImageLayers& aLayers);
-  already_AddRefed<CSSValue> DoGetImageLayerPositionY(const nsStyleImageLayers& aLayers);
-  already_AddRefed<CSSValue> DoGetImageLayerRepeat(const nsStyleImageLayers& aLayers);
-  already_AddRefed<CSSValue> DoGetImageLayerSize(const nsStyleImageLayers& aLayers);
-
-  /* Background properties */
-  already_AddRefed<CSSValue> DoGetBackgroundImage();
-  already_AddRefed<CSSValue> DoGetBackgroundPosition();
-  already_AddRefed<CSSValue> DoGetBackgroundPositionX();
-  already_AddRefed<CSSValue> DoGetBackgroundPositionY();
-  already_AddRefed<CSSValue> DoGetBackgroundRepeat();
-  already_AddRefed<CSSValue> DoGetBackgroundSize();
 
   /* Mask properties */
   already_AddRefed<CSSValue> DoGetMask();
-  already_AddRefed<CSSValue> DoGetMaskImage();
-  already_AddRefed<CSSValue> DoGetMaskPosition();
-  already_AddRefed<CSSValue> DoGetMaskPositionX();
-  already_AddRefed<CSSValue> DoGetMaskPositionY();
-  already_AddRefed<CSSValue> DoGetMaskRepeat();
-  already_AddRefed<CSSValue> DoGetMaskSize();
 
   /* Padding properties */
   already_AddRefed<CSSValue> DoGetPaddingTop();
@@ -330,16 +302,12 @@ private:
   already_AddRefed<CSSValue> DoGetBorderTopRightRadius();
 
   /* Border Image */
-  already_AddRefed<CSSValue> DoGetBorderImageSource();
   already_AddRefed<CSSValue> DoGetBorderImageSlice();
   already_AddRefed<CSSValue> DoGetBorderImageWidth();
   already_AddRefed<CSSValue> DoGetBorderImageOutset();
-  already_AddRefed<CSSValue> DoGetBorderImageRepeat();
 
   /* Box Shadow */
   already_AddRefed<CSSValue> DoGetBoxShadow();
-
-  /* Window Shadow */
 
   /* Margin Properties */
   already_AddRefed<CSSValue> DoGetMarginTopWidth();
@@ -355,19 +323,12 @@ private:
   already_AddRefed<CSSValue> DoGetOutlineRadiusTopLeft();
   already_AddRefed<CSSValue> DoGetOutlineRadiusTopRight();
 
-  /* Quotes Properties */
-  already_AddRefed<CSSValue> DoGetQuotes();
-
   /* z-index */
   already_AddRefed<CSSValue> DoGetZIndex();
-
-  /* List properties */
-  already_AddRefed<CSSValue> DoGetImageRegion();
 
   /* Text Properties */
   already_AddRefed<CSSValue> DoGetInitialLetter();
   already_AddRefed<CSSValue> DoGetLineHeight();
-  already_AddRefed<CSSValue> DoGetTextAlign();
   already_AddRefed<CSSValue> DoGetTextDecoration();
   already_AddRefed<CSSValue> DoGetTextDecorationColor();
   already_AddRefed<CSSValue> DoGetTextDecorationLine();
@@ -381,37 +342,25 @@ private:
   already_AddRefed<CSSValue> DoGetTabSize();
   already_AddRefed<CSSValue> DoGetWebkitTextStrokeWidth();
 
-  /* Visibility properties */
-
-  /* Direction properties */
-
   /* Display properties */
   already_AddRefed<CSSValue> DoGetBinding();
   already_AddRefed<CSSValue> DoGetDisplay();
   already_AddRefed<CSSValue> DoGetContain();
-  already_AddRefed<CSSValue> DoGetClip();
   already_AddRefed<CSSValue> DoGetWillChange();
-  already_AddRefed<CSSValue> DoGetOverflow();
   already_AddRefed<CSSValue> DoGetOverflowY();
   already_AddRefed<CSSValue> DoGetOverflowClipBoxBlock();
   already_AddRefed<CSSValue> DoGetOverflowClipBoxInline();
   already_AddRefed<CSSValue> DoGetTouchAction();
   already_AddRefed<CSSValue> DoGetTransform();
-  already_AddRefed<CSSValue> DoGetTranslate();
-  already_AddRefed<CSSValue> DoGetRotate();
-  already_AddRefed<CSSValue> DoGetScale();
   already_AddRefed<CSSValue> DoGetTransformOrigin();
   already_AddRefed<CSSValue> DoGetPerspective();
   already_AddRefed<CSSValue> DoGetPerspectiveOrigin();
-  already_AddRefed<CSSValue> DoGetTransformStyle();
   already_AddRefed<CSSValue> DoGetOverscrollBehaviorX();
   already_AddRefed<CSSValue> DoGetOverscrollBehaviorY();
   already_AddRefed<CSSValue> DoGetScrollSnapTypeX();
   already_AddRefed<CSSValue> DoGetScrollSnapTypeY();
   already_AddRefed<CSSValue> DoGetScrollSnapPointsX();
   already_AddRefed<CSSValue> DoGetScrollSnapPointsY();
-  already_AddRefed<CSSValue> DoGetScrollSnapDestination();
-  already_AddRefed<CSSValue> DoGetScrollSnapCoordinate();
   already_AddRefed<CSSValue> DoGetScrollbarColor();
 
   /* User interface properties */
@@ -428,13 +377,11 @@ private:
   already_AddRefed<CSSValue> DoGetTransitionProperty();
   already_AddRefed<CSSValue> DoGetTransitionDuration();
   already_AddRefed<CSSValue> DoGetTransitionDelay();
-  already_AddRefed<CSSValue> DoGetTransitionTimingFunction();
 
   /* CSS Animations */
   already_AddRefed<CSSValue> DoGetAnimationName();
   already_AddRefed<CSSValue> DoGetAnimationDuration();
   already_AddRefed<CSSValue> DoGetAnimationDelay();
-  already_AddRefed<CSSValue> DoGetAnimationTimingFunction();
   already_AddRefed<CSSValue> DoGetAnimationIterationCount();
 
   /* CSS Flexbox properties */
@@ -484,16 +431,11 @@ private:
   void SetToRGBAColor(nsROCSSPrimitiveValue* aValue, nscolor aColor);
   void SetValueFromComplexColor(nsROCSSPrimitiveValue* aValue,
                                 const mozilla::StyleComplexColor& aColor);
-  void SetValueForWidgetColor(nsROCSSPrimitiveValue* aValue,
-                              const mozilla::StyleComplexColor& aColor,
-                              mozilla::StyleAppearance aWidgetType);
-  void SetValueToStyleImage(const nsStyleImage& aStyleImage,
-                            nsROCSSPrimitiveValue* aValue);
   void SetValueToPositionCoord(const mozilla::Position::Coord& aCoord,
                                nsROCSSPrimitiveValue* aValue);
   void SetValueToPosition(const mozilla::Position& aPosition,
                           nsDOMCSSValueList* aValueList);
-  void SetValueToURLValue(const mozilla::css::URLValueData* aURL,
+  void SetValueToURLValue(const mozilla::css::URLValue* aURL,
                           nsROCSSPrimitiveValue* aValue);
 
   /**

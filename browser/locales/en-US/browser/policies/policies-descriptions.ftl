@@ -23,7 +23,7 @@ policy-BlockAboutSupport = Block access to the about:support page.
 
 policy-Bookmarks = Create bookmarks in the Bookmarks toolbar, Bookmarks menu, or a specified folder inside them.
 
-policy-Certificates = Whether or not to use built-in certificates. This policy is Windows only at this time.
+policy-CertificatesDescription = Add certificates or use built-in certificates.
 
 policy-Cookies = Allow or deny websites to set cookies.
 
@@ -70,6 +70,8 @@ policy-DisplayBookmarksToolbar = Display the Bookmarks Toolbar by default.
 
 policy-DisplayMenuBar = Display the Menu Bar by default.
 
+policy-DNSOverHTTPS = Configure DNS over HTTPS.
+
 policy-DontCheckDefaultBrowser = Disable check for default browser on startup.
 
 # “lock” means that the user won’t be able to change this setting
@@ -77,8 +79,7 @@ policy-EnableTrackingProtection = Enable or disable Content Blocking and optiona
 
 # A “locked” extension can’t be disabled or removed by the user. This policy
 # takes 3 keys (“Install”, ”Uninstall”, ”Locked”), you can either keep them in
-# English or translate them as verbs. See also:
-# https://github.com/mozilla/policy-templates/blob/master/README.md#extensions-machine-only
+# English or translate them as verbs.
 policy-Extensions = Install, uninstall or lock extensions. The Install option takes URLs or paths as parameters. The Uninstall and Locked options take extension IDs.
 
 policy-FlashPlugin = Allow or deny usage of the Flash plugin.
@@ -104,12 +105,16 @@ policy-PopupBlocking = Allow certain websites to display popups by default.
 
 policy-Proxy = Configure proxy settings.
 
+policy-RequestedLocales = Set the list of requested locales for the application in order of preference.
+
 policy-SanitizeOnShutdown = Clear all navigation data on shutdown.
 
 policy-SearchBar = Set the default location of the search bar. The user is still allowed to customize it.
 
 policy-SearchEngines = Configure search engine settings. This policy is only available on the Extended Support Release (ESR) version.
 
-# “format” refers to the format used for the value of this policy. See also:
-# https://github.com/mozilla/policy-templates/blob/master/README.md#websitefilter-machine-only
+# For more information, see https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/PKCS11/Module_Installation
+policy-SecurityDevices = Install PKCS #11 modules.
+
+# “format” refers to the format used for the value of this policy.
 policy-WebsiteFilter = Block websites from being visited. See documentation for more details on the format.

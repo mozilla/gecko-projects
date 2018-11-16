@@ -74,10 +74,10 @@ window.gActivityStreamStrings = {
   "topsites_form_image_validation": "Ofbylding koe net laden wurde. Probearje in oare URL.",
   "pocket_read_more": "Populêre ûnderwerpen:",
   "pocket_read_even_more": "Mear ferhalen besjen",
-  "pocket_more_reccommendations": "More Recommendations",
-  "pocket_learn_more": "Learn More",
-  "pocket_cta_button": "Get Pocket",
-  "pocket_cta_text": "Save the stories you love in Pocket, and fuel your mind with fascinating reads.",
+  "pocket_more_reccommendations": "Mear oanrekommandaasjes",
+  "pocket_how_it_works": "Hoe it wurket",
+  "pocket_cta_button": "Pocket brûke",
+  "pocket_cta_text": "Bewarje de ferhalen dy't jo ynteressant fine yn Pocket, en stimulearje jo tinzen mei boeiende lêsstof.",
   "highlights_empty_state": "Start mei sneupen en wy toane jo guon moaie artikelen, fideo's en oare siden dy't jo resint besocht hawwe of in blêdwizer fan makke hawwe.",
   "topstories_empty_state": "Jo binne by. Kom letter werom foar mear ferhalen fan {provider}. Kin jo net wachtsje? Selektearje in populêr ûnderwerp om mear ferhalen fan it ynternet te finen.",
   "manual_migration_explanation2": "Probearje Firefox en ymportearje de blêdwizers, skiednis en wachtwurden fan oare browsers.",
@@ -106,5 +106,7 @@ window.gActivityStreamStrings = {
   "firstrun_terms_of_service": "Tsjinstbetingsten",
   "firstrun_privacy_notice": "Privacyferklearring",
   "firstrun_continue_to_login": "Trochgean",
-  "firstrun_skip_login": "Dizze stap oerslaan"
+  "firstrun_skip_login": "Dizze stap oerslaan",
+  "context_menu_title": "Menu iepenje",
+  "pocket_learn_more": "Mear ynfo"
 };

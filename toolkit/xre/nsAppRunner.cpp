@@ -8,6 +8,7 @@
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/FilePreferences.h"
 #include "mozilla/ChaosMode.h"
@@ -180,7 +181,7 @@
 #endif
 
 // for X remote support
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
 #include "XRemoteClient.h"
 #include "nsIRemoteService.h"
 #include "nsProfileLock.h"
@@ -785,9 +786,10 @@ SYNC_ENUMS(GMPLUGIN, GMPlugin)
 SYNC_ENUMS(GPU, GPU)
 SYNC_ENUMS(PDFIUM, PDFium)
 SYNC_ENUMS(VR, VR)
+SYNC_ENUMS(RDD, RDD)
 
 // .. and ensure that that is all of them:
-static_assert(GeckoProcessType_VR + 1 == GeckoProcessType_End,
+static_assert(GeckoProcessType_RDD + 1 == GeckoProcessType_End,
               "Did not find the final GeckoProcessType");
 
 NS_IMETHODIMP
@@ -1117,7 +1119,7 @@ nsXULAppInfo::SetEnabled(bool aEnabled)
       return NS_ERROR_FAILURE;
     }
 
-    nsCOMPtr<nsIFile> xreBinDirectory = do_QueryInterface(greBinDir);
+    nsCOMPtr<nsIFile> xreBinDirectory = greBinDir;
     if (!xreBinDirectory) {
       return NS_ERROR_FAILURE;
     }
@@ -1648,48 +1650,6 @@ DumpHelp()
   DumpArbitraryHelp();
 }
 
-#if defined(DEBUG) && defined(XP_WIN)
-#ifdef DEBUG_warren
-#define _CRTDBG_MAP_ALLOC
-#endif
-// Set a CRT ReportHook function to capture and format MSCRT
-// warnings, errors and assertions.
-// See http://msdn.microsoft.com/en-US/library/74kabxyx(v=VS.80).aspx
-#include <stdio.h>
-#include <crtdbg.h>
-#include "mozilla/mozalloc_abort.h"
-static int MSCRTReportHook( int aReportType, char *aMessage, int *oReturnValue)
-{
-  *oReturnValue = 0; // continue execution
-
-  // Do not use fprintf or other functions which may allocate
-  // memory from the heap which may be corrupted. Instead,
-  // use fputs to output the leading portion of the message
-  // and use mozalloc_abort to emit the remainder of the
-  // message.
-
-  switch(aReportType) {
-  case 0:
-    fputs("\nWARNING: CRT WARNING", stderr);
-    fputs(aMessage, stderr);
-    fputs("\n", stderr);
-    break;
-  case 1:
-    fputs("\n###!!! ABORT: CRT ERROR ", stderr);
-    mozalloc_abort(aMessage);
-    break;
-  case 2:
-    fputs("\n###!!! ABORT: CRT ASSERT ", stderr);
-    mozalloc_abort(aMessage);
-    break;
-  }
-
-  // do not invoke the debugger
-  return 1;
-}
-
-#endif
-
 static inline void
 DumpVersion()
 {
@@ -1701,7 +1661,7 @@ DumpVersion()
   printf("\n");
 }
 
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
 static RemoteResult
 ParseRemoteCommandLine(nsCString& program,
                        const char** profile,
@@ -1742,13 +1702,18 @@ StartRemoteClient(const char* aDesktopStartupID,
 {
   nsAutoPtr<nsRemoteClient> client;
 
-#if defined(MOZ_ENABLE_DBUS) && defined(MOZ_WAYLAND)
-  client = new DBusRemoteClient();
-#else
-  client = new XRemoteClient();
-#endif
+  bool useX11Remote = GDK_IS_X11_DISPLAY(gdk_display_get_default());
 
-  nsresult rv = client->Init();
+#if defined(MOZ_ENABLE_DBUS)
+  if (!useX11Remote) {
+    client = new DBusRemoteClient();
+  }
+#endif
+  if (useX11Remote) {
+    client = new XRemoteClient();
+  }
+
+  nsresult rv = client ? client->Init() : NS_ERROR_FAILURE;
   if (NS_FAILED(rv))
     return REMOTE_NOT_FOUND;
 
@@ -1771,7 +1736,7 @@ StartRemoteClient(const char* aDesktopStartupID,
 
   return REMOTE_FOUND;
 }
-#endif // MOZ_ENABLE_XREMOTE
+#endif // MOZ_WIDGET_GTK
 
 void
 XRE_InitOmnijar(nsIFile* greOmni, nsIFile* appOmni)
@@ -1806,7 +1771,7 @@ RegisterApplicationRestartChanged(const char* aPref, void* aData) {
     // Excludes argv[0] because RegisterApplicationRestart adds the
     // executable name, replace that temporarily with -os-restarted
     char* exeName = gRestartArgv[0];
-    gRestartArgv[0] = "-os-restarted";
+    gRestartArgv[0] = const_cast<char*>("-os-restarted");
     wchar_t** restartArgvConverted =
       AllocConvertUTF8toUTF16Strings(gRestartArgc, gRestartArgv);
     gRestartArgv[0] = exeName;
@@ -2119,6 +2084,7 @@ ShowProfileManager(nsIToolkitProfileService* aProfileSvc,
   nsCOMPtr<nsIFile> profD, profLD;
   char16_t* profileNamePtr;
   nsAutoCString profileName;
+  bool offline = false;
 
   {
     ScopedXPCOMStartup xpcom;
@@ -2172,6 +2138,10 @@ ShowProfileManager(nsIToolkitProfileService* aProfileSvc,
       rv = ioParamBlock->GetInt(0, &dialogConfirmed);
       if (NS_FAILED(rv) || dialogConfirmed == 0) return NS_ERROR_ABORT;
 
+      int32_t startOffline;
+      rv = ioParamBlock->GetInt(1, &startOffline);
+      offline = NS_SUCCEEDED(rv) && startOffline == 1;
+
       nsCOMPtr<nsIProfileLock> lock;
       rv = dlgArray->QueryElementAt(0, NS_GET_IID(nsIProfileLock),
                                     getter_AddRefs(lock));
@@ -2197,8 +2167,6 @@ ShowProfileManager(nsIToolkitProfileService* aProfileSvc,
   SaveFileToEnv("XRE_PROFILE_LOCAL_PATH", profLD);
   SaveWordToEnv("XRE_PROFILE_NAME", profileName);
 
-  bool offline = false;
-  aProfileSvc->GetStartOffline(&offline);
   if (offline) {
     SaveToEnv("XRE_START_OFFLINE=1");
   }
@@ -3058,10 +3026,8 @@ public:
   XREMain() :
     mStartOffline(false)
     , mShuttingDown(false)
-#ifdef MOZ_ENABLE_XREMOTE
-    , mDisableRemote(false)
-#endif
 #if defined(MOZ_WIDGET_GTK)
+    , mDisableRemote(false)
     , mGdkDisplay(nullptr)
 #endif
   {};
@@ -3083,7 +3049,7 @@ public:
   nsCOMPtr<nsIFile> mProfD;
   nsCOMPtr<nsIFile> mProfLD;
   nsCOMPtr<nsIProfileLock> mProfileLock;
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
   nsCOMPtr<nsIRemoteService> mRemoteService;
   nsProfileLock mRemoteLock;
   nsCOMPtr<nsIFile> mRemoteLockDir;
@@ -3098,7 +3064,7 @@ public:
 
   bool mStartOffline;
   bool mShuttingDown;
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
   bool mDisableRemote;
 #endif
 
@@ -3227,6 +3193,17 @@ XREMain::XRE_mainInit(bool* aExitFlag)
     }
     ChaosMode::SetChaosFeature(feature);
   }
+
+#ifdef MOZ_ASAN_REPORTER
+  // In ASan Reporter builds, we enable certain chaos features by default unless
+  // the user explicitly requests a particular set of features.
+  if (!PR_GetEnv("MOZ_CHAOSMODE")) {
+    ChaosMode::SetChaosFeature(static_cast<ChaosFeature>(
+                               ChaosFeature::ThreadScheduling
+                               | ChaosFeature::NetworkScheduling
+                               | ChaosFeature::TimerScheduling));
+  }
+#endif
 
   if (ChaosMode::isActive(ChaosFeature::Any)) {
     printf_stderr("*** You are running in chaos test mode. See ChaosMode.h. ***\n");
@@ -3939,7 +3916,7 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
   HeapSetInformation(NULL, HeapEnableTerminationOnCorruption, NULL, 0);
 #endif /* XP_WIN */
 
-#if defined(MOZ_WIDGET_GTK) || defined(MOZ_ENABLE_XREMOTE)
+#if defined(MOZ_WIDGET_GTK)
   // Stash DESKTOP_STARTUP_ID in malloc'ed memory because gtk_init will clear it.
 #define HAVE_DESKTOP_STARTUP_ID
   const char* desktopStartupIDEnv = PR_GetEnv("DESKTOP_STARTUP_ID");
@@ -4026,10 +4003,18 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
       saveDisplayArg = true;
     }
 
+    bool disableWayland = true;
+#if defined(MOZ_WAYLAND)
+    // Make X11 backend the default one.
+    // Enable Wayland backend only when GDK_BACKEND is set and
+    // Gtk+ >= 3.22 where we can expect recent enough
+    // compositor & libwayland interface.
+    disableWayland = (PR_GetEnv("GDK_BACKEND") == nullptr) ||
+                     (gtk_check_version(3, 22, 0) != nullptr);
+#endif
     // On Wayland disabled builds read X11 DISPLAY env exclusively
     // and don't care about different displays.
-#if !defined(MOZ_WAYLAND)
-    if (!display_name) {
+    if (disableWayland && !display_name) {
       display_name = PR_GetEnv("DISPLAY");
       if (!display_name) {
         PR_fprintf(PR_STDERR,
@@ -4037,7 +4022,6 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
         return 1;
       }
     }
-#endif
 
     if (display_name) {
       mGdkDisplay = gdk_display_open(display_name);
@@ -4052,7 +4036,7 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
             SaveWordToEnv("DISPLAY", nsDependentCString(display_name));
         }
 #ifdef MOZ_WAYLAND
-        else if (GDK_IS_WAYLAND_DISPLAY(mGdkDisplay)) {
+        else if (!GDK_IS_X11_DISPLAY(mGdkDisplay)) {
             SaveWordToEnv("WAYLAND_DISPLAY", nsDependentCString(display_name));
         }
 #endif
@@ -4069,7 +4053,7 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
     mDisableRemote = true;
   }
 #endif
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
   // handle --remote now that xpcom is fired up
   bool newInstance;
   {
@@ -4752,7 +4736,7 @@ XREMain::XRE_mainRun()
   }
 
   if (!mShuttingDown) {
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
     // if we have X remote support, start listening for requests on the
     // proxy window.
     if (!mDisableRemote)
@@ -4764,7 +4748,7 @@ XREMain::XRE_mainRun()
       mRemoteLock.Cleanup();
       mRemoteLockDir->Remove(false);
     }
-#endif /* MOZ_ENABLE_XREMOTE */
+#endif /* MOZ_WIDGET_GTK */
 
     mNativeApp->Enable();
   }
@@ -4969,12 +4953,12 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
   }
 
   if (!mShuttingDown) {
-#ifdef MOZ_ENABLE_XREMOTE
+#if defined(MOZ_WIDGET_GTK)
     // shut down the x remote proxy window
     if (mRemoteService) {
       mRemoteService->Shutdown();
     }
-#endif /* MOZ_ENABLE_XREMOTE */
+#endif /* MOZ_WIDGET_GTK */
   }
 
   mScopedXPCOM = nullptr;
@@ -5146,6 +5130,12 @@ XRE_IsGPUProcess()
 }
 
 bool
+XRE_IsRDDProcess()
+{
+  return XRE_GetProcessType() == GeckoProcessType_RDD;
+}
+
+bool
 XRE_IsVRProcess()
 {
   return XRE_GetProcessType() == GeckoProcessType_VR;
@@ -5182,6 +5172,11 @@ XRE_IsPluginProcess()
 bool
 XRE_UseNativeEventProcessing()
 {
+#ifdef XP_MACOSX
+  if (XRE_IsRDDProcess()) {
+    return false;
+  }
+#endif
   if (XRE_IsContentProcess()) {
     static bool sInited = false;
     static bool sUseNativeEventProcessing = false;
@@ -5316,21 +5311,6 @@ SetupErrorHandling(const char* progname)
 
 #endif
 
-#if defined (DEBUG) && defined(XP_WIN)
-  // Send MSCRT Warnings, Errors and Assertions to stderr.
-  // See http://msdn.microsoft.com/en-us/library/1y71x448(v=VS.80).aspx
-  // and http://msdn.microsoft.com/en-us/library/a68f826y(v=VS.80).aspx.
-
-  _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE);
-  _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDERR);
-  _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
-  _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
-  _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
-  _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
-
-  _CrtSetReportHook(MSCRTReportHook);
-#endif
-
   InstallSignalHandlers(progname);
 
   // Unbuffer stdout, needed for tinderbox tests.
@@ -5363,6 +5343,23 @@ extern "C" void
 GeckoHandleOOM(size_t size) {
   mozalloc_handle_oom(size);
 }
+
+// Similarly, this wraps MOZ_CrashOOL
+extern "C" void
+GeckoCrashOOL(const char* aFilename, int aLine, const char* aReason) {
+  MOZ_CrashOOL(aFilename, aLine, aReason);
+}
+
+// From toolkit/library/rust/shared/lib.rs
+extern "C" void install_rust_panic_hook();
+
+struct InstallRustPanicHook {
+  InstallRustPanicHook() {
+    install_rust_panic_hook();
+  }
+};
+
+InstallRustPanicHook sInstallRustPanicHook;
 
 #ifdef MOZ_ASAN_REPORTER
 void setASanReporterPath(nsIFile* aDir) {

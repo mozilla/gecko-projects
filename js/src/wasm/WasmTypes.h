@@ -66,6 +66,7 @@ typedef Handle<WasmInstanceObject*> HandleWasmInstanceObject;
 typedef MutableHandle<WasmInstanceObject*> MutableHandleWasmInstanceObject;
 
 class WasmTableObject;
+typedef GCVector<WasmTableObject*, 0, SystemAllocPolicy> WasmTableObjectVector;
 typedef Rooted<WasmTableObject*> RootedWasmTableObject;
 typedef Handle<WasmTableObject*> HandleWasmTableObject;
 typedef MutableHandle<WasmTableObject*> MutableHandleWasmTableObject;
@@ -73,6 +74,9 @@ typedef MutableHandle<WasmTableObject*> MutableHandleWasmTableObject;
 class WasmGlobalObject;
 typedef GCVector<WasmGlobalObject*, 0, SystemAllocPolicy> WasmGlobalObjectVector;
 typedef Rooted<WasmGlobalObject*> RootedWasmGlobalObject;
+
+class StructTypeDescr;
+typedef GCVector<HeapPtr<StructTypeDescr*>, 0, SystemAllocPolicy> StructTypeDescrVector;
 
 namespace wasm {
 
@@ -595,8 +599,16 @@ enum class Tier
 {
     Baseline,
     Debug = Baseline,
+    Optimized,
+    Serialized = Optimized
+};
+
+// Which backend to use in the case of the optimized tier.
+
+enum class OptimizedBackend
+{
     Ion,
-    Serialized = Ion
+    Cranelift,
 };
 
 // The CompileMode controls how compilation of a module is performed (notably,
@@ -830,9 +842,9 @@ struct FuncTypeHashPolicy
 
 // Structure type.
 //
-// The Module owns a dense array of Struct values that represent the structure
-// types that the module knows about.  It is created from the sparse array of
-// types in the ModuleEnvironment when the Module is created.
+// The Module owns a dense array of StructType values that represent the
+// structure types that the module knows about.  It is created from the sparse
+// array of types in the ModuleEnvironment when the Module is created.
 
 struct StructField
 {
@@ -846,14 +858,30 @@ typedef Vector<StructField, 0, SystemAllocPolicy> StructFieldVector;
 class StructType
 {
   public:
-    StructFieldVector fields_;
-
+    StructFieldVector fields_; // Field type, offset, and mutability
+    uint32_t moduleIndex_;     // Index in a dense array of structs in the module
+    bool isInline_;            // True if this is an InlineTypedObject and we
+                               //   interpret the offsets from the object pointer;
+                               //   if false this is an OutlineTypedObject and we
+                               //   interpret everything relative to the pointer to
+                               //   the attached storage.
   public:
-    StructType() : fields_() {}
+    StructType() : fields_(), moduleIndex_(0), isInline_(true) {}
 
-    explicit StructType(StructFieldVector&& fields)
-      : fields_(std::move(fields))
+    StructType(StructFieldVector&& fields, uint32_t index, bool isInline)
+      : fields_(std::move(fields)),
+        moduleIndex_(index),
+        isInline_(isInline)
     {}
+
+    bool copyFrom(const StructType& src) {
+        if (!fields_.appendAll(src.fields_)) {
+            return false;
+        }
+        moduleIndex_ = src.moduleIndex_;
+        isInline_ = src.isInline_;
+        return true;
+    }
 
     bool hasPrefix(const StructType& other) const;
 
@@ -975,6 +1003,7 @@ class Export
     DefinitionKind kind() const { return pod.kind_; }
     uint32_t funcIndex() const;
     uint32_t globalIndex() const;
+    uint32_t tableIndex() const;
 
     WASM_DECLARE_SERIALIZABLE(Export)
 };
@@ -1447,6 +1476,24 @@ struct TrapSiteVectorArray : EnumeratedArray<Trap, Trap::Limit, TrapSiteVector>
     WASM_DECLARE_SERIALIZABLE(TrapSiteVectorArray)
 };
 
+// On trap, the bytecode offset to be reported in callstacks is saved.
+
+struct TrapData
+{
+    // The resumePC indicates where, if the trap doesn't throw, the trap stub
+    // should jump to after restoring all register state.
+    void* resumePC;
+
+    // The unwoundPC is the PC after adjustment by wasm::StartUnwinding(), which
+    // basically unwinds partially-construted wasm::Frames when pc is in the
+    // prologue/epilogue. Stack traces during a trap should use this PC since
+    // it corresponds to the JitActivation::wasmExitFP.
+    void* unwoundPC;
+
+    Trap trap;
+    uint32_t bytecodeOffset;
+};
+
 // The (,Callable,Func)Offsets classes are used to record the offsets of
 // different key points in a CodeRange during compilation.
 
@@ -1872,10 +1919,14 @@ enum class SymbolicAddress
     MemInit,
     TableCopy,
     TableDrop,
+    TableGet,
+    TableGrow,
     TableInit,
-#ifdef ENABLE_WASM_GC
+    TableSet,
+    TableSize,
     PostBarrier,
-#endif
+    StructNew,
+    StructNarrow,
 #if defined(JS_CODEGEN_MIPS32)
     js_jit_gAtomic64Lock,
 #endif
@@ -1910,30 +1961,21 @@ struct Limits
 enum class TableKind
 {
     AnyFunction,
+    AnyRef,
     TypedFunction
 };
 
 struct TableDesc
 {
-    // If a table is marked 'external' it is because it can contain functions
-    // from multiple instances; a table is therefore marked external if it is
-    // imported or exported or if it is initialized with an imported function.
-
     TableKind kind;
-#ifdef WASM_PRIVATE_REFTYPES
     bool importedOrExported;
-#endif
-    bool external;
     uint32_t globalDataOffset;
     Limits limits;
 
     TableDesc() = default;
-    TableDesc(TableKind kind, const Limits& limits)
+    TableDesc(TableKind kind, const Limits& limits, bool importedOrExported = false)
      : kind(kind),
-#ifdef WASM_PRIVATE_REFTYPES
-       importedOrExported(false),
-#endif
-       external(false),
+       importedOrExported(importedOrExported),
        globalDataOffset(UINT32_MAX),
        limits(limits)
     {}
@@ -1958,10 +2000,8 @@ struct TlsData
     // Pointer to the base of the default memory (or null if there is none).
     uint8_t* memoryBase;
 
-#ifndef WASM_HUGE_MEMORY
     // Bounds check limit of memory, in bytes (or zero if there is no memory).
     uint32_t boundsCheckLimit;
-#endif
 
     // Pointer to the Instance that contains this TLS data.
     Instance* instance;
@@ -1980,9 +2020,7 @@ struct TlsData
     // Set to 1 when wasm should call CheckForInterrupt.
     Atomic<uint32_t, mozilla::Relaxed> interrupt;
 
-#ifdef ENABLE_WASM_GC
     uint8_t* addressOfNeedsIncrementalBarrier;
-#endif
 
     // Methods to set, test and clear the above two fields. Both interrupt
     // fields are Relaxed and so no consistency/ordering can be assumed.
@@ -2064,16 +2102,15 @@ struct TableTls
     // Length of the table in number of elements (not bytes).
     uint32_t length;
 
-    // Pointer to the array of elements (of type either ExternalTableElem or
-    // void*).
-    void* base;
+    // Pointer to the array of elements (which can have various representations).
+    // For tables of anyref this is null.
+    void* functionBase;
 };
 
-// When a table can contain functions from other instances (it is "external"),
-// the internal representation is an array of ExternalTableElem instead of just
-// an array of code pointers.
+// Table elements for TableKind::AnyFunctions carry both the code pointer and an
+// instance pointer.
 
-struct ExternalTableElem
+struct FunctionTableElem
 {
     // The code to call when calling this element. The table ABI is the system
     // ABI with the additional ABI requirements that:
@@ -2127,7 +2164,6 @@ class CalleeDesc
         struct {
             uint32_t globalDataOffset_;
             uint32_t minLength_;
-            bool external_;
             FuncTypeIdDesc funcTypeId_;
         } table;
         SymbolicAddress builtin_;
@@ -2152,7 +2188,6 @@ class CalleeDesc
         c.which_ = WasmTable;
         c.u.table.globalDataOffset_ = desc.globalDataOffset;
         c.u.table.minLength_ = desc.limits.initial;
-        c.u.table.external_ = desc.external;
         c.u.table.funcTypeId_ = funcTypeId;
         return c;
     }
@@ -2192,13 +2227,9 @@ class CalleeDesc
         MOZ_ASSERT(isTable());
         return u.table.globalDataOffset_ + offsetof(TableTls, length);
     }
-    uint32_t tableBaseGlobalDataOffset() const {
+    uint32_t tableFunctionBaseGlobalDataOffset() const {
         MOZ_ASSERT(isTable());
-        return u.table.globalDataOffset_ + offsetof(TableTls, base);
-    }
-    bool wasmTableIsExternal() const {
-        MOZ_ASSERT(which_ == WasmTable);
-        return u.table.external_;
+        return u.table.globalDataOffset_ + offsetof(TableTls, functionBase);
     }
     FuncTypeIdDesc wasmTableSigId() const {
         MOZ_ASSERT(which_ == WasmTable);

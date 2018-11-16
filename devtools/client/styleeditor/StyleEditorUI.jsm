@@ -23,12 +23,12 @@ const {SplitView} = require("resource://devtools/client/shared/SplitView.jsm");
 const {StyleSheetEditor} = require("resource://devtools/client/styleeditor/StyleSheetEditor.jsm");
 const {PluralForm} = require("devtools/shared/plural-form");
 const {PrefObserver} = require("devtools/client/shared/prefs");
-const csscoverage = require("devtools/shared/fronts/csscoverage");
 const {KeyCodes} = require("devtools/client/shared/keycodes");
 const {OriginalSource} = require("devtools/client/styleeditor/original-source");
 
 loader.lazyRequireGetter(this, "ResponsiveUIManager", "devtools/client/responsive.html/manager", true);
 loader.lazyRequireGetter(this, "openContentLink", "devtools/client/shared/link", true);
+loader.lazyRequireGetter(this, "copyString", "devtools/shared/platform/clipboard", true);
 
 const LOAD_ERROR = "error-load";
 const STYLE_EDITOR_TEMPLATE = "stylesheet";
@@ -85,8 +85,9 @@ function StyleEditorUI(debuggee, target, panelDoc, cssProperties) {
   this._updateMediaList = this._updateMediaList.bind(this);
   this._clear = this._clear.bind(this);
   this._onError = this._onError.bind(this);
-  this._updateOpenLinkItem = this._updateOpenLinkItem.bind(this);
+  this._updateContextMenuItems = this._updateContextMenuItems.bind(this);
   this._openLinkNewTab = this._openLinkNewTab.bind(this);
+  this._copyUrl = this._copyUrl.bind(this);
   this._addStyleSheet = this._addStyleSheet.bind(this);
 
   this._prefObserver = new PrefObserver("devtools.styleeditor.");
@@ -165,7 +166,7 @@ StyleEditorUI.prototype = {
 
     this._contextMenu = this._panelDoc.getElementById("sidebar-context");
     this._contextMenu.addEventListener("popupshowing",
-                                       this._updateOpenLinkItem);
+                                       this._updateContextMenuItems);
 
     this._optionsMenu =
       this._panelDoc.getElementById("style-editor-options-popup");
@@ -186,6 +187,9 @@ StyleEditorUI.prototype = {
       this._panelDoc.getElementById("context-openlinknewtab");
     this._openLinkNewTabItem.addEventListener("command",
                                               this._openLinkNewTab);
+
+    this._copyUrlItem = this._panelDoc.getElementById("context-copyurl");
+    this._copyUrlItem.addEventListener("command", this._copyUrl);
 
     const nav = this._panelDoc.querySelector(".splitview-controller");
     nav.setAttribute("width", Services.prefs.getIntPref(PREF_NAV_WIDTH));
@@ -261,7 +265,7 @@ StyleEditorUI.prototype = {
       this._styleSheetToSelect = {
         stylesheet: href,
         line: line,
-        col: ch
+        col: ch,
       };
     }
 
@@ -403,7 +407,7 @@ StyleEditorUI.prototype = {
         uri: NetUtil.newURI(selectedFile),
         loadingNode: this._window.document,
         securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS,
-        contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER
+        contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER,
       }, (stream, status) => {
         if (!Components.isSuccessCode(status)) {
           this.emit("error", { key: LOAD_ERROR, level: "warning" });
@@ -465,7 +469,7 @@ StyleEditorUI.prototype = {
 
   /**
    * This method handles the following cases related to the context
-   * menu item "_openLinkNewTabItem":
+   * menu items "_openLinkNewTabItem" and "_copyUrlItem":
    *
    * 1) There was a stylesheet clicked on and it is external: show and
    * enable the context menu item
@@ -474,12 +478,15 @@ StyleEditorUI.prototype = {
    * 3) There was no stylesheet clicked on (the right click happened
    * below the list): hide the context menu
    */
-  _updateOpenLinkItem: function() {
+  _updateContextMenuItems: function() {
     this._openLinkNewTabItem.setAttribute("hidden",
                                           !this._contextMenuStyleSheet);
+    this._copyUrlItem.setAttribute("hidden", !this._contextMenuStyleSheet);
+
     if (this._contextMenuStyleSheet) {
       this._openLinkNewTabItem.setAttribute("disabled",
                                             !this._contextMenuStyleSheet.href);
+      this._copyUrlItem.setAttribute("disabled", !this._contextMenuStyleSheet.href);
     }
   },
 
@@ -489,6 +496,15 @@ StyleEditorUI.prototype = {
   _openLinkNewTab: function() {
     if (this._contextMenuStyleSheet) {
       openContentLink(this._contextMenuStyleSheet.href);
+    }
+  },
+
+  /**
+   * Copies a stylesheet's URL.
+   */
+  _copyUrl: function() {
+    if (this._contextMenuStyleSheet) {
+      copyString(this._contextMenuStyleSheet.href);
     }
   },
 
@@ -538,7 +554,7 @@ StyleEditorUI.prototype = {
     // add new sidebar item and editor to the UI
     this._view.appendTemplatedItem(STYLE_EDITOR_TEMPLATE, {
       data: {
-        editor: editor
+        editor: editor,
       },
       disableAnimations: this._alwaysDisableAnimations,
       ordinal: ordinal,
@@ -560,8 +576,8 @@ StyleEditorUI.prototype = {
               if (event.keyCode == KeyCodes.DOM_VK_RETURN) {
                 this._view.activeSummary = summary;
               }
-            }
-          }
+            },
+          },
         });
 
         wire(summary, ".stylesheet-saveButton", function onSaveButton(event) {
@@ -636,7 +652,7 @@ StyleEditorUI.prototype = {
           this.emit("editor-selected", showEditor);
 
           // Is there any CSS coverage markup to include?
-          const usage = await csscoverage.getUsage(this._target);
+          const usage = this._target.getFront("cssUsage");
           if (usage == null) {
             return;
           }
@@ -659,7 +675,7 @@ StyleEditorUI.prototype = {
             }
           }
         }.bind(this))().catch(console.error);
-      }
+      },
     });
   },
 
@@ -901,7 +917,7 @@ StyleEditorUI.prototype = {
           line: line,
           column: column,
           source: editor.styleSheet.href,
-          styleSheet: parentStyleSheet
+          styleSheet: parentStyleSheet,
         };
         if (editor.styleSheet.isOriginalSource) {
           const styleSheet = editor.cssSheet;
@@ -1049,5 +1065,5 @@ StyleEditorUI.prototype = {
     this._prefObserver.destroy();
 
     this._debuggee.off("stylesheet-added", this._addStyleSheet);
-  }
+  },
 };

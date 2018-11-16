@@ -476,7 +476,7 @@ category used in plural forms. For these reasons, it’s not possible to use
                   elements=[
                       FTL.Placeable(
                           expression=FTL.SelectExpression(
-                              expression=VARIABLE_REFERENCE("tabCount"),
+                              selector=VARIABLE_REFERENCE("tabCount"),
                               variants=[
                                   FTL.Variant(
                                       key=FTL.NumberExpression("1"),
@@ -487,7 +487,7 @@ category used in plural forms. For these reasons, it’s not possible to use
                                       )
                                   ),
                                   FTL.Variant(
-                                      key=FTL.VariantName("other"),
+                                      key=FTL.Identifier("other"),
                                       default=True,
                                       value=COPY(
                                           "browser/chrome/browser/preferences/main.dtd",

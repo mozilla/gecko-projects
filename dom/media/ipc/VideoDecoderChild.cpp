@@ -50,7 +50,6 @@ VideoDecoderChild::VideoDecoderChild()
 
 VideoDecoderChild::~VideoDecoderChild()
 {
-  AssertOnManagerThread();
   mInitPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
 }
 
@@ -81,8 +80,8 @@ mozilla::ipc::IPCResult
 VideoDecoderChild::RecvInputExhausted()
 {
   AssertOnManagerThread();
-  mDecodePromise.ResolveIfExists(mDecodedData, __func__);
-  mDecodedData.Clear();
+  mDecodePromise.ResolveIfExists(std::move(mDecodedData), __func__);
+  mDecodedData = MediaDataDecoder::DecodedData();
   return IPC_OK();
 }
 
@@ -90,8 +89,8 @@ mozilla::ipc::IPCResult
 VideoDecoderChild::RecvDrainComplete()
 {
   AssertOnManagerThread();
-  mDrainPromise.ResolveIfExists(mDecodedData, __func__);
-  mDecodedData.Clear();
+  mDrainPromise.ResolveIfExists(std::move(mDecodedData), __func__);
+  mDecodedData = MediaDataDecoder::DecodedData();
   return IPC_OK();
 }
 
@@ -99,7 +98,7 @@ mozilla::ipc::IPCResult
 VideoDecoderChild::RecvError(const nsresult& aError)
 {
   AssertOnManagerThread();
-  mDecodedData.Clear();
+  mDecodedData = MediaDataDecoder::DecodedData();
   mDecodePromise.RejectIfExists(aError, __func__);
   mDrainPromise.RejectIfExists(aError, __func__);
   mFlushPromise.RejectIfExists(aError, __func__);
@@ -153,7 +152,7 @@ VideoDecoderChild::ActorDestroy(ActorDestroyReason aWhy)
         MediaResult error(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER);
         error.SetGPUCrashTimeStamp(ref->mGPUCrashTime);
         if (ref->mInitialized) {
-          mDecodedData.Clear();
+          mDecodedData = MediaDataDecoder::DecodedData();
           mDecodePromise.RejectIfExists(error, __func__);
           mDrainPromise.RejectIfExists(error, __func__);
           mFlushPromise.RejectIfExists(error, __func__);
@@ -177,6 +176,7 @@ VideoDecoderChild::ActorDestroy(ActorDestroyReason aWhy)
 MediaResult
 VideoDecoderChild::InitIPDL(const VideoInfo& aVideoInfo,
                             float aFramerate,
+                            const CreateDecoderParams::OptionSet& aOptions,
                             const layers::TextureFactoryIdentifier& aIdentifier)
 {
   RefPtr<VideoDecoderManagerChild> manager =
@@ -206,6 +206,7 @@ VideoDecoderChild::InitIPDL(const VideoInfo& aVideoInfo,
   if (manager->SendPVideoDecoderConstructor(this,
                                             aVideoInfo,
                                             aFramerate,
+                                            aOptions,
                                             aIdentifier,
                                             &success,
                                             &mBlacklistedD3D11Driver,

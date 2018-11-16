@@ -48,7 +48,7 @@ CodeGeneratorARM64::generateOutOfLineCode()
         masm.bind(&deoptLabel_);
 
         // Store the frame size, so the handler can recover the IonScript.
-        masm.Mov(x30, frameSize());
+        masm.push(Imm32(frameSize()));
 
         TrampolinePtr handler = gen->jitRuntime()->getGenericBailoutHandler();
         masm.jump(handler);
@@ -158,8 +158,8 @@ CodeGeneratorARM64::bailoutIf(Assembler::Condition condition, LSnapshot* snapsho
 void
 CodeGeneratorARM64::bailoutFrom(Label* label, LSnapshot* snapshot)
 {
-    MOZ_ASSERT(label->used());
-    MOZ_ASSERT(!label->bound());
+    MOZ_ASSERT_IF(!masm.oom(), label->used());
+    MOZ_ASSERT_IF(!masm.oom(), !label->bound());
 
     encode(snapshot);
 
@@ -179,7 +179,9 @@ CodeGeneratorARM64::bailoutFrom(Label* label, LSnapshot* snapshot)
 void
 CodeGeneratorARM64::bailout(LSnapshot* snapshot)
 {
-    MOZ_CRASH("bailout");
+    Label label;
+    masm.b(&label);
+    bailoutFrom(&label, snapshot);
 }
 
 void
@@ -192,37 +194,57 @@ CodeGeneratorARM64::visitOutOfLineBailout(OutOfLineBailout* ool)
 void
 CodeGenerator::visitMinMaxD(LMinMaxD* ins)
 {
-    MOZ_CRASH("visitMinMaxD");
+    ARMFPRegister lhs(ToFloatRegister(ins->first()), 64);
+    ARMFPRegister rhs(ToFloatRegister(ins->second()), 64);
+    ARMFPRegister output(ToFloatRegister(ins->output()), 64);
+    if (ins->mir()->isMax()) {
+        masm.Fmax(output, lhs, rhs);
+    } else {
+        masm.Fmin(output, lhs, rhs);
+    }
 }
 
 void
 CodeGenerator::visitMinMaxF(LMinMaxF* ins)
 {
-    MOZ_CRASH("visitMinMaxF");
+    ARMFPRegister lhs(ToFloatRegister(ins->first()), 32);
+    ARMFPRegister rhs(ToFloatRegister(ins->second()), 32);
+    ARMFPRegister output(ToFloatRegister(ins->output()), 32);
+    if (ins->mir()->isMax()) {
+        masm.Fmax(output, lhs, rhs);
+    } else {
+        masm.Fmin(output, lhs, rhs);
+    }
 }
 
 void
 CodeGenerator::visitAbsD(LAbsD* ins)
 {
-    MOZ_CRASH("visitAbsD");
+    ARMFPRegister input(ToFloatRegister(ins->input()), 64);
+    masm.Fabs(input, input);
 }
 
 void
 CodeGenerator::visitAbsF(LAbsF* ins)
 {
-    MOZ_CRASH("visitAbsF");
+    ARMFPRegister input(ToFloatRegister(ins->input()), 32);
+    masm.Fabs(input, input);
 }
 
 void
 CodeGenerator::visitSqrtD(LSqrtD* ins)
 {
-    MOZ_CRASH("visitSqrtD");
+    ARMFPRegister input(ToFloatRegister(ins->input()), 64);
+    ARMFPRegister output(ToFloatRegister(ins->output()), 64);
+    masm.Fsqrt(output, input);
 }
 
 void
 CodeGenerator::visitSqrtF(LSqrtF* ins)
 {
-    MOZ_CRASH("visitSqrtF");
+    ARMFPRegister input(ToFloatRegister(ins->input()), 32);
+    ARMFPRegister output(ToFloatRegister(ins->output()), 32);
+    masm.Fsqrt(output, input);
 }
 
 // FIXME: Uh, is this a static function? It looks like it is...
@@ -389,8 +411,84 @@ CodeGenerator::visitMulI(LMulI* ins)
 void
 CodeGenerator::visitDivI(LDivI* ins)
 {
-    MOZ_CRASH("visitDivI");
+    const Register lhs = ToRegister(ins->lhs());
+    const Register rhs = ToRegister(ins->rhs());
+    const Register output = ToRegister(ins->output());
 
+    const ARMRegister lhs32 = toWRegister(ins->lhs());
+    const ARMRegister rhs32 = toWRegister(ins->rhs());
+    const ARMRegister temp32 = toWRegister(ins->getTemp(0));
+    const ARMRegister output32 = toWRegister(ins->output());
+
+    MDiv* mir = ins->mir();
+
+    Label done;
+
+    // Handle division by zero.
+    if (mir->canBeDivideByZero()) {
+        masm.test32(rhs, rhs);
+        // TODO: x64 has an additional mir->canTruncateInfinities() handler
+        // TODO: to avoid taking a bailout.
+        if (mir->trapOnError()) {
+            Label nonZero;
+            masm.j(Assembler::NonZero, &nonZero);
+            masm.wasmTrap(wasm::Trap::IntegerDivideByZero, mir->bytecodeOffset());
+            masm.bind(&nonZero);
+        } else {
+            MOZ_ASSERT(mir->fallible());
+            bailoutIf(Assembler::Zero, ins->snapshot());
+        }
+    }
+
+    // Handle an integer overflow from (INT32_MIN / -1).
+    // The integer division gives INT32_MIN, but should be -(double)INT32_MIN.
+    if (mir->canBeNegativeOverflow()) {
+        Label notOverflow;
+
+        // Branch to handle the non-overflow cases.
+        masm.branch32(Assembler::NotEqual, lhs, Imm32(INT32_MIN), &notOverflow);
+        masm.branch32(Assembler::NotEqual, rhs, Imm32(-1), &notOverflow);
+
+        // Handle overflow.
+        if (mir->trapOnError()) {
+            masm.wasmTrap(wasm::Trap::IntegerOverflow, mir->bytecodeOffset());
+        } else if (mir->canTruncateOverflow()) {
+            // (-INT32_MIN)|0 == INT32_MIN, which is already in lhs.
+            masm.move32(lhs, output);
+            masm.jump(&done);
+        } else {
+            MOZ_ASSERT(mir->fallible());
+            bailout(ins->snapshot());
+        }
+        masm.bind(&notOverflow);
+    }
+
+    // Handle negative zero: lhs == 0 && rhs < 0.
+    if (!mir->canTruncateNegativeZero() && mir->canBeNegativeZero()) {
+        Label nonZero;
+        masm.branch32(Assembler::NotEqual, lhs, Imm32(0), &nonZero);
+        masm.cmp32(rhs, Imm32(0));
+        bailoutIf(Assembler::LessThan, ins->snapshot());
+        masm.bind(&nonZero);
+    }
+
+    // Perform integer division.
+    if (mir->canTruncateRemainder()) {
+        masm.Sdiv(output32, lhs32, rhs32);
+    } else {
+        vixl::UseScratchRegisterScope temps(&masm.asVIXL());
+        ARMRegister scratch32 = temps.AcquireW();
+
+        // ARM does not automatically calculate the remainder.
+        // The ISR suggests multiplication to determine whether a remainder exists.
+        masm.Sdiv(scratch32, lhs32, rhs32);
+        masm.Mul(temp32, scratch32, rhs32);
+        masm.Cmp(lhs32, temp32);
+        bailoutIf(Assembler::NotEqual, ins->snapshot());
+        masm.Mov(output32, scratch32);
+    }
+
+    masm.bind(&done);
 }
 
 void
@@ -492,13 +590,82 @@ CodeGenerator::visitBitOpI(LBitOpI* ins)
 void
 CodeGenerator::visitShiftI(LShiftI* ins)
 {
-    MOZ_CRASH("visitShiftI");
+    const ARMRegister lhs = toWRegister(ins->lhs());
+    const LAllocation* rhs = ins->rhs();
+    const ARMRegister dest = toWRegister(ins->output());
+
+    if (rhs->isConstant()) {
+        int32_t shift = ToInt32(rhs) & 0x1F;
+        switch (ins->bitop()) {
+          case JSOP_LSH:
+            masm.Lsl(dest, lhs, shift);
+            break;
+          case JSOP_RSH:
+            masm.Asr(dest, lhs, shift);
+            break;
+          case JSOP_URSH:
+            if (shift) {
+                masm.Lsr(dest, lhs, shift);
+            } else if (ins->mir()->toUrsh()->fallible()) {
+                // x >>> 0 can overflow.
+                masm.Ands(dest, lhs, Operand(0xFFFFFFFF));
+                bailoutIf(Assembler::Signed, ins->snapshot());
+            } else {
+                masm.Mov(dest, lhs);
+            }
+            break;
+          default:
+            MOZ_CRASH("Unexpected shift op");
+        }
+    } else {
+        const ARMRegister rhsreg = toWRegister(rhs);
+        switch (ins->bitop()) {
+          case JSOP_LSH:
+            masm.Lsl(dest, lhs, rhsreg);
+            break;
+          case JSOP_RSH:
+            masm.Asr(dest, lhs, rhsreg);
+            break;
+          case JSOP_URSH:
+            masm.Lsr(dest, lhs, rhsreg);
+            if (ins->mir()->toUrsh()->fallible()) {
+                /// x >>> 0 can overflow.
+                Label nonzero;
+                masm.Cbnz(rhsreg, &nonzero);
+                masm.Cmp(dest, Operand(0));
+                bailoutIf(Assembler::LessThan, ins->snapshot());
+                masm.bind(&nonzero);
+            }
+            break;
+          default:
+            MOZ_CRASH("Unexpected shift op");
+        }
+    }
 }
 
 void
 CodeGenerator::visitUrshD(LUrshD* ins)
 {
-    MOZ_CRASH("visitUrshD");
+    const ARMRegister lhs = toWRegister(ins->lhs());
+    const LAllocation* rhs = ins->rhs();
+    const FloatRegister out = ToFloatRegister(ins->output());
+
+    const Register temp = ToRegister(ins->temp());
+    const ARMRegister temp32 = toWRegister(ins->temp());
+
+    if (rhs->isConstant()) {
+        int32_t shift = ToInt32(rhs) & 0x1F;
+        if (shift) {
+            masm.Lsr(temp32, lhs, shift);
+            masm.convertUInt32ToDouble(temp, out);
+        } else {
+            masm.convertUInt32ToDouble(ToRegister(ins->lhs()), out);
+        }
+    } else {
+        masm.And(temp32, toWRegister(rhs), Operand(0x1F));
+        masm.Lsr(temp32, lhs, temp32);
+        masm.convertUInt32ToDouble(temp, out);
+    }
 }
 
 void
@@ -561,13 +728,51 @@ CodeGeneratorARM64::emitTableSwitchDispatch(MTableSwitch* mir, Register index_, 
 void
 CodeGenerator::visitMathD(LMathD* math)
 {
-    MOZ_CRASH("visitMathD");
+    ARMFPRegister lhs(ToFloatRegister(math->lhs()), 64);
+    ARMFPRegister rhs(ToFloatRegister(math->rhs()), 64);
+    ARMFPRegister output(ToFloatRegister(math->output()), 64);
+
+    switch (math->jsop()) {
+      case JSOP_ADD:
+        masm.Fadd(output, lhs, rhs);
+        break;
+      case JSOP_SUB:
+        masm.Fsub(output, lhs, rhs);
+        break;
+      case JSOP_MUL:
+        masm.Fmul(output, lhs, rhs);
+        break;
+      case JSOP_DIV:
+        masm.Fdiv(output, lhs, rhs);
+        break;
+      default:
+        MOZ_CRASH("unexpected opcode");
+    }
 }
 
 void
 CodeGenerator::visitMathF(LMathF* math)
 {
-    MOZ_CRASH("visitMathF");
+    ARMFPRegister lhs(ToFloatRegister(math->lhs()), 32);
+    ARMFPRegister rhs(ToFloatRegister(math->rhs()), 32);
+    ARMFPRegister output(ToFloatRegister(math->output()), 32);
+
+    switch (math->jsop()) {
+      case JSOP_ADD:
+        masm.Fadd(output, lhs, rhs);
+        break;
+      case JSOP_SUB:
+        masm.Fsub(output, lhs, rhs);
+        break;
+      case JSOP_MUL:
+        masm.Fmul(output, lhs, rhs);
+        break;
+      case JSOP_DIV:
+        masm.Fdiv(output, lhs, rhs);
+        break;
+      default:
+        MOZ_CRASH("unexpected opcode");
+    }
 }
 
 void
@@ -649,7 +854,9 @@ CodeGenerator::visitClzI(LClzI* lir)
 void
 CodeGenerator::visitCtzI(LCtzI* lir)
 {
-    MOZ_CRASH("visitCtzI");
+    Register input = ToRegister(lir->input());
+    Register output = ToRegister(lir->output());
+    masm.ctz32(input, output, /* knownNotZero = */ false);
 }
 
 void
@@ -661,16 +868,14 @@ CodeGeneratorARM64::emitRoundDouble(FloatRegister src, Register dest, Label* fai
 void
 CodeGenerator::visitTruncateDToInt32(LTruncateDToInt32* ins)
 {
-    MOZ_CRASH("visitTruncateDToInt32");
+    emitTruncateDouble(ToFloatRegister(ins->input()), ToRegister(ins->output()), ins->mir());
 }
 
 void
 CodeGenerator::visitTruncateFToInt32(LTruncateFToInt32* ins)
 {
-    MOZ_CRASH("visitTruncateFToInt32");
+    emitTruncateFloat32(ToFloatRegister(ins->input()), ToRegister(ins->output()), ins->mir());
 }
-
-static const uint32_t FrameSizes[] = { 128, 256, 512, 1024 };
 
 FrameSizeClass
 FrameSizeClass::FromDepth(uint32_t frameDepth)
@@ -798,12 +1003,6 @@ CodeGenerator::visitFloat32(LFloat32* ins)
 }
 
 void
-CodeGeneratorARM64::splitTagForTest(const ValueOperand& value, ScratchTagScope& tag)
-{
-    MOZ_CRASH("splitTagForTest");
-}
-
-void
 CodeGenerator::visitTestDAndBranch(LTestDAndBranch* test)
 {
     MOZ_CRASH("visitTestDAndBranch");
@@ -866,49 +1065,113 @@ CodeGenerator::visitCompareFAndBranch(LCompareFAndBranch* comp)
 void
 CodeGenerator::visitCompareB(LCompareB* lir)
 {
-    MOZ_CRASH("visitCompareB");
+    MCompare* mir = lir->mir();
+    const ValueOperand lhs = ToValue(lir, LCompareB::Lhs);
+    const LAllocation* rhs = lir->rhs();
+    const Register output = ToRegister(lir->output());
+    const Assembler::Condition cond = JSOpToCondition(mir->compareType(), mir->jsop());
+
+    vixl::UseScratchRegisterScope temps(&masm.asVIXL());
+    const Register scratch = temps.AcquireX().asUnsized();
+
+    MOZ_ASSERT(mir->jsop() == JSOP_STRICTEQ || mir->jsop() == JSOP_STRICTNE);
+
+    // Load boxed boolean into scratch.
+    if (rhs->isConstant()) {
+        masm.moveValue(rhs->toConstant()->toJSValue(), ValueOperand(scratch));
+    } else {
+        masm.boxValue(JSVAL_TYPE_BOOLEAN, ToRegister(rhs), scratch);
+    }
+
+    // Compare the entire Value.
+    masm.cmpPtrSet(cond, lhs.valueReg(), scratch, output);
 }
 
 void
 CodeGenerator::visitCompareBAndBranch(LCompareBAndBranch* lir)
 {
-    MOZ_CRASH("visitCompareBAndBranch");
+    MCompare* mir = lir->cmpMir();
+    const ValueOperand lhs = ToValue(lir, LCompareBAndBranch::Lhs);
+    const LAllocation* rhs = lir->rhs();
+    const Assembler::Condition cond = JSOpToCondition(mir->compareType(), mir->jsop());
+
+    vixl::UseScratchRegisterScope temps(&masm.asVIXL());
+    const Register scratch = temps.AcquireX().asUnsized();
+
+    MOZ_ASSERT(mir->jsop() == JSOP_STRICTEQ || mir->jsop() == JSOP_STRICTNE);
+
+    // Load boxed boolean into scratch.
+    if (rhs->isConstant()) {
+        masm.moveValue(rhs->toConstant()->toJSValue(), ValueOperand(scratch));
+    } else {
+        masm.boxValue(JSVAL_TYPE_BOOLEAN, ToRegister(rhs), scratch);
+    }
+
+    // Compare the entire Value.
+    masm.cmpPtr(lhs.valueReg(), scratch);
+    emitBranch(cond, lir->ifTrue(), lir->ifFalse());
 }
 
 void
 CodeGenerator::visitCompareBitwise(LCompareBitwise* lir)
 {
-    MOZ_CRASH("visitCompareBitwise");
+    MCompare* mir = lir->mir();
+    Assembler::Condition cond = JSOpToCondition(mir->compareType(), mir->jsop());
+    const ValueOperand lhs = ToValue(lir, LCompareBitwise::LhsInput);
+    const ValueOperand rhs = ToValue(lir, LCompareBitwise::RhsInput);
+    const Register output = ToRegister(lir->output());
+
+    MOZ_ASSERT(IsEqualityOp(mir->jsop()));
+
+    masm.cmpPtrSet(cond, lhs.valueReg(), rhs.valueReg(), output);
 }
 
 void
 CodeGenerator::visitCompareBitwiseAndBranch(LCompareBitwiseAndBranch* lir)
 {
-    MOZ_CRASH("visitCompareBitwiseAndBranch");
+    MCompare* mir = lir->cmpMir();
+    Assembler::Condition cond = JSOpToCondition(mir->compareType(), mir->jsop());
+    const ValueOperand lhs = ToValue(lir, LCompareBitwiseAndBranch::LhsInput);
+    const ValueOperand rhs = ToValue(lir, LCompareBitwiseAndBranch::RhsInput);
+
+    MOZ_ASSERT(mir->jsop() == JSOP_EQ || mir->jsop() == JSOP_STRICTEQ ||
+               mir->jsop() == JSOP_NE || mir->jsop() == JSOP_STRICTNE);
+
+    masm.cmpPtr(lhs.valueReg(), rhs.valueReg());
+    emitBranch(cond, lir->ifTrue(), lir->ifFalse());
 }
 
 void
 CodeGenerator::visitBitAndAndBranch(LBitAndAndBranch* baab)
 {
-    MOZ_CRASH("visitBitAndAndBranch");
+    if (baab->right()->isConstant()) {
+        masm.Tst(toWRegister(baab->left()), Operand(ToInt32(baab->right())));
+    } else {
+        masm.Tst(toWRegister(baab->left()), toWRegister(baab->right()));
+    }
+    emitBranch(Assembler::NonZero, baab->ifTrue(), baab->ifFalse());
 }
 
 void
 CodeGenerator::visitWasmUint32ToDouble(LWasmUint32ToDouble* lir)
 {
-    MOZ_CRASH("visitWasmUint32ToDouble");
+    masm.convertUInt32ToDouble(ToRegister(lir->input()), ToFloatRegister(lir->output()));
 }
 
 void
 CodeGenerator::visitWasmUint32ToFloat32(LWasmUint32ToFloat32* lir)
 {
-    MOZ_CRASH("visitWasmUint32ToFloat32");
+    masm.convertUInt32ToFloat32(ToRegister(lir->input()), ToFloatRegister(lir->output()));
 }
 
 void
 CodeGenerator::visitNotI(LNotI* ins)
 {
-    MOZ_CRASH("visitNotI");
+    ARMRegister input = toWRegister(ins->input());
+    ARMRegister output = toWRegister(ins->output());
+
+    masm.Cmp(input, ZeroRegister32);
+    masm.Cset(output, Assembler::Zero);
 }
 
 //        NZCV
@@ -919,13 +1182,33 @@ CodeGenerator::visitNotI(LNotI* ins)
 void
 CodeGenerator::visitNotD(LNotD* ins)
 {
-    MOZ_CRASH("visitNotD");
+    ARMFPRegister input(ToFloatRegister(ins->input()), 64);
+    ARMRegister output = toWRegister(ins->output());
+
+    // Set output to 1 if input compares equal to 0.0, else 0.
+    masm.Fcmp(input, 0.0);
+    masm.Cset(output, Assembler::Equal);
+
+    // Comparison with NaN sets V in the NZCV register.
+    // If the input was NaN, output must now be zero, so it can be incremented.
+    // The instruction is read: "output = if NoOverflow then output else 0+1".
+    masm.Csinc(output, output, ZeroRegister32, Assembler::NoOverflow);
 }
 
 void
 CodeGenerator::visitNotF(LNotF* ins)
 {
-    MOZ_CRASH("visitNotF");
+    ARMFPRegister input(ToFloatRegister(ins->input()), 32);
+    ARMRegister output = toWRegister(ins->output());
+
+    // Set output to 1 input compares equal to 0.0, else 0.
+    masm.Fcmp(input, 0.0);
+    masm.Cset(output, Assembler::Equal);
+
+    // Comparison with NaN sets V in the NZCV register.
+    // If the input was NaN, output must now be zero, so it can be incremented.
+    // The instruction is read: "output = if NoOverflow then output else 0+1".
+    masm.Csinc(output, output, ZeroRegister32, Assembler::NoOverflow);
 }
 
 void
@@ -946,6 +1229,9 @@ CodeGeneratorARM64::generateInvalidateEpilogue()
     }
 
     masm.bind(&invalidate_);
+
+    // Push the return address of the point that we bailout out onto the stack.
+    masm.push(lr);
 
     // Push the Ion script onto the stack (when we determine what that pointer is).
     invalidateEpilogueData_ = masm.pushWithPatch(ImmWord(uintptr_t(-1)));
@@ -1013,25 +1299,37 @@ CodeGenerator::visitUMod(LUMod* ins)
 void
 CodeGenerator::visitEffectiveAddress(LEffectiveAddress* ins)
 {
-    MOZ_CRASH("visitEffectiveAddress");
+    const MEffectiveAddress* mir = ins->mir();
+    const ARMRegister base = toXRegister(ins->base());
+    const ARMRegister index = toXRegister(ins->index());
+    const ARMRegister output = toXRegister(ins->output());
+
+    masm.Add(output, base, Operand(index, vixl::LSL, mir->scale()));
+    masm.Add(output, output, Operand(mir->displacement()));
 }
 
 void
 CodeGenerator::visitNegI(LNegI* ins)
 {
-    MOZ_CRASH("visitNegI");
+    const ARMRegister input = toWRegister(ins->input());
+    const ARMRegister output = toWRegister(ins->output());
+    masm.Neg(output, input);
 }
 
 void
 CodeGenerator::visitNegD(LNegD* ins)
 {
-    MOZ_CRASH("visitNegD");
+    const ARMFPRegister input(ToFloatRegister(ins->input()), 64);
+    const ARMFPRegister output(ToFloatRegister(ins->input()), 64);
+    masm.Fneg(output, input);
 }
 
 void
 CodeGenerator::visitNegF(LNegF* ins)
 {
-    MOZ_CRASH("visitNegF");
+    const ARMFPRegister input(ToFloatRegister(ins->input()), 32);
+    const ARMFPRegister output(ToFloatRegister(ins->input()), 32);
+    masm.Fneg(output, input);
 }
 
 void

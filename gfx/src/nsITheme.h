@@ -41,10 +41,6 @@ class IpcResourceUpdateQueue;
  #define NS_ITHEME_IID     \
 { 0x7329f760, 0x08cb, 0x450f, \
   { 0x82, 0x25, 0xda, 0xe7, 0x29, 0x09, 0x6d, 0xec } }
-// {0ae05515-cf7a-45a8-9e02-6556de7685b1}
-#define NS_THEMERENDERER_CID \
-{ 0x0ae05515, 0xcf7a, 0x45a8, \
-  { 0x9e, 0x02, 0x65, 0x56, 0xde, 0x76, 0x85, 0xb1 } }
 
 /**
  * nsITheme is a service that provides platform-specific native
@@ -59,7 +55,7 @@ class IpcResourceUpdateQueue;
 class nsITheme: public nsISupports {
 protected:
   using LayoutDeviceIntMargin = mozilla::LayoutDeviceIntMargin;
-  using WidgetType = mozilla::StyleAppearance;
+  using StyleAppearance = mozilla::StyleAppearance;
 
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ITHEME_IID)
@@ -74,17 +70,9 @@ public:
    */
   NS_IMETHOD DrawWidgetBackground(gfxContext* aContext,
                                   nsIFrame* aFrame,
-                                  WidgetType aWidgetType,
+                                  StyleAppearance aWidgetType,
                                   const nsRect& aRect,
                                   const nsRect& aDirtyRect) = 0;
-
-  /**
-   * Get the used color of the given widget when it's specified as auto.
-   * It's currently only used for scrollbar-*-color properties.
-   */
-  virtual nscolor GetWidgetAutoColor(mozilla::ComputedStyle* aStyle,
-                                     WidgetType aWidgetType)
-  { return NS_RGB(0, 0, 0); }
 
   /**
    * Create WebRender commands for the theme background.
@@ -97,7 +85,7 @@ public:
                                                 const mozilla::layers::StackingContextHelper& aSc,
                                                 mozilla::layers::WebRenderLayerManager* aManager,
                                                 nsIFrame* aFrame,
-                                                WidgetType aWidgetType,
+                                                StyleAppearance aWidgetType,
                                                 const nsRect& aRect) { return false; }
 
   /**
@@ -105,7 +93,7 @@ public:
    */
   virtual MOZ_MUST_USE LayoutDeviceIntMargin GetWidgetBorder(nsDeviceContext* aContext,
                                                              nsIFrame* aFrame,
-                                                             WidgetType aWidgetType) = 0;
+                                                             StyleAppearance aWidgetType) = 0;
 
   /**
    * This method can return false to indicate that the CSS padding
@@ -118,7 +106,7 @@ public:
    */
   virtual bool GetWidgetPadding(nsDeviceContext* aContext,
                                 nsIFrame* aFrame,
-                                WidgetType aWidgetType,
+                                StyleAppearance aWidgetType,
                                 LayoutDeviceIntMargin* aResult) = 0;
 
   /**
@@ -137,7 +125,7 @@ public:
    */
   virtual bool GetWidgetOverflow(nsDeviceContext* aContext,
                                  nsIFrame* aFrame,
-                                 WidgetType aWidgetType,
+                                 StyleAppearance aWidgetType,
                                  /*INOUT*/ nsRect* aOverflowRect)
   { return false; }
 
@@ -149,7 +137,7 @@ public:
    */
   NS_IMETHOD GetMinimumWidgetSize(nsPresContext* aPresContext,
                                   nsIFrame* aFrame,
-                                  WidgetType aWidgetType,
+                                  StyleAppearance aWidgetType,
                                   mozilla::LayoutDeviceIntSize* aResult,
                                   bool* aIsOverridable)=0;
 
@@ -163,7 +151,8 @@ public:
   /**
    * Returns what we know about the transparency of the widget.
    */
-  virtual Transparency GetWidgetTransparency(nsIFrame* aFrame, WidgetType aWidgetType)
+  virtual Transparency GetWidgetTransparency(nsIFrame* aFrame,
+                                             StyleAppearance aWidgetType)
   { return eUnknownTransparency; }
 
   /**
@@ -171,16 +160,18 @@ public:
    * change should trigger a repaint.  Call with null |aAttribute| (and
    * null |aOldValue|) for content state changes.
    */
-  NS_IMETHOD WidgetStateChanged(nsIFrame* aFrame, WidgetType aWidgetType,
+  NS_IMETHOD WidgetStateChanged(nsIFrame* aFrame,
+                                StyleAppearance aWidgetType,
                                 nsAtom* aAttribute, bool* aShouldRepaint,
                                 const nsAttrValue* aOldValue)=0;
 
   NS_IMETHOD ThemeChanged()=0;
 
-  virtual bool WidgetAppearanceDependsOnWindowFocus(WidgetType aWidgetType)
+  virtual bool WidgetAppearanceDependsOnWindowFocus(StyleAppearance aWidgetType)
   { return false; }
 
-  virtual bool NeedToClearBackgroundBehindWidget(nsIFrame* aFrame, WidgetType aWidgetType)
+  virtual bool NeedToClearBackgroundBehindWidget(nsIFrame* aFrame,
+                                                 StyleAppearance aWidgetType)
   { return false; }
 
   /**
@@ -207,7 +198,7 @@ public:
    * not be included in the ThemeGeometry array.
    */
   virtual ThemeGeometryType ThemeGeometryTypeForWidget(nsIFrame* aFrame,
-                                                       WidgetType aWidgetType)
+                                                       StyleAppearance aWidgetType)
   { return eThemeGeometryTypeUnknown; }
 
   /**
@@ -215,14 +206,14 @@ public:
    */
   virtual bool ThemeSupportsWidget(nsPresContext* aPresContext,
                                    nsIFrame* aFrame,
-                                   WidgetType aWidgetType) = 0;
+                                   StyleAppearance aWidgetType) = 0;
 
-  virtual bool WidgetIsContainer(WidgetType aWidgetType) = 0;
+  virtual bool WidgetIsContainer(StyleAppearance aWidgetType) = 0;
 
   /**
    * Does the nsITheme implementation draw its own focus ring for this widget?
    */
-  virtual bool ThemeDrawsFocusForWidget(WidgetType aWidgetType) = 0;
+  virtual bool ThemeDrawsFocusForWidget(StyleAppearance aWidgetType) = 0;
   
   /**
     * Should we insert a dropmarker inside of combobox button?
@@ -232,7 +223,7 @@ public:
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsITheme, NS_ITHEME_IID)
 
-// Creator function
-extern nsresult NS_NewNativeTheme(nsISupports *aOuter, REFNSIID aIID, void **aResult);
+// Singleton accessor function
+extern already_AddRefed<nsITheme> do_GetNativeTheme();
 
 #endif

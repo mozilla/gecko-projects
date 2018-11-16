@@ -120,31 +120,6 @@ class Selection;
 
 } // namespace mozilla
 
-/**
- * Indication of how the frame can be split. This is used when doing runaround
- * of floats, and when pulling up child frames from a next-in-flow.
- *
- * The choices are splittable, not splittable at all, and splittable in
- * a non-rectangular fashion. This last type only applies to block-level
- * elements, and indicates whether splitting can be used when doing runaround.
- * If you can split across page boundaries, but you expect each continuing
- * frame to be the same width then return frSplittable and not
- * frSplittableNonRectangular.
- *
- * @see #GetSplittableType()
- */
-typedef uint32_t nsSplittableType;
-
-#define NS_FRAME_NOT_SPLITTABLE             0   // Note: not a bit!
-#define NS_FRAME_SPLITTABLE                 0x1
-#define NS_FRAME_SPLITTABLE_NON_RECTANGULAR 0x3
-
-#define NS_FRAME_IS_SPLITTABLE(type)\
-  (0 != ((type) & NS_FRAME_SPLITTABLE))
-
-#define NS_FRAME_IS_NOT_SPLITTABLE(type)\
-  (0 == ((type) & NS_FRAME_SPLITTABLE))
-
 //----------------------------------------------------------------------
 
 #define NS_SUBTREE_DIRTY(_frame)  \
@@ -190,16 +165,6 @@ enum nsSelectionAmount {
   eSelectNoAmount  = 7, // just bounce back current offset.
   eSelectParagraph = 8  // select a "paragraph"
 };
-
-enum nsSpread {
-  eSpreadNone   = 0,
-  eSpreadAcross = 1,
-  eSpreadDown   = 2
-};
-
-// Carried out margin flags
-#define NS_CARRIED_TOP_MARGIN_IS_AUTO    0x1
-#define NS_CARRIED_BOTTOM_MARGIN_IS_AUTO 0x2
 
 //----------------------------------------------------------------------
 // Reflow status returned by the Reflow() methods.
@@ -368,11 +333,9 @@ private:
 #define NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aMetrics) \
   aStatus.UpdateTruncated(aReflowInput, aMetrics);
 
-#ifdef DEBUG
 // Convert nsReflowStatus to a human-readable string.
 std::ostream&
 operator<<(std::ostream& aStream, const nsReflowStatus& aStatus);
-#endif
 
 //----------------------------------------------------------------------
 
@@ -774,10 +737,18 @@ public:
    * Get the style associated with this frame.
    */
   ComputedStyle* Style() const { return mComputedStyle; }
+
+  void AssertNewStyleIsSane(ComputedStyle&)
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    ;
+#else
+    { }
+#endif
+
   void SetComputedStyle(ComputedStyle* aStyle)
   {
     if (aStyle != mComputedStyle) {
-      MOZ_DIAGNOSTIC_ASSERT(PresShell() == aStyle->PresContextForFrame()->PresShell());
+      AssertNewStyleIsSane(*aStyle);
       RefPtr<ComputedStyle> oldComputedStyle = mComputedStyle.forget();
       mComputedStyle = aStyle;
       DidSetComputedStyle(oldComputedStyle);
@@ -867,12 +838,15 @@ public:
   /**
    * Gets the parent of a frame, using the parent of the placeholder for
    * out-of-flow frames.
-   *
-   * This is effectively the primary frame (or one of the continuations) of the
-   * closest flattened tree ancestor that has a frame (flattened tree ancestors
-   * may not have frames in presence of display: contents).
    */
   inline nsContainerFrame* GetInFlowParent() const;
+
+  /**
+   * Gets the primary frame of the closest flattened tree ancestor that has a
+   * frame (flattened tree ancestors may not have frames in presence of display:
+   * contents).
+   */
+  inline nsIFrame* GetClosestFlattenedTreeAncestorPrimaryFrame() const;
 
   /**
    * Return the placeholder for this frame (which must be out-of-flow).
@@ -1251,13 +1225,18 @@ public:
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(IBaselinePadProperty, nscoord)
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(BBaselinePadProperty, nscoord)
 
-  NS_DECLARE_FRAME_PROPERTY_DELETABLE(ModifiedFrameList, nsTArray<nsIFrame*>)
-  NS_DECLARE_FRAME_PROPERTY_DELETABLE(OverriddenDirtyRectFrameList, nsTArray<nsIFrame*>)
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(DisplayItems, DisplayItemArray)
 
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(BidiDataProperty, mozilla::FrameBidiData)
 
   NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(PlaceholderFrameProperty, nsPlaceholderFrame)
+
+  // HasColumnSpanSiblings property stores whether the frame has any
+  // column-span siblings under the same multi-column ancestor. That is, the
+  // frame's element has column-span descendants without an intervening
+  // multi-column container element in between them. If the frame having
+  // this bit set is removed, we need to reframe the multi-column container
+  NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(HasColumnSpanSiblings, bool)
 
   mozilla::FrameBidiData GetBidiData() const
   {
@@ -2067,11 +2046,6 @@ public:
    * @param aStates the changed states
    */
   virtual void ContentStatesChanged(mozilla::EventStates aStates);
-
-  /**
-   * Return how your frame can be split.
-   */
-  virtual nsSplittableType GetSplittableType() const = 0;
 
   /**
    * Continuation member functions
@@ -3918,6 +3892,19 @@ public:
   inline bool IsRelativelyPositioned() const;
   inline bool IsAbsolutelyPositioned(const nsStyleDisplay* aStyleDisplay = nullptr) const;
 
+  // Does this frame have "column-span: all" style.
+  //
+  // Note this only checks computed style, but not testing whether the
+  // containing block formatting context was established by a multicol.
+  // Callers need to consider NS_FRAME_HAS_MULTI_COLUMN_ANCESTOR to check
+  // whether multi-column effects apply or not, or use
+  // IsColumnSpanInMulticolSubtree().
+  inline bool IsColumnSpan() const;
+
+  // Like IsColumnSpan(), but this also checks whether the frame has a
+  // multi-column ancestor or not.
+  inline bool IsColumnSpanInMulticolSubtree() const;
+
   /**
    * Returns the vertical-align value to be used for layout, if it is one
    * of the enumerated values.  If this is an SVG text frame, it returns a value
@@ -4104,6 +4091,10 @@ public:
                             ComputeSizeFlags    aFlags = eDefault);
 
   DisplayItemDataArray& DisplayItemData() { return mDisplayItemData; }
+  const DisplayItemDataArray& DisplayItemData() const
+  {
+    return mDisplayItemData;
+  }
 
   void AddDisplayItem(nsDisplayItem* aItem);
   bool RemoveDisplayItem(nsDisplayItem* aItem);
@@ -4125,6 +4116,11 @@ public:
 
   bool MayHaveWillChangeBudget() { return mMayHaveWillChangeBudget; }
   void SetMayHaveWillChangeBudget(bool aHasBudget) { mMayHaveWillChangeBudget = aHasBudget; }
+
+  /**
+   * Returns the hit test area of the frame.
+   */
+  nsRect GetCompositorHitTestArea(nsDisplayListBuilder* aBuilder);
 
   /**
    * Returns the set of flags indicating the properties of the frame that the

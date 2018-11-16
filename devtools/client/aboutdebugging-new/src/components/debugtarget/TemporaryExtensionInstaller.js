@@ -4,9 +4,12 @@
 
 "use strict";
 
-const { PureComponent } = require("devtools/client/shared/vendor/react");
+const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
+
+const FluentReact = require("devtools/client/shared/vendor/fluent-react");
+const Localized = createFactory(FluentReact.Localized);
 
 const Actions = require("../../actions/index");
 
@@ -25,12 +28,17 @@ class TemporaryExtensionInstaller extends PureComponent {
   }
 
   render() {
-    return dom.button(
+    return Localized(
       {
-        className: "aboutdebugging-button",
-        onClick: e => this.install()
+        id: "about-debugging-tmp-extension-install-button",
       },
-      "Load Temporary Add-on…"
+      dom.button(
+        {
+          className: "default-button js-temporary-extension-install-button",
+          onClick: e => this.install(),
+        },
+        "Load Temporary Add-on…"
+      )
     );
   }
 }

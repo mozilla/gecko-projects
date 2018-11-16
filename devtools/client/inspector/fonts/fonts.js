@@ -6,11 +6,9 @@
 
 "use strict";
 
-const Services = require("Services");
 const { gDevTools } = require("devtools/client/framework/devtools");
 const { getColor } = require("devtools/client/shared/theme");
 const { createFactory, createElement } = require("devtools/client/shared/vendor/react");
-const { getCssProperties } = require("devtools/shared/fronts/css-properties");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
 const { debounce } = require("devtools/shared/debounce");
 const { ELEMENT_STYLE } = require("devtools/shared/specs/styles");
@@ -46,7 +44,6 @@ const FONT_PROPERTIES = [
   "font-weight",
   "line-height",
 ];
-const PREF_FONT_EDITOR = "devtools.inspector.fonteditor.enabled";
 const REGISTERED_AXES_TO_FONT_PROPERTIES = {
   "ital": "font-style",
   "opsz": "font-optical-sizing",
@@ -62,7 +59,7 @@ const HISTOGRAM_FONT_TYPE_DISPLAYED = "DEVTOOLS_FONTEDITOR_FONT_TYPE_DISPLAYED";
 
 class FontInspector {
   constructor(inspector, window) {
-    this.cssProperties = getCssProperties(inspector.toolbox);
+    this.cssProperties = inspector.cssProperties;
     this.document = window.document;
     this.inspector = inspector;
     // Set of unique keyword values supported by designated font properties.
@@ -100,7 +97,6 @@ class FontInspector {
     }
 
     const fontsApp = FontsApp({
-      fontEditorEnabled: Services.prefs.getBoolPref(PREF_FONT_EDITOR),
       onInstanceChange: this.onInstanceChange,
       onToggleFontHighlight: this.onToggleFontHighlight,
       onPreviewTextChange: this.onPreviewTextChange,
@@ -374,7 +370,7 @@ class FontInspector {
       "font-size",
       "font-weight",
       "font-stretch",
-      "line-height"
+      "line-height",
     ].reduce((acc, property) => {
       return acc.concat(this.cssProperties.getValues(property));
     }, []);
@@ -563,11 +559,11 @@ class FontInspector {
    * Upon a new node selection, log some interesting telemetry probes.
    */
   logTelemetryProbesOnNewNode() {
-    const { fontData, fontEditor } = this.store.getState();
+    const { fontEditor } = this.store.getState();
     const { telemetry } = this.inspector;
 
     // Log the number of font faces used to render content of the element.
-    const nbOfFontsRendered = fontData.fonts.length;
+    const nbOfFontsRendered = fontEditor.fonts.length;
     if (nbOfFontsRendered) {
       telemetry.getHistogramById(HISTOGRAM_N_FONTS_RENDERED).add(nbOfFontsRendered);
     }
@@ -808,11 +804,6 @@ class FontInspector {
    * and the ones already in the store to decide if to update the font editor state.
    */
   async refreshFontEditor() {
-    // Early return if pref for font editor is not enabled.
-    if (!Services.prefs.getBoolPref(PREF_FONT_EDITOR)) {
-      return;
-    }
-
     if (!this.store || !this.isSelectedNodeValid()) {
       if (this.inspector.selection.isPseudoElementNode()) {
         const noPseudoWarning = getStr("fontinspector.noPseduoWarning");
@@ -843,7 +834,7 @@ class FontInspector {
     try {
       // Get computed styles for the selected node, but filter by CSS font properties.
       this.nodeComputedStyle = await this.pageStyle.getComputed(node, {
-        filterProperties: FONT_PROPERTIES
+        filterProperties: FONT_PROPERTIES,
       });
     } catch (e) {
       // Because getComputed is async, there is a chance the font editor was
@@ -906,11 +897,9 @@ class FontInspector {
     }
 
     let allFonts = [];
-    let fonts = [];
-    let otherFonts = [];
 
     if (!this.isSelectedNodeValid()) {
-      this.store.dispatch(updateFonts(fonts, otherFonts, allFonts));
+      this.store.dispatch(updateFonts(allFonts));
       return;
     }
 
@@ -919,43 +908,24 @@ class FontInspector {
 
     const options = {
       includePreviews: true,
+      // Coerce the type of `supportsFontVariations` to a boolean.
+      includeVariations: !!this.pageStyle.supportsFontVariations,
       previewText,
-      previewFillStyle: getColor("body-color")
+      previewFillStyle: getColor("body-color"),
     };
 
-    // Add the includeVariations argument into the option to get font variation data.
-    if (this.pageStyle.supportsFontVariations) {
-      options.includeVariations = true;
-    }
-
-    const node = this.inspector.selection.nodeFront;
-    fonts = await this.getFontsForNode(node, options);
+    // If there are no fonts used on the page, the result is an empty array.
     allFonts = await this.getAllFonts(options);
-    // Get the subset of fonts from the page which are not used on the selected node.
-    otherFonts = allFonts.filter(font => {
-      return !fonts.some(nodeFont => nodeFont.name === font.name);
-    });
 
-    if (!fonts.length && !otherFonts.length) {
-      // No fonts to display. Clear the previously shown fonts.
-      if (this.store) {
-        this.store.dispatch(updateFonts(fonts, otherFonts, allFonts));
-      }
-      return;
-    }
-
+    // Augment each font object with a dataURI for an image with a sample of the font.
     for (const font of [...allFonts]) {
       font.previewUrl = await font.preview.data.string();
     }
 
-    // in case we've been destroyed in the meantime
-    if (!this.document) {
-      return;
-    }
-
-    this.store.dispatch(updateFonts(fonts, otherFonts, allFonts));
-
-    this.inspector.emit("fontinspector-updated");
+    // Dispatch to the store if it hasn't been destroyed in the meantime.
+    this.store && this.store.dispatch(updateFonts(allFonts));
+    // Emit on the inspector if it hasn't been destroyed in the meantime.
+    this.inspector && this.inspector.emit("fontinspector-updated");
   }
 
   /**

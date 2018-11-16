@@ -48,14 +48,12 @@ public:
   NS_DECL_NSICONTENTPERMISSIONTYPE
 
   ContentPermissionType(const nsACString& aType,
-                        const nsACString& aAccess,
                         const nsTArray<nsString>& aOptions);
 
 protected:
   virtual ~ContentPermissionType();
 
   nsCString mType;
-  nsCString mAccess;
   nsTArray<nsString> mOptions;
 };
 
@@ -72,7 +70,6 @@ public:
 
   static nsresult
   CreatePermissionArray(const nsACString& aType,
-                        const nsACString& aAccess,
                         const nsTArray<nsString>& aOptions,
                         nsIArray** aTypesArray);
 
@@ -113,6 +110,51 @@ private:
 
   nsWeakPtr mWindow;
   RefPtr<VisibilityChangeListener> mListener;
+};
+
+class ContentPermissionRequestBase : public nsIContentPermissionRequest
+{
+public:
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS(ContentPermissionRequestBase)
+
+  NS_IMETHOD GetTypes(nsIArray **aTypes) override;
+  NS_IMETHOD GetPrincipal(nsIPrincipal **aPrincipal) override;
+  NS_IMETHOD GetWindow(mozIDOMWindow **aWindow) override;
+  NS_IMETHOD GetElement(mozilla::dom::Element **aElement) override;
+  NS_IMETHOD GetIsHandlingUserInput(bool *aIsHandlingUserInput) override;
+  NS_IMETHOD GetRequester(nsIContentPermissionRequester **aRequester) override;
+  // Overrides for Allow() and Cancel() aren't provided by this class.
+  // That is the responsibility of the subclasses.
+
+  enum class PromptResult {
+    Granted,
+    Denied,
+    Pending,
+  };
+  nsresult ShowPrompt(PromptResult& aResult);
+
+  PromptResult CheckPromptPrefs();
+
+  enum class DelayedTaskType {
+    Allow,
+    Deny,
+    Request,
+  };
+  void RequestDelayedTask(nsIEventTarget* aTarget, DelayedTaskType aType);
+
+protected:
+  ContentPermissionRequestBase(nsIPrincipal* aPrincipal, bool aIsHandlingUserInput,
+                               nsPIDOMWindowInner* aWindow, const nsACString& aPrefName,
+                               const nsACString& aType);
+  virtual ~ContentPermissionRequestBase() = default;
+
+  nsCOMPtr<nsIPrincipal> mPrincipal;
+  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  nsCOMPtr<nsIContentPermissionRequester> mRequester;
+  nsCString mPrefName;
+  nsCString mType;
+  bool mIsHandlingUserInput;
 };
 
 } // namespace dom

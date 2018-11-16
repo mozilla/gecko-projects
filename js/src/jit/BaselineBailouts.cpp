@@ -489,21 +489,20 @@ HasLiveStackValueAtDepth(JSScript* script, jsbytecode* pc, uint32_t stackDepth)
         return false;
     }
 
-    JSTryNote* tn = script->trynotes()->vector;
-    JSTryNote* tnEnd = tn + script->trynotes()->length;
-    uint32_t pcOffset = uint32_t(pc - script->main());
-    for (; tn != tnEnd; ++tn) {
-        if (pcOffset < tn->start) {
+    uint32_t pcOffset = script->pcToOffset(pc);
+
+    for (const JSTryNote& tn : script->trynotes()) {
+        if (pcOffset < tn.start) {
             continue;
         }
-        if (pcOffset >= tn->start + tn->length) {
+        if (pcOffset >= tn.start + tn.length) {
             continue;
         }
 
-        switch (tn->kind) {
+        switch (tn.kind) {
           case JSTRY_FOR_IN:
             // For-in loops have only the iterator on stack.
-            if (stackDepth == tn->stackDepth) {
+            if (stackDepth == tn.stackDepth) {
                 return true;
             }
             break;
@@ -513,7 +512,7 @@ HasLiveStackValueAtDepth(JSScript* script, jsbytecode* pc, uint32_t stackDepth)
             // result.value on stack.
             // The iterator is below the result.value, the next method below
             // the iterator.
-            if (stackDepth == tn->stackDepth - 1 || stackDepth == tn->stackDepth - 2) {
+            if (stackDepth == tn.stackDepth - 1 || stackDepth == tn.stackDepth - 2) {
                 return true;
             }
             break;
@@ -521,7 +520,7 @@ HasLiveStackValueAtDepth(JSScript* script, jsbytecode* pc, uint32_t stackDepth)
           case JSTRY_DESTRUCTURING_ITERCLOSE:
             // Destructuring code that need to call IteratorClose have both
             // the iterator and the "done" value on the stack.
-            if (stackDepth == tn->stackDepth || stackDepth == tn->stackDepth - 1) {
+            if (stackDepth == tn.stackDepth || stackDepth == tn.stackDepth - 1) {
                 return true;
             }
             break;
@@ -1194,10 +1193,13 @@ InitFromBailout(JSContext* cx, size_t frameNo,
 
             // Set the resume address to the return point from the IC, and set
             // the monitor stub addr.
-            builder.setResumeAddr(baselineScript->returnAddressForIC(icEntry));
+            RetAddrEntry& retAddrEntry =
+                baselineScript->retAddrEntryFromPCOffset(pcOff, RetAddrEntry::Kind::IC);
+            uint8_t* retAddr = baselineScript->returnAddressForEntry(retAddrEntry);
+            builder.setResumeAddr(retAddr);
             builder.setMonitorStub(firstMonStub);
             JitSpew(JitSpew_BaselineBailouts, "      Set resumeAddr=%p monitorStub=%p",
-                    baselineScript->returnAddressForIC(icEntry), firstMonStub);
+                    retAddr, firstMonStub);
 
         } else {
             // If needed, initialize BaselineBailoutInfo's valueR0 and/or valueR1 with the
@@ -1214,12 +1216,13 @@ InitFromBailout(JSContext* cx, size_t frameNo,
                 // the correct pc offset of the throwing op instead of its
                 // successor (this pc will be used as the BaselineFrame's
                 // override pc).
-                //
-                // Note that we never resume at this pc, it is set for the sake
-                // of frame iterators giving the correct answer.
                 jsbytecode* throwPC = script->offsetToPC(iter.pcOffset());
                 builder.setResumePC(throwPC);
-                nativeCodeForPC = baselineScript->nativeCodeForPC(script, throwPC);
+
+                // Note that we never resume at this pc, it is set for the sake
+                // of frame iterators giving the correct answer.
+                PCMappingSlotInfo unused;
+                nativeCodeForPC = baselineScript->nativeCodeForPC(script, throwPC, &unused);
             } else {
                 nativeCodeForPC = baselineScript->nativeCodeForPC(script, pc, &slotInfo);
             }
@@ -1258,7 +1261,7 @@ InitFromBailout(JSContext* cx, size_t frameNo,
                 // resume into the prologue for function scripts.
                 MOZ_ASSERT(fun);
                 MOZ_ASSERT(numUnsynced == 0);
-                opReturnAddr = baselineScript->prologueEntryAddr();
+                opReturnAddr = baselineScript->bailoutPrologueEntryAddr();
                 JitSpew(JitSpew_BaselineBailouts, "      Resuming into prologue.");
 
                 // Undo the progress for any loop entry we thought we were skipping
@@ -1310,7 +1313,10 @@ InitFromBailout(JSContext* cx, size_t frameNo,
     // The icEntry in question MUST have an inlinable fallback stub.
     ICEntry& icEntry = baselineScript->icEntryFromPCOffset(pcOff);
     MOZ_ASSERT(IsInlinableFallback(icEntry.firstStub()->getChainFallback()));
-    if (!builder.writePtr(baselineScript->returnAddressForIC(icEntry), "ReturnAddr")) {
+
+    RetAddrEntry& retAddrEntry =
+        baselineScript->retAddrEntryFromPCOffset(pcOff, RetAddrEntry::Kind::IC);
+    if (!builder.writePtr(baselineScript->returnAddressForEntry(retAddrEntry), "ReturnAddr")) {
         return false;
     }
 

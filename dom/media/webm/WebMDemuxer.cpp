@@ -15,7 +15,6 @@
 #include "WebMDemuxer.h"
 #include "WebMBufferedParser.h"
 #include "gfx2DGlue.h"
-#include "mozilla/Atomics.h"
 #include "mozilla/EndianUtils.h"
 #include "mozilla/SharedThreadPool.h"
 #include "MediaDataDemuxer.h"
@@ -49,8 +48,6 @@ LazyLogModule gNesteggLog("Nestegg");
 // This value is based on what appears to be a reasonable value as most webm
 // files encountered appear to have keyframes located < 4s.
 #define MAX_LOOK_AHEAD 10000000
-
-static Atomic<uint32_t> sStreamSourceID(0u);
 
 // Functions for reading and seeking using WebMDemuxer required for
 // nestegg_io. The 'user data' passed to these functions is the
@@ -597,45 +594,41 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType,
   // the timestamp of the next packet for this track.  If we've reached the
   // end of the resource, use the file's duration as the end time of this
   // video frame.
+  RefPtr<NesteggPacketHolder> next_holder;
+  rv = NextPacket(aType, next_holder);
+  if (NS_FAILED(rv) && rv != NS_ERROR_DOM_MEDIA_END_OF_STREAM) {
+    return rv;
+  }
+
   int64_t next_tstamp = INT64_MIN;
-  if (aType == TrackInfo::kAudioTrack) {
-    RefPtr<NesteggPacketHolder> next_holder;
-    rv = NextPacket(aType, next_holder);
-    if (NS_FAILED(rv) && rv != NS_ERROR_DOM_MEDIA_END_OF_STREAM) {
-      return rv;
-    }
-    if (next_holder) {
-      next_tstamp = next_holder->Timestamp();
-      PushAudioPacket(next_holder);
-    } else if (duration >= 0) {
-      next_tstamp = tstamp + duration;
-    } else if (!mIsMediaSource ||
-               (mIsMediaSource && mLastAudioFrameTime.isSome())) {
-      next_tstamp = tstamp;
-      next_tstamp += tstamp - mLastAudioFrameTime.refOr(0);
-    } else {
-      PushAudioPacket(holder);
-    }
-    mLastAudioFrameTime = Some(tstamp);
-  } else if (aType == TrackInfo::kVideoTrack) {
-    RefPtr<NesteggPacketHolder> next_holder;
-    rv = NextPacket(aType, next_holder);
-    if (NS_FAILED(rv) && rv != NS_ERROR_DOM_MEDIA_END_OF_STREAM) {
-      return rv;
-    }
-    if (next_holder) {
-      next_tstamp = next_holder->Timestamp();
-      PushVideoPacket(next_holder);
-    } else if (duration >= 0) {
-      next_tstamp = tstamp + duration;
-    } else if (!mIsMediaSource ||
-               (mIsMediaSource && mLastVideoFrameTime.isSome())) {
-      next_tstamp = tstamp;
-      next_tstamp += tstamp - mLastVideoFrameTime.refOr(0);
-    } else {
-      PushVideoPacket(holder);
-    }
-    mLastVideoFrameTime = Some(tstamp);
+  auto calculateNextTimestamp =
+    [&] (auto&& pushPacket, auto&& lastFrameTime, auto&& trackEndTime) {
+      if (next_holder) {
+        next_tstamp = next_holder->Timestamp();
+        (this->*pushPacket)(next_holder);
+      } else if (duration >= 0) {
+        next_tstamp = tstamp + duration;
+      } else if (lastFrameTime.isSome()) {
+        next_tstamp = tstamp + (tstamp - lastFrameTime.ref());
+      } else if (mIsMediaSource) {
+        (this->*pushPacket)(holder);
+      } else {
+        // If we can't get frame's duration, it means either we need to wait for
+        // more data for MSE case or this is the last frame for file resource case.
+        MOZ_ASSERT(trackEndTime >= tstamp);
+        next_tstamp = trackEndTime;
+      }
+      lastFrameTime = Some(tstamp);
+  };
+
+  if (aType == TrackInfo::kAudioTrack)  {
+    calculateNextTimestamp(&WebMDemuxer::PushAudioPacket,
+                           mLastAudioFrameTime,
+                           mInfo.mAudio.mDuration.ToMicroseconds());
+  } else {
+    calculateNextTimestamp(&WebMDemuxer::PushVideoPacket,
+                           mLastVideoFrameTime,
+                           mInfo.mVideo.mDuration.ToMicroseconds());
   }
 
   if (mIsMediaSource && next_tstamp == INT64_MIN) {
@@ -676,11 +669,16 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType,
     if (aType == TrackInfo::kAudioTrack) {
       isKeyframe = true;
     } else if (aType == TrackInfo::kVideoTrack) {
-      if (packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_ENCRYPTED) {
+      if (packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_ENCRYPTED ||
+          packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_PARTITIONED) {
         // Packet is encrypted, can't peek, use packet info
         isKeyframe = nestegg_packet_has_keyframe(holder->Packet())
                      == NESTEGG_PACKET_HAS_KEYFRAME_TRUE;
       } else {
+        MOZ_ASSERT(packetEncryption ==
+                       NESTEGG_PACKET_HAS_SIGNAL_BYTE_UNENCRYPTED ||
+                     packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_FALSE,
+                   "Unencrypted packet expected");
         auto sample = MakeSpan(data, length);
         auto alphaSample = MakeSpan(alphaData, alphaLength);
 
@@ -710,31 +708,6 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType,
         default:
           NS_WARNING("Cannot detect keyframes in unknown WebM video codec");
           return NS_ERROR_FAILURE;
-        }
-        if (isKeyframe) {
-          // For both VP8 and VP9, we only look for resolution changes
-          // on keyframes. Other resolution changes are invalid.
-          auto dimensions = gfx::IntSize(0, 0);
-          switch (mVideoCodec) {
-          case NESTEGG_CODEC_VP8:
-            dimensions = VPXDecoder::GetFrameSize(sample, VPXDecoder::Codec::VP8);
-            break;
-          case NESTEGG_CODEC_VP9:
-            dimensions = VPXDecoder::GetFrameSize(sample, VPXDecoder::Codec::VP9);
-            break;
-#ifdef MOZ_AV1
-          case NESTEGG_CODEC_AV1:
-            dimensions = AOMDecoder::GetFrameSize(sample);
-            break;
-#endif
-          }
-          if (mLastSeenFrameSize.isSome() &&
-              (dimensions != mLastSeenFrameSize.value())) {
-            mInfo.mVideo.mDisplay = dimensions;
-            mSharedVideoTrackInfo =
-              new TrackInfoSharedPtr(mInfo.mVideo, ++sStreamSourceID);
-          }
-          mLastSeenFrameSize = Some(dimensions);
         }
       }
     }
@@ -777,8 +750,7 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType,
       }
     }
 
-    if (packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_UNENCRYPTED ||
-        packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_ENCRYPTED ||
+    if (packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_ENCRYPTED ||
         packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_PARTITIONED) {
       UniquePtr<MediaRawDataWriter> writer(sample->CreateWriter());
       unsigned char const* iv;
@@ -787,7 +759,12 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType,
       writer->mCrypto.mValid = true;
       writer->mCrypto.mIVSize = ivLength;
       if (ivLength == 0) {
-        // Frame is not encrypted
+        // Frame is not encrypted. This shouldn't happen as it means the
+        // encryption bit is set on a frame with no IV, but we gracefully
+        // handle incase.
+        MOZ_ASSERT_UNREACHABLE(
+          "Unencrypted packets should not have the encryption bit set!");
+        WEBM_DEBUG("Unencrypted packet with encryption bit set");
         writer->mCrypto.mPlainSizes.AppendElement(length);
         writer->mCrypto.mEncryptedSizes.AppendElement(0);
       } else {
@@ -865,9 +842,6 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType,
                  == length));
         }
       }
-    }
-    if (aType == TrackInfo::kVideoTrack) {
-      sample->mTrackInfo = mSharedVideoTrackInfo;
     }
     aSamples->Push(sample);
   }
@@ -1150,7 +1124,7 @@ WebMTrackDemuxer::Seek(const TimeUnit& aTime)
 nsresult
 WebMTrackDemuxer::NextSample(RefPtr<MediaRawData>& aData)
 {
-  nsresult rv = NS_ERROR_DOM_MEDIA_END_OF_STREAM;;
+  nsresult rv = NS_ERROR_DOM_MEDIA_END_OF_STREAM;
   while (mSamples.GetSize() < 1 &&
          NS_SUCCEEDED((rv = mParent->GetNextPacket(mType, &mSamples)))) {
   }

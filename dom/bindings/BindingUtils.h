@@ -44,7 +44,6 @@
 
 class nsGenericHTMLElement;
 class nsIJSID;
-class nsIDocument;
 
 namespace mozilla {
 
@@ -54,7 +53,6 @@ namespace dom {
 class CustomElementReactionsStack;
 class MessageManagerGlobal;
 template<typename KeyType, typename ValueType> class Record;
-class Location;
 
 nsresult
 UnwrapArgImpl(JSContext* cx, JS::Handle<JSObject*> src, const nsIID& iid,
@@ -1062,29 +1060,7 @@ struct CheckWrapperCacheTracing<T, true>
 void
 AssertReflectorHasGivenProto(JSContext* aCx, JSObject* aReflector,
                              JS::Handle<JSObject*> aGivenProto);
-
 #endif // DEBUG
-
-template <class T>
-MOZ_ALWAYS_INLINE void
-CrashIfDocumentOrLocationWrapFailed()
-{
-  // Do nothing.
-}
-
-template<>
-MOZ_ALWAYS_INLINE void
-CrashIfDocumentOrLocationWrapFailed<nsIDocument>()
-{
-  MOZ_CRASH("Looks like bug 1488480/1405521, with WrapObject() on nsIDocument throwing");
-}
-
-template<>
-MOZ_ALWAYS_INLINE void
-CrashIfDocumentOrLocationWrapFailed<Location>()
-{
-  MOZ_CRASH("Looks like bug 1488480/1405521, with WrapObject() on Location throwing");
-}
 
 template <class T, GetOrCreateReflectorWrapBehavior wrapBehavior>
 MOZ_ALWAYS_INLINE bool
@@ -1108,7 +1084,6 @@ DoGetOrCreateDOMReflector(JSContext* cx, T* value,
       // At this point, obj is null, so just return false.
       // Callers seem to be testing JS_IsExceptionPending(cx) to
       // figure out whether WrapObject() threw.
-      CrashIfDocumentOrLocationWrapFailed<T>();
       return false;
     }
 
@@ -1138,35 +1113,19 @@ DoGetOrCreateDOMReflector(JSContext* cx, T* value,
   rval.set(JS::ObjectValue(*obj));
 
   if (js::GetObjectCompartment(obj) == js::GetContextCompartment(cx)) {
-    if (!TypeNeedsOuterization<T>::value) {
-      return true;
-    }
-    if (TryToOuterize(rval)) {
-      return true;
-    }
-
-    return false;
+    return TypeNeedsOuterization<T>::value ? TryToOuterize(rval) : true;
   }
 
   if (wrapBehavior == eDontWrapIntoContextCompartment) {
     if (TypeNeedsOuterization<T>::value) {
       JSAutoRealm ar(cx, obj);
-      if (TryToOuterize(rval)) {
-        return true;
-      }
-
-      return false;
+      return TryToOuterize(rval);
     }
 
     return true;
   }
 
-  if (JS_WrapValue(cx, rval)) {
-    return true;
-  }
-
-  MOZ_CRASH("Looks like bug 1488480/1405521, with JS_WrapValue failing");
-  return false;
+  return JS_WrapValue(cx, rval);
 }
 
 } // namespace binding_detail
@@ -1518,7 +1477,7 @@ UpdateWrapper(T* p, void*, JSObject* obj, const JSObject* old)
 // This operation will return false only for non-nsISupports cycle-collected
 // objects, because we cannot determine if they are wrappercached or not.
 bool
-TryPreserveWrapper(JSObject* obj);
+TryPreserveWrapper(JS::Handle<JSObject*> obj);
 
 // Can only be called with a DOM JSClass.
 bool
@@ -2863,7 +2822,6 @@ public:
       js::SetProxyReservedSlot(aReflector, DOM_OBJECT_SLOT, JS::PrivateValue(aNative));
       mNative = aNative;
       mReflector = aReflector;
-      RecordReplayRegisterDeferredFinalize<T>(aNative);
     }
 
     if (size_t mallocBytes = BindingJSObjectMallocBytes(aNative)) {
@@ -2881,7 +2839,6 @@ public:
       js::SetReservedSlot(aReflector, DOM_OBJECT_SLOT, JS::PrivateValue(aNative));
       mNative = aNative;
       mReflector = aReflector;
-      RecordReplayRegisterDeferredFinalize<T>(aNative);
     }
 
     if (size_t mallocBytes = BindingJSObjectMallocBytes(aNative)) {
@@ -2892,8 +2849,10 @@ public:
   void
   InitializationSucceeded()
   {
-    void* dummy;
-    mNative.forget(&dummy);
+    T* pointer;
+    mNative.forget(&pointer);
+    RecordReplayRegisterDeferredFinalize<T>(pointer);
+
     mReflector = nullptr;
   }
 
@@ -2909,15 +2868,23 @@ private:
     OwnedNative&
     operator=(T* aNative)
     {
+      mNative = aNative;
       return *this;
     }
 
     // This signature sucks, but it's the only one that will make a nsRefPtr
     // just forget about its pointer without warning.
     void
-    forget(void**)
+    forget(T** aResult)
     {
+      *aResult = mNative;
+      mNative = nullptr;
     }
+
+    // Keep track of the pointer for use in InitializationSucceeded().
+    // The caller (or, after initialization succeeds, the JS object) retains
+    // ownership of the object.
+    T* mNative;
   };
 
   JS::Rooted<JSObject*> mReflector;
@@ -3036,9 +3003,9 @@ RecordReplayRegisterDeferredFinalize(T* aObject)
   DeferredFinalizer<T>::RecordReplayRegisterDeferredFinalize(aObject);
 }
 
-// This returns T's CC participant if it participates in CC or null if it
-// doesn't. This also returns null for classes that don't inherit from
-// nsISupports (QI should be used to get the participant for those).
+// This returns T's CC participant if it participates in CC and does not inherit
+// from nsISupports. Otherwise, it returns null. QI should be used to get the
+// participant if T inherits from nsISupports.
 template<class T, bool isISupports=IsBaseOf<nsISupports, T>::value>
 class GetCCParticipant
 {
@@ -3062,7 +3029,7 @@ public:
   Get()
   {
     // Passing int() here will try to call the GetHelper that takes an int as
-    // its firt argument. If T doesn't participate in CC then substitution for
+    // its first argument. If T doesn't participate in CC then substitution for
     // the second argument (with a default value) will fail and because of
     // SFINAE the next best match (the variant taking a double) will be called.
     return GetHelper<T>(int());
@@ -3137,7 +3104,6 @@ struct CreateGlobalOptions<nsGlobalWindowInner>
 {
   static constexpr ProtoAndIfaceCache::Kind ProtoAndIfaceCacheKind =
     ProtoAndIfaceCache::WindowLike;
-  static bool PostCreateGlobal(JSContext* aCx, JS::Handle<JSObject*> aGlobal);
 };
 
 // The return value is true if we created and successfully performed our part of
@@ -3155,9 +3121,7 @@ CreateGlobal(JSContext* aCx, T* aNative, nsWrapperCache* aCache,
              JS::MutableHandle<JSObject*> aGlobal)
 {
   aOptions.creationOptions().setTrace(CreateGlobalOptions<T>::TraceGlobal);
-  if (xpc::SharedMemoryEnabled()) {
-    aOptions.creationOptions().setSharedMemoryAndAtomicsEnabled(true);
-  }
+  xpc::SetPrefableRealmOptions(aOptions);
 
   aGlobal.set(JS_NewGlobalObject(aCx, aClass, aPrincipal,
                                  JS::DontFireOnNewGlobalHook, aOptions));

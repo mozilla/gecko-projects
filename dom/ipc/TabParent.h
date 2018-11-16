@@ -17,7 +17,9 @@
 #include "mozilla/dom/TabContext.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/dom/File.h"
+#include "mozilla/gfx/CrossProcessPaint.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
+#include "mozilla/layout/RenderFrame.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/Move.h"
 #include "nsCOMPtr.h"
@@ -25,7 +27,6 @@
 #include "nsIBrowserDOMWindow.h"
 #include "nsIDOMEventListener.h"
 #include "nsIKeyEventInPluginCallback.h"
-#include "nsISecureBrowserUI.h"
 #include "nsITabParent.h"
 #include "nsIXULBrowserWindow.h"
 #include "nsRefreshDriver.h"
@@ -55,10 +56,6 @@ namespace layers {
 struct TextureFactoryIdentifier;
 } // namespace layers
 
-namespace layout {
-class RenderFrameParent;
-} // namespace layout
-
 namespace widget {
 struct IMENotification;
 } // namespace widget
@@ -83,7 +80,6 @@ class TabParent final : public PBrowserParent
                       , public nsIDOMEventListener
                       , public nsITabParent
                       , public nsIAuthPromptProvider
-                      , public nsISecureBrowserUI
                       , public nsIKeyEventInPluginCallback
                       , public nsSupportsWeakReference
                       , public TabContext
@@ -163,7 +159,6 @@ public:
 
   virtual mozilla::ipc::IPCResult
   RecvBrowserFrameOpenWindow(PBrowserParent* aOpener,
-                             PRenderFrameParent* aRenderFrame,
                              const nsString& aURL,
                              const nsString& aName,
                              const nsString& aFeatures,
@@ -334,7 +329,8 @@ public:
 
   void LoadURL(nsIURI* aURI);
 
-  void InitRenderFrame();
+  void InitRendering();
+  void MaybeShowFrame();
 
   // XXX/cjones: it's not clear what we gain by hiding these
   // message-sending functions under a layer of indirection and
@@ -487,7 +483,6 @@ public:
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIAUTHPROMPTPROVIDER
-  NS_DECL_NSISECUREBROWSERUI
 
   void StartPersistence(uint64_t aOuterWindowID,
                         nsIWebBrowserPersistDocumentReceiver* aRecv,
@@ -556,14 +551,13 @@ public:
   virtual bool
   DeallocPPaymentRequestParent(PPaymentRequestParent* aActor) override;
 
-  void SetInitedByParent() { mInitedByParent = true; }
-
-  bool IsInitedByParent() const { return mInitedByParent; }
-
   bool SendLoadRemoteScript(const nsString& aURL,
                             const bool& aRunInGlobalScope);
 
   void LayerTreeUpdate(const LayersObserverEpoch& aEpoch, bool aActive);
+
+  void RequestRootPaint(gfx::CrossProcessPaint* aPaint, IntRect aRect, float aScale, nscolor aBackgroundColor);
+  void RequestSubPaint(gfx::CrossProcessPaint* aPaint, float aScale, nscolor aBackgroundColor);
 
   virtual mozilla::ipc::IPCResult
   RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
@@ -579,11 +573,7 @@ public:
   bool TakeDragVisualization(RefPtr<mozilla::gfx::SourceSurface>& aSurface,
                              LayoutDeviceIntRect* aDragRect);
 
-  layout::RenderFrameParent* GetRenderFrame();
-
-  bool SetRenderFrame(PRenderFrameParent* aRFParent);
-  bool GetRenderFrameInfo(TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                          layers::LayersId* aLayersId);
+  layout::RenderFrame* GetRenderFrame();
 
   mozilla::ipc::IPCResult RecvEnsureLayersConnected(CompositorOptions* aCompositorOptions) override;
 
@@ -597,6 +587,8 @@ public:
   static bool AreRecordReplayTabsActive() {
     return gNumActiveRecordReplayTabs != 0;
   }
+
+  void NavigateByKey(bool aForward, bool aForDocumentNavigation);
 
 protected:
   bool ReceiveMessage(const nsString& aMessage,
@@ -617,11 +609,9 @@ protected:
   Element* mFrameElement;
   nsCOMPtr<nsIBrowserDOMWindow> mBrowserDOMWindow;
 
-  virtual PRenderFrameParent* AllocPRenderFrameParent() override;
-
-  virtual bool DeallocPRenderFrameParent(PRenderFrameParent* aFrame) override;
-
   virtual mozilla::ipc::IPCResult RecvRemotePaintIsReady() override;
+
+  virtual mozilla::ipc::IPCResult RecvNotifyCompositorTransaction() override;
 
   virtual mozilla::ipc::IPCResult RecvRemoteIsReadyToHandleInputEvents() override;
 
@@ -652,6 +642,8 @@ protected:
   LayoutDeviceIntPoint mChromeOffset;
 
 private:
+  void SuppressDisplayport(bool aEnabled);
+
   void DestroyInternal();
 
   void SetRenderLayersInternal(bool aEnabled, bool aForceRepaint);
@@ -691,10 +683,6 @@ private:
   bool mDragValid;
   LayoutDeviceIntRect mDragRect;
   nsCString mDragPrincipalURISpec;
-
-  // When true, the TabParent is initialized without child side's request.
-  // When false, the TabParent is initialized by window.open() from child side.
-  bool mInitedByParent;
 
   nsCOMPtr<nsILoadContext> mLoadContext;
 
@@ -767,6 +755,7 @@ private:
 
   static void RemoveTabParentFromTable(layers::LayersId aLayersId);
 
+  layout::RenderFrame mRenderFrame;
   LayersObserverEpoch mLayerTreeEpoch;
 
   // If this flag is set, then the tab's layers will be preserved even when
@@ -777,6 +766,9 @@ private:
   // does not necessarily mean that the layers have finished rendering
   // and have uploaded - for that, use mHasLayers.
   bool mRenderLayers;
+
+  // Whether this is active for the ProcessPriorityManager or not.
+  bool mActiveInPriorityManager;
 
   // True if the compositor has reported that the TabChild has uploaded
   // layers.

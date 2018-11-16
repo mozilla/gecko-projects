@@ -19,25 +19,28 @@ using mozilla::FloorLog2;
 LBoxAllocation
 LIRGeneratorARM64::useBoxFixed(MDefinition* mir, Register reg1, Register, bool useAtStart)
 {
-    MOZ_CRASH("useBoxFixed");
+    MOZ_ASSERT(mir->type() == MIRType::Value);
+
+    ensureDefined(mir);
+    return LBoxAllocation(LUse(reg1, mir->virtualRegister(), useAtStart));
 }
 
 LAllocation
 LIRGeneratorARM64::useByteOpRegister(MDefinition* mir)
 {
-    MOZ_CRASH("useByteOpRegister");
+    return useRegister(mir);
 }
 
 LAllocation
 LIRGeneratorARM64::useByteOpRegisterAtStart(MDefinition* mir)
 {
-    MOZ_CRASH("useByteOpRegister");
+    return useRegisterAtStart(mir);
 }
 
 LAllocation
 LIRGeneratorARM64::useByteOpRegisterOrNonDoubleConstant(MDefinition* mir)
 {
-    MOZ_CRASH("useByteOpRegisterOrNonDoubleConstant");
+    return useRegisterOrNonDoubleConstant(mir);
 }
 
 void
@@ -129,7 +132,8 @@ LIRGeneratorARM64::lowerForALU(LInstructionHelper<1, 2, 0>* ins, MDefinition* mi
 void
 LIRGeneratorARM64::lowerForFPU(LInstructionHelper<1, 1, 0>* ins, MDefinition* mir, MDefinition* input)
 {
-    MOZ_CRASH("lowerForFPU");
+    ins->setOperand(0, useRegisterAtStart(input));
+    define(ins, mir, LDefinition(LDefinition::TypeFrom(mir->type()), LDefinition::REGISTER));
 }
 
 template <size_t Temps>
@@ -137,7 +141,9 @@ void
 LIRGeneratorARM64::lowerForFPU(LInstructionHelper<1, 2, Temps>* ins, MDefinition* mir,
                                MDefinition* lhs, MDefinition* rhs)
 {
-    MOZ_CRASH("lowerForFPU");
+    ins->setOperand(0, useRegisterAtStart(lhs));
+    ins->setOperand(1, useRegisterAtStart(rhs));
+    define(ins, mir, LDefinition(LDefinition::TypeFrom(mir->type()), LDefinition::REGISTER));
 }
 
 template void LIRGeneratorARM64::lowerForFPU(LInstructionHelper<1, 2, 0>* ins, MDefinition* mir,
@@ -177,13 +183,9 @@ void
 LIRGeneratorARM64::lowerForBitAndAndBranch(LBitAndAndBranch* baab, MInstruction* mir,
                                          MDefinition* lhs, MDefinition* rhs)
 {
-    MOZ_CRASH("lowerForBitAndAndBranch");
-}
-
-void
-LIRGeneratorARM64::defineUntypedPhi(MPhi* phi, size_t lirIndex)
-{
-    defineTypedPhi(phi, lirIndex);
+    baab->setOperand(0, useRegisterAtStart(lhs));
+    baab->setOperand(1, useRegisterOrConstantAtStart(rhs));
+    add(baab, mir);
 }
 
 void
@@ -205,7 +207,20 @@ LIRGeneratorARM64::lowerForShift(LInstructionHelper<1, 2, 0>* ins,
 void
 LIRGeneratorARM64::lowerDivI(MDiv* div)
 {
-    MOZ_CRASH("lowerDivI");
+    if (div->isUnsigned()) {
+        lowerUDiv(div);
+        return;
+    }
+
+    // TODO: Implement the division-avoidance paths when rhs is constant.
+
+    LDivI* lir = new(alloc()) LDivI(useRegister(div->lhs()),
+                                    useRegister(div->rhs()),
+                                    temp());
+    if (div->fallible()) {
+        assignSnapshot(lir, Bailout_DoubleOutput);
+    }
+    define(lir, div);
 }
 
 void
@@ -235,32 +250,54 @@ LIRGeneratorARM64::lowerModI64(MMod* mod)
 void
 LIRGenerator::visitPowHalf(MPowHalf* ins)
 {
-    MOZ_CRASH("visitPowHalf");
+    MDefinition* input = ins->input();
+    MOZ_ASSERT(input->type() == MIRType::Double);
+    LPowHalfD* lir = new(alloc()) LPowHalfD(useRegister(input));
+    define(lir, ins);
 }
 
 LTableSwitch*
 LIRGeneratorARM64::newLTableSwitch(const LAllocation& in, const LDefinition& inputCopy,
                                        MTableSwitch* tableswitch)
 {
-    MOZ_CRASH("newLTableSwitch");
+    return new(alloc()) LTableSwitch(in, inputCopy, tableswitch);
 }
 
 LTableSwitchV*
 LIRGeneratorARM64::newLTableSwitchV(MTableSwitch* tableswitch)
 {
-    MOZ_CRASH("newLTableSwitchV");
+    MOZ_CRASH("NYI");
 }
 
 void
 LIRGeneratorARM64::lowerUrshD(MUrsh* mir)
 {
-    MOZ_CRASH("lowerUrshD");
+    MDefinition* lhs = mir->lhs();
+    MDefinition* rhs = mir->rhs();
+
+    MOZ_ASSERT(lhs->type() == MIRType::Int32);
+    MOZ_ASSERT(rhs->type() == MIRType::Int32);
+
+    LUrshD* lir = new(alloc()) LUrshD(useRegister(lhs), useRegisterOrConstant(rhs), temp());
+    define(lir, mir);
 }
 
 void
 LIRGenerator::visitWasmNeg(MWasmNeg* ins)
 {
-    MOZ_CRASH("visitWasmNeg");
+    switch (ins->type()) {
+      case MIRType::Int32:
+        define(new(alloc()) LNegI(useRegisterAtStart(ins->input())), ins);
+        break;
+      case MIRType::Float32:
+        define(new(alloc()) LNegF(useRegisterAtStart(ins->input())), ins);
+        break;
+      case MIRType::Double:
+        define(new(alloc()) LNegD(useRegisterAtStart(ins->input())), ins);
+        break;
+      default:
+        MOZ_CRASH("unexpected type");
+    }
 }
 
 void
@@ -356,15 +393,20 @@ LIRGenerator::visitAtomicExchangeTypedArrayElement(MAtomicExchangeTypedArrayElem
 void
 LIRGenerator::visitSubstr(MSubstr* ins)
 {
-    MOZ_CRASH("visitSubstr");
+    LSubstr* lir = new(alloc()) LSubstr(useRegister(ins->string()),
+                                        useRegister(ins->begin()),
+                                        useRegister(ins->length()),
+                                        temp(),
+                                        temp(),
+                                        temp());
+    define(lir, ins);
+    assignSafepoint(lir, ins);
 }
 
 void
 LIRGenerator::visitRandom(MRandom* ins)
 {
-    LRandom *lir = new(alloc()) LRandom(temp(),
-                                        temp(),
-                                        temp());
+    LRandom* lir = new(alloc()) LRandom(temp(), temp(), temp());
     defineFixed(lir, ins, LFloatReg(ReturnDoubleReg));
 }
 

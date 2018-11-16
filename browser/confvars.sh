@@ -8,13 +8,7 @@ MOZ_APP_VENDOR=Mozilla
 MOZ_UPDATER=1
 MOZ_PHOENIX=1
 
-if test "$OS_ARCH" = "WINNT" -o \
-        "$OS_ARCH" = "Linux"; then
-  MOZ_BUNDLED_FONTS=1
-fi
-
 if test "$OS_ARCH" = "WINNT"; then
-  MOZ_MAINTENANCE_SERVICE=1
   if ! test "$HAVE_64BIT_BUILD"; then
     if test "$MOZ_UPDATE_CHANNEL" = "nightly" -o \
             "$MOZ_UPDATE_CHANNEL" = "nightly-try" -o \
@@ -36,9 +30,6 @@ fi
 
 # Enable building ./signmar and running libmar signature tests
 MOZ_ENABLE_SIGNMAR=1
-
-MOZ_APP_VERSION=$FIREFOX_VERSION
-MOZ_APP_VERSION_DISPLAY=$FIREFOX_VERSION_DISPLAY
 
 if [ "${MOZ_BROWSER_XHTML}" = "1" ]; then
   BROWSER_CHROME_URL=chrome://browser/content/browser.xhtml

@@ -19,30 +19,40 @@ class FlexItem extends PureComponent {
   static get propTypes() {
     return {
       flexItem: PropTypes.shape(Types.flexItem).isRequired,
-      onToggleFlexItemShown: PropTypes.func.isRequired,
+      index: PropTypes.number.isRequired,
+      onHideBoxModelHighlighter: PropTypes.func.isRequired,
+      onShowBoxModelHighlighterForNode: PropTypes.func.isRequired,
+      setSelectedNode: PropTypes.func.isRequired,
     };
   }
 
   render() {
     const {
       flexItem,
-      onToggleFlexItemShown,
+      index,
+      onHideBoxModelHighlighter,
+      onShowBoxModelHighlighterForNode,
+      setSelectedNode,
     } = this.props;
     const { nodeFront } = flexItem;
 
     return (
-      dom.li({},
-        dom.button(
-          {
-            className: "devtools-button devtools-monospace",
-            onClick: () => onToggleFlexItemShown(nodeFront),
+      dom.button(
+        {
+          className: "devtools-button devtools-monospace",
+          onClick: () => {
+            setSelectedNode(nodeFront);
+            onHideBoxModelHighlighter();
           },
-          Rep({
-            defaultRep: ElementNode,
-            mode: MODE.TINY,
-            object: translateNodeFrontToGrip(nodeFront),
-          })
-        )
+          onMouseOut: () => onHideBoxModelHighlighter(),
+          onMouseOver: () => onShowBoxModelHighlighterForNode(nodeFront),
+        },
+        dom.span({ className: "flex-item-index" }, index),
+        Rep({
+          defaultRep: ElementNode,
+          mode: MODE.TINY,
+          object: translateNodeFrontToGrip(nodeFront),
+        })
       )
     );
   }

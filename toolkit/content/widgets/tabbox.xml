@@ -199,6 +199,53 @@
         </setter>
       </property>
 
+      <field name="ACTIVE_DESCENDANT_ID" readonly="true"><![CDATA[
+        "keyboard-focused-tab-" + Math.trunc(Math.random() * 1000000);
+      ]]></field>
+
+      <property name="ariaFocusedIndex" readonly="true">
+        <getter>
+        <![CDATA[
+          const tabs = this.children;
+          for (var i = 0; i < tabs.length; i++) {
+            if (tabs[i].id == this.ACTIVE_DESCENDANT_ID)
+              return i;
+          }
+          return -1;
+        ]]>
+        </getter>
+      </property>
+
+      <property name="ariaFocusedItem">
+        <getter>
+        <![CDATA[
+          return document.getElementById(this.ACTIVE_DESCENDANT_ID);
+        ]]>
+        </getter>
+
+        <setter>
+        <![CDATA[
+          let setNewItem = val && this.getIndexOfItem(val) != -1;
+          let clearExistingItem = this.ariaFocusedItem && (!val || setNewItem);
+          if (clearExistingItem) {
+            let ariaFocusedItem = this.ariaFocusedItem;
+            ariaFocusedItem.classList.remove("keyboard-focused-tab");
+            ariaFocusedItem.id = "";
+            this.selectedItem.removeAttribute("aria-activedescendant");
+          }
+
+          if (setNewItem) {
+            this.ariaFocusedItem = null;
+            val.id = this.ACTIVE_DESCENDANT_ID;
+            val.classList.add("keyboard-focused-tab");
+            this.selectedItem.setAttribute("aria-activedescendant", this.ACTIVE_DESCENDANT_ID);
+          }
+
+          return val;
+        ]]>
+        </setter>
+      </property>
+
       <method name="getIndexOfItem">
         <parameter name="item"/>
         <body>
@@ -223,6 +270,8 @@
         <parameter name="aWrap"/>
         <body>
         <![CDATA[
+          this.ariaFocusedItem = null;
+
           var requestedTab = aNewTab;
           while (aNewTab.hidden || aNewTab.disabled || !this._canAdvanceToTab(aNewTab)) {
             aNewTab = aFallbackDir == -1 ? aNewTab.previousElementSibling : aNewTab.nextElementSibling;
@@ -277,7 +326,7 @@
         <parameter name="aWrap"/>
         <body>
         <![CDATA[
-          var startTab = this.selectedItem;
+          var startTab = this.ariaFocusedItem || this.selectedItem;
           var next = startTab[(aDir == -1 ? "previous" : "next") + "ElementSibling"];
           if (!next && aWrap) {
             next = aDir == -1 ? this.children[this.children.length - 1] :
@@ -319,117 +368,6 @@
       </handler>
     </handlers>
 #endif
-  </binding>
-
-  <binding id="tabpanels">
-    <implementation implements="nsIDOMXULRelatedElement">
-      <!-- nsIDOMXULRelatedElement -->
-      <method name="getRelatedElement">
-        <parameter name="aTabPanelElm"/>
-        <body>
-        <![CDATA[
-          if (!aTabPanelElm)
-            return null;
-
-          let tabboxElm = this.tabbox;
-          if (!tabboxElm)
-            return null;
-
-          let tabsElm = tabboxElm.tabs;
-          if (!tabsElm)
-            return null;
-
-          // Return tab element having 'linkedpanel' attribute equal to the id
-          // of the tab panel or the same index as the tab panel element.
-          let tabpanelIdx = Array.indexOf(this.children, aTabPanelElm);
-          if (tabpanelIdx == -1)
-            return null;
-
-          let tabElms = tabsElm.children;
-          let tabElmFromIndex = tabElms[tabpanelIdx];
-
-          let tabpanelId = aTabPanelElm.id;
-          if (tabpanelId) {
-            for (let idx = 0; idx < tabElms.length; idx++) {
-              var tabElm = tabElms[idx];
-              if (tabElm.linkedPanel == tabpanelId)
-                return tabElm;
-            }
-          }
-
-          return tabElmFromIndex;
-        ]]>
-        </body>
-      </method>
-
-      <!-- public -->
-      <field name="_tabbox">null</field>
-      <property name="tabbox" readonly="true">
-        <getter><![CDATA[
-          // Memoize the result in a field rather than replacing this property,
-          // so that it can be reset along with the binding.
-          if (this._tabbox) {
-            return this._tabbox;
-          }
-
-          let parent = this.parentNode;
-          while (parent) {
-            if (parent.localName == "tabbox") {
-              break;
-            }
-            parent = parent.parentNode;
-          }
-
-          return this._tabbox = parent;
-        ]]></getter>
-      </property>
-
-      <field name="_selectedPanel">this.children.item(this.selectedIndex)</field>
-
-      <property name="selectedIndex">
-        <getter>
-        <![CDATA[
-          var indexStr = this.getAttribute("selectedIndex");
-          return indexStr ? parseInt(indexStr) : -1;
-        ]]>
-        </getter>
-
-        <setter>
-        <![CDATA[
-          if (val < 0 || val >= this.children.length)
-            return val;
-
-          var panel = this._selectedPanel;
-          this._selectedPanel = this.children[val];
-          this.setAttribute("selectedIndex", val);
-          if (this._selectedPanel != panel) {
-            var event = document.createEvent("Events");
-            event.initEvent("select", true, true);
-            this.dispatchEvent(event);
-          }
-          return val;
-        ]]>
-        </setter>
-      </property>
-
-      <property name="selectedPanel">
-        <getter>
-          <![CDATA[
-            return this._selectedPanel;
-          ]]>
-        </getter>
-
-        <setter>
-          <![CDATA[
-            var selectedIndex = -1;
-            for (var panel = val; panel != null; panel = panel.previousElementSibling)
-              ++selectedIndex;
-            this.selectedIndex = selectedIndex;
-            return val;
-          ]]>
-        </setter>
-      </property>
-    </implementation>
   </binding>
 
   <binding id="tab" display="xul:button"
@@ -483,19 +421,6 @@
       <field name="arrowKeysShouldWrap" readonly="true">
         /Mac/.test(navigator.platform)
       </field>
-      <property name="TelemetryStopwatch" readonly="true">
-        <getter><![CDATA[
-          let module = {};
-          ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm", module);
-          Object.defineProperty(this, "TelemetryStopwatch", {
-            configurable: true,
-            enumerable: true,
-            writable: true,
-            value: module.TelemetryStopwatch,
-          });
-          return module.TelemetryStopwatch;
-        ]]></getter>
-      </property>
     </implementation>
 
     <handlers>
@@ -504,10 +429,12 @@
         if (this.disabled)
           return;
 
+        this.parentNode.ariaFocusedItem = null;
+
         if (this != this.parentNode.selectedItem) { // Not selected yet
           let stopwatchid = this.parentNode.getAttribute("stopwatchid");
           if (stopwatchid) {
-            this.TelemetryStopwatch.start(stopwatchid);
+            TelemetryStopwatch.start(stopwatchid);
           }
 
           // Call this before setting the 'ignorefocus' attribute because this
@@ -529,7 +456,7 @@
           }
 
           if (stopwatchid) {
-            this.TelemetryStopwatch.finish(stopwatchid);
+            TelemetryStopwatch.finish(stopwatchid);
           }
         }
         // Otherwise this tab is already selected and we will fall

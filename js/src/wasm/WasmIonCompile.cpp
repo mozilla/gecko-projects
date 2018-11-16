@@ -596,14 +596,16 @@ class FunctionCompiler
     }
 
     MWasmLoadTls* maybeLoadBoundsCheckLimit() {
-        MWasmLoadTls* load = nullptr;
-#ifndef WASM_HUGE_MEMORY
+#ifdef WASM_HUGE_MEMORY
+        if (!env_.isAsmJS()) {
+            return nullptr;
+        }
+#endif
         AliasSet aliases = env_.maxMemoryLength.isSome() ? AliasSet::None()
                                                          : AliasSet::Load(AliasSet::WasmHeapMeta);
-        load = MWasmLoadTls::New(alloc(), tlsPointer_, offsetof(wasm::TlsData, boundsCheckLimit),
-                                 MIRType::Int32, aliases);
+        auto load = MWasmLoadTls::New(alloc(), tlsPointer_, offsetof(wasm::TlsData, boundsCheckLimit),
+                                      MIRType::Int32, aliases);
         curBlock_->add(load);
-#endif
         return load;
     }
 
@@ -1065,8 +1067,8 @@ class FunctionCompiler
         return true;
     }
 
-    bool callIndirect(uint32_t funcTypeIndex, MDefinition* index, const CallCompileState& call,
-                      MDefinition** def)
+    bool callIndirect(uint32_t funcTypeIndex, uint32_t tableIndex, MDefinition* index,
+                      const CallCompileState& call, MDefinition** def)
     {
         if (inDeadCode()) {
             *def = nullptr;
@@ -1077,10 +1079,10 @@ class FunctionCompiler
 
         CalleeDesc callee;
         if (env_.isAsmJS()) {
+            MOZ_ASSERT(tableIndex == 0);
             MOZ_ASSERT(funcType.id.kind() == FuncTypeIdDescKind::None);
             const TableDesc& table = env_.tables[env_.asmJSSigToTableIndex[funcTypeIndex]];
             MOZ_ASSERT(IsPowerOfTwo(table.limits.initial));
-            MOZ_ASSERT(!table.external);
 
             MConstant* mask = MConstant::New(alloc(), Int32Value(table.limits.initial - 1));
             curBlock_->add(mask);
@@ -1091,8 +1093,7 @@ class FunctionCompiler
             callee = CalleeDesc::asmJSTable(table);
         } else {
             MOZ_ASSERT(funcType.id.kind() != FuncTypeIdDescKind::None);
-            MOZ_ASSERT(env_.tables.length() == 1);
-            const TableDesc& table = env_.tables[0];
+            const TableDesc& table = env_.tables[tableIndex];
             callee = CalleeDesc::wasmTable(table, funcType.id);
         }
 
@@ -2102,14 +2103,16 @@ EmitCallIndirect(FunctionCompiler& f, bool oldStyle)
     uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode();
 
     uint32_t funcTypeIndex;
+    uint32_t tableIndex;
     MDefinition* callee;
     DefVector args;
     if (oldStyle) {
+        tableIndex = 0;
         if (!f.iter().readOldCallIndirect(&funcTypeIndex, &callee, &args)) {
             return false;
         }
     } else {
-        if (!f.iter().readCallIndirect(&funcTypeIndex, &callee, &args)) {
+        if (!f.iter().readCallIndirect(&funcTypeIndex, &tableIndex, &callee, &args)) {
             return false;
         }
     }
@@ -2126,7 +2129,7 @@ EmitCallIndirect(FunctionCompiler& f, bool oldStyle)
     }
 
     MDefinition* def;
-    if (!f.callIndirect(funcTypeIndex, callee, call, &def)) {
+    if (!f.callIndirect(funcTypeIndex, tableIndex, callee, call, &def)) {
         return false;
     }
 
@@ -2984,7 +2987,9 @@ static bool
 EmitMemOrTableCopy(FunctionCompiler& f, bool isMem)
 {
     MDefinition* dst, *src, *len;
-    if (!f.iter().readMemOrTableCopy(isMem, &dst, &src, &len)) {
+    uint32_t dstTableIndex;
+    uint32_t srcTableIndex;
+    if (!f.iter().readMemOrTableCopy(isMem, &dstTableIndex, &dst, &srcTableIndex, &src, &len)) {
         return false;
     }
 
@@ -3012,7 +3017,22 @@ EmitMemOrTableCopy(FunctionCompiler& f, bool isMem)
     if (!f.passArg(len, ValType::I32, &args)) {
         return false;
     }
-
+    if (!isMem) {
+        MDefinition* dti = f.constant(Int32Value(dstTableIndex), MIRType::Int32);
+        if (!dti) {
+            return false;
+        }
+        if (!f.passArg(dti, ValType::I32, &args)) {
+            return false;
+        }
+        MDefinition* sti = f.constant(Int32Value(srcTableIndex), MIRType::Int32);
+        if (!sti) {
+            return false;
+        }
+        if (!f.passArg(sti, ValType::I32, &args)) {
+            return false;
+        }
+    }
     if (!f.finishCall(&args)) {
         return false;
     }
@@ -3129,49 +3149,159 @@ EmitMemFill(FunctionCompiler& f)
 static bool
 EmitMemOrTableInit(FunctionCompiler& f, bool isMem)
 {
-    uint32_t segIndexVal = 0;
+    uint32_t segIndexVal = 0, dstTableIndex = 0;
     MDefinition* dstOff, *srcOff, *len;
-    if (!f.iter().readMemOrTableInit(isMem, &segIndexVal, &dstOff, &srcOff, &len))
+    if (!f.iter().readMemOrTableInit(isMem, &segIndexVal, &dstTableIndex, &dstOff, &srcOff, &len)) {
         return false;
+    }
 
-    if (f.inDeadCode())
+    if (f.inDeadCode()) {
         return false;
+    }
 
     uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode();
 
     CallCompileState args(f, lineOrBytecode);
-    if (!f.startCall(&args))
+    if (!f.startCall(&args)) {
         return false;
+    }
 
-    if (!f.passInstance(&args))
+    if (!f.passInstance(&args)) {
         return false;
+    }
 
-    if (!f.passArg(dstOff, ValType::I32, &args))
+    if (!f.passArg(dstOff, ValType::I32, &args)) {
         return false;
-    if (!f.passArg(srcOff, ValType::I32, &args))
+    }
+    if (!f.passArg(srcOff, ValType::I32, &args)) {
         return false;
-    if (!f.passArg(len, ValType::I32, &args))
+    }
+    if (!f.passArg(len, ValType::I32, &args)) {
         return false;
+    }
 
     MDefinition* segIndex = f.constant(Int32Value(int32_t(segIndexVal)), MIRType::Int32);
-    if (!f.passArg(segIndex, ValType::I32, &args))
+    if (!f.passArg(segIndex, ValType::I32, &args)) {
         return false;
-
-    if (!f.finishCall(&args))
+    }
+    if (!isMem) {
+        MDefinition* dti = f.constant(Int32Value(dstTableIndex), MIRType::Int32);
+        if (!dti) {
+            return false;
+        }
+        if (!f.passArg(dti, ValType::I32, &args)) {
+            return false;
+        }
+    }
+    if (!f.finishCall(&args)) {
         return false;
+    }
 
     SymbolicAddress callee = isMem ? SymbolicAddress::MemInit
                                    : SymbolicAddress::TableInit;
     MDefinition* ret;
-    if (!f.builtinInstanceMethodCall(callee, args, ValType::I32, &ret))
+    if (!f.builtinInstanceMethodCall(callee, args, ValType::I32, &ret)) {
         return false;
+    }
 
-    if (!f.checkI32NegativeMeansFailedResult(ret))
+    if (!f.checkI32NegativeMeansFailedResult(ret)) {
         return false;
+    }
 
     return true;
 }
 #endif // ENABLE_WASM_BULKMEM_OPS
+
+#ifdef ENABLE_WASM_GENERALIZED_TABLES
+// About these implementations: table.{get,grow,set} on table(anyfunc) is
+// rejected by the verifier, while table.{get,grow,set} on table(anyref)
+// requires gc_feature_opt_in and will always be handled by the baseline
+// compiler; we should never get here in that case.
+//
+// table.size must however be handled properly here.
+
+static bool
+EmitTableGet(FunctionCompiler& f)
+{
+    uint32_t tableIndex;
+    MDefinition* index;
+    if (!f.iter().readTableGet(&tableIndex, &index)) {
+        return false;
+    }
+
+    MOZ_CRASH("Should not happen"); // See above
+}
+
+static bool
+EmitTableGrow(FunctionCompiler& f)
+{
+    uint32_t tableIndex;
+    MDefinition* delta;
+    MDefinition* initValue;
+    if (!f.iter().readTableGrow(&tableIndex, &delta, &initValue)) {
+        return false;
+    }
+
+    MOZ_CRASH("Should not happen"); // See above
+}
+
+static bool
+EmitTableSet(FunctionCompiler& f)
+{
+    uint32_t tableIndex;
+    MDefinition* index;
+    MDefinition* value;
+    if (!f.iter().readTableSet(&tableIndex, &index, &value)) {
+        return false;
+    }
+
+    MOZ_CRASH("Should not happen"); // See above
+}
+
+static bool
+EmitTableSize(FunctionCompiler& f)
+{
+    uint32_t tableIndex;
+    if (!f.iter().readTableSize(&tableIndex)) {
+        return false;
+    }
+
+    if (f.inDeadCode()) {
+        return false;
+    }
+
+    uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode();
+
+    CallCompileState args(f, lineOrBytecode);
+    if (!f.startCall(&args)) {
+        return false;
+    }
+
+    if (!f.passInstance(&args)) {
+        return false;
+    }
+
+    MDefinition* tableIndexArg = f.constant(Int32Value(tableIndex), MIRType::Int32);
+    if (!tableIndexArg) {
+        return false;
+    }
+    if (!f.passArg(tableIndexArg, ValType::I32, &args)) {
+        return false;
+    }
+
+    if (!f.finishCall(&args)) {
+        return false;
+    }
+
+    MDefinition* ret;
+    if (!f.builtinInstanceMethodCall(SymbolicAddress::TableSize, args, ValType::I32, &ret)) {
+        return false;
+    }
+
+    f.iter().setResult(ret);
+    return true;
+}
+#endif  // ENABLE_WASM_GENERALIZED_TABLES
 
 static bool
 EmitBodyExprs(FunctionCompiler& f)
@@ -3558,10 +3688,13 @@ EmitBodyExprs(FunctionCompiler& f)
           case uint16_t(Op::F64ReinterpretI64):
             CHECK(EmitReinterpret(f, ValType::F64, ValType::I64, MIRType::Double));
 
-          // GC types are NYI in Ion.
+#ifdef ENABLE_WASM_GC
+          case uint16_t(Op::RefEq):
           case uint16_t(Op::RefNull):
           case uint16_t(Op::RefIsNull):
+            // Not yet supported
             return f.iter().unrecognizedOpcode(&op);
+#endif
 
           // Sign extensions
           case uint16_t(Op::I32Extend8S):
@@ -3578,7 +3711,6 @@ EmitBodyExprs(FunctionCompiler& f)
           // Miscellaneous operations
           case uint16_t(Op::MiscPrefix): {
             switch (op.b1) {
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
               case uint16_t(MiscOp::I32TruncSSatF32):
               case uint16_t(MiscOp::I32TruncUSatF32):
                 CHECK(EmitTruncate(f, ValType::F32, ValType::I32,
@@ -3595,7 +3727,6 @@ EmitBodyExprs(FunctionCompiler& f)
               case uint16_t(MiscOp::I64TruncUSatF64):
                 CHECK(EmitTruncate(f, ValType::F64, ValType::I64,
                                    MiscOp(op.b1) == MiscOp::I64TruncUSatF64, true));
-#endif
 #ifdef ENABLE_WASM_BULKMEM_OPS
               case uint16_t(MiscOp::MemCopy):
                 CHECK(EmitMemOrTableCopy(f, /*isMem=*/true));
@@ -3611,6 +3742,24 @@ EmitBodyExprs(FunctionCompiler& f)
                 CHECK(EmitMemOrTableDrop(f, /*isMem=*/false));
               case uint16_t(MiscOp::TableInit):
                 CHECK(EmitMemOrTableInit(f, /*isMem=*/false));
+#endif
+#ifdef ENABLE_WASM_GENERALIZED_TABLES
+              case uint16_t(MiscOp::TableGet):
+                CHECK(EmitTableGet(f));
+              case uint16_t(MiscOp::TableGrow):
+                CHECK(EmitTableGrow(f));
+              case uint16_t(MiscOp::TableSet):
+                CHECK(EmitTableSet(f));
+              case uint16_t(MiscOp::TableSize):
+                CHECK(EmitTableSize(f));
+#endif
+#ifdef ENABLE_WASM_GC
+              case uint16_t(MiscOp::StructNew):
+              case uint16_t(MiscOp::StructGet):
+              case uint16_t(MiscOp::StructSet):
+              case uint16_t(MiscOp::StructNarrow):
+                // Not yet supported
+                return f.iter().unrecognizedOpcode(&op);
 #endif
               default:
                 return f.iter().unrecognizedOpcode(&op);
@@ -3862,7 +4011,8 @@ wasm::IonCompileFunctions(const ModuleEnvironment& env, LifoAlloc& lifo,
                           ExclusiveDeferredValidationState& dvs,
                           UniqueChars* error)
 {
-    MOZ_ASSERT(env.tier() == Tier::Ion);
+    MOZ_ASSERT(env.tier() == Tier::Optimized);
+    MOZ_ASSERT(env.optimizedBackend() == OptimizedBackend::Ion);
 
     TempAllocator alloc(&lifo);
     JitContext jitContext(&alloc);

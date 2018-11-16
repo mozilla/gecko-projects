@@ -15,8 +15,13 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const XHTML_NS = "http://www.w3.org/1999/xhtml";
+
 ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+
+ChromeUtils.defineModuleGetter(this, "BrowserWindowTracker",
+                               "resource:///modules/BrowserWindowTracker.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this,
                                    "paymentSrv",
@@ -32,37 +37,59 @@ function PaymentUIService() {
       prefix: "Payment UI Service",
     });
   });
-  Services.wm.addListener(this);
   this.log.debug("constructor");
 }
 
 PaymentUIService.prototype = {
   classID: Components.ID("{01f8bd55-9017-438b-85ec-7c15d2b35cdc}"),
   QueryInterface: ChromeUtils.generateQI([Ci.nsIPaymentUIService]),
-  DIALOG_URL: "chrome://payments/content/paymentDialogWrapper.xul",
-  REQUEST_ID_PREFIX: "paymentRequest-",
-
-  // nsIWindowMediatorListener implementation:
-
-  onOpenWindow(aWindow) {},
-  onCloseWindow(aWindow) {
-    let domWindow = aWindow.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
-    let requestId = this.requestIdForWindow(domWindow);
-    if (!requestId || !paymentSrv.getPaymentRequestById(requestId)) {
-      return;
-    }
-    this.log.debug(`onCloseWindow, close of window for active requestId: ${requestId}`);
-    this.rejectPaymentForClosedDialog(requestId);
-  },
 
   // nsIPaymentUIService implementation:
 
   showPayment(requestId) {
     this.log.debug("showPayment:", requestId);
-    let chromeWindow = Services.wm.getMostRecentWindow("navigator:browser");
-    chromeWindow.openDialog(`${this.DIALOG_URL}?requestId=${requestId}`,
-                            `${this.REQUEST_ID_PREFIX}${requestId}`,
-                            "modal,dialog,centerscreen,resizable=no");
+    let request = paymentSrv.getPaymentRequestById(requestId);
+    let merchantBrowser = this.findBrowserByOuterWindowId(request.topOuterWindowId);
+    let chromeWindow = merchantBrowser.ownerGlobal;
+    let {gBrowser} = chromeWindow;
+    let browserContainer = gBrowser.getBrowserContainer(merchantBrowser);
+    let container = chromeWindow.document.createElementNS(XHTML_NS, "div");
+    container.dataset.requestId = requestId;
+    container.classList.add("paymentDialogContainer");
+    container.hidden = true;
+    let paymentsBrowser = this._createPaymentFrame(chromeWindow.document, requestId);
+
+    let pdwGlobal = {};
+    Services.scriptloader.loadSubScript("chrome://payments/content/paymentDialogWrapper.js",
+                                        pdwGlobal);
+
+    paymentsBrowser.paymentDialogWrapper = pdwGlobal.paymentDialogWrapper;
+
+    // Create an <html:div> wrapper to absolutely position the <xul:browser>
+    // because XUL elements don't support position:absolute.
+    let absDiv = chromeWindow.document.createElementNS(XHTML_NS, "div");
+    container.appendChild(absDiv);
+
+    // append the frame to start the loading
+    absDiv.appendChild(paymentsBrowser);
+    browserContainer.prepend(container);
+
+    // Initialize the wrapper once the <browser> is connected.
+    paymentsBrowser.paymentDialogWrapper.init(requestId, paymentsBrowser);
+
+    this._attachBrowserEventListeners(merchantBrowser);
+
+    // Only show the frame and change the UI when the dialog is ready to show.
+    paymentsBrowser.addEventListener("tabmodaldialogready", function readyToShow() {
+      if (!container) {
+        // The dialog was closed by the DOM code before it was ready to be shown.
+        return;
+      }
+      container.hidden = false;
+      this._showDialog(merchantBrowser);
+    }.bind(this), {
+      once: true,
+    });
   },
 
   abortPayment(requestId) {
@@ -81,20 +108,6 @@ PaymentUIService.prototype = {
     paymentSrv.respondPayment(abortResponse);
   },
 
-  rejectPaymentForClosedDialog(requestId) {
-    this.log.debug("rejectPaymentForClosedDialog:", requestId);
-    const rejectResponse = Cc["@mozilla.org/dom/payments/payment-show-action-response;1"]
-                            .createInstance(Ci.nsIPaymentShowActionResponse);
-    rejectResponse.init(requestId,
-                        Ci.nsIPaymentActionResponse.PAYMENT_REJECTED,
-                        "", // payment method
-                        null, // payment method data
-                        "", // payer name
-                        "", // payer email
-                        "");// payer phone
-    paymentSrv.respondPayment(rejectResponse);
-  },
-
   completePayment(requestId) {
     // completeStatus should be one of "timeout", "success", "fail", ""
     let {completeStatus} = paymentSrv.getPaymentRequestById(requestId);
@@ -109,6 +122,18 @@ PaymentUIService.prototype = {
         closed = this.closeDialog(requestId);
         break;
     }
+
+    let paymentFrame;
+    if (!closed) {
+      // We need to call findDialog before we respond below as getPaymentRequestById
+      // may fail due to the request being removed upon completion.
+      paymentFrame = this.findDialog(requestId).paymentFrame;
+      if (!paymentFrame) {
+        this.log.error("completePayment: no dialog found");
+        return;
+      }
+    }
+
     let responseCode = closed ?
         Ci.nsIPaymentActionResponse.COMPLETE_SUCCEEDED :
         Ci.nsIPaymentActionResponse.COMPLETE_FAILED;
@@ -118,23 +143,18 @@ PaymentUIService.prototype = {
     paymentSrv.respondPayment(completeResponse.QueryInterface(Ci.nsIPaymentActionResponse));
 
     if (!closed) {
-      let dialog = this.findDialog(requestId);
-      if (!dialog) {
-        this.log.error("completePayment: no dialog found");
-        return;
-      }
-      dialog.paymentDialogWrapper.updateRequest();
+      paymentFrame.paymentDialogWrapper.updateRequest();
     }
   },
 
   updatePayment(requestId) {
-    let dialog = this.findDialog(requestId);
+    let {paymentFrame} = this.findDialog(requestId);
     this.log.debug("updatePayment:", requestId);
-    if (!dialog) {
+    if (!paymentFrame) {
       this.log.error("updatePayment: no dialog found");
       return;
     }
-    dialog.paymentDialogWrapper.updateRequest();
+    paymentFrame.paymentDialogWrapper.updateRequest();
   },
 
   closePayment(requestId) {
@@ -143,36 +163,141 @@ PaymentUIService.prototype = {
 
   // other helper methods
 
+  _createPaymentFrame(doc, requestId) {
+    let frame = doc.createXULElement("browser");
+    frame.classList.add("paymentDialogContainerFrame");
+    frame.setAttribute("type", "content");
+    frame.setAttribute("remote", "true");
+    frame.setAttribute("disablehistory", "true");
+    frame.setAttribute("nodefaultsrc", "true");
+    frame.setAttribute("transparent", "true");
+    frame.setAttribute("selectmenulist", "ContentSelectDropdown");
+    frame.setAttribute("autocompletepopup", "PopupAutoComplete");
+    return frame;
+  },
+
+  _attachBrowserEventListeners(merchantBrowser) {
+    merchantBrowser.addEventListener("SwapDocShells", this);
+  },
+
+  _showDialog(merchantBrowser) {
+    let chromeWindow = merchantBrowser.ownerGlobal;
+    // Prevent focusing or interacting with the <browser>.
+    merchantBrowser.setAttribute("tabmodalPromptShowing", "true");
+
+    // Darken the merchant content area.
+    let tabModalBackground = chromeWindow.document.createXULElement("box");
+    tabModalBackground.classList.add("tabModalBackground", "paymentDialogBackground");
+    // Insert the same way as <tabmodalprompt>.
+    merchantBrowser.parentNode.insertBefore(tabModalBackground,
+                                            merchantBrowser.nextElementSibling);
+  },
+
   /**
    * @param {string} requestId - Payment Request ID of the dialog to close.
    * @returns {boolean} whether the specified dialog was closed.
    */
   closeDialog(requestId) {
-    let win = this.findDialog(requestId);
-    if (!win) {
+    let {
+      browser,
+      dialogContainer,
+      paymentFrame,
+    } = this.findDialog(requestId);
+    if (!dialogContainer) {
       return false;
     }
-    this.log.debug(`closing: ${win.name}`);
-    win.close();
+    this.log.debug(`closing: ${requestId}`);
+    paymentFrame.paymentDialogWrapper.uninit();
+    dialogContainer.remove();
+    browser.removeEventListener("SwapDocShells", this);
+
+    if (!dialogContainer.hidden) {
+      // If the container is no longer hidden then the background was added after
+      // `tabmodaldialogready` so remove it.
+      browser.parentElement.querySelector(".paymentDialogBackground").remove();
+
+      if (!browser.tabModalPromptBox || browser.tabModalPromptBox.listPrompts().length == 0) {
+        browser.removeAttribute("tabmodalPromptShowing");
+      }
+    }
     return true;
   },
 
+  getDialogContainerForMerchantBrowser(merchantBrowser) {
+    return merchantBrowser.ownerGlobal.gBrowser.getBrowserContainer(merchantBrowser)
+                          .querySelector(".paymentDialogContainer");
+  },
+
   findDialog(requestId) {
-    for (let win of Services.wm.getEnumerator(null)) {
-      if (win.name == `${this.REQUEST_ID_PREFIX}${requestId}`) {
-        return win;
+    for (let win of BrowserWindowTracker.orderedWindows) {
+      for (let dialogContainer of win.document.querySelectorAll(".paymentDialogContainer")) {
+        if (dialogContainer.dataset.requestId == requestId) {
+          return {
+            dialogContainer,
+            paymentFrame: dialogContainer.querySelector(".paymentDialogContainerFrame"),
+            browser: dialogContainer.parentElement.querySelector(".browserStack > browser"),
+          };
+        }
       }
     }
+    return {};
+  },
 
+  findBrowserByOuterWindowId(outerWindowId) {
+    for (let win of BrowserWindowTracker.orderedWindows) {
+      let browser = win.gBrowser.getBrowserForOuterWindowID(outerWindowId);
+      if (!browser) {
+        continue;
+      }
+      return browser;
+    }
+
+    this.log.error("findBrowserByOuterWindowId: No browser found for outerWindowId:",
+                   outerWindowId);
     return null;
   },
 
-  requestIdForWindow(window) {
-    let windowName = window.name;
+  _moveDialogToNewBrowser(oldBrowser, newBrowser) {
+    // Re-attach event listeners to the new browser.
+    newBrowser.addEventListener("SwapDocShells", this);
 
-    return windowName.startsWith(this.REQUEST_ID_PREFIX) ?
-      windowName.replace(this.REQUEST_ID_PREFIX, "") : // returns suffix, which is the requestId
-      null;
+    let dialogContainer = this.getDialogContainerForMerchantBrowser(oldBrowser);
+    let newBrowserContainer = newBrowser.ownerGlobal.gBrowser.getBrowserContainer(newBrowser);
+
+    // Clone the container tree
+    let newDialogContainer = newBrowserContainer.ownerDocument.importNode(dialogContainer, true);
+
+    let oldFrame = dialogContainer.querySelector(".paymentDialogContainerFrame");
+    let newFrame = newDialogContainer.querySelector(".paymentDialogContainerFrame");
+
+    // We need a document to be synchronously loaded in order to do the swap and
+    // there's no point in wasting resources loading a dialog we're going to replace.
+    newFrame.setAttribute("src", "about:blank");
+    newFrame.setAttribute("nodefaultsrc", "true");
+
+    newBrowserContainer.prepend(newDialogContainer);
+
+    // Force the <browser> to be created so that it'll have a document loaded and frame created.
+    // See `ourChildDocument` and `ourFrame` checks in nsFrameLoader::SwapWithOtherLoader.
+    /* eslint-disable-next-line no-unused-expressions */
+    newFrame.clientTop;
+
+    // Swap the frameLoaders to preserve the frame state
+    newFrame.swapFrameLoaders(oldFrame);
+    newFrame.paymentDialogWrapper = oldFrame.paymentDialogWrapper;
+    newFrame.paymentDialogWrapper.changeAttachedFrame(newFrame);
+    dialogContainer.remove();
+
+    this._showDialog(newBrowser);
+  },
+
+  handleEvent(event) {
+    switch (event.type) {
+      case "SwapDocShells": {
+        this._moveDialogToNewBrowser(event.target, event.detail);
+        break;
+      }
+    }
   },
 };
 

@@ -54,12 +54,6 @@ PrioEncoder::Encode(GlobalObject& aGlobal,
   SECStatus prio_rv = SECSuccess;
 
   if (!sSingleton) {
-    sSingleton = new PrioEncoder();
-
-    ClearOnShutdown(&sSingleton);
-
-    Prio_init();
-
     nsresult rv;
 
     nsAutoCStringN<CURVE25519_KEY_LEN_HEX + 1> prioKeyA;
@@ -84,6 +78,13 @@ PrioEncoder::Encode(GlobalObject& aGlobal,
       return;
     }
 
+    prio_rv = Prio_init();
+
+    if (prio_rv != SECSuccess) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return;
+    }
+
     prio_rv = PublicKey_import_hex(&sPublicKeyA,
                                    reinterpret_cast<const unsigned char*>(prioKeyA.BeginReading()),
                                    CURVE25519_KEY_LEN_HEX);
@@ -99,15 +100,19 @@ PrioEncoder::Encode(GlobalObject& aGlobal,
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return;
     }
+
+    sSingleton = new PrioEncoder();
+    ClearOnShutdown(&sSingleton);
   }
 
-  bool dataItems[] = {
-    aPrioParams.mBrowserIsUserDefault,
-    aPrioParams.mNewTabPageEnabled,
-    aPrioParams.mPdfViewerUsed,
-  };
+  nsTArray<bool> dataItems = aPrioParams.mBooleans;
+  if (dataItems.Length() > gNumBooleans) {
+    aRv.ThrowRangeError<MSG_VALUE_OUT_OF_RANGE>(
+      NS_LITERAL_STRING("Maximum boolean value exceeded"));
+    return;
+  }
 
-  PrioConfig prioConfig = PrioConfig_new(mozilla::ArrayLength(dataItems),
+  PrioConfig prioConfig = PrioConfig_new(dataItems.Length(),
                                          sPublicKeyA,
                                          sPublicKeyB,
                                          reinterpret_cast<const unsigned char*>(aBatchID.BeginReading()),
@@ -128,7 +133,7 @@ PrioEncoder::Encode(GlobalObject& aGlobal,
   unsigned int lenB = 0;
 
   prio_rv = PrioClient_encode(prioConfig,
-                              dataItems,
+                              dataItems.Elements(),
                               &forServerA,
                               &lenA,
                               &forServerB,

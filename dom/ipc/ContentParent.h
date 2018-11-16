@@ -92,10 +92,6 @@ namespace layers {
 struct TextureFactoryIdentifier;
 } // namespace layers
 
-namespace layout {
-class PRenderFrameParent;
-} // namespace layout
-
 namespace dom {
 
 class Element;
@@ -307,7 +303,6 @@ public:
   virtual mozilla::ipc::IPCResult RecvOpenRecordReplayChannel(const uint32_t& channelId,
                                                               FileDescriptor* connection) override;
   virtual mozilla::ipc::IPCResult RecvCreateReplayingProcess(const uint32_t& aChannelId) override;
-  virtual mozilla::ipc::IPCResult RecvTerminateReplayingProcess(const uint32_t& aChannelId) override;
 
   virtual mozilla::ipc::IPCResult RecvCreateGMPService() override;
 
@@ -544,7 +539,6 @@ public:
   virtual mozilla::ipc::IPCResult
   RecvCreateWindow(PBrowserParent* aThisTabParent,
                    PBrowserParent* aNewTab,
-                   layout::PRenderFrameParent* aRenderFrame,
                    const uint32_t& aChromeFlags,
                    const bool& aCalledFromJS,
                    const bool& aPositionSpecified,
@@ -570,8 +564,6 @@ public:
     const nsString& aName,
     const IPC::Principal& aTriggeringPrincipal,
     const uint32_t& aReferrerPolicy) override;
-
-  static bool AllocateLayerTreeId(TabParent* aTabParent, layers::LayersId* aId);
 
   static void
   BroadcastBlobURLRegistration(const nsACString& aURI,
@@ -693,6 +685,10 @@ public:
     const BrowsingContextId& aContextId,
     const bool& aMoveToBFCache) override;
 
+  virtual mozilla::ipc::IPCResult RecvSetOpenerBrowsingContext(
+    const BrowsingContextId& aContextId,
+    const BrowsingContextId& aOpenerContextId) override;
+
 protected:
   void OnChannelConnected(int32_t pid) override;
 
@@ -721,6 +717,11 @@ private:
                                                         const hal::ProcessPriority& aPriority,
                                                         const TabId& aOpenerTabId,
                                                         const TabId& aTabId);
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+  // Cached Mac sandbox params used when launching content processes.
+  static StaticAutoPtr<std::vector<std::string>> sMacSandboxParams;
+#endif
 
   // Hide the raw constructor methods since we don't want client code
   // using them.
@@ -790,6 +791,9 @@ private:
 
   // Common initialization after sub process launch.
   void InitInternal(ProcessPriority aPriority);
+
+  // Generate a minidump for the child process and one for the main process
+  void GeneratePairedMinidump(const char* aReason);
 
   virtual ~ContentParent();
 
@@ -870,10 +874,6 @@ private:
   void EnsurePermissionsByKey(const nsCString& aKey);
 
   static void ForceKillTimerCallback(nsITimer* aTimer, void* aClosure);
-
-  static bool AllocateLayerTreeId(ContentParent* aContent,
-                                  TabParent* aTopLevel, const TabId& aTabId,
-                                  layers::LayersId* aId);
 
   /**
    * Get or create the corresponding content parent array to |aContentProcessType|.
@@ -1034,9 +1034,6 @@ private:
   virtual mozilla::ipc::IPCResult RecvBeep() override;
   virtual mozilla::ipc::IPCResult RecvPlayEventSound(const uint32_t& aEventId) override;
 
-  virtual mozilla::ipc::IPCResult RecvGetSystemColors(const uint32_t& colorsCount,
-                                                      InfallibleTArray<uint32_t>* colors) override;
-
   virtual mozilla::ipc::IPCResult RecvGetIconForExtension(const nsCString& aFileExt,
                                                           const uint32_t& aIconSize,
                                                           InfallibleTArray<uint8_t>* bits) override;
@@ -1144,13 +1141,6 @@ public:
 
   virtual void ProcessingError(Result aCode, const char* aMsgName) override;
 
-  virtual mozilla::ipc::IPCResult RecvAllocateLayerTreeId(const ContentParentId& aCpId,
-                                                          const TabId& aTabId,
-                                                          layers::LayersId* aId) override;
-
-  virtual mozilla::ipc::IPCResult RecvDeallocateLayerTreeId(const ContentParentId& aCpId,
-                                                            const layers::LayersId& aId) override;
-
   virtual mozilla::ipc::IPCResult RecvGraphicsError(const nsCString& aError) override;
 
   virtual mozilla::ipc::IPCResult
@@ -1256,9 +1246,17 @@ public:
                                               const nsCString& aGrantedOrigin,
                                               FirstPartyStorageAccessGrantedForOriginResolver&& aResolver) override;
 
+  virtual mozilla::ipc::IPCResult
+  RecvStoreUserInteractionAsPermission(const Principal& aPrincipal) override;
+
   // Notify the ContentChild to enable the input event prioritization when
   // initializing.
   void MaybeEnableRemoteInputEventQueue();
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+  void AppendSandboxParams(std::vector<std::string>& aArgs);
+  void AppendDynamicSandboxParams(std::vector<std::string>& aArgs);
+#endif
 
 public:
   void SendGetFilesResponseAndForget(const nsID& aID,
@@ -1278,6 +1276,8 @@ public:
   }
 
 private:
+  // Released in ActorDestroy; deliberately not exposed to the CC.
+  RefPtr<ContentParent> mSelfRef;
 
   // If you add strong pointers to cycle collected objects here, be sure to
   // release these objects in ShutDownProcess.  See the comment there for more
@@ -1299,8 +1299,6 @@ private:
   // nsFakePluginTag::NOT_JSPLUGIN.
   int32_t mJSPluginID;
 
-  nsCString mKillHardAnnotation;
-
   // After we initiate shutdown, we also start a timer to ensure
   // that even content processes that are 100% blocked (say from
   // SIGSTOP), are still killed eventually.  This task enforces that
@@ -1318,6 +1316,7 @@ private:
   // still pass through.
   bool mIsAlive;
 
+  bool mShuttingDown;
   bool mIsForBrowser;
 
   // Whether this process is recording or replaying its execution, and any
@@ -1385,6 +1384,13 @@ private:
 
   static uint64_t sNextTabParentId;
   static nsDataHashtable<nsUint64HashKey, TabParent*> sNextTabParents;
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+  // When set to true, indicates that content processes should
+  // initialize their sandbox during startup instead of waiting
+  // for the SetProcessSandbox IPDL message.
+  static bool sEarlySandboxInit;
+#endif
 };
 
 } // namespace dom

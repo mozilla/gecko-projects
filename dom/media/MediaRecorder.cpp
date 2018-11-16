@@ -1385,7 +1385,7 @@ void
 MediaRecorder::Pause(ErrorResult& aResult)
 {
   LOG(LogLevel::Debug, ("MediaRecorder.Pause"));
-  if (mState != RecordingState::Recording) {
+  if (mState == RecordingState::Inactive) {
     aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
@@ -1396,14 +1396,16 @@ MediaRecorder::Pause(ErrorResult& aResult)
     NotifyError(rv);
     return;
   }
+
   mState = RecordingState::Paused;
+  DispatchSimpleEvent(NS_LITERAL_STRING("pause"));
 }
 
 void
 MediaRecorder::Resume(ErrorResult& aResult)
 {
   LOG(LogLevel::Debug, ("MediaRecorder.Resume"));
-  if (mState != RecordingState::Paused) {
+  if (mState == RecordingState::Inactive) {
     aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
@@ -1414,7 +1416,9 @@ MediaRecorder::Resume(ErrorResult& aResult)
     NotifyError(rv);
     return;
   }
+
   mState = RecordingState::Recording;
+  DispatchSimpleEvent(NS_LITERAL_STRING("resume"));
 }
 
 void

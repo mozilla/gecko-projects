@@ -12,6 +12,7 @@
 #include "gfxRect.h"
 #include "nsRegionFwd.h"
 #include "mozilla/gfx/Rect.h"
+#include "mozilla/webrender/WebRenderTypes.h"
 
 class gfxContext;
 class gfxDrawable;
@@ -44,6 +45,13 @@ class nsSVGIntegrationUtils final
   typedef mozilla::image::imgDrawingParams imgDrawingParams;
 
 public:
+  /**
+   * Returns true if SVG effects that affect the overflow of the given frame
+   * are currently applied to the frame.
+   */
+  static bool
+  UsingOverflowAffectingEffects(const nsIFrame* aFrame);
+
   /**
    * Returns true if SVG effects are currently applied to this frame.
    */
@@ -166,6 +174,11 @@ public:
   static void
   PaintMaskAndClipPath(const PaintFramesParams& aParams);
 
+  // This should use FunctionRef instead of std::function because we don't need
+  // to take ownership of the function. See bug 1490781.
+  static void
+  PaintMaskAndClipPath(const PaintFramesParams& aParams, const std::function<void()>& aPaintChild);
+
   /**
    * Paint mask of non-SVG frame onto a given context, aParams.ctx.
    * aParams.ctx must contain an A8 surface. Returns false if the mask
@@ -185,6 +198,15 @@ public:
    */
   static void
   PaintFilter(const PaintFramesParams& aParams);
+
+  /**
+   * Try to build WebRender filters for a frame if the filters applied to it are supported.
+   */
+  static bool
+  BuildWebRenderFilters(nsIFrame *aFilteredFrame,
+                        const mozilla::LayoutDeviceIntRect& aPreFilterBounds,
+                        nsTArray<mozilla::wr::WrFilterOp>& aWrFilters,
+                        mozilla::LayoutDeviceIntRect& aPostFilterBounds);
 
   /**
    * @param aRenderingContext the target rendering context in which the paint

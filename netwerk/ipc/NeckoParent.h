@@ -108,6 +108,12 @@ protected:
   virtual bool
     DeallocPStunAddrsRequestParent(PStunAddrsRequestParent* aActor) override;
 
+  virtual PWebrtcProxyChannelParent* AllocPWebrtcProxyChannelParent(
+    const PBrowserOrId& aBrowser) override;
+  virtual bool
+    DeallocPWebrtcProxyChannelParent(PWebrtcProxyChannelParent* aActor)
+    override;
+
   virtual PAltDataOutputStreamParent* AllocPAltDataOutputStreamParent(
     const nsCString& type, const int64_t& predictedSize, PHttpChannelParent* channel) override;
   virtual bool DeallocPAltDataOutputStreamParent(
@@ -163,9 +169,11 @@ protected:
                                                          const Principal& aPrincipal,
                                                          const bool& aAnonymous) override;
   virtual mozilla::ipc::IPCResult RecvHTMLDNSPrefetch(const nsString& hostname,
+                                                      const bool& isHttps,
                                                       const OriginAttributes& aOriginAttributes,
                                                       const uint16_t& flags) override;
   virtual mozilla::ipc::IPCResult RecvCancelHTMLDNSPrefetch(const nsString& hostname,
+                                                            const bool& isHttps,
                                                             const OriginAttributes& aOriginAttributes,
                                                             const uint16_t& flags,
                                                             const nsresult& reason) override;
@@ -238,6 +246,22 @@ protected:
   virtual mozilla::ipc::IPCResult
     RecvGetExtensionFD(const URIParams& aURI,
                        GetExtensionFDResolver&& aResolve) override;
+
+  virtual PTrackingDummyChannelParent*
+    AllocPTrackingDummyChannelParent(nsIURI* aURI,
+                                     nsIURI* aTopWindowURI,
+                                     const nsresult& aTopWindowURIResult,
+                                     const OptionalLoadInfoArgs& aLoadInfo) override;
+
+  virtual bool
+    DeallocPTrackingDummyChannelParent(PTrackingDummyChannelParent* aChild) override;
+
+  virtual mozilla::ipc::IPCResult
+    RecvPTrackingDummyChannelConstructor(PTrackingDummyChannelParent* aActor,
+                                         nsIURI* aURI,
+                                         nsIURI* aTopWindowURI,
+                                         const nsresult& aTopWindowURIResult,
+                                         const OptionalLoadInfoArgs& aLoadInfo) override;
 };
 
 } // namespace net

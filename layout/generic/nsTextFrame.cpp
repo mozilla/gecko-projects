@@ -1789,6 +1789,16 @@ GetSpaceWidthAppUnits(const gfxTextRun* aTextRun)
   return spaceWidthAppUnits;
 }
 
+static gfxFloat
+GetMinTabAdvanceAppUnits(const gfxTextRun* aTextRun)
+{
+  gfxFloat chWidthAppUnits =
+    NS_round(GetFirstFontMetrics(aTextRun->GetFontGroup(),
+                                 aTextRun->IsVertical()).zeroOrAveCharWidth *
+             aTextRun->GetAppUnitsPerDevUnit());
+  return 0.5 * chWidthAppUnits;
+}
+
 static nscoord
 LetterSpacing(nsIFrame* aFrame, const nsStyleText* aStyleText = nullptr)
 {
@@ -3100,6 +3110,7 @@ public:
       mLength(aLength),
       mWordSpacing(WordSpacing(aFrame, mTextRun, aTextStyle)),
       mLetterSpacing(LetterSpacing(aFrame, aTextStyle)),
+      mMinTabAdvance(-1.0),
       mHyphenWidth(-1),
       mOffsetFromBlockOriginForTabs(aOffsetFromBlockOriginForTabs),
       mJustificationArrayStart(0),
@@ -3125,6 +3136,7 @@ public:
       mLength(aFrame->GetContentLength()),
       mWordSpacing(WordSpacing(aFrame, mTextRun)),
       mLetterSpacing(LetterSpacing(aFrame)),
+      mMinTabAdvance(-1.0),
       mHyphenWidth(-1),
       mOffsetFromBlockOriginForTabs(0),
       mJustificationArrayStart(0),
@@ -3191,6 +3203,13 @@ public:
 
   void CalcTabWidths(Range aTransformedRange, gfxFloat aTabWidth) const;
 
+  gfxFloat MinTabAdvance() const {
+    if (mMinTabAdvance < 0.0) {
+      mMinTabAdvance = GetMinTabAdvanceAppUnits(mTextRun);
+    }
+    return mMinTabAdvance;
+  }
+
   const gfxSkipCharsIterator& GetEndHint() const { return mTempIterator; }
 
 protected:
@@ -3223,6 +3242,7 @@ protected:
   int32_t                         mLength;  // DOM string length, may be INT32_MAX
   const gfxFloat                  mWordSpacing; // space for each whitespace char
   const gfxFloat                  mLetterSpacing; // space for each letter
+  mutable gfxFloat                mMinTabAdvance; // min advance for <tab> char
   mutable gfxFloat                mHyphenWidth;
   mutable gfxFloat                mOffsetFromBlockOriginForTabs;
 
@@ -3480,13 +3500,11 @@ PropertyProvider::GetSpacingInternal(Range aRange, Spacing* aSpacing,
 
 // aX and the result are in whole appunits.
 static gfxFloat
-AdvanceToNextTab(gfxFloat aX, gfxFloat aTabWidth)
+AdvanceToNextTab(gfxFloat aX, gfxFloat aTabWidth, gfxFloat aMinAdvance)
 {
-
-  // Advance aX to the next multiple of *aCachedTabWidth. We must advance
-  // by at least 1 appunit.
-  // XXX should we make this 1 CSS pixel?
-  return ceil((aX + 1) / aTabWidth) * aTabWidth;
+  // Advance aX to the next multiple of aTabWidth. We must advance
+  // by at least aMinAdvance.
+  return ceil((aX + aMinAdvance) / aTabWidth) * aTabWidth;
 }
 
 void
@@ -3549,7 +3567,7 @@ PropertyProvider::CalcTabWidths(Range aRange, gfxFloat aTabWidth) const
           mFrame->SetProperty(TabWidthProperty(), mTabWidths);
         }
         double nextTab = AdvanceToNextTab(mOffsetFromBlockOriginForTabs,
-                                          aTabWidth);
+                                          aTabWidth, MinTabAdvance());
         mTabWidths->mWidths.AppendElement(TabWidth(i - startOffset,
                 NSToIntRound(nextTab - mOffsetFromBlockOriginForTabs)));
         mOffsetFromBlockOriginForTabs = nextTab;
@@ -4776,6 +4794,28 @@ nsTextFrame::DisconnectTextRuns()
   if ((GetStateBits() & TEXT_HAS_FONT_INFLATION)) {
     DeleteProperty(UninflatedTextRunProperty());
   }
+}
+
+void
+nsTextFrame::NotifyNativeAnonymousTextnodeChange(uint32_t aOldLength)
+{
+  MOZ_ASSERT(mContent->IsInNativeAnonymousSubtree());
+
+  MarkIntrinsicISizesDirty();
+
+  // This is to avoid making a new Reflow request in CharacterDataChanged:
+  for (nsTextFrame* f = this; f; f = f->GetNextContinuation()) {
+    f->AddStateBits(NS_FRAME_IS_DIRTY);
+    f->mReflowRequestedForCharDataChange = true;
+  }
+
+  // Pretend that all the text changed.
+  CharacterDataChangeInfo info;
+  info.mAppend = false;
+  info.mChangeStart = 0;
+  info.mChangeEnd = aOldLength;
+  info.mReplaceLength = mContent->TextLength();
+  CharacterDataChanged(info);
 }
 
 nsresult
@@ -6633,6 +6673,17 @@ nsTextFrame::DrawEmphasisMarks(gfxContext* aContext,
   }
 
   bool isTextCombined = Style()->IsTextCombined();
+  if (isTextCombined && !aWM.IsVertical()) {
+    // XXX This only happens when the parent is display:contents with an
+    // orthogonal writing mode. This should be rare, and don't have use
+    // cases, so we don't care. It is non-trivial to implement a sane
+    // behavior for that case: if you treat the text as not combined,
+    // the marks would spread wider than the text (which is rendered as
+    // combined); if you try to draw a single mark, selecting part of
+    // the text could dynamically create multiple new marks.
+    NS_WARNING("Give up on combined text with horizontal wm");
+    return;
+  }
   nscolor color = aDecorationOverrideColor ? *aDecorationOverrideColor :
     nsLayoutUtils::GetColor(this, &nsStyleText::mTextEmphasisColor);
   aContext->SetColor(Color::FromABGR(color));
@@ -8556,8 +8607,7 @@ nsTextFrame::AddInlineMinISizeForFlow(gfxContext *aRenderingContext,
     return;
   }
 
-  // If overflow-wrap is break-word, we can wrap everywhere.
-  if (StaticPrefs::layout_css_overflow_break_intrinsic_size() &&
+  if (textStyle->mOverflowWrap == mozilla::StyleOverflowWrap::Anywhere &&
       textStyle->WordCanWrap(this)) {
     aData->OptionallyBreak();
     aData->mCurrentLine +=
@@ -8630,7 +8680,8 @@ nsTextFrame::AddInlineMinISizeForFlow(gfxContext *aRenderingContext,
         tabWidth = ComputeTabWidthAppUnits(this, textRun);
       }
       gfxFloat afterTab =
-        AdvanceToNextTab(aData->mCurrentLine, tabWidth);
+        AdvanceToNextTab(aData->mCurrentLine, tabWidth,
+                         provider.MinTabAdvance());
       aData->mCurrentLine = nscoord(afterTab + spacing.mAfter);
       wordStart = i + 1;
     } else if (i < flowEndInTextRun ||
@@ -8793,7 +8844,8 @@ nsTextFrame::AddInlinePrefISizeForFlow(gfxContext *aRenderingContext,
         tabWidth = ComputeTabWidthAppUnits(this, textRun);
       }
       gfxFloat afterTab =
-        AdvanceToNextTab(aData->mCurrentLine, tabWidth);
+        AdvanceToNextTab(aData->mCurrentLine, tabWidth,
+                         provider.MinTabAdvance());
       aData->mCurrentLine = nscoord(afterTab + spacing.mAfter);
       aData->mLineIsEmpty = false;
       lineStart = i + 1;

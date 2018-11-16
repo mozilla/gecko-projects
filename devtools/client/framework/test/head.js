@@ -34,9 +34,9 @@ function getParentProcessActors(callback) {
 
   const client = new DebuggerClient(DebuggerServer.connectPipe());
   client.connect()
-    .then(() => client.getProcess())
-    .then(response => {
-      callback(client, response.form);
+    .then(() => client.mainRoot.getMainProcess())
+    .then(front => {
+      callback(client, front);
     });
 
   SimpleTest.registerCleanupFunction(() => {
@@ -65,7 +65,7 @@ async function openScratchpadWindow() {
       onReady: function() {
         win.Scratchpad.removeObserver(this);
         resolve(win);
-      }
+      },
     });
   });
 }
@@ -314,6 +314,16 @@ async function dndToolTab(toolbox, dragTarget, dropTarget, passedTargets = []) {
     EventUtils.synthesizeMouse(containerEl, 0, 0,
                                { type: "mouseout" }, containerEl.ownerGlobal);
   }
+
+  // Wait for updating the preference.
+  await new Promise(resolve => {
+    const onUpdated = () => {
+      Services.prefs.removeObserver("devtools.toolbox.tabsOrder", onUpdated);
+      resolve();
+    };
+
+    Services.prefs.addObserver("devtools.toolbox.tabsOrder", onUpdated);
+  });
 }
 
 function assertToolTabOrder(toolbox, expectedOrder) {

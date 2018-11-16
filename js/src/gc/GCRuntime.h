@@ -64,6 +64,7 @@ struct SweepAction
     virtual ~SweepAction() {}
     virtual IncrementalProgress run(Args... args) = 0;
     virtual void assertFinished() const = 0;
+    virtual bool shouldSkip() { return false; }
 };
 
 class ChunkPool
@@ -299,6 +300,7 @@ class GCRuntime
     }
     void getZealBits(uint32_t* zealBits, uint32_t* frequency, uint32_t* nextScheduled);
     void setZeal(uint8_t zeal, uint32_t frequency);
+    void unsetZeal(uint8_t zeal);
     bool parseAndSetZeal(const char* str);
     void setNextScheduled(uint32_t count);
     void verifyPreBarriers();
@@ -592,9 +594,9 @@ class GCRuntime
                                            SliceBudget& budget,
                                            JS::gcreason::Reason reason);
     bool shouldRepeatForDeadZone(JS::gcreason::Reason reason);
-    IncrementalResult incrementalCollectSlice(SliceBudget& budget,
-                                              JS::gcreason::Reason reason,
-                                              AutoGCSession& session);
+    IncrementalResult incrementalSlice(SliceBudget& budget,
+                                       JS::gcreason::Reason reason,
+                                       AutoGCSession& session);
     MOZ_MUST_USE bool shouldCollectNurseryForSlice(bool nonincrementalByAPI,
         SliceBudget& budget);
 
@@ -613,10 +615,11 @@ class GCRuntime
     void traceRuntimeCommon(JSTracer* trc, TraceOrMarkRuntime traceOrMark);
     void maybeDoCycleCollection();
     void markCompartments();
-    IncrementalProgress drainMarkStack(SliceBudget& sliceBudget, gcstats::PhaseKind phase);
-    template <class CompartmentIterT> void markWeakReferences(gcstats::PhaseKind phase);
+    IncrementalProgress markUntilBudgetExhaused(SliceBudget& sliceBudget, gcstats::PhaseKind phase);
+    void drainMarkStack();
+    template <class ZoneIterT> void markWeakReferences(gcstats::PhaseKind phase);
     void markWeakReferencesInCurrentGroup(gcstats::PhaseKind phase);
-    template <class ZoneIterT, class CompartmentIterT> void markGrayReferences(gcstats::PhaseKind phase);
+    template <class ZoneIterT> void markGrayReferences(gcstats::PhaseKind phase);
     void markBufferedGrayRoots(JS::Zone* zone);
     void markGrayReferencesInCurrentGroup(gcstats::PhaseKind phase);
     void markAllWeakReferences(gcstats::PhaseKind phase);
@@ -629,10 +632,6 @@ class GCRuntime
     IncrementalProgress endMarkingSweepGroup(FreeOp* fop, SliceBudget& budget);
     void markIncomingCrossCompartmentPointers(MarkColor color);
     IncrementalProgress beginSweepingSweepGroup(FreeOp* fop, SliceBudget& budget);
-#ifdef JS_GC_ZEAL
-    IncrementalProgress maybeYieldForSweepingZeal(FreeOp* fop, SliceBudget& budget);
-#endif
-    bool shouldReleaseObservedTypes();
     void sweepDebuggerOnMainThread(FreeOp* fop);
     void sweepJitDataOnMainThread(FreeOp* fop);
     IncrementalProgress endSweepingSweepGroup(FreeOp* fop, SliceBudget& budget);
@@ -816,9 +815,6 @@ class GCRuntime
     /* Incremented at the start of every major GC. */
     MainThreadData<uint64_t> majorGCNumber;
 
-    /* The major GC number at which to release observed type information. */
-    MainThreadData<uint64_t> jitReleaseNumber;
-
     /* Incremented on every GC slice. */
     MainThreadData<uint64_t> number;
 
@@ -859,9 +855,6 @@ class GCRuntime
 
     /* Whether any sweeping will take place in the separate GC helper thread. */
     MainThreadData<bool> sweepOnBackgroundThread;
-
-    /* Whether observed type information is being released in the current GC. */
-    MainThreadData<bool> releaseObservedTypes;
 
     /* Singly linked list of zones to be swept in the background. */
     HelperThreadLockData<ZoneList> backgroundSweepZones;

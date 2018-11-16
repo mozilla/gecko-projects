@@ -12,6 +12,7 @@
 #include "nsContentUtils.h"
 #include "nsIScriptError.h"
 #include "nsPIDOMWindow.h"
+#include "jsapi.h"
 
 namespace mozilla {
 namespace dom {
@@ -65,10 +66,14 @@ FetchStreamReader::Create(JSContext* aCx, nsIGlobalObject* aGlobal,
 
     RefPtr<WeakWorkerRef> workerRef =
       WeakWorkerRef::Create(workerPrivate, [streamReader]() {
-        // The WorkerPrivate does have a context available, and we could pass
-        // it here to trigger cancellation of the reader, but the author of
-        // this comment chickened out.
-        streamReader->CloseAndRelease(nullptr, NS_ERROR_DOM_INVALID_STATE_ERR);
+        MOZ_ASSERT(streamReader);
+        MOZ_ASSERT(streamReader->mWorkerRef);
+
+        WorkerPrivate* workerPrivate = streamReader->mWorkerRef->GetPrivate();
+        MOZ_ASSERT(workerPrivate);
+
+        streamReader->CloseAndRelease(workerPrivate->GetJSContext(),
+                                      NS_ERROR_DOM_INVALID_STATE_ERR);
       });
 
     if (NS_WARN_IF(!workerRef)) {
@@ -119,9 +124,7 @@ FetchStreamReader::CloseAndRelease(JSContext* aCx, nsresult aStatus)
 
   RefPtr<FetchStreamReader> kungFuDeathGrip = this;
 
-  if (aCx) {
-    MOZ_ASSERT(mReader);
-
+  if (aCx && mReader) {
     RefPtr<DOMException> error = DOMException::Create(aStatus);
 
     JS::Rooted<JS::Value> errorValue(aCx);
@@ -133,6 +136,9 @@ FetchStreamReader::CloseAndRelease(JSContext* aCx, nsresult aStatus)
       // "closed", return a new promise resolved with undefined.
       JS::ReadableStreamReaderCancel(aCx, reader, errorValue);
     }
+
+    // We don't want to propagate exceptions during the cleanup.
+    JS_ClearPendingException(aCx);
   }
 
   mStreamClosed = true;
@@ -156,6 +162,14 @@ FetchStreamReader::StartConsuming(JSContext* aCx,
 {
   MOZ_DIAGNOSTIC_ASSERT(!mReader);
   MOZ_DIAGNOSTIC_ASSERT(aStream);
+
+  aRv.MightThrowJSException();
+
+  // Here, by spec, we can pick any global we want. Just to avoid extra
+  // cross-compartment steps, we want to create the reader in the same
+  // compartment of the owning Fetch Body object.
+  // The same global will be used to retrieve data from this reader.
+  JSAutoRealm ar(aCx, mGlobal->GetGlobalJSObject());
 
   JS::Rooted<JSObject*> reader(aCx,
                                JS::ReadableStreamGetReader(aCx, aStream,
@@ -192,8 +206,9 @@ FetchStreamReader::OnOutputStreamReady(nsIAsyncOutputStream* aStream)
     return WriteBuffer();
   }
 
-  // TODO: We need to verify this is the correct global per the spec.
-  //       See bug 1385890.
+  // Here we can retrieve data from the reader using any global we want because
+  // it is not observable. We want to use the reader's global, which is also the
+  // Response's one.
   AutoEntryScript aes(mGlobal, "ReadableStreamReader.read", !mWorkerRef);
 
   JS::Rooted<JSObject*> reader(aes.cx(), mReader);

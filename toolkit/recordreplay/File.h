@@ -44,11 +44,11 @@ struct StreamChunkLocation
   // Decompressed size of the chunk.
   uint32_t mDecompressedSize;
 
-  inline bool operator == (const StreamChunkLocation& aOther) const {
-    return mOffset == aOther.mOffset
-        && mCompressedSize == aOther.mCompressedSize
-        && mDecompressedSize == aOther.mDecompressedSize;
-  }
+  // Hash of the compressed chunk data.
+  uint32_t mHash;
+
+  // Position in the stream of the start of this chunk.
+  uint64_t mStreamPos;
 };
 
 enum class StreamName
@@ -60,10 +60,12 @@ enum class StreamName
 };
 
 class File;
+class RecordingEventSection;
 
 class Stream
 {
   friend class File;
+  friend class RecordingEventSection;
 
   // File this stream belongs to.
   File* mFile;
@@ -117,6 +119,9 @@ class Stream
   // flushed.
   size_t mFlushedChunks;
 
+  // Whether there is a RecordingEventSection instance active for this stream.
+  bool mInRecordingEventSection;
+
   Stream(File* aFile, StreamName aName, size_t aNameIndex)
     : mFile(aFile)
     , mName(aName)
@@ -133,6 +138,7 @@ class Stream
     , mLastEvent((ThreadEvent) 0)
     , mChunkIndex(0)
     , mFlushedChunks(0)
+    , mInRecordingEventSection(false)
   {}
 
 public:
@@ -204,6 +210,7 @@ public:
   };
 
   friend class Stream;
+  friend class RecordingEventSection;
 
 private:
   // Open file handle, or 0 if closed.
@@ -275,7 +282,7 @@ public:
 private:
   StreamChunkLocation WriteChunk(const char* aStart,
                                  size_t aCompressedSize, size_t aDecompressedSize,
-                                 bool aTakeLock);
+                                 uint64_t aStreamPos, bool aTakeLock);
   void ReadChunk(char* aDest, const StreamChunkLocation& aChunk);
 };
 

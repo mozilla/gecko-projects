@@ -7,11 +7,11 @@
 function test() {
   waitForExplicitFinish();
 
-  getParentProcessActors((client, response) => {
+  getParentProcessActors((client, front) => {
     const options = {
-      form: response,
-      client: client,
-      chrome: true
+      activeTab: front,
+      client,
+      chrome: true,
     };
 
     TargetFactory.forRemoteTab(options).then(target => {

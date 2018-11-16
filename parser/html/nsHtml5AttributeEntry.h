@@ -57,32 +57,18 @@ public:
 
   inline void ReleaseValue() { mValue.Release(); }
 
-  inline nsHtml5AttributeEntry Clone(nsHtml5AtomTable* aInterner)
+  inline nsHtml5AttributeEntry Clone()
   {
     // Copy the memory
     nsHtml5AttributeEntry clone(*this);
     // Increment refcount for value
     clone.mValue = this->mValue.Clone();
-    if (aInterner) {
-      // Now if we have an interner, we'll need to rewrite non-static atoms.
-      // Only the local names may be non-static, in which case all three
-      // are the same.
-      nsAtom* local = GetLocal(0);
-      if (!local->IsStatic()) {
-        nsAutoString str;
-        local->ToString(str);
-        local = aInterner->GetAtom(str);
-        clone.mLocals[0] = local;
-        clone.mLocals[1] = local;
-        clone.mLocals[2] = local;
-      }
-    }
     return clone;
   }
 
 private:
-  nsAtom* mLocals[3];
-  nsAtom* mPrefixes[3];
+  RefPtr<nsAtom> mLocals[3];
+  RefPtr<nsAtom> mPrefixes[3];
   int32_t mUris[3];
   int32_t mLine;
   nsHtml5String mValue;

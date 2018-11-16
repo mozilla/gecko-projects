@@ -55,7 +55,8 @@ async function checkEventsForNode(test, inspector, testActor) {
     await beforeTest(inspector, testActor);
   }
 
-  const evHolder = container.elt.querySelector(".markup-badge[data-event]");
+  const evHolder = container.elt.querySelector(
+    ".inspector-badge.interactive[data-event]");
 
   if (expected.length === 0) {
     // If no event is expected, check that event bubble is hidden.
@@ -120,7 +121,8 @@ async function checkEventsForNode(test, inspector, testActor) {
     // Make sure the header is not hidden by scrollbars before clicking.
     header.scrollIntoView();
 
-    EventUtils.synthesizeMouseAtCenter(header, {}, type.ownerGlobal);
+    // Avoid clicking the header's center (could hit the debugger button)
+    EventUtils.synthesizeMouse(header, 2, 2, {}, type.ownerGlobal);
     await tooltip.once("event-tooltip-ready");
 
     is(header.classList.contains("content-expanded"), true,

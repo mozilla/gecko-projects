@@ -18,14 +18,17 @@ class PaymentRequestParent final : public PPaymentRequestParent
 {
   NS_INLINE_DECL_REFCOUNTING(PaymentRequestParent)
 public:
-  explicit PaymentRequestParent(uint64_t aTabId);
+  PaymentRequestParent();
 
-  uint64_t GetTabId();
   nsresult RespondPayment(nsIPaymentActionResponse* aResponse);
   nsresult ChangeShippingAddress(const nsAString& aRequestId,
                                  nsIPaymentAddress* aAddress);
   nsresult ChangeShippingOption(const nsAString& aRequestId,
                                 const nsAString& aOption);
+  nsresult ChangePayerDetail(const nsAString& aRequestId,
+                             const nsAString& aPayerName,
+                             const nsAString& aPayerEmail,
+                             const nsAString& aPayerPhone);
 
 protected:
   mozilla::ipc::IPCResult
@@ -37,8 +40,12 @@ protected:
 private:
   ~PaymentRequestParent() = default;
 
+  nsresult SerializeAddress(IPCPaymentAddress& ipcAddress,
+                            nsIPaymentAddress* aAddress);
+  nsresult SerializeResponseData(IPCPaymentResponseData& ipcData,
+                                 nsIPaymentResponseData* aData);
+
   bool mActorAlive;
-  uint64_t mTabId;
   nsString mRequestId;
 };
 

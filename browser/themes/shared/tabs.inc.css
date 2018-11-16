@@ -6,18 +6,15 @@
 %filter substitution
 %define horizontalTabPadding 9px
 
-#titlebar,
-#tabbrowser-tabs {
+:root {
   --tab-min-height: 33px;
 }
 
-:root[uidensity=compact] #titlebar,
-:root[uidensity=compact] #tabbrowser-tabs {
+:root[uidensity=compact] {
   --tab-min-height: 29px;
 }
 
-:root[uidensity=touch] #titlebar,
-:root[uidensity=touch] #tabbrowser-tabs {
+:root[uidensity=touch] {
   --tab-min-height: 41px;
 }
 
@@ -489,7 +486,7 @@
 }
 
 .tabbrowser-tab[visuallyselected=true]:-moz-lwtheme {
-  color: var(--lwt-tab-text, var(--toolbar-color, inherit));
+  color: var(--lwt-tab-text, var(--toolbar-color));
 }
 
 .tab-line {
@@ -512,7 +509,7 @@
 }
 
 %ifdef MENUBAR_CAN_AUTOHIDE
-#toolbar-menubar:not([autohide=true]) + #TabsToolbar > #tabbrowser-tabs > .tabbrowser-tab > .tab-stack > .tab-background,
+#toolbar-menubar:not([autohide=true]) + #TabsToolbar .tabbrowser-tab > .tab-stack > .tab-background,
 %endif
 :root:not([tabsintitlebar]) .tab-background,
 :root[extradragspace] .tab-background {
@@ -554,7 +551,7 @@
   background-color: rgba(0,0,0,.1);
 }
 
-#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab:hover > .tab-stack > .tab-background:not([selected=true]) {
+#TabsToolbar[brighttext] .tabbrowser-tab:hover > .tab-stack > .tab-background:not([selected=true]) {
   background-color: rgba(255,255,255,.1);
 }
 
@@ -570,12 +567,12 @@
   transform: none;
 }
 
-#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true]):not([multiselected]) {
+#TabsToolbar[brighttext] .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true]):not([multiselected]) {
   background-color: rgba(255,255,255,.2);
 }
 
 .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true])[multiselected],
-#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true])[multiselected] {
+#TabsToolbar[brighttext] .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true])[multiselected] {
   opacity: 0.5;
 }
 
@@ -585,7 +582,7 @@
   background-color: rgba(0,0,0,.1);
 }
 
-#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab[multiselected] > .tab-stack > .tab-background:not([selected=true]) {
+#TabsToolbar[brighttext] .tabbrowser-tab[multiselected] > .tab-stack > .tab-background:not([selected=true]) {
   background-color: rgba(255,255,255,.1);
 }
 
@@ -629,20 +626,20 @@
 
 /* Drag space */
 
-.titlebar-placeholder[type="pre-tabs"],
-.titlebar-placeholder[type="post-tabs"] {
+.titlebar-spacer[type="pre-tabs"],
+.titlebar-spacer[type="post-tabs"] {
   width: 40px;
 }
 
 @media (max-width: 500px) {
-  .titlebar-placeholder[type="post-tabs"] {
+  .titlebar-spacer[type="post-tabs"] {
     display: none;
   }
 }
 
 /* Tab separators */
 
-.titlebar-placeholder[type="pre-tabs"] {
+.titlebar-spacer[type="pre-tabs"] {
   border-inline-end: 1px solid var(--lwt-background-tab-separator-color, currentColor);
   opacity: 0.2;
 }
@@ -668,7 +665,7 @@
 }
 
 %ifdef MENUBAR_CAN_AUTOHIDE
-:root[tabsintitlebar]:not([extradragspace]) #toolbar-menubar[autohide=true] + #TabsToolbar > #tabbrowser-tabs > .tabbrowser-tab::after,
+:root[tabsintitlebar]:not([extradragspace]) #toolbar-menubar[autohide=true] + #TabsToolbar .tabbrowser-tab::after,
 %else
 :root[tabsintitlebar]:not([extradragspace]) .tabbrowser-tab::after,
 %endif
@@ -702,7 +699,7 @@
 
 .tabbrowser-arrowscrollbox > .scrollbutton-up,
 .tabbrowser-arrowscrollbox > .scrollbutton-down {
-  list-style-image: url(chrome://browser/skin/arrow-left.svg);
+  list-style-image: url(chrome://browser/skin/arrow-left.svg) !important;
   -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
   fill-opacity: var(--toolbarbutton-icon-fill-opacity);
@@ -717,9 +714,8 @@
 /* New tab button */
 
 .tabs-newtab-button,
-#TabsToolbar > #new-tab-button ,
-#TabsToolbar > toolbarpaletteitem > #new-tab-button {
-  list-style-image: url(chrome://browser/skin/tabbrowser/newtab.svg);
+#TabsToolbar #new-tab-button {
+  list-style-image: url(chrome://browser/skin/add.svg);
 }
 
 /* All tabs button and menupopup */

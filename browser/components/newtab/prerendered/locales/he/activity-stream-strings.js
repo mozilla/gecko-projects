@@ -74,9 +74,9 @@ window.gActivityStreamStrings = {
   "topsites_form_image_validation": "טעינת התמונה נכשלה. נא לנסות כתובת שונה.",
   "pocket_read_more": "נושאים פופולריים:",
   "pocket_read_even_more": "צפייה בחדשות נוספות",
-  "pocket_more_reccommendations": "More Recommendations",
-  "pocket_learn_more": "Learn More",
-  "pocket_cta_button": "Get Pocket",
+  "pocket_more_reccommendations": "המלצות נוספות",
+  "pocket_how_it_works": "How it works",
+  "pocket_cta_button": "קבלת Pocket",
   "pocket_cta_text": "Save the stories you love in Pocket, and fuel your mind with fascinating reads.",
   "highlights_empty_state": "ניתן להתחיל בגלישה ואנו נציג בפניך מספר כתבות, סרטונים ועמודים שונים מעולים בהם ביקרת לאחרונה או שהוספת לסימניות.",
   "topstories_empty_state": "התעדכנת בכל הסיפורים. כדאי לנסות שוב מאוחר יותר כדי לקבל עוד סיפורים מובילים מאת {provider}. לא רוצה לחכות? ניתן לבחור נושא נפוץ כדי למצוא עוד סיפורים נפלאים מרחבי הרשת.",
@@ -106,5 +106,7 @@ window.gActivityStreamStrings = {
   "firstrun_terms_of_service": "תנאי השירות",
   "firstrun_privacy_notice": "הצהרת הפרטיות",
   "firstrun_continue_to_login": "להמשיך",
-  "firstrun_skip_login": "לדלג על שלב זה"
+  "firstrun_skip_login": "לדלג על שלב זה",
+  "context_menu_title": "Open menu",
+  "pocket_learn_more": "מידע נוסף"
 };

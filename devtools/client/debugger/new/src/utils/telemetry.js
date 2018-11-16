@@ -1,18 +1,3 @@
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.recordEvent = recordEvent;
-
-var _telemetry = require("devtools/client/shared/telemetry");
-
-var _telemetry2 = _interopRequireDefault(_telemetry);
-
-var _devtoolsEnvironment = require("devtools/client/debugger/new/dist/vendors").vendored["devtools-environment"];
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
@@ -42,27 +27,33 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
  * //
  * // NOTE: You CAN send properties before preparing the event.
  * //
- * telemetry.preparePendingEvent("devtools.main", "pause", "debugger", null, [
+ *  telemetry.preparePendingEvent(this, "pause", "debugger", null, [
  *   "reason", "collapsed_callstacks"
  * ]);
  *
  * // Elsewhere in another codepath send the reason property
  * telemetry.addEventProperty(
- *   "devtools.main", "pause", "debugger", null, "reason", "debugger-statement"
+ *   this, "pause", "debugger", null, "reason", "debugger-statement"
  * );
  *
  * // Elsewhere in another codepath send the collapsed_callstacks property
  * telemetry.addEventProperty(
- *   "devtools.main", "pause", "debugger", null, "collapsed_callstacks", 1
+ *   this, "pause", "debugger", null, "collapsed_callstacks", 1
  * );
  */
-const telemetry = new _telemetry2.default();
+
+// @flow
+
+import { Telemetry } from "devtools-modules";
+import { isFirefoxPanel } from "devtools-environment";
+
+const telemetry = new Telemetry();
+
 /**
  * @memberof utils/telemetry
  * @static
  */
-
-function recordEvent(eventName, fields = {}) {
+export function recordEvent(eventName: string, fields: {} = {}) {
   let sessionId = -1;
 
   if (typeof window !== "object") {
@@ -72,22 +63,19 @@ function recordEvent(eventName, fields = {}) {
   if (window.parent.frameElement) {
     sessionId = window.parent.frameElement.getAttribute("session_id");
   }
+
   /* eslint-disable camelcase */
-
-
-  telemetry.recordEvent("devtools.main", eventName, "debugger", null, {
+  telemetry.recordEvent(eventName, "debugger", null, {
     session_id: sessionId,
     ...fields
   });
   /* eslint-enable camelcase */
 
-  if (!(0, _devtoolsEnvironment.isFirefoxPanel)() && window.dbg) {
+  if (!isFirefoxPanel() && window.dbg) {
     const events = window.dbg._telemetry.events;
-
     if (!events[eventName]) {
       events[eventName] = [];
     }
-
     events[eventName].push(fields);
   }
 }

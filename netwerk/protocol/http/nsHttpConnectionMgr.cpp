@@ -35,6 +35,7 @@
 #include "mozilla/ChaosMode.h"
 #include "mozilla/Unused.h"
 #include "nsIURI.h"
+#include "nsIPropertyBag.h"
 
 #include "mozilla/Move.h"
 #include "mozilla/Telemetry.h"
@@ -559,20 +560,28 @@ nsHttpConnectionMgr::ReclaimConnection(nsHttpConnection *conn)
     return PostEvent(&nsHttpConnectionMgr::OnMsgReclaimConnection, 0, conn);
 }
 
-// A structure used to marshall 2 pointers across the various necessary
+// A structure used to marshall 5 pointers across the various necessary
 // threads to complete an HTTP upgrade.
 class nsCompleteUpgradeData : public ARefBase
 {
 public:
     nsCompleteUpgradeData(nsAHttpConnection *aConn,
-                          nsIHttpUpgradeListener *aListener)
+                          nsIHttpUpgradeListener *aListener,
+                          bool aJsWrapped)
         : mConn(aConn)
-        , mUpgradeListener(aListener) { }
+        , mUpgradeListener(aListener)
+        , mJsWrapped(aJsWrapped) { }
 
     NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsCompleteUpgradeData, override)
 
     RefPtr<nsAHttpConnection> mConn;
     nsCOMPtr<nsIHttpUpgradeListener> mUpgradeListener;
+
+    nsCOMPtr<nsISocketTransport> mSocketTransport;
+    nsCOMPtr<nsIAsyncInputStream> mSocketIn;
+    nsCOMPtr<nsIAsyncOutputStream> mSocketOut;
+
+    bool mJsWrapped;
 private:
     virtual ~nsCompleteUpgradeData() = default;
 };
@@ -581,8 +590,14 @@ nsresult
 nsHttpConnectionMgr::CompleteUpgrade(nsAHttpConnection *aConn,
                                      nsIHttpUpgradeListener *aUpgradeListener)
 {
+    // test if aUpgradeListener is a wrapped JsObject
+    // bit of a HACK
+    nsCOMPtr<nsIPropertyBag> wrapper = do_QueryInterface(aUpgradeListener);
+
+    bool wrapped = !!wrapper;
+
     RefPtr<nsCompleteUpgradeData> data =
-        new nsCompleteUpgradeData(aConn, aUpgradeListener);
+        new nsCompleteUpgradeData(aConn, aUpgradeListener, wrapped);
     return PostEvent(&nsHttpConnectionMgr::OnMsgCompleteUpgrade, 0, data);
 }
 
@@ -1546,7 +1561,11 @@ nsHttpConnectionMgr::TryDispatchTransaction(nsConnectionEntry *ent,
     if (!(caps & NS_HTTP_DISALLOW_SPDY) && gHttpHandler->IsSpdyEnabled()) {
         RefPtr<nsHttpConnection> conn = GetSpdyActiveConn(ent);
         if (conn) {
-            if ((caps & NS_HTTP_ALLOW_KEEPALIVE) || !conn->IsExperienced()) {
+            bool websocketCheckOK = trans->IsWebsocketUpgrade() ? conn->CanAcceptWebsocket() : true;
+            if (websocketCheckOK &&
+                ((caps & NS_HTTP_ALLOW_KEEPALIVE) ||
+                 (caps & NS_HTTP_ALLOW_SPDY_WITHOUT_KEEPALIVE) ||
+                 !conn->IsExperienced())) {
                 LOG(("   dispatch to spdy: [conn=%p]\n", conn.get()));
                 trans->RemoveDispatchedAsBlocking();  /* just in case */
                 nsresult rv = DispatchTransaction(ent, trans, conn);
@@ -1910,7 +1929,7 @@ nsHttpConnectionMgr::ProcessNewTransaction(nsHttpTransaction *trans)
         LOG(("  ProcessNewTransaction %p tied to h2 session push %p\n",
              trans, pushedStream->Session()));
         return pushedStream->Session()->
-            AddStream(trans, trans->Priority(), false, nullptr) ?
+            AddStream(trans, trans->Priority(), false, false, nullptr) ?
             NS_OK : NS_ERROR_UNEXPECTED;
     }
 
@@ -1954,6 +1973,9 @@ nsHttpConnectionMgr::ProcessNewTransaction(nsHttpTransaction *trans)
         trans->SetConnection(nullptr);
         rv = DispatchTransaction(ent, trans, conn);
     } else {
+        if (!ent->AllowSpdy()) {
+            trans->DisableSpdy();
+        }
         pendingTransInfo = new PendingTransactionInfo(trans);
         rv = TryDispatchTransaction(ent, !!trans->TunnelProvider(), pendingTransInfo);
     }
@@ -2891,29 +2913,47 @@ nsHttpConnectionMgr::OnMsgReclaimConnection(int32_t, ARefBase *param)
 void
 nsHttpConnectionMgr::OnMsgCompleteUpgrade(int32_t, ARefBase *param)
 {
-    MOZ_ASSERT(OnSocketThread(), "not on socket thread");
     nsCompleteUpgradeData *data = static_cast<nsCompleteUpgradeData *>(param);
+    MOZ_ASSERT(OnSocketThread() || (data->mJsWrapped == NS_IsMainThread()), "not on socket thread");
     LOG(("nsHttpConnectionMgr::OnMsgCompleteUpgrade "
-         "this=%p conn=%p listener=%p\n", this, data->mConn.get(),
-         data->mUpgradeListener.get()));
+         "this=%p conn=%p listener=%p wrapped=%d\n", this, data->mConn.get(),
+         data->mUpgradeListener.get(),
+         data->mJsWrapped));
 
-    nsCOMPtr<nsISocketTransport> socketTransport;
-    nsCOMPtr<nsIAsyncInputStream> socketIn;
-    nsCOMPtr<nsIAsyncOutputStream> socketOut;
-
-    nsresult rv;
-    rv = data->mConn->TakeTransport(getter_AddRefs(socketTransport),
-                                    getter_AddRefs(socketIn),
-                                    getter_AddRefs(socketOut));
+    nsresult rv = NS_OK;
+    if (!data->mSocketTransport) {
+        rv = data->mConn->TakeTransport(getter_AddRefs(data->mSocketTransport),
+                                        getter_AddRefs(data->mSocketIn),
+                                        getter_AddRefs(data->mSocketOut));
+    }
 
     if (NS_SUCCEEDED(rv)) {
-        rv = data->mUpgradeListener->OnTransportAvailable(socketTransport,
-                                                          socketIn,
-                                                          socketOut);
-        if (NS_FAILED(rv)) {
+        if (!data->mJsWrapped || !OnSocketThread()) {
+            rv = data->mUpgradeListener->OnTransportAvailable(
+                data->mSocketTransport,
+                data->mSocketIn,
+                data->mSocketOut);
+            if (NS_FAILED(rv)) {
+                LOG(("nsHttpConnectionMgr::OnMsgCompleteUpgrade "
+                     "this=%p conn=%p listener=%p wrapped=%d\n", this,
+                     data->mConn.get(),
+                     data->mUpgradeListener.get(),
+                     data->mJsWrapped));
+            }
+        } else {
             LOG(("nsHttpConnectionMgr::OnMsgCompleteUpgrade "
-                 "this=%p conn=%p listener=%p\n", this, data->mConn.get(),
-                 data->mUpgradeListener.get()));
+                 "this=%p conn=%p listener=%p wrapped=%d pass to main thread\n",
+                 this,
+                 data->mConn.get(),
+                 data->mUpgradeListener.get(),
+                 data->mJsWrapped));
+
+            nsCOMPtr<nsIRunnable> event = new ConnEvent(
+                this,
+                &nsHttpConnectionMgr::OnMsgCompleteUpgrade,
+                0,
+                param);
+            NS_DispatchToMainThread(event);
         }
     }
 }
@@ -4076,6 +4116,10 @@ nsHalfOpenSocket::SetupStreams(nsISocketTransport **transport,
     if (ci->GetPrivate())
         tmpFlags |= nsISocketTransport::NO_PERMANENT_STORAGE;
 
+    if (ci->GetLessThanTls13()) {
+        tmpFlags |= nsISocketTransport::DONT_TRY_ESNI;
+    }
+
     if ((mCaps & NS_HTTP_BE_CONSERVATIVE) || ci->GetBeConservative()) {
         LOG(("Setting Socket to BE_CONSERVATIVE"));
         tmpFlags |= nsISocketTransport::BE_CONSERVATIVE;
@@ -5108,6 +5152,7 @@ nsHttpConnectionMgr::nsHalfOpenSocket::OnTransportStatus(nsITransport *trans,
         gHttpHandler->IsSpdyEnabled() &&
         gHttpHandler->CoalesceSpdy() &&
         mEnt && mEnt->mConnInfo && mEnt->mConnInfo->EndToEndSSL() &&
+        mEnt->AllowSpdy() &&
         !mEnt->mConnInfo->UsingProxy() &&
         mEnt->mCoalescingKeys.IsEmpty()) {
 
@@ -5262,6 +5307,7 @@ nsHttpConnectionMgr::
 nsConnectionEntry::nsConnectionEntry(nsHttpConnectionInfo *ci)
     : mConnInfo(ci)
     , mUsingSpdy(false)
+    , mCanUseSpdy(true)
     , mPreferIPv4(false)
     , mPreferIPv6(false)
     , mUsedForConnection(false)
@@ -5396,6 +5442,42 @@ nsConnectionEntry::RemoveHalfOpen(nsHalfOpenSocket *halfOpen)
                  "    failed to process pending queue\n"));
         }
     }
+}
+
+void
+nsHttpConnectionMgr::BlacklistSpdy(const nsHttpConnectionInfo *ci)
+{
+    LOG(("nsHttpConnectionMgr::BlacklistSpdy blacklisting ci %s", ci->HashKey().BeginReading()));
+    nsConnectionEntry *ent = mCT.GetWeak(ci->HashKey());
+    if (!ent) {
+        LOG(("nsHttpConnectionMgr::BlacklistSpdy no entry found?!"));
+        return;
+    }
+
+    ent->DisallowSpdy();
+}
+
+void
+nsHttpConnectionMgr::
+nsConnectionEntry::DisallowSpdy()
+{
+    mCanUseSpdy = false;
+
+    // If we have any spdy connections, we want to go ahead and close them when
+    // they're done so we can free up some connections.
+    for (uint32_t i = 0; i < mActiveConns.Length(); ++i) {
+        if (mActiveConns[i]->UsingSpdy()) {
+            mActiveConns[i]->DontReuse();
+        }
+    }
+    for (uint32_t i = 0; i < mIdleConns.Length(); ++i) {
+        if (mIdleConns[i]->UsingSpdy()) {
+            mIdleConns[i]->DontReuse();
+        }
+    }
+
+    // Can't coalesce if we're not using spdy
+    mCoalescingKeys.Clear();
 }
 
 void

@@ -115,7 +115,7 @@ interface nsIDOMWindowUtils : nsISupports {
 
   /**
    * Information retrieved from the <meta name="viewport"> tag.
-   * See nsContentUtils::GetViewportInfo for more information.
+   * See nsIDocument::GetViewportInfo for more information.
    */
   void getViewportInfo(in uint32_t aDisplayWidth, in uint32_t aDisplayHeight,
                        out double aDefaultZoom, out boolean aAllowZoom,
@@ -844,6 +844,13 @@ interface nsIDOMWindowUtils : nsISupports {
    */
   DOMRect getBoundsWithoutFlushing(in Element aElement);
 
+  /**
+   * Returns the offset of the window's visual viewport relative to the
+   * layout viewport. 
+   */
+  void getVisualViewportOffsetRelativeToLayoutViewport(out float aOffsetX, 
+                                                       out float aOffsetY);
+
   const long FLUSH_NONE = -1;
   const long FLUSH_STYLE = 0;
   const long FLUSH_LAYOUT = 1;
@@ -1349,11 +1356,6 @@ interface nsIDOMWindowUtils : nsISupports {
    * Ignores all chrome/content or mozbrowser boundaries.
    */
   readonly attribute Element containerElement;
-
-  [noscript] void RenderDocument(in nsConstRect aRect,
-                                 in uint32_t aFlags,
-                                 in nscolor aBackgroundColor,
-                                 in gfxContext aThebesContext);
 
   /**
    * advanceTimeAndRefresh allows the caller to take over the refresh
@@ -1868,12 +1870,6 @@ interface nsIDOMWindowUtils : nsISupports {
     * Returns the GPU process pid, or -1 if there is no GPU process.
     */
   readonly attribute int32_t gpuProcessPid;
-
-  /**
-   * Returns true if the given timeout ID is in the list of tracking
-   * timeouts.
-   */
-  boolean isTimeoutTracking(in unsigned long timeoutId);
 
   /**
    * Adds an EventStates bit to the element.

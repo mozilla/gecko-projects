@@ -52,6 +52,7 @@
 #include "nsDOMString.h"
 #include "nsIScriptSecurityManager.h"
 #include "mozilla/dom/AnimatableBinding.h"
+#include "mozilla/dom/FeaturePolicyUtils.h"
 #include "mozilla/dom/HTMLDivElement.h"
 #include "mozilla/dom/HTMLSpanElement.h"
 #include "mozilla/dom/KeyframeAnimationOptionsBinding.h"
@@ -527,6 +528,23 @@ Element::ClearStyleStateLocks()
 }
 
 static bool
+IsLikelyCustomElement(const nsXULElement& aElement)
+{
+  const CustomElementData* data = aElement.GetCustomElementData();
+  if (!data) {
+    return false;
+  }
+
+  const CustomElementRegistry* registry =
+    nsContentUtils::GetCustomElementRegistry(aElement.OwnerDoc());
+  if (!registry) {
+    return false;
+  }
+
+  return registry->IsLikelyToBeCustomElement(data->GetCustomElementType());
+}
+
+static bool
 MayNeedToLoadXBLBinding(const nsIDocument& aDocument, const Element& aElement)
 {
   // If we have a frame, the frame has already loaded the binding.
@@ -537,11 +555,8 @@ MayNeedToLoadXBLBinding(const nsIDocument& aDocument, const Element& aElement)
     return false;
   }
 
-  if (aElement.IsXULElement()) {
-    // We know dropmarkers don't have XBL bindings, and they get
-    // accessed while hidden when opening new windows. So skip
-    // looking up -moz-binding for performance reasons (bug 1478999).
-    return !aElement.IsXULElement(nsGkAtoms::dropMarker);
+  if (auto* xulElem = nsXULElement::FromNode(aElement)) {
+    return !IsLikelyCustomElement(*xulElem);
   }
 
   return aElement.IsAnyOfHTMLElements(nsGkAtoms::object, nsGkAtoms::embed);
@@ -607,7 +622,7 @@ Element::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 
     if (bindingURL) {
       nsCOMPtr<nsIURI> uri = bindingURL->GetURI();
-      nsCOMPtr<nsIPrincipal> principal = bindingURL->mExtraData->GetPrincipal();
+      nsCOMPtr<nsIPrincipal> principal = bindingURL->ExtraData()->Principal();
 
       // We have a binding that must be installed.
       bool dummy;
@@ -873,10 +888,10 @@ Element::ScrollBy(double aXScrollDif, double aYScrollDif)
 {
   nsIScrollableFrame *sf = GetScrollFrame();
   if (sf) {
-    CSSIntPoint scrollPos = sf->GetScrollPositionCSSPixels();
-    scrollPos += CSSIntPoint::Truncate(mozilla::ToZeroIfNonfinite(aXScrollDif),
-                                       mozilla::ToZeroIfNonfinite(aYScrollDif));
-    Scroll(scrollPos, ScrollOptions());
+    ScrollToOptions options;
+    options.mLeft.Construct(aXScrollDif);
+    options.mTop.Construct(aYScrollDif);
+    ScrollBy(options);
   }
 }
 
@@ -885,14 +900,25 @@ Element::ScrollBy(const ScrollToOptions& aOptions)
 {
   nsIScrollableFrame *sf = GetScrollFrame();
   if (sf) {
-    CSSIntPoint scrollPos = sf->GetScrollPositionCSSPixels();
+    CSSIntPoint scrollDelta;
     if (aOptions.mLeft.WasPassed()) {
-      scrollPos.x += mozilla::ToZeroIfNonfinite(aOptions.mLeft.Value());
+      scrollDelta.x = mozilla::ToZeroIfNonfinite(aOptions.mLeft.Value());
     }
     if (aOptions.mTop.WasPassed()) {
-      scrollPos.y += mozilla::ToZeroIfNonfinite(aOptions.mTop.Value());
+      scrollDelta.y = mozilla::ToZeroIfNonfinite(aOptions.mTop.Value());
     }
-    Scroll(scrollPos, aOptions);
+
+    nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
+    if (aOptions.mBehavior == ScrollBehavior::Smooth) {
+      scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+    } else if (aOptions.mBehavior == ScrollBehavior::Auto) {
+      ScrollStyles styles = sf->GetScrollStyles();
+      if (styles.mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
+        scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+      }
+    }
+
+    sf->ScrollByCSSPixels(scrollDelta, scrollMode, nsGkAtoms::relative);
   }
 }
 
@@ -1114,7 +1140,7 @@ Element::AddToIdTable(nsAtom* aId)
     containingShadow->AddToIdTable(this, aId);
   } else {
     nsIDocument* doc = GetUncomposedDoc();
-    if (doc && (!IsInAnonymousSubtree() || doc->IsXULDocument())) {
+    if (doc && !IsInAnonymousSubtree()) {
       doc->AddToIdTable(this, aId);
     }
   }
@@ -1137,7 +1163,7 @@ Element::RemoveFromIdTable()
     }
   } else {
     nsIDocument* doc = GetUncomposedDoc();
-    if (doc && (!IsInAnonymousSubtree() || doc->IsXULDocument())) {
+    if (doc && !IsInAnonymousSubtree()) {
       doc->RemoveFromIdTable(this, id);
     }
   }
@@ -1174,25 +1200,15 @@ Element::GetShadowRootByMode() const
   return shadowRoot;
 }
 
-// https://dom.spec.whatwg.org/#dom-element-attachshadow
-already_AddRefed<ShadowRoot>
-Element::AttachShadow(const ShadowRootInit& aInit, ErrorResult& aError)
+bool
+Element::CanAttachShadowDOM() const
 {
   /**
-   * 1. If context object’s namespace is not the HTML namespace,
-   *    then throw a "NotSupportedError" DOMException.
-   */
-  if (!IsHTMLElement()) {
-    aError.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-    return nullptr;
-  }
-
-  /**
-   * 2. If context object’s local name is not
-   *      a valid custom element name, "article", "aside", "blockquote",
-   *      "body", "div", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
-   *      "header", "main" "nav", "p", "section", or "span",
-   *    then throw a "NotSupportedError" DOMException.
+   * If context object’s local name is not
+   *    a valid custom element name, "article", "aside", "blockquote",
+   *    "body", "div", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
+   *    "header", "main" "nav", "p", "section", or "span",
+   *  return false.
    */
   nsAtom* nameAtom = NodeInfo()->NameAtom();
   if (!(nsContentUtils::IsCustomElementName(nameAtom, NodeInfo()->NamespaceID()) ||
@@ -1214,12 +1230,37 @@ Element::AttachShadow(const ShadowRootInit& aInit, ErrorResult& aError)
         nameAtom == nsGkAtoms::p ||
         nameAtom == nsGkAtoms::section ||
         nameAtom == nsGkAtoms::span)) {
+    return false;
+  }
+
+  return true;
+}
+
+// https://dom.spec.whatwg.org/#dom-element-attachshadow
+already_AddRefed<ShadowRoot>
+Element::AttachShadow(const ShadowRootInit& aInit, ErrorResult& aError)
+{
+  /**
+   * 1. If context object’s namespace is not the HTML namespace,
+   *    then throw a "NotSupportedError" DOMException.
+   */
+  if (!IsHTMLElement() &&
+      !(XRE_IsParentProcess() && IsXULElement() && nsContentUtils::AllowXULXBLForPrincipal(NodePrincipal()))) {
     aError.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return nullptr;
   }
 
   /**
-   * 3. If context object is a shadow host, then throw
+   * 2. If context object’s local name is not valid to attach shadow DOM to,
+   *    then throw a "NotSupportedError" DOMException.
+   */
+  if (!CanAttachShadowDOM()) {
+    aError.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return nullptr;
+  }
+
+  /**
+   * 2. If context object is a shadow host, then throw
    *    an "InvalidStateError" DOMException.
    */
   if (GetShadowRoot() || GetXBLBinding()) {
@@ -1288,25 +1329,24 @@ Element::AttachShadowWithoutNameChecks(ShadowRootMode aMode)
 void
 Element::UnattachShadow()
 {
-  RefPtr<ShadowRoot> shadowRoot = GetShadowRoot();
+  ShadowRoot* shadowRoot = GetShadowRoot();
   if (!shadowRoot) {
     return;
   }
 
   nsAutoScriptBlocker scriptBlocker;
 
-  nsIDocument* doc = GetComposedDoc();
-  if (doc) {
+  if (nsIDocument* doc = GetComposedDoc()) {
     if (nsIPresShell* shell = doc->GetShell()) {
       shell->DestroyFramesForAndRestyle(this);
     }
   }
   MOZ_ASSERT(!GetPrimaryFrame());
 
-  // Simply unhook the shadow root from the element.
-  MOZ_ASSERT(!shadowRoot->HasSlots(), "Won't work when shadow root has slots!");
-  shadowRoot->Unbind();
+  shadowRoot->Unattach();
   SetShadowRoot(nullptr);
+
+  // Beware shadowRoot could be dead after this call.
 }
 
 void
@@ -1656,6 +1696,10 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
       slots->mBindingParent = aBindingParent; // Weak, so no addref happens.
     }
   }
+
+  const bool hadParent = !!GetParentNode();
+  const bool wasInShadowTree = IsInShadowTree();
+
   NS_ASSERTION(!aBindingParent || IsRootOfNativeAnonymousSubtree() ||
                !HasFlag(NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE) ||
                (aParent && aParent->IsInNativeAnonymousSubtree()),
@@ -1679,7 +1723,7 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     }
   }
 
-  bool hadParent = !!GetParentNode();
+  MOZ_ASSERT_IF(wasInShadowTree, IsInShadowTree());
 
   // Now set the parent.
   if (aParent) {
@@ -1734,7 +1778,7 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     SetSubtreeRootPointer(aParent->SubtreeRoot());
   }
 
-  if (CustomElementRegistry::IsCustomElementEnabled(OwnerDoc()) && IsInComposedDoc()) {
+  if (IsInComposedDoc()) {
     // Connected callback must be enqueued whenever a custom element becomes
     // connected.
     CustomElementData* data = GetCustomElementData();
@@ -1810,7 +1854,9 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     nsNodeUtils::NativeAnonymousChildListChange(this, false);
   }
 
-  if (HasID()) {
+  // Ensure we only add to the table once, in the case we move the ShadowRoot
+  // around.
+  if (HasID() && !wasInShadowTree) {
     AddToIdTable(DoGetID());
   }
 
@@ -2059,17 +2105,15 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
 
      // Disconnected must be enqueued whenever a connected custom element becomes
      // disconnected.
-    if (CustomElementRegistry::IsCustomElementEnabled(OwnerDoc())) {
-      CustomElementData* data  = GetCustomElementData();
-      if (data) {
-        if (data->mState == CustomElementData::State::eCustom) {
-          nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eDisconnected,
-                                                   this);
-        } else {
-          // Remove an unresolved custom element that is a candidate for upgrade
-          // when a custom element is disconnected.
-          nsContentUtils::UnregisterUnresolvedElement(this);
-        }
+    CustomElementData* data  = GetCustomElementData();
+    if (data) {
+      if (data->mState == CustomElementData::State::eCustom) {
+        nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eDisconnected,
+                                                 this);
+      } else {
+        // Remove an unresolved custom element that is a candidate for upgrade
+        // when a custom element is disconnected.
+        nsContentUtils::UnregisterUnresolvedElement(this);
       }
     }
   }
@@ -2213,7 +2257,7 @@ Element::FindAttributeDependence(const nsAtom* aAttribute,
   for (uint32_t mapindex = 0; mapindex < aMapCount; ++mapindex) {
     for (const MappedAttributeEntry* map = aMaps[mapindex];
          map->attribute; ++map) {
-      if (aAttribute == *map->attribute) {
+      if (aAttribute == map->attribute) {
         return true;
       }
     }
@@ -2713,34 +2757,32 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
     }
   }
 
-  if (CustomElementRegistry::IsCustomElementEnabled(OwnerDoc())) {
-    CustomElementDefinition* definition = GetCustomElementDefinition();
-    // Only custom element which is in `custom` state could get the
-    // CustomElementDefinition.
-    if (definition && definition->IsInObservedAttributeList(aName)) {
-      RefPtr<nsAtom> oldValueAtom;
-      if (oldValue) {
-        oldValueAtom = oldValue->GetAsAtom();
-      } else {
-        // If there is no old value, get the value of the uninitialized
-        // attribute that was swapped with aParsedValue.
-        oldValueAtom = aParsedValue.GetAsAtom();
-      }
-      RefPtr<nsAtom> newValueAtom = valueForAfterSetAttr.GetAsAtom();
-      nsAutoString ns;
-      nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
-
-      LifecycleCallbackArgs args = {
-        nsDependentAtomString(aName),
-        aModType == MutationEvent_Binding::ADDITION ?
-          VoidString() : nsDependentAtomString(oldValueAtom),
-        nsDependentAtomString(newValueAtom),
-        (ns.IsEmpty() ? VoidString() : ns)
-      };
-
-      nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eAttributeChanged,
-        this, &args, nullptr, definition);
+  CustomElementDefinition* definition = GetCustomElementDefinition();
+  // Only custom element which is in `custom` state could get the
+  // CustomElementDefinition.
+  if (definition && definition->IsInObservedAttributeList(aName)) {
+    RefPtr<nsAtom> oldValueAtom;
+    if (oldValue) {
+      oldValueAtom = oldValue->GetAsAtom();
+    } else {
+      // If there is no old value, get the value of the uninitialized
+      // attribute that was swapped with aParsedValue.
+      oldValueAtom = aParsedValue.GetAsAtom();
     }
+    RefPtr<nsAtom> newValueAtom = valueForAfterSetAttr.GetAsAtom();
+    nsAutoString ns;
+    nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
+
+    LifecycleCallbackArgs args = {
+      nsDependentAtomString(aName),
+      aModType == MutationEvent_Binding::ADDITION ?
+        VoidString() : nsDependentAtomString(oldValueAtom),
+      nsDependentAtomString(newValueAtom),
+      (ns.IsEmpty() ? VoidString() : ns)
+    };
+
+    nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eAttributeChanged,
+      this, &args, nullptr, definition);
   }
 
   if (aCallAfterSetAttr) {
@@ -2887,25 +2929,23 @@ Element::OnAttrSetButNotChanged(int32_t aNamespaceID, nsAtom* aName,
                                 const nsAttrValueOrString& aValue,
                                 bool aNotify)
 {
-  if (CustomElementRegistry::IsCustomElementEnabled(OwnerDoc())) {
-    // Only custom element which is in `custom` state could get the
-    // CustomElementDefinition.
-    CustomElementDefinition* definition = GetCustomElementDefinition();
-    if (definition && definition->IsInObservedAttributeList(aName)) {
-      nsAutoString ns;
-      nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
+  // Only custom element which is in `custom` state could get the
+  // CustomElementDefinition.
+  CustomElementDefinition* definition = GetCustomElementDefinition();
+  if (definition && definition->IsInObservedAttributeList(aName)) {
+    nsAutoString ns;
+    nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
 
-      nsAutoString value(aValue.String());
-      LifecycleCallbackArgs args = {
-        nsDependentAtomString(aName),
-        value,
-        value,
-        (ns.IsEmpty() ? VoidString() : ns)
-      };
+    nsAutoString value(aValue.String());
+    LifecycleCallbackArgs args = {
+      nsDependentAtomString(aName),
+      value,
+      value,
+      (ns.IsEmpty() ? VoidString() : ns)
+    };
 
-      nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eAttributeChanged,
-        this, &args, nullptr, definition);
-    }
+    nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eAttributeChanged,
+      this, &args, nullptr, definition);
   }
 
   return NS_OK;
@@ -2942,7 +2982,7 @@ Element::FindAttrValueIn(int32_t aNameSpaceID,
   const nsAttrValue* val = mAttrs.GetAttr(aName, aNameSpaceID);
   if (val) {
     for (int32_t i = 0; aValues[i]; ++i) {
-      if (val->Equals(*aValues[i], aCaseSensitive)) {
+      if (val->Equals(aValues[i], aCaseSensitive)) {
         return i;
       }
     }
@@ -3020,25 +3060,23 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsAtom* aName,
     }
   }
 
-  if (CustomElementRegistry::IsCustomElementEnabled(OwnerDoc())) {
-    CustomElementDefinition* definition = GetCustomElementDefinition();
-    // Only custom element which is in `custom` state could get the
-    // CustomElementDefinition.
-    if (definition && definition->IsInObservedAttributeList(aName)) {
-      nsAutoString ns;
-      nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNameSpaceID, ns);
+  CustomElementDefinition* definition = GetCustomElementDefinition();
+  // Only custom element which is in `custom` state could get the
+  // CustomElementDefinition.
+  if (definition && definition->IsInObservedAttributeList(aName)) {
+    nsAutoString ns;
+    nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNameSpaceID, ns);
 
-      RefPtr<nsAtom> oldValueAtom = oldValue.GetAsAtom();
-      LifecycleCallbackArgs args = {
-        nsDependentAtomString(aName),
-        nsDependentAtomString(oldValueAtom),
-        VoidString(),
-        (ns.IsEmpty() ? VoidString() : ns)
-      };
+    RefPtr<nsAtom> oldValueAtom = oldValue.GetAsAtom();
+    LifecycleCallbackArgs args = {
+      nsDependentAtomString(aName),
+      nsDependentAtomString(oldValueAtom),
+      VoidString(),
+      (ns.IsEmpty() ? VoidString() : ns)
+    };
 
-      nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eAttributeChanged,
-        this, &args, nullptr, definition);
-    }
+    nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eAttributeChanged,
+      this, &args, nullptr, definition);
   }
 
   rv = AfterSetAttr(aNameSpaceID, aName, nullptr, &oldValue, nullptr, aNotify);
@@ -3454,16 +3492,16 @@ nsDOMTokenListPropertyDestructor(void *aObject, nsAtom *aProperty,
   NS_RELEASE(list);
 }
 
-static nsStaticAtom** sPropertiesToTraverseAndUnlink[] =
+static nsStaticAtom* const sPropertiesToTraverseAndUnlink[] =
   {
-    &nsGkAtoms::sandbox,
-    &nsGkAtoms::sizes,
-    &nsGkAtoms::dirAutoSetBy,
+    nsGkAtoms::sandbox,
+    nsGkAtoms::sizes,
+    nsGkAtoms::dirAutoSetBy,
     nullptr
   };
 
 // static
-nsStaticAtom***
+nsStaticAtom* const*
 Element::HTMLSVGPropertiesToTraverseAndUnlink()
 {
   return sPropertiesToTraverseAndUnlink;
@@ -3474,10 +3512,10 @@ Element::GetTokenList(nsAtom* aAtom,
                       const DOMTokenListSupportedTokenArray aSupportedTokens)
 {
 #ifdef DEBUG
-  nsStaticAtom*** props = HTMLSVGPropertiesToTraverseAndUnlink();
+  const nsStaticAtom* const* props = HTMLSVGPropertiesToTraverseAndUnlink();
   bool found = false;
   for (uint32_t i = 0; props[i]; ++i) {
-    if (*props[i] == aAtom) {
+    if (props[i] == aAtom) {
       found = true;
       break;
     }
@@ -3575,6 +3613,13 @@ Element::RequestFullscreen(CallerType aCallerType, ErrorResult& aRv)
 {
   auto request = FullscreenRequest::Create(this, aCallerType, aRv);
   RefPtr<Promise> promise = request->GetPromise();
+
+  if (!FeaturePolicyUtils::IsFeatureAllowed(OwnerDoc(),
+                                            NS_LITERAL_STRING("fullscreen"))) {
+    request->Reject("FullscreenDeniedFeaturePolicy");
+    return promise.forget();
+  }
+
   // Only grant fullscreen requests if this is called from inside a trusted
   // event handler (i.e. inside an event handler for a user initiated event).
   // This stops the fullscreen from being abused similar to the popups of old,

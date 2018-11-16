@@ -91,7 +91,7 @@ async function testRealRefresh(refreshPage, delay) {
   }, async function(browser) {
     await pushPrefs(["accessibility.blockautorefresh", true]);
 
-    browser.loadURI(refreshPage + "?p=" + TARGET_PAGE + "&d=" + delay);
+    BrowserTestUtils.loadURI(browser, refreshPage + "?p=" + TARGET_PAGE + "&d=" + delay);
     await BrowserTestUtils.browserLoaded(browser);
 
     // Once browserLoaded resolves, all nsIWebProgressListener callbacks
@@ -100,7 +100,7 @@ async function testRealRefresh(refreshPage, delay) {
     let notification = notificationBox.currentNotification;
 
     ok(notification, "Notification should be visible");
-    is(notification.value, "refresh-blocked",
+    is(notification.getAttribute("value"), "refresh-blocked",
        "Should be showing the right notification");
 
     // Then click the button to allow the refresh.

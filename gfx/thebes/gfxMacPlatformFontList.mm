@@ -334,9 +334,11 @@ MacOSFontEntry::GetVariationAxes(nsTArray<gfxFontVariationAxis>& aVariationAxes)
                             kCTFontVariationAxisNameKey);
             if (name) {
                 CFIndex len = CFStringGetLength(name);
-                axis.mName.SetLength(len);
+                nsAutoString nameStr;
+                nameStr.SetLength(len);
                 CFStringGetCharacters(name, CFRangeMake(0, len),
-                                      (UniChar*)axis.mName.BeginWriting());
+                                      (UniChar*)nameStr.BeginWriting());
+                AppendUTF16toUTF8(nameStr, axis.mName);
             }
             axis.mTag = (uint32_t)tag;
             axis.mMinValue = minValue;
@@ -1126,7 +1128,7 @@ gfxMacPlatformFontList::AddFamily(const nsACString& aFamilyName,
     table.Put(key, familyEntry);
 
     // check the bad underline blacklist
-    if (mBadUnderlineFamilyNames.Contains(key)) {
+    if (mBadUnderlineFamilyNames.ContainsSorted(key)) {
         familyEntry->SetBadUnderlineFamily();
     }
 }

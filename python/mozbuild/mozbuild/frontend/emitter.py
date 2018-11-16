@@ -83,7 +83,6 @@ from .reader import SandboxValidationError
 from ..testing import (
     TEST_MANIFESTS,
     REFTEST_FLAVORS,
-    WEB_PLATFORM_TESTS_FLAVORS,
     SupportFilesConverter,
 )
 
@@ -530,7 +529,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 'crate-type %s is not permitted for %s' % (crate_type, libname),
                 context)
 
-        cargo_target_dir = context.get('RUST_LIBRARY_TARGET_DIR', '.')
+        cargo_target_dir = context.config.topobjdir
 
         dependencies = set(config.get('dependencies', {}).iterkeys())
 
@@ -1038,7 +1037,6 @@ class TreeMetadataEmitter(LoggingMixin):
             'RCINCLUDE',
             'WIN32_EXE_LDFLAGS',
             'USE_EXTENSION_MANIFEST',
-            'NO_JS_MANIFEST',
             'HAS_MISC_RULE',
         ]
         for v in varlist:
@@ -1301,30 +1299,19 @@ class TreeMetadataEmitter(LoggingMixin):
 
             yield cls(context, all_files)
 
-        # Check for manifest declarations in EXTRA_{PP_,}COMPONENTS.
-        if any(e.endswith('.js') for e in components) and \
-                not any(e.endswith('.manifest') for e in components) and \
-                not context.get('NO_JS_MANIFEST', False):
-            raise SandboxValidationError('A .js component was specified in EXTRA_COMPONENTS '
-                                         'or EXTRA_PP_COMPONENTS without a matching '
-                                         '.manifest file.  See '
-                                         'https://developer.mozilla.org/en/XPCOM/XPCOM_changes_in_Gecko_2.0 .',
-                                         context);
-
         for c in components:
             if c.endswith('.manifest'):
                 yield ChromeManifestEntry(context, 'chrome.manifest',
                                           Manifest('components',
                                                    mozpath.basename(c)))
 
-        if self.config.substs.get('MOZ_RUST_TESTS', None):
-            rust_tests = context.get('RUST_TESTS', [])
-            if rust_tests:
-                # TODO: more sophisticated checking of the declared name vs.
-                # contents of the Cargo.toml file.
-                features = context.get('RUST_TEST_FEATURES', [])
+        rust_tests = context.get('RUST_TESTS', [])
+        if rust_tests:
+            # TODO: more sophisticated checking of the declared name vs.
+            # contents of the Cargo.toml file.
+            features = context.get('RUST_TEST_FEATURES', [])
 
-                yield RustTests(context, rust_tests, features)
+            yield RustTests(context, rust_tests, features)
 
         for obj in self._process_test_manifests(context):
             yield obj
@@ -1336,14 +1323,33 @@ class TreeMetadataEmitter(LoggingMixin):
                                         context.get('ASFLAGS'))
 
         if context.get('USE_YASM') is True:
-            yasm = context.config.substs.get('YASM')
-            if not yasm:
-                raise SandboxValidationError('yasm is not available', context)
-            passthru.variables['AS'] = yasm
-            passthru.variables['AS_DASH_C_FLAG'] = ''
-            computed_as_flags.resolve_flags('OS',
-                                            context.config.substs.get('YASM_ASFLAGS', []))
+            nasm = context.config.substs.get('NASM')
+            if nasm and nasm != ':':
+                # prefer using nasm to yasm
+                passthru.variables['AS'] = nasm
+                passthru.variables['AS_DASH_C_FLAG'] = ''
+                passthru.variables['ASOUTOPTION'] = '-o '
+                computed_as_flags.resolve_flags('OS',
+                                                context.config.substs.get('NASM_ASFLAGS', []))
+            else:
+                yasm = context.config.substs.get('YASM')
+                if not yasm:
+                    raise SandboxValidationError('yasm is not available', context)
+                passthru.variables['AS'] = yasm
+                passthru.variables['AS_DASH_C_FLAG'] = ''
+                passthru.variables['ASOUTOPTION'] = '-o '
+                computed_as_flags.resolve_flags('OS',
+                                                context.config.substs.get('YASM_ASFLAGS', []))
 
+        if context.get('USE_NASM') is True:
+            nasm = context.config.substs.get('NASM')
+            if not nasm:
+                raise SandboxValidationError('nasm is not available', context)
+            passthru.variables['AS'] = nasm
+            passthru.variables['AS_DASH_C_FLAG'] = ''
+            passthru.variables['ASOUTOPTION'] = '-o '
+            computed_as_flags.resolve_flags('OS',
+                                            context.config.substs.get('NASM_ASFLAGS', []))
 
         if passthru.variables:
             yield passthru
@@ -1456,11 +1462,6 @@ class TreeMetadataEmitter(LoggingMixin):
         for flavor in REFTEST_FLAVORS:
             for path, manifest in context.get('%s_MANIFESTS' % flavor.upper(), []):
                 for obj in self._process_reftest_manifest(context, flavor, path, manifest):
-                    yield obj
-
-        for flavor in WEB_PLATFORM_TESTS_FLAVORS:
-            for path, manifest in context.get("%s_MANIFESTS" % flavor.upper().replace('-', '_'), []):
-                for obj in self._process_web_platform_tests_manifest(context, path, manifest):
                     yield obj
 
     def _process_test_manifest(self, context, info, manifest_path, mpmanifest):
@@ -1588,40 +1589,6 @@ class TreeMetadataEmitter(LoggingMixin):
                 'support-files': '',
                 'subsuite': '',
             })
-
-        yield obj
-
-    def _process_web_platform_tests_manifest(self, context, paths, manifest):
-        manifest_path, tests_root = paths
-        manifest_full_path = mozpath.normpath(mozpath.join(
-            context.srcdir, manifest_path))
-        manifest_reldir = mozpath.dirname(mozpath.relpath(manifest_full_path,
-            context.config.topsrcdir))
-        tests_root = mozpath.normpath(mozpath.join(context.srcdir, tests_root))
-
-        # Create a equivalent TestManifest object
-        obj = TestManifest(context, manifest_full_path, manifest,
-                           flavor="web-platform-tests",
-                           relpath=mozpath.join(manifest_reldir,
-                                                mozpath.basename(manifest_path)),
-                           install_prefix="web-platform/")
-
-
-        for test_type, path, tests in manifest:
-            path = mozpath.join(tests_root, path)
-            if test_type not in ["testharness", "reftest", "wdspec"]:
-                continue
-
-            for test in tests:
-                obj.tests.append({
-                    'path': path,
-                    'here': mozpath.dirname(path),
-                    'manifest': manifest_path,
-                    'name': test.id,
-                    'head': '',
-                    'support-files': '',
-                    'subsuite': '',
-                })
 
         yield obj
 

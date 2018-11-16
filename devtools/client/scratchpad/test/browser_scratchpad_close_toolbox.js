@@ -8,7 +8,7 @@ var {TargetFactory} = require("devtools/client/framework/target");
 
 function test() {
   const options = {
-    tabContent: "test closing toolbox and then reusing scratchpad"
+    tabContent: "test closing toolbox and then reusing scratchpad",
   };
   openTabAndScratchpad(options)
     .then(runTests)
@@ -23,11 +23,10 @@ async function runTests([win, sp]) {
   is(result, 7, "Display produced the expected output.");
 
   // Now open the toolbox and close it again.
-  const target = TargetFactory.forTab(gBrowser.selectedTab);
+  const target = await TargetFactory.forTab(gBrowser.selectedTab);
   const toolbox = await gDevTools.showToolbox(target, "webconsole");
   ok(toolbox, "Toolbox was opened.");
-  const closed = await gDevTools.closeToolbox(target);
-  is(closed, true, "Toolbox was closed.");
+  await toolbox.destroy();
 
   // Now see if using the scratcphad works as expected.
   sp.setText(source);

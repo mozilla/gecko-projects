@@ -37,6 +37,7 @@
 #include "nsIMutableArray.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIObserverService.h"
+#include "nsIProtocolProxyService.h"
 #include "nsProxyRelease.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDocShell.h"
@@ -914,9 +915,16 @@ HttpBaseChannel::EnsureUploadStreamIsCloneable(nsIRunnable* aCallback)
   // this is called more than once simultaneously.
   NS_ENSURE_FALSE(mUploadCloneableCallback, NS_ERROR_UNEXPECTED);
 
-  // If the CloneUploadStream() will succeed, then synchronously invoke
-  // the callback to indicate we're already cloneable.
-  if (!mUploadStream || NS_InputStreamIsCloneable(mUploadStream)) {
+  // We can immediately exec the callback if we don't have an upload stream.
+  if (!mUploadStream) {
+    aCallback->Run();
+    return NS_OK;
+  }
+
+  // Upload nsIInputStream must be cloneable and seekable in order to be
+  // processed by devtools network inspector.
+  nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(mUploadStream);
+  if (seekable && NS_InputStreamIsCloneable(mUploadStream)) {
     aCallback->Run();
     return NS_OK;
   }
@@ -1457,7 +1465,8 @@ HttpBaseChannel::nsContentEncodings::GetNext(nsACString& aNextEncoding)
 // HttpBaseChannel::nsContentEncodings::nsISupports
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS(HttpBaseChannel::nsContentEncodings, nsIUTF8StringEnumerator)
+NS_IMPL_ISUPPORTS(HttpBaseChannel::nsContentEncodings, nsIUTF8StringEnumerator,
+                  nsIStringEnumerator)
 
 //-----------------------------------------------------------------------------
 // HttpBaseChannel::nsContentEncodings <private>
@@ -1690,7 +1699,8 @@ HttpBaseChannel::IsCrossOriginWithReferrer()
       LOG(("triggeringURI=%s\n", triggeringURISpec.get()));
     }
     nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-    rv = ssm->CheckSameOriginURI(triggeringURI, mURI, false);
+    bool isPrivateWin = mLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+    rv = ssm->CheckSameOriginURI(triggeringURI, mURI, false, isPrivateWin);
     return (NS_FAILED(rv));
   }
 
@@ -2738,6 +2748,33 @@ HttpBaseChannel::HTTPUpgrade(const nsACString &aProtocolName,
     mUpgradeProtocol = aProtocolName;
     mUpgradeProtocolCallback = aListener;
     return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetOnlyConnect(bool* aOnlyConnect)
+{
+  NS_ENSURE_ARG_POINTER(aOnlyConnect);
+
+  *aOnlyConnect = mCaps & NS_HTTP_CONNECT_ONLY;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::SetConnectOnly()
+{
+  ENSURE_CALLED_BEFORE_CONNECT();
+
+  if (!mUpgradeProtocolCallback) {
+    return NS_ERROR_FAILURE;
+  }
+
+  mCaps |= NS_HTTP_CONNECT_ONLY;
+  mProxyResolveFlags = nsIProtocolProxyService::RESOLVE_PREFER_HTTPS_PROXY |
+                       nsIProtocolProxyService::RESOLVE_ALWAYS_TUNNEL;
+  return SetLoadFlags(nsIRequest::INHIBIT_CACHING |
+                      nsIChannel::LOAD_ANONYMOUS |
+                      nsIRequest::LOAD_BYPASS_CACHE |
+                      nsIChannel::LOAD_BYPASS_SERVICE_WORKER);
 }
 
 NS_IMETHODIMP
@@ -3896,7 +3933,9 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
   // Pass the preferred alt-data type on to the new channel.
   nsCOMPtr<nsICacheInfoChannel> cacheInfoChan(do_QueryInterface(newChannel));
   if (cacheInfoChan) {
-    cacheInfoChan->PreferAlternativeDataType(mPreferredCachedAltDataType);
+    for (auto& pair : mPreferredCachedAltDataTypes) {
+      cacheInfoChan->PreferAlternativeDataType(mozilla::Get<0>(pair), mozilla::Get<1>(pair));
+    }
   }
 
   if (redirectFlags & (nsIChannelEventSink::REDIRECT_INTERNAL |
@@ -3918,7 +3957,8 @@ bool
 HttpBaseChannel::SameOriginWithOriginalUri(nsIURI *aURI)
 {
   nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-  nsresult rv = ssm->CheckSameOriginURI(aURI, mOriginalURI, false);
+  bool isPrivateWin = mLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+  nsresult rv = ssm->CheckSameOriginURI(aURI, mOriginalURI, false, isPrivateWin);
   return (NS_SUCCEEDED(rv));
 }
 
@@ -4130,7 +4170,7 @@ HttpBaseChannel::TimingAllowCheck(nsIPrincipal *aOrigin, bool *_retval)
     if (t.Type() == Tokenizer::TOKEN_EOF ||
         t.Equals(Tokenizer::Token::Char(','))) {
       p.Claim(headerItem);
-      headerItem.StripWhitespace();
+      nsHttp::TrimHTTPWhitespace(headerItem, headerItem);
       // If the list item contains a case-sensitive match for the value of the
       // origin, or a wildcard, return pass
       if (headerItem == origin || headerItem == "*") {

@@ -21,11 +21,13 @@
 #include "mozilla/dom/workerinternals/JSSettings.h"
 #include "mozilla/dom/workerinternals/Queue.h"
 #include "mozilla/PerformanceCounter.h"
+#include "mozilla/ThreadBound.h"
 
 class nsIConsoleReportCollector;
 class nsIThreadInternal;
 
 namespace mozilla {
+class ThrottledEventQueue;
 namespace dom {
 
 // If you change this, the corresponding list in nsIWorkerDebugger.idl needs
@@ -52,6 +54,7 @@ class WorkerErrorReport;
 class WorkerEventTarget;
 class WorkerGlobalScope;
 class WorkerRunnable;
+class WorkerDebuggeeRunnable;
 class WorkerThread;
 
 // SharedMutex is a small wrapper around an (internal) reference-counted Mutex
@@ -400,19 +403,28 @@ public:
   WorkerGlobalScope*
   GlobalScope() const
   {
-    AssertIsOnWorkerThread();
-    return mScope;
+    MOZ_ACCESS_THREAD_BOUND(mWorkerThreadAccessible, data);
+    return data->mScope;
   }
 
   WorkerDebuggerGlobalScope*
   DebuggerGlobalScope() const
   {
-    AssertIsOnWorkerThread();
-    return mDebuggerScope;
+    MOZ_ACCESS_THREAD_BOUND(mWorkerThreadAccessible, data);
+    return data->mDebuggerScope;
   }
+
+  nsICSPEventListener*
+  CSPEventListener() const;
 
   void
   SetThread(WorkerThread* aThread);
+
+  void
+  SetWorkerPrivateInWorkerThread(WorkerThread* aThread);
+
+  void
+  ResetWorkerPrivateInWorkerThread();
 
   bool
   IsOnWorkerThread() const;
@@ -467,8 +479,8 @@ public:
   bool
   OnLine() const
   {
-    AssertIsOnWorkerThread();
-    return mOnLine;
+    MOZ_ACCESS_THREAD_BOUND(mWorkerThreadAccessible, data);
+    return data->mOnLine;
   }
 
   void
@@ -530,6 +542,10 @@ public:
   nsresult
   DispatchToMainThread(already_AddRefed<nsIRunnable> aRunnable,
                        uint32_t aFlags = NS_DISPATCH_NORMAL);
+
+  nsresult
+  DispatchDebuggeeToMainThread(already_AddRefed<WorkerDebuggeeRunnable> aRunnable,
+                               uint32_t aFlags = NS_DISPATCH_NORMAL);
 
   // Get an event target that will dispatch runnables as control runnables on
   // the worker thread.  Implement nsICancelableRunnable if you wish to take
@@ -1064,13 +1080,6 @@ public:
     mLoadingWorkerScript = aLoadingWorkerScript;
   }
 
-  void
-  QueueRunnable(nsIRunnable* aRunnable)
-  {
-    AssertIsOnParentThread();
-    mQueuedRunnables.AppendElement(aRunnable);
-  }
-
   bool
   RegisterSharedWorker(SharedWorker* aSharedWorker, MessagePort* aPort);
 
@@ -1300,8 +1309,9 @@ private:
   bool
   HasActiveHolders()
   {
-    return !(mChildWorkers.IsEmpty() && mTimeouts.IsEmpty() &&
-             mHolders.IsEmpty());
+    MOZ_ACCESS_THREAD_BOUND(mWorkerThreadAccessible, data);
+    return !(data->mChildWorkers.IsEmpty() && data->mTimeouts.IsEmpty() &&
+             data->mHolders.IsEmpty());
   }
 
   class EventTarget;
@@ -1361,16 +1371,16 @@ private:
   RefPtr<WorkerThread> mThread;
   PRThread* mPRThread;
 
-  // Things touched on worker thread only.
-  RefPtr<WorkerGlobalScope> mScope;
-  RefPtr<WorkerDebuggerGlobalScope> mDebuggerScope;
-  nsTArray<WorkerPrivate*> mChildWorkers;
-  nsTObserverArray<WorkerHolder*> mHolders;
-  nsTArray<nsAutoPtr<TimeoutInfo>> mTimeouts;
-  RefPtr<ThrottledEventQueue> mMainThreadThrottledEventQueue;
-  nsCOMPtr<nsIEventTarget> mMainThreadEventTarget;
+  // Accessed from main thread
+  RefPtr<ThrottledEventQueue> mMainThreadEventTarget;
+
+  // Accessed from worker thread and destructing thread
   RefPtr<WorkerEventTarget> mWorkerControlEventTarget;
   RefPtr<WorkerEventTarget> mWorkerHybridEventTarget;
+
+  // A pauseable queue for WorkerDebuggeeRunnables directed at the main thread.
+  // See WorkerDebuggeeRunnable for details.
+  RefPtr<ThrottledEventQueue> mMainThreadDebuggeeEventTarget;
 
   struct SyncLoopInfo
   {
@@ -1389,14 +1399,7 @@ private:
   // modifications are done with mMutex held *only* in DEBUG builds.
   nsTArray<nsAutoPtr<SyncLoopInfo>> mSyncLoopStack;
 
-  nsCOMPtr<nsITimer> mTimer;
-  nsCOMPtr<nsITimerCallback> mTimerRunnable;
-
   nsCOMPtr<nsITimer> mCancelingTimer;
-
-  nsCOMPtr<nsITimer> mGCTimer;
-
-  RefPtr<MemoryReporter> mMemoryReporter;
 
   // fired on the main thread if the worker script fails to load
   nsCOMPtr<nsIRunnable> mLoadFailedRunnable;
@@ -1404,9 +1407,6 @@ private:
   RefPtr<PerformanceStorage> mPerformanceStorage;
 
   RefPtr<WorkerCSPEventListener> mCSPEventListener;
-
-  // Only used for top level workers.
-  nsTArray<nsCOMPtr<nsIRunnable>> mQueuedRunnables;
 
   // Protected by mMutex.
   nsTArray<RefPtr<WorkerRunnable>> mPreStartRunnables;
@@ -1419,7 +1419,6 @@ private:
   TimeStamp mKillTime;
   WorkerStatus mParentStatus;
   WorkerStatus mStatus;
-  UniquePtr<ClientSource> mClientSource;
 
   // This is touched on parent thread only, but it can be read on a different
   // thread before crashing because hanging.
@@ -1431,26 +1430,48 @@ private:
   DOMHighResTimeStamp mCreationTimeHighRes;
 
   // Things touched on worker thread only.
-  uint32_t mNumHoldersPreventingShutdownStart;
-  uint32_t mDebuggerEventLoopLevel;
+  struct WorkerThreadAccessible
+  {
+    explicit WorkerThreadAccessible(WorkerPrivate* aParent);
 
-  uint32_t mErrorHandlerRecursionCount;
-  uint32_t mNextTimeoutId;
+    RefPtr<WorkerGlobalScope> mScope;
+    RefPtr<WorkerDebuggerGlobalScope> mDebuggerScope;
+    nsTArray<WorkerPrivate*> mChildWorkers;
+    nsTObserverArray<WorkerHolder*> mHolders;
+    nsTArray<nsAutoPtr<TimeoutInfo>> mTimeouts;
+
+    nsCOMPtr<nsITimer> mTimer;
+    nsCOMPtr<nsITimerCallback> mTimerRunnable;
+
+    nsCOMPtr<nsITimer> mGCTimer;
+
+    RefPtr<MemoryReporter> mMemoryReporter;
+
+    UniquePtr<ClientSource> mClientSource;
+
+    uint32_t mNumHoldersPreventingShutdownStart;
+    uint32_t mDebuggerEventLoopLevel;
+
+    uint32_t mErrorHandlerRecursionCount;
+    uint32_t mNextTimeoutId;
+
+    bool mFrozen;
+    bool mTimerRunning;
+    bool mRunningExpiredTimeouts;
+    bool mPeriodicGCTimerRunning;
+    bool mIdleGCTimerRunning;
+    bool mOnLine;
+  };
+  ThreadBound<WorkerThreadAccessible> mWorkerThreadAccessible;
 
   // SharedWorkers may have multiple windows paused, so this must be
   // a count instead of just a boolean.
   uint32_t mParentWindowPausedDepth;
 
-  bool mFrozen;
-  bool mTimerRunning;
-  bool mRunningExpiredTimeouts;
   bool mPendingEventQueueClearing;
   bool mCancelAllPendingRunnables;
-  bool mPeriodicGCTimerRunning;
-  bool mIdleGCTimerRunning;
   bool mWorkerScriptExecutedSuccessfully;
   bool mFetchHandlerWasAdded;
-  bool mOnLine;
   bool mMainThreadObjectsForgotten;
   bool mIsChromeWorker;
   bool mParentFrozen;

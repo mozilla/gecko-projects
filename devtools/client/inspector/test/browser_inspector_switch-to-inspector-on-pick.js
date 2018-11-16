@@ -22,8 +22,8 @@ const DATA = [
       panel_name: "webconsole",
       cold: "true",
       message_count: "0",
-      width: "1300"
-    }
+      width: "1300",
+    },
   },
   {
     timestamp: 3671,
@@ -35,8 +35,8 @@ const DATA = [
       width: "1300",
       panel_name: "webconsole",
       next_panel: "inspector",
-      reason: "inspect_dom"
-    }
+      reason: "inspect_dom",
+    },
   },
   {
     timestamp: 3671,
@@ -48,9 +48,9 @@ const DATA = [
       start_state: "inspect_dom",
       panel_name: "inspector",
       cold: "true",
-      width: "1300"
-    }
-  }
+      width: "1300",
+    },
+  },
 ];
 
 add_task(async function() {
@@ -72,9 +72,9 @@ add_task(async function() {
   checkResults();
 });
 
-function openToolbox(tab) {
+async function openToolbox(tab) {
   info("Opening webconsole.");
-  const target = TargetFactory.forTab(tab);
+  const target = await TargetFactory.forTab(tab);
   return gDevTools.showToolbox(target, "webconsole");
 }
 

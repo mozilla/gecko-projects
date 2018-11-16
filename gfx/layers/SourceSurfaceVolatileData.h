@@ -31,7 +31,6 @@ public:
   SourceSurfaceVolatileData()
     : mMutex("SourceSurfaceVolatileData")
     , mStride(0)
-    , mMapCount(0)
     , mFormat(SurfaceFormat::UNKNOWN)
     , mWasPurged(false)
   {
@@ -53,7 +52,8 @@ public:
   void AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
                               size_t& aHeapSizeOut,
                               size_t& aNonHeapSizeOut,
-                              size_t& aExtHandlesOut) const override;
+                              size_t& aExtHandlesOut,
+                              uint64_t& aExtIdOut) const override;
 
   bool OnHeap() const override
   {
@@ -98,12 +98,10 @@ public:
 private:
   ~SourceSurfaceVolatileData() override
   {
-    MOZ_ASSERT(mMapCount == 0);
   }
 
   Mutex mMutex;
   int32_t mStride;
-  int32_t mMapCount;
   IntSize mSize;
   RefPtr<VolatileBuffer> mVBuf;
   VolatileBufferPtr<uint8_t> mVBufPtr;

@@ -576,7 +576,7 @@ CompositorOGL::PrepareViewport(CompositingRenderTargetOGL* aRenderTarget)
   const gfx::IntSize& phySize = aRenderTarget->mInitParams.mPhySize;
 
   // Set the viewport correctly.
-  mGLContext->fViewport(0, 0, phySize.width, phySize.height);
+  mGLContext->fViewport(mSurfaceOrigin.x, mSurfaceOrigin.y, phySize.width, phySize.height);
 
   mViewportSize = size;
 
@@ -848,7 +848,18 @@ CompositorOGL::BeginFrame(const nsIntRegion& aInvalidRegion,
     aClipRectOut->SetRect(0, 0, width, height);
   }
 
+#if defined(MOZ_WIDGET_ANDROID)
+  if ((mSurfaceOrigin.x > 0) || (mSurfaceOrigin.y > 0)) {
+    mGLContext->fClearColor(gfxPrefs::CompositorOverrideClearColorR(),
+                            gfxPrefs::CompositorOverrideClearColorG(),
+                            gfxPrefs::CompositorOverrideClearColorB(),
+                            gfxPrefs::CompositorOverrideClearColorA());
+  } else {
+    mGLContext->fClearColor(mClearColor.r, mClearColor.g, mClearColor.b, mClearColor.a);
+  }
+#else
   mGLContext->fClearColor(mClearColor.r, mClearColor.g, mClearColor.b, mClearColor.a);
+#endif // defined(MOZ_WIDGET_ANDROID)
   mGLContext->fClear(LOCAL_GL_COLOR_BUFFER_BIT | LOCAL_GL_DEPTH_BUFFER_BIT);
 }
 
@@ -986,15 +997,11 @@ CompositorOGL::GetShaderConfigFor(Effect *aEffect,
   case EffectTypes::YCBCR:
   {
     config.SetYCbCr(true);
-    EffectYCbCr* effectYCbCr =
-      static_cast<EffectYCbCr*>(aEffect);
-    uint32_t pixelBits = (8 * BytesPerPixel(SurfaceFormatForAlphaBitDepth(effectYCbCr->mBitDepth)));
-    uint32_t paddingBits = pixelBits - effectYCbCr->mBitDepth;
-    // OpenGL expects values between [0,255], this range needs to be adjusted
-    // according to the bit depth.
-    // So we will scale the YUV values by this amount.
-    config.SetColorMultiplier(pow(2, paddingBits));
-    config.SetTextureTarget(effectYCbCr->mTexture->AsSourceOGL()->GetTextureTarget());
+    EffectYCbCr* effectYCbCr = static_cast<EffectYCbCr*>(aEffect);
+    config.SetColorMultiplier(
+      RescalingFactorForColorDepth(effectYCbCr->mColorDepth));
+    config.SetTextureTarget(
+      effectYCbCr->mTexture->AsSourceOGL()->GetTextureTarget());
     break;
   }
   case EffectTypes::NV12:
@@ -1250,7 +1257,7 @@ CompositorOGL::DrawGeometry(const Geometry& aGeometry,
   // drawing is going to be shifted by mRenderOffset then we need
   // to shift the clip rect by the same amount.
   if (!mTarget && mCurrentRenderTarget->IsWindow()) {
-    clipRect.MoveBy(mRenderOffset.x, mRenderOffset.y);
+    clipRect.MoveBy(mRenderOffset.x + mSurfaceOrigin.x, mRenderOffset.y - mSurfaceOrigin.y);
   }
 
   ScopedGLState scopedScissorTestState(mGLContext, LOCAL_GL_SCISSOR_TEST, true);
@@ -1490,6 +1497,7 @@ CompositorOGL::DrawGeometry(const Geometry& aGeometry,
 
       BindAndDrawGeometryWithTextureRect(program, aGeometry,
                                          texturedEffect->mTextureCoords, source);
+      source->AsSourceOGL()->MaybeFenceTexture();
     }
     break;
   case EffectTypes::YCBCR: {
@@ -1530,6 +1538,9 @@ CompositorOGL::DrawGeometry(const Geometry& aGeometry,
                                          aGeometry,
                                          effectYCbCr->mTextureCoords,
                                          sourceYCbCr->GetSubSource(Y));
+      sourceY->MaybeFenceTexture();
+      sourceCb->MaybeFenceTexture();
+      sourceCr->MaybeFenceTexture();
     }
     break;
   case EffectTypes::NV12: {
@@ -1567,6 +1578,8 @@ CompositorOGL::DrawGeometry(const Geometry& aGeometry,
                                          aGeometry,
                                          effectNV12->mTextureCoords,
                                          sourceNV12->GetSubSource(Y));
+      sourceY->MaybeFenceTexture();
+      sourceCbCr->MaybeFenceTexture();
     }
     break;
   case EffectTypes::RENDER_TARGET: {
@@ -1649,6 +1662,9 @@ CompositorOGL::DrawGeometry(const Geometry& aGeometry,
 
       mGLContext->fBlendFuncSeparate(LOCAL_GL_ONE, LOCAL_GL_ONE_MINUS_SRC_ALPHA,
                                      LOCAL_GL_ONE, LOCAL_GL_ONE_MINUS_SRC_ALPHA);
+
+      sourceOnBlack->MaybeFenceTexture();
+      sourceOnWhite->MaybeFenceTexture();
     }
     break;
   default:
@@ -1941,7 +1957,7 @@ CompositorOGL::CreateDataTextureSourceAroundYCbCr(TextureHost* aTexture)
     gfx::Factory::CreateWrappingDataSourceSurface(ImageDataSerializer::GetYChannel(buf, desc),
                                                   desc.yStride(),
                                                   desc.ySize(),
-                                                  SurfaceFormatForAlphaBitDepth(desc.bitDepth()));
+                                                  SurfaceFormatForColorDepth(desc.colorDepth()));
   if (!tempY) {
     return nullptr;
   }
@@ -1949,7 +1965,7 @@ CompositorOGL::CreateDataTextureSourceAroundYCbCr(TextureHost* aTexture)
     gfx::Factory::CreateWrappingDataSourceSurface(ImageDataSerializer::GetCbChannel(buf, desc),
                                                   desc.cbCrStride(),
                                                   desc.cbCrSize(),
-                                                  SurfaceFormatForAlphaBitDepth(desc.bitDepth()));
+                                                  SurfaceFormatForColorDepth(desc.colorDepth()));
   if (!tempCb) {
     return nullptr;
   }
@@ -1957,7 +1973,7 @@ CompositorOGL::CreateDataTextureSourceAroundYCbCr(TextureHost* aTexture)
     gfx::Factory::CreateWrappingDataSourceSurface(ImageDataSerializer::GetCrChannel(buf, desc),
                                                   desc.cbCrStride(),
                                                   desc.cbCrSize(),
-                                                  SurfaceFormatForAlphaBitDepth(desc.bitDepth()));
+                                                  SurfaceFormatForColorDepth(desc.colorDepth()));
   if (!tempCr) {
     return nullptr;
   }

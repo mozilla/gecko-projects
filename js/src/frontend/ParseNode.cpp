@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "frontend/ParseNode-inl.h"
+#include "frontend/ParseNode.h"
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/FloatingPoint.h"
@@ -102,10 +102,16 @@ ParseNode::appendOrCreateList(ParseNodeKind kind, ParseNode* left, ParseNode* ri
     return list;
 }
 
+const ParseNodeArity js::frontend::ParseNodeKindArity[] = {
+#define ARITY(_name, arity) arity,
+    FOR_EACH_PARSE_NODE_KIND(ARITY)
+#undef ARITY
+};
+
 #ifdef DEBUG
 
 static const char * const parseNodeNames[] = {
-#define STRINGIFY(name) #name,
+#define STRINGIFY(name, _arity) #name,
     FOR_EACH_PARSE_NODE_KIND(STRINGIFY)
 #undef STRINGIFY
 };
@@ -146,7 +152,7 @@ ParseNode::dump()
 void
 ParseNode::dump(GenericPrinter& out, int indent)
 {
-    switch (ParseNodeArity(pn_arity)) {
+    switch (getArity()) {
       case PN_NULLARY:
         as<NullaryNode>().dump(out);
         return;
@@ -168,9 +174,17 @@ ParseNode::dump(GenericPrinter& out, int indent)
       case PN_NAME:
         as<NameNode>().dump(out, indent);
         return;
+      case PN_FIELD:
+        as<ClassField>().dump(out, indent);
+        return;
       case PN_NUMBER:
         as<NumericLiteral>().dump(out, indent);
         return;
+#ifdef ENABLE_BIGINT
+      case PN_BIGINT:
+        as<BigIntLiteral>().dump(out, indent);
+        return;
+#endif
       case PN_REGEXP:
         as<RegExpLiteral>().dump(out, indent);
         return;
@@ -181,8 +195,8 @@ ParseNode::dump(GenericPrinter& out, int indent)
         as<LexicalScopeNode>().dump(out, indent);
         return;
     }
-    out.printf("#<BAD NODE %p, kind=%u, arity=%u>",
-               (void*) this, unsigned(getKind()), unsigned(pn_arity));
+    out.printf("#<BAD NODE %p, kind=%u>",
+               (void*) this, unsigned(getKind()));
 }
 
 void
@@ -213,6 +227,14 @@ NumericLiteral::dump(GenericPrinter& out, int indent)
         out.printf("%g", value());
     }
 }
+
+#ifdef ENABLE_BIGINT
+void
+BigIntLiteral::dump(GenericPrinter& out, int indent)
+{
+    out.printf("(%s)", parseNodeNames[size_t(getKind())]);
+}
+#endif
 
 void
 RegExpLiteral::dump(GenericPrinter& out, int indent)
@@ -341,6 +363,7 @@ NameNode::dump(GenericPrinter& out, int indent)
         return;
 
       case ParseNodeKind::Name:
+      case ParseNodeKind::PrivateName: // atom() already includes the '#', no need to specially include it.
       case ParseNodeKind::PropertyName:
         if (!atom()) {
             out.put("#<null name>");
@@ -383,6 +406,21 @@ NameNode::dump(GenericPrinter& out, int indent)
 }
 
 void
+ClassField::dump(GenericPrinter& out, int indent)
+{
+    out.printf("(");
+    if (hasInitializer()) {
+        indent += 2;
+    }
+    DumpParseTree(&name(), out, indent);
+    if (hasInitializer()) {
+        IndentNewLine(out, indent);
+        DumpParseTree(&initializer(), out, indent);
+    }
+    out.printf(")");
+}
+
+void
 LexicalScopeNode::dump(GenericPrinter& out, int indent)
 {
     const char* name = parseNodeNames[size_t(getKind())];
@@ -411,23 +449,49 @@ LexicalScopeNode::dump(GenericPrinter& out, int indent)
 }
 #endif
 
-ObjectBox::ObjectBox(JSObject* object, ObjectBox* traceLink)
-  : object(object),
-    traceLink(traceLink),
-    emitLink(nullptr)
+TraceListNode::TraceListNode(js::gc::Cell* gcThing, TraceListNode* traceLink)
+  : gcThing(gcThing),
+    traceLink(traceLink)
 {
-    MOZ_ASSERT(!object->is<JSFunction>());
-    MOZ_ASSERT(object->isTenured());
+    MOZ_ASSERT(gcThing->isTenured());
 }
 
-ObjectBox::ObjectBox(JSFunction* function, ObjectBox* traceLink)
-  : object(function),
-    traceLink(traceLink),
+#ifdef ENABLE_BIGINT
+BigIntBox*
+TraceListNode::asBigIntBox()
+{
+    MOZ_ASSERT(isBigIntBox());
+    return static_cast<BigIntBox*>(this);
+}
+#endif
+
+ObjectBox*
+TraceListNode::asObjectBox()
+{
+    MOZ_ASSERT(isObjectBox());
+    return static_cast<ObjectBox*>(this);
+}
+
+#ifdef ENABLE_BIGINT
+BigIntBox::BigIntBox(BigInt* bi, TraceListNode* traceLink)
+  : TraceListNode(bi, traceLink)
+{
+}
+#endif
+
+ObjectBox::ObjectBox(JSObject* obj, TraceListNode* traceLink)
+  : TraceListNode(obj, traceLink),
     emitLink(nullptr)
 {
-    MOZ_ASSERT(object->is<JSFunction>());
+    MOZ_ASSERT(!object()->is<JSFunction>());
+}
+
+ObjectBox::ObjectBox(JSFunction* function, TraceListNode* traceLink)
+  : TraceListNode(function, traceLink),
+    emitLink(nullptr)
+{
+    MOZ_ASSERT(object()->is<JSFunction>());
     MOZ_ASSERT(asFunctionBox()->function() == function);
-    MOZ_ASSERT(object->isTenured());
 }
 
 FunctionBox*
@@ -438,17 +502,17 @@ ObjectBox::asFunctionBox()
 }
 
 /* static */ void
-ObjectBox::TraceList(JSTracer* trc, ObjectBox* listHead)
+TraceListNode::TraceList(JSTracer* trc, TraceListNode* listHead)
 {
-    for (ObjectBox* box = listHead; box; box = box->traceLink) {
-        box->trace(trc);
+    for (TraceListNode* node = listHead; node; node = node->traceLink) {
+        node->trace(trc);
     }
 }
 
 void
-ObjectBox::trace(JSTracer* trc)
+TraceListNode::trace(JSTracer* trc)
 {
-    TraceRoot(trc, &object, "parser.object");
+    TraceGenericPointerRoot(trc, &gcThing, "parser.traceListNode");
 }
 
 void

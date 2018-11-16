@@ -156,7 +156,6 @@ const RESTORE_TAB_CONTENT_REASON = {
 
 ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm", this);
 ChromeUtils.import("resource://gre/modules/Services.jsm", this);
-ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm", this);
 ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm", this);
 ChromeUtils.import("resource://gre/modules/Timer.jsm", this);
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
@@ -300,16 +299,16 @@ var SessionStore = {
     return SessionStoreInternal.forgetClosedWindow(aIndex);
   },
 
-  getWindowValue: function ss_getWindowValue(aWindow, aKey) {
-    return SessionStoreInternal.getWindowValue(aWindow, aKey);
+  getCustomWindowValue(aWindow, aKey) {
+    return SessionStoreInternal.getCustomWindowValue(aWindow, aKey);
   },
 
-  setWindowValue: function ss_setWindowValue(aWindow, aKey, aStringValue) {
-    SessionStoreInternal.setWindowValue(aWindow, aKey, aStringValue);
+  setCustomWindowValue(aWindow, aKey, aStringValue) {
+    SessionStoreInternal.setCustomWindowValue(aWindow, aKey, aStringValue);
   },
 
-  deleteWindowValue: function ss_deleteWindowValue(aWindow, aKey) {
-    SessionStoreInternal.deleteWindowValue(aWindow, aKey);
+  deleteCustomWindowValue(aWindow, aKey) {
+    SessionStoreInternal.deleteCustomWindowValue(aWindow, aKey);
   },
 
   getCustomTabValue(aTab, aKey) {
@@ -328,16 +327,16 @@ var SessionStore = {
     return SessionStoreInternal.getLazyTabValue(aTab, aKey);
   },
 
-  getGlobalValue: function ss_getGlobalValue(aKey) {
-    return SessionStoreInternal.getGlobalValue(aKey);
+  getCustomGlobalValue(aKey) {
+    return SessionStoreInternal.getCustomGlobalValue(aKey);
   },
 
-  setGlobalValue: function ss_setGlobalValue(aKey, aStringValue) {
-    SessionStoreInternal.setGlobalValue(aKey, aStringValue);
+  setCustomGlobalValue(aKey, aStringValue) {
+    SessionStoreInternal.setCustomGlobalValue(aKey, aStringValue);
   },
 
-  deleteGlobalValue: function ss_deleteGlobalValue(aKey) {
-    SessionStoreInternal.deleteGlobalValue(aKey);
+  deleteCustomGlobalValue(aKey) {
+    SessionStoreInternal.deleteCustomGlobalValue(aKey);
   },
 
   persistTabAttribute: function ss_persistTabAttribute(aName) {
@@ -1046,10 +1045,6 @@ var SessionStoreInternal = {
           this.resetEpoch(target);
         }
         break;
-      case "BrowserWillChangeProcess":
-        let promise = TabStateFlusher.flush(target);
-        target.frameLoader.addProcessChangeBlockingPromise(promise);
-        break;
       case "BrowserChangedProcess":
         let newEpoch = 1 + Math.max(this.getCurrentEpoch(target),
                                     this.getCurrentEpoch(aEvent.otherBrowser));
@@ -1125,7 +1120,6 @@ var SessionStoreInternal = {
     // Keep track of a browser's latest frameLoader.
     aWindow.gBrowser.addEventListener("XULFrameLoaderCreated", this);
     aWindow.gBrowser.addEventListener("BrowserChangedProcess", this);
-    aWindow.gBrowser.addEventListener("BrowserWillChangeProcess", this);
   },
 
   /**
@@ -1391,7 +1385,6 @@ var SessionStoreInternal = {
 
     aWindow.gBrowser.removeEventListener("XULFrameLoaderCreated", this);
     aWindow.gBrowser.removeEventListener("BrowserChangedProcess", this);
-    aWindow.gBrowser.removeEventListener("BrowserWillChangeProcess", this);
 
     let winData = this._windows[aWindow.__SSi];
 
@@ -2442,8 +2435,17 @@ var SessionStoreInternal = {
     let newTab = aWindow.gBrowser.addTrustedTab(null, tabOptions);
 
     // Start the throbber to pretend we're doing something while actually
-    // waiting for data from the frame script.
-    newTab.setAttribute("busy", "true");
+    // waiting for data from the frame script. This throbber is disabled
+    // if the URI is a local about: URI.
+    let uriObj = aTab.linkedBrowser.currentURI;
+    if (!uriObj || (uriObj && !aWindow.gBrowser.isLocalAboutURI(uriObj))) {
+      newTab.setAttribute("busy", "true");
+    }
+
+    // Hack to ensure that the about:home, about:newtab, and about:welcome
+    // favicon is loaded instantaneously, to avoid flickering and improve
+    // perceived performance.
+    aWindow.gBrowser.setDefaultIcon(newTab, uriObj);
 
     // Collect state before flushing.
     let tabState = TabState.collect(aTab, TAB_CUSTOM_VALUES.get(aTab));
@@ -2607,7 +2609,7 @@ var SessionStoreInternal = {
     this._notifyOfClosedObjectsChange();
   },
 
-  getWindowValue: function ssi_getWindowValue(aWindow, aKey) {
+  getCustomWindowValue(aWindow, aKey) {
     if ("__SSi" in aWindow) {
       let data = this._windows[aWindow.__SSi].extData || {};
       return data[aKey] || "";
@@ -2621,9 +2623,9 @@ var SessionStoreInternal = {
     throw Components.Exception("Window is not tracked", Cr.NS_ERROR_INVALID_ARG);
   },
 
-  setWindowValue: function ssi_setWindowValue(aWindow, aKey, aStringValue) {
+  setCustomWindowValue(aWindow, aKey, aStringValue) {
     if (typeof aStringValue != "string") {
-      throw new TypeError("setWindowValue only accepts string values");
+      throw new TypeError("setCustomWindowValue only accepts string values");
     }
 
     if (!("__SSi" in aWindow)) {
@@ -2636,7 +2638,7 @@ var SessionStoreInternal = {
     this.saveStateDelayed(aWindow);
   },
 
-  deleteWindowValue: function ssi_deleteWindowValue(aWindow, aKey) {
+  deleteCustomWindowValue(aWindow, aKey) {
     if (aWindow.__SSi && this._windows[aWindow.__SSi].extData &&
         this._windows[aWindow.__SSi].extData[aKey])
       delete this._windows[aWindow.__SSi].extData[aKey];
@@ -2683,20 +2685,20 @@ var SessionStoreInternal = {
     return (TAB_LAZY_STATES.get(aTab) || {})[aKey];
   },
 
-  getGlobalValue: function ssi_getGlobalValue(aKey) {
+  getCustomGlobalValue(aKey) {
     return this._globalState.get(aKey);
   },
 
-  setGlobalValue: function ssi_setGlobalValue(aKey, aStringValue) {
+  setCustomGlobalValue(aKey, aStringValue) {
     if (typeof aStringValue != "string") {
-      throw new TypeError("setGlobalValue only accepts string values");
+      throw new TypeError("setCustomGlobalValue only accepts string values");
     }
 
     this._globalState.set(aKey, aStringValue);
     this.saveStateDelayed();
   },
 
-  deleteGlobalValue: function ssi_deleteGlobalValue(aKey) {
+  deleteCustomGlobalValue(aKey) {
     this._globalState.delete(aKey);
     this.saveStateDelayed();
   },
@@ -2773,14 +2775,21 @@ var SessionStoreInternal = {
       if (activePageData.title &&
           activePageData.title != activePageData.url) {
         win.gBrowser.setInitialTabTitle(tab, activePageData.title, { isContentTitle: true });
-      } else if (activePageData.url != "about:blank") {
+      } else {
         win.gBrowser.setInitialTabTitle(tab, activePageData.url);
       }
     }
 
     // Restore the tab icon.
     if ("image" in tabData) {
-      win.gBrowser.setIcon(tab, tabData.image, undefined, tabData.iconLoadingPrincipal);
+      // We know that about:blank is safe to load in any remote type. Since
+      // SessionStore is triggered with about:blank, there must be a process
+      // flip. We will ignore the first about:blank load to prevent resetting the
+      // favicon that we have set earlier to avoid flickering and improve
+      // perceived performance.
+      if (!activePageData || (activePageData && activePageData.url != "about:blank")) {
+        win.gBrowser.setIcon(tab, tabData.image, undefined, tabData.iconLoadingPrincipal);
+      }
       TabStateCache.update(browser, { image: null, iconLoadingPrincipal: null });
     }
   },
@@ -2960,7 +2969,11 @@ var SessionStoreInternal = {
     // a flash of the about:tabcrashed page after selecting
     // the revived tab.
     aTab.removeAttribute("crashed");
-    browser.loadURI("about:blank");
+    browser.loadURI("about:blank", {
+      triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({
+        userContextId: aTab.userContextId,
+      }),
+    });
 
     let data = TabState.collect(aTab, TAB_CUSTOM_VALUES.get(aTab));
     this.restoreTab(aTab, data, {
@@ -3016,9 +3029,22 @@ var SessionStoreInternal = {
       return;
     }
 
+    let uriObj;
+    try {
+      uriObj = Services.io.newURI(loadArguments.uri);
+    } catch (e) {}
+
     // Start the throbber to pretend we're doing something while actually
-    // waiting for data from the frame script.
-    tab.setAttribute("busy", "true");
+    // waiting for data from the frame script. This throbber is disabled
+    // if the URI is a local about: URI.
+    if (!uriObj || (uriObj && !window.gBrowser.isLocalAboutURI(uriObj))) {
+      tab.setAttribute("busy", "true");
+    }
+
+    // Hack to ensure that the about:home, about:newtab, and about:welcome
+    // favicon is loaded instantaneously, to avoid flickering and improve
+    // perceived performance.
+    window.gBrowser.setDefaultIcon(tab, uriObj);
 
     // Flush to get the latest tab state.
     TabStateFlusher.flush(browser).then(() => {
@@ -3590,15 +3616,20 @@ var SessionStoreInternal = {
   /**
    * Prepare connection to host beforehand.
    *
+   * @param tab
+   *        Tab we are loading from.
    * @param url
    *        URL of a host.
    * @returns a flag indicates whether a connection has been made
    */
-  prepareConnectionToHost(url) {
+  prepareConnectionToHost(tab, url) {
     if (!url.startsWith("about:")) {
+      let principal = Services.scriptSecurityManager.createNullPrincipal({
+        userContextId: tab.userContextId,
+      });
       let sc = Services.io.QueryInterface(Ci.nsISpeculativeConnect);
       let uri = Services.io.newURI(url);
-      sc.speculativeConnect(uri, null, null);
+      sc.speculativeConnect2(uri, principal, null);
       return true;
     }
     return false;
@@ -3616,7 +3647,7 @@ var SessionStoreInternal = {
     let tabState = TAB_LAZY_STATES.get(tab);
     if (tabState && !tabState.connectionPrepared) {
       let url = this.getLazyTabValue(tab, "url");
-      let prepared = this.prepareConnectionToHost(url);
+      let prepared = this.prepareConnectionToHost(tab, url);
       // This is used to test if a connection has been made beforehand.
       if (gDebuggingEnabled) {
         tab.__test_connection_prepared = prepared;
@@ -3923,7 +3954,7 @@ var SessionStoreInternal = {
         if (TabRestoreQueue.willRestoreSoon(tab)) {
           if (activeIndex in tabData.entries) {
             let url = tabData.entries[activeIndex].url;
-            let prepared = this.prepareConnectionToHost(url);
+            let prepared = this.prepareConnectionToHost(tab, url);
             if (gDebuggingEnabled) {
               tab.__test_connection_prepared = prepared;
               tab.__test_connection_url = url;
@@ -4039,7 +4070,7 @@ var SessionStoreInternal = {
        requestTime: Services.telemetry.msSystemNow()});
 
     // Focus the tab's content area.
-    if (aTab.selected) {
+    if (aTab.selected && !window.isBlankPageURL(uri)) {
       browser.focus();
     }
   },

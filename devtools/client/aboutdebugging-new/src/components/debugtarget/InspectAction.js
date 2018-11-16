@@ -4,9 +4,12 @@
 
 "use strict";
 
-const { PureComponent } = require("devtools/client/shared/vendor/react");
+const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
+
+const FluentReact = require("devtools/client/shared/vendor/fluent-react");
+const Localized = createFactory(FluentReact.Localized);
 
 const Actions = require("../../actions/index");
 
@@ -23,16 +26,21 @@ class InspectAction extends PureComponent {
 
   inspect() {
     const { dispatch, target } = this.props;
-    dispatch(Actions.inspectDebugTarget(target.type, target.id));
+    dispatch(Actions.inspectDebugTarget(target));
   }
 
   render() {
-    return dom.button(
+    return Localized(
       {
-        onClick: e => this.inspect(),
-        className: "aboutdebugging-button",
+        id: "about-debugging-debug-target-inspect-button",
       },
-      "Inspect"
+      dom.button(
+        {
+          onClick: e => this.inspect(),
+          className: "default-button",
+        },
+        "Inspect"
+      )
     );
   }
 }

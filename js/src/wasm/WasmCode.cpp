@@ -1230,11 +1230,13 @@ JumpTables::init(CompileMode mode, const ModuleSegment& ms, const CodeRangeVecto
     return true;
 }
 
-Code::Code(UniqueCodeTier tier1, const Metadata& metadata, JumpTables&& maybeJumpTables)
+Code::Code(UniqueCodeTier tier1, const Metadata& metadata, JumpTables&& maybeJumpTables,
+           StructTypeVector&& structTypes)
   : tier1_(std::move(tier1)),
     metadata_(&metadata),
     profilingLabels_(mutexid::WasmCodeProfilingLabels, CacheableCharsVector()),
-    jumpTables_(std::move(maybeJumpTables))
+    jumpTables_(std::move(maybeJumpTables)),
+    structTypes_(std::move(structTypes))
 {}
 
 bool
@@ -1254,7 +1256,7 @@ bool
 Code::setTier2(UniqueCodeTier tier2, const LinkData& linkData) const
 {
     MOZ_RELEASE_ASSERT(!hasTier2());
-    MOZ_RELEASE_ASSERT(tier2->tier() == Tier::Ion && tier1_->tier() == Tier::Baseline);
+    MOZ_RELEASE_ASSERT(tier2->tier() == Tier::Optimized && tier1_->tier() == Tier::Baseline);
 
     if (!tier2->initialize(*this, linkData, *metadata_)) {
         return false;
@@ -1326,8 +1328,8 @@ Code::codeTier(Tier tier) const
             return *tier1_;
         }
         MOZ_CRASH("No code segment at this tier");
-      case Tier::Ion:
-        if (tier1_->tier() == Tier::Ion) {
+      case Tier::Optimized:
+        if (tier1_->tier() == Tier::Optimized) {
             MOZ_ASSERT(tier1_->initialized());
             return *tier1_;
         }
@@ -1336,9 +1338,8 @@ Code::codeTier(Tier tier) const
             return *tier2_;
         }
         MOZ_CRASH("No code segment at this tier");
-      default:
-        MOZ_CRASH();
     }
+    MOZ_CRASH();
 }
 
 bool
@@ -1528,13 +1529,15 @@ Code::addSizeOfMiscIfNotSeen(MallocSizeOf mallocSizeOf,
     for (auto t : tiers()) {
         codeTier(t).addSizeOfMisc(mallocSizeOf, code, data);
     }
+    *data += SizeOfVectorExcludingThis(structTypes_, mallocSizeOf);
 }
 
 size_t
 Code::serializedSize() const
 {
     return metadata().serializedSize() +
-           codeTier(Tier::Serialized).serializedSize();
+           codeTier(Tier::Serialized).serializedSize() +
+           SerializedVectorSize(structTypes_);
 }
 
 uint8_t*
@@ -1544,6 +1547,7 @@ Code::serialize(uint8_t* cursor, const LinkData& linkData) const
 
     cursor = metadata().serialize(cursor);
     cursor = codeTier(Tier::Serialized).serialize(cursor, linkData);
+    cursor = SerializeVector(cursor, structTypes_);
     return cursor;
 }
 
@@ -1569,7 +1573,14 @@ Code::deserialize(const uint8_t* cursor,
         return nullptr;
     }
 
-    MutableCode code = js_new<Code>(std::move(codeTier), metadata, std::move(jumpTables));
+    StructTypeVector structTypes;
+    cursor = DeserializeVector(cursor, &structTypes);
+    if (!cursor) {
+        return nullptr;
+    }
+
+    MutableCode code = js_new<Code>(std::move(codeTier), metadata, std::move(jumpTables),
+                                    std::move(structTypes));
     if (!code || !code->initialize(linkData)) {
         return nullptr;
     }

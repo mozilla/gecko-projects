@@ -1,5 +1,6 @@
 /* exported MANAGE_ADDRESSES_DIALOG_URL, MANAGE_CREDIT_CARDS_DIALOG_URL, EDIT_ADDRESS_DIALOG_URL, EDIT_CREDIT_CARD_DIALOG_URL,
             BASE_URL, TEST_ADDRESS_1, TEST_ADDRESS_2, TEST_ADDRESS_3, TEST_ADDRESS_4, TEST_ADDRESS_5, TEST_ADDRESS_CA_1, TEST_ADDRESS_DE_1,
+            TEST_ADDRESS_IE_1,
             TEST_CREDIT_CARD_1, TEST_CREDIT_CARD_2, TEST_CREDIT_CARD_3, FORM_URL, CREDITCARD_FORM_URL,
             FTU_PREF, ENABLED_AUTOFILL_ADDRESSES_PREF, AUTOFILL_CREDITCARDS_AVAILABLE_PREF, ENABLED_AUTOFILL_CREDITCARDS_PREF,
             SUPPORTED_COUNTRIES_PREF,
@@ -7,13 +8,13 @@
             DEFAULT_REGION_PREF,
             sleep, expectPopupOpen, openPopupOn, expectPopupClose, closePopup, clickDoorhangerButton,
             getAddresses, saveAddress, removeAddresses, saveCreditCard,
-            getDisplayedPopupItems, getDoorhangerCheckbox, waitForMasterPasswordDialog,
+            getDisplayedPopupItems, getDoorhangerCheckbox,
             getNotification, getDoorhangerButton, removeAllRecords, testDialog */
 
 "use strict";
 
-ChromeUtils.import("resource://testing-common/LoginTestUtils.jsm", this);
-ChromeUtils.import("resource://formautofill/MasterPassword.jsm", this);
+ChromeUtils.import("resource://formautofill/OSKeyStore.jsm", this);
+ChromeUtils.import("resource://testing-common/OSKeyStoreTestUtils.jsm", this);
 
 const MANAGE_ADDRESSES_DIALOG_URL = "chrome://formautofill/content/manageAddresses.xhtml";
 const MANAGE_CREDIT_CARDS_DIALOG_URL = "chrome://formautofill/content/manageCreditCards.xhtml";
@@ -21,8 +22,7 @@ const EDIT_ADDRESS_DIALOG_URL = "chrome://formautofill/content/editAddress.xhtml
 const EDIT_CREDIT_CARD_DIALOG_URL = "chrome://formautofill/content/editCreditCard.xhtml";
 const BASE_URL = "http://mochi.test:8888/browser/browser/extensions/formautofill/test/browser/";
 const FORM_URL = "http://mochi.test:8888/browser/browser/extensions/formautofill/test/browser/autocomplete_basic.html";
-const CREDITCARD_FORM_URL =
-  "https://example.org/browser/browser/extensions/formautofill/test/browser/autocomplete_creditcard_basic.html";
+const CREDITCARD_FORM_URL = "https://example.org/browser/browser/extensions/formautofill/test/browser/autocomplete_creditcard_basic.html";
 const FTU_PREF = "extensions.formautofill.firstTimeUse";
 const CREDITCARDS_USED_STATUS_PREF = "extensions.formautofill.creditCards.used";
 const ENABLED_AUTOFILL_ADDRESSES_PREF = "extensions.formautofill.addresses.enabled";
@@ -97,6 +97,21 @@ const TEST_ADDRESS_DE_1 = {
   country: "DE",
   tel: "+4930983333000",
   email: "timbl@w3.org",
+};
+
+const TEST_ADDRESS_IE_1 = {
+  "given-name": "Bob",
+  "additional-name": "Z.",
+  "family-name": "Builder",
+  organization: "Best Co.",
+  "street-address": "123 Kilkenny St.",
+  "address-level3": "Some Townland",
+  "address-level2": "Dublin",
+  "address-level1": "Co. Dublin",
+  "postal-code": "A65 F4E2",
+  country: "IE",
+  tel: "+13534564947391",
+  email: "ie@example.com",
 };
 
 const TEST_CREDIT_CARD_1 = {
@@ -310,24 +325,6 @@ function getDoorhangerButton(button) {
   return getNotification()[button];
 }
 
-
-// Wait for the master password dialog to popup and enter the password to log in
-// if "login" is "true" or dismiss it directly if otherwise.
-function waitForMasterPasswordDialog(login = false) {
-  info("expecting master password dialog loaded");
-  let dialogShown = TestUtils.topicObserved("common-dialog-loaded");
-  return dialogShown.then(([subject]) => {
-    let dialog = subject.Dialog;
-    is(dialog.args.title, "Password Required", "Master password dialog shown");
-    if (login) {
-      dialog.ui.password1Textbox.value = LoginTestUtils.masterPassword.masterPassword;
-      dialog.ui.button0.click();
-    } else {
-      dialog.ui.button1.click();
-    }
-  });
-}
-
 async function removeAllRecords() {
   let addresses = await getAddresses();
   if (addresses.length) {
@@ -348,9 +345,14 @@ async function waitForFocusAndFormReady(win) {
 }
 
 async function testDialog(url, testFn, arg = undefined) {
-  if (url == EDIT_CREDIT_CARD_DIALOG_URL && arg) {
-    arg = Object.assign({}, arg, {
-      "cc-number": await MasterPassword.decrypt(arg["cc-number-encrypted"]),
+  // Skip this step for test cards that lack an encrypted
+  // number since they will fail to decrypt.
+  if (url == EDIT_CREDIT_CARD_DIALOG_URL &&
+      arg &&
+      arg.record &&
+      arg.record["cc-number-encrypted"]) {
+    arg.record = Object.assign({}, arg.record, {
+      "cc-number": await OSKeyStore.decrypt(arg.record["cc-number-encrypted"]),
     });
   }
   let win = window.openDialog(url, null, "width=600,height=600", arg);
@@ -360,4 +362,11 @@ async function testDialog(url, testFn, arg = undefined) {
   return unloadPromise;
 }
 
+add_task(function setup() {
+  OSKeyStoreTestUtils.setup();
+});
+
 registerCleanupFunction(removeAllRecords);
+registerCleanupFunction(async () => {
+  await OSKeyStoreTestUtils.cleanup();
+});

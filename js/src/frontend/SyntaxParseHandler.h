@@ -208,6 +208,12 @@ FOR_EACH_PARSENODE_SUBCLASS(DECLARE_AS)
         return NodeGeneric;
     }
 
+#ifdef ENABLE_BIGINT
+    BigIntLiteralType newBigInt() {
+        return NodeGeneric;
+    }
+#endif
+
     BooleanLiteralType newBooleanLiteral(bool cond, const TokenPos& pos) { return NodeGeneric; }
 
     NameNodeType newStringLiteral(JSAtom* atom, const TokenPos& pos) {
@@ -279,7 +285,7 @@ FOR_EACH_PARSENODE_SUBCLASS(DECLARE_AS)
     BinaryNodeType newTaggedTemplate(Node tag, Node args) { return NodeGeneric; }
 
     ListNodeType newObjectLiteral(uint32_t begin) { return NodeUnparenthesizedObject; }
-    ListNodeType newClassMethodList(uint32_t begin) { return NodeGeneric; }
+    ListNodeType newClassMemberList(uint32_t begin) { return NodeGeneric; }
     ClassNamesType newClassNames(Node outer, Node inner, const TokenPos& pos) {
         return NodeGeneric;
     }
@@ -305,9 +311,13 @@ FOR_EACH_PARSENODE_SUBCLASS(DECLARE_AS)
                                                 CodeNodeType funNode, AccessorType atype) {
         return true;
     }
-    MOZ_MUST_USE bool addClassMethodDefinition(ListNodeType methodList, Node key,
+    MOZ_MUST_USE bool addClassMethodDefinition(ListNodeType memberList, Node key,
                                                CodeNodeType funNode, AccessorType atype,
                                                bool isStatic) {
+        return true;
+    }
+    MOZ_MUST_USE bool addClassFieldDefinition(ListNodeType memberList,
+                                              Node name, Node initializer) {
         return true;
     }
     UnaryNodeType newYieldExpression(uint32_t begin, Node value) { return NodeGeneric; }

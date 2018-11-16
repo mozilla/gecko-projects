@@ -14,6 +14,7 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Range.h"
+#include "mozilla/Utf8.h"
 
 #include <string.h>
 
@@ -25,6 +26,7 @@
 #include "builtin/Object.h"
 #include "builtin/SelfHostingDefines.h"
 #include "builtin/String.h"
+#include "frontend/BytecodeCompilation.h"
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/TokenStream.h"
 #include "gc/Marking.h"
@@ -34,8 +36,7 @@
 #include "js/CallNonGenericMethod.h"
 #include "js/CompileOptions.h"
 #include "js/Proxy.h"
-
-#include "js/SourceBufferHolder.h"
+#include "js/SourceText.h"
 #include "js/StableStringChars.h"
 #include "js/Wrapper.h"
 #include "util/StringBuffer.h"
@@ -65,10 +66,12 @@ using mozilla::ArrayLength;
 using mozilla::CheckedInt;
 using mozilla::Maybe;
 using mozilla::Some;
+using mozilla::Utf8Unit;
 
 using JS::AutoStableStringChars;
 using JS::CompileOptions;
-using JS::SourceBufferHolder;
+using JS::SourceOwnership;
+using JS::SourceText;
 
 static bool
 fun_enumerate(JSContext* cx, HandleObject obj)
@@ -1051,7 +1054,7 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool isToSource)
     // that eval returns lambda, not function statement.
     bool addParentheses = haveSource && isToSource && (fun->isLambda() && !fun->isArrow());
 
-    if (haveSource && !script->scriptSource()->hasSourceData() &&
+    if (haveSource && !script->scriptSource()->hasSourceText() &&
         !JSScript::loadSource(cx, script->scriptSource(), &haveSource))
     {
         return nullptr;
@@ -1085,6 +1088,61 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool isToSource)
 
     if (haveSource) {
         if (!script->appendSourceDataForToString(cx, out)) {
+            return nullptr;
+        }
+    } else if (!isToSource) {
+        // For the toString() output the source representation must match
+        // NativeFunction when no source text is available.
+        //
+        // NativeFunction:
+        //   function PropertyName[~Yield,~Await]opt ( FormalParameters[~Yield,~Await] ) { [native code] }
+        //
+        // Additionally, if |fun| is a well-known intrinsic object and is not
+        // identified as an anonymous function, the portion of the returned
+        // string that would be matched by IdentifierName must be the initial
+        // value of the name property of |fun|.
+
+        auto hasGetterOrSetterPrefix = [](JSAtom* name) {
+            auto hasGetterOrSetterPrefix = [](const auto* chars) {
+                return (chars[0] == 'g' || chars[0] == 's') &&
+                       chars[1] == 'e' &&
+                       chars[2] == 't' &&
+                       chars[3] == ' ';
+            };
+
+            JS::AutoCheckCannotGC nogc;
+            return name->length() >= 4 &&
+                   (name->hasLatin1Chars()
+                    ? hasGetterOrSetterPrefix(name->latin1Chars(nogc))
+                    : hasGetterOrSetterPrefix(name->twoByteChars(nogc)));
+        };
+
+        if (!out.append("function")) {
+            return nullptr;
+        }
+
+        // We don't want to fully parse the function's name here because of
+        // performance reasons, so only append the name if we're confident it
+        // can be matched as the 'PropertyName' grammar production.
+        if (fun->explicitName() &&
+            !fun->isBoundFunction() &&
+            (fun->kind() == JSFunction::NormalFunction ||
+             fun->kind() == JSFunction::ClassConstructor))
+        {
+            if (!out.append(' ')) {
+                return nullptr;
+            }
+
+            // Built-in getters or setters are classified as normal
+            // functions, strip any leading "get " or "set " if present.
+            JSAtom* name = fun->explicitName();
+            size_t offset = hasGetterOrSetterPrefix(name) ? 4 : 0;
+            if (!out.appendSubstring(name, offset, name->length() - offset)) {
+                return nullptr;
+            }
+        }
+
+        if (!out.append("() {\n    [native code]\n}")) {
             return nullptr;
         }
     } else {
@@ -1123,28 +1181,8 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool isToSource)
             }
         }
 
-        if (fun->isInterpreted() &&
-            (!fun->isSelfHostedBuiltin() ||
-             fun->infallibleIsDefaultClassConstructor(cx)))
-        {
-            // Default class constructors should always haveSource except;
-            //
-            // 1. Source has been discarded for the whole compartment.
-            //
-            // 2. The source is marked as "lazy", i.e., retrieved on demand, and
-            // the embedding has not provided a hook to retrieve sources.
-            MOZ_ASSERT_IF(fun->infallibleIsDefaultClassConstructor(cx),
-                          !cx->runtime()->sourceHook.ref() ||
-                          !script->scriptSource()->sourceRetrievable() ||
-                          fun->realm()->behaviors().discardSource());
-
-            if (!out.append("() {\n    [sourceless code]\n}")) {
-                return nullptr;
-            }
-        } else {
-            if (!out.append("() {\n    [native code]\n}")) {
-                return nullptr;
-            }
+        if (!out.append("() {\n    [native code]\n}")) {
+            return nullptr;
         }
     }
 
@@ -1171,8 +1209,7 @@ fun_toStringHelper(JSContext* cx, HandleObject obj, bool isToSource)
         return nullptr;
     }
 
-    RootedFunction fun(cx, &obj->as<JSFunction>());
-    return FunctionToString(cx, fun, isToSource);
+    return FunctionToString(cx, obj.as<JSFunction>(), isToSource);
 }
 
 bool
@@ -1343,27 +1380,6 @@ js::fun_apply(JSContext* cx, unsigned argc, Value* vp)
 
     // Step 9.
     return Call(cx, fval, args[0], args2, args.rval());
-}
-
-bool
-JSFunction::infallibleIsDefaultClassConstructor(JSContext* cx) const
-{
-    if (!isSelfHostedBuiltin()) {
-        return false;
-    }
-
-    bool isDefault = false;
-    if (isInterpretedLazy()) {
-        JSAtom* name = &getExtendedSlot(LAZY_FUNCTION_NAME_SLOT).toString()->asAtom();
-        isDefault = name == cx->names().DefaultDerivedClassConstructor ||
-                    name == cx->names().DefaultBaseClassConstructor;
-    } else {
-        isDefault = nonLazyScript()->isDefaultClassConstructor();
-    }
-
-    MOZ_ASSERT_IF(isDefault, isConstructor());
-    MOZ_ASSERT_IF(isDefault, isClassConstructor());
-    return isDefault;
 }
 
 bool
@@ -1716,6 +1732,7 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext* cx, HandleFuncti
         // StaticScopeIter queries needsCallObject of those functions, which
         // requires a non-lazy script.  Note that if this ever changes,
         // XDRRelazificationInfo will have to be fixed.
+        bool isBinAST = lazy->scriptSource()->hasBinASTSource();
         bool canRelazify = !lazy->numInnerFunctions() && !lazy->hasDirectEval();
 
         if (script) {
@@ -1749,24 +1766,61 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext* cx, HandleFuncti
 
         // This is lazy canonical-function.
 
-        MOZ_ASSERT(lazy->scriptSource()->hasSourceData());
-
-        // Parse and compile the script from source.
         size_t lazyLength = lazy->sourceEnd() - lazy->sourceStart();
-        UncompressedSourceCache::AutoHoldEntry holder;
-        ScriptSource::PinnedChars chars(cx, lazy->scriptSource(), holder,
-                                        lazy->sourceStart(), lazyLength);
-        if (!chars.get()) {
-            return false;
-        }
+        if (isBinAST) {
+#if defined(JS_BUILD_BINAST)
+            if (!frontend::CompileLazyBinASTFunction(cx, lazy,
+                    lazy->scriptSource()->binASTSource() + lazy->sourceStart(), lazyLength))
+            {
+                MOZ_ASSERT(fun->isInterpretedLazy());
+                MOZ_ASSERT(fun->lazyScript() == lazy);
+                MOZ_ASSERT(!lazy->hasScript());
+                return false;
+            }
+#else
+            MOZ_CRASH("Trying to delazify BinAST function in non-BinAST build");
+#endif /*JS_BUILD_BINAST */
+        } else {
+            MOZ_ASSERT(lazy->scriptSource()->hasSourceText());
 
-        if (!frontend::CompileLazyFunction(cx, lazy, chars.get(), lazyLength)) {
-            // The frontend shouldn't fail after linking the function and the
-            // non-lazy script together.
-            MOZ_ASSERT(fun->isInterpretedLazy());
-            MOZ_ASSERT(fun->lazyScript() == lazy);
-            MOZ_ASSERT(!lazy->hasScript());
-            return false;
+            // Parse and compile the script from source.
+            UncompressedSourceCache::AutoHoldEntry holder;
+
+            if (lazy->scriptSource()->hasSourceType<Utf8Unit>()) {
+                // UTF-8 source text.
+                ScriptSource::PinnedUnits<Utf8Unit> units(cx, lazy->scriptSource(), holder,
+                                                          lazy->sourceStart(), lazyLength);
+                if (!units.get()) {
+                    return false;
+                }
+
+                if (!frontend::CompileLazyFunction(cx, lazy, units.get(), lazyLength)) {
+                    // The frontend shouldn't fail after linking the function and the
+                    // non-lazy script together.
+                    MOZ_ASSERT(fun->isInterpretedLazy());
+                    MOZ_ASSERT(fun->lazyScript() == lazy);
+                    MOZ_ASSERT(!lazy->hasScript());
+                    return false;
+                }
+            } else {
+                MOZ_ASSERT(lazy->scriptSource()->hasSourceType<char16_t>());
+
+                // UTF-16 source text.
+                ScriptSource::PinnedUnits<char16_t> units(cx, lazy->scriptSource(), holder,
+                                                          lazy->sourceStart(), lazyLength);
+                if (!units.get()) {
+                    return false;
+                }
+
+                if (!frontend::CompileLazyFunction(cx, lazy, units.get(), lazyLength)) {
+                    // The frontend shouldn't fail after linking the function and the
+                    // non-lazy script together.
+                    MOZ_ASSERT(fun->isInterpretedLazy());
+                    MOZ_ASSERT(fun->lazyScript() == lazy);
+                    MOZ_ASSERT(!lazy->hasScript());
+                    return false;
+                }
+            }
         }
 
         script = fun->nonLazyScript();
@@ -1879,6 +1933,7 @@ JSFunction::maybeRelazify(JSRuntime* rt)
 }
 
 const JSFunctionSpec js::function_methods[] = {
+    // clang-format off
     JS_FN(js_toSource_str,   fun_toSource,   0,0),
     JS_FN(js_toString_str,   fun_toString,   0,0),
     JS_FN(js_apply_str,      fun_apply,      2,0),
@@ -1886,6 +1941,7 @@ const JSFunctionSpec js::function_methods[] = {
     JS_SELF_HOSTED_FN("bind", "FunctionBind", 2, 0),
     JS_SYM_FN(hasInstance, fun_symbolHasInstance, 1, JSPROP_READONLY | JSPROP_PERMANENT),
     JS_FS_END
+    // clang-format on
 };
 
 // ES2018 draft rev 2aea8f3e617b49df06414eb062ab44fad87661d3
@@ -2065,10 +2121,14 @@ CreateDynamicFunction(JSContext* cx, const CallArgs& args, GeneratorKind generat
     }
 
     mozilla::Range<const char16_t> chars = stableChars.twoByteRange();
-    SourceBufferHolder::Ownership ownership = stableChars.maybeGiveOwnershipToCaller()
-                                              ? SourceBufferHolder::GiveOwnership
-                                              : SourceBufferHolder::NoOwnership;
-    SourceBufferHolder srcBuf(chars.begin().get(), chars.length(), ownership);
+    SourceOwnership ownership = stableChars.maybeGiveOwnershipToCaller()
+                                ? SourceOwnership::TakeOwnership
+                                : SourceOwnership::Borrowed;
+    SourceText<char16_t> srcBuf;
+    if (!srcBuf.init(cx, chars.begin().get(), chars.length(), ownership)) {
+        return false;
+    }
+
     if (isAsync) {
         if (isGenerator) {
             if (!CompileStandaloneAsyncGenerator(cx, &fun, options, srcBuf, parameterListEnd)) {

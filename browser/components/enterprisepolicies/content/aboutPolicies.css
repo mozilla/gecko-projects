@@ -114,10 +114,6 @@ tbody:nth-child(4n + 1) {
   margin-left: .5rem;
 }
 
-.icon.machine-only {
-  background-image: url("chrome://browser/skin/developer.svg");
-}
-
 .collapsible {
   cursor: pointer;
   border: none;
@@ -140,4 +136,5 @@ tbody.collapsible td {
 .schema {
   font-family: monospace;
   white-space: pre;
+  direction: ltr;
 }

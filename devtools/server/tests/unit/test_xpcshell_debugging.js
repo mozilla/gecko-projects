@@ -13,7 +13,7 @@ add_task(async function() {
   // _setupDebuggerServer is from xpcshell-test's head.js
   /* global _setupDebuggerServer */
   let testResumed = false;
-  const DebuggerServer = _setupDebuggerServer([testFile.path], () => {
+  const { DebuggerServer } = _setupDebuggerServer([testFile.path], () => {
     testResumed = true;
   });
   const transport = DebuggerServer.connectPipe();
@@ -25,12 +25,9 @@ add_task(async function() {
   const desc = await deviceFront.getDescription();
   equal(desc.geckobuildid, Services.appinfo.platformBuildID, "device actor works");
 
-  // Even though we have no tabs, getProcess gives us the chromeDebugger.
-  const response = await client.getProcess();
-
-  const actor = response.form.actor;
-  const [, tabClient] = await client.attachTab(actor);
-  const [, threadClient] = await tabClient.attachThread(null);
+  // Even though we have no tabs, getMainProcess gives us the chrome debugger.
+  const front = await client.mainRoot.getMainProcess();
+  const [, threadClient] = await front.attachThread();
   const onResumed = new Promise(resolve => {
     threadClient.addOneTimeListener("paused", (event, packet) => {
       equal(packet.why.type, "breakpoint",

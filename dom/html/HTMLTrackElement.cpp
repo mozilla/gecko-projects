@@ -7,6 +7,10 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/HTMLTrackElement.h"
+#ifdef XP_WIN
+// HTMLTrackElement.webidl defines ERROR, but so does windows.h:
+#undef ERROR
+#endif
 #include "mozilla/dom/HTMLTrackElementBinding.h"
 #include "mozilla/dom/HTMLUnknownElement.h"
 #include "nsIContentPolicy.h"
@@ -47,7 +51,7 @@ nsGenericHTMLElement*
 NS_NewHTMLTrackElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                        mozilla::dom::FromParser aFromParser)
 {
-  return new mozilla::dom::HTMLTrackElement(aNodeInfo);
+  return new mozilla::dom::HTMLTrackElement(std::move(aNodeInfo));
 }
 
 namespace mozilla {
@@ -120,8 +124,8 @@ private:
 NS_IMPL_ISUPPORTS(WindowDestroyObserver, nsIObserver);
 
 /** HTMLTrackElement */
-HTMLTrackElement::HTMLTrackElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-  : nsGenericHTMLElement(aNodeInfo)
+HTMLTrackElement::HTMLTrackElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
+  : nsGenericHTMLElement(std::move(aNodeInfo))
   , mLoadResourceDispatched(false)
   , mWindowDestroyObserver(nullptr)
 {

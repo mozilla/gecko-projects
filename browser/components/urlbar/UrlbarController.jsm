@@ -6,18 +6,13 @@
 
 var EXPORTED_SYMBOLS = ["QueryContext", "UrlbarController"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-
-// XXX This is a fake manager to provide a basic integration test whilst we
-// are still constructing the manager.
-/* eslint-disable require-jsdoc */
-const ProvidersManager = {
-  queryStart(queryContext, controller) {
-    queryContext.results = [{url: queryContext.searchString}];
-    controller.receiveResults(queryContext);
-  },
-};
-/* eslint-enable require-jsdoc */
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  AppConstants: "resource://gre/modules/AppConstants.jsm",
+  // BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
+  UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarProvidersManager: "resource:///modules/UrlbarProvidersManager.jsm",
+});
 
 /**
  * QueryContext defines a user's autocomplete input from within the Address Bar.
@@ -82,20 +77,32 @@ class QueryContext {
  * - onQueryStarted(queryContext)
  * - onQueryResults(queryContext)
  * - onQueryCancelled(queryContext)
+ * - onQueryFinished(queryContext)
  */
 class UrlbarController {
   /**
    * Initialises the class. The manager may be overridden here, this is for
    * test purposes.
    *
-   * @param {object} [options]
+   * @param {object} options
    *   The initial options for UrlbarController.
-   * @param {string} [options.manager]
-   *   The string the user entered in autocomplete. Could be the empty string
-   *   in the case of the user opening the popup via the mouse.
+   * @param {object} options.browserWindow
+   *   The browser window this controller is operating within.
+   * @param {object} [options.manager]
+   *   Optional fake providers manager to override the built-in providers manager.
+   *   Intended for use in unit tests only.
    */
   constructor(options = {}) {
-    this.manager = options.manager || ProvidersManager;
+    if (!options.browserWindow) {
+      throw new Error("Missing options: browserWindow");
+    }
+    if (!options.browserWindow.location ||
+        options.browserWindow.location.href != AppConstants.BROWSER_CHROME_URL) {
+      throw new Error("browserWindow should be an actual browser window.");
+    }
+
+    this.manager = options.manager || UrlbarProvidersManager;
+    this.browserWindow = options.browserWindow;
 
     this._listeners = new Set();
   }
@@ -105,21 +112,24 @@ class UrlbarController {
    *
    * @param {QueryContext} queryContext The query details.
    */
-  handleQuery(queryContext) {
-    queryContext.autoFill = Services.prefs.getBoolPref("browser.urlbar.autoFill", true);
-
-    this.manager.queryStart(queryContext, this);
+  async startQuery(queryContext) {
+    queryContext.autoFill = UrlbarPrefs.get("autoFill");
 
     this._notify("onQueryStarted", queryContext);
+
+    await this.manager.startQuery(queryContext, this);
+
+    this._notify("onQueryFinished", queryContext);
   }
 
   /**
-   * Cancels an in-progress query.
+   * Cancels an in-progress query. Note, queries may continue running if they
+   * can't be canceled.
    *
    * @param {QueryContext} queryContext The query details.
    */
   cancelQuery(queryContext) {
-    this.manager.queryCancel(queryContext);
+    this.manager.cancelQuery(queryContext);
 
     this._notify("onQueryCancelled", queryContext);
   }
@@ -153,6 +163,14 @@ class UrlbarController {
    */
   removeQueryListener(listener) {
     this._listeners.delete(listener);
+  }
+
+  /**
+   * When switching tabs, clear some internal caches to handle cases like
+   * backspace, autofill or repeated searches.
+   */
+  tabContextChanged() {
+    // TODO: implementation needed (bug 1496685)
   }
 
   /**

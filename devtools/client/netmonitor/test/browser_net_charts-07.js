@@ -17,19 +17,19 @@ add_task(async function() {
   const { Chart } = windowRequire("devtools/client/shared/widgets/Chart");
 
   const wait = waitForNetworkEvents(monitor, 1);
-  tab.linkedBrowser.loadURI(SIMPLE_URL);
+  BrowserTestUtils.loadURI(tab.linkedBrowser, SIMPLE_URL);
   await wait;
 
   const table = Chart.Table(document, {
     data: [],
     totals: {
       label1: value => "Hello " + L10N.numberWithDecimals(value, 2),
-      label2: value => "World " + L10N.numberWithDecimals(value, 2)
+      label2: value => "World " + L10N.numberWithDecimals(value, 2),
     },
     header: {
       label1: "",
-      label2: ""
-    }
+      label2: "",
+    },
   });
 
   const node = table.node;

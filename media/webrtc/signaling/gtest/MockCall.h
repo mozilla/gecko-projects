@@ -14,6 +14,22 @@ namespace test {
 
 class MockAudioSendStream : public webrtc::AudioSendStream {
 public:
+
+  MockAudioSendStream()
+    : mConfig(nullptr)
+  {
+  }
+
+  const webrtc::AudioSendStream::Config& GetConfig() const override
+  {
+    return mConfig;
+  }
+
+  void Reconfigure(const Config& config) override
+  {
+    mConfig = config;
+  }
+
   void Start() override {}
 
   void Stop() override {}
@@ -31,8 +47,14 @@ public:
     return mStats;
   }
 
+  Stats GetStats(bool has_remote_tracks) const override
+  {
+    return mStats;
+  }
+
   virtual ~MockAudioSendStream() {}
 
+  AudioSendStream::Config mConfig;
   AudioSendStream::Stats mStats;
 };
 
@@ -47,28 +69,38 @@ public:
     return mStats;
   }
 
+  int GetOutputLevel() const override
+  {
+    return 0;
+  }
+
   void SetSink(std::unique_ptr<AudioSinkInterface> sink) override {}
 
   void SetGain(float gain) override {}
 
+  std::vector<RtpSource> GetSources() const override
+  {
+    return mRtpSources;
+  }
+
   virtual ~MockAudioReceiveStream() {}
 
   AudioReceiveStream::Stats mStats;
+  std::vector<RtpSource> mRtpSources;
 };
 
 class MockVideoSendStream : public webrtc::VideoSendStream {
 public:
+  explicit MockVideoSendStream(VideoEncoderConfig&& config)
+    : mEncoderConfig(std::move(config))
+  {}
+
   void Start() override {}
 
   void Stop() override {}
 
   void SetSource(rtc::VideoSourceInterface<webrtc::VideoFrame>* source,
                  const DegradationPreference& degradation_preference) override {}
-
-  CPULoadStateObserver* LoadStateObserver() override
-  {
-    return nullptr;
-  }
 
   void ReconfigureVideoEncoder(VideoEncoderConfig config) override
   {
@@ -100,16 +132,12 @@ public:
     return mStats;
   }
 
-  bool
-  GetRemoteRTCPSenderInfo(RTCPSenderInfo* sender_info) const override
-  {
-    return false;
-  }
-
-  void SetSyncChannel(VoiceEngine* voice_engine, int audio_channel_id) override {}
-
   void EnableEncodedFrameRecording(rtc::PlatformFile file,
                                    size_t byte_limit) override {}
+
+
+  void AddSecondarySink(RtpPacketSinkInterface* sink) override {};
+  void RemoveSecondarySink(const RtpPacketSinkInterface* sink) override {};
 
   virtual ~MockVideoReceiveStream() {}
 
@@ -149,8 +177,7 @@ public:
                                          VideoEncoderConfig encoder_config) override {
     MOZ_RELEASE_ASSERT(!mCurrentVideoSendStream);
     mVideoSendConfig = config.Copy();
-    mEncoderConfig = encoder_config.Copy();
-    mCurrentVideoSendStream = new MockVideoSendStream;
+    mCurrentVideoSendStream = new MockVideoSendStream(encoder_config.Copy());
     return mCurrentVideoSendStream;
   }
 
@@ -193,6 +220,13 @@ public:
 
   void SetBitrateConfig(const Config::BitrateConfig& bitrate_config) override {}
 
+  void SetBitrateConfigMask(
+      const Config::BitrateConfigMask& bitrate_mask) override {}
+
+  void SetBitrateAllocationStrategy(
+      std::unique_ptr<rtc::BitrateAllocationStrategy>
+          bitrate_allocation_strategy) override {}
+
   void SignalChannelNetworkState(MediaType media,
                                  NetworkState state) override {}
 
@@ -209,13 +243,18 @@ public:
     return nullptr;
   }
 
+  std::vector<webrtc::VideoStream> CreateEncoderStreams(int width, int height)
+  {
+    const VideoEncoderConfig& config = mCurrentVideoSendStream->mEncoderConfig;
+    return config.video_stream_factory->CreateEncoderStreams(width, height, config);
+  }
+
   virtual ~MockCall() {};
 
   AudioReceiveStream::Config mAudioReceiveConfig;
   AudioSendStream::Config mAudioSendConfig;
   VideoReceiveStream::Config mVideoReceiveConfig;
   VideoSendStream::Config mVideoSendConfig;
-  VideoEncoderConfig mEncoderConfig;
   Call::Stats mStats;
   MockVideoSendStream* mCurrentVideoSendStream;
 };

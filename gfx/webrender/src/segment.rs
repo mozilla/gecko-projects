@@ -7,6 +7,7 @@ use app_units::Au;
 use prim_store::EdgeAaSegmentMask;
 use std::{cmp, usize};
 use util::{extract_inner_rect_safe, RectHelpers};
+use smallvec::SmallVec;
 
 bitflags! {
     pub struct ItemFlags: u8 {
@@ -176,26 +177,47 @@ pub struct SegmentBuilder {
     items: Vec<Item>,
     inner_rect: Option<LayoutRect>,
     bounding_rect: Option<LayoutRect>,
+    has_interesting_clips: bool,
+
+    #[cfg(debug_assertions)]
+    initialized: bool,
 }
 
 impl SegmentBuilder {
     // Create a new segment builder, supplying the primitive
     // local rect and associated local clip rect.
-    pub fn new(
+    pub fn new() -> SegmentBuilder {
+        SegmentBuilder {
+            items: Vec::with_capacity(4),
+            bounding_rect: None,
+            inner_rect: None,
+            has_interesting_clips: false,
+            #[cfg(debug_assertions)]
+            initialized: false,
+        }
+    }
+
+    pub fn initialize(
+        &mut self,
         local_rect: LayoutRect,
         inner_rect: Option<LayoutRect>,
         local_clip_rect: LayoutRect,
-    ) -> SegmentBuilder {
-        let mut builder = SegmentBuilder {
-            items: Vec::new(),
-            bounding_rect: Some(local_rect),
-            inner_rect,
-        };
+    ) {
+        self.items.clear();
+        self.inner_rect = inner_rect;
+        self.bounding_rect = Some(local_rect);
 
-        builder.push_clip_rect(local_rect, None, ClipMode::Clip);
-        builder.push_clip_rect(local_clip_rect, None, ClipMode::Clip);
+        self.push_clip_rect(local_rect, None, ClipMode::Clip);
+        self.push_clip_rect(local_clip_rect, None, ClipMode::Clip);
 
-        builder
+        // This must be set after the push_clip_rect calls above, since we
+        // want to skip segment building if those are the only clips.
+        self.has_interesting_clips = false;
+
+        #[cfg(debug_assertions)]
+        {
+            self.initialized = true;
+        }
     }
 
     // Push a region defined by an inner and outer rect where there
@@ -210,69 +232,72 @@ impl SegmentBuilder {
         inner_rect: LayoutRect,
         inner_clip_mode: Option<ClipMode>,
     ) {
-        if inner_rect.is_well_formed_and_nonempty() {
-            debug_assert!(outer_rect.contains_rect(&inner_rect));
+        self.has_interesting_clips = true;
 
-            let p0 = outer_rect.origin;
-            let p1 = inner_rect.origin;
-            let p2 = inner_rect.bottom_right();
-            let p3 = outer_rect.bottom_right();
-
-            let segments = &[
-                LayoutRect::new(
-                    LayoutPoint::new(p0.x, p0.y),
-                    LayoutSize::new(p1.x - p0.x, p1.y - p0.y),
-                ),
-                LayoutRect::new(
-                    LayoutPoint::new(p2.x, p0.y),
-                    LayoutSize::new(p3.x - p2.x, p1.y - p0.y),
-                ),
-                LayoutRect::new(
-                    LayoutPoint::new(p2.x, p2.y),
-                    LayoutSize::new(p3.x - p2.x, p3.y - p2.y),
-                ),
-                LayoutRect::new(
-                    LayoutPoint::new(p0.x, p2.y),
-                    LayoutSize::new(p1.x - p0.x, p3.y - p2.y),
-                ),
-                LayoutRect::new(
-                    LayoutPoint::new(p1.x, p0.y),
-                    LayoutSize::new(p2.x - p1.x, p1.y - p0.y),
-                ),
-                LayoutRect::new(
-                    LayoutPoint::new(p2.x, p1.y),
-                    LayoutSize::new(p3.x - p2.x, p2.y - p1.y),
-                ),
-                LayoutRect::new(
-                    LayoutPoint::new(p1.x, p2.y),
-                    LayoutSize::new(p2.x - p1.x, p3.y - p2.y),
-                ),
-                LayoutRect::new(
-                    LayoutPoint::new(p0.x, p1.y),
-                    LayoutSize::new(p1.x - p0.x, p2.y - p1.y),
-                ),
-            ];
-
-            for segment in segments {
-                self.items.push(Item::new(
-                    *segment,
-                    None,
-                    true
-                ));
-            }
-
-            if inner_clip_mode.is_some() {
-                self.items.push(Item::new(
-                    inner_rect,
-                    inner_clip_mode,
-                    false,
-                ));
-            }
-        } else {
+        if !inner_rect.is_well_formed_and_nonempty() {
             self.items.push(Item::new(
                 outer_rect,
                 None,
                 true
+            ));
+            return;
+        }
+
+        debug_assert!(outer_rect.contains_rect(&inner_rect));
+
+        let p0 = outer_rect.origin;
+        let p1 = inner_rect.origin;
+        let p2 = inner_rect.bottom_right();
+        let p3 = outer_rect.bottom_right();
+
+        let segments = &[
+            LayoutRect::new(
+                LayoutPoint::new(p0.x, p0.y),
+                LayoutSize::new(p1.x - p0.x, p1.y - p0.y),
+            ),
+            LayoutRect::new(
+                LayoutPoint::new(p2.x, p0.y),
+                LayoutSize::new(p3.x - p2.x, p1.y - p0.y),
+            ),
+            LayoutRect::new(
+                LayoutPoint::new(p2.x, p2.y),
+                LayoutSize::new(p3.x - p2.x, p3.y - p2.y),
+            ),
+            LayoutRect::new(
+                LayoutPoint::new(p0.x, p2.y),
+                LayoutSize::new(p1.x - p0.x, p3.y - p2.y),
+            ),
+            LayoutRect::new(
+                LayoutPoint::new(p1.x, p0.y),
+                LayoutSize::new(p2.x - p1.x, p1.y - p0.y),
+            ),
+            LayoutRect::new(
+                LayoutPoint::new(p2.x, p1.y),
+                LayoutSize::new(p3.x - p2.x, p2.y - p1.y),
+            ),
+            LayoutRect::new(
+                LayoutPoint::new(p1.x, p2.y),
+                LayoutSize::new(p2.x - p1.x, p3.y - p2.y),
+            ),
+            LayoutRect::new(
+                LayoutPoint::new(p0.x, p1.y),
+                LayoutSize::new(p1.x - p0.x, p2.y - p1.y),
+            ),
+        ];
+
+        for segment in segments {
+            self.items.push(Item::new(
+                *segment,
+                None,
+                true
+            ));
+        }
+
+        if inner_clip_mode.is_some() {
+            self.items.push(Item::new(
+                inner_rect,
+                inner_clip_mode,
+                false,
             ));
         }
     }
@@ -285,6 +310,8 @@ impl SegmentBuilder {
         radius: Option<BorderRadius>,
         mode: ClipMode,
     ) {
+        self.has_interesting_clips = true;
+
         // Keep track of a minimal bounding rect for the set of
         // segments that will be generated.
         if mode == ClipMode::Clip {
@@ -389,23 +416,42 @@ impl SegmentBuilder {
     }
 
     // Consume this segment builder and produce a list of segments.
-    pub fn build<F>(self, mut f: F) where F: FnMut(&Segment) {
+    pub fn build<F>(&mut self, mut f: F) where F: FnMut(&Segment) {
+        #[cfg(debug_assertions)]
+        debug_assert!(self.initialized);
+
+        #[cfg(debug_assertions)]
+        {
+            self.initialized = false;
+        }
+
         let bounding_rect = match self.bounding_rect {
             Some(bounding_rect) => bounding_rect,
             None => return,
         };
 
-        let mut items = self.items;
+        if !self.has_interesting_clips {
+            // There were no additional clips added, so don't bother building segments.
+            // Just emit a single segment for the bounding rect of the primitive.
+            f(&Segment {
+                edge_flags: EdgeAaSegmentMask::all(),
+                region_x: 0,
+                region_y: 0,
+                has_mask: false,
+                rect: bounding_rect,
+            });
+            return
+        }
 
         // First, filter out any items that don't intersect
         // with the visible bounding rect.
-        items.retain(|item| item.rect.intersects(&bounding_rect));
+        self.items.retain(|item| item.rect.intersects(&bounding_rect));
 
         // Create events for each item
-        let mut x_events = Vec::new();
-        let mut y_events = Vec::new();
+        let mut x_events : SmallVec<[Event; 4]> = SmallVec::new();
+        let mut y_events : SmallVec<[Event; 4]> = SmallVec::new();
 
-        for (item_index, item) in items.iter().enumerate() {
+        for (item_index, item) in self.items.iter().enumerate() {
             let p0 = item.rect.origin;
             let p1 = item.rect.bottom_right();
 
@@ -456,7 +502,7 @@ impl SegmentBuilder {
 
         let mut prev_y = clamp(p0.y, y_events[0].value, p1.y);
         let mut region_y = 0;
-        let mut segments = Vec::new();
+        let mut segments : SmallVec<[_; 4]> = SmallVec::new();
         let mut x_count = 0;
         let mut y_count = 0;
 
@@ -478,7 +524,7 @@ impl SegmentBuilder {
                             cur_y,
                             region_x,
                             region_y,
-                            &items,
+                            &self.items,
                         ));
 
                         prev_x = cur_x;
@@ -489,7 +535,7 @@ impl SegmentBuilder {
 
                     ex.update(
                         ItemFlags::X_ACTIVE,
-                        &mut items,
+                        &mut self.items,
                         &mut region_x,
                     );
                 }
@@ -500,7 +546,7 @@ impl SegmentBuilder {
 
             ey.update(
                 ItemFlags::Y_ACTIVE,
-                &mut items,
+                &mut self.items,
                 &mut region_y,
             );
         }
@@ -650,11 +696,14 @@ mod test {
         clips: &[(LayoutRect, Option<BorderRadius>, ClipMode)],
         expected_segments: &mut [Segment]
     ) {
-        let mut sb = SegmentBuilder::new(
+        let mut sb = SegmentBuilder::new();
+        sb.initialize(
             local_rect,
             inner_rect,
             local_clip_rect,
         );
+        sb.push_clip_rect(local_rect, None, ClipMode::Clip);
+        sb.push_clip_rect(local_clip_rect, None, ClipMode::Clip);
         let mut segments = Vec::new();
         for &(rect, radius, mode) in clips {
             sb.push_clip_rect(rect, radius, mode);

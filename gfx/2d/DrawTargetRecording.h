@@ -57,6 +57,11 @@ public:
                            const DrawSurfaceOptions &aSurfOptions = DrawSurfaceOptions(),
                            const DrawOptions &aOptions = DrawOptions()) override;
 
+  virtual void DrawDependentSurface(uint64_t aId,
+                                    const Rect &aDest,
+                                    const DrawSurfaceOptions &aSurfOptions = DrawSurfaceOptions(),
+                                    const DrawOptions &aOptions = DrawOptions()) override;
+
   virtual void DrawFilter(FilterNode *aNode,
                           const Rect &aSourceRect,
                           const Point &aDestPoint,
@@ -298,7 +303,9 @@ public:
   virtual already_AddRefed<DrawTarget>
     CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const override;
 
-   /**
+  bool CanCreateSimilarDrawTarget(const IntSize& aSize,
+                                  SurfaceFormat aFormat) const override;
+  /**
    * Create a similar DrawTarget whose requested size may be clipped based
    * on this DrawTarget's rect transformed to the new target's space.
    */

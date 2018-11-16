@@ -23,7 +23,7 @@
 #include "nsXPCOMCID.h"
 #include "nsString.h"
 #include "nsTreeColumns.h"
-#include "pkix/pkixtypes.h"
+#include "mozpkix/pkixtypes.h"
 
 using namespace mozilla;
 
@@ -1127,7 +1127,7 @@ nsCertTree::CycleHeader(nsTreeColumn* col)
 }
 
 NS_IMETHODIMP
-nsCertTree::SelectionChanged()
+nsCertTree::SelectionChangedXPCOM()
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }

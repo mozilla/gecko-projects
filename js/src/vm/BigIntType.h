@@ -21,12 +21,16 @@
 #include "js/RootingAPI.h"
 #include "js/TypeDecls.h"
 #include "vm/StringType.h"
+#include "vm/Xdr.h"
 
 namespace js {
 
 template <typename CharT>
 static bool StringToBigIntImpl(const mozilla::Range<const CharT>& chars,
                                uint8_t radix, Handle<JS::BigInt*> res);
+
+template<XDRMode mode>
+XDRResult XDRBigInt(XDRState<mode>* xdr, MutableHandleBigInt bi);
 
 } // namespace js
 
@@ -38,6 +42,8 @@ class BigInt final : public js::gc::TenuredCell
     template <typename CharT>
     friend bool js::StringToBigIntImpl(const mozilla::Range<const CharT>& chars,
                                        uint8_t radix, Handle<BigInt*> res);
+    template <js::XDRMode mode>
+    friend js::XDRResult js::XDRBigInt(js::XDRState<mode>* xdr, MutableHandleBigInt bi);
 
   protected:
     // Reserved word for Cell GC invariants. This also ensures minimum
@@ -60,6 +66,9 @@ class BigInt final : public js::gc::TenuredCell
 
     // Read a BigInt value from a little-endian byte array.
     static BigInt* createFromBytes(JSContext* cx, int sign, void* bytes, size_t nbytes);
+
+    static BigInt* createFromInt64(JSContext* cx, int64_t n);
+    static BigInt* createFromUint64(JSContext* cx, uint64_t n);
 
     static const JS::TraceKind TraceKind = JS::TraceKind::BigInt;
 
@@ -91,6 +100,12 @@ class BigInt final : public js::gc::TenuredCell
     static BigInt* bitOr(JSContext* cx, Handle<BigInt*> x, Handle<BigInt*> y);
     static BigInt* bitNot(JSContext* cx, Handle<BigInt*> x);
 
+    static int64_t toInt64(BigInt* x);
+    static uint64_t toUint64(BigInt* x);
+
+    static BigInt* asIntN(JSContext* cx, HandleBigInt x, uint64_t bits);
+    static BigInt* asUintN(JSContext* cx, HandleBigInt x, uint64_t bits);
+
     // Type-checking versions of arithmetic operations. These methods
     // must be called with at least one BigInt operand. Binary
     // operations with throw a TypeError if one of the operands is not a
@@ -115,6 +130,16 @@ class BigInt final : public js::gc::TenuredCell
     static bool equal(BigInt* lhs, BigInt* rhs);
     static bool equal(BigInt* lhs, double rhs);
     static JS::Result<bool> looselyEqual(JSContext* cx, HandleBigInt lhs, HandleValue rhs);
+
+    static bool lessThan(BigInt* x, BigInt* y);
+
+    // These methods return Nothing when the non-BigInt operand is NaN
+    // or a string that can't be interpreted as a BigInt.
+    static mozilla::Maybe<bool> lessThan(BigInt* lhs, double rhs);
+    static mozilla::Maybe<bool> lessThan(double lhs, BigInt* rhs);
+    static bool lessThan(JSContext* cx, HandleBigInt lhs, HandleString rhs, mozilla::Maybe<bool>& res);
+    static bool lessThan(JSContext* cx, HandleString lhs, HandleBigInt rhs, mozilla::Maybe<bool>& res);
+    static bool lessThan(JSContext* cx, HandleValue lhs, HandleValue rhs, mozilla::Maybe<bool>& res);
 
     // Return the length in bytes of the representation used by
     // writeBytes.
@@ -141,6 +166,10 @@ NumberToBigInt(JSContext* cx, double d);
 // Convert a string to a BigInt, returning nullptr if parsing fails.
 extern JS::Result<JS::BigInt*, JS::OOM&>
 StringToBigInt(JSContext* cx, JS::Handle<JSString*> str, uint8_t radix);
+
+// Same.
+extern JS::BigInt*
+StringToBigInt(JSContext* cx, const mozilla::Range<const char16_t>& chars);
 
 extern JS::BigInt*
 ToBigInt(JSContext* cx, JS::Handle<JS::Value> v);

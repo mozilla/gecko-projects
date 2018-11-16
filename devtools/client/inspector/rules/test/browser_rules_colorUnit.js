@@ -18,7 +18,7 @@ const TEST_URI = `
 add_task(async function() {
   const TESTS = [
     {name: "hex", result: "#0f0"},
-    {name: "rgb", result: "rgb(0, 255, 0)"}
+    {name: "rgb", result: "rgb(0, 255, 0)"},
   ];
 
   for (const {name, result} of TESTS) {
@@ -32,7 +32,7 @@ add_task(async function() {
     await selectNode("#testid", inspector);
     await basicTest(view, name, result);
 
-    const target = TargetFactory.forTab(tab);
+    const target = await TargetFactory.forTab(tab);
     await gDevTools.closeToolbox(target);
     gBrowser.removeCurrentTab();
   }
@@ -49,7 +49,7 @@ async function basicTest(view, name, result) {
   await simulateColorPickerChange(view, cPicker, [0, 255, 0, 1], {
     selector: "#testid",
     name: "color",
-    value: "rgb(0, 255, 0)"
+    value: "rgb(0, 255, 0)",
   });
 
   const spectrum = cPicker.spectrum;

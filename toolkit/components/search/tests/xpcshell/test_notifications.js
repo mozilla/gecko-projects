@@ -36,7 +36,7 @@ function search_observer(subject, topic, data) {
       let retrievedEngine = Services.search.getEngineByName("Test search engine");
       Assert.equal(engine, retrievedEngine);
       Services.search.defaultEngine = engine;
-      Services.search.currentEngine = engine;
+      Services.search.defaultEngine = engine;
       executeSoon(function() {
         Services.search.removeEngine(engine);
       });
@@ -66,5 +66,5 @@ function run_test() {
 
   Services.obs.addObserver(search_observer, "browser-search-engine-modified");
 
-  Services.search.addEngine(gDataUrl + "engine.xml", null, null, false);
+  Services.search.addEngine(gDataUrl + "engine.xml", null, false);
 }

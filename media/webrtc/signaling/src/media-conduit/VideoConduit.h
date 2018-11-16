@@ -15,20 +15,22 @@
 #include "MediaConduitInterface.h"
 #include "MediaEngineWrapper.h"
 #include "RunningStat.h"
+#include "RtpPacketQueue.h"
 #include "runnable_utils.h"
 
 // conflicts with #include of scoped_ptr.h
 #undef FF
 // Video Engine Includes
-#include "webrtc/call.h"
+#include "api/video_codecs/video_encoder_factory.h"
+#include "webrtc/call/call.h"
 #include "webrtc/common_types.h"
 #ifdef FF
 #undef FF // Avoid name collision between scoped_ptr.h and nsCRTGlue.h.
 #endif
-#include "webrtc/video_decoder.h"
-#include "webrtc/video_encoder.h"
+#include "webrtc/api/video_codecs/video_decoder.h"
+#include "webrtc/api/video_codecs/video_encoder.h"
+#include "webrtc/api/video_codecs/sdp_video_format.h"
 #include "webrtc/common_video/include/i420_buffer_pool.h"
-#include "webrtc/config.h"
 #include "webrtc/media/base/videosinkinterface.h"
 #include "webrtc/media/base/videoadapter.h"
 #include "webrtc/media/base/videobroadcaster.h"
@@ -40,9 +42,17 @@
 
 namespace mozilla {
 
+// Convert (SI) kilobits/sec to (SI) bits/sec
+#define KBPS(kbps) kbps * 1000
+
+const int kViEMinCodecBitrate_bps = KBPS(30);
 const unsigned int kVideoMtu = 1200;
 const int kQpMax = 56;
 
+template<typename T>
+T MinIgnoreZero(const T& a, const T& b);
+
+class VideoStreamFactory;
 class WebrtcAudioConduit;
 class nsThread;
 
@@ -64,29 +74,17 @@ class WebrtcVideoDecoder : public VideoDecoder
  */
 class WebrtcVideoConduit : public VideoSessionConduit
                          , public webrtc::Transport
+                         , public webrtc::VideoEncoderFactory
                          , public rtc::VideoSinkInterface<webrtc::VideoFrame>
                          , public rtc::VideoSourceInterface<webrtc::VideoFrame>
 {
 public:
-  struct ResolutionAndBitrateLimits
-  {
-    int resolution_in_mb;
-    int min_bitrate_bps;
-    int start_bitrate_bps;
-    int max_bitrate_bps;
-  };
-
   //VoiceEngine defined constant for Payload Name Size.
   static const unsigned int CODEC_PLNAME_SIZE;
 
   MediaConduitErrorCode
   SetLocalRTPExtensions(MediaSessionConduitLocalDirection aDirection,
                         const RtpExtList& aExtensions) override;
-
-  /**
-   * Set up A/V sync between this (incoming) VideoConduit and an audio conduit.
-   */
-  void SyncTo(WebrtcAudioConduit *aConduit);
 
   /**
    * Function to attach Renderer end-point for the Media-Video conduit.
@@ -144,7 +142,7 @@ public:
    *        transmission sub-system on the engine.
    */
    MediaConduitErrorCode ConfigureRecvMediaCodecs(
-       const std::vector<VideoCodecConfig* >& codecConfigList) override;
+       const std::vector<UniquePtr<VideoCodecConfig>>& codecConfigList) override;
 
   /**
    * Register Transport for this Conduit. RTP and RTCP frames from the VideoEngine
@@ -153,17 +151,6 @@ public:
   MediaConduitErrorCode SetTransmitterTransport(RefPtr<TransportInterface> aTransport) override;
 
   MediaConduitErrorCode SetReceiverTransport(RefPtr<TransportInterface> aTransport) override;
-
-  /**
-   * Function to set the encoding bitrate limits based on incoming frame size and rate
-   * @param width, height: dimensions of the frame
-   * @param cap: user-enforced max bitrate, or 0
-   * @param aVideoStream stream to apply bitrates to
-   */
-  void SelectBitrates(unsigned short width,
-                      unsigned short height,
-                      int cap,
-                      webrtc::VideoStream& aVideoStream);
 
   /**
    * Function to select and change the encoding resolution based on incoming frame size
@@ -242,6 +229,7 @@ public:
   }
 
   webrtc::VideoCodecMode CodecMode() const {
+    MOZ_ASSERT(NS_IsMainThread());
     return mCodecMode;
   }
 
@@ -259,6 +247,8 @@ public:
   bool UnsetRemoteSSRC(uint32_t ssrc) override;
   bool SetLocalCNAME(const char* cname) override;
   bool SetLocalMID(const std::string& mid) override;
+
+  void SetSyncGroup(const std::string& group) override;
 
   bool GetRemoteSSRCLocked(unsigned int* ssrc);
   bool SetRemoteSSRCLocked(unsigned int ssrc);
@@ -384,7 +374,7 @@ private:
 
     bool SsrcFound() const;
     uint32_t JitterMs() const;
-    uint32_t CumulativeLost() const;
+    uint32_t PacketsLost() const;
     uint64_t BytesReceived() const;
     uint32_t PacketsReceived() const;
   private:
@@ -394,7 +384,7 @@ private:
 
     bool mSsrcFound = false;
     uint32_t mJitterMs = 0;
-    uint32_t mCumulativeLost = 0;
+    uint32_t mPacketsLost = 0;
     uint64_t mBytesReceived = 0;
     uint32_t mPacketsReceived = 0;
   };
@@ -407,6 +397,7 @@ private:
     explicit ReceiveStreamStatistics(nsCOMPtr<nsIEventTarget> aStatsThread)
       : StreamStatistics(std::forward<nsCOMPtr<nsIEventTarget>>(aStatsThread))
     {}
+    uint32_t BytesSent() const;
     /**
      * Returns the number of discarded packets
      */
@@ -416,14 +407,17 @@ private:
      */
     uint32_t FramesDecoded() const;
     uint32_t JitterMs() const;
-    uint32_t CumulativeLost() const;
+    uint32_t PacketsLost() const;
+    uint32_t PacketsSent() const;
     uint32_t Ssrc() const;
     void Update(const webrtc::VideoReceiveStream::Stats& aStats);
   private:
+    uint32_t mBytesSent = 0;
     uint32_t mDiscardedPackets = 0;
     uint32_t mFramesDecoded = 0;
     uint32_t mJitterMs = 0;
-    uint32_t mCumulativeLost = 0;
+    uint32_t mPacketsLost = 0;
+    uint32_t mPacketsSent = 0;
     uint32_t mSsrc = 0;
   };
 
@@ -431,8 +425,6 @@ private:
    * Stores encoder configuration information and produces
    * a VideoEncoderConfig from it.
    */
-  class VideoStreamFactory;
-
   class VideoEncoderConfigBuilder {
   public:
     /**
@@ -444,10 +436,9 @@ private:
       double jsScaleDownBy=1.0; // user-controlled downscale
     };
     void SetEncoderSpecificSettings(rtc::scoped_refptr<webrtc::VideoEncoderConfig::EncoderSpecificSettings> aSettings);
-    void SetVideoStreamFactory(rtc::scoped_refptr<WebrtcVideoConduit::VideoStreamFactory> aFactory);
+    void SetVideoStreamFactory(rtc::scoped_refptr<VideoStreamFactory> aFactory);
     void SetMinTransmitBitrateBps(int aXmitMinBps);
     void SetContentType(webrtc::VideoEncoderConfig::ContentType aContentType);
-    void SetResolutionDivisor(unsigned char aDivisor);
     void SetMaxEncodings(size_t aMaxStreams);
     void AddStream(webrtc::VideoStream aStream);
     void AddStream(webrtc::VideoStream aStream,const SimulcastStreamConfig& aSimulcastConfig);
@@ -466,25 +457,6 @@ private:
   // Utility function to dump recv codec database
   void DumpCodecDB() const;
 
-  // Factory class for VideoStreams... vie_encoder.cc will call this to reconfigure.
-  // We need to give it access to the conduit to make it's decisions
-  class VideoStreamFactory : public webrtc::VideoEncoderConfig::VideoStreamFactoryInterface
-  {
-  public:
-    VideoStreamFactory(const std::string& aCodecName,
-                       WebrtcVideoConduit *aConduit)
-      : mCodecName(aCodecName),
-        mConduit(aConduit) {}
-
-  private:
-    std::vector<webrtc::VideoStream>
-      CreateEncoderStreams(int width, int height,
-                           const webrtc::VideoEncoderConfig& config) override;
-    std::string mCodecName;
-    // this is owned by the conduit!
-    WebrtcVideoConduit* mConduit;
-  };
-
   // Video Latency Test averaging filter
   void VideoLatencyUpdate(uint64_t new_sample);
 
@@ -493,11 +465,19 @@ private:
   MediaConduitErrorCode CreateRecvStream();
   void DeleteRecvStream();
 
-  webrtc::VideoDecoder* CreateDecoder(webrtc::VideoCodecType aType);
-  webrtc::VideoEncoder* CreateEncoder(webrtc::VideoCodecType aType,
-                                      bool enable_simulcast);
+  std::unique_ptr<webrtc::VideoDecoder> CreateDecoder(webrtc::VideoCodecType aType);
+  std::unique_ptr<webrtc::VideoEncoder> CreateEncoder(webrtc::VideoCodecType aType,
+                                                      bool enable_simulcast);
 
-  MediaConduitErrorCode DeliverPacket(const void *data, int len);
+  // webrtc::VideoEncoderFactory
+  std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override;
+
+  CodecInfo QueryVideoEncoder(const webrtc::SdpVideoFormat& format) const override;
+
+  std::unique_ptr<webrtc::VideoEncoder> CreateVideoEncoder(
+      const webrtc::SdpVideoFormat& format) override;
+
+  MediaConduitErrorCode DeliverPacket(const void *data, int len) override;
 
   bool RequiresNewSendStream(const VideoCodecConfig& newConfig) const;
 
@@ -614,8 +594,9 @@ private:
   // Main thread only.
   RefPtr<WebrtcAudioConduit> mSyncedTo;
 
-  // Written on main thread, read anywhere.
-  Atomic<webrtc::VideoCodecMode> mCodecMode;
+  // Main thread only.
+  webrtc::VideoCodecMode mActiveCodecMode;
+  webrtc::VideoCodecMode mCodecMode;
 
   // WEBRTC.ORG Call API
   // Const so can be accessed on any thread. Most methods are called on
@@ -628,6 +609,10 @@ private:
   // Main thread only.
   VideoEncoderConfigBuilder mEncoderConfig;
 
+  // Written only on main thread. Guarded by mMutex, except for reads on main.
+  // Calls can happen on any thread.
+  RefPtr<rtc::RefCountedObject<VideoStreamFactory>> mVideoStreamFactory;
+
   // Main thread only.
   webrtc::VideoReceiveStream::Config mRecvStreamConfig;
 
@@ -638,30 +623,21 @@ private:
   // Accessed only on mStsThread.
   bool mWaitingForInitialSsrc = true;
 
-  // The runnable to set the SSRC is in-flight; queue packets until it's done.
-  // Accessed only on mStsThread.
-  bool mRecvSsrcSetInProgress = false;
-
   // Accessed during configuration/signaling (main),
   // and when receiving packets (sts).
   Atomic<uint32_t> mRecvSSRC; // this can change during a stream!
 
-  struct QueuedPacket {
-    int mLen;
-    uint8_t mData[1];
-  };
-  // Accessed only on mStsThread.
-  nsTArray<UniquePtr<QueuedPacket>> mQueuedPackets;
+  RtpPacketQueue mRtpPacketQueue;
 
   // The lifetime of these codecs are maintained by the VideoConduit instance.
   // They are passed to the webrtc::VideoSendStream or VideoReceiveStream,
   // on construction.
-  nsAutoPtr<webrtc::VideoEncoder> mEncoder; // only one encoder for now
+  std::unique_ptr<webrtc::VideoEncoder> mEncoder; // only one encoder for now
   std::vector<std::unique_ptr<webrtc::VideoDecoder>> mDecoders;
   // Main thread only
-  WebrtcVideoEncoder* mSendCodecPlugin = nullptr;
+  uint64_t mSendCodecPluginID = 0;
   // Main thread only
-  WebrtcVideoDecoder* mRecvCodecPlugin = nullptr;
+  uint64_t mRecvCodecPluginID = 0;
 
   // Timer that updates video stats periodically. Main thread only.
   nsCOMPtr<nsITimer> mVideoStatsTimer;

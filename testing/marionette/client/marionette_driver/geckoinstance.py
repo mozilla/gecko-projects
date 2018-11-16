@@ -376,8 +376,9 @@ class GeckoInstance(object):
 
 class FennecInstance(GeckoInstance):
     fennec_prefs = {
-        # Enable output of dump()
+        # Enable output for dump() and chrome console API
         "browser.dom.window.dump.enabled": True,
+        "devtools.console.stdout.chrome": True,
 
         # Disable Android snippets
         "browser.snippets.enabled": False,
@@ -443,16 +444,6 @@ class FennecInstance(GeckoInstance):
             exc, val, tb = sys.exc_info()
             message = "Error possibly due to runner or device args: {}"
             reraise(exc, message.format(e.message), tb)
-        # gecko_log comes from logcat when running with device/emulator
-        logcat_args = {
-            "filterspec": "Gecko",
-            "serial": self.runner.device.app_ctx.device_serial
-        }
-        if self.gecko_log == "-":
-            logcat_args["stream"] = sys.stdout
-        else:
-            logcat_args["logfile"] = self.gecko_log
-        self.runner.device.start_logcat(**logcat_args)
 
         # forward marionette port
         self.runner.device.device.forward(
@@ -510,8 +501,13 @@ class DesktopInstance(GeckoInstance):
         # the line below can be removed as well.
         "app.update.enabled": False,
 
-        # Enable output of dump()
+        # Don't show the content blocking introduction panel
+        # We use a larger number than the default 22 to have some buffer
+        "browser.contentblocking.introCount": 99,
+
+        # Enable output for dump() and chrome console API
         "browser.dom.window.dump.enabled": True,
+        "devtools.console.stdout.chrome": True,
 
         # Indicate that the download panel has been shown once so that whichever
         # download test runs first doesn"t show the popup inconsistently
@@ -519,6 +515,9 @@ class DesktopInstance(GeckoInstance):
 
         # Do not show the EULA notification which can interfer with tests
         "browser.EULA.override": True,
+
+        # Always display a blank page
+        "browser.newtabpage.enabled": False,
 
         # Background thumbnails in particular cause grief, and disabling thumbnails
         # in general can"t hurt - we re-enable them when tests need them

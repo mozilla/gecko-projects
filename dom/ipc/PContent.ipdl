@@ -32,7 +32,6 @@ include protocol PPrinting;
 include protocol PChildToParentStream;
 include protocol PParentToChildStream;
 include protocol POfflineCacheUpdate;
-include protocol PRenderFrame;
 include protocol PSpeechSynthesis;
 include protocol PTestShell;
 include protocol PJavaScript;
@@ -44,6 +43,7 @@ include protocol PURLClassifier;
 include protocol PURLClassifierLocal;
 include protocol PVRManager;
 include protocol PVideoDecoderManager;
+include protocol PRemoteDecoderManager;
 include protocol PProfiler;
 include protocol PScriptCache;
 include DOMTypes;
@@ -194,10 +194,10 @@ union FileDescOrError {
 struct DomainPolicyClone
 {
     bool        active;
-    URIParams[] blacklist;
-    URIParams[] whitelist;
-    URIParams[] superBlacklist;
-    URIParams[] superWhitelist;
+    URIParams[] blocklist;
+    URIParams[] allowlist;
+    URIParams[] superBlocklist;
+    URIParams[] superAllowlist;
 };
 
 struct AndroidSystemInfo
@@ -397,6 +397,8 @@ child:
 
     // Re-create the rendering stack for a device reset.
     async ReinitRenderingForDeviceReset();
+
+    async InitRemoteDecoder(Endpoint<PRemoteDecoderManagerChild> decoder);
 
     /**
      * Enable system-level sandboxing features, if available.  Can
@@ -648,8 +650,7 @@ child:
     async SetPluginList(uint32_t pluginEpoch, PluginTag[] plugins, FakePluginTag[] fakePlugins);
 
     async ShareCodeCoverageMutex(CrossProcessMutexHandle handle);
-    async DumpCodeCoverageCounters() returns (bool unused);
-    async ResetCodeCoverageCounters() returns (bool unused);
+    async FlushCodeCoverageCounters() returns (bool unused);
 
     /*
      * IPC message to enable the input event queue on the main thread of the
@@ -742,7 +743,6 @@ parent:
     sync OpenRecordReplayChannel(uint32_t channelId)
         returns (FileDescriptor connection);
     async CreateReplayingProcess(uint32_t channelId);
-    async TerminateReplayingProcess(uint32_t channelId);
 
     async CreateGMPService();
 
@@ -894,9 +894,6 @@ parent:
     async Beep() compress;
     async PlayEventSound(uint32_t aEventId) compress;
 
-    sync GetSystemColors(uint32_t colorsCount)
-        returns (uint32_t[] colors);
-
     sync GetIconForExtension(nsCString aFileExt, uint32_t aIconSize)
         returns (uint8_t[] bits);
 
@@ -917,11 +914,6 @@ parent:
     sync NotifyKeywordSearchLoading(nsString providerName, nsString keyword);
 
     async CopyFavicon(URIParams oldURI, URIParams newURI, Principal aLoadingPrincipal, bool isPrivate);
-
-    // Tell the compositor to allocate a layer tree id for nested remote mozbrowsers.
-    sync AllocateLayerTreeId(ContentParentId cpId, TabId tabId)
-        returns (LayersId id);
-    async DeallocateLayerTreeId(ContentParentId cpId, LayersId id);
 
     /**
      * Notifies the parent about a recording device is starting or shutdown.
@@ -1059,7 +1051,6 @@ parent:
 
     async CreateWindow(nullable PBrowser aThisTab,
                        PBrowser aNewTab,
-                       PRenderFrame aRenderFrame,
                        uint32_t aChromeFlags,
                        bool aCalledFromJS,
                        bool aPositionSpecified,
@@ -1168,6 +1159,8 @@ parent:
                                                   nsCString aGrantedOrigin)
           returns (bool unused);
 
+    async StoreUserInteractionAsPermission(Principal aPrincipal);
+
     /**
      * Sync the BrowsingContext with id 'aContextId' and name 'aName'
      * to the parent, and attach it to the BrowsingContext with id
@@ -1197,6 +1190,14 @@ parent:
      */
     async DetachBrowsingContext(BrowsingContextId aContextId,
                                 bool aMoveToBFCache);
+
+    /**
+     * Set the opener of browsing context with id 'aContextId' to the
+     * browsing context with id 'aOpenerId'.
+     */
+    async SetOpenerBrowsingContext(BrowsingContextId aContextId,
+                                   BrowsingContextId aOpenerContextId);
+
 both:
      async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,
                         Principal aPrincipal, ClonedMessageData aData);

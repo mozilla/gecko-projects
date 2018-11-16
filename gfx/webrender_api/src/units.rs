@@ -93,8 +93,8 @@ pub type WorldVector3D = TypedVector3D<f32, WorldPixel>;
 /// Offset in number of tiles.
 #[derive(Hash, Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Tiles;
-pub type TileOffset = TypedPoint2D<u16, Tiles>;
-pub type TileRange = TypedRect<u16, Tiles>;
+pub type TileOffset = TypedPoint2D<u32, Tiles>;
+pub type TileRange = TypedRect<u32, Tiles>;
 
 /// Scaling ratio from world pixels to device pixels.
 pub type DevicePixelScale = TypedScale<f32, WorldPixel, DevicePixel>;
@@ -121,12 +121,7 @@ pub type RasterToPictureTransform = TypedTransform3D<f32, RasterPixel, PicturePi
 pub type LayoutPointAu = TypedPoint2D<Au, LayoutPixel>;
 pub type LayoutRectAu = TypedRect<Au, LayoutPixel>;
 pub type LayoutSizeAu = TypedSize2D<Au, LayoutPixel>;
-
-/// Coordinates in normalized space (between zero and one).
-#[derive(Hash, Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct NormalizedCoordinates;
-
-pub type NormalizedRect = TypedRect<f32, NormalizedCoordinates>;
+pub type LayoutVector2DAu = TypedVector2D<Au, LayoutPixel>;
 
 /// Stores two coordinates in texel space. The coordinates
 /// are stored in texel coordinates because the texture atlas
@@ -152,5 +147,82 @@ impl TexelRect {
             uv0: DevicePoint::new(-1.0, -1.0),
             uv1: DevicePoint::new(-1.0, -1.0),
         }
+    }
+}
+
+const MAX_AU_FLOAT: f32 = 1.0e6;
+
+pub trait AuHelpers<T> {
+    fn from_au(data: T) -> Self;
+    fn to_au(&self) -> T;
+}
+
+impl AuHelpers<LayoutSizeAu> for LayoutSize {
+    fn from_au(size: LayoutSizeAu) -> Self {
+        LayoutSize::new(
+            size.width.to_f32_px(),
+            size.height.to_f32_px(),
+        )
+    }
+
+    fn to_au(&self) -> LayoutSizeAu {
+        let width = self.width.min(2.0 * MAX_AU_FLOAT);
+        let height = self.height.min(2.0 * MAX_AU_FLOAT);
+
+        LayoutSizeAu::new(
+            Au::from_f32_px(width),
+            Au::from_f32_px(height),
+        )
+    }
+}
+
+impl AuHelpers<LayoutVector2DAu> for LayoutVector2D {
+    fn from_au(size: LayoutVector2DAu) -> Self {
+        LayoutVector2D::new(
+            size.x.to_f32_px(),
+            size.y.to_f32_px(),
+        )
+    }
+
+    fn to_au(&self) -> LayoutVector2DAu {
+        LayoutVector2DAu::new(
+            Au::from_f32_px(self.x),
+            Au::from_f32_px(self.y),
+        )
+    }
+}
+
+impl AuHelpers<LayoutPointAu> for LayoutPoint {
+    fn from_au(point: LayoutPointAu) -> Self {
+        LayoutPoint::new(
+            point.x.to_f32_px(),
+            point.y.to_f32_px(),
+        )
+    }
+
+    fn to_au(&self) -> LayoutPointAu {
+        let x = self.x.min(MAX_AU_FLOAT).max(-MAX_AU_FLOAT);
+        let y = self.y.min(MAX_AU_FLOAT).max(-MAX_AU_FLOAT);
+
+        LayoutPointAu::new(
+            Au::from_f32_px(x),
+            Au::from_f32_px(y),
+        )
+    }
+}
+
+impl AuHelpers<LayoutRectAu> for LayoutRect {
+    fn from_au(rect: LayoutRectAu) -> Self {
+        LayoutRect::new(
+            LayoutPoint::from_au(rect.origin),
+            LayoutSize::from_au(rect.size),
+        )
+    }
+
+    fn to_au(&self) -> LayoutRectAu {
+        LayoutRectAu::new(
+            self.origin.to_au(),
+            self.size.to_au(),
+        )
     }
 }

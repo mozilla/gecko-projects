@@ -292,6 +292,45 @@ ScalarTypeDescr::call(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+/* static */ TypeDescr*
+GlobalObject::getOrCreateScalarTypeDescr(JSContext* cx, Handle<GlobalObject*> global,
+                                         Scalar::Type scalarType)
+{
+    int32_t slot = 0;
+    switch (scalarType) {
+      case Scalar::Int32:   slot = TypedObjectModuleObject::Int32Desc; break;
+      case Scalar::Int64:   MOZ_CRASH("No Int64 support yet");
+      case Scalar::Float32: slot = TypedObjectModuleObject::Float32Desc; break;
+      case Scalar::Float64: slot = TypedObjectModuleObject::Float64Desc; break;
+      default:              MOZ_CRASH("NYI");
+    }
+
+    Rooted<TypedObjectModuleObject*> module(cx,
+        &GlobalObject::getOrCreateTypedObjectModule(cx, global)->as<TypedObjectModuleObject>());
+    if (!module) {
+       return nullptr;
+    }
+    return &module->getReservedSlot(slot).toObject().as<TypeDescr>();
+}
+
+/* static */ TypeDescr*
+GlobalObject::getOrCreateReferenceTypeDescr(JSContext* cx, Handle<GlobalObject*> global,
+                                            ReferenceType type)
+{
+    int32_t slot = 0;
+    switch (type) {
+      case ReferenceType::TYPE_OBJECT: slot = TypedObjectModuleObject::ObjectDesc; break;
+      default:                         MOZ_CRASH("NYI");
+    }
+
+    Rooted<TypedObjectModuleObject*> module(cx,
+        &GlobalObject::getOrCreateTypedObjectModule(cx, global)->as<TypedObjectModuleObject>());
+    if (!module) {
+       return nullptr;
+    }
+    return &module->getReservedSlot(slot).toObject().as<TypeDescr>();
+}
+
 /***************************************************************************
  * Reference type objects
  *
@@ -796,7 +835,7 @@ StructMetaTypeDescr::create(JSContext* cx,
     AutoValueVector fieldTypeObjs(cx); // Type descriptor of each field.
     bool opaque = false;               // Opacity of struct.
 
-    Vector<bool> fieldMutabilities(cx);
+    Vector<StructFieldProps> fieldProps(cx);
 
     RootedValue fieldTypeVal(cx);
     RootedId id(cx);
@@ -830,7 +869,9 @@ StructMetaTypeDescr::create(JSContext* cx,
         }
 
         // Along this path everything is mutable
-        if (!fieldMutabilities.append(true)) {
+        StructFieldProps props;
+        props.isMutable = true;
+        if (!fieldProps.append(props)) {
             return nullptr;
         }
 
@@ -846,7 +887,7 @@ StructMetaTypeDescr::create(JSContext* cx,
     }
 
     return createFromArrays(cx, structTypePrototype, opaque, /* allowConstruct= */ true, ids,
-                            fieldTypeObjs, fieldMutabilities);
+                            fieldTypeObjs, fieldProps);
 }
 
 /* static */ StructTypeDescr*
@@ -856,7 +897,7 @@ StructMetaTypeDescr::createFromArrays(JSContext* cx,
                                       bool allowConstruct,
                                       AutoIdVector& ids,
                                       AutoValueVector& fieldTypeObjs,
-                                      Vector<bool>& fieldMutabilities)
+                                      Vector<StructFieldProps>& fieldProps)
 {
     StringBuffer stringBuffer(cx);     // Canonical string repr
     AutoValueVector fieldNames(cx);    // Name of each field.
@@ -915,7 +956,10 @@ StructMetaTypeDescr::createFromArrays(JSContext* cx,
             return nullptr;
         }
 
-        CheckedInt32 offset = layout.addField(fieldType->alignment(), fieldType->size());
+        CheckedInt32 offset = layout.addField(fieldProps[i].alignAsInt64
+                                              ? ScalarTypeDescr::alignment(Scalar::Int64)
+                                              : fieldType->alignment(),
+                                              fieldType->size());
         if (!offset.isValid()) {
             JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_TYPEDOBJECT_TOO_BIG);
             return nullptr;
@@ -924,8 +968,7 @@ StructMetaTypeDescr::createFromArrays(JSContext* cx,
         if (!fieldOffsets.append(Int32Value(offset.value()))) {
             return nullptr;
         }
-
-        if (!fieldMuts.append(BooleanValue(fieldMutabilities[i]))) {
+        if (!fieldMuts.append(BooleanValue(fieldProps[i].isMutable))) {
             return nullptr;
         }
 
@@ -1370,6 +1413,34 @@ GlobalObject::initTypedObjectModule(JSContext* cx, Handle<GlobalObject*> global)
         return false;
     JS_FOR_EACH_REFERENCE_TYPE_REPR(BINARYDATA_REFERENCE_DEFINE)
 #undef BINARYDATA_REFERENCE_DEFINE
+
+    // Tuck away descriptors we will use for wasm.
+
+    RootedValue typeDescr(cx);
+
+    // The lookups should fail only from atomization-related OOM in
+    // JS_GetProperty().  The properties themselves will always exist on the
+    // object.
+
+    if (!JS_GetProperty(cx, module, "int32", &typeDescr)) {
+        return false;
+    }
+    module->initReservedSlot(TypedObjectModuleObject::Int32Desc, typeDescr);
+
+    if (!JS_GetProperty(cx, module, "float32", &typeDescr)) {
+        return false;
+    }
+    module->initReservedSlot(TypedObjectModuleObject::Float32Desc, typeDescr);
+
+    if (!JS_GetProperty(cx, module, "float64", &typeDescr)) {
+        return false;
+    }
+    module->initReservedSlot(TypedObjectModuleObject::Float64Desc, typeDescr);
+
+    if (!JS_GetProperty(cx, module, "Object", &typeDescr)) {
+        return false;
+    }
+    module->initReservedSlot(TypedObjectModuleObject::ObjectDesc, typeDescr);
 
     // ArrayType.
 
@@ -2480,7 +2551,7 @@ js::NewDerivedTypedObject(JSContext* cx, unsigned argc, Value* vp)
     MOZ_ASSERT(args.length() == 3);
     MOZ_ASSERT(args[0].isObject() && args[0].toObject().is<TypeDescr>());
     MOZ_ASSERT(args[1].isObject() && args[1].toObject().is<TypedObject>());
-    MOZ_ASSERT(args[2].isInt32());
+    MOZ_RELEASE_ASSERT(args[2].isInt32());
 
     Rooted<TypeDescr*> descr(cx, &args[0].toObject().as<TypeDescr>());
     Rooted<TypedObject*> typedObj(cx, &args[1].toObject().as<TypedObject>());
@@ -2501,7 +2572,7 @@ js::AttachTypedObject(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     MOZ_ASSERT(args.length() == 3);
-    MOZ_ASSERT(args[2].isInt32());
+    MOZ_RELEASE_ASSERT(args[2].isInt32());
 
     OutlineTypedObject& handle = args[0].toObject().as<OutlineTypedObject>();
     TypedObject& target = args[1].toObject().as<TypedObject>();
@@ -2519,7 +2590,7 @@ js::SetTypedObjectOffset(JSContext*, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
     MOZ_ASSERT(args.length() == 2);
     MOZ_ASSERT(args[0].isObject() && args[0].toObject().is<TypedObject>());
-    MOZ_ASSERT(args[1].isInt32());
+    MOZ_RELEASE_ASSERT(args[1].isInt32());
 
     OutlineTypedObject& typedObj = args[0].toObject().as<OutlineTypedObject>();
     int32_t offset = args[1].toInt32();
@@ -2638,7 +2709,7 @@ js::StoreScalar##T::Func(JSContext* cx, unsigned argc, Value* vp)               
     CallArgs args = CallArgsFromVp(argc, vp);                                   \
     MOZ_ASSERT(args.length() == 3);                                             \
     MOZ_ASSERT(args[0].isObject() && args[0].toObject().is<TypedObject>());     \
-    MOZ_ASSERT(args[1].isInt32());                                              \
+    MOZ_RELEASE_ASSERT(args[1].isInt32());                                      \
     MOZ_ASSERT(args[2].isNumber());                                             \
                                                                                 \
     TypedObject& typedObj = args[0].toObject().as<TypedObject>();               \
@@ -2662,7 +2733,7 @@ js::StoreReference##_name::Func(JSContext* cx, unsigned argc, Value* vp)        
     CallArgs args = CallArgsFromVp(argc, vp);                                   \
     MOZ_ASSERT(args.length() == 4);                                             \
     MOZ_ASSERT(args[0].isObject() && args[0].toObject().is<TypedObject>());     \
-    MOZ_ASSERT(args[1].isInt32());                                              \
+    MOZ_RELEASE_ASSERT(args[1].isInt32());                                      \
     MOZ_ASSERT(args[2].isString() || args[2].isNull());                         \
                                                                                 \
     TypedObject& typedObj = args[0].toObject().as<TypedObject>();               \
@@ -2690,7 +2761,7 @@ js::LoadScalar##T::Func(JSContext* cx, unsigned argc, Value* vp)                
     CallArgs args = CallArgsFromVp(argc, vp);                                           \
     MOZ_ASSERT(args.length() == 2);                                                     \
     MOZ_ASSERT(args[0].isObject() && args[0].toObject().is<TypedObject>());             \
-    MOZ_ASSERT(args[1].isInt32());                                                      \
+    MOZ_RELEASE_ASSERT(args[1].isInt32());                                              \
                                                                                         \
     TypedObject& typedObj = args[0].toObject().as<TypedObject>();                       \
     int32_t offset = args[1].toInt32();                                                 \
@@ -2711,7 +2782,7 @@ js::LoadReference##_name::Func(JSContext* cx, unsigned argc, Value* vp)         
     CallArgs args = CallArgsFromVp(argc, vp);                                   \
     MOZ_ASSERT(args.length() == 2);                                             \
     MOZ_ASSERT(args[0].isObject() && args[0].toObject().is<TypedObject>());     \
-    MOZ_ASSERT(args[1].isInt32());                                              \
+    MOZ_RELEASE_ASSERT(args[1].isInt32());                                      \
                                                                                 \
     TypedObject& typedObj = args[0].toObject().as<TypedObject>();               \
     int32_t offset = args[1].toInt32();                                         \

@@ -34,10 +34,10 @@ class nsAttributeTextNode final : public nsTextNode,
 public:
   NS_DECL_ISUPPORTS_INHERITED
 
-  nsAttributeTextNode(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo,
+  nsAttributeTextNode(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                       int32_t aNameSpaceID,
                       nsAtom* aAttrName) :
-    nsTextNode(aNodeInfo),
+    nsTextNode(std::move(aNodeInfo)),
     mGrandparent(nullptr),
     mNameSpaceID(aNameSpaceID),
     mAttrName(aAttrName)
@@ -58,10 +58,8 @@ public:
     CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo,
                   bool aCloneText) const override
   {
-    already_AddRefed<mozilla::dom::NodeInfo> ni =
-      RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
     RefPtr<nsAttributeTextNode> it =
-      new nsAttributeTextNode(ni, mNameSpaceID, mAttrName);
+      new nsAttributeTextNode(do_AddRef(aNodeInfo), mNameSpaceID, mAttrName);
     if (aCloneText) {
       it->mText = mText;
     }
@@ -115,8 +113,7 @@ nsTextNode::IsNodeOfType(uint32_t aFlags) const
 already_AddRefed<CharacterData>
 nsTextNode::CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo, bool aCloneText) const
 {
-  already_AddRefed<mozilla::dom::NodeInfo> ni = RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
-  RefPtr<nsTextNode> it = new nsTextNode(ni);
+  RefPtr<nsTextNode> it = new nsTextNode(do_AddRef(aNodeInfo));
   if (aCloneText) {
     it->mText = mText;
   }
@@ -152,12 +149,6 @@ void nsTextNode::UnbindFromTree(bool aDeep, bool aNullParent)
   ResetDirectionSetByTextNode(this);
 
   CharacterData::UnbindFromTree(aDeep, aNullParent);
-}
-
-bool
-nsTextNode::IsShadowDOMEnabled(JSContext* aCx, JSObject* aObject)
-{
-  return nsDocument::IsShadowDOMEnabled(aCx, aObject);
 }
 
 #ifdef DEBUG
@@ -219,12 +210,12 @@ NS_NewAttributeContent(nsNodeInfoManager *aNodeInfoManager,
 
   *aResult = nullptr;
 
-  already_AddRefed<mozilla::dom::NodeInfo> ni = aNodeInfoManager->GetTextNodeInfo();
+  RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfoManager->GetTextNodeInfo();
 
-  nsAttributeTextNode* textNode = new nsAttributeTextNode(ni,
-                                                          aNameSpaceID,
-                                                          aAttrName);
-  NS_ADDREF(*aResult = textNode);
+  RefPtr<nsAttributeTextNode> textNode = new nsAttributeTextNode(ni.forget(),
+                                                                 aNameSpaceID,
+                                                                 aAttrName);
+  textNode.forget(aResult);
 
   return NS_OK;
 }

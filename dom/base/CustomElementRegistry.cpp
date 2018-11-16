@@ -229,12 +229,6 @@ CustomElementData::GetCustomElementDefinition()
   return mCustomElementDefinition;
 }
 
-nsAtom*
-CustomElementData::GetCustomElementType()
-{
-  return mType;
-}
-
 void
 CustomElementData::Traverse(nsCycleCollectionTraversalCallback& aCb) const
 {
@@ -266,7 +260,12 @@ CustomElementData::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
   n += mReactionQueue.ShallowSizeOfExcludingThis(aMallocSizeOf);
 
   for (auto& reaction : mReactionQueue) {
-    n += reaction->SizeOfIncludingThis(aMallocSizeOf);
+    // "reaction" can be null if we're being called indirectly from
+    // InvokeReactions (e.g. due to a reaction causing a memory report to be
+    // captured somehow).
+    if (reaction) {
+      n += reaction->SizeOfIncludingThis(aMallocSizeOf);
+    }
   }
 
   return n;
@@ -354,32 +353,6 @@ CustomElementRegistry::~CustomElementRegistry()
   mozilla::DropJSObjects(this);
 }
 
-bool
-CustomElementRegistry::IsCustomElementEnabled(JSContext* aCx, JSObject* aObject)
-{
-  if (nsContentUtils::IsCustomElementsEnabled()) {
-    return true;
-  }
-
-  if (!XRE_IsParentProcess()) {
-    return false;
-  }
-
-  nsIPrincipal* principal =
-    nsContentUtils::ObjectPrincipal(js::UncheckedUnwrap(aObject));
-  return nsContentUtils::AllowXULXBLForPrincipal(principal);
-}
-
-bool
-CustomElementRegistry::IsCustomElementEnabled(nsIDocument* aDoc)
-{
-  if (nsContentUtils::IsCustomElementsEnabled()) {
-    return true;
-  }
-
-  return XRE_IsParentProcess() && aDoc->AllowXULXBL();
-}
-
 NS_IMETHODIMP
 CustomElementRegistry::RunCustomElementCreationCallback::Run()
 {
@@ -428,7 +401,7 @@ CustomElementRegistry::LookupCustomElementDefinition(nsAtom* aNameAtom,
       mElementCreationCallbacksUpgradeCandidatesMap.LookupOrAdd(aTypeAtom);
       RefPtr<Runnable> runnable =
         new RunCustomElementCreationCallback(this, aTypeAtom, callback);
-      nsContentUtils::AddScriptRunner(runnable);
+      nsContentUtils::AddScriptRunner(runnable.forget());
       data = mCustomDefinitions.GetWeak(aTypeAtom);
     }
   }
@@ -752,7 +725,7 @@ int32_t
 CustomElementRegistry::InferNamespace(JSContext* aCx,
                                       JS::Handle<JSObject*> constructor)
 {
-  JSObject* XULConstructor = XULElement_Binding::GetConstructorObject(aCx);
+  JS::Rooted<JSObject*> XULConstructor(aCx, XULElement_Binding::GetConstructorObject(aCx));
 
   JS::Rooted<JSObject*> proto(aCx, constructor);
   while (proto) {
@@ -774,17 +747,8 @@ CustomElementRegistry::Define(JSContext* aCx,
                               const ElementDefinitionOptions& aOptions,
                               ErrorResult& aRv)
 {
-  // Note: No calls that might run JS or trigger CC before this point, or
-  // there's a (vanishingly small) chance of our constructor being nulled
-  // before we access it.
   JS::Rooted<JSObject*> constructor(aCx, aFunctionConstructor.CallableOrNull());
 
-  /**
-   * 1. If IsConstructor(constructor) is false, then throw a TypeError and abort
-   *    these steps.
-   */
-  // For now, all wrappers are constructable if they are callable. So we need to
-  // unwrap constructor to check it is really constructable.
   JS::Rooted<JSObject*> constructorUnwrapped(aCx, js::CheckedUnwrap(constructor));
   if (!constructorUnwrapped) {
     // If the caller's compartment does not have permission to access the
@@ -793,6 +757,10 @@ CustomElementRegistry::Define(JSContext* aCx,
     return;
   }
 
+  /**
+   * 1. If IsConstructor(constructor) is false, then throw a TypeError and abort
+   *    these steps.
+   */
   if (!JS::IsConstructor(constructorUnwrapped)) {
     aRv.ThrowTypeError<MSG_NOT_CONSTRUCTOR>(NS_LITERAL_STRING("Argument 2 of CustomElementRegistry.define"));
     return;
@@ -1299,31 +1267,20 @@ CustomElementRegistry::CallGetCustomInterface(Element* aElement,
       func->Call(aElement, iid, &customInterface);
       JS::Rooted<JSObject*> funcGlobal(RootingCx(), func->CallbackGlobalOrNull());
       if (customInterface && funcGlobal) {
-        RefPtr<nsXPCWrappedJS> wrappedJS;
         AutoJSAPI jsapi;
         if (jsapi.Init(funcGlobal)) {
+          nsIXPConnect *xpConnect = nsContentUtils::XPConnect();
           JSContext* cx = jsapi.cx();
-          nsresult rv =
-            nsXPCWrappedJS::GetNewOrUsed(cx, customInterface,
-                                         NS_GET_IID(nsISupports),
-                                         getter_AddRefs(wrappedJS));
-          if (NS_SUCCEEDED(rv) && wrappedJS) {
-            // Check if the returned object implements the desired interface.
-            nsCOMPtr<nsISupports> retval;
-            if (NS_SUCCEEDED(wrappedJS->QueryInterface(aIID,
-                                                       getter_AddRefs(retval)))) {
-              return retval.forget();
-            }
+
+          nsCOMPtr<nsISupports> wrapper;
+          nsresult rv = xpConnect->WrapJSAggregatedToNative(aElement, cx, customInterface,
+                                                            aIID, getter_AddRefs(wrapper));
+          if (NS_SUCCEEDED(rv)) {
+            return wrapper.forget();
           }
         }
       }
     }
-  }
-
-  // Otherwise, check if the element supports the interface directly, and just use that.
-  nsCOMPtr<nsISupports> supports;
-  if (NS_SUCCEEDED(aElement->QueryInterface(aIID, getter_AddRefs(supports)))) {
-    return supports.forget();
   }
 
   return nullptr;

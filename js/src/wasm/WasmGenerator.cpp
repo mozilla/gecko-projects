@@ -29,6 +29,7 @@
 #include "util/Text.h"
 #include "wasm/WasmBaselineCompile.h"
 #include "wasm/WasmCompile.h"
+#include "wasm/WasmCraneliftCompile.h"
 #include "wasm/WasmIonCompile.h"
 #include "wasm/WasmStubs.h"
 
@@ -300,10 +301,10 @@ ModuleGenerator::init(Metadata* maybeAsmJSMetadata)
     }
 
     // Accumulate all exported functions, whether by explicit export or
-    // implicitly by being an element of an external (imported or exported)
-    // table or by being the start function. The FuncExportVector stored in
-    // Metadata needs to be sorted (to allow O(log(n)) lookup at runtime) and
-    // deduplicated, so use an intermediate vector to sort and de-duplicate.
+    // implicitly by being an element of a function table or by being the start
+    // function. The FuncExportVector stored in Metadata needs to be sorted (to
+    // allow O(log(n)) lookup at runtime) and deduplicated, so use an
+    // intermediate vector to sort and de-duplicate.
 
     static_assert((uint64_t(MaxFuncs) << 1) < uint64_t(UINT32_MAX), "bit packing won't work");
 
@@ -328,13 +329,21 @@ ModuleGenerator::init(Metadata* maybeAsmJSMetadata)
     }
 
     for (const ElemSegment* seg : env_->elemSegments) {
-        if (env_->tables[seg->tableIndex].external) {
+        TableKind kind = !seg->active() ? TableKind::AnyFunction : env_->tables[seg->tableIndex].kind;
+        switch (kind) {
+          case TableKind::AnyFunction:
             if (!exportedFuncs.reserve(exportedFuncs.length() + seg->length())) {
                 return false;
             }
             for (uint32_t funcIndex : seg->elemFuncIndices) {
                 exportedFuncs.infallibleEmplaceBack(funcIndex, false);
             }
+            break;
+          case TableKind::TypedFunction:
+            // asm.js functions are not exported.
+            break;
+          case TableKind::AnyRef:
+            break;
         }
     }
 
@@ -659,7 +668,18 @@ ExecuteCompileTask(CompileTask* task, UniqueChars* error)
     MOZ_ASSERT(task->output.empty());
 
     switch (task->env.tier()) {
-      case Tier::Ion:
+      case Tier::Optimized:
+#ifdef ENABLE_WASM_CRANELIFT
+        if (task->env.optimizedBackend() == OptimizedBackend::Cranelift) {
+            if (!CraneliftCompileFunctions(task->env, task->lifo, task->inputs, &task->output,
+                                           error))
+            {
+                return false;
+            }
+            break;
+        }
+#endif
+        MOZ_ASSERT(task->env.optimizedBackend() == OptimizedBackend::Ion);
         if (!IonCompileFunctions(task->env, task->lifo, task->inputs,
                                  &task->output, task->dvs, error)) {
             return false;
@@ -808,9 +828,9 @@ ModuleGenerator::compileFuncDef(uint32_t funcIndex, uint32_t lineOrBytecode,
 
     uint32_t threshold;
     switch (tier()) {
-      case Tier::Baseline: threshold = JitOptions.wasmBatchBaselineThreshold; break;
-      case Tier::Ion:      threshold = JitOptions.wasmBatchIonThreshold;      break;
-      default:             MOZ_CRASH("Invalid tier value");                   break;
+      case Tier::Baseline:  threshold = JitOptions.wasmBatchBaselineThreshold; break;
+      case Tier::Optimized: threshold = JitOptions.wasmBatchIonThreshold;      break;
+      default:              MOZ_CRASH("Invalid tier value");                   break;
     }
 
     batchedBytecode_ += funcBytecodeLength;
@@ -944,8 +964,9 @@ ModuleGenerator::finishCodeTier()
     // All functions and stubs have been compiled.  Perform module-end
     // validation.
 
-    if (!deferredValidationState_.lock()->performDeferredValidation(*env_, error_))
+    if (!deferredValidationState_.lock()->performDeferredValidation(*env_, error_)) {
         return nullptr;
+    }
 
     // Finish linking and metadata.
 
@@ -965,7 +986,7 @@ ModuleGenerator::finishCodeTier()
     return js::MakeUnique<CodeTier>(std::move(metadataTier_), std::move(segment));
 }
 
-bool
+SharedMetadata
 ModuleGenerator::finishMetadata(const Bytes& bytecode)
 {
     // Finish initialization of Metadata, which is only needed for constructing
@@ -992,14 +1013,14 @@ ModuleGenerator::finishMetadata(const Bytes& bytecode)
 
         const size_t numFuncTypes = env_->funcTypes.length();
         if (!metadata_->debugFuncArgTypes.resize(numFuncTypes)) {
-            return false;
+            return nullptr;
         }
         if (!metadata_->debugFuncReturnTypes.resize(numFuncTypes)) {
-            return false;
+            return nullptr;
         }
         for (size_t i = 0; i < numFuncTypes; i++) {
             if (!metadata_->debugFuncArgTypes[i].appendAll(env_->funcTypes[i]->args())) {
-                return false;
+                return nullptr;
             }
             metadata_->debugFuncReturnTypes[i] = env_->funcTypes[i]->ret();
         }
@@ -1013,11 +1034,18 @@ ModuleGenerator::finishMetadata(const Bytes& bytecode)
         memcpy(metadata_->debugHash, hash, sizeof(ModuleHash));
     }
 
-    return true;
+    MOZ_ASSERT_IF(env_->nameCustomSectionIndex, !!metadata_->namePayload);
+
+    // Metadata shouldn't be mutably modified after finishMetadata().
+    SharedMetadata metadata = metadata_;
+    metadata_ = nullptr;
+    return metadata;
 }
 
 SharedModule
-ModuleGenerator::finishModule(const ShareableBytes& bytecode, UniqueLinkData* linkData)
+ModuleGenerator::finishModule(const ShareableBytes& bytecode,
+                              JS::OptimizedEncodingListener* maybeTier2Listener,
+                              UniqueLinkData* maybeLinkData)
 {
     MOZ_ASSERT(mode() == CompileMode::Once || mode() == CompileMode::Tier1);
 
@@ -1029,22 +1057,6 @@ ModuleGenerator::finishModule(const ShareableBytes& bytecode, UniqueLinkData* li
     JumpTables jumpTables;
     if (!jumpTables.init(mode(), codeTier->segment(), codeTier->metadata().codeRanges)) {
         return nullptr;
-    }
-
-    if (!finishMetadata(bytecode.bytes)) {
-        return nullptr;
-    }
-
-    MutableCode code = js_new<Code>(std::move(codeTier), *metadata_, std::move(jumpTables));
-    if (!code || !code->initialize(*linkData_)) {
-        return nullptr;
-    }
-
-    StructTypeVector structTypes;
-    for (TypeDef& td : env_->types) {
-        if (td.isStructType() && !structTypes.append(std::move(td.structType()))) {
-            return nullptr;
-        }
     }
 
     // Copy over data from the Bytecode, which is going away at the end of
@@ -1089,6 +1101,24 @@ ModuleGenerator::finishModule(const ShareableBytes& bytecode, UniqueLinkData* li
         metadata_->namePayload = customSections[*env_->nameCustomSectionIndex].payload;
     }
 
+    SharedMetadata metadata = finishMetadata(bytecode.bytes);
+    if (!metadata) {
+        return nullptr;
+    }
+
+    StructTypeVector structTypes;
+    for (TypeDef& td : env_->types) {
+        if (td.isStructType() && !structTypes.append(std::move(td.structType()))) {
+            return nullptr;
+        }
+    }
+
+    MutableCode code = js_new<Code>(std::move(codeTier), *metadata, std::move(jumpTables),
+                                    std::move(structTypes));
+    if (!code || !code->initialize(*linkData_)) {
+        return nullptr;
+    }
+
     // See Module debugCodeClaimed_ comments for why we need to make a separate
     // debug copy.
 
@@ -1116,7 +1146,6 @@ ModuleGenerator::finishModule(const ShareableBytes& bytecode, UniqueLinkData* li
     MutableModule module = js_new<Module>(*code,
                                           std::move(env_->imports),
                                           std::move(env_->exports),
-                                          std::move(structTypes),
                                           std::move(dataSegments),
                                           std::move(env_->elemSegments),
                                           std::move(customSections),
@@ -1128,13 +1157,14 @@ ModuleGenerator::finishModule(const ShareableBytes& bytecode, UniqueLinkData* li
     }
 
     if (mode() == CompileMode::Tier1) {
-        module->startTier2(*compileArgs_, bytecode);
+        module->startTier2(*compileArgs_, bytecode, maybeTier2Listener);
+    } else if (tier() == Tier::Serialized && maybeTier2Listener) {
+        module->serialize(*linkData_, *maybeTier2Listener);
     }
 
-    if (linkData) {
-        MOZ_ASSERT(isAsmJS());
+    if (maybeLinkData) {
         MOZ_ASSERT(!env_->debugEnabled());
-        *linkData = std::move(linkData_);
+        *maybeLinkData = std::move(linkData_);
     }
 
     return module;
@@ -1144,7 +1174,7 @@ bool
 ModuleGenerator::finishTier2(const Module& module)
 {
     MOZ_ASSERT(mode() == CompileMode::Tier2);
-    MOZ_ASSERT(tier() == Tier::Ion);
+    MOZ_ASSERT(tier() == Tier::Optimized);
     MOZ_ASSERT(!env_->debugEnabled());
 
     if (cancelled_ && *cancelled_) {

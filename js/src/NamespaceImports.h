@@ -38,7 +38,7 @@ using ValueVector = JS::GCVector<JS::Value>;
 using IdVector = JS::GCVector<jsid>;
 using ScriptVector = JS::GCVector<JSScript*>;
 
-class SourceBufferHolder;
+template<typename UnitT> class SourceText;
 
 class HandleValueArray;
 
@@ -47,9 +47,6 @@ class PropertyResult;
 
 enum class SymbolCode: uint32_t;
 
-#ifdef ENABLE_BIGINT
-class BigInt;
-#endif
 } // namespace JS
 
 // Do the importing.
@@ -171,6 +168,7 @@ using JS::SymbolCode;
 #ifdef ENABLE_BIGINT
 using JS::BigInt;
 #endif
+
 } /* namespace js */
 
 #endif /* NamespaceImports_h */

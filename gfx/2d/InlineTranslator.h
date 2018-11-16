@@ -8,6 +8,7 @@
 #define mozilla_layout_InlineTranslator_h
 
 #include <istream>
+#include <string>
 
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Filters.h"
@@ -33,6 +34,11 @@ public:
   explicit InlineTranslator(DrawTarget* aDT, void* aFontContext = nullptr);
 
   bool TranslateRecording(char *, size_t len);
+
+  void SetExternalSurfaces(nsRefPtrHashtable<nsUint64HashKey, SourceSurface>* aExternalSurfaces)
+  {
+    mExternalSurfaces = aExternalSurfaces;
+  }
 
   DrawTarget* LookupDrawTarget(ReferencePtr aRefPtr) final
   {
@@ -88,6 +94,11 @@ public:
     NativeFontResource* result = mNativeFontResources.GetWeak(aKey);
     MOZ_ASSERT(result);
     return result;
+  }
+
+  already_AddRefed<SourceSurface> LookupExternalSurface(uint64_t aKey) override
+  {
+    return mExternalSurfaces->Get(aKey);
   }
 
   void AddDrawTarget(ReferencePtr aRefPtr, DrawTarget *aDT) final
@@ -174,10 +185,12 @@ public:
   mozilla::gfx::DrawTarget* GetReferenceDrawTarget() final { return mBaseDT; }
 
   void* GetFontContext() final { return mFontContext; }
+  std::string GetError() { return mError; }
 
 private:
   RefPtr<DrawTarget> mBaseDT;
   void*              mFontContext;
+  std::string        mError;
 
   nsRefPtrHashtable<nsPtrHashKey<void>, DrawTarget> mDrawTargets;
   nsRefPtrHashtable<nsPtrHashKey<void>, Path> mPaths;
@@ -187,6 +200,7 @@ private:
   nsRefPtrHashtable<nsPtrHashKey<void>, ScaledFont> mScaledFonts;
   nsRefPtrHashtable<nsPtrHashKey<void>, UnscaledFont> mUnscaledFonts;
   nsRefPtrHashtable<nsUint64HashKey, NativeFontResource> mNativeFontResources;
+  nsRefPtrHashtable<nsUint64HashKey, SourceSurface>* mExternalSurfaces;
 };
 
 } // namespace gfx

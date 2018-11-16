@@ -73,8 +73,10 @@
     macro(LeftParen,    "'('") \
     macro(RightParen,   "')'") \
     macro(Name,         "identifier") \
+    macro(PrivateName,  "private identifier") \
     macro(Number,       "numeric literal") \
     macro(String,       "string literal") \
+    IF_BIGINT(macro(BigInt, "bigint literal"),) \
     \
     /* start of template literal with substitutions */ \
     macro(TemplateHead,    "'${'") \
@@ -156,7 +158,7 @@
      */ \
     /* \
      * Binary operators tokens, Or thru Pow. These must be in the same \
-     * order as F(OR) and friends in FOR_EACH_PARSE_NODE_KIND in ParseNode.h. \
+     * order as F(Or) and friends in FOR_EACH_PARSE_NODE_KIND in ParseNode.h. \
      */ \
     macro(Pipeline,     "'|>'") \
     range(BinOpFirst,   Pipeline) \
@@ -322,6 +324,7 @@ inline MOZ_MUST_USE bool
 TokenKindIsPossibleIdentifier(TokenKind tt)
 {
     return tt == TokenKind::Name ||
+           tt == TokenKind::PrivateName ||
            TokenKindIsContextualKeyword(tt) ||
            TokenKindIsStrictReservedWord(tt);
 }

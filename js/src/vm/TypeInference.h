@@ -51,7 +51,6 @@ class TempAllocator;
 class AutoClearTypeInferenceStateOnOOM
 {
     Zone* zone;
-    bool oom;
 
     AutoClearTypeInferenceStateOnOOM(const AutoClearTypeInferenceStateOnOOM&) = delete;
     void operator=(const AutoClearTypeInferenceStateOnOOM&) = delete;
@@ -59,13 +58,6 @@ class AutoClearTypeInferenceStateOnOOM
   public:
     explicit AutoClearTypeInferenceStateOnOOM(Zone* zone);
     ~AutoClearTypeInferenceStateOnOOM();
-
-    void setOOM() {
-        oom = true;
-    }
-    bool hadOOM() const {
-        return oom;
-    }
 };
 
 class MOZ_RAII AutoSweepBase
@@ -84,8 +76,7 @@ class MOZ_RAII AutoSweepObjectGroup : public AutoSweepBase
 #endif
 
   public:
-    inline explicit AutoSweepObjectGroup(ObjectGroup* group,
-                                         AutoClearTypeInferenceStateOnOOM* oom = nullptr);
+    inline explicit AutoSweepObjectGroup(ObjectGroup* group);
 #ifdef DEBUG
     inline ~AutoSweepObjectGroup();
 
@@ -104,8 +95,7 @@ class MOZ_RAII AutoSweepTypeScript : public AutoSweepBase
 #endif
 
   public:
-    inline explicit AutoSweepTypeScript(JSScript* script,
-                                        AutoClearTypeInferenceStateOnOOM* oom = nullptr);
+    inline explicit AutoSweepTypeScript(JSScript* script);
 #ifdef DEBUG
     inline ~AutoSweepTypeScript();
 
@@ -389,11 +379,8 @@ class TypeZone
     // for the zone.
     ZoneData<LifoAlloc> sweepTypeLifoAlloc;
 
-    // During incremental sweeping, whether to try to destroy all type
-    // information attached to scripts.
-    ZoneData<bool> sweepReleaseTypes;
-
     ZoneData<bool> sweepingTypes;
+    ZoneData<bool> oomSweepingTypes;
 
     ZoneData<bool> keepTypeScripts;
 
@@ -412,7 +399,7 @@ class TypeZone
         return typeLifoAlloc_.ref();
     }
 
-    void beginSweep(bool releaseTypes);
+    void beginSweep();
     void endSweep(JSRuntime* rt);
     void clearAllNewScriptsOnOOM();
 
@@ -422,9 +409,22 @@ class TypeZone
 
     void processPendingRecompiles(FreeOp* fop, RecompileInfoVector& recompiles);
 
+    bool isSweepingTypes() const {
+        return sweepingTypes;
+    }
     void setSweepingTypes(bool sweeping) {
         MOZ_RELEASE_ASSERT(sweepingTypes != sweeping);
+        MOZ_ASSERT_IF(sweeping, !oomSweepingTypes);
         sweepingTypes = sweeping;
+        oomSweepingTypes = false;
+    }
+    void setOOMSweepingTypes() {
+        MOZ_ASSERT(sweepingTypes);
+        oomSweepingTypes = true;
+    }
+    bool hadOOMSweepingTypes() {
+        MOZ_ASSERT(sweepingTypes);
+        return oomSweepingTypes;
     }
 
     mozilla::Maybe<IonCompilationId> currentCompilationId() const {

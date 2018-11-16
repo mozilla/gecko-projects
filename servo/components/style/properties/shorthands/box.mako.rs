@@ -7,12 +7,12 @@
 <%helpers:shorthand
     name="overflow"
     flags="SHORTHAND_IN_GETCS"
-    sub_properties="overflow-y overflow-x"
+    sub_properties="overflow-x overflow-y"
     spec="https://drafts.csswg.org/css-overflow/#propdef-overflow"
 >
-    use properties::longhands::overflow_x::parse as parse_overflow;
+    use crate::properties::longhands::overflow_x::parse as parse_overflow;
     % if product == "gecko":
-        use properties::longhands::overflow_x::SpecifiedValue;
+        use crate::properties::longhands::overflow_x::SpecifiedValue;
     % endif
 
     pub fn parse_value<'i, 't>(
@@ -20,7 +20,7 @@
         input: &mut Parser<'i, 't>,
     ) -> Result<Longhands, ParseError<'i>> {
         % if product == "gecko":
-            use gecko_bindings::structs;
+            use crate::gecko_bindings::structs;
             let moz_kw_enabled = unsafe {
                 structs::StaticPrefs_sVarCache_layout_css_overflow_moz_scrollbars_enabled
             };
@@ -52,9 +52,9 @@
                 }
             }
         % endif
-        let overflow_y = parse_overflow(context, input)?;
-        let overflow_x =
-            input.try(|i| parse_overflow(context, i)).unwrap_or(overflow_y);
+        let overflow_x = parse_overflow(context, input)?;
+        let overflow_y =
+            input.try(|i| parse_overflow(context, i)).unwrap_or(overflow_x);
         Ok(expanded! {
             overflow_x: overflow_x,
             overflow_y: overflow_y,
@@ -63,10 +63,10 @@
 
     impl<'a> ToCss for LonghandsToSerialize<'a>  {
         fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result where W: fmt::Write {
-            self.overflow_y.to_css(dest)?;
+            self.overflow_x.to_css(dest)?;
             if self.overflow_x != self.overflow_y {
                 dest.write_char(' ')?;
-                self.overflow_x.to_css(dest)?;
+                self.overflow_y.to_css(dest)?;
             }
             Ok(())
         }
@@ -82,7 +82,7 @@
          "(https://developer.mozilla.org/en-US/docs/Web/CSS/overflow-clip-box)"
     products="gecko"
 >
-    use values::specified::OverflowClipBox;
+    use crate::values::specified::OverflowClipBox;
     pub fn parse_value<'i, 't>(
         _: &ParserContext,
         input: &mut Parser<'i, 't>,
@@ -130,11 +130,11 @@ macro_rules! try_parse_one {
                                     transition-timing-function
                                     transition-delay"
                     spec="https://drafts.csswg.org/css-transitions/#propdef-transition">
-    use parser::Parse;
+    use crate::parser::Parse;
     % for prop in "delay duration property timing_function".split():
-    use properties::longhands::transition_${prop};
+    use crate::properties::longhands::transition_${prop};
     % endfor
-    use values::specified::TransitionProperty;
+    use crate::values::specified::TransitionProperty;
 
     pub fn parse_value<'i, 't>(
         context: &ParserContext,
@@ -282,7 +282,7 @@ macro_rules! try_parse_one {
                  direction fill_mode play_state".split()
     %>
     % for prop in props:
-    use properties::longhands::animation_${prop};
+    use crate::properties::longhands::animation_${prop};
     % endfor
 
     pub fn parse_value<'i, 't>(
@@ -391,7 +391,7 @@ macro_rules! try_parse_one {
                     gecko_pref="layout.css.scroll-snap.enabled"
                     sub_properties="scroll-snap-type-x scroll-snap-type-y"
                     spec="https://drafts.csswg.org/css-scroll-snap/#propdef-scroll-snap-type">
-    use properties::longhands::scroll_snap_type_x;
+    use crate::properties::longhands::scroll_snap_type_x;
 
     pub fn parse_value<'i, 't>(
         context: &ParserContext,
@@ -425,7 +425,7 @@ macro_rules! try_parse_one {
         _: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Longhands, ParseError<'i>> {
-        use values::specified::OverscrollBehavior;
+        use crate::values::specified::OverscrollBehavior;
         let behavior_x = OverscrollBehavior::parse(input)?;
         let behavior_y = input.try(OverscrollBehavior::parse).unwrap_or(behavior_x);
         Ok(expanded! {

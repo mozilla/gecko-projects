@@ -12,25 +12,29 @@ describe("asrouter", () => {
     store = createStore(combineReducers(reducers));
     sandbox.spy(store, "subscribe");
   });
-  it("should initialize asrouter once if asrouterExperimentEnabled is true", () => {
+  afterEach(() => {
+    sandbox.restore();
+  });
+  it("should initialize asrouter once if ASRouter.initialized is true", () => {
     ({asrouterContent} = enableASRouterContent(store, {
       init: sandbox.stub(),
-      uninit: sandbox.stub(),
-      initialized: false
+      initialized: false,
     }));
-    store.dispatch({type: at.PREF_CHANGED, data: {name: "asrouterExperimentEnabled", value: true}});
+    store.dispatch({type: at.AS_ROUTER_INITIALIZED, data: {}});
+    asrouterContent.initialized = true;
+
+    // Dispatch another irrelevant event to make sure we don't initialize twice.
+    store.dispatch({type: at.PREF_CHANGED, data: {name: "foo", value: "bar"}});
 
     assert.calledOnce(asrouterContent.init);
   });
-  it("should uninitialize asrouter if asrouterExperimentEnabled pref is turned off", () => {
+  it("should do nothing if ASRouter is not initialized", () => {
+    const addStub = sandbox.stub(global.document.body.classList, "add");
     ({asrouterContent} = enableASRouterContent(store, {
       init: sandbox.stub(),
-      uninit: sandbox.stub(),
-      initialized: true
+      initialized: false,
     }));
-    store.dispatch({type: at.PREF_CHANGED, data: {name: "asrouterExperimentEnabled", value: true}});
-
-    store.dispatch({type: at.PREF_CHANGED, data: {name: "asrouterExperimentEnabled", value: false}});
-    assert.calledOnce(asrouterContent.uninit);
+    store.dispatch({type: at.INIT});
+    assert.notCalled(addStub);
   });
 });

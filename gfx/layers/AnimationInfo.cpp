@@ -5,17 +5,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "AnimationInfo.h"
+#include "mozilla/LayerAnimationInfo.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/layers/AnimationHelper.h"
 #include "mozilla/dom/Animation.h"
+#include "nsIContent.h"
+#include "PuppetWidget.h"
 
 namespace mozilla {
 namespace layers {
 
-AnimationInfo::AnimationInfo(LayerManager* aManager) :
-  mManager(aManager),
+AnimationInfo::AnimationInfo() :
   mCompositorAnimationsId(0),
-  mAnimationGeneration(0),
   mMutated(false)
 {
 }
@@ -173,7 +174,7 @@ AnimationInfo::GetGenerationFromFrame(nsIFrame* aFrame,
   layers::Layer* layer =
     FrameLayerBuilder::GetDedicatedLayer(aFrame, aDisplayItemKey);
   if (layer) {
-    return Some(layer->GetAnimationInfo().GetAnimationGeneration());
+    return layer->GetAnimationInfo().GetAnimationGeneration();
   }
 
   // In case of continuation, KeyframeEffectReadOnly uses its first frame,
@@ -185,10 +186,69 @@ AnimationInfo::GetGenerationFromFrame(nsIFrame* aFrame,
   RefPtr<WebRenderAnimationData> animationData =
       GetWebRenderUserData<WebRenderAnimationData>(aFrame, (uint32_t)aDisplayItemKey);
   if (animationData) {
-    return Some(animationData->GetAnimationInfo().GetAnimationGeneration());
+    return animationData->GetAnimationInfo().GetAnimationGeneration();
   }
 
   return Nothing();
+}
+
+/* static */ void
+AnimationInfo::EnumerateGenerationOnFrame(
+  const nsIFrame* aFrame,
+  const nsIContent* aContent,
+  const CompositorAnimatableDisplayItemTypes& aDisplayItemTypes,
+  const AnimationGenerationCallback& aCallback)
+{
+  if (XRE_IsContentProcess()) {
+    if (nsIWidget* widget = nsContentUtils::WidgetForContent(aContent)) {
+      // In case of child processes, we might not have yet created the layer
+      // manager.  That means there is no animation generation we have, thus
+      // we call the callback function with |Nothing()| for the generation.
+      //
+      // Note that we need to use nsContentUtils::WidgetForContent() instead of
+      // TabChild::GetFrom(aFrame->PresShell())->WebWidget() because in the case
+      // of child popup content PuppetWidget::mTabChild is the same as the
+      // parent's one, which means mTabChild->IsLayersConnected() check in
+      // PuppetWidget::GetLayerManager queries the parent state, it results the
+      // assertion in the function failure.
+      if (widget->GetOwningTabChild() &&
+          !static_cast<widget::PuppetWidget*>(widget)->HasLayerManager()) {
+        for (auto displayItem : LayerAnimationInfo::sDisplayItemTypes) {
+          aCallback(Nothing(), displayItem);
+        }
+        return;
+      }
+    }
+  }
+
+  RefPtr<LayerManager> layerManager =
+    nsContentUtils::LayerManagerForContent(aContent);
+
+  if (layerManager &&
+      layerManager->GetBackendType() == layers::LayersBackend::LAYERS_WR) {
+    // In case of continuation, nsDisplayItem uses its last continuation, so we
+    // have to use the last continuation frame here.
+    if (nsLayoutUtils::IsFirstContinuationOrIBSplitSibling(aFrame)) {
+      aFrame = nsLayoutUtils::LastContinuationOrIBSplitSibling(aFrame);
+    }
+
+    for (auto displayItem : LayerAnimationInfo::sDisplayItemTypes) {
+      RefPtr<WebRenderAnimationData> animationData =
+        GetWebRenderUserData<WebRenderAnimationData>(aFrame,
+                                                     (uint32_t)displayItem);
+      Maybe<uint64_t> generation;
+      if (animationData) {
+        generation = animationData->GetAnimationInfo().GetAnimationGeneration();
+      }
+      aCallback(generation, displayItem);
+    }
+    return;
+  }
+
+  FrameLayerBuilder::EnumerateGenerationForDedicatedLayers(
+    aFrame,
+    LayerAnimationInfo::sDisplayItemTypes,
+    aCallback);
 }
 
 } // namespace layers

@@ -66,11 +66,14 @@ public:
   ~ClipManager();
 
   void PushOverrideForASR(const ActiveScrolledRoot* aASR,
-                          const Maybe<wr::WrClipId>& aClipId);
+                          const wr::WrClipId& aClipId);
   void PopOverrideForASR(const ActiveScrolledRoot* aASR);
 
 private:
   Maybe<wr::WrClipId> ClipIdAfterOverride(const Maybe<wr::WrClipId>& aClipId);
+
+  Maybe<wr::WrClipId>
+  GetScrollLayer(const ActiveScrolledRoot* aASR);
 
   Maybe<wr::WrClipId>
   DefineScrollLayers(const ActiveScrolledRoot* aASR,
@@ -116,7 +119,7 @@ private:
   // be multiple different "Y" clips (in case of nested cache overrides), which
   // is why we need a stack.
   std::unordered_map<wr::WrClipId,
-                     std::stack<Maybe<wr::WrClipId>>,
+                     std::stack<wr::WrClipId>,
                      wr::WrClipId::HashFn> mASROverride;
 
   // This holds some clip state for a single nsDisplayItem

@@ -60,6 +60,7 @@
 #include "jit/shared/Lowering-shared-inl.h"
 #include "vm/Debugger-inl.h"
 #include "vm/EnvironmentObject-inl.h"
+#include "vm/GeckoProfiler-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/Realm-inl.h"
@@ -178,6 +179,7 @@ JitRuntime::JitRuntime()
     invalidatorOffset_(0),
     lazyLinkStubOffset_(0),
     interpreterStubOffset_(0),
+    doubleToInt32ValueStubOffset_(0),
     debugTrapHandler_(nullptr),
     baselineDebugModeOSRHandler_(nullptr),
     trampolineCode_(nullptr),
@@ -300,6 +302,9 @@ JitRuntime::initialize(JSContext* cx)
 
     JitSpew(JitSpew_Codegen, "# Emitting interpreter stub");
     generateInterpreterStub(masm);
+
+    JitSpew(JitSpew_Codegen, "# Emitting double-to-int32-value stub");
+    generateDoubleToInt32ValueStub(masm);
 
     JitSpew(JitSpew_Codegen, "# Emitting VM function wrappers");
     for (VMFunction* fun = VMFunction::functions; fun; fun = fun->next) {
@@ -1502,8 +1507,7 @@ OptimizeMIR(MIRGenerator* mir)
         // LICM can hoist instructions from conditional branches and trigger
         // repeated bailouts. Disable it if this script is known to bailout
         // frequently.
-        JSScript* script = mir->info().script();
-        if (!script || !script->hadFrequentBailouts()) {
+        if (!mir->info().hadFrequentBailouts()) {
             if (!LICM(mir, graph)) {
                 return false;
             }
@@ -2374,6 +2378,7 @@ Compile(JSContext* cx, HandleScript script, BaselineFrame* osrFrame, jsbytecode*
     MOZ_ASSERT(jit::IsIonEnabled(cx));
     MOZ_ASSERT(jit::IsBaselineEnabled(cx));
     MOZ_ASSERT_IF(osrPc != nullptr, LoopEntryCanIonOsr(osrPc));
+    AutoGeckoProfilerEntry pseudoFrame(cx, "Ion script compilation");
 
     if (!script->hasBaselineScript()) {
         return Method_Skipped;
@@ -2436,6 +2441,7 @@ Compile(JSContext* cx, HandleScript script, BaselineFrame* osrFrame, jsbytecode*
 
     AbortReason reason = IonCompile(cx, script, osrFrame, osrPc, recompile, optimizationLevel);
     if (reason == AbortReason::Error) {
+        MOZ_ASSERT(cx->isExceptionPending());
         return Method_Error;
     }
 

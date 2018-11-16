@@ -26,7 +26,7 @@
 
 #include "mediapacket.h"
 #include "dtlsidentity.h"
-#include "nricectxhandler.h"
+#include "nricectx.h"
 #include "nricemediastream.h"
 #include "transportflow.h"
 #include "transportlayer.h"
@@ -443,8 +443,8 @@ class TransportTestPeer : public sigslot::has_slots<> {
         lossy_(new TransportLayerLossy()),
         dtls_(new TransportLayerDtls()),
         identity_(DtlsIdentity::Generate()),
-        ice_ctx_(NrIceCtxHandler::Create(name)),
-        streams_(), candidates_(),
+        ice_ctx_(NrIceCtx::Create(name)),
+        streams_(),
         peer_(nullptr),
         gathering_complete_(false),
         enabled_cipersuites_(),
@@ -454,7 +454,7 @@ class TransportTestPeer : public sigslot::has_slots<> {
     UniquePtr<NrIceStunServer> server(NrIceStunServer::Create(
         std::string((char *)"stun.services.mozilla.com"), 3478));
     stun_servers.push_back(*server);
-    EXPECT_TRUE(NS_SUCCEEDED(ice_ctx_->ctx()->SetStunServers(stun_servers)));
+    EXPECT_TRUE(NS_SUCCEEDED(ice_ctx_->SetStunServers(stun_servers)));
 
     dtls_->SetIdentity(identity_);
     dtls_->SetRole(offerer_ ?
@@ -482,6 +482,7 @@ class TransportTestPeer : public sigslot::has_slots<> {
       loopback_->Disconnect();
       flow_ = nullptr;
     }
+    ice_ctx_->Destroy();
     ice_ctx_ = nullptr;
     streams_.clear();
   }
@@ -535,13 +536,7 @@ class TransportTestPeer : public sigslot::has_slots<> {
   }
 
   void SetupSrtp() {
-    // this mimics the setup we do elsewhere
-    std::vector<uint16_t> srtp_ciphers;
-    srtp_ciphers.push_back(kDtlsSrtpAeadAes256Gcm);
-    srtp_ciphers.push_back(kDtlsSrtpAeadAes128Gcm);
-    srtp_ciphers.push_back(kDtlsSrtpAes128CmHmacSha1_80);
-    srtp_ciphers.push_back(kDtlsSrtpAes128CmHmacSha1_32);
-
+    std::vector<uint16_t> srtp_ciphers = TransportLayerDtls::GetDefaultSrtpCiphers();
     SetSrtpCiphers(srtp_ciphers);
  }
 
@@ -610,7 +605,7 @@ class TransportTestPeer : public sigslot::has_slots<> {
     nsresult res;
 
     // Attach our slots
-    ice_ctx_->ctx()->SignalGatheringStateChange.
+    ice_ctx_->SignalGatheringStateChange.
         connect(this, &TransportTestPeer::GatheringStateChange);
 
     char name[100];
@@ -618,11 +613,10 @@ class TransportTestPeer : public sigslot::has_slots<> {
              (int)streams_.size());
 
     // Create the media stream
-    RefPtr<NrIceMediaStream> stream =
-        ice_ctx_->CreateStream(static_cast<char *>(name), 1);
+    RefPtr<NrIceMediaStream> stream = ice_ctx_->CreateStream(name, name, 1);
 
     ASSERT_TRUE(stream != nullptr);
-    ice_ctx_->ctx()->SetStream(name, stream);
+    stream->SetIceCredentials("ufrag", "pass");
     streams_.push_back(stream);
 
     // Listen for candidates
@@ -646,7 +640,7 @@ class TransportTestPeer : public sigslot::has_slots<> {
     // Start gathering
     test_utils_->sts_target()->Dispatch(
         WrapRunnableRet(&res,
-                        ice_ctx_->ctx(),
+                        ice_ctx_,
                         &NrIceCtx::StartGathering,
                         false,
                         false),
@@ -665,7 +659,6 @@ class TransportTestPeer : public sigslot::has_slots<> {
   // New candidate
   void GotCandidate(NrIceMediaStream *stream, const std::string &candidate) {
     std::cerr << "Got candidate " << candidate << std::endl;
-    candidates_[stream->name()].push_back(candidate);
   }
 
   void GatheringStateChange(NrIceCtx* ctx,
@@ -689,23 +682,23 @@ class TransportTestPeer : public sigslot::has_slots<> {
 
     // First send attributes
     test_utils_->sts_target()->Dispatch(
-      WrapRunnableRet(&res, peer_->ice_ctx_->ctx(),
+      WrapRunnableRet(&res, peer_->ice_ctx_,
                       &NrIceCtx::ParseGlobalAttributes,
-                      ice_ctx_->ctx()->GetGlobalAttributes()),
+                      ice_ctx_->GetGlobalAttributes()),
       NS_DISPATCH_SYNC);
     ASSERT_TRUE(NS_SUCCEEDED(res));
 
     for (size_t i=0; i<streams_.size(); ++i) {
       test_utils_->sts_target()->Dispatch(
-        WrapRunnableRet(&res, peer_->streams_[i], &NrIceMediaStream::ParseAttributes,
-                        candidates_[streams_[i]->name()]), NS_DISPATCH_SYNC);
+        WrapRunnableRet(&res, peer_->streams_[i], &NrIceMediaStream::ConnectToPeer,
+                        "ufrag", "pass", streams_[i]->GetAttributes()), NS_DISPATCH_SYNC);
 
       ASSERT_TRUE(NS_SUCCEEDED(res));
     }
 
     // Start checks on the other peer.
     test_utils_->sts_target()->Dispatch(
-      WrapRunnableRet(&res, peer_->ice_ctx_->ctx(), &NrIceCtx::StartChecks,
+      WrapRunnableRet(&res, peer_->ice_ctx_, &NrIceCtx::StartChecks,
                       offerer_),
       NS_DISPATCH_SYNC);
     ASSERT_TRUE(NS_SUCCEEDED(res));
@@ -831,9 +824,8 @@ class TransportTestPeer : public sigslot::has_slots<> {
   TransportLayerDtls *dtls_;
   TransportLayerIce *ice_;
   RefPtr<DtlsIdentity> identity_;
-  RefPtr<NrIceCtxHandler> ice_ctx_;
+  RefPtr<NrIceCtx> ice_ctx_;
   std::vector<RefPtr<NrIceMediaStream> > streams_;
-  std::map<std::string, std::vector<std::string> > candidates_;
   TransportTestPeer *peer_;
   bool gathering_complete_;
   unsigned char fingerprint_[TransportLayerDtls::kMaxDigestLength];
@@ -983,7 +975,6 @@ class TransportTest : public MtransportTest {
   nsCOMPtr<nsIEventTarget> target_;
 };
 
-
 TEST_F(TransportTest, TestNoDtlsVerificationSettings) {
   ConnectSocketExpectFail();
 }
@@ -1018,8 +1009,8 @@ TEST_F(TransportTest, TestConnectSrtp) {
 
   ASSERT_EQ(TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, p1_->cipherSuite());
 
-  // SRTP is on
-  ASSERT_EQ(kDtlsSrtpAeadAes256Gcm, p1_->srtpCipher());
+  // SRTP is on with default value
+  ASSERT_EQ(kDtlsSrtpAeadAes128Gcm, p1_->srtpCipher());
 }
 
 
@@ -1411,20 +1402,29 @@ TEST_F(TransportTest, OnlyClientSendsSrtpXtn) {
                            TransportLayer::TS_ERROR);
 }
 
-TEST_F(TransportTest, TestSrtpFallback) {
-  std::vector<uint16_t> setA;
-  setA.push_back(kDtlsSrtpAeadAes256Gcm);
-  setA.push_back(kDtlsSrtpAes128CmHmacSha1_80);
-  std::vector<uint16_t> setB;
-  setB.push_back(kDtlsSrtpAes128CmHmacSha1_80);
+class TransportSrtpParameterTest : public TransportTest,
+                                   public ::testing::WithParamInterface<uint16_t> {
+};
 
-  p1_->SetSrtpCiphers(setA);
+INSTANTIATE_TEST_CASE_P(SrtpParamInit,
+                        TransportSrtpParameterTest,
+                        ::testing::ValuesIn(TransportLayerDtls::GetDefaultSrtpCiphers()));
+
+TEST_P(TransportSrtpParameterTest, TestSrtpCiphersMismatchCombinations) {
+  uint16_t cipher = GetParam();
+  std::cerr << "Checking cipher: " << cipher << std::endl;
+
+  p1_->SetupSrtp();
+
+  std::vector<uint16_t> setB;
+  setB.push_back(cipher);
+
   p2_->SetSrtpCiphers(setB);
   SetDtlsPeer();
   ConnectSocket();
 
-  ASSERT_EQ(kDtlsSrtpAes128CmHmacSha1_80, p1_->srtpCipher());
-  ASSERT_EQ(kDtlsSrtpAes128CmHmacSha1_80, p1_->srtpCipher());
+  ASSERT_EQ(cipher, p1_->srtpCipher());
+  ASSERT_EQ(cipher, p2_->srtpCipher());
 }
 
 // NSS doesn't support DHE suites on the server end.

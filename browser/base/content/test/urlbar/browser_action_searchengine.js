@@ -5,13 +5,13 @@ add_task(async function() {
   Services.search.addEngineWithDetails("MozSearch", "", "", "", "GET",
                                        "http://example.com/?q={searchTerms}");
   let engine = Services.search.getEngineByName("MozSearch");
-  let originalEngine = Services.search.currentEngine;
-  Services.search.currentEngine = engine;
+  let originalEngine = Services.search.defaultEngine;
+  Services.search.defaultEngine = engine;
 
   let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "about:mozilla");
 
   registerCleanupFunction(async function() {
-    Services.search.currentEngine = originalEngine;
+    Services.search.defaultEngine = originalEngine;
     Services.search.removeEngine(engine);
     try {
       BrowserTestUtils.removeTab(tab);
@@ -22,9 +22,18 @@ add_task(async function() {
   await promiseAutocompleteResultPopup("open a search");
   let result = await waitForAutocompleteResultAt(0);
   isnot(result, null, "Should have a result");
-  is(result.getAttribute("url"),
-     `moz-action:searchengine,{"engineName":"MozSearch","input":"open%20a%20search","searchQuery":"open%20a%20search"}`,
-     "Result should be a moz-action: for the correct search engine");
+  Assert.deepEqual(
+    PlacesUtils.parseActionUrl(result.getAttribute("url")),
+    {
+      type: "searchengine",
+      params: {
+        engineName: "MozSearch",
+        input: "open a search",
+        searchQuery: "open a search",
+      },
+    },
+    "Result should be a moz-action: for the correct search engine"
+  );
   is(result.hasAttribute("image"), false, "Result shouldn't have an image attribute");
 
   let tabPromise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);

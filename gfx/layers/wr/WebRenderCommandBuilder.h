@@ -41,6 +41,7 @@ public:
   , mBuilderDumpIndex(0)
   , mDumpIndent(0)
   , mDoGrouping(false)
+  , mContainsSVGGroup(false)
   {}
 
   void Destroy();
@@ -58,7 +59,7 @@ public:
                               const nsTArray<wr::WrFilterOp>& aFilters);
 
   void PushOverrideForASR(const ActiveScrolledRoot* aASR,
-                          const Maybe<wr::WrClipId>& aClipId);
+                          const wr::WrClipId& aClipId);
   void PopOverrideForASR(const ActiveScrolledRoot* aASR);
 
   Maybe<wr::ImageKey> CreateImageKey(nsDisplayItem* aItem,
@@ -117,8 +118,10 @@ public:
   void RemoveUnusedAndResetWebRenderUserData();
   void ClearCachedResources();
 
-  bool ShouldDumpDisplayList();
+  bool ShouldDumpDisplayList(nsDisplayListBuilder* aBuilder);
   wr::usize GetBuilderDumpIndex() { return mBuilderDumpIndex; }
+
+  bool GetContainsSVGGroup() { return mContainsSVGGroup; }
 
   // Those are data that we kept between transactions. We used to cache some
   // data in the layer. But in layers free mode, we don't have layer which
@@ -190,10 +193,19 @@ private:
 
   wr::usize mBuilderDumpIndex;
   wr::usize mDumpIndent;
+
+  // When zooming is enabled, this stores the animation property that we use
+  // to manipulate the zoom from APZ.
+  Maybe<wr::WrAnimationProperty> mZoomProp;
+
 public:
   // Whether consecutive inactive display items should be grouped into one
   // blob image.
   bool mDoGrouping;
+
+  // True if the most recently build display list contained an svg that
+  // we did grouping for.
+  bool mContainsSVGGroup;
 };
 
 } // namespace layers

@@ -12,6 +12,7 @@
 #include "nsDirectoryService.h"
 #include "nsDataHashtable.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/EnumeratedRange.h"
 #include "mozilla/Services.h"
 #include "nsIObserverService.h"
@@ -111,6 +112,7 @@ using google_breakpad::MinidumpDescriptor;
 #if defined(MOZ_WIDGET_ANDROID)
 using google_breakpad::auto_wasteful_vector;
 using google_breakpad::FileID;
+using google_breakpad::kDefaultBuildIdSize;
 using google_breakpad::PageAllocator;
 #endif
 using namespace mozilla;
@@ -118,9 +120,7 @@ using mozilla::ipc::CrashReporterClient;
 
 // From toolkit/library/rust/shared/lib.rs
 extern "C" {
-  void install_rust_panic_hook();
   void install_rust_oom_hook();
-  bool get_rust_panic_reason(char** reason, size_t* length);
 }
 
 
@@ -410,12 +410,27 @@ typedef struct {
   size_t      length;
   size_t      file_offset;
 } mapping_info;
-static std::vector<mapping_info> library_mappings;
-typedef std::map<uint32_t,google_breakpad::MappingList> MappingMap;
-#endif
+static std::vector<mapping_info> gLibraryMappings;
+
+static void
+AddMappingInfoToExceptionHandler(const mapping_info& aInfo)
+{
+  PageAllocator allocator;
+  auto_wasteful_vector<uint8_t, kDefaultBuildIdSize> guid(&allocator);
+  FileID::ElfFileIdentifierFromMappedFile(
+    reinterpret_cast<void const *>(aInfo.start_address), guid);
+  gExceptionHandler->AddMappingInfo(aInfo.name, guid, aInfo.start_address,
+                                    aInfo.length, aInfo.file_offset);
 }
 
-namespace CrashReporter {
+static void
+AddAndroidMappingInfo() {
+  for (auto info : gLibraryMappings) {
+    AddMappingInfoToExceptionHandler(info);
+  }
+}
+
+#endif // defined(MOZ_WIDGET_ANDROID)
 
 #ifdef XP_LINUX
 static inline void
@@ -886,6 +901,38 @@ LaunchCrashHandlerService(XP_CHAR* aProgramPath, XP_CHAR* aMinidumpPath,
 
 #endif
 
+void
+WriteEscapedMozCrashReason(PlatformWriter& aWriter)
+{
+  const char *reason;
+  size_t len;
+
+  if (gMozCrashReason != nullptr) {
+    reason = gMozCrashReason;
+    len = strlen(reason);
+  } else {
+    return; // No crash reason, bail out
+  }
+
+  WriteString(aWriter, AnnotationToString(Annotation::MozCrashReason));
+  WriteLiteral(aWriter, "=");
+
+  // The crash reason might be non-null-terminated in the case of a rust panic,
+  // it has also not being escaped so escape it one character at a time and
+  // write out the resulting string.
+  for (size_t i = 0; i < len; i++) {
+    if (reason[i] == '\\') {
+      WriteLiteral(aWriter, "\\\\");
+    } else if (reason[i] == '\n') {
+      WriteLiteral(aWriter, "\\n");
+    } else {
+      aWriter.WriteBuffer(reason + i, 1);
+    }
+  }
+
+  WriteLiteral(aWriter, "\n");
+}
+
 // Callback invoked from breakpad's exception handler, this writes out the
 // last annotations after a crash occurs and launches the crash reporter client.
 //
@@ -1087,18 +1134,8 @@ MinidumpCallback(
     WriteGlobalMemoryStatus(&apiData, &eventFile);
 #endif // XP_WIN
 
-    char* rust_panic_reason;
-    size_t rust_panic_len;
-    if (get_rust_panic_reason(&rust_panic_reason, &rust_panic_len)) {
-      // rust_panic_reason is not null-terminated.
-      WriteAnnotation(apiData, Annotation::MozCrashReason, rust_panic_reason,
-                      rust_panic_len);
-      WriteAnnotation(eventFile, Annotation::MozCrashReason, rust_panic_reason,
-                      rust_panic_len);
-    } else if (gMozCrashReason) {
-      WriteAnnotation(apiData, Annotation::MozCrashReason, gMozCrashReason);
-      WriteAnnotation(eventFile, Annotation::MozCrashReason, gMozCrashReason);
-    }
+    WriteEscapedMozCrashReason(apiData);
+    WriteEscapedMozCrashReason(eventFile);
 
     if (oomAllocationSizeBuffer[0]) {
       WriteAnnotation(apiData, Annotation::OOMAllocationSize,
@@ -1292,15 +1329,7 @@ PrepareChildExceptionTimeAnnotations(void* context)
                     oomAllocationSizeBuffer);
   }
 
-  char* rust_panic_reason;
-  size_t rust_panic_len;
-  if (get_rust_panic_reason(&rust_panic_reason, &rust_panic_len)) {
-    // rust_panic_reason is not null-terminated.
-    WriteAnnotation(apiData, Annotation::MozCrashReason, rust_panic_reason,
-                    rust_panic_len);
-  } else if (gMozCrashReason) {
-    WriteAnnotation(apiData, Annotation::MozCrashReason, gMozCrashReason);
-  }
+  WriteEscapedMozCrashReason(apiData);
 
   std::function<void(const char*)> getThreadAnnotationCB =
     [&] (const char * aValue) -> void {
@@ -1328,6 +1357,8 @@ FreeBreakpadVM()
     VirtualFree(gBreakpadReservedVM, 0, MEM_RELEASE);
   }
 }
+
+#if defined(XP_WIN)
 
 /**
  * Filters out floating point exceptions which are handled by nsSigHandlers.cpp
@@ -1379,6 +1410,8 @@ ChildFPEFilter(void* context, EXCEPTION_POINTERS* exinfo,
   return result;
 }
 
+#endif // defined(XP_WIN)
+
 static MINIDUMP_TYPE
 GetMinidumpType()
 {
@@ -1428,6 +1461,8 @@ static bool ShouldReport()
   return true;
 }
 
+#if !defined(XP_WIN)
+
 static bool
 Filter(void* context)
 {
@@ -1447,6 +1482,8 @@ ChildFilter(void* context)
   }
   return result;
 }
+
+#endif // !defined(XP_WIN)
 
 static void
 TerminateHandler()
@@ -1585,6 +1622,9 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
 
 #ifdef XP_WIN32
   ReserveBreakpadVM();
+
+  // Pre-load psapi.dll to prevent it from being loaded during exception handling.
+  ::LoadLibraryW(L"psapi.dll");
 #endif // XP_WIN32
 
 #ifdef MOZ_WIDGET_ANDROID
@@ -1659,9 +1699,10 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
   // protect the crash reporter from being unloaded
   gBlockUnhandledExceptionFilter = true;
   gKernel32Intercept.Init("kernel32.dll");
-  bool ok = stub_SetUnhandledExceptionFilter.Set(gKernel32Intercept,
-                                                 "SetUnhandledExceptionFilter",
-                                                 &patched_SetUnhandledExceptionFilter);
+  DebugOnly<bool> ok =
+    stub_SetUnhandledExceptionFilter.Set(gKernel32Intercept,
+                                         "SetUnhandledExceptionFilter",
+                                         &patched_SetUnhandledExceptionFilter);
 
 #ifdef DEBUG
   if (!ok)
@@ -1688,24 +1729,12 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
 #endif
 
 #if defined(MOZ_WIDGET_ANDROID)
-  for (unsigned int i = 0; i < library_mappings.size(); i++) {
-    PageAllocator allocator;
-    auto_wasteful_vector<uint8_t, sizeof(MDGUID)> guid(&allocator);
-    FileID::ElfFileIdentifierFromMappedFile(
-      (void const *)library_mappings[i].start_address, guid);
-    gExceptionHandler->AddMappingInfo(library_mappings[i].name,
-                                      guid.data(),
-                                      library_mappings[i].start_address,
-                                      library_mappings[i].length,
-                                      library_mappings[i].file_offset);
-  }
-#endif
+  AddAndroidMappingInfo();
+#endif // defined(MOZ_WIDGET_ANDROID)
 
   mozalloc_set_oom_abort_handler(AnnotateOOMAllocationSize);
 
   oldTerminateHandler = std::set_terminate(&TerminateHandler);
-
-  install_rust_panic_hook();
 
   install_rust_oom_hook();
 
@@ -3000,6 +3029,11 @@ WriteExtraData(nsIFile* extraFile,
     WriteAnnotation(fd, key, value);
   }
 
+  if (content && currentSessionId) {
+    WriteAnnotation(fd, Annotation::TelemetrySessionId,
+                    nsDependentCString(currentSessionId));
+  }
+
   if (writeCrashTime) {
     time_t crashTime = time(nullptr);
     char crashTimeString[32];
@@ -3043,7 +3077,7 @@ IsDataEscaped(char* aData)
   }
   char* pos = aData;
   while ((pos = strchr(pos, '\\'))) {
-    if (*(pos + 1) != '\\') {
+    if (*(pos + 1) != '\\' && *(pos + 1) != 'n') {
       return false;
     }
     // Add 2 to account for the second pos
@@ -3566,8 +3600,6 @@ SetRemoteExceptionHandler(const nsACString& crashPipe,
 
   oldTerminateHandler = std::set_terminate(&TerminateHandler);
 
-  install_rust_panic_hook();
-
   // we either do remote or nothing, no fallback to regular crash reporting
   return gExceptionHandler->IsOutOfProcess();
 }
@@ -3614,8 +3646,6 @@ SetRemoteExceptionHandler()
 
   oldTerminateHandler = std::set_terminate(&TerminateHandler);
 
-  install_rust_panic_hook();
-
   // we either do remote or nothing, no fallback to regular crash reporting
   return gExceptionHandler->IsOutOfProcess();
 }
@@ -3643,8 +3673,6 @@ SetRemoteExceptionHandler(const nsACString& crashPipe)
   mozalloc_set_oom_abort_handler(AnnotateOOMAllocationSize);
 
   oldTerminateHandler = std::set_terminate(&TerminateHandler);
-
-  install_rust_panic_hook();
 
   // we either do remote or nothing, no fallback to regular crash reporting
   return gExceptionHandler->IsOutOfProcess();
@@ -3992,23 +4020,15 @@ void AddLibraryMapping(const char* library_name,
                        size_t      mapping_length,
                        size_t      file_offset)
 {
+  mapping_info info;
   if (!gExceptionHandler) {
-    mapping_info info;
     info.name = library_name;
     info.start_address = start_address;
     info.length = mapping_length;
     info.file_offset = file_offset;
-    library_mappings.push_back(info);
-  }
-  else {
-    PageAllocator allocator;
-    auto_wasteful_vector<uint8_t, sizeof(MDGUID)> guid(&allocator);
-    FileID::ElfFileIdentifierFromMappedFile((void const *)start_address, guid);
-    gExceptionHandler->AddMappingInfo(library_name,
-                                      guid.data(),
-                                      start_address,
-                                      mapping_length,
-                                      file_offset);
+    gLibraryMappings.push_back(info);
+  } else {
+    AddMappingInfoToExceptionHandler(info);
   }
 }
 #endif

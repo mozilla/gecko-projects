@@ -29,7 +29,7 @@ var Translation = {
   _defaultTargetLanguage: "",
   get defaultTargetLanguage() {
     if (!this._defaultTargetLanguage) {
-      this._defaultTargetLanguage = Services.locale.getAppLocaleAsLangTag()
+      this._defaultTargetLanguage = Services.locale.appLocaleAsLangTag
                                       .split("-")[0];
     }
     return this._defaultTargetLanguage;
@@ -228,7 +228,8 @@ TranslationUI.prototype = {
   showTranslationInfoBar() {
     let notificationBox = this.notificationBox;
     let notif = notificationBox.appendNotification("", "translation", null,
-                                                   notificationBox.PRIORITY_INFO_HIGH);
+      notificationBox.PRIORITY_INFO_HIGH, null, null,
+      "translation-notification");
     notif.init(this);
     return notif;
   },

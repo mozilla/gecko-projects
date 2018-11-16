@@ -14,7 +14,7 @@
  * C++ callers use a fast path, and never call the JSAPI or WebIDL methods of
  * this object.
  */
-[ChromeOnly, Exposed=(Window,System)]
+[ChromeOnly, Exposed=Window]
 interface MozQueryInterface {
   [Throws]
   legacycaller any (IID aIID);
@@ -25,7 +25,7 @@ interface MozQueryInterface {
  * This is exposed in all the system globals where we can expose stuff by
  * default, so should only include methods that are **thread-safe**.
  */
-[ChromeOnly, Exposed=(Window,System,Worker)]
+[ChromeOnly, Exposed=(Window,Worker)]
 namespace ChromeUtils {
   /**
    * Serialize a snapshot of the heap graph, as seen by |JS::ubi::Node| and
@@ -148,7 +148,7 @@ namespace ChromeUtils {
  * Additional ChromeUtils methods that are _not_ thread-safe, and hence not
  * exposed in workers.
  */
-[Exposed=(Window,System)]
+[Exposed=Window]
 partial namespace ChromeUtils {
   /**
    * A helper that converts OriginAttributesDictionary to a opaque suffix string.
@@ -356,6 +356,15 @@ partial namespace ChromeUtils {
   [Throws]
   Promise<sequence<IOActivityDataDictionary>> requestIOActivity();
 
+  /**
+   * Returns the BrowsingContext referred by the given id.
+   */
+  [ChromeOnly]
+  BrowsingContext? getBrowsingContext(unsigned long long id);
+
+  /**
+   * Returns all the root BrowsingContexts.
+   */
   [ChromeOnly]
   sequence<BrowsingContext> getRootBrowsingContexts();
 };

@@ -138,7 +138,9 @@ add_task(async function test_editCreditCard() {
     EventUtils.synthesizeKey("VK_RIGHT", {}, win);
     EventUtils.synthesizeKey("test", {}, win);
     win.document.querySelector("#save").click();
-  }, creditCards[0]);
+  }, {
+    record: creditCards[0],
+  });
   ok(true, "Edit credit card dialog is closed");
   creditCards = await getCreditCards();
 
@@ -168,7 +170,9 @@ add_task(async function test_editCreditCardWithMissingBillingAddress() {
     EventUtils.synthesizeKey("VK_RIGHT", {}, win);
     EventUtils.synthesizeKey("test", {}, win);
     win.document.querySelector("#save").click();
-  }, creditCards[0]);
+  }, {
+    record: creditCards[0],
+  });
   ok(true, "Edit credit card dialog is closed");
   creditCards = await getCreditCards();
 
@@ -228,7 +232,9 @@ add_task(async function test_editCardWithInvalidNetwork() {
     EventUtils.synthesizeKey("VK_RIGHT", {}, win);
     EventUtils.synthesizeKey("test", {}, win);
     win.document.querySelector("#save").click();
-  }, creditCards[0]);
+  }, {
+    record: creditCards[0],
+  });
   ok(true, "Edit credit card dialog is closed");
   creditCards = await getCreditCards();
 
@@ -240,4 +246,54 @@ add_task(async function test_editCardWithInvalidNetwork() {
 
   creditCards = await getCreditCards();
   is(creditCards.length, 0, "Credit card storage is empty");
+});
+
+add_task(async function test_editInvalidCreditCardNumber() {
+  await saveAddress(TEST_ADDRESS_4);
+  let addresses = await getAddresses();
+  let billingAddress = addresses[0];
+
+  const INVALID_CREDIT_CARD_NUMBER = "123456789";
+  const TEST_CREDIT_CARD = Object.assign({}, TEST_CREDIT_CARD_2, {
+    billingAddressGUID: billingAddress.guid,
+    guid: "invalid-number",
+    version: 2,
+    "cc-number": INVALID_CREDIT_CARD_NUMBER,
+  });
+
+  // Directly use FormAutofillStorage so we can set
+  // sourceSync: true, since saveCreditCard uses FormAutofillParent
+  // which doesn't expose this option.
+  let {formAutofillStorage} = ChromeUtils.import("resource://formautofill/FormAutofillStorage.jsm", {});
+  await formAutofillStorage.initialize();
+  // Use `sourceSync: true` to bypass field normalization which will
+  // fail due to the invalid credit card number.
+  await formAutofillStorage.creditCards.add(TEST_CREDIT_CARD, {sourceSync: true});
+
+  let creditCards = await getCreditCards();
+  is(creditCards.length, 1, "only one credit card is in storage");
+  is(creditCards[0]["cc-number"], "*********", "invalid credit card number stored");
+  await testDialog(EDIT_CREDIT_CARD_DIALOG_URL, (win) => {
+    is(win.document.querySelector("#cc-number").value,
+       INVALID_CREDIT_CARD_NUMBER,
+       "cc-number field should be showing invalid credit card number");
+    ok(win.document.querySelector("#save").disabled,
+       "save button should be disabled due to invalid credit card number");
+    win.document.querySelector("#cancel").click();
+  }, {
+    record: creditCards[0],
+    skipDecryption: true,
+  });
+  ok(true, "Edit credit card dialog is closed");
+  creditCards = await getCreditCards();
+
+  is(creditCards.length, 1, "only one credit card is in storage");
+  is(creditCards[0]["cc-number"], "*********", "invalid cc number still in record");
+  await removeCreditCards([creditCards[0].guid]);
+  await removeAddresses([addresses[0].guid]);
+
+  creditCards = await getCreditCards();
+  is(creditCards.length, 0, "Credit card storage is empty");
+  addresses = await getAddresses();
+  is(addresses.length, 0, "Address storage is empty");
 });
