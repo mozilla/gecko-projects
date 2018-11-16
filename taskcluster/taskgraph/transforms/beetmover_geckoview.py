@@ -108,7 +108,7 @@ def make_task_description(config, jobs):
             'scopes': [job['bucket-scope'], 'project:releng:beetmover:action:push-to-maven'],
             'dependencies': dependencies,
             'attributes': attributes,
-            'run-on-projects': ['mozilla-central'],
+            'run-on-projects': ['mozilla-central', 'birch'],
             'treeherder': treeherder,
             'shipping-phase': job.get('shipping-phase', get_phase(config)),
         }
