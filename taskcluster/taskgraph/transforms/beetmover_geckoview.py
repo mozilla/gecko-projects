@@ -14,10 +14,9 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import \
     craft_release_properties as beetmover_craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, Schema, resolve_keyed_by, optionally_keyed_by
+from taskgraph.util.schema import validate_schema, resolve_keyed_by, optionally_keyed_by
 from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
                                          generate_beetmover_compressed_upstream_artifacts,
-                                         get_phase,
                                          get_worker_type_for_scope)
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Required, Optional

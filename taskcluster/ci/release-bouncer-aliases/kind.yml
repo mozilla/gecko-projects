@@ -79,10 +79,6 @@ jobs:
                firefox-esr-latest-ssl: installer-ssl
                firefox-esr-latest: installer
                firefox-esr-msi-latest-ssl: msi
-            birch:
-               firefox-latest-ssl: installer-ssl
-               firefox-latest: installer
-               firefox-stub: stub-installer
             jamun:
                firefox-esr-latest-ssl: installer-ssl
                firefox-esr-latest: installer
