@@ -681,11 +681,12 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
 
             # Key must be artifact path, to avoid trampling duplicates, such
             # as public/build/target.apk and public/build/en-US/target.apk
-            key = "{}{}/{}".format(
+            key = os.path.join(
                 base_artifact_prefix,
                 file_config['source_path_modifier'],
                 filename,
             )
+
             paths[key] = {
                 'destinations': destinations,
             }
