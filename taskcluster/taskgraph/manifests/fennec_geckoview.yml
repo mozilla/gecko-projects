@@ -21,7 +21,7 @@ default: &default
   from:
     - build
   locale_prefix: ''
-  source_path_modifier: org/mozilla/geckoview/${artifact_id}/${major_version}.${minor_version}.${build_date}
+  source_path_modifier: ''
   description: "TODO"
   destinations:  # locale_prefix is appended
     - org/mozilla/geckoview/${artifact_id}/${major_version}.${minor_version}.${build_date}
