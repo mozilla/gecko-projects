@@ -986,11 +986,14 @@ def build_beetmover_push_to_release_payload(config, task, task_def):
         Required('paths'): [basestring],
         Required('zipExtract', default=False): bool,
     }],
+    Optional('artifact-map'): object,
 })
 def build_beetmover_maven_payload(config, task, task_def):
     build_beetmover_payload(config, task, task_def)
 
     task_def['payload']['artifact_id'] = task['worker']['release-properties']['artifact-id']
+    if task['worker'].get('artifact-map'):
+        task_def['payload']['artifactMap'] = task['worker']['artifact-map']
 
     del task_def['payload']['releaseProperties']['hashType']
     del task_def['payload']['releaseProperties']['platform']
