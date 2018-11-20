@@ -1,35 +1,71 @@
 {
-    "app-id": "org.mozilla.Firefox",
+    "app-id": "org.mozilla.firefox",
     "runtime": "org.freedesktop.Platform",
-    "runtime-version": "1.6",
+    "runtime-version": "18.08",
     "sdk": "org.freedesktop.Sdk",
+    "separate-locales": false,
+    "no-debuginfo": true,
     "command": "firefox",
-    "rename-appdata-file" : "org.mozilla.Firefox.appdata.xml",
-    "rename-icon" : "org.mozilla.Firefox",
     "finish-args": [
         /* X11 + XShm access */
         "--share=ipc", "--socket=x11",
-        /* Wayland access */
-        "--socket=wayland",
-        /* We don't want full fs access so we can read the files */
-        "--filesystem=home:rw",
         /* Needs to talk to the network: */
         "--share=network",
         /* Enable playing sound thru pulseaudio */
         "--socket=pulseaudio",
+        /* Keep user profile after application exit */
+        "--persist=.mozilla",
+        /* Allow access to Download folder */
+        "--filesystem=xdg-download:rw",
         /* Enable access to dri */
         "--device=dri",
-        /* Enable themes support */
-        "--filesystem=~/.config/dconf:ro",
-        "--env=DCONF_USER_CONFIG_DIR=.config/dconf",
+		/* dconf */
+		"--filesystem=xdg-run/dconf",
+		"--filesystem=xdg-config/dconf:ro",
+		"--talk-name=ca.desrt.dconf",
+		"--env=DCONF_USER_CONFIG_DIR=.config/dconf",
         /* Required for file reveal in file manager */
-        "--socket=session-bus"
-    ],
+        "--talk-name=org.freedesktop.FileManager1",
+        /* For geolocation purposes (to get list of nearby wifi networks) */
+        "--system-talk-name=org.freedesktop.NetworkManager",
+        /* Accessibility support */
+        "--talk-name=org.a11y.Bus",
+        /* For screenshot inhibiting */
+        "--talk-name=org.gnome.SessionManager",
+        "--talk-name=org.freedesktop.ScreenSaver",
+        /* FIXME: is this needed? */
+        "--talk-name=org.gtk.vfs.*"
+],
     "modules": [
       {
+          "name": "dbus-glib",
+          "cleanup": [ "*.la", "/bin", "/etc", "/include", "/libexec", "/share/gtk-doc", "/share/man" ],
+          "config-opts": [
+              "--disable-static",
+              "--disable-gtk-doc"
+          ],
+          "sources": [
+              {
+                  "type": "archive",
+                  "url": "https://dbus.freedesktop.org/releases/dbus-glib/dbus-glib-0.108.tar.gz",
+                  "sha256": "9f340c7e2352e9cdf113893ca77ca9075d9f8d5e81476bf2bf361099383c602c"
+              }
+          ]
+      },
+      {
           "name": "firefox",
-          "no-autogen": true,
-          "make-install-args": ["prefix=/app"],
+          "buildsystem": "simple",
+          "build-commands": [
+			  "install -d /app/lib",
+			  "cp -r firefox /app/lib",
+			  "install -D -m644 -t /app/share/appdata org.mozilla.firefox.appdata.xml",
+			  "install -D -m644 -t /app/share/applications org.mozilla.firefox.desktop",
+			  "for size in 16 32 48 64 128; do install -D -m644 firefox/browser/chrome/icons/default/default${size}.png /app/share/icons/hicolor/${size}x${size}/apps/org.mozilla.firefox.png; done",
+			  "install -D -m644 -t /app/lib/firefox/distribution/extensions langpacks/*",
+			  "install -D -m644 -t /app/lib/firefox/distribution distribution.ini",
+			  "install -D -m644 -t /app/lib/firefox/browser/defaults/preferences default-preferences.js",
+			  "install -D -m755 launch-script.sh /app/bin/firefox"
+          ],
           "sources": [
               {
                   "type": "archive",
@@ -38,29 +74,28 @@
               },
               {
                   "type": "file",
-                  "path": "Makefile",
-                  "dest": ""
+                  "path": "Makefile"
               },
               {
                   "type": "file",
-                  "path": "org.mozilla.Firefox.appdata.xml",
-                  "dest": ""
+                  "path": "org.mozilla.firefox.appdata.xml"
               },
               {
                   "type": "file",
-                  "path": "org.mozilla.Firefox.desktop",
-                  "dest": ""
+                  "path": "org.mozilla.firefox.desktop"
               },
               {
                   "type": "file",
-                  "path": "distribution.ini",
-                  "dest": ""
+                  "path": "distribution.ini"
               },
 $LANGPACKS
               {
                   "type": "file",
-                  "path": "default-preferences.js",
-                  "dest": ""
+                  "path": "default-preferences.js"
+              },
+              {
+                  "type": "file",
+                  "path": "launch-script.sh"
               }
           ]
       }

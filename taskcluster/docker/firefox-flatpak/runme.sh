@@ -3,6 +3,8 @@
 set -xe
 
 # Required env variables
+
+#test "$DATE" # YYYY-MM-DD - get it from in-tree for release date
 test "$VERSION"
 test "$BUILD_NUMBER"
 test "$CANDIDATES_DIR"
@@ -12,10 +14,12 @@ test "$L10N_CHANGESETS"
 : WORKSPACE                     "${WORKSPACE:=/home/worker/workspace}"
 : ARTIFACTS_DIR                 "${ARTIFACTS_DIR:=/home/worker/artifacts}"
 
+DATE=$(date +%Y-%m-%d)
 SCRIPT_DIRECTORY="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
 TARGET="target.flatpak"
+TARGET_TAR_GZ="target.flatpak.tar.gz"
 TARGET_FULL_PATH="$ARTIFACTS_DIR/$TARGET"
+TARGET_TAR_GZ_FULL_PATH="$ARTIFACTS_DIR/$TARGET_TAR_GZ"
 SOURCE_DEST="${WORKSPACE}/source"
 
 mkdir -p "$ARTIFACTS_DIR"
@@ -58,18 +62,22 @@ done
 export LANGPACKS
 
 # Generate flatpak manifest
-envsubst < "$SCRIPT_DIRECTORY/flatpak.json.in" > "${WORKSPACE}/org.mozilla.Firefox.json"
+envsubst '$LANGPACKS'< "$SCRIPT_DIRECTORY/flatpak.json.in" > "${WORKSPACE}/org.mozilla.firefox.json"
+envsubst < "$SCRIPT_DIRECTORY/org.mozilla.firefox.appdata.xml.in" > "${WORKSPACE}/org.mozilla.firefox.appdata.xml"
 cp -v "$SCRIPT_DIRECTORY/Makefile" "$WORKSPACE"
-cp -v "$SCRIPT_DIRECTORY/org.mozilla.Firefox.appdata.xml" "$WORKSPACE"
-cp -v "$SCRIPT_DIRECTORY/org.mozilla.Firefox.desktop" "$WORKSPACE"
+cp -v "$SCRIPT_DIRECTORY/org.mozilla.firefox.desktop" "$WORKSPACE"
 cp -v "$SCRIPT_DIRECTORY/distribution.ini" "$WORKSPACE"
 cp -v "$SCRIPT_DIRECTORY/default-preferences.js" "$WORKSPACE"
+cp -v "$SCRIPT_DIRECTORY/launch-script.sh" "$WORKSPACE"
 cd "${WORKSPACE}"
 
-flatpak-builder --install-deps-from=flathub --assumeyes --force-clean --disable-rofiles-fuse --disable-cache --repo="$WORKSPACE"/repo --verbose "$WORKSPACE"/app org.mozilla.Firefox.json
-flatpak build-bundle "$WORKSPACE"/repo org.mozilla.Firefox.flatpak org.mozilla.Firefox
+flatpak-builder --install-deps-from=flathub --assumeyes --force-clean --disable-rofiles-fuse --disable-cache --repo="$WORKSPACE"/repo --verbose "$WORKSPACE"/app org.mozilla.firefox.json
+flatpak build-bundle "$WORKSPACE"/repo org.mozilla.firefox.flatpak org.mozilla.firefox
+flatpak build-update-repo repo
+tar cvfz flatpak.tar.gz repo
 
 mv -- *.flatpak "$TARGET_FULL_PATH"
+mv -- flatpak.tar.gz "$TARGET_TAR_GZ_FULL_PATH"
 
 cd "$ARTIFACTS_DIR"
 

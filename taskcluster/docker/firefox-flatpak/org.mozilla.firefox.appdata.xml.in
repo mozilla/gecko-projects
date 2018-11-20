@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<application>
+  <id type="desktop">org.mozilla.firefox</id>
+  <launchable type="desktop-id">org.mozilla.firefox.desktop</launchable>
+  <name>Firefox</name>
+  <summary>Firefox Web Browser</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MPL-2.0</project_license>
+  <description>
+    <p>
+      Firefox is a Web browser that is smaller, faster, and in some ways more secure than other competitors. Firefox gives users a cleaner interface and faster download speeds.
+    </p>
+    <p>
+      Firefox is repack of upstream binaries to the flatpak.
+    </p>
+  </description>
+  <releases>
+	<release version="$VERSION" date="$DATE"/>
+  </releases>
+  <keywords>
+    <keyword>mozilla</keyword>
+    <keyword>internet</keyword>
+    <keyword>web</keyword>
+  </keywords>
+  <content_rating type="oars-1.1" />
+  <url type="homepage">https://www.mozilla.org/firefox/</url>
+  <url type="donation">https://donate.mozilla.org/</url>
+  <url type="bugtracker">https://www.mozilla.org/firefox/feedback/</url>
+
+  <screenshots>
+    <screenshot type="default">https://raw.githubusercontent.com/hughsie/fedora-appstream/master/screenshots-extra/firefox/a.png</screenshot>
+    <screenshot>https://raw.githubusercontent.com/hughsie/fedora-appstream/master/screenshots-extra/firefox/b.png</screenshot>
+    <screenshot>https://raw.githubusercontent.com/hughsie/fedora-appstream/master/screenshots-extra/firefox/c.png</screenshot>
+  </screenshots>
+</application>
