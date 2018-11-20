@@ -55,7 +55,7 @@ beetmover_description_schema = schema.extend({
         'project', task_description_schema['shipping-phase']
     ),
     Optional('shipping-product'): task_description_schema['shipping-product'],
-    Optional('artifact-map'): optionally_keyed_by('platform', basestring),
+    Optional('attributes'): task_description_schema['attributes'],
 })
 
 
@@ -112,6 +112,7 @@ def make_task_description(config, jobs):
         dependencies = {dependent_kind: dep_job.label}
 
         attributes = copy_attributes_from_dependent_job(dep_job)
+        attributes.update(job.get('attributes', {}))
 
         if job.get('locale'):
             attributes['locale'] = job['locale']
@@ -129,9 +130,6 @@ def make_task_description(config, jobs):
             'treeherder': treeherder,
             'shipping-phase': job['shipping-phase'],
         }
-
-        if 'artifact-map' in job:
-            task['artifact-map'] = job['artifact-map']
 
         yield task
 
@@ -179,10 +177,6 @@ def make_task_worker(config, jobs):
             config, job, **template_vars)
 
         job["worker"] = worker
-
-        # Clean up
-        if job.get('artifact-map'):
-            del job['artifact-map']
 
         yield job
 

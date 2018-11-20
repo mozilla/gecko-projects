@@ -15,4 +15,5 @@ kind-dependencies:
 
 job-template:
    shipping-phase: promote
-   artifact-map: taskcluster/taskgraph/manifests/source_files.yml
+   attributes:
+      artifact_map: taskcluster/taskgraph/manifests/source_files.yml

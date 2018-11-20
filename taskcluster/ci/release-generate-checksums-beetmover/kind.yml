@@ -13,4 +13,5 @@ kind-dependencies:
 
 job-template:
    shipping-phase: promote
-   artifact-map: taskcluster/taskgraph/manifests/release_checksums.yml
+   attributes:
+      artifact_map: taskcluster/taskgraph/manifests/release_checksums.yml

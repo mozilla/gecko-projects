@@ -13,7 +13,7 @@ from taskgraph.loader.single_dep import schema
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.task import task_description_schema
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, optionally_keyed_by
+from taskgraph.util.schema import validate_schema
 from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
                                          generate_beetmover_upstream_artifacts,
                                          get_beetmover_action_scope,
@@ -142,8 +142,7 @@ beetmover_description_schema = schema.extend({
 
     Required('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
-
-    Optional('artifact-map'): optionally_keyed_by('platform', basestring),
+    Optional('attributes'): task_description_schema['attributes'],
 })
 
 
@@ -194,6 +193,7 @@ def make_task_description(config, jobs):
         dependencies.update(signing_dependencies)
 
         attributes = copy_attributes_from_dependent_job(dep_job)
+        attributes.update(job.get('attributes', {}))
 
         if job.get('locale'):
             attributes['locale'] = job['locale']
@@ -212,8 +212,6 @@ def make_task_description(config, jobs):
             'treeherder': treeherder,
             'shipping-phase': job['shipping-phase'],
         }
-        if job.get('artifact-map'):
-            task['artifact-map'] = job['artifact-map']
 
         yield task
 
@@ -347,8 +345,5 @@ def make_task_worker(config, jobs):
         if locale:
             worker["locale"] = locale
         job["worker"] = worker
-
-        if job.get('artifact-map'):
-            del job['artifact-map']
 
         yield job

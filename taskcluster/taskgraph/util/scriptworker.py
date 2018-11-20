@@ -412,8 +412,8 @@ def generate_beetmover_upstream_artifacts(job, platform, locale=None, dependenci
         list: A list of dictionaries conforming to the upstream_artifacts spec.
     """
     base_artifact_prefix = get_artifact_prefix(job)
-    resolve_keyed_by(job, 'artifact-map', 'artifact map', platform=platform)
-    map_config = load_yaml(*os.path.split(job['artifact-map']))
+    resolve_keyed_by(job, 'attributes.artifact_map', 'artifact map', platform=platform)
+    map_config = load_yaml(*os.path.split(job['attributes']['artifact_map']))
     upstream_artifacts = list()
 
     if not locale:
@@ -476,7 +476,7 @@ def generate_beetmover_compressed_upstream_artifacts(job, dependencies=None):
         list: A list of dictionaries conforming to the upstream_artifacts spec.
     """
     base_artifact_prefix = get_artifact_prefix(job)
-    map_config = load_yaml(*os.path.split(job['artifact-map']))
+    map_config = load_yaml(*os.path.split(job['attributes']['artifact_map']))
     upstream_artifacts = list()
 
     if not dependencies:
@@ -527,8 +527,8 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
             maps for beetmover.
     """
     platform = kwargs.get('platform', '')
-    resolve_keyed_by(job, 'artifact-map', 'artifact map', platform=platform)
-    map_config = load_yaml(*os.path.split(job['artifact-map']))
+    resolve_keyed_by(job, 'attributes.artifact_map', 'artifact map', platform=platform)
+    map_config = load_yaml(*os.path.split(job['attributes']['artifact_map']))
     base_artifact_prefix = map_config.get('base_artifact_prefix', get_artifact_prefix(job))
 
     artifacts = list()

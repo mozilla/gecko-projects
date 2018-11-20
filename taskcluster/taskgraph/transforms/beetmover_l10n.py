@@ -33,8 +33,7 @@ def make_beetmover_description(config, jobs):
                 'treeherder': treeherder,
                 'locale': locale,
                 'shipping-phase': job['shipping-phase'],
+                'attributes': job['attributes'],
             }
-            if job.get('artifact-map'):
-                beet_description['artifact-map'] = job['artifact-map']
 
             yield beet_description

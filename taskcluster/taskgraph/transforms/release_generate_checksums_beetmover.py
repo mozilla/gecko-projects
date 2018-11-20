@@ -58,7 +58,7 @@ release_generate_checksums_beetmover_schema = schema.extend({
 
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
-    Optional('artifact-map'): basestring,
+    Optional('attributes'): task_description_schema['attributes'],
 })
 
 
@@ -77,6 +77,7 @@ def make_task_description(config, jobs):
     for job in jobs:
         dep_job = job['primary-dependency']
         attributes = copy_attributes_from_dependent_job(dep_job)
+        attributes.update(job.get('attributes', {}))
 
         treeherder = job.get('treeherder', {})
         treeherder.setdefault('symbol', 'BM-SGenChcks')
@@ -117,9 +118,6 @@ def make_task_description(config, jobs):
             'treeherder': treeherder,
             'shipping-phase': 'promote',
         }
-
-        if 'artifact-map' in job:
-            task['artifact-map'] = job['artifact-map']
 
         yield task
 
@@ -190,9 +188,5 @@ def make_task_worker(config, jobs):
                 config, job, platform=platform)
 
         job["worker"] = worker
-
-        # Clean up
-        if job.get('artifact-map'):
-            del job['artifact-map']
 
         yield job

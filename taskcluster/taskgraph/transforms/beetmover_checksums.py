@@ -12,7 +12,7 @@ from taskgraph.loader.single_dep import schema
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, optionally_keyed_by
+from taskgraph.util.schema import validate_schema
 from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
                                          generate_beetmover_upstream_artifacts,
                                          get_beetmover_action_scope,
@@ -40,7 +40,6 @@ beetmover_checksums_description_schema = schema.extend({
     Optional('locale'): basestring,
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
-    Optional('artifact-map'): optionally_keyed_by('platform', basestring),
 })
 
 
@@ -123,9 +122,6 @@ def make_beetmover_checksums_description(config, jobs):
         if 'shipping-product' in job:
             task['shipping-product'] = job['shipping-product']
 
-        if 'artifact-map' in job:
-            task['artifact-map'] = job['artifact-map']
-
         yield task
 
 
@@ -174,15 +170,14 @@ def make_beetmover_checksums_worker(config, jobs):
             upstream_artifacts = generate_upstream_artifacts(
                 refs, platform, locale
             )
+            # Clean up un-used artifact map, to avoid confusion
+            if job['attributes'].get('artifact_map'):
+                del job['attributes']['artifact_map']
 
         worker['upstream-artifacts'] = upstream_artifacts
 
         if locale:
             worker["locale"] = locale
         job["worker"] = worker
-
-        # Clean up
-        if job.get('artifact-map'):
-            del job['artifact-map']
 
         yield job

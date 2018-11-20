@@ -11,7 +11,7 @@ from taskgraph.loader.single_dep import schema
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, optionally_keyed_by
+from taskgraph.util.schema import validate_schema
 from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
                                          generate_beetmover_upstream_artifacts,
                                          get_beetmover_bucket_scope,
@@ -38,7 +38,7 @@ beetmover_checksums_description_schema = schema.extend({
     Optional('locale'): basestring,
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
-    Optional('artifact-map'): optionally_keyed_by('platform', basestring),
+    Optional('attributes'): task_description_schema['attributes'],
 })
 
 
@@ -87,6 +87,7 @@ def make_beetmover_checksums_description(config, jobs):
                 dependencies[k] = v
 
         attributes = copy_attributes_from_dependent_job(dep_job)
+        attributes.update(job.get('attributes', {}))
 
         bucket_scope = get_beetmover_bucket_scope(config)
         action_scope = get_beetmover_action_scope(config)
@@ -108,9 +109,6 @@ def make_beetmover_checksums_description(config, jobs):
 
         if 'shipping-product' in job:
             task['shipping-product'] = job['shipping-product']
-
-        if job.get('artifact-map'):
-            task['artifact-map'] = job['artifact-map']
 
         yield task
 
@@ -176,8 +174,5 @@ def make_beetmover_checksums_worker(config, jobs):
         if locale:
             worker["locale"] = locale
         job["worker"] = worker
-
-        if job.get('artifact-map'):
-            del job['artifact-map']
 
         yield job
