@@ -8,6 +8,8 @@ var TrackingProtection = {
   PREF_ENABLED_GLOBALLY: "privacy.trackingprotection.enabled",
   PREF_ENABLED_IN_PRIVATE_WINDOWS: "privacy.trackingprotection.pbmode.enabled",
   PREF_UI_ENABLED: "browser.contentblocking.trackingprotection.control-center.ui.enabled",
+  PREF_TRACKING_TABLE: "urlclassifier.trackingTable",
+  PREF_TRACKING_ANNOTATION_TABLE: "urlclassifier.trackingAnnotationTable",
   enabledGlobally: false,
   enabledInPrivateWindows: false,
 
@@ -17,6 +19,16 @@ var TrackingProtection = {
       document.getElementById("identity-popup-content-blocking-category-tracking-protection");
   },
 
+  get subViewList() {
+    delete this.subViewList;
+    return this.subViewList = document.getElementById("identity-popup-trackersView-list");
+  },
+
+  get strictInfo() {
+    delete this.strictInfo;
+    return this.strictInfo = document.getElementById("identity-popup-trackersView-strict-info");
+  },
+
   init() {
     this.updateEnabled();
 
@@ -24,6 +36,8 @@ var TrackingProtection = {
     Services.prefs.addObserver(this.PREF_ENABLED_IN_PRIVATE_WINDOWS, this);
 
     XPCOMUtils.defineLazyPreferenceGetter(this, "visible", this.PREF_UI_ENABLED, false);
+    XPCOMUtils.defineLazyPreferenceGetter(this, "trackingTable", this.PREF_TRACKING_TABLE, false);
+    XPCOMUtils.defineLazyPreferenceGetter(this, "trackingAnnotationTable", this.PREF_TRACKING_ANNOTATION_TABLE, false);
   },
 
   uninit() {
@@ -50,6 +64,86 @@ var TrackingProtection = {
 
   isBlockerActivated(state) {
     return state & Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT;
+  },
+
+  isAllowing(state) {
+    return state & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT;
+  },
+
+  async updateSubView() {
+    let previousURI = gBrowser.currentURI.spec;
+    let previousWindow = gBrowser.selectedBrowser.innerWindowID;
+
+    let contentBlockingLogJSON = await gBrowser.selectedBrowser.getContentBlockingLog();
+    let contentBlockingLog = JSON.parse(contentBlockingLogJSON);
+
+    // Don't tell the user to turn on TP if they are already blocking trackers.
+    this.strictInfo.hidden = this.enabled;
+
+    let fragment = document.createDocumentFragment();
+    for (let [origin, actions] of Object.entries(contentBlockingLog)) {
+      let listItem = await this._createListItem(origin, actions);
+      if (listItem) {
+        fragment.appendChild(listItem);
+      }
+    }
+
+    // This might have taken a while. Only update the list if we're still on the same page.
+    if (previousURI == gBrowser.currentURI.spec &&
+        previousWindow == gBrowser.selectedBrowser.innerWindowID) {
+      this.subViewList.textContent = "";
+      this.subViewList.append(fragment);
+    }
+  },
+
+  // Given a URI from a source that was tracking-annotated, figure out
+  // if it's really on the tracking table or just on the annotation table.
+  _isOnTrackingTable(uri) {
+    if (this.trackingTable == this.trackingAnnotationTable) {
+      return true;
+    }
+    return new Promise(resolve => {
+      classifierService.asyncClassifyLocalWithTables(uri, this.trackingTable, [], [],
+        (code, list) => resolve(!!list));
+    });
+  },
+
+  async _createListItem(origin, actions) {
+    // Figure out if this list entry was actually detected by TP or something else.
+    let isDetected = false;
+    let isAllowed = false;
+    for (let [state] of actions) {
+      isAllowed = isAllowed || this.isAllowing(state);
+      isDetected = isDetected || isAllowed || this.isBlockerActivated(state);
+    }
+
+    if (!isDetected) {
+      return null;
+    }
+
+    let uri = Services.io.newURI(origin);
+
+    // Because we might use different lists for annotation vs. blocking, we
+    // need to make sure that this is a tracker that we would actually have blocked
+    // before showing it to the user.
+    let isTracker = await this._isOnTrackingTable(uri);
+    if (!isTracker) {
+      return null;
+    }
+
+    let listItem = document.createXULElement("hbox");
+    listItem.className = "identity-popup-trackersView-list-item";
+    listItem.classList.toggle("allowed", isAllowed);
+
+    let image = document.createXULElement("image");
+    listItem.append(image);
+
+    let label = document.createXULElement("label");
+    label.value = uri.host;
+    label.setAttribute("crop", "end");
+    listItem.append(label);
+
+    return listItem;
   },
 };
 
@@ -133,10 +227,28 @@ var ContentBlocking = {
   PREF_REPORT_BREAKAGE_ENABLED: "browser.contentblocking.reportBreakage.enabled",
   PREF_REPORT_BREAKAGE_URL: "browser.contentblocking.reportBreakage.url",
   PREF_INTRO_COUNT_CB: "browser.contentblocking.introCount",
+  PREF_CB_CATEGORY: "browser.contentblocking.category",
+  // The prefs inside CATEGORY_PREFS set expected behavior for each CB category.
+  // A null value means that pref is default.
+  CATEGORY_PREFS: {
+    strict: [
+      [TrackingProtection.PREF_TRACKING_TABLE, null],
+      [ThirdPartyCookies.PREF_ENABLED, Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN],
+      [TrackingProtection.PREF_ENABLED_IN_PRIVATE_WINDOWS, true],
+      [TrackingProtection.PREF_ENABLED_GLOBALLY, true],
+    ],
+    standard: [
+      [TrackingProtection.PREF_TRACKING_TABLE, null],
+      [ThirdPartyCookies.PREF_ENABLED, null],
+      [TrackingProtection.PREF_ENABLED_IN_PRIVATE_WINDOWS, null],
+      [TrackingProtection.PREF_ENABLED_GLOBALLY, null],
+    ],
+  },
   content: null,
   icon: null,
   activeTooltipText: null,
   disabledTooltipText: null,
+  switchingCategory: false,
 
   get prefIntroCount() {
     return this.PREF_INTRO_COUNT_CB;
@@ -145,6 +257,11 @@ var ContentBlocking = {
   get appMenuLabel() {
     delete this.appMenuLabel;
     return this.appMenuLabel = document.getElementById("appMenu-tp-label");
+  },
+
+  get identityPopup() {
+    delete this.identityPopup;
+    return this.identityPopup = document.getElementById("identity-popup");
   },
 
   strings: {
@@ -225,6 +342,14 @@ var ContentBlocking = {
       gNavigatorBundle.getString("trackingProtection.icon.activeTooltip");
     this.disabledTooltipText =
       gNavigatorBundle.getString("trackingProtection.icon.disabledTooltip");
+
+    this.matchCBCategory = this.matchCBCategory.bind(this);
+    this.updateCBCategory = this.updateCBCategory.bind(this);
+    this.matchCBCategory();
+    Services.prefs.addObserver(TrackingProtection.PREF_ENABLED_GLOBALLY, this.matchCBCategory);
+    Services.prefs.addObserver(TrackingProtection.PREF_ENABLED_IN_PRIVATE_WINDOWS, this.matchCBCategory);
+    Services.prefs.addObserver(ThirdPartyCookies.PREF_ENABLED, this.matchCBCategory);
+    Services.prefs.addObserver(this.PREF_CB_CATEGORY, this.updateCBCategory);
   },
 
   uninit() {
@@ -235,10 +360,14 @@ var ContentBlocking = {
     }
 
     Services.prefs.removeObserver(this.PREF_ANIMATIONS_ENABLED, this.updateAnimationsEnabled);
+    Services.prefs.removeObserver(TrackingProtection.PREF_ENABLED_GLOBALLY, this.matchCBCategory);
+    Services.prefs.removeObserver(TrackingProtection.PREF_ENABLED_IN_PRIVATE_WINDOWS, this.matchCBCategory);
+    Services.prefs.removeObserver(ThirdPartyCookies.PREF_ENABLED, this.matchCBCategory);
+    Services.prefs.removeObserver(this.PREF_CB_CATEGORY, this.updateCBCategory);
   },
 
   hideIdentityPopupAndReload() {
-    document.getElementById("identity-popup").hidePopup();
+    this.identityPopup.hidePopup();
     BrowserReload();
   },
 
@@ -251,7 +380,7 @@ var ContentBlocking = {
   },
 
   submitBreakageReport() {
-    document.getElementById("identity-popup").hidePopup();
+    this.identityPopup.hidePopup();
 
     let reportEndpoint = Services.prefs.getStringPref(this.PREF_REPORT_BREAKAGE_URL);
     if (!reportEndpoint) {
@@ -312,6 +441,11 @@ var ContentBlocking = {
     let urlWithoutQuery = this.reportURI.asciiSpec.replace("?" + this.reportURI.query, "");
     this.reportBreakageURL.textContent = urlWithoutQuery;
     this.identityPopupMultiView.showSubView("identity-popup-breakageReportView");
+  },
+
+  async showTrackersSubview() {
+    await TrackingProtection.updateSubView();
+    this.identityPopupMultiView.showSubView("identity-popup-trackersView");
   },
 
   shieldHistogramAdd(value) {
@@ -505,5 +639,90 @@ var ContentBlocking = {
     UITour.initForBrowser(gBrowser.selectedBrowser, window);
     UITour.showInfo(window, panelTarget, introTitle, introDescription, undefined, buttons,
                     { closeButtonCallback: () => this.dontShowIntroPanelAgain() });
+  },
+
+  /**
+   * Checks if CB prefs match perfectly with one of our pre-defined categories.
+   */
+  prefsMatch(category) {
+    // The category pref must be either unset, or match.
+    if (Services.prefs.prefHasUserValue(this.PREF_CB_CATEGORY) &&
+        Services.prefs.getStringPref(this.PREF_CB_CATEGORY) != category) {
+      return false;
+    }
+    for (let [pref, value] of this.CATEGORY_PREFS[category]) {
+      if (!value) {
+        if (Services.prefs.prefHasUserValue(pref)) {
+          return false;
+        }
+      } else {
+        let prefType = Services.prefs.getPrefType(pref);
+        if ((prefType == Services.prefs.PREF_BOOL && Services.prefs.getBoolPref(pref) != value) ||
+            (prefType == Services.prefs.PREF_INT && Services.prefs.getIntPref(pref) != value) ||
+            (prefType == Services.prefs.PREF_STRING && Services.prefs.getStringPref(pref) != value)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  },
+
+  async matchCBCategory() {
+    if (this.switchingCategory) {
+      return;
+    }
+    // If PREF_CB_CATEGORY is not set match users to a Content Blocking category. Check if prefs fit
+    // perfectly into strict or standard, otherwise match with custom. If PREF_CB_CATEGORY has previously been set,
+    // a change of one of these prefs necessarily puts us in "custom".
+    if (this.prefsMatch("standard")) {
+      Services.prefs.setStringPref(this.PREF_CB_CATEGORY, "standard");
+    } else if (this.prefsMatch("strict")) {
+      Services.prefs.setStringPref(this.PREF_CB_CATEGORY, "strict");
+    } else {
+      Services.prefs.setStringPref(this.PREF_CB_CATEGORY, "custom");
+    }
+  },
+
+  updateCBCategory() {
+    if (this.switchingCategory) {
+      return;
+    }
+    // Turn on switchingCategory flag, to ensure that when the individual prefs that change as a result
+    // of the category change do not trigger yet another category change.
+    this.switchingCategory = true;
+    let value = Services.prefs.getStringPref(this.PREF_CB_CATEGORY);
+    this.setPrefsToCategory(value);
+    this.switchingCategory = false;
+  },
+
+  /**
+   * Sets all user-exposed content blocking preferences to values that match the selected category.
+   */
+  setPrefsToCategory(category) {
+    // Leave prefs as they were if we are switching to "custom" category.
+    if (category == "custom") {
+      return;
+    }
+
+    for (let [pref, value] of this.CATEGORY_PREFS[category]) {
+      // this.setPrefIfNotLocked(pref[0], pref[1]);
+      if (!Services.prefs.prefIsLocked(pref)) {
+        if (!value) {
+          Services.prefs.clearUserPref(pref);
+        } else {
+          switch (Services.prefs.getPrefType(pref)) {
+          case Services.prefs.PREF_BOOL:
+            Services.prefs.setBoolPref(pref, value);
+            break;
+          case Services.prefs.PREF_INT:
+            Services.prefs.setIntPref(pref, value);
+            break;
+          case Services.prefs.PREF_STRING:
+            Services.prefs.setStringPref(pref, value);
+            break;
+          }
+        }
+      }
+    }
   },
 };

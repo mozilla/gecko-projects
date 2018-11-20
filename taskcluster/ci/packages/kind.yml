@@ -150,25 +150,12 @@ jobs:
     description: "Valgrind for Debian Wheezy"
     treeherder:
       symbol: Deb7(valgrind)
-    worker:
-      env:
-        VERSION: 3.14.0.git20180806
-        COMMIT: 2eb2df759f51b15702934dee108f4c20c3db5fef
     run:
       using: debian-package
       dsc:
-        url: http://snapshot.debian.org/archive/debian/20170725T040438Z/pool/main/v/valgrind/valgrind_3.13.0-1.dsc
-        sha256: ab84e017d1660efd30e9e0593a4c8b976aeda013cefb8c416dd284cc7222c11c
-      packages:
-        - deb7-git
+        url: http://snapshot.debian.org/archive/debian/20181115T045552Z/pool/main/v/valgrind/valgrind_3.14.0-1.dsc
+        sha256: 6709e2fe4e8251ee32f3cfbf2c6ee106a5cfa3e8dc672cf1dd5f2b26e72b64ee
       patch: valgrind-wheezy.diff
-      pre-build-command: >-
-        git clone -n git://sourceware.org/git/valgrind.git ../valgrind-git &&
-        git -C ../valgrind-git archive --format=tar --prefix=valgrind-$VERSION/ $COMMIT | bzip2 > ../valgrind_$VERSION.orig.tar.bz2 &&
-        tar -C .. -jxf ../valgrind_$VERSION.orig.tar.bz2 &&
-        cp -r debian ../valgrind-$VERSION &&
-        cd ../valgrind-$VERSION &&
-        debchange -v 1:$VERSION-1.deb7moz1 --distribution wheezy "Mozilla backport of git master as of 2018-08-06." < /dev/null
 
   deb7-dh-python:
     description: "dh-python for Debian wheezy"
@@ -277,6 +264,16 @@ jobs:
       tarball:
         url: https://github.com/indygreg/python-zstandard/releases/download/0.9.1/python-zstandard-0.9.1.tar.gz
         sha256: 59c7d6f1f85cebb5124abb50d8ec281c5311e0812e18785e28b197cf1515dd3b
+
+  deb7-nasm:
+    description: "nasm for Debian wheezy"
+    treeherder:
+      symbol: Deb7(nasm)
+    run:
+      using: debian-package
+      dsc:
+        url: http://snapshot.debian.org/archive/debian/20160426T155816Z/pool/main/n/nasm/nasm_2.12.01-1.dsc
+        sha256: 70b0478243ca8b36e163af15fb8a0a9be504b3321a9fb7d67ba0767dbfcc32ec
 
   deb7-pcre3:
     description: "pcre3 8.31 for Debian Wheezy"

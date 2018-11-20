@@ -253,6 +253,8 @@
 #include "mozilla/dom/SpeechSynthesis.h"
 #endif
 
+#include "mozilla/HashFunctions.h"
+
 // Apple system headers seem to have a check() macro.  <sigh>
 #ifdef check
 class nsIScriptTimeoutHandler;
@@ -319,6 +321,11 @@ static LazyLogModule gDOMLeakPRLogOuter("DOMLeakOuter");
 static int32_t              gOpenPopupSpamCount               = 0;
 
 nsGlobalWindowOuter::OuterWindowByIdTable *nsGlobalWindowOuter::sOuterWindowsById = nullptr;
+
+extern mozilla::LazyLogModule gAutoplayPermissionLog;
+
+#define AUTOPLAY_LOG(msg, ...)                                             \
+  MOZ_LOG(gAutoplayPermissionLog, LogLevel::Debug, (msg, ##__VA_ARGS__))
 
 /* static */
 nsPIDOMWindowOuter*
@@ -2244,8 +2251,9 @@ nsGlobalWindowOuter::SetOpenerWindow(nsPIDOMWindowOuter* aOpener,
   nsWeakPtr opener = do_GetWeakReference(aOpener);
   if (opener == mOpener) {
     MOZ_DIAGNOSTIC_ASSERT(
-      !aOpener || (GetBrowsingContext() && GetBrowsingContext()->GetOpener() ==
-                                             aOpener->GetBrowsingContext()));
+      !aOpener || !aOpener->GetDocShell() ||
+      (GetBrowsingContext() &&
+       GetBrowsingContext()->GetOpener() == aOpener->GetBrowsingContext()));
     return;
   }
 
@@ -3104,8 +3112,7 @@ nsGlobalWindowOuter::DevToCSSIntPixels(int32_t px)
   if (!mDocShell)
     return px; // assume 1:1
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   if (!presContext)
     return px;
 
@@ -3118,8 +3125,7 @@ nsGlobalWindowOuter::CSSToDevIntPixels(int32_t px)
   if (!mDocShell)
     return px; // assume 1:1
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   if (!presContext)
     return px;
 
@@ -3132,8 +3138,7 @@ nsGlobalWindowOuter::DevToCSSIntPixels(nsIntSize px)
   if (!mDocShell)
     return px; // assume 1:1
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   if (!presContext)
     return px;
 
@@ -3148,8 +3153,7 @@ nsGlobalWindowOuter::CSSToDevIntPixels(nsIntSize px)
   if (!mDocShell)
     return px; // assume 1:1
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   if (!presContext)
     return px;
 
@@ -3165,8 +3169,7 @@ nsGlobalWindowOuter::GetInnerSize(CSSIntSize& aSize)
 
   NS_ENSURE_STATE(mDocShell);
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   RefPtr<nsIPresShell> presShell = mDocShell->GetPresShell();
 
   if (!presContext || !presShell) {
@@ -3394,8 +3397,7 @@ nsGlobalWindowOuter::GetScreenXY(CallerType aCallerType, ErrorResult& aError)
   int32_t x = 0, y = 0;
   aError = treeOwnerAsWin->GetPosition(&x, &y); // LayoutDevice px values
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   if (!presContext) {
     return CSSIntPoint(x, y);
   }
@@ -3485,8 +3487,7 @@ nsGlobalWindowOuter::GetDevicePixelRatioOuter(CallerType aCallerType)
     return 1.0;
   }
 
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
   if (!presContext) {
     return 1.0;
   }
@@ -3639,8 +3640,7 @@ nsGlobalWindowOuter::SetDocShellWidthAndHeight(int32_t aInnerWidth, int32_t aInn
 void
 nsGlobalWindowOuter::SetCSSViewportWidthAndHeight(nscoord aInnerWidth, nscoord aInnerHeight)
 {
-  RefPtr<nsPresContext> presContext;
-  mDocShell->GetPresContext(getter_AddRefs(presContext));
+  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
 
   nsRect shellArea = presContext->GetVisibleArea();
   shellArea.SetHeight(aInnerHeight);
@@ -4830,7 +4830,7 @@ nsGlobalWindowOuter::FocusOuter(ErrorResult& aError)
   }
 
   if (lookForPresShell) {
-    mDocShell->GetEldestPresShell(getter_AddRefs(presShell));
+    presShell = mDocShell->GetEldestPresShell();
   }
 
   nsCOMPtr<nsIDocShellTreeItem> parentDsti;
@@ -7229,7 +7229,7 @@ nsGlobalWindowOuter::MaybeAllowStorageForOpenedWindow(nsIURI* aURI)
   // We don't care when the asynchronous work finishes here.
   Unused << AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(principal,
                                                                      inner,
-                                                                     AntiTrackingCommon::eHeuristic);
+                                                                     AntiTrackingCommon::eOpener);
 }
 
 //*****************************************************************************
@@ -7467,7 +7467,7 @@ nsGlobalWindowOuter::SetCursorOuter(const nsAString& aCursor, ErrorResult& aErro
 
   RefPtr<nsPresContext> presContext;
   if (mDocShell) {
-    mDocShell->GetPresContext(getter_AddRefs(presContext));
+    presContext = mDocShell->GetPresContext();
   }
 
   if (presContext) {
@@ -7641,8 +7641,7 @@ void
 nsGlobalWindowOuter::CheckForDPIChange()
 {
   if (mDocShell) {
-    RefPtr<nsPresContext> presContext;
-    mDocShell->GetPresContext(getter_AddRefs(presContext));
+    RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
     if (presContext) {
       if (presContext->DeviceContext()->CheckDPIChange()) {
         presContext->UIResolutionChanged();
@@ -7808,6 +7807,66 @@ nsPIDOMWindowOuter::GetDocumentURI() const
   return mDoc ? mDoc->GetDocumentURI() : mDocumentURI.get();
 }
 
+void
+nsPIDOMWindowOuter::NotifyTemporaryAutoplayPermissionChanged(int32_t aState,
+                                                             const nsAString& aPrePath)
+{
+  MOZ_ASSERT(int32_t(nsIPermissionManager::ALLOW_ACTION) == int32_t(nsIDOMWindowUtils::PERMISSION_ALLOW) &&
+             int32_t(nsIPermissionManager::DENY_ACTION) == int32_t(nsIDOMWindowUtils::PERMISSION_DENY) &&
+             int32_t(nsIPermissionManager::UNKNOWN_ACTION) == int32_t(nsIDOMWindowUtils::PERMISSION_UNKNOWN));
+
+  bool isAllowed = aState == nsIDOMWindowUtils::PERMISSION_ALLOW;
+  switch (aState) {
+    case nsIDOMWindowUtils::PERMISSION_ALLOW:
+    case nsIDOMWindowUtils::PERMISSION_DENY:
+      AUTOPLAY_LOG("update temporary autoplay permission");
+      mAutoplayTemporaryPermission.Put(aPrePath, PermissionInfo(isAllowed, TimeStamp::Now()));
+      break;
+    case nsIDOMWindowUtils::PERMISSION_UNKNOWN:
+      if (!aPrePath.Length()) {
+        AUTOPLAY_LOG("remove temporary autoplay permission for all domains");
+        mAutoplayTemporaryPermission.Clear();
+      } else {
+        AUTOPLAY_LOG("remove temporary autoplay permission");
+        mAutoplayTemporaryPermission.Remove(aPrePath);
+      }
+      break;
+    default:
+      AUTOPLAY_LOG("ERROR! non-defined permission state!");
+  }
+}
+
+bool
+nsPIDOMWindowOuter::HasTemporaryAutoplayPermission()
+{
+  if (!mDoc) {
+    return false;
+  }
+
+  nsIPrincipal* principal = mDoc->NodePrincipal();
+  if (!principal) {
+    return false;
+  }
+
+  nsCOMPtr<nsIURI> URI;
+  nsresult rv = principal->GetURI(getter_AddRefs(URI));
+  if (NS_FAILED(rv) || !URI) {
+    return false;
+  }
+
+  nsAutoCString prePath;
+  URI->GetPrePath(prePath);
+  NS_ConvertUTF8toUTF16 key(prePath);
+  PermissionInfo info = mAutoplayTemporaryPermission.Get(key);
+  int32_t expireTime = Preferences::GetInt("privacy.temporary_permission_expire_time_ms", 3600 * 1000);
+  if (info.first &&
+      TimeStamp::Now() - info.second >= TimeDuration::FromMilliseconds(expireTime)) {
+    AUTOPLAY_LOG("remove expired temporary autoplay permission");
+    mAutoplayTemporaryPermission.Remove(key);
+    return false;
+  }
+  return info.first;
+}
 
 void
 nsPIDOMWindowOuter::MaybeCreateDoc()

@@ -2382,7 +2382,12 @@ window._gBrowser = {
              Services.prefs.getBoolPref("browser.tabs.insertAfterCurrent"))) {
 
           let lastRelatedTab = openerTab && this._lastRelatedTabMap.get(openerTab);
-          index = (lastRelatedTab || openerTab || this.selectedTab)._tPos + 1;
+          let previousTab = (lastRelatedTab || openerTab || this.selectedTab);
+          if (previousTab.multiselected) {
+            index = this.selectedTabs[this.selectedTabs.length - 1]._tPos + 1;
+          } else {
+            index = previousTab._tPos + 1;
+          }
 
           if (lastRelatedTab) {
             lastRelatedTab.owner = null;
@@ -5491,11 +5496,11 @@ var TabContextMenu = {
       toggleMultiSelectMute.label = gNavigatorBundle.getString("playTabs.label");
       toggleMultiSelectMute.accessKey = gNavigatorBundle.getString("playTabs.accesskey");
     } else if (this.contextTab.hasAttribute("muted")) {
-      toggleMultiSelectMute.label = gNavigatorBundle.getString("unmuteSelectedTabs.label");
-      toggleMultiSelectMute.accessKey = gNavigatorBundle.getString("unmuteSelectedTabs.accesskey");
+      toggleMultiSelectMute.label = gNavigatorBundle.getString("unmuteSelectedTabs2.label");
+      toggleMultiSelectMute.accessKey = gNavigatorBundle.getString("unmuteSelectedTabs2.accesskey");
     } else {
-      toggleMultiSelectMute.label = gNavigatorBundle.getString("muteSelectedTabs.label");
-      toggleMultiSelectMute.accessKey = gNavigatorBundle.getString("muteSelectedTabs.accesskey");
+      toggleMultiSelectMute.label = gNavigatorBundle.getString("muteSelectedTabs2.label");
+      toggleMultiSelectMute.accessKey = gNavigatorBundle.getString("muteSelectedTabs2.accesskey");
     }
 
     this.contextTab.toggleMuteMenuItem = toggleMute;

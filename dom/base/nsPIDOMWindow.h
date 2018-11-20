@@ -11,9 +11,11 @@
 #include "mozIDOMWindow.h"
 
 #include "nsCOMPtr.h"
+#include "nsDataHashtable.h"
 #include "nsTArray.h"
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/TaskCategory.h"
+#include "mozilla/TimeStamp.h"
 #include "js/TypeDecls.h"
 #include "nsRefPtrHashtable.h"
 
@@ -644,6 +646,12 @@ public:
   void
   NotifyReportingObservers();
 
+  void
+  SaveStorageAccessGranted(const nsACString& aPermissionKey);
+
+  bool
+  HasStorageAccessGranted(const nsACString& aPermissionKey);
+
 protected:
   void CreatePerformanceObjectIfNeeded();
 
@@ -742,6 +750,11 @@ protected:
   // List of Report objects for ReportingObservers.
   nsTArray<RefPtr<mozilla::dom::ReportingObserver>> mReportingObservers;
   nsTArray<RefPtr<mozilla::dom::Report>> mReportRecords;
+
+  // This is a list of storage access granted for the current window. These are
+  // also set as permissions, but it could happen that we need to access them
+  // synchronously in this context, and for this, we need a copy here.
+  nsTArray<nsCString> mStorageAccessGranted;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsPIDOMWindowInner, NS_PIDOMWINDOWINNER_IID)
@@ -858,6 +871,13 @@ public:
   virtual nsPIDOMWindowOuter* GetPrivateRoot() = 0;
 
   virtual void ActivateOrDeactivate(bool aActivate) = 0;
+
+  /**
+   * These functions are used to modify and check temporary autoplay permission.
+   */
+  void NotifyTemporaryAutoplayPermissionChanged(int32_t aState,
+                                                const nsAString& aPrePath);
+  bool HasTemporaryAutoplayPermission();
 
   /**
    * |top| gets the root of the window hierarchy.
@@ -1278,6 +1298,9 @@ protected:
   mozilla::dom::LargeAllocStatus mLargeAllocStatus;
 
   nsCOMPtr<nsPIDOMWindowOuter> mOpenerForInitialContentBrowser;
+
+  using PermissionInfo = std::pair<bool, mozilla::TimeStamp>;
+  nsDataHashtable<nsStringHashKey, PermissionInfo> mAutoplayTemporaryPermission;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsPIDOMWindowOuter, NS_PIDOMWINDOWOUTER_IID)

@@ -23,13 +23,14 @@
 //! that channel and operate on the `RenderBackend`.
 
 use api::{BlobImageHandler, ColorF, DeviceIntPoint, DeviceIntRect, DeviceIntSize};
-use api::{DeviceUintPoint, DeviceUintRect, DeviceUintSize, DocumentId, Epoch, ExternalImageId};
+use api::{DocumentId, Epoch, ExternalImageId};
 use api::{ExternalImageType, FontRenderMode, FrameMsg, ImageFormat, PipelineId};
 use api::{ImageRendering, Checkpoint, NotificationRequest};
 use api::{MemoryReport, VoidPtrToSizeFn};
 use api::{RenderApiSender, RenderNotifier, TexelRect, TextureTarget};
 use api::{channel};
 use api::DebugCommand;
+pub use api::DebugFlags;
 use api::channel::PayloadReceiverHelperMethods;
 use batch::{BatchKind, BatchTextures, BrushBatchKind};
 #[cfg(any(feature = "capture", feature = "replay"))]
@@ -198,6 +199,11 @@ const GPU_SAMPLER_TAG_TRANSPARENT: GpuProfileTag = GpuProfileTag {
     color: debug_colors::BLACK,
 };
 
+/// The clear color used for the texture cache when the debug display is enabled.
+/// We use a shade of blue so that we can still identify completely blue items in
+/// the texture cache.
+const TEXTURE_CACHE_DBG_CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.8, 1.0];
+
 impl BatchKind {
     #[cfg(feature = "debugger")]
     fn debug_name(&self) -> &'static str {
@@ -234,26 +240,6 @@ impl BatchKind {
             }
             BatchKind::TextRun(_) => GPU_TAG_PRIM_TEXT_RUN,
         }
-    }
-}
-
-bitflags! {
-    #[derive(Default)]
-    pub struct DebugFlags: u32 {
-        const PROFILER_DBG          = 1 << 0;
-        const RENDER_TARGET_DBG     = 1 << 1;
-        const TEXTURE_CACHE_DBG     = 1 << 2;
-        const GPU_TIME_QUERIES      = 1 << 3;
-        const GPU_SAMPLE_QUERIES    = 1 << 4;
-        const DISABLE_BATCHING      = 1 << 5;
-        const EPOCHS                = 1 << 6;
-        const COMPACT_PROFILER      = 1 << 7;
-        const ECHO_DRIVER_MESSAGES  = 1 << 8;
-        const NEW_FRAME_INDICATOR   = 1 << 9;
-        const NEW_SCENE_INDICATOR   = 1 << 10;
-        const SHOW_OVERDRAW         = 1 << 11;
-        const GPU_CACHE_DBG         = 1 << 12;
-        const SLOW_FRAME_INDICATOR  = 1 << 13;
     }
 }
 
@@ -1080,7 +1066,7 @@ impl GpuCacheTexture {
 
     /// Ensures that we have an appropriately-sized texture. Returns true if a
     /// new texture was created.
-    fn ensure_texture(&mut self, device: &mut Device, height: u32) -> bool {
+    fn ensure_texture(&mut self, device: &mut Device, height: i32) -> bool {
         // If we already have a texture that works, we're done.
         if self.texture.as_ref().map_or(false, |t| t.get_dimensions().height >= height) {
             if GPU_CACHE_RESIZE_TEST && self.bus.uses_render_target() {
@@ -1093,7 +1079,7 @@ impl GpuCacheTexture {
         // Compute a few parameters for the new texture. We round the height up to
         // a multiple of 256 to avoid many small resizes.
         let new_height = (height + 255) & !255;
-        let new_size = DeviceUintSize::new(MAX_VERTEX_TEXTURE_WIDTH as _, new_height);
+        let new_size = DeviceIntSize::new(MAX_VERTEX_TEXTURE_WIDTH as _, new_height);
         let rt_info = if self.bus.uses_render_target() {
             Some(RenderTargetInfo { has_depth: false })
         } else {
@@ -1186,7 +1172,7 @@ impl GpuCacheTexture {
         }
     }
 
-    fn get_height(&self) -> u32 {
+    fn get_height(&self) -> i32 {
         self.texture.as_ref().map_or(0, |t| t.get_dimensions().height)
     }
 
@@ -1194,7 +1180,7 @@ impl GpuCacheTexture {
         &mut self,
         device: &mut Device,
         total_block_count: usize,
-        max_height: u32,
+        max_height: i32,
     ) {
         let allocated_new_texture = self.ensure_texture(device, max_height);
         match self.bus {
@@ -1320,9 +1306,9 @@ impl GpuCacheTexture {
                     let block_index = row_index * MAX_VERTEX_TEXTURE_WIDTH;
                     let cpu_blocks =
                         &cpu_blocks[block_index .. (block_index + MAX_VERTEX_TEXTURE_WIDTH)];
-                    let rect = DeviceUintRect::new(
-                        DeviceUintPoint::new(0, row_index as u32),
-                        DeviceUintSize::new(MAX_VERTEX_TEXTURE_WIDTH as u32, 1),
+                    let rect = DeviceIntRect::new(
+                        DeviceIntPoint::new(0, row_index as i32),
+                        DeviceIntSize::new(MAX_VERTEX_TEXTURE_WIDTH as i32, 1),
                     );
 
                     uploader.upload(rect, 0, None, cpu_blocks);
@@ -1399,8 +1385,8 @@ impl VertexDataTexture {
         }
 
         let width =
-            (MAX_VERTEX_TEXTURE_WIDTH - (MAX_VERTEX_TEXTURE_WIDTH % texels_per_item)) as u32;
-        let needed_height = (data.len() / items_per_row) as u32;
+            (MAX_VERTEX_TEXTURE_WIDTH - (MAX_VERTEX_TEXTURE_WIDTH % texels_per_item)) as i32;
+        let needed_height = (data.len() / items_per_row) as i32;
         let existing_height = self.texture.as_ref().map_or(0, |t| t.get_dimensions().height);
 
         // Create a new texture if needed.
@@ -1423,9 +1409,9 @@ impl VertexDataTexture {
             self.texture = Some(texture);
         }
 
-        let rect = DeviceUintRect::new(
-            DeviceUintPoint::zero(),
-            DeviceUintSize::new(width, needed_height),
+        let rect = DeviceIntRect::new(
+            DeviceIntPoint::zero(),
+            DeviceIntSize::new(width, needed_height),
         );
         device
             .upload_texture(self.texture(), &self.pbo, 0)
@@ -1447,7 +1433,7 @@ struct FrameOutput {
 
 #[derive(PartialEq)]
 struct TargetSelector {
-    size: DeviceUintSize,
+    size: DeviceIntSize,
     num_layers: usize,
     format: ImageFormat,
 }
@@ -1671,7 +1657,7 @@ impl Renderer {
             device.supports_extension("GL_ARB_explicit_attrib_location");
 
         // 512 is the minimum that the texture cache can work with.
-        const MIN_TEXTURE_SIZE: u32 = 512;
+        const MIN_TEXTURE_SIZE: i32 = 512;
         if let Some(user_limit) = options.max_texture_size {
             assert!(user_limit >= MIN_TEXTURE_SIZE);
             device.clamp_max_texture_size(user_limit);
@@ -2044,7 +2030,7 @@ impl Renderer {
         Ok((renderer, sender))
     }
 
-    pub fn get_max_texture_size(&self) -> u32 {
+    pub fn get_max_texture_size(&self) -> i32 {
         self.device.max_texture_size()
     }
 
@@ -2208,7 +2194,7 @@ impl Renderer {
 
         let desc = ImageDescriptor::new(1024, 768, ImageFormat::BGRA8, true, false);
         let data = self.device.read_pixels(&desc);
-        let screenshot = debug_server::Screenshot::new(desc.size.width, desc.size.height, data);
+        let screenshot = debug_server::Screenshot::new(desc.size, data);
 
         serde_json::to_string(&screenshot).unwrap()
     }
@@ -2436,6 +2422,9 @@ impl Renderer {
                     }
                 }
             }
+            DebugCommand::SetFlags(flags) => {
+                self.set_debug_flags(flags);
+            }
         }
     }
 
@@ -2493,7 +2482,7 @@ impl Renderer {
     /// [genframe]: ../../webrender_api/struct.DocumentApi.html#method.generate_frame
     pub fn render(
         &mut self,
-        framebuffer_size: DeviceUintSize,
+        framebuffer_size: DeviceIntSize,
     ) -> Result<RendererStats, Vec<RendererError>> {
         let result = self.render_impl(Some(framebuffer_size));
 
@@ -2517,7 +2506,7 @@ impl Renderer {
     // avoid doing a full frame render.
     fn render_impl(
         &mut self,
-        framebuffer_size: Option<DeviceUintSize>,
+        framebuffer_size: Option<DeviceIntSize>,
     ) -> Result<RendererStats, Vec<RendererError>> {
         profile_scope!("render");
         if self.active_documents.is_empty() {
@@ -2581,7 +2570,7 @@ impl Renderer {
                     .iter()
                     .any(|&(_, RenderedDocument { ref frame, .. })| {
                         frame.background_color.is_some() &&
-                        frame.inner_rect.origin == DeviceUintPoint::zero() &&
+                        frame.inner_rect.origin == DeviceIntPoint::zero() &&
                         frame.inner_rect.size == framebuffer_size
                     });
 
@@ -2839,6 +2828,14 @@ impl Renderer {
                             if info.is_shared_cache {
                                 texture.flags_mut()
                                     .insert(TextureFlags::IS_SHARED_TEXTURE_CACHE);
+
+                                // Textures in the cache generally don't need to be cleared,
+                                // but we do so if the debug display is active to make it
+                                // easier to identify unallocated regions.
+                                if self.debug_flags.contains(DebugFlags::TEXTURE_CACHE_DBG) {
+                                    self.clear_texture(&texture, TEXTURE_CACHE_DBG_CLEAR_COLOR);
+                                }
+
                             }
 
                             let old = self.texture_resolver.texture_cache_map.insert(allocation.id, texture);
@@ -2861,20 +2858,25 @@ impl Renderer {
                 for update in update_list.updates {
                     let TextureCacheUpdate { id, rect, stride, offset, layer_index, source } = update;
                     let texture = &self.texture_resolver.texture_cache_map[&id];
-                    let mut uploader = self.device.upload_texture(
-                        texture,
-                        &self.texture_cache_upload_pbo,
-                        0,
-                    );
 
                     let bytes_uploaded = match source {
                         TextureUpdateSource::Bytes { data } => {
+                            let mut uploader = self.device.upload_texture(
+                                texture,
+                                &self.texture_cache_upload_pbo,
+                                0,
+                            );
                             uploader.upload(
                                 rect, layer_index, stride,
                                 &data[offset as usize ..],
                             )
                         }
                         TextureUpdateSource::External { id, channel_index } => {
+                            let mut uploader = self.device.upload_texture(
+                                texture,
+                                &self.texture_cache_upload_pbo,
+                                0,
+                            );
                             let handler = self.external_image_handler
                                 .as_mut()
                                 .expect("Found external image, but no handler set!");
@@ -2902,6 +2904,19 @@ impl Renderer {
                             };
                             handler.unlock(id, channel_index);
                             size
+                        }
+                        TextureUpdateSource::DebugClear => {
+                            self.device.bind_draw_target(DrawTarget::Texture {
+                                texture,
+                                layer: layer_index as usize,
+                                with_depth: false,
+                            });
+                            self.device.clear_target(
+                                Some(TEXTURE_CACHE_DBG_CLEAR_COLOR),
+                                None,
+                                Some(rect.to_i32())
+                            );
+                            0
                         }
                     };
                     self.profile_counters.texture_data_uploaded.add(bytes_uploaded >> 10);
@@ -3127,7 +3142,7 @@ impl Renderer {
         &mut self,
         draw_target: DrawTarget,
         target: &ColorRenderTarget,
-        framebuffer_target_rect: DeviceUintRect,
+        framebuffer_target_rect: DeviceIntRect,
         depth_is_ready: bool,
         clear_color: Option<[f32; 4]>,
         render_tasks: &RenderTaskTree,
@@ -3178,7 +3193,7 @@ impl Renderer {
                 } else {
                     None
                 }
-            } else if framebuffer_target_rect == DeviceUintRect::new(DeviceUintPoint::zero(), draw_target.dimensions()) {
+            } else if framebuffer_target_rect == DeviceIntRect::new(DeviceIntPoint::zero(), draw_target.dimensions()) {
                 // whole screen is covered, no need for scissor
                 None
             } else {
@@ -3742,7 +3757,7 @@ impl Renderer {
     fn stencil_glyphs(&mut self,
                       _: &[GlyphJob],
                       _: &Transform3D<f32>,
-                      _: &DeviceUintSize,
+                      _: &DeviceIntSize,
                       _: &mut RendererStats)
                       -> Option<StenciledGlyphPage> {
         None
@@ -3872,9 +3887,9 @@ impl Renderer {
             bounding_rect = t.used_rect().union(&bounding_rect);
         }
         debug_assert_eq!(bounding_rect.origin, DeviceIntPoint::zero());
-        let dimensions = DeviceUintSize::new(
-            (bounding_rect.size.width as u32 + 255) & !255,
-            (bounding_rect.size.height as u32 + 255) & !255,
+        let dimensions = DeviceIntSize::new(
+            (bounding_rect.size.width + 255) & !255,
+            (bounding_rect.size.height + 255) & !255,
         );
 
         counters.targets_used.inc();
@@ -3966,7 +3981,7 @@ impl Renderer {
     fn draw_tile_frame(
         &mut self,
         frame: &mut Frame,
-        framebuffer_size: Option<DeviceUintSize>,
+        framebuffer_size: Option<DeviceIntSize>,
         framebuffer_depth_is_ready: bool,
         frame_id: GpuFrameId,
         stats: &mut RendererStats,
@@ -4185,7 +4200,7 @@ impl Renderer {
     }
 
     #[cfg(feature = "debug_renderer")]
-    fn draw_render_target_debug(&mut self, framebuffer_size: DeviceUintSize) {
+    fn draw_render_target_debug(&mut self, framebuffer_size: DeviceIntSize) {
         if !self.debug_flags.contains(DebugFlags::RENDER_TARGET_DBG) {
             return;
         }
@@ -4209,7 +4224,7 @@ impl Renderer {
     }
 
     #[cfg(feature = "debug_renderer")]
-    fn draw_texture_cache_debug(&mut self, framebuffer_size: DeviceUintSize) {
+    fn draw_texture_cache_debug(&mut self, framebuffer_size: DeviceIntSize) {
         if !self.debug_flags.contains(DebugFlags::TEXTURE_CACHE_DBG) {
             return;
         }
@@ -4245,7 +4260,7 @@ impl Renderer {
         device: &mut Device,
         debug_renderer: &mut DebugRenderer,
         mut textures: Vec<&Texture>,
-        framebuffer_size: DeviceUintSize,
+        framebuffer_size: DeviceIntSize,
         bottom: i32,
         select_color: &Fn(&Texture) -> [f32; 4],
     ) {
@@ -4361,7 +4376,7 @@ impl Renderer {
     }
 
     #[cfg(feature = "debug_renderer")]
-    fn draw_gpu_cache_debug(&mut self, framebuffer_size: DeviceUintSize) {
+    fn draw_gpu_cache_debug(&mut self, framebuffer_size: DeviceIntSize) {
         if !self.debug_flags.contains(DebugFlags::GPU_CACHE_DBG) {
             return;
         }
@@ -4399,24 +4414,24 @@ impl Renderer {
     }
 
     /// Pass-through to `Device::read_pixels_into`, used by Gecko's WR bindings.
-    pub fn read_pixels_into(&mut self, rect: DeviceUintRect, format: ReadPixelsFormat, output: &mut [u8]) {
+    pub fn read_pixels_into(&mut self, rect: DeviceIntRect, format: ReadPixelsFormat, output: &mut [u8]) {
         self.device.read_pixels_into(rect, format, output);
     }
 
-    pub fn read_pixels_rgba8(&mut self, rect: DeviceUintRect) -> Vec<u8> {
+    pub fn read_pixels_rgba8(&mut self, rect: DeviceIntRect) -> Vec<u8> {
         let mut pixels = vec![0; (rect.size.width * rect.size.height * 4) as usize];
         self.device.read_pixels_into(rect, ReadPixelsFormat::Rgba8, &mut pixels);
         pixels
     }
 
-    pub fn read_gpu_cache(&mut self) -> (DeviceUintSize, Vec<u8>) {
+    pub fn read_gpu_cache(&mut self) -> (DeviceIntSize, Vec<u8>) {
         let texture = self.gpu_cache_texture.texture.as_ref().unwrap();
         let size = texture.get_dimensions();
         let mut texels = vec![0; (size.width * size.height * 16) as usize];
         self.device.begin_frame();
         self.device.bind_read_target(ReadTarget::Texture { texture, layer: 0 });
         self.device.read_pixels_into(
-            DeviceUintRect::new(DeviceUintPoint::zero(), size),
+            DeviceIntRect::new(DeviceIntPoint::zero(), size),
             ReadPixelsFormat::Standard(ImageFormat::RGBAF32),
             &mut texels,
         );
@@ -4550,6 +4565,18 @@ impl Renderer {
             self.device.set_blend_mode_subpixel_with_bg_color_pass2();
         }
     }
+
+    /// Clears all the layers of a texture with a given color.
+    fn clear_texture(&mut self, texture: &Texture, color: [f32; 4]) {
+        for i in 0..texture.get_layer_count() {
+            self.device.bind_draw_target(DrawTarget::Texture {
+                texture: &texture,
+                layer: i as usize,
+                with_depth: false,
+            });
+            self.device.clear_target(Some(color), None, None);
+        }
+    }
 }
 
 pub enum ExternalImageSource<'a> {
@@ -4678,7 +4705,7 @@ pub struct RendererOptions {
     pub enable_subpixel_aa: bool,
     pub clear_color: Option<ColorF>,
     pub enable_clear_scissor: bool,
-    pub max_texture_size: Option<u32>,
+    pub max_texture_size: Option<i32>,
     pub scatter_gpu_cache_updates: bool,
     pub upload_method: UploadMethod,
     pub workers: Option<Arc<ThreadPool>>,
@@ -4780,7 +4807,7 @@ impl RendererStats {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 struct PlainTexture {
     data: String,
-    size: (u32, u32, i32),
+    size: (DeviceIntSize, i32),
     format: ImageFormat,
     filter: TextureFilter,
 }
@@ -4850,8 +4877,8 @@ impl Renderer {
 
         let bytes_per_pixel = texture.get_format().bytes_per_pixel();
         let read_format = ReadPixelsFormat::Standard(texture.get_format());
-        let rect = DeviceUintRect::new(
-            DeviceUintPoint::zero(),
+        let rect = DeviceIntRect::new(
+            DeviceIntPoint::zero(),
             texture.get_dimensions(),
         );
 
@@ -4878,7 +4905,7 @@ impl Renderer {
                 };
                 CaptureConfig::save_png(
                     root.join(format!("textures/{}-{}.png", name, layer_id)),
-                    (rect.size.width, rect.size.height), format,
+                    rect.size, format,
                     data_ref,
                 );
             }
@@ -4889,7 +4916,7 @@ impl Renderer {
 
         PlainTexture {
             data: short_path,
-            size: (rect.size.width, rect.size.height, texture.get_layer_count()),
+            size: (rect.size, texture.get_layer_count()),
             format: texture.get_format(),
             filter: texture.get_filter(),
         }
@@ -4916,11 +4943,11 @@ impl Renderer {
         let texture = device.create_texture(
             target,
             plain.format,
-            plain.size.0,
-            plain.size.1,
+            plain.size.0.width,
+            plain.size.0.height,
             plain.filter,
             rt_info,
-            plain.size.2,
+            plain.size.1,
         );
         device.upload_texture_immediate(&texture, &texels);
 
@@ -5146,7 +5173,7 @@ impl Renderer {
                         let (layer_count, filter) = (1, TextureFilter::Linear);
                         let plain_tex = PlainTexture {
                             data: e.key().clone(),
-                            size: (descriptor.size.width, descriptor.size.height, layer_count),
+                            size: (descriptor.size, layer_count),
                             format: descriptor.format,
                             filter,
                         };

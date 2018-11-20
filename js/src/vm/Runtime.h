@@ -339,6 +339,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
   public:
     js::UnprotectedData<js::OffThreadPromiseRuntimeState> offThreadPromiseState;
     js::UnprotectedData<JS::ConsumeStreamCallback> consumeStreamCallback;
+    js::UnprotectedData<JS::ReportStreamErrorCallback> reportStreamErrorCallback;
 
     js::GlobalObject* getIncumbentGlobal(JSContext* cx);
     bool enqueuePromiseJob(JSContext* cx, js::HandleFunction job, js::HandleObject promise,
@@ -847,12 +848,12 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
      *
      * The function must be called outside the GC lock.
      */
-    JS_FRIEND_API(void*) onOutOfMemory(js::AllocFunction allocator, size_t nbytes,
-                                       void* reallocPtr = nullptr, JSContext* maybecx = nullptr);
+    JS_FRIEND_API void* onOutOfMemory(js::AllocFunction allocator, size_t nbytes,
+                                      void* reallocPtr = nullptr, JSContext* maybecx = nullptr);
 
     /*  onOutOfMemory but can call OnLargeAllocationFailure. */
-    JS_FRIEND_API(void*) onOutOfMemoryCanGC(js::AllocFunction allocator, size_t nbytes,
-                                            void* reallocPtr = nullptr);
+    JS_FRIEND_API void* onOutOfMemoryCanGC(js::AllocFunction allocator, size_t nbytes,
+                                           void* reallocPtr = nullptr);
 
     static const unsigned LARGE_ALLOCATION = 25 * 1024 * 1024;
 

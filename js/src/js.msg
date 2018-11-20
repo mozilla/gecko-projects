@@ -51,6 +51,7 @@ MSG_DEF(JSMSG_CANT_DELETE,             1, JSEXN_TYPEERR, "property {0} is non-co
 MSG_DEF(JSMSG_CANT_TRUNCATE_ARRAY,     0, JSEXN_TYPEERR, "can't delete non-configurable array element")
 MSG_DEF(JSMSG_NOT_FUNCTION,            1, JSEXN_TYPEERR, "{0} is not a function")
 MSG_DEF(JSMSG_NOT_CONSTRUCTOR,         1, JSEXN_TYPEERR, "{0} is not a constructor")
+MSG_DEF(JSMSG_BOGUS_CONSTRUCTOR,       1, JSEXN_TYPEERR, "{0} constructor can't be used directly")
 MSG_DEF(JSMSG_CANT_CONVERT_TO,         2, JSEXN_TYPEERR, "can't convert {0} to {1}")
 MSG_DEF(JSMSG_TOPRIMITIVE_NOT_CALLABLE, 2, JSEXN_TYPEERR, "can't convert {0} to {1}: its [Symbol.toPrimitive] property is not a function")
 MSG_DEF(JSMSG_TOPRIMITIVE_RETURNED_OBJECT, 2, JSEXN_TYPEERR, "can't convert {0} to {1}: its [Symbol.toPrimitive] method returned an object")
@@ -86,6 +87,7 @@ MSG_DEF(JSMSG_MISSING_FUN_ARG,         2, JSEXN_TYPEERR, "missing argument {0} w
 MSG_DEF(JSMSG_NOT_NONNULL_OBJECT,      1, JSEXN_TYPEERR, "{0} is not a non-null object")
 MSG_DEF(JSMSG_NOT_NONNULL_OBJECT_NAME, 2, JSEXN_TYPEERR, "{0} must be an object, got {1}")
 MSG_DEF(JSMSG_NOT_NONNULL_OBJECT_ARG,  3, JSEXN_TYPEERR, "{0} argument of {1} must be an object, got {2}")
+MSG_DEF(JSMSG_WRONG_TYPE_ARG,          4, JSEXN_TYPEERR, "argument {0} to {1} must be an object of type {2}, got {3}")
 MSG_DEF(JSMSG_SET_NON_OBJECT_RECEIVER, 2, JSEXN_TYPEERR, "can't assign to property {1} on {0}: not an object")
 MSG_DEF(JSMSG_INVALID_DESCRIPTOR,      0, JSEXN_TYPEERR, "property descriptors must not specify a value or be writable when a getter or setter has been specified")
 MSG_DEF(JSMSG_OBJECT_NOT_EXTENSIBLE,   1, JSEXN_TYPEERR, "{0}: Object is not extensible")
@@ -415,7 +417,6 @@ MSG_DEF(JSMSG_WASM_BAD_TABLE_VALUE,    0, JSEXN_TYPEERR,     "can only assign We
 MSG_DEF(JSMSG_WASM_BAD_I64_TYPE,       0, JSEXN_TYPEERR,     "cannot pass i64 to or from JS")
 MSG_DEF(JSMSG_WASM_BAD_GLOBAL_TYPE,    0, JSEXN_TYPEERR,     "bad type for a WebAssembly.Global")
 MSG_DEF(JSMSG_WASM_NO_TRANSFER,        0, JSEXN_TYPEERR,     "cannot transfer WebAssembly/asm.js ArrayBuffer")
-MSG_DEF(JSMSG_WASM_STREAM_ERROR,       0, JSEXN_TYPEERR,     "stream error during WebAssembly compilation")
 MSG_DEF(JSMSG_WASM_TEXT_FAIL,          1, JSEXN_SYNTAXERR,   "wasm text error: {0}")
 MSG_DEF(JSMSG_WASM_MISSING_MAXIMUM,    0, JSEXN_TYPEERR,     "'shared' is true but maximum is not specified")
 MSG_DEF(JSMSG_WASM_GLOBAL_IMMUTABLE,   0, JSEXN_TYPEERR,     "can't set value of immutable global")
@@ -666,7 +667,8 @@ MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_CLOSED,  0, JSEXN_TYPEERR, "Read
 MSG_DEF(JSMSG_READABLESTREAM_METHOD_NOT_IMPLEMENTED,     1, JSEXN_TYPEERR, "ReadableStream method {0} not yet implemented")
 
 // Other Stream-related
-MSG_DEF(JSMSG_STREAM_INVALID_HIGHWATERMARK,             0, JSEXN_RANGEERR, "'highWaterMark' must be a non-negative, non-NaN number.")
+MSG_DEF(JSMSG_STREAM_INVALID_HIGHWATERMARK,              0, JSEXN_RANGEERR, "'highWaterMark' must be a non-negative, non-NaN number.")
+MSG_DEF(JSMSG_STREAM_CONSUME_ERROR,                      0, JSEXN_TYPEERR,  "error consuming stream body")
 
 // Response-related
 MSG_DEF(JSMSG_ERROR_CONSUMING_RESPONSE,                  0, JSEXN_TYPEERR,  "there was an error consuming the Response")

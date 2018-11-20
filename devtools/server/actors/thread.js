@@ -28,6 +28,7 @@ loader.lazyRequireGetter(this, "PauseScopedObjectActor", "devtools/server/actors
 loader.lazyRequireGetter(this, "EventLoopStack", "devtools/server/actors/utils/event-loop", true);
 loader.lazyRequireGetter(this, "FrameActor", "devtools/server/actors/frame", true);
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
+loader.lazyRequireGetter(this, "throttle", "devtools/shared/throttle", true);
 
 /**
  * JSD2 actors.
@@ -113,6 +114,14 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       this._dbg.onNewScript = this.onNewScript;
       if (this._dbg.replaying) {
         this._dbg.replayingOnForcedPause = this.replayingOnForcedPause.bind(this);
+        const sendProgress = throttle((recording, executionPoint) => {
+          if (this.attached) {
+            this.conn.send({ type: "progress", from: this.actorID,
+                             recording, executionPoint });
+          }
+        }, 100);
+        this._dbg.replayingOnPositionChange =
+          this.replayingOnPositionChange.bind(this, sendProgress);
       }
       // Keep the debugger disabled until a client attaches.
       this._dbg.enabled = this._state != "detached";
@@ -177,6 +186,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
    */
   _threadPauseEventLoops: null,
   _pushThreadPause: function() {
+    if (this.dbg.replaying) {
+      this.dbg.replayPushThreadPause();
+    }
     if (!this._threadPauseEventLoops) {
       this._threadPauseEventLoops = [];
     }
@@ -188,6 +200,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     const eventLoop = this._threadPauseEventLoops.pop();
     assert(eventLoop, "Should have an event loop.");
     eventLoop.resolve();
+    if (this.dbg.replaying) {
+      this.dbg.replayPopThreadPause();
+    }
   },
 
   /**
@@ -423,9 +438,6 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
     if ("observeAsmJS" in options) {
       this.dbg.allowUnobservedAsmJS = !options.observeAsmJS;
-    }
-    if ("wasmBinarySource" in options) {
-      this.dbg.allowWasmBinarySource = !!options.wasmBinarySource;
     }
 
     Object.assign(this._options, options);
@@ -1776,6 +1788,17 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   onSkipBreakpoints: function({ skip }) {
     this.skipBreakpoints = skip;
     return { skip };
+  },
+
+  /*
+   * A function that the engine calls when a recording/replaying process has
+   * changed its position: a checkpoint was reached or a switch between a
+   * recording and replaying child process occurred.
+   */
+  replayingOnPositionChange: function(sendProgress) {
+    const recording = this.dbg.replayIsRecording();
+    const executionPoint = this.dbg.replayCurrentExecutionPoint();
+    sendProgress(recording, executionPoint);
   },
 
   /**

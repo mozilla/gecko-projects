@@ -128,7 +128,7 @@ public:
   void UpdateBlobImage(wr::ImageKey aKey,
                        const ImageDescriptor& aDescriptor,
                        wr::Vec<uint8_t>& aBytes,
-                       const wr::DeviceUintRect& aDirtyRect);
+                       const wr::DeviceIntRect& aDirtyRect);
 
   void UpdateExternalImage(ImageKey aKey,
                            const ImageDescriptor& aDescriptor,
@@ -140,10 +140,10 @@ public:
                                         const ImageDescriptor& aDescriptor,
                                         ExternalImageId aExtID,
                                         wr::WrExternalImageBufferType aBufferType,
-                                        const wr::DeviceUintRect& aDirtyRect,
+                                        const wr::DeviceIntRect& aDirtyRect,
                                         uint8_t aChannelIndex = 0);
 
-  void SetImageVisibleArea(ImageKey aKey, const wr::DeviceUintRect& aArea);
+  void SetImageVisibleArea(ImageKey aKey, const wr::DeviceIntRect& aArea);
 
   void DeleteImage(wr::ImageKey aKey);
 
@@ -238,7 +238,7 @@ public:
   void Capture();
 
 protected:
-  WebRenderAPI(wr::DocumentHandle* aHandle, wr::WindowId aId, uint32_t aMaxTextureSize, bool aUseANGLE, bool aUseDComp, bool aUseTripleBuffering, layers::SyncHandle aSyncHandle)
+  WebRenderAPI(wr::DocumentHandle* aHandle, wr::WindowId aId, int32_t aMaxTextureSize, bool aUseANGLE, bool aUseDComp, bool aUseTripleBuffering, layers::SyncHandle aSyncHandle)
     : mDocHandle(aHandle)
     , mId(aId)
     , mMaxTextureSize(aMaxTextureSize)
@@ -246,19 +246,23 @@ protected:
     , mUseDComp(aUseDComp)
     , mUseTripleBuffering(aUseTripleBuffering)
     , mSyncHandle(aSyncHandle)
+    , mDebugFlags({ 0 })
   {}
 
   ~WebRenderAPI();
   // Should be used only for shutdown handling
   void WaitFlushed();
 
+  void UpdateDebugFlags(uint32_t aFlags);
+
   wr::DocumentHandle* mDocHandle;
   wr::WindowId mId;
-  uint32_t mMaxTextureSize;
+  int32_t mMaxTextureSize;
   bool mUseANGLE;
   bool mUseDComp;
   bool mUseTripleBuffering;
   layers::SyncHandle mSyncHandle;
+  wr::DebugFlags mDebugFlags;
 
   // We maintain alive the root api to know when to shut the render backend down,
   // and the root api for the document to know when to delete the document.
@@ -455,9 +459,9 @@ public:
                        bool aIsBackfaceVisible,
                        const wr::LayoutSideOffsets& aWidths,
                        wr::ImageKey aImage,
-                       const uint32_t aWidth,
-                       const uint32_t aHeight,
-                       const wr::SideOffsets2D<uint32_t>& aSlice,
+                       const int32_t aWidth,
+                       const int32_t aHeight,
+                       const wr::SideOffsets2D<int32_t>& aSlice,
                        const wr::SideOffsets2D<float>& aOutset,
                        const wr::RepeatMode& aRepeatHorizontal,
                        const wr::RepeatMode& aRepeatVertical);
@@ -466,9 +470,9 @@ public:
                           const wr::LayoutRect& aClip,
                           bool aIsBackfaceVisible,
                           const wr::LayoutSideOffsets& aWidths,
-                          const uint32_t aWidth,
-                          const uint32_t aHeight,
-                          const wr::SideOffsets2D<uint32_t>& aSlice,
+                          const int32_t aWidth,
+                          const int32_t aHeight,
+                          const wr::SideOffsets2D<int32_t>& aSlice,
                           const wr::LayoutPoint& aStartPoint,
                           const wr::LayoutPoint& aEndPoint,
                           const nsTArray<wr::GradientStop>& aStops,

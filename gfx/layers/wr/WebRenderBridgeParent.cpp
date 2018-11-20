@@ -197,6 +197,52 @@ protected:
   bool mIsActive;
 };
 
+class SceneBuiltNotification: public wr::NotificationHandler {
+public:
+  explicit SceneBuiltNotification(TimeStamp aTxnStartTime)
+  : mTxnStartTime(aTxnStartTime)
+  {}
+
+  virtual void Notify(wr::Checkpoint) override {
+    auto startTime = this->mTxnStartTime;
+    CompositorThreadHolder::Loop()->PostTask(
+      NS_NewRunnableFunction("SceneBuiltNotificationRunnable", [startTime]() {
+        auto endTime = TimeStamp::Now();
+#ifdef MOZ_GECKO_PROFILER
+        if (profiler_is_active()) {
+          class ContentFullPaintPayload : public ProfilerMarkerPayload
+          {
+          public:
+            ContentFullPaintPayload(const mozilla::TimeStamp& aStartTime,
+                                    const mozilla::TimeStamp& aEndTime)
+              : ProfilerMarkerPayload(aStartTime, aEndTime)
+            {
+            }
+            virtual void StreamPayload(SpliceableJSONWriter& aWriter,
+                                       const TimeStamp& aProcessStartTime,
+                                       UniqueStacks& aUniqueStacks) override
+            {
+              StreamCommonProps("CONTENT_FULL_PAINT_TIME",
+                                aWriter,
+                                aProcessStartTime,
+                                aUniqueStacks);
+            }
+          };
+
+          profiler_add_marker_for_thread(profiler_current_thread_id(),
+                                         "CONTENT_FULL_PAINT_TIME",
+                                         MakeUnique<ContentFullPaintPayload>(startTime, endTime));
+        }
+#endif
+        Telemetry::Accumulate(Telemetry::CONTENT_FULL_PAINT_TIME,
+                              static_cast<uint32_t>((endTime - startTime).ToMilliseconds()));
+      }));
+  }
+protected:
+  TimeStamp mTxnStartTime;
+};
+
+
 class WebRenderBridgeParent::ScheduleSharedSurfaceRelease final
   : public wr::NotificationHandler
 {
@@ -274,7 +320,7 @@ WebRenderBridgeParent::WebRenderBridgeParent(CompositorBridgeParentBase* aCompos
 {
   MOZ_ASSERT(mAsyncImageManager);
   MOZ_ASSERT(mAnimStorage);
-  mAsyncImageManager->AddPipeline(mPipelineId);
+  mAsyncImageManager->AddPipeline(mPipelineId, this);
   if (IsRootWebRenderBridgeParent()) {
     MOZ_ASSERT(!mCompositorScheduler);
     mCompositorScheduler = new CompositorVsyncScheduler(this, mWidget);
@@ -399,12 +445,12 @@ WebRenderBridgeParent::UpdateResources(const nsTArray<OpUpdateResource>& aResour
         if (!reader.Read(op.bytes(), bytes)) {
           return false;
         }
-        aUpdates.UpdateBlobImage(op.key(), op.descriptor(), bytes, wr::ToDeviceUintRect(op.dirtyRect()));
+        aUpdates.UpdateBlobImage(op.key(), op.descriptor(), bytes, wr::ToDeviceIntRect(op.dirtyRect()));
         break;
       }
       case OpUpdateResource::TOpSetImageVisibleArea: {
         const auto& op = cmd.get_OpSetImageVisibleArea();
-        wr::DeviceUintRect area;
+        wr::DeviceIntRect area;
         area.origin.x = op.area().x;
         area.origin.y = op.area().y;
         area.size.width = op.area().width;
@@ -653,7 +699,7 @@ WebRenderBridgeParent::UpdateExternalImage(wr::ExternalImageId aExtId,
                                    dSurf->GetFormat());
     aResources.UpdateExternalImageWithDirtyRect(aKey, descriptor, aExtId,
                                                 wr::WrExternalImageBufferType::ExternalBuffer,
-                                                wr::ToDeviceUintRect(aDirtyRect),
+                                                wr::ToDeviceIntRect(aDirtyRect),
                                                 0);
     return true;
   }
@@ -935,6 +981,13 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
         )
       );
     }
+
+    txn.Notify(
+      wr::Checkpoint::SceneBuilt,
+      MakeUnique<SceneBuiltNotification>(
+        aTxnStartTime
+      )
+    );
 
     mApi->SendTransaction(txn);
 
@@ -1479,7 +1532,7 @@ WebRenderBridgeParent::UpdateWebRender(CompositorVsyncScheduler* aScheduler,
   mAnimStorage = aAnimStorage;
 
   // Register pipeline to updated AsyncImageManager.
-  mAsyncImageManager->AddPipeline(mPipelineId);
+  mAsyncImageManager->AddPipeline(mPipelineId, this);
 
   return GetNextWrEpoch(); // Update webrender epoch
 }

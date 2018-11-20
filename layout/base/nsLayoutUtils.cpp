@@ -6444,10 +6444,11 @@ nsLayoutUtils::GetFirstLinePosition(WritingMode aWM,
       return false;
     }
 
-    if (fType == LayoutFrameType::FieldSet) {
+    if (fType == LayoutFrameType::FieldSet ||
+        fType == LayoutFrameType::ColumnSet) {
       LinePosition kidPosition;
       nsIFrame* kid = aFrame->PrincipalChildList().FirstChild();
-      // kid might be a legend frame here, but that's ok.
+      // If aFrame is fieldset, kid might be a legend frame here, but that's ok.
       if (GetFirstLinePosition(aWM, kid, &kidPosition)) {
         *aResult = kidPosition +
           kid->GetLogicalNormalPosition(aWM, aFrame->GetSize()).B(aWM);
@@ -7646,8 +7647,7 @@ nsLayoutUtils::GetDeviceContextForScreenInfo(nsPIDOMWindowOuter* aWindow)
 
     win->EnsureSizeAndPositionUpToDate();
 
-    RefPtr<nsPresContext> presContext;
-    docShell->GetPresContext(getter_AddRefs(presContext));
+    RefPtr<nsPresContext> presContext = docShell->GetPresContext();
     if (presContext) {
       nsDeviceContext* context = presContext->DeviceContext();
       if (context) {
@@ -9214,9 +9214,8 @@ MaybeReflowForInflationScreenSizeChange(nsPresContext *aPresContext)
           nsTArray<nsCOMPtr<nsIContentViewer> > array;
           cv->AppendSubtree(array);
           for (uint32_t i = 0, iEnd = array.Length(); i < iEnd; ++i) {
-            nsCOMPtr<nsIPresShell> shell;
             nsCOMPtr<nsIContentViewer> cv = array[i];
-            cv->GetPresShell(getter_AddRefs(shell));
+            nsCOMPtr<nsIPresShell> shell = cv->GetPresShell();
             if (shell) {
               nsIFrame *rootFrame = shell->GetRootFrame();
               if (rootFrame) {

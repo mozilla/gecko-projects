@@ -43,12 +43,14 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Locale;
 
 public class GeckoViewActivity extends AppCompatActivity {
     private static final String LOGTAG = "GeckoViewActivity";
-    private static final String DEFAULT_URL = "https://mozilla.org";
+    private static final String DEFAULT_URL = "about:blank";
     private static final String USE_MULTIPROCESS_EXTRA = "use_multiprocess";
     private static final String FULL_ACCESSIBILITY_TREE_EXTRA = "full_accessibility_tree";
     private static final String SEARCH_URI_BASE = "https://www.google.com/search?q=";
@@ -171,6 +173,7 @@ public class GeckoViewActivity extends AppCompatActivity {
 
     private void connectSession(GeckoSession session) {
         session.setContentDelegate(new ExampleContentDelegate());
+        session.setHistoryDelegate(new ExampleHistoryDelegate());
         final ExampleTrackingProtectionDelegate tp = new ExampleTrackingProtectionDelegate();
         session.setTrackingProtectionDelegate(tp);
         session.setProgressDelegate(new ExampleProgressDelegate(tp));
@@ -414,6 +417,32 @@ public class GeckoViewActivity extends AppCompatActivity {
         }
 
         return mErrorTemplate.replace("$ERROR", error);
+    }
+
+    private class ExampleHistoryDelegate implements GeckoSession.HistoryDelegate {
+        private final HashSet<String> mVisitedURLs;
+
+        private ExampleHistoryDelegate() {
+            mVisitedURLs = new HashSet<String>();
+        }
+
+        @Override
+        public GeckoResult<Boolean> onVisited(GeckoSession session, String url,
+                                              String lastVisitedURL, int flags) {
+            Log.i(LOGTAG, "Visited URL: " + url);
+
+            mVisitedURLs.add(url);
+            return GeckoResult.fromValue(true);
+        }
+
+        @Override
+        public GeckoResult<boolean[]> getVisited(GeckoSession session, String[] urls) {
+            boolean[] visited = new boolean[urls.length];
+            for (int i = 0; i < urls.length; i++) {
+                visited[i] = mVisitedURLs.contains(urls[i]);
+            }
+            return GeckoResult.fromValue(visited);
+        }
     }
 
     private class ExampleContentDelegate implements GeckoSession.ContentDelegate {

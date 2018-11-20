@@ -8032,7 +8032,7 @@
     "releaseChannelCollection": "opt-out",
     "alert_emails": ["adw@mozilla.com"],
     "bug_numbers": [1089670, 1482158, 1499193],
-    "description": "Records search counts for search access points and in content searches. For search access points in general and for the urlbar when an internal @engine shorcut is not used, the format is: <engine-name>.<search-access-point> For the urlbar when an internal @engine shortcut is used, the format is: <engine-name>.<@engine>.urlbar For in content searches, the format is <provider>.in-content:[sap|sap-follow-on|organic]:[code|none]"
+    "description": "Records search counts for search access points and in content searches. For search access points in general and for the urlbar when an internal @engine shorcut is not used, the format is: <engine-name>.<search-access-point> For the urlbar when an internal @engine shortcut is used, the format is: <engine-name>.alias For in content searches, the format is <provider>.in-content:[sap|sap-follow-on|organic]:[code|none]"
   },
   "SEARCH_RESET_RESULT": {
     "record_in_processes": ["main", "content"],
@@ -13053,6 +13053,17 @@
     "high": 1000,
     "n_buckets": 50,
     "description": "Time spent in the paint pipeline for content in milliseconds."
+  },
+  "CONTENT_FULL_PAINT_TIME": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com", "jmuizelaar@mozilla.com", "dbolter@mozilla.com"],
+    "bug_numbers": [1505858],
+    "expires_in_version": "never",
+    "releaseChannelCollection": "opt-out",
+    "kind": "exponential",
+    "high": 1000,
+    "n_buckets": 50,
+    "description": "Time spent in the paint pipeline until it's ready for composition in milliseconds."
   },
   "CONTENT_FRAME_TIME": {
     "record_in_processes": ["main", "gpu"],

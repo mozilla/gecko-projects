@@ -116,6 +116,9 @@ const char* const XPCJSRuntime::mStrings[] = {
     "isInstance",           // IDX_ISINSTANCE
     "Infinity",             // IDX_INFINITY
     "NaN",                  // IDX_NAN
+    "classId",              // IDX_CLASS_ID
+    "interfaceId",          // IDX_INTERFACE_ID
+    "initializer",          // IDX_INITIALIZER
 };
 
 /***************************************************************************/
@@ -192,7 +195,6 @@ CompartmentPrivate::CompartmentPrivate(JS::Compartment* c, mozilla::BasePrincipa
     , isContentXBLCompartment(false)
     , isUAWidgetCompartment(false)
     , isSandboxCompartment(false)
-    , isAddonCompartment(false)
     , universalXPConnectEnabled(false)
     , forcePermissiveCOWs(false)
     , wasNuked(false)

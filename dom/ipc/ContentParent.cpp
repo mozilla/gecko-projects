@@ -1862,6 +1862,11 @@ ContentParent::ShouldKeepProcessAlive() const
     return true;
   }
 
+  // If we have active workers, we need to stay alive.
+  if (mRemoteWorkerActors) {
+    return true;
+  }
+
   if (!sBrowserContentParents) {
     return false;
   }
@@ -2385,6 +2390,7 @@ ContentParent::ContentParent(ContentParent* aOpener,
   , mChildID(gContentChildID++)
   , mGeolocationWatchID(-1)
   , mJSPluginID(aJSPluginID)
+  , mRemoteWorkerActors(0)
   , mNumDestroyingTabs(0)
   , mIsAvailable(true)
   , mIsAlive(true)
@@ -3906,25 +3912,6 @@ ContentParent::RecvStartVisitedQuery(const URIParams& aURI)
   return IPC_OK();
 }
 
-
-mozilla::ipc::IPCResult
-ContentParent::RecvVisitURI(const URIParams& uri,
-                            const OptionalURIParams& referrer,
-                            const uint32_t& flags)
-{
-  nsCOMPtr<nsIURI> ourURI = DeserializeURI(uri);
-  if (!ourURI) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  nsCOMPtr<nsIURI> ourReferrer = DeserializeURI(referrer);
-  nsCOMPtr<IHistory> history = services::GetHistoryService();
-  if (history) {
-    history->VisitURI(ourURI, ourReferrer, flags);
-  }
-  return IPC_OK();
-}
-
-
 mozilla::ipc::IPCResult
 ContentParent::RecvSetURITitle(const URIParams& uri,
                                const nsString& title)
@@ -4891,6 +4878,7 @@ ContentParent::RecvUpdateDropEffect(const uint32_t& aDragAction,
 PContentPermissionRequestParent*
 ContentParent::AllocPContentPermissionRequestParent(const InfallibleTArray<PermissionRequest>& aRequests,
                                                     const IPC::Principal& aPrincipal,
+                                                    const IPC::Principal& aTopLevelPrincipal,
                                                     const bool& aIsHandlingUserInput,
                                                     const TabId& aTabId)
 {
@@ -4904,6 +4892,7 @@ ContentParent::AllocPContentPermissionRequestParent(const InfallibleTArray<Permi
   return nsContentPermissionUtils::CreateContentPermissionRequestParent(aRequests,
                                                                         tp->GetOwnerElement(),
                                                                         aPrincipal,
+                                                                        aTopLevelPrincipal,
                                                                         aIsHandlingUserInput,
                                                                         aTabId);
 }
@@ -6180,4 +6169,33 @@ ContentParent::RecvSetOpenerBrowsingContext(
   context->SetOpener(opener);
 
   return IPC_OK();
+}
+
+void
+ContentParent::RegisterRemoteWorkerActor()
+{
+  ++mRemoteWorkerActors;
+}
+
+void
+ContentParent::UnregisterRemoveWorkerActor()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (--mRemoteWorkerActors) {
+    return;
+  }
+
+  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
+  if (!cpm->GetTabParentCountByProcessId(ChildID()) &&
+      !ShouldKeepProcessAlive() &&
+      !TryToRecycle()) {
+    // In the case of normal shutdown, send a shutdown message to child to
+    // allow it to perform shutdown tasks.
+    MessageLoop::current()->PostTask(
+      NewRunnableMethod<ShutDownMethod>("dom::ContentParent::ShutDownProcess",
+                                        this,
+                                        &ContentParent::ShutDownProcess,
+                                        SEND_SHUTDOWN_MESSAGE));
+  }
 }

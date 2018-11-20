@@ -36,7 +36,7 @@ class Shape;
 
 // This is equal to JSFunction::class_.  Use it in places where you don't want
 // to #include jsfun.h.
-extern JS_FRIEND_DATA(const js::Class* const) FunctionClassPtr;
+extern JS_FRIEND_DATA const js::Class* const FunctionClassPtr;
 
 } // namespace js
 
@@ -65,7 +65,7 @@ enum class IsArrayAnswer
  * revoked, or if |obj| is a proxy whose target (at any number of hops) is a
  * revoked proxy, this method throws a TypeError and returns false.
  */
-extern JS_PUBLIC_API(bool)
+extern JS_PUBLIC_API bool
 IsArray(JSContext* cx, HandleObject obj, bool* isArray);
 
 /**
@@ -76,7 +76,7 @@ IsArray(JSContext* cx, HandleObject obj, bool* isArray);
  *
  * Most users will want the overload above, not this one.
  */
-extern JS_PUBLIC_API(bool)
+extern JS_PUBLIC_API bool
 IsArray(JSContext* cx, HandleObject obj, IsArrayAnswer* answer);
 
 /**
@@ -192,20 +192,20 @@ class ObjectOpResult
         return true;
     }
 
-    JS_PUBLIC_API(bool) failCantRedefineProp();
-    JS_PUBLIC_API(bool) failReadOnly();
-    JS_PUBLIC_API(bool) failGetterOnly();
-    JS_PUBLIC_API(bool) failCantDelete();
+    JS_PUBLIC_API bool failCantRedefineProp();
+    JS_PUBLIC_API bool failReadOnly();
+    JS_PUBLIC_API bool failGetterOnly();
+    JS_PUBLIC_API bool failCantDelete();
 
-    JS_PUBLIC_API(bool) failCantSetInterposed();
-    JS_PUBLIC_API(bool) failCantDefineWindowElement();
-    JS_PUBLIC_API(bool) failCantDeleteWindowElement();
-    JS_PUBLIC_API(bool) failCantDeleteWindowNamedProperty();
-    JS_PUBLIC_API(bool) failCantPreventExtensions();
-    JS_PUBLIC_API(bool) failCantSetProto();
-    JS_PUBLIC_API(bool) failNoNamedSetter();
-    JS_PUBLIC_API(bool) failNoIndexedSetter();
-    JS_PUBLIC_API(bool) failNotDataDescriptor();
+    JS_PUBLIC_API bool failCantSetInterposed();
+    JS_PUBLIC_API bool failCantDefineWindowElement();
+    JS_PUBLIC_API bool failCantDeleteWindowElement();
+    JS_PUBLIC_API bool failCantDeleteWindowNamedProperty();
+    JS_PUBLIC_API bool failCantPreventExtensions();
+    JS_PUBLIC_API bool failCantSetProto();
+    JS_PUBLIC_API bool failNoNamedSetter();
+    JS_PUBLIC_API bool failNoIndexedSetter();
+    JS_PUBLIC_API bool failNotDataDescriptor();
 
     uint32_t failureCode() const {
         MOZ_ASSERT(!ok());
@@ -257,8 +257,8 @@ class ObjectOpResult
     }
 
     /* Helper function for checkStrictErrorOrWarning's slow path. */
-    JS_PUBLIC_API(bool) reportStrictErrorOrWarning(JSContext* cx, HandleObject obj, HandleId id, bool strict);
-    JS_PUBLIC_API(bool) reportStrictErrorOrWarning(JSContext* cx, HandleObject obj, bool strict);
+    JS_PUBLIC_API bool reportStrictErrorOrWarning(JSContext* cx, HandleObject obj, HandleId id, bool strict);
+    JS_PUBLIC_API bool reportStrictErrorOrWarning(JSContext* cx, HandleObject obj, bool strict);
 
     /*
      * Convenience method. Return true if ok() or if strict is false; otherwise
@@ -558,7 +558,7 @@ typedef bool
 (* DeletePropertyOp)(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
                      JS::ObjectOpResult& result);
 
-class JS_FRIEND_API(ElementAdder)
+class JS_FRIEND_API ElementAdder
 {
   public:
     enum GetBehavior {
@@ -868,7 +868,7 @@ static const uint32_t JSCLASS_FOREGROUND_FINALIZE =     1 << (JSCLASS_HIGH_FLAGS
 // application.
 static const uint32_t JSCLASS_GLOBAL_APPLICATION_SLOTS = 5;
 static const uint32_t JSCLASS_GLOBAL_SLOT_COUNT =
-    JSCLASS_GLOBAL_APPLICATION_SLOTS + JSProto_LIMIT * 2 + 36;
+    JSCLASS_GLOBAL_APPLICATION_SLOTS + JSProto_LIMIT * 2 + 37;
 
 #define JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(n)                              \
     (JSCLASS_IS_GLOBAL | JSCLASS_HAS_RESERVED_SLOTS(JSCLASS_GLOBAL_SLOT_COUNT + (n)))
@@ -1067,7 +1067,7 @@ bool
 Unbox(JSContext* cx, JS::HandleObject obj, JS::MutableHandleValue vp);
 
 #ifdef DEBUG
-JS_FRIEND_API(bool)
+JS_FRIEND_API bool
 HasObjectMovedOp(JSObject* obj);
 #endif
 

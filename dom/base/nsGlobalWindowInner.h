@@ -69,7 +69,6 @@ class nsIDOMWindowUtils;
 class nsDOMOfflineResourceList;
 class nsIScrollableFrame;
 class nsIControllers;
-class nsIJSID;
 class nsIScriptContext;
 class nsIScriptTimeoutHandler;
 class nsITabChild;
@@ -120,6 +119,7 @@ class Promise;
 class PostMessageEvent;
 struct RequestInit;
 class RequestOrUSVString;
+class SharedWorker;
 class Selection;
 class SpeechSynthesis;
 class TabGroup;
@@ -713,6 +713,12 @@ public:
   mozilla::dom::IntlUtils*
   GetIntlUtils(mozilla::ErrorResult& aRv);
 
+  void
+  StoreSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
+
+  void
+  ForgetSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
+
 public:
   void Alert(nsIPrincipal& aSubjectPrincipal,
              mozilla::ErrorResult& aError);
@@ -978,7 +984,7 @@ public:
                       nsIPrincipal& aSubjectPrincipal,
                       mozilla::ErrorResult& aError);
 
-  void GetInterface(JSContext* aCx, nsIJSID* aIID,
+  void GetInterface(JSContext* aCx, JS::Handle<JS::Value> aIID,
                     JS::MutableHandle<JS::Value> aRetval,
                     mozilla::ErrorResult& aError);
 
@@ -1405,6 +1411,8 @@ protected:
   RefPtr<mozilla::dom::Location> mLocation;
   RefPtr<nsHistory>           mHistory;
   RefPtr<mozilla::dom::CustomElementRegistry> mCustomElements;
+
+  nsTObserverArray<RefPtr<mozilla::dom::SharedWorker>> mSharedWorkers;
 
   RefPtr<mozilla::dom::VisualViewport> mVisualViewport;
 

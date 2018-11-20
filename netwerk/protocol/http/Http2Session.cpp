@@ -395,7 +395,7 @@ Http2Session::RegisterStreamID(Http2Stream *stream, uint32_t aNewID)
     mNextStreamID += 2;
   }
 
-  LOG3(("Http2Session::RegisterStreamID session=%p stream=%p id=0x%X "
+  LOG1(("Http2Session::RegisterStreamID session=%p stream=%p id=0x%X "
         "concurrent=%d",this, stream, aNewID, mConcurrent));
 
   // We've used up plenty of ID's on this session. Start
@@ -1266,8 +1266,7 @@ Http2Session::CleanupStream(Http2Stream *aStream, nsresult aResult,
       MOZ_ASSERT(rv);
       nsIRequestContext *requestContext = aStream->RequestContext();
       if (requestContext) {
-        SpdyPushCache *cache = nullptr;
-        requestContext->GetSpdyPushCache(&cache);
+        SpdyPushCache *cache = requestContext->GetSpdyPushCache();
         if (cache) {
           // Make sure the id of the stream in the push cache is the same
           // as the id of the stream we're cleaning up! See bug 1368080.
@@ -1881,13 +1880,10 @@ Http2Session::RecvPushPromise(Http2Session *self)
   } else {
     nsIRequestContext *requestContext = associatedStream->RequestContext();
     if (requestContext) {
-      requestContext->GetSpdyPushCache(&cache);
+      cache = requestContext->GetSpdyPushCache();
       if (!cache) {
         cache = new SpdyPushCache();
-        if (!cache || NS_FAILED(requestContext->SetSpdyPushCache(cache))) {
-          delete cache;
-          cache = nullptr;
-        }
+        requestContext->SetSpdyPushCache(cache);
       }
     }
     if (!cache) {

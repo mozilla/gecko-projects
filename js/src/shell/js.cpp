@@ -6019,6 +6019,8 @@ class AutoPipe
     }
 };
 
+static const char sWasmCompileAndSerializeFlag[] = "--wasm-compile-and-serialize";
+
 static bool
 CompileAndSerializeInSeparateProcess(JSContext* cx, const uint8_t* bytecode, size_t bytecodeLength,
                                      wasm::Bytes* serialized)
@@ -6035,8 +6037,19 @@ CompileAndSerializeInSeparateProcess(JSContext* cx, const uint8_t* bytecode, siz
         return false;
     }
 
-    UniqueChars argv1 = DuplicateString("--wasm-compile-and-serialize");
-    if (!argv1 || !argv.append(std::move(argv1))) {
+    // Propagate shell flags first, since they must precede the non-option
+    // file-descriptor args (passed on Windows, below).
+    for (unsigned i = 0; i < sPropagatedFlags.length(); i++) {
+        UniqueChars flags = DuplicateString(cx, sPropagatedFlags[i]);
+        if (!flags || !argv.append(std::move(flags))) {
+            return false;
+        }
+    }
+
+    UniqueChars arg;
+
+    arg = DuplicateString(sWasmCompileAndSerializeFlag);
+    if (!arg || !argv.append(std::move(arg))) {
         return false;
     }
 
@@ -6047,34 +6060,28 @@ CompileAndSerializeInSeparateProcess(JSContext* cx, const uint8_t* bytecode, siz
     // has a matching #ifdef XP_WIN to parse them out. Communicate both ends of
     // both pipes so the child process can closed the unused ends.
 
-    UniqueChars argv2 = JS_smprintf("%d", stdIn.reader());
-    if (!argv2 || !argv.append(std::move(argv2))) {
+    arg = JS_smprintf("%d", stdIn.reader());
+    if (!arg || !argv.append(std::move(arg))) {
         return false;
     }
 
-    UniqueChars argv3 = JS_smprintf("%d", stdIn.writer());
-    if (!argv3 || !argv.append(std::move(argv3))) {
+    arg = JS_smprintf("%d", stdIn.writer());
+    if (!arg || !argv.append(std::move(arg))) {
         return false;
     }
 
-    UniqueChars argv4 = JS_smprintf("%d", stdOut.reader());
-    if (!argv4 || !argv.append(std::move(argv4))) {
+    arg = JS_smprintf("%d", stdOut.reader());
+    if (!arg || !argv.append(std::move(arg))) {
         return false;
     }
 
-    UniqueChars argv5 = JS_smprintf("%d", stdOut.writer());
-    if (!argv5 || !argv.append(std::move(argv5))) {
+    arg = JS_smprintf("%d", stdOut.writer());
+    if (!arg || !argv.append(std::move(arg))) {
         return false;
     }
 #endif
 
-    for (unsigned i = 0; i < sPropagatedFlags.length(); i++) {
-        UniqueChars flags = DuplicateString(cx, sPropagatedFlags[i]);
-        if (!flags || !argv.append(std::move(flags))) {
-            return false;
-        }
-    }
-
+    // Required by both _spawnv and exec.
     if (!argv.append(nullptr)) {
         return false;
     }
@@ -6158,12 +6165,26 @@ WasmCompileAndSerialize(JSContext* cx)
     // See CompileAndSerializeInSeparateProcess for why we've had to smuggle
     // these fd values through argv. Closing the writing ends is necessary for
     // the reading ends to hit EOF.
-    MOZ_RELEASE_ASSERT(sArgc >= 6);
-    MOZ_ASSERT(!strcmp(sArgv[1], "--wasm-compile-and-serialize"));
-    int stdIn = atoi(sArgv[2]);   // stdIn.reader()
-    close(atoi(sArgv[3]));        // stdIn.writer()
-    close(atoi(sArgv[4]));        // stdOut.reader()
-    int stdOut = atoi(sArgv[5]);  // stdOut.writer()
+    int flagIndex = 0;
+    for (; flagIndex < sArgc; flagIndex++) {
+        if (!strcmp(sArgv[flagIndex], sWasmCompileAndSerializeFlag)) {
+            break;
+        }
+    }
+    MOZ_RELEASE_ASSERT(flagIndex < sArgc);
+
+    int fdsIndex = flagIndex + 1;
+    MOZ_RELEASE_ASSERT(fdsIndex + 4 == sArgc);
+
+    int stdInReader  = atoi(sArgv[fdsIndex + 0]);
+    int stdInWriter  = atoi(sArgv[fdsIndex + 1]);
+    int stdOutReader = atoi(sArgv[fdsIndex + 2]);
+    int stdOutWriter = atoi(sArgv[fdsIndex + 3]);
+
+    int stdIn = stdInReader;
+    close(stdInWriter);
+    close(stdOutReader);
+    int stdOut = stdOutWriter;
 #else
     int stdIn = STDIN_FILENO;
     int stdOut = STDOUT_FILENO;
@@ -7389,7 +7410,7 @@ BufferStreamMain(BufferStreamJob* job)
     byteOffset = 0;
     while (true) {
         if (byteOffset == byteLength) {
-            job->consumer->streamClosed(JS::StreamConsumer::EndOfFile, listener);
+            job->consumer->streamEnd(listener);
             break;
         }
 
@@ -7404,7 +7425,7 @@ BufferStreamMain(BufferStreamJob* job)
         }
 
         if (shutdown) {
-            job->consumer->streamClosed(JS::StreamConsumer::Error);
+            job->consumer->streamError(JSMSG_STREAM_CONSUME_ERROR);
             break;
         }
 
@@ -7524,6 +7545,13 @@ ConsumeBufferSource(JSContext* cx, JS::HandleObject obj, JS::MimeType, JS::Strea
 
     return true;
 }
+
+static void
+ReportStreamError(JSContext* cx, size_t errorNumber)
+{
+    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, errorNumber);
+}
+
 
 static bool
 SetBufferStreamParams(JSContext* cx, unsigned argc, Value* vp)
@@ -10454,21 +10482,19 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
 #endif
 #ifdef ENABLE_WASM_GC
     enableWasmGc = op.getBoolOption("wasm-gc");
+# ifdef ENABLE_WASM_CRANELIFT
+    if (enableWasmGc && wasmForceCranelift) {
+        fprintf(stderr, "Do not combine --wasm-gc and --wasm-force-cranelift, they are "
+                        "incompatible.\n");
+    }
+    enableWasmGc = enableWasmGc && !wasmForceCranelift;
+# endif
 #endif
     enableTestWasmAwaitTier2 = op.getBoolOption("test-wasm-await-tier2");
     enableAsyncStacks = !op.getBoolOption("no-async-stacks");
     enableStreams = !op.getBoolOption("no-streams");
 #ifdef ENABLE_BIGINT
     enableBigInt = !op.getBoolOption("no-bigint");
-#endif
-
-#if defined ENABLE_WASM_GC && defined ENABLE_WASM_CRANELIFT
-    // Note, once we remove --wasm-gc this test will no longer make any sense
-    // and we'll need a better solution.
-    if (enableWasmGc && wasmForceCranelift) {
-        fprintf(stderr, "Do not combine --wasm-gc and --wasm-force-cranelift, they are incompatible.\n");
-        return false;
-    }
 #endif
 
     JS::ContextOptionsRef(cx).setBaseline(enableBaseline)
@@ -10708,7 +10734,6 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
         return false;
     }
 
-#ifdef ENABLE_SHARED_ARRAY_BUFFER
     if (const char* str = op.getStringOption("shared-memory")) {
         if (strcmp(str, "off") == 0) {
             enableSharedMemory = false;
@@ -10718,7 +10743,6 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
             return OptionFailure("shared-memory", str);
         }
     }
-#endif
 
 #if defined(JS_CODEGEN_ARM)
     if (const char* str = op.getStringOption("arm-hwcap")) {
@@ -11102,16 +11126,14 @@ main(int argc, char** argv, char** envp)
 #ifdef ENABLE_BIGINT
         || !op.addBoolOption('\0', "no-bigint", "Disable experimental BigInt support")
 #endif
-#ifdef ENABLE_SHARED_ARRAY_BUFFER
         || !op.addStringOption('\0', "shared-memory", "on/off",
                                "SharedArrayBuffer and Atomics "
-#  if SHARED_MEMORY_DEFAULT
+#if SHARED_MEMORY_DEFAULT
                                "(default: on, off to disable)"
-#  else
+#else
                                "(default: off, on to enable)"
-#  endif
-            )
 #endif
+            )
         || !op.addStringOption('\0', "spectre-mitigations", "on/off",
                                "Whether Spectre mitigations are enabled (default: off, on to enable)")
         || !op.addStringOption('\0', "cache-ir-stubs", "on/off/nobinary",
@@ -11350,7 +11372,7 @@ main(int argc, char** argv, char** envp)
         ShutdownBufferStreams();
         js_delete(bufferStreamState);
     });
-    JS::InitConsumeStreamCallback(cx, ConsumeBufferSource);
+    JS::InitConsumeStreamCallback(cx, ConsumeBufferSource, ReportStreamError);
 
     JS_SetNativeStackQuota(cx, gMaxStackSize);
 

@@ -399,8 +399,7 @@ NS_HandleScriptError(nsIScriptGlobalObject *aScriptGlobal,
   nsCOMPtr<nsPIDOMWindowInner> win(do_QueryInterface(aScriptGlobal));
   nsIDocShell *docShell = win ? win->GetDocShell() : nullptr;
   if (docShell) {
-    RefPtr<nsPresContext> presContext;
-    docShell->GetPresContext(getter_AddRefs(presContext));
+    RefPtr<nsPresContext> presContext = docShell->GetPresContext();
 
     static int32_t errorDepth; // Recursion prevention
     ++errorDepth;
@@ -449,8 +448,7 @@ public:
       AutoRestore<bool> recursionGuard(sHandlingScriptError);
       sHandlingScriptError = true;
 
-      RefPtr<nsPresContext> presContext;
-      win->GetDocShell()->GetPresContext(getter_AddRefs(presContext));
+      RefPtr<nsPresContext> presContext = win->GetDocShell()->GetPresContext();
 
       RootedDictionary<ErrorEventInit> init(rootingCx);
       init.mCancelable = true;
@@ -2702,7 +2700,9 @@ nsJSContext::EnsureStatics()
   JS::SetAsmJSCacheOps(jsapi.cx(), &asmJSCacheOps);
 
   JS::InitDispatchToEventLoop(jsapi.cx(), DispatchToEventLoop, nullptr);
-  JS::InitConsumeStreamCallback(jsapi.cx(), ConsumeStream);
+  JS::InitConsumeStreamCallback(jsapi.cx(),
+                                ConsumeStream,
+                                FetchUtil::ReportJSStreamError);
 
   // Set these global xpconnect options...
   Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackMB,
@@ -2946,7 +2946,7 @@ NS_IMETHODIMP nsJSArgArray::IndexOf(uint32_t startIndex, nsISupports *element, u
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-NS_IMETHODIMP nsJSArgArray::ScriptedEnumerate(nsIJSIID* aElemIID, uint8_t aArgc,
+NS_IMETHODIMP nsJSArgArray::ScriptedEnumerate(const nsIID& aElemIID, uint8_t aArgc,
                                               nsISimpleEnumerator** aResult)
 {
   return NS_ERROR_NOT_IMPLEMENTED;

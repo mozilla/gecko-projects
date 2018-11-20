@@ -422,7 +422,7 @@ nsHttpChannel::Init(nsIURI *uri,
     if (NS_FAILED(rv))
         return rv;
 
-    LOG(("nsHttpChannel::Init [this=%p]\n", this));
+    LOG1(("nsHttpChannel::Init [this=%p]\n", this));
 
     return rv;
 }
@@ -1371,7 +1371,7 @@ nsHttpChannel::SetupTransaction()
 
     // create the transaction object
     mTransaction = new nsHttpTransaction();
-    LOG(("nsHttpChannel %p created nsHttpTransaction %p\n", this, mTransaction.get()));
+    LOG1(("nsHttpChannel %p created nsHttpTransaction %p\n", this, mTransaction.get()));
     mTransaction->SetTransactionObserver(mTransactionObserver);
     mTransactionObserver = nullptr;
 
@@ -6560,6 +6560,18 @@ nsHttpChannel::BeginConnect()
     if (mProxyInfo)
         proxyInfo = do_QueryInterface(mProxyInfo);
 
+    if (mCaps & NS_HTTP_CONNECT_ONLY) {
+        if (!proxyInfo) {
+            LOG(("return failure: no proxy for connect-only channel\n"));
+            return NS_ERROR_FAILURE;
+        }
+
+        if (!proxyInfo->IsHTTP() && !proxyInfo->IsHTTPS()) {
+            LOG(("return failure: non-http proxy for connect-only channel\n"));
+            return NS_ERROR_FAILURE;
+        }
+    }
+
     mRequestHead.SetHTTPS(isHttps);
     mRequestHead.SetOrigin(scheme, host, port);
 
@@ -9389,8 +9401,8 @@ nsHttpChannel::SetLoadGroupUserAgentOverride()
         // Don't overwrite the UA if it is already set (eg by an XHR with explicit UA).
         if (ua.IsEmpty()) {
             if (rc) {
-                rc->GetUserAgentOverride(ua);
-                SetRequestHeader(NS_LITERAL_CSTRING("User-Agent"), ua, false);
+                SetRequestHeader(NS_LITERAL_CSTRING("User-Agent"),
+                                 rc->GetUserAgentOverride(), false);
             } else {
                 gHttpHandler->OnUserAgentRequest(this);
             }

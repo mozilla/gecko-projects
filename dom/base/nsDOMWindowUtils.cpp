@@ -243,9 +243,7 @@ nsDOMWindowUtils::GetPresContext()
   nsIDocShell *docShell = window->GetDocShell();
   if (!docShell)
     return nullptr;
-  RefPtr<nsPresContext> presContext;
-  docShell->GetPresContext(getter_AddRefs(presContext));
-  return presContext;
+  return docShell->GetPresContext();
 }
 
 nsIDocument*
@@ -4370,6 +4368,38 @@ nsDOMWindowUtils::ResetPrefersReducedMotionOverrideForTest()
   }
 
   return widget->ResetPrefersReducedMotionOverrideForTest();
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::NotifyTemporaryAutoplayPermissionChanged(int32_t aState,
+                                                           const nsAString& aPrePath)
+{
+  nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
+  NS_ENSURE_STATE(window);
+
+  nsCOMPtr<nsPIDOMWindowOuter> topWindow = window->GetScriptableTop();
+  if (!topWindow) {
+    return NS_OK;
+  }
+
+  topWindow->NotifyTemporaryAutoplayPermissionChanged(aState, aPrePath);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::IsAutoplayTemporarilyAllowed(bool* aResult)
+{
+  *aResult = false;
+  nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
+  NS_ENSURE_STATE(window);
+
+  nsCOMPtr<nsPIDOMWindowOuter> topWindow = window->GetScriptableTop();
+  if (!topWindow) {
+    return NS_OK;
+  }
+
+  *aResult = topWindow->HasTemporaryAutoplayPermission();
+  return NS_OK;
 }
 
 NS_INTERFACE_MAP_BEGIN(nsTranslationNodeList)
