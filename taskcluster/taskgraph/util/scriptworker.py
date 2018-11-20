@@ -458,13 +458,13 @@ def generate_beetmover_upstream_artifacts(job, platform, locale=None, dependenci
     return upstream_artifacts
 
 
-# generate_beetmover_upstream_artifacts {{{1
+# generate_beetmover_compressed_upstream_artifacts {{{1
 def generate_beetmover_compressed_upstream_artifacts(job, dependencies=None):
     """Generate compressed file upstream artifacts for beetmover.
 
-    These artifacts will not be beetmoved directly, but
-    will be decompressed and the contents beetmoved using the
-    `zip_mapping` entry in the artifact map.
+    These artifacts will not be beetmoved directly, but will be
+    decompressed from upstream_mapping and the contents beetmoved
+    using the `mapping` entry in the artifact map.
 
     Currently only applies to beetmover tasks.
 
@@ -615,11 +615,6 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
 
         upload_date = datetime.fromtimestamp(config.params['build_date'])
 
-        # TODO move more specific variables into the transforms.
-        # Such as year, month, upload_date.
-        # Proposal: Leep anything generated inside this function,
-        # and anything from config.params.
-        # Should we .update(config.params) ?
         kwargs.update({
             'locale': locale,
             'version': config.params['app_version'],
