@@ -172,9 +172,11 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
     const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
     const nsCString& aSecurityInfoSerialization, const NetAddr& aSelfAddr,
     const NetAddr& aPeerAddr, const bool& aProxyConnectFailed) {
-  LOG(("HttpTransactionParent::RecvOnStartRequest [this=%p]\n", this));
+  LOG(("HttpTransactionParent::RecvOnStartRequest [this=%p aStatus=%" PRIx32
+       "]\n",
+       this, static_cast<uint32_t>(aStatus)));
 
-  if (!mCanceled) {
+  if (!mCanceled && NS_SUCCEEDED(mStatus)) {
     mStatus = aStatus;
   }
 
@@ -192,8 +194,10 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
 
   nsCOMPtr<nsIStreamListener> chan = mChannel;
 
-  // TODO: return IPC_Fail if OnStartRequest failed?
-  Unused << chan->OnStartRequest(this);
+  nsresult rv = chan->OnStartRequest(this);
+  if (NS_FAILED(rv)) {
+    Cancel(rv);
+  }
   return IPC_OK();
 }
 
@@ -225,17 +229,28 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
                                       NS_ASSIGNMENT_DEPEND);
 
   if (NS_FAILED(rv)) {
+    Cancel(rv);
     return IPC_OK();
   }
-  // TODO: return IPC_Fail if OnDataAvailable failed?
-  Unused << chan->OnDataAvailable(this, stringStream, aOffset, aCount);
+
+  rv = chan->OnDataAvailable(this, stringStream, aOffset, aCount);
+  if (NS_FAILED(rv)) {
+    Cancel(rv);
+  }
+
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
     const nsresult& aStatus, const bool& aResponseIsComplete,
     const int64_t& aTransferSize) {
-  LOG(("HttpTransactionParent::RecvOnStopRequest [this=%p]\n", this));
+  LOG(("HttpTransactionParent::RecvOnStopRequest [this=%p status=%" PRIx32
+       "]\n",
+       this, static_cast<uint32_t>(aStatus)));
+
+  if (!mCanceled && NS_SUCCEEDED(mStatus)) {
+    mStatus = aStatus;
+  }
 
   nsCOMPtr<nsIRequest> deathGrip = this;
 
@@ -274,6 +289,9 @@ HttpTransactionParent::GetStatus(nsresult* aStatus) {
 
 NS_IMETHODIMP
 HttpTransactionParent::Cancel(nsresult aStatus) {
+  LOG(("HttpTransactionParent::Cancel [this=%p status=%" PRIx32 "]\n", this,
+       static_cast<uint32_t>(aStatus)));
+
   if (!mCanceled) {
     mCanceled = true;
     mStatus = aStatus;
