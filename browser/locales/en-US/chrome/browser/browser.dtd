@@ -282,6 +282,7 @@ These should match what Safari and other Apple applications use on OS X Lion. --
 <!ENTITY urlbar.persistentStorageNotificationAnchor.tooltip     "Store data in Persistent Storage">
 <!ENTITY urlbar.remoteControlNotificationAnchor.tooltip   "Browser is under remote control">
 <!ENTITY urlbar.webAuthnAnchor.tooltip                    "Open Web Authentication panel">
+<!ENTITY urlbar.storageAccessAnchor.tooltip               "Open browsing activity permission panel">
 
 <!ENTITY urlbar.webRTCShareDevicesNotificationAnchor.tooltip      "Manage sharing your camera and/or microphone with the site">
 <!ENTITY urlbar.webRTCShareMicrophoneNotificationAnchor.tooltip   "Manage sharing your microphone with the site">
@@ -966,9 +967,6 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 <!ENTITY contentBlocking.title "Content Blocking">
 <!ENTITY contentBlocking.detected "Blockable content detected on this site.">
 <!ENTITY contentBlocking.notDetected "No blockable content detected on this page.">
-<!ENTITY contentBlocking.disabled.label "Disabled">
-<!ENTITY contentBlocking.disabled.tooltip "You have disabled Content Blocking.">
-<!ENTITY contentBlocking.exception.tooltip "You have disabled Content Blocking for this site.">
 
 <!ENTITY contentBlocking.trackingProtection3.label "Trackers">
 <!-- LOCALIZATION NOTE (contentBlocking.trackingProtection.allowed.label):

@@ -287,8 +287,8 @@ struct LayoutPixel;
 // one per OS window), and all instances share the same thread.
 struct Renderer;
 
-// Offset in number of tiles.
-struct Tiles;
+// Unit for tile coordinates.
+struct TileCoordinate;
 
 // Represents the work associated to a transaction before scene building.
 struct Transaction;
@@ -595,16 +595,13 @@ struct BuiltDisplayListDescriptor {
   uintptr_t total_clip_nodes;
   // The amount of spatial nodes created while building this display list.
   uintptr_t total_spatial_nodes;
-  // An estimate of the number of primitives that will be created by this display list.
-  uintptr_t prim_count_estimate;
 
   bool operator==(const BuiltDisplayListDescriptor& aOther) const {
     return builder_start_time == aOther.builder_start_time &&
            builder_finish_time == aOther.builder_finish_time &&
            send_start_time == aOther.send_start_time &&
            total_clip_nodes == aOther.total_clip_nodes &&
-           total_spatial_nodes == aOther.total_spatial_nodes &&
-           prim_count_estimate == aOther.prim_count_estimate;
+           total_spatial_nodes == aOther.total_spatial_nodes;
   }
 };
 
@@ -639,6 +636,14 @@ struct WrDebugFlags {
 
   bool operator==(const WrDebugFlags& aOther) const {
     return mBits == aOther.mBits;
+  }
+};
+
+struct WrClipId {
+  uintptr_t id;
+
+  bool operator==(const WrClipId& aOther) const {
+    return id == aOther.id;
   }
 };
 
@@ -987,9 +992,9 @@ struct ByteSlice {
   }
 };
 
-using TileOffset = TypedPoint2D<int32_t, Tiles>;
+using TileOffset = TypedPoint2D<int32_t, TileCoordinate>;
 
-using DeviceIntRect = TypedRect<int32_t, DevicePixel>;
+using LayoutIntRect = TypedRect<int32_t, LayoutPixel>;
 
 struct MutByteSlice {
   uint8_t *buffer;
@@ -1065,6 +1070,17 @@ struct WrExternalImageHandler {
   }
 };
 
+// An opaque identifier describing a blob image registered with WebRender.
+// This is used as a handle to reference blob images, and can be used as an
+// image in display items.
+struct BlobImageKey {
+  ImageKey _0;
+
+  bool operator==(const BlobImageKey& aOther) const {
+    return _0 == aOther._0;
+  }
+};
+
 struct WrImageDescriptor {
   ImageFormat format;
   int32_t width;
@@ -1080,6 +1096,8 @@ struct WrImageDescriptor {
            opacity == aOther.opacity;
   }
 };
+
+using DeviceIntRect = TypedRect<int32_t, DevicePixel>;
 
 struct WrTransformProperty {
   uint64_t id;
@@ -1293,7 +1311,7 @@ WR_FUNC;
 
 WR_INLINE
 uintptr_t wr_dp_define_clip(WrState *aState,
-                            const uintptr_t *aParentId,
+                            const WrClipId *aParentId,
                             LayoutRect aClipRect,
                             const ComplexClipRegion *aComplex,
                             uintptr_t aComplexCount,
@@ -1303,14 +1321,14 @@ WR_FUNC;
 WR_INLINE
 uint64_t wr_dp_define_clipchain(WrState *aState,
                                 const uint64_t *aParentClipchainId,
-                                const uintptr_t *aClips,
+                                const WrClipId *aClips,
                                 uintptr_t aClipsCount)
 WR_FUNC;
 
 WR_INLINE
 uintptr_t wr_dp_define_scroll_layer(WrState *aState,
                                     uint64_t aScrollId,
-                                    const uintptr_t *aParentId,
+                                    const WrClipId *aParentId,
                                     LayoutRect aContentRect,
                                     LayoutRect aClipRect)
 WR_FUNC;
@@ -1430,12 +1448,12 @@ WR_FUNC;
 
 WR_INLINE
 void wr_dp_push_clip(WrState *aState,
-                     uintptr_t aClipId)
+                     WrClipId aClipId)
 WR_FUNC;
 
 WR_INLINE
 void wr_dp_push_clip_and_scroll_info(WrState *aState,
-                                     uintptr_t aScrollId,
+                                     WrClipId aScrollId,
                                      const uint64_t *aClipChainId)
 WR_FUNC;
 
@@ -1510,7 +1528,7 @@ WR_FUNC;
 
 WR_INLINE
 void wr_dp_push_scroll_layer(WrState *aState,
-                             uintptr_t aScrollId)
+                             WrClipId aScrollId)
 WR_FUNC;
 
 WR_INLINE
@@ -1524,7 +1542,7 @@ WR_FUNC;
 WR_INLINE
 void wr_dp_push_stacking_context(WrState *aState,
                                  LayoutRect aBounds,
-                                 const uintptr_t *aClipNodeId,
+                                 const WrClipId *aClipNodeId,
                                  const WrAnimationProperty *aAnimation,
                                  const float *aOpacity,
                                  const LayoutTransform *aTransform,
@@ -1611,7 +1629,7 @@ extern bool wr_moz2d_render_cb(ByteSlice aBlob,
                                ImageFormat aFormat,
                                const uint16_t *aTileSize,
                                const TileOffset *aTileOffset,
-                               const DeviceIntRect *aDirtyRect,
+                               const LayoutIntRect *aDirtyRect,
                                MutByteSlice aOutput);
 
 extern void wr_notifier_external_event(WrWindowId aWindowId,
@@ -1687,7 +1705,7 @@ WR_FUNC;
 
 WR_INLINE
 void wr_resource_updates_add_blob_image(Transaction *aTxn,
-                                        WrImageKey aImageKey,
+                                        BlobImageKey aImageKey,
                                         const WrImageDescriptor *aDescriptor,
                                         WrVecU8 *aBytes)
 WR_FUNC;
@@ -1737,6 +1755,11 @@ void wr_resource_updates_clear(Transaction *aTxn)
 WR_FUNC;
 
 WR_INLINE
+void wr_resource_updates_delete_blob_image(Transaction *aTxn,
+                                           BlobImageKey aKey)
+WR_FUNC;
+
+WR_INLINE
 void wr_resource_updates_delete_font(Transaction *aTxn,
                                      WrFontKey aKey)
 WR_FUNC;
@@ -1752,17 +1775,17 @@ void wr_resource_updates_delete_image(Transaction *aTxn,
 WR_FUNC;
 
 WR_INLINE
-void wr_resource_updates_set_image_visible_area(Transaction *aTxn,
-                                                WrImageKey aKey,
-                                                const DeviceIntRect *aArea)
+void wr_resource_updates_set_blob_image_visible_area(Transaction *aTxn,
+                                                     BlobImageKey aKey,
+                                                     const DeviceIntRect *aArea)
 WR_FUNC;
 
 WR_INLINE
 void wr_resource_updates_update_blob_image(Transaction *aTxn,
-                                           WrImageKey aImageKey,
+                                           BlobImageKey aImageKey,
                                            const WrImageDescriptor *aDescriptor,
                                            WrVecU8 *aBytes,
-                                           DeviceIntRect aDirtyRect)
+                                           LayoutIntRect aDirtyRect)
 WR_FUNC;
 
 WR_INLINE
@@ -1884,6 +1907,10 @@ WR_FUNC;
 WR_INLINE
 void wr_transaction_remove_pipeline(Transaction *aTxn,
                                     WrPipelineId aPipelineId)
+WR_FUNC;
+
+WR_INLINE
+bool wr_transaction_resource_updates_is_empty(const Transaction *aTxn)
 WR_FUNC;
 
 WR_INLINE

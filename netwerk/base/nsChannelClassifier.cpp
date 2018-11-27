@@ -64,6 +64,7 @@ static LazyLogModule gChannelClassifierLog("nsChannelClassifier");
 #define LOG_ENABLED() MOZ_LOG_TEST(gChannelClassifierLog, LogLevel::Info)
 
 #define URLCLASSIFIER_SKIP_HOSTNAMES       "urlclassifier.skipHostnames"
+#define URLCLASSIFIER_TRACKING_ANNOTATION_SKIP_URLS "urlclassifier.trackingAnnotationSkipURLs"
 #define URLCLASSIFIER_ANNOTATION_TABLE     "urlclassifier.trackingAnnotationTable"
 #define URLCLASSIFIER_ANNOTATION_TABLE_TEST_ENTRIES "urlclassifier.trackingAnnotationTable.testEntries"
 #define URLCLASSIFIER_ANNOTATION_WHITELIST "urlclassifier.trackingAnnotationWhitelistTable"
@@ -100,6 +101,7 @@ public:
   bool IsAnnotateChannelEnabled() { return sAnnotateChannelEnabled;}
 
   nsCString GetSkipHostnames() const { return mSkipHostnames; }
+  nsCString GetSkipTrackingAnnotationURLs() const { return mSkipTrackingAnnotationURLs; }
   nsCString GetAnnotationBlackList() const { return mAnnotationBlacklist; }
   nsCString GetAnnotationBlackListExtraEntries() const { return mAnnotationBlacklistExtraEntries; }
   nsCString GetAnnotationWhiteList() const { return mAnnotationWhitelist; }
@@ -110,6 +112,7 @@ public:
   nsCString GetTrackingWhiteListExtraEntries() { return mTrackingWhitelistExtraEntries; }
 
   void SetSkipHostnames(const nsACString& aHostnames) { mSkipHostnames = aHostnames; }
+  void SetSkipTrackingAnnotationURLs(const nsACString& aURLs) { mSkipTrackingAnnotationURLs = aURLs; }
   void SetAnnotationBlackList(const nsACString& aList) { mAnnotationBlacklist = aList; }
   void SetAnnotationBlackListExtraEntries(const nsACString& aList) { mAnnotationBlacklistExtraEntries = aList; }
   void SetAnnotationWhiteList(const nsACString& aList) { mAnnotationWhitelist = aList; }
@@ -135,6 +138,7 @@ private:
   static bool sAllowListExample;
 
   nsCString mSkipHostnames;
+  nsCString mSkipTrackingAnnotationURLs;
   nsCString mAnnotationBlacklist;
   nsCString mAnnotationBlacklistExtraEntries;
   nsCString mAnnotationWhitelist;
@@ -162,6 +166,11 @@ CachedPrefs::OnPrefsChange(const char* aPref, CachedPrefs* aPrefs)
     Preferences::GetCString(URLCLASSIFIER_SKIP_HOSTNAMES, skipHostnames);
     ToLowerCase(skipHostnames);
     aPrefs->SetSkipHostnames(skipHostnames);
+  } else if (!strcmp(aPref, URLCLASSIFIER_TRACKING_ANNOTATION_SKIP_URLS)) {
+    nsCString skipTrackingAnnotationURLs;
+    Preferences::GetCString(URLCLASSIFIER_TRACKING_ANNOTATION_SKIP_URLS, skipTrackingAnnotationURLs);
+    ToLowerCase(skipTrackingAnnotationURLs);
+    aPrefs->SetSkipTrackingAnnotationURLs(skipTrackingAnnotationURLs);
   } else if (!strcmp(aPref, URLCLASSIFIER_ANNOTATION_TABLE)) {
     nsAutoCString annotationBlacklist;
     Preferences::GetCString(URLCLASSIFIER_ANNOTATION_TABLE,
@@ -215,6 +224,8 @@ CachedPrefs::Init()
   Preferences::RegisterCallbackAndCall(CachedPrefs::OnPrefsChange,
                                        URLCLASSIFIER_SKIP_HOSTNAMES, this);
   Preferences::RegisterCallbackAndCall(CachedPrefs::OnPrefsChange,
+                                       URLCLASSIFIER_TRACKING_ANNOTATION_SKIP_URLS, this);
+  Preferences::RegisterCallbackAndCall(CachedPrefs::OnPrefsChange,
                                        URLCLASSIFIER_ANNOTATION_TABLE, this);
   Preferences::RegisterCallbackAndCall(CachedPrefs::OnPrefsChange,
                                        URLCLASSIFIER_ANNOTATION_TABLE_TEST_ENTRIES, this);
@@ -255,6 +266,7 @@ CachedPrefs::~CachedPrefs()
   MOZ_COUNT_DTOR(CachedPrefs);
 
   Preferences::UnregisterCallback(CachedPrefs::OnPrefsChange, URLCLASSIFIER_SKIP_HOSTNAMES, this);
+  Preferences::UnregisterCallback(CachedPrefs::OnPrefsChange, URLCLASSIFIER_TRACKING_ANNOTATION_SKIP_URLS, this);
   Preferences::UnregisterCallback(CachedPrefs::OnPrefsChange, URLCLASSIFIER_ANNOTATION_TABLE, this);
   Preferences::UnregisterCallback(CachedPrefs::OnPrefsChange, URLCLASSIFIER_ANNOTATION_TABLE_TEST_ENTRIES, this);
   Preferences::UnregisterCallback(CachedPrefs::OnPrefsChange, URLCLASSIFIER_ANNOTATION_WHITELIST, this);
@@ -265,53 +277,6 @@ CachedPrefs::~CachedPrefs()
   Preferences::UnregisterCallback(CachedPrefs::OnPrefsChange, URLCLASSIFIER_TRACKING_TABLE_TEST_ENTRIES, this);
 }
 } // anonymous namespace
-
-static nsresult
-IsThirdParty(nsIChannel* aChannel, bool* aResult)
-{
-  NS_ENSURE_ARG(aResult);
-  *aResult = false;
-
-  nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil = services::GetThirdPartyUtil();
-  if (NS_WARN_IF(!thirdPartyUtil)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  nsresult rv;
-  nsCOMPtr<nsIHttpChannelInternal> chan = do_QueryInterface(aChannel, &rv);
-  if (NS_FAILED(rv) || !chan) {
-    LOG(("nsChannelClassifier: Not an HTTP channel"));
-    return NS_OK;
-  }
-  nsCOMPtr<nsIURI> chanURI;
-  rv = aChannel->GetURI(getter_AddRefs(chanURI));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<nsIURI> topWinURI;
-  rv = chan->GetTopWindowURI(getter_AddRefs(topWinURI));
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-  if (!topWinURI) {
-    LOG(("nsChannelClassifier: No window URI\n"));
-  }
-
-  // Third party checks don't work for chrome:// URIs in mochitests, so just
-  // default to isThirdParty = true. We check isThirdPartyWindow to expand
-  // the list of domains that are considered first party (e.g., if
-  // facebook.com includes an iframe from fatratgames.com, all subsources
-  // included in that iframe are considered third-party with
-  // isThirdPartyChannel, even if they are not third-party w.r.t.
-  // facebook.com), and isThirdPartyChannel to prevent top-level navigations
-  // from being detected as third-party.
-  bool isThirdPartyChannel = true;
-  bool isThirdPartyWindow = true;
-  thirdPartyUtil->IsThirdPartyURI(chanURI, topWinURI, &isThirdPartyWindow);
-  thirdPartyUtil->IsThirdPartyChannel(aChannel, nullptr, &isThirdPartyChannel);
-
-  *aResult = isThirdPartyWindow && isThirdPartyChannel;
-  return NS_OK;
-}
 
 static void
 SetIsTrackingResourceHelper(nsIChannel* aChannel, bool aIsThirdParty)
@@ -484,12 +449,9 @@ nsChannelClassifier::ShouldEnableTrackingProtectionInternal(
 
     // Only perform third-party checks for tracking protection
     if (!aAnnotationsOnly) {
-      bool isThirdParty = false;
-      rv = IsThirdParty(aChannel, &isThirdParty);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        LOG(("nsChannelClassifier[%p]: IsThirdParty() failed", this));
-        return NS_OK;
-      }
+      bool isThirdParty =
+        nsContentUtils::IsThirdPartyWindowOrChannel(nullptr, aChannel,
+                                                    chanURI);
       if (!isThirdParty) {
         *result = false;
         if (LOG_ENABLED()) {
@@ -761,6 +723,12 @@ nsChannelClassifier::IsHostnameWhitelisted(nsIURI *aUri,
   }
 
   return false;
+}
+
+bool
+nsChannelClassifier::IsTrackingURLWhitelisted(nsIURI *aUri)
+{
+  return nsContentUtils::IsURIInList(aUri, CachedPrefs::GetInstance()->GetSkipTrackingAnnotationURLs());
 }
 
 // Note in the cache entry that this URL was classified, so that future
@@ -1207,25 +1175,34 @@ TrackingURICallback::OnWhitelistResult(nsresult aErrorCode)
   LOG_DEBUG(("TrackingURICallback[%p]::OnWhitelistResult aErrorCode=0x%" PRIx32,
              mChannelClassifier.get(), static_cast<uint32_t>(aErrorCode)));
 
+  // Change our error code if the URL has been whitelisted.
+  nsCOMPtr<nsIChannel> channel = mChannelClassifier->GetChannel();
+  nsCOMPtr<nsIURI> uri;
+  channel->GetURI(getter_AddRefs(uri));
+  if (!uri) {
+    return NS_ERROR_UNEXPECTED;
+  }
+  bool prefBasedWhitelistUsed = false;
+  if (aErrorCode == NS_ERROR_TRACKING_ANNOTATION_URI &&
+      mChannelClassifier->IsTrackingURLWhitelisted(uri)) {
+    aErrorCode = NS_OK;
+    prefBasedWhitelistUsed = true;
+  }
+
   if (NS_SUCCEEDED(aErrorCode)) {
     if (LOG_ENABLED()) {
-      nsCOMPtr<nsIChannel> channel = mChannelClassifier->GetChannel();
-      nsCOMPtr<nsIURI> uri;
-      channel->GetURI(getter_AddRefs(uri));
       nsCString spec = uri->GetSpecOrDefault();
       spec.Truncate(std::min(spec.Length(), sMaxSpecLength));
       LOG(("TrackingURICallback[%p]::OnWhitelistResult uri %s found "
-           "in whitelist so we won't block it", mChannelClassifier.get(),
-           spec.get()));
+           "in %s whitelist so we won't block it", mChannelClassifier.get(),
+           spec.get(), prefBasedWhitelistUsed ? "pref-based" :
+           "tracking protection"));
     }
     mChannelCallback();
     return NS_OK;
   }
 
   if (LOG_ENABLED()) {
-    nsCOMPtr<nsIChannel> channel = mChannelClassifier->GetChannel();
-    nsCOMPtr<nsIURI> uri;
-    channel->GetURI(getter_AddRefs(uri));
     nsCString spec = uri->GetSpecOrDefault();
     spec.Truncate(std::min(spec.Length(), sMaxSpecLength));
     LOG(("TrackingURICallback[%p]::OnWhitelistResult "
@@ -1259,13 +1236,16 @@ TrackingURICallback::OnTrackerFound(nsresult aErrorCode)
     MOZ_ASSERT(aErrorCode == NS_ERROR_TRACKING_ANNOTATION_URI);
     MOZ_ASSERT(mChannelClassifier->ShouldEnableTrackingAnnotation());
 
-    bool isThirdPartyWithTopLevelWinURI = false;
-    nsresult rv = IsThirdParty(channel, &isThirdPartyWithTopLevelWinURI);
+    nsCOMPtr<nsIURI> chanURI;
+    nsresult rv = channel->GetURI(getter_AddRefs(chanURI));
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      LOG(("TrackingURICallback[%p]::OnTrackerFound IsThirdParty() failed",
-           mChannelClassifier.get()));
+      LOG(("TrackingURICallback[%p]::OnTrackerFound nsIChannel::GetURI(%p) failed",
+           mChannelClassifier.get(), (void*) channel.get()));
       return; // we'll assume the channel is NOT third-party
     }
+    bool isThirdPartyWithTopLevelWinURI =
+      nsContentUtils::IsThirdPartyWindowOrChannel(nullptr, channel,
+                                                  chanURI);
 
     LOG(("TrackingURICallback[%p]::OnTrackerFound, annotating channel[%p]",
          mChannelClassifier.get(), channel.get()));

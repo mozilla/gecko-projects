@@ -842,8 +842,8 @@ nsGlobalWindowOuter::nsGlobalWindowOuter(uint64_t aWindowID)
     mAllowScriptsToClose(false),
     mTopLevelOuterContentWindow(false),
     mHasStorageAccess(false),
-    mSerial(0),
 #ifdef DEBUG
+    mSerial(0),
     mSetOpenerWindowCalled(false),
 #endif
     mCleanedUp(false),
@@ -868,9 +868,9 @@ nsGlobalWindowOuter::nsGlobalWindowOuter(uint64_t aWindowID)
   // to create the entropy collector, so we should
   // try to get one until we succeed.
 
+#ifdef DEBUG
   mSerial = nsContentUtils::InnerOrOuterWindowCreated();
 
-#ifdef DEBUG
   if (!PR_GetEnv("MOZ_QUIET")) {
     printf_stderr("++DOMWINDOW == %d (%p) [pid = %d] [serial = %d] [outer = %p]\n",
                   nsContentUtils::GetCurrentInnerOrOuterWindowCount(),
@@ -2266,11 +2266,11 @@ nsGlobalWindowOuter::SetOpenerWindow(nsPIDOMWindowOuter* aOpener,
   mOpener = opener.forget();
   NS_ASSERTION(mOpener || !aOpener, "Opener must support weak references!");
 
-  if (mDocShell && aOpener) {
+  if (mDocShell) {
     // TODO(farre): Here we really wish to only consider the case
     // where 'aOriginalOpener' is false, and we also really want to
     // move opener entirely to BrowsingContext. See bug 1502330.
-    GetBrowsingContext()->SetOpener(aOpener->GetBrowsingContext());
+    GetBrowsingContext()->SetOpener(aOpener ? aOpener->GetBrowsingContext() : nullptr);
   }
 
   // Check that the js visible opener matches! We currently don't depend on this
@@ -4703,6 +4703,7 @@ nsGlobalWindowOuter::PromptOuter(const nsAString& aMessage,
   // string. See bug #310037.
   nsAutoString fixedMessage, fixedInitial;
   nsContentUtils::StripNullChars(aMessage, fixedMessage);
+  nsContentUtils::PlatformToDOMLineBreaks(fixedMessage);
   nsContentUtils::StripNullChars(aInitial, fixedInitial);
 
   nsresult rv;
@@ -5375,6 +5376,14 @@ nsGlobalWindowOuter::NotifyContentBlockingState(unsigned aState,
     if (!aBlocked) {
       unblocked = !doc->GetHasForeignCookiesBlocked();
     }
+  } else if (aState == nsIWebProgressListener::STATE_COOKIES_LOADED) {
+    MOZ_ASSERT(!aBlocked, "We don't expected to see blocked STATE_COOKIES_LOADED");
+    // Note that the logic in this branch is the logical negation of the logic
+    // in other branches, since the nsIDocument API we have is phrased in
+    // "loaded" terms as opposed to "blocked" terms.
+    doc->SetHasCookiesLoaded(!aBlocked, origin);
+    aBlocked = true;
+    unblocked = false;
   } else {
     // Ignore nsIWebProgressListener::STATE_BLOCKED_UNSAFE_CONTENT;
   }
@@ -5383,6 +5392,11 @@ nsGlobalWindowOuter::NotifyContentBlockingState(unsigned aState,
     state |= aState;
   } else if (unblocked) {
     state &= ~aState;
+  }
+
+  if (state == oldState) {
+    // Avoid dispatching repeated notifications when nothing has changed
+    return;
   }
 
   eventSink->OnSecurityChange(aChannel, oldState, state, doc->GetContentBlockingLog());

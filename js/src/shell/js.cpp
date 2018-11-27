@@ -5012,16 +5012,10 @@ AbortDynamicModuleImport(JSContext* cx, unsigned argc, Value* vp)
         return ReportArgumentTypeError(cx, args[2], "PromiseObject");
     }
 
-    if (!args[3].isObject() || !args[3].toObject().is<ErrorObject>()) {
-        return ReportArgumentTypeError(cx, args[3], "ErrorObject");
-    }
-
     RootedString specifier(cx, args[1].toString());
     Rooted<PromiseObject*> promise(cx, &args[2].toObject().as<PromiseObject>());
-    Rooted<ErrorObject*> error(cx, &args[3].toObject().as<ErrorObject>());
 
-    Rooted<Value> value(cx, ObjectValue(*error));
-    cx->setPendingException(value);
+    cx->setPendingException(args[3]);
     return js::FinishDynamicModuleImport(cx, args[0], specifier, promise);
 }
 
@@ -9876,7 +9870,8 @@ dom_constructor(JSContext* cx, unsigned argc, JS::Value* vp)
 static bool
 InstanceClassHasProtoAtDepth(const Class* clasp, uint32_t protoID, uint32_t depth)
 {
-    /* There's only a single (fake) DOM object in the shell, so just return true. */
+    // There's only a single (fake) DOM object in the shell, so just return
+    // true.
     return true;
 }
 

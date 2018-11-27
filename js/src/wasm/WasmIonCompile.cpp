@@ -228,6 +228,8 @@ class FunctionCompiler
               case ValType::AnyRef:
                 MOZ_CRASH("ion support for ref/anyref value NYI");
                 break;
+              case ValType::NullRef:
+                MOZ_CRASH("NullRef not expressible");
             }
 
             curBlock_->add(ins);
@@ -1030,7 +1032,8 @@ class FunctionCompiler
                 stackArg->incrementOffset(call->spIncrement_);
             }
 
-            // If instanceArg_ is not initialized then instanceArg_.kind() != ABIArg::Stack
+            // If instanceArg_ is not initialized then
+            // instanceArg_.kind() != ABIArg::Stack
             if (call->instanceArg_.kind() == ABIArg::Stack) {
                 call->instanceArg_ = ABIArg(call->instanceArg_.offsetFromArgBase() +
                                             call->spIncrement_);

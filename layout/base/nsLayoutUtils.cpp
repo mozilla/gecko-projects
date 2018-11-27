@@ -339,8 +339,15 @@ nsLayoutUtils::GetAnimationPropertiesForCompositor(const nsIFrame* aFrame)
     return properties;
   }
 
+  AnimationPerformanceWarning::Type warning;
+  if (!EffectCompositor::AllowCompositorAnimationsOnFrame(aFrame,
+                                                          *effects,
+                                                          warning)) {
+    return properties;
+  }
+
   for (const KeyframeEffect* effect : *effects) {
-    properties |= effect->GetPropertiesForCompositor(*effects);
+    properties |= effect->GetPropertiesForCompositor(*effects, aFrame);
   }
 
   return properties;
@@ -4771,7 +4778,7 @@ nsLayoutUtils::GetNonGeneratedAncestor(nsIFrame* aFrame)
 }
 
 nsIFrame*
-nsLayoutUtils::GetParentOrPlaceholderFor(nsIFrame* aFrame)
+nsLayoutUtils::GetParentOrPlaceholderFor(const nsIFrame* aFrame)
 {
   if ((aFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW)
       && !aFrame->GetPrevInFlow()) {

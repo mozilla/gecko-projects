@@ -501,6 +501,11 @@ public class GeckoViewActivity extends AppCompatActivity {
             session.open(sGeckoRuntime);
             session.loadUri(DEFAULT_URL);
         }
+
+        @Override
+        public void onFirstComposite(final GeckoSession session) {
+            Log.d(LOGTAG, "onFirstComposite");
+        }
     }
 
     private class ExampleProgressDelegate implements GeckoSession.ProgressDelegate {
@@ -588,6 +593,8 @@ public class GeckoViewActivity extends AppCompatActivity {
                 resId = R.string.request_geolocation;
             } else if (PERMISSION_DESKTOP_NOTIFICATION == type) {
                 resId = R.string.request_notification;
+            } else if (PERMISSION_AUTOPLAY_MEDIA == type) {
+                resId = R.string.request_autoplay;
             } else {
                 Log.w(LOGTAG, "Unknown permission: " + type);
                 callback.reject();
@@ -673,7 +680,7 @@ public class GeckoViewActivity extends AppCompatActivity {
             Log.d(LOGTAG, "onLoadRequest=" + request.uri +
                   " triggerUri=" + request.triggerUri +
                   " where=" + request.target +
-                  " isUserTriggered=" + request.isUserTriggered);
+                  " isRedirect=" + request.isRedirect);
 
             return GeckoResult.fromValue(AllowOrDeny.ALLOW);
         }

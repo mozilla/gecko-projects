@@ -6,6 +6,7 @@
 
 #include "MediaDecoder.h"
 
+#include "DOMMediaStream.h"
 #include "ImageContainer.h"
 #include "Layers.h"
 #include "MediaDecoderStateMachine.h"
@@ -155,6 +156,35 @@ class MediaMemoryTracker : public nsIMemoryReporter {
   }
 };
 
+// When media is looping back to the head position, the spec [1] mentions that
+// MediaElement should dispatch `seeking` first, `timeupdate`, and `seeked` in
+// the end. This guard should be created before we fire `timeupdate` so that it
+// can ensure the event order.
+// [1]
+// https://html.spec.whatwg.org/multipage/media.html#playing-the-media-resource:attr-media-loop-2
+// https://html.spec.whatwg.org/multipage/media.html#seeking:dom-media-seek
+class MOZ_RAII SeekEventsGuard {
+ public:
+  explicit SeekEventsGuard(MediaDecoderOwner* aOwner, bool aIsLoopingBack)
+      : mOwner(aOwner), mIsLoopingBack(aIsLoopingBack) {
+    MOZ_ASSERT(mOwner);
+    if (mIsLoopingBack) {
+      mOwner->SeekStarted();
+    }
+  }
+
+  ~SeekEventsGuard() {
+    MOZ_ASSERT(mOwner);
+    if (mIsLoopingBack) {
+      mOwner->SeekCompleted();
+    }
+  }
+
+ private:
+  MediaDecoderOwner* mOwner;
+  bool mIsLoopingBack;
+};
+
 StaticRefPtr<MediaMemoryTracker> MediaMemoryTracker::sUniqueInstance;
 
 RefPtr<MediaMemoryPromise>
@@ -210,29 +240,40 @@ RefPtr<GenericPromise> MediaDecoder::SetSink(AudioDeviceInfo* aSink) {
   return GetStateMachine()->InvokeSetSink(aSink);
 }
 
-void MediaDecoder::AddOutputStream(ProcessedMediaStream* aStream,
-                                   TrackID aNextAvailableTrackID,
-                                   bool aFinishWhenEnded) {
+void MediaDecoder::SetOutputStreamCORSMode(CORSMode aCORSMode) {
+  MOZ_ASSERT(NS_IsMainThread());
+  AbstractThread::AutoEnter context(AbstractMainThread());
+  mDecoderStateMachine->SetOutputStreamCORSMode(aCORSMode);
+}
+
+void MediaDecoder::AddOutputStream(DOMMediaStream* aStream) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mDecoderStateMachine, "Must be called after Load().");
   AbstractThread::AutoEnter context(AbstractMainThread());
-  mDecoderStateMachine->AddOutputStream(aStream, aNextAvailableTrackID,
-                                        aFinishWhenEnded);
+  mDecoderStateMachine->EnsureOutputStreamManager(
+      aStream->GetInputStream()->Graph(), ToMaybe(mInfo.get()));
+  mDecoderStateMachine->AddOutputStream(aStream);
 }
 
-void MediaDecoder::RemoveOutputStream(MediaStream* aStream) {
+void MediaDecoder::RemoveOutputStream(DOMMediaStream* aStream) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mDecoderStateMachine, "Must be called after Load().");
   AbstractThread::AutoEnter context(AbstractMainThread());
   mDecoderStateMachine->RemoveOutputStream(aStream);
 }
 
-TrackID MediaDecoder::NextAvailableTrackIDFor(
-    MediaStream* aOutputStream) const {
+void MediaDecoder::SetNextOutputStreamTrackID(TrackID aNextTrackID) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mDecoderStateMachine, "Must be called after Load().");
   AbstractThread::AutoEnter context(AbstractMainThread());
-  return mDecoderStateMachine->NextAvailableTrackIDFor(aOutputStream);
+  mDecoderStateMachine->SetNextOutputStreamTrackID(aNextTrackID);
+}
+
+TrackID MediaDecoder::GetNextOutputStreamTrackID() {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mDecoderStateMachine, "Must be called after Load().");
+  AbstractThread::AutoEnter context(AbstractMainThread());
+  return mDecoderStateMachine->GetNextOutputStreamTrackID();
 }
 
 double MediaDecoder::GetDuration() {
@@ -268,6 +309,7 @@ MediaDecoder::MediaDecoder(MediaDecoderInit& aInit)
       mForcedHidden(false),
       mHasSuspendTaint(aInit.mHasSuspendTaint),
       mPlaybackRate(aInit.mPlaybackRate),
+      mLogicallySeeking(false, "MediaDecoder::mLogicallySeeking"),
       INIT_MIRROR(mBuffered, TimeIntervals()),
       INIT_MIRROR(mCurrentPosition, TimeUnit::Zero()),
       INIT_MIRROR(mStateMachineDuration, NullableTimeUnit()),
@@ -276,9 +318,7 @@ MediaDecoder::MediaDecoder(MediaDecoderInit& aInit)
       INIT_CANONICAL(mPreservesPitch, aInit.mPreservesPitch),
       INIT_CANONICAL(mLooping, aInit.mLooping),
       INIT_CANONICAL(mPlayState, PLAY_STATE_LOADING),
-      INIT_CANONICAL(mLogicallySeeking, false),
       INIT_CANONICAL(mSameOriginMedia, false),
-      INIT_CANONICAL(mMediaPrincipalHandle, PRINCIPAL_HANDLE_NONE),
       mVideoDecodingOberver(
           new BackgroundVideoDecodingPermissionObserver(this)),
       mIsBackgroundVideoDecodingAllowed(false),
@@ -392,10 +432,6 @@ void MediaDecoder::OnPlaybackEvent(MediaPlaybackEvent&& aEvent) {
       break;
     case MediaPlaybackEvent::SeekStarted:
       SeekingStarted();
-      break;
-    case MediaPlaybackEvent::Loop:
-      GetOwner()->DispatchAsyncEvent(NS_LITERAL_STRING("seeking"));
-      GetOwner()->DispatchAsyncEvent(NS_LITERAL_STRING("seeked"));
       break;
     case MediaPlaybackEvent::Invalidate:
       Invalidate();
@@ -595,7 +631,7 @@ void MediaDecoder::OnMetadataUpdate(TimedMetadata&& aMetadata) {
   AbstractThread::AutoEnter context(AbstractMainThread());
   GetOwner()->RemoveMediaTracks();
   MetadataLoaded(MakeUnique<MediaInfo>(*aMetadata.mInfo),
-                 UniquePtr<MetadataTags>(aMetadata.mTags.forget()),
+                 UniquePtr<MetadataTags>(std::move(aMetadata.mTags)),
                  MediaDecoderEventVisibility::Observable);
   FirstFrameLoaded(std::move(aMetadata.mInfo),
                    MediaDecoderEventVisibility::Observable);
@@ -717,6 +753,8 @@ void MediaDecoder::DecodeError(const MediaResult& aError) {
 void MediaDecoder::UpdateSameOriginStatus(bool aSameOrigin) {
   MOZ_ASSERT(NS_IsMainThread());
   AbstractThread::AutoEnter context(AbstractMainThread());
+  nsCOMPtr<nsIPrincipal> principal = GetCurrentPrincipal();
+  mDecoderStateMachine->SetOutputStreamPrincipal(principal);
   mSameOriginMedia = aSameOrigin;
 }
 
@@ -764,8 +802,6 @@ void MediaDecoder::NotifyPrincipalChanged() {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
   AbstractThread::AutoEnter context(AbstractMainThread());
-  nsCOMPtr<nsIPrincipal> newPrincipal = GetCurrentPrincipal();
-  mMediaPrincipalHandle = MakePrincipalHandle(newPrincipal);
   GetOwner()->NotifyDecoderPrincipalChanged();
 }
 
@@ -773,12 +809,11 @@ void MediaDecoder::OnSeekResolved() {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
   AbstractThread::AutoEnter context(AbstractMainThread());
-  mSeekRequest.Complete();
-
   mLogicallySeeking = false;
 
   // Ensure logical position is updated after seek.
   UpdateLogicalPositionInternal();
+  mSeekRequest.Complete();
 
   GetOwner()->SeekCompleted();
   GetOwner()->AsyncResolveSeekDOMPromiseIfExists();
@@ -818,6 +853,12 @@ void MediaDecoder::ChangeState(PlayState aState) {
   }
 }
 
+bool MediaDecoder::IsLoopingBack(double aPrevPos, double aCurPos) const {
+  // If current position is early than previous position and we didn't do seek,
+  // that means we looped back to the start position.
+  return mLooping && !mSeekRequest.Exists() && aCurPos < aPrevPos;
+}
+
 void MediaDecoder::UpdateLogicalPositionInternal() {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
@@ -827,6 +868,8 @@ void MediaDecoder::UpdateLogicalPositionInternal() {
     currentPosition = std::max(currentPosition, mDuration);
   }
   bool logicalPositionChanged = mLogicalPosition != currentPosition;
+  SeekEventsGuard guard(GetOwner(),
+                        IsLoopingBack(mLogicalPosition, currentPosition));
   mLogicalPosition = currentPosition;
   DDLOG(DDLogCategory::Property, "currentTime", mLogicalPosition);
 

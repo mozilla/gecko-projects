@@ -7,9 +7,10 @@
 #ifndef builtin_Stream_h
 #define builtin_Stream_h
 
+#include "js/Stream.h"
 #include "builtin/Promise.h"
+#include "vm/List.h"
 #include "vm/NativeObject.h"
-
 
 namespace js {
 
@@ -97,17 +98,10 @@ class ReadableStream : public NativeObject
 
     bool locked() const;
 
-  public:
-    static ReadableStream* createDefaultStream(JSContext* cx, HandleValue underlyingSource,
-                                               HandleValue size, HandleValue highWaterMark,
-                                               HandleObject proto = nullptr);
+    static MOZ_MUST_USE ReadableStream* create(JSContext* cx, HandleObject proto = nullptr);
     static ReadableStream* createExternalSourceStream(JSContext* cx, void* underlyingSource,
                                                       uint8_t flags, HandleObject proto = nullptr);
 
-  private:
-    static MOZ_MUST_USE ReadableStream* createStream(JSContext* cx, HandleObject proto = nullptr);
-
-  public:
     static bool constructor(JSContext* cx, unsigned argc, Value* vp);
     static const ClassSpec classSpec_;
     static const Class class_;
@@ -181,8 +175,8 @@ class ReadableStreamReader : public NativeObject
         setFixedSlot(Slot_ForAuthorCode, BooleanValue(value == ForAuthorCodeBool::Yes));
     }
 
-    NativeObject* requests() const {
-        return &getFixedSlot(Slot_Requests).toObject().as<NativeObject>();
+    ListObject* requests() const {
+        return &getFixedSlot(Slot_Requests).toObject().as<ListObject>();
     }
     void clearRequests() { setFixedSlot(Slot_Requests, UndefinedValue()); }
 
@@ -225,7 +219,7 @@ class StreamController : public NativeObject
         SlotCount
     };
 
-    NativeObject* queue() const { return &getFixedSlot(Slot_Queue).toObject().as<NativeObject>(); }
+    ListObject* queue() const { return &getFixedSlot(Slot_Queue).toObject().as<ListObject>(); }
     double queueTotalSize() const { return getFixedSlot(Slot_TotalSize).toNumber(); }
     void setQueueTotalSize(double size) { setFixedSlot(Slot_TotalSize, NumberValue(size)); }
 };
@@ -355,8 +349,8 @@ class ReadableByteStreamController : public ReadableStreamController
 
     Value byobRequest() const { return getFixedSlot(Slot_BYOBRequest); }
     void clearBYOBRequest() { setFixedSlot(Slot_BYOBRequest, JS::UndefinedValue()); }
-    NativeObject* pendingPullIntos() const {
-        return &getFixedSlot(Slot_PendingPullIntos).toObject().as<NativeObject>();
+    ListObject* pendingPullIntos() const {
+        return &getFixedSlot(Slot_PendingPullIntos).toObject().as<ListObject>();
     }
     Value autoAllocateChunkSize() const { return getFixedSlot(Slot_AutoAllocateSize); }
     void setAutoAllocateChunkSize(const Value & size) {

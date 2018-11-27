@@ -227,6 +227,8 @@ private:
                          recordreplay::Behavior::DontPreserve> sActiveAndFeatures;
 };
 
+bool IsThreadBeingProfiled();
+
 } // namespace detail
 } // namespace profiler
 } // namespace mozilla
@@ -241,6 +243,7 @@ private:
 # define PROFILER_DEFAULT_ENTRIES 100000
 #endif
 
+#define PROFILER_DEFAULT_DURATION 20
 #define PROFILER_DEFAULT_INTERVAL 1
 
 // Initialize the profiler. If MOZ_PROFILER_STARTUP is set the profiler will
@@ -271,8 +274,10 @@ void profiler_shutdown();
 //                  substring, or
 //              (b) the filter is of the form "pid:<n>" where n is the process
 //                  id of the process that the thread is running in.
+//   "aDuration" is the duration of entries in the profiler's circular buffer.
 void profiler_start(uint32_t aCapacity, double aInterval, uint32_t aFeatures,
-                    const char** aFilters, uint32_t aFilterCount);
+                    const char** aFilters, uint32_t aFilterCount,
+                    const mozilla::Maybe<double>& aDuration = mozilla::Nothing());
 
 // Stop the profiler and discard the profile without saving it. A no-op if the
 // profiler is inactive. After stopping the profiler is "inactive".
@@ -285,7 +290,8 @@ void profiler_stop();
 // not discarded if the profiler is already running with the requested settings.
 void profiler_ensure_started(uint32_t aCapacity, double aInterval,
                              uint32_t aFeatures, const char** aFilters,
-                             uint32_t aFilterCount);
+                             uint32_t aFilterCount,
+                             const mozilla::Maybe<double>& aDuration = mozilla::Nothing());
 
 //---------------------------------------------------------------------------
 // Control the profiler
@@ -394,6 +400,14 @@ inline bool profiler_is_active()
   return mozilla::profiler::detail::RacyFeatures::IsActive();
 }
 
+// Is the profiler active, and is the current thread being profiled?
+// (Same caveats and recommented usage as profiler_is_active().)
+inline bool profiler_thread_is_being_profiled()
+{
+  return profiler_is_active() &&
+         mozilla::profiler::detail::IsThreadBeingProfiled();
+}
+
 // Is the profiler active and paused? Returns false if the profiler is inactive.
 bool profiler_is_paused();
 
@@ -415,8 +429,8 @@ bool profiler_feature_active(uint32_t aFeature);
 // (via outparams) if the profile is inactive. It's possible that the features
 // returned may be slightly different to those requested due to required
 // adjustments.
-void profiler_get_start_params(int* aEntrySize, double* aInterval,
-                               uint32_t* aFeatures,
+void profiler_get_start_params(int* aEntrySize, mozilla::Maybe<double>* aDuration,
+                               double* aInterval, uint32_t* aFeatures,
                                mozilla::Vector<const char*, 0,
                                                mozilla::MallocAllocPolicy>*
                                  aFilters);

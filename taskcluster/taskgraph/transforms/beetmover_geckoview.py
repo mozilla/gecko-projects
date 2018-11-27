@@ -14,7 +14,7 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import \
     craft_release_properties as beetmover_craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, resolve_keyed_by, optionally_keyed_by
+from taskgraph.util.schema import resolve_keyed_by, optionally_keyed_by
 from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
                                          generate_beetmover_compressed_upstream_artifacts,
                                          get_worker_type_for_scope)
@@ -40,8 +40,6 @@ _MOZ_UPDATE_CHANNEL_PER_BRANCH = {
 
 task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
 
-transforms = TransformSequence()
-
 beetmover_description_schema = schema.extend({
     Required('depname', default='build'): basestring,
     Optional('label'): basestring,
@@ -58,15 +56,8 @@ beetmover_description_schema = schema.extend({
     Optional('attributes'): task_description_schema['attributes'],
 })
 
-
-@transforms.add
-def validate(config, jobs):
-    for job in jobs:
-        label = job.get('primary-dependency', object).__dict__.get('label', '?no-label?')
-        validate_schema(
-            beetmover_description_schema, job,
-            "In beetmover-geckoview ({!r} kind) task for {!r}:".format(config.kind, label))
-        yield job
+transforms = TransformSequence()
+transforms.add_validate(beetmover_description_schema)
 
 
 @transforms.add

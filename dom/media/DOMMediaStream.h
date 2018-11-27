@@ -61,33 +61,9 @@ class Pledge;
     }                                                \
   }
 
-class OnTracksAvailableCallback {
- public:
-  virtual ~OnTracksAvailableCallback() {}
-  virtual void NotifyTracksAvailable(DOMMediaStream* aStream) = 0;
-};
-
 /**
- * Interface through which a DOMMediaStream can query its producer for a
- * MediaStreamTrackSource. This will be used whenever a track occurs in the
- * DOMMediaStream's owned stream that has not yet been created on the main
- * thread (see DOMMediaStream::CreateOwnDOMTrack).
- */
-class MediaStreamTrackSourceGetter : public nsISupports {
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_CLASS(MediaStreamTrackSourceGetter)
 
- public:
-  MediaStreamTrackSourceGetter() {}
-
-  virtual already_AddRefed<dom::MediaStreamTrackSource>
-  GetMediaStreamTrackSource(TrackID aInputTrackID) = 0;
-
- protected:
-  virtual ~MediaStreamTrackSourceGetter() {}
-};
-
-/**
+// clang-format off
  * DOM wrapper for MediaStreams.
  *
  * To account for track operations such as clone(), addTrack() and
@@ -176,13 +152,16 @@ class MediaStreamTrackSourceGetter : public nsISupports {
  *
  * DOMStream A
  *           Input        Owned          Playback
- *            t1 ---------> t1                      <- MediaStreamTrack X
- * (removed) (pointing to t1 in A) t2 ---------> t2 ------------> t2     <-
- * MediaStreamTrack Y \                                       (pointing to t2 in
- * A) \                    ------> t3     <- MediaStreamTrack Z \ / (pointing to
- * t1 in B) DOMStream B    \                / Input \      Owned   / Playback t1
- * ---^-----> t1 ---                  <- MediaStreamTrack Z (removed) \    \
- * (pointing to t1 in B)
+ *            t1 ---------> t1                      <- MediaStreamTrack X (removed)
+ *                                                     (pointing to t1 in A)
+ *            t2 ---------> t2 ------------> t2     <- MediaStreamTrack Y
+ *             \                                       (pointing to t2 in A)
+ *              \                    ------> t3     <- MediaStreamTrack Z
+ *               \                  /                  (pointing to t1 in B)
+ * DOMStream B    \                /
+ *           Input \      Owned   /      Playback
+ *            t1 ---^-----> t1 ---                  <- MediaStreamTrack Z (removed)
+ *              \    \                                 (pointing to t1 in B)
  *               \    \
  * DOMStream A'   \    \
  *           Input \    \ Owned          Playback
@@ -191,6 +170,7 @@ class MediaStreamTrackSourceGetter : public nsISupports {
  *                    ----> t2 ------------> t2     <- MediaStreamTrack Z'
  *                                                     (pointing to t2 in A')
  */
+// clang-format on
 class DOMMediaStream
     : public DOMEventTargetHelper,
       public dom::PrincipalChangeObserver<dom::MediaStreamTrack>,
@@ -309,8 +289,7 @@ class DOMMediaStream
     const InputPortOwnership mOwnership;
   };
 
-  DOMMediaStream(nsPIDOMWindowInner* aWindow,
-                 MediaStreamTrackSourceGetter* aTrackSourceGetter);
+  explicit DOMMediaStream(nsPIDOMWindowInner* aWindow);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(DOMMediaStream, DOMEventTargetHelper)
@@ -347,8 +326,6 @@ class DOMMediaStream
   MediaStreamTrack* GetTrackById(const nsAString& aId) const;
   void AddTrack(MediaStreamTrack& aTrack);
   void RemoveTrack(MediaStreamTrack& aTrack);
-
-  /** Identical to CloneInternal(TrackForwardingOption::EXPLICIT) */
   already_AddRefed<DOMMediaStream> Clone();
 
   bool Active() const;
@@ -357,18 +334,6 @@ class DOMMediaStream
   IMPL_EVENT_HANDLER(removetrack)
 
   // NON-WebIDL
-
-  /**
-   * Option to provide to CloneInternal() of which tracks should be forwarded
-   * from the source stream (`this`) to the returned stream clone.
-   *
-   * CURRENT forwards the tracks currently in the source stream's track set.
-   * ALL     forwards like EXPLICIT plus any and all future tracks originating
-   *         from the same input stream as the source DOMMediaStream (`this`).
-   */
-  enum class TrackForwardingOption { CURRENT, ALL };
-  already_AddRefed<DOMMediaStream> CloneInternal(
-      TrackForwardingOption aForwarding);
 
   MediaStreamTrack* GetOwnedTrackById(const nsAString& aId);
 
@@ -430,11 +395,6 @@ class DOMMediaStream
    */
   bool IsFinished() const;
 
-  /**
-   * Becomes inactive only when the playback stream has finished.
-   */
-  void SetInactiveOnFinish();
-
   TrackRate GraphRate();
 
   /**
@@ -480,16 +440,14 @@ class DOMMediaStream
    * SourceMediaStream.
    */
   static already_AddRefed<DOMMediaStream> CreateSourceStreamAsInput(
-      nsPIDOMWindowInner* aWindow, MediaStreamGraph* aGraph,
-      MediaStreamTrackSourceGetter* aTrackSourceGetter = nullptr);
+      nsPIDOMWindowInner* aWindow, MediaStreamGraph* aGraph);
 
   /**
    * Create a DOMMediaStream whose underlying input stream is a
    * TrackUnionStream.
    */
   static already_AddRefed<DOMMediaStream> CreateTrackUnionStreamAsInput(
-      nsPIDOMWindowInner* aWindow, MediaStreamGraph* aGraph,
-      MediaStreamTrackSourceGetter* aTrackSourceGetter = nullptr);
+      nsPIDOMWindowInner* aWindow, MediaStreamGraph* aGraph);
 
   /**
    * Create an DOMMediaStream whose underlying input stream is an
@@ -528,16 +486,6 @@ class DOMMediaStream
   already_AddRefed<MediaStreamTrack> CloneDOMTrack(MediaStreamTrack& aTrack,
                                                    TrackID aCloneTrackID);
 
-  // When the initial set of tracks has been added, run
-  // aCallback->NotifyTracksAvailable.
-  // It is allowed to do anything, including run script.
-  // aCallback may run immediately during this call if tracks are already
-  // available!
-  // We only care about track additions, we'll fire the notification even if
-  // some of the tracks have been removed.
-  // Takes ownership of aCallback.
-  void OnTracksAvailable(OnTracksAvailableCallback* aCallback);
-
   /**
    * Add an nsISupports object that this stream will keep alive as long as
    * the stream itself is alive.
@@ -555,6 +503,10 @@ class DOMMediaStream
   // UnregisterTrackListener before being destroyed, so we don't hold on to
   // a dead pointer. Main thread only.
   void UnregisterTrackListener(TrackListener* aListener);
+
+  // Tells this MediaStream whether it can go inactive as soon as no tracks
+  // are live anymore.
+  void SetFinishedOnInactive(bool aFinishedOnInactive);
 
  protected:
   virtual ~DOMMediaStream();
@@ -582,15 +534,6 @@ class DOMMediaStream
   // it has to be initiated before the playback stream.
   void InitPlaybackStreamCommon(MediaStreamGraph* aGraph);
 
-  void CheckTracksAvailable();
-
-  // Called when MediaStreamGraph has finished an iteration where tracks were
-  // created.
-  void NotifyTracksCreated();
-
-  // Called when our playback stream has finished in the MediaStreamGraph.
-  void NotifyFinished();
-
   // Dispatches NotifyActive() to all registered track listeners.
   void NotifyActive();
 
@@ -606,12 +549,6 @@ class DOMMediaStream
   // Dispatches "addtrack" or "removetrack".
   nsresult DispatchTrackEvent(const nsAString& aName,
                               const RefPtr<MediaStreamTrack>& aTrack);
-
-  class OwnedStreamListener;
-  friend class OwnedStreamListener;
-
-  class PlaybackStreamListener;
-  friend class PlaybackStreamListener;
 
   class PlaybackTrackListener;
   friend class PlaybackTrackListener;
@@ -670,22 +607,8 @@ class DOMMediaStream
   // waiting to be removed on MediaStreamGraph thread.
   size_t mTracksPendingRemoval;
 
-  // The interface through which we can query the stream producer for
-  // track sources.
-  RefPtr<MediaStreamTrackSourceGetter> mTrackSourceGetter;
-
-  // Listener tracking changes to mOwnedStream. We use this to notify the
-  // MediaStreamTracks we own about state changes.
-  RefPtr<OwnedStreamListener> mOwnedListener;
-
-  // Listener tracking changes to mPlaybackStream. This drives state changes
-  // in this DOMMediaStream and notifications to mTrackListeners.
-  RefPtr<PlaybackStreamListener> mPlaybackListener;
-
   // Listener tracking when live MediaStreamTracks in mTracks end.
   RefPtr<PlaybackTrackListener> mPlaybackTrackListener;
-
-  nsTArray<nsAutoPtr<OnTracksAvailableCallback>> mRunOnTracksAvailable;
 
   // Set to true after MediaStreamGraph has created tracks for mPlaybackStream.
   bool mTracksCreated;
@@ -703,10 +626,9 @@ class DOMMediaStream
   // True if this stream has live tracks.
   bool mActive;
 
-  // True if this stream only sets mActive to false when its playback stream
-  // finishes. This is a hack to maintain legacy functionality for playing a
-  // HTMLMediaElement::MozCaptureStream(). See bug 1302379.
-  bool mSetInactiveOnFinish;
+  // For compatibility with mozCaptureStream, we in some cases do not go
+  // inactive until the MediaDecoder lets us. (Remove this in Bug 1302379)
+  bool mFinishedOnInactive;
 
  private:
   void NotifyPrincipalChanged();

@@ -564,8 +564,12 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
             originalLocation, "next", false, ncompletion
           );
           if (thread.dbg.replaying) {
+            const parentGeneratedLocation = thread.sources.getFrameLocation(parentFrame);
+            const parentOriginalLocation = thread.unsafeSynchronize(
+              thread.sources.getOriginalLocation(parentGeneratedLocation)
+            );
             const offsets =
-              thread._findReplayingStepOffsets(originalLocation, parentFrame,
+              thread._findReplayingStepOffsets(parentOriginalLocation, parentFrame,
                                                /* rewinding = */ false);
             parentFrame.setReplayingOnStep(onStep, offsets);
           } else {
@@ -855,18 +859,19 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   },
 
   /**
-   * Clear the onStep and onPop hooks from the given frame and all of the frames
-   * below it.
-   *
-   * @param Debugger.Frame aFrame
-   *        The frame we want to clear the stepping hooks from.
+   * Clear the onStep and onPop hooks for all frames on the stack.
    */
-  _clearSteppingHooks: function(frame) {
-    if (frame && frame.live) {
-      while (frame) {
-        frame.onStep = undefined;
-        frame.onPop = undefined;
-        frame = frame.older;
+  _clearSteppingHooks: function() {
+    if (this.dbg.replaying) {
+      this.dbg.replayClearSteppingHooks();
+    } else {
+      let frame = this.youngestFrame;
+      if (frame && frame.live) {
+        while (frame) {
+          frame.onStep = undefined;
+          frame.onPop = undefined;
+          frame = frame.older;
+        }
       }
     }
   },
@@ -936,7 +941,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     if (request && request.resumeLimit) {
       resumeLimitHandled = this._handleResumeLimit(request);
     } else {
-      this._clearSteppingHooks(this.youngestFrame);
+      this._clearSteppingHooks();
       resumeLimitHandled = Promise.resolve(true);
     }
 
@@ -1458,10 +1463,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     this.dbg.onEnterFrame = undefined;
     this.dbg.replayingOnPopFrame = undefined;
     this.dbg.onExceptionUnwind = undefined;
-    if (frame) {
-      frame.onStep = undefined;
-      frame.onPop = undefined;
-    }
+    this._clearSteppingHooks();
 
     // Clear DOM event breakpoints.
     // XPCShell tests don't use actual DOM windows for globals and cause

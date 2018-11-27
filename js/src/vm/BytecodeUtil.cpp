@@ -707,9 +707,9 @@ BytecodeParser::simulateOp(JSOp op, uint32_t offset, OffsetAndDefIndex* offsetSt
         break;
 
       case JSOP_INITHOMEOBJECT:
-        // Keep the top 2 values.
+        // Pop the top value, keep the other value.
         MOZ_ASSERT(nuses == 2);
-        MOZ_ASSERT(ndefs == 2);
+        MOZ_ASSERT(ndefs == 1);
         break;
 
       case JSOP_SETGNAME:
@@ -2526,7 +2526,8 @@ js::DecompileArgument(JSContext* cx, int formalIndex, HandleValue v)
 extern bool
 js::IsValidBytecodeOffset(JSContext* cx, JSScript* script, size_t offset)
 {
-    // This could be faster (by following jump instructions if the target is <= offset).
+    // This could be faster (by following jump instructions if the target
+    // is <= offset).
     for (BytecodeRange r(cx, script); !r.empty(); r.popFront()) {
         size_t here = r.frontOffset();
         if (here >= offset) {

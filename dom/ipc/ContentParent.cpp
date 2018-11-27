@@ -3438,7 +3438,9 @@ ContentParent::GeneratePairedMinidump(const char* aReason)
   // Something has gone wrong to get us here, so we generate a minidump
   // of the parent and child for submission to the crash server unless we're
   // already shutting down.
-  if (mCrashReporter && !mShuttingDown) {
+  if (mCrashReporter &&
+      !mShuttingDown &&
+      Preferences::GetBool("dom.ipc.tabs.createKillHardCrashReports", false)) {
     // GeneratePairedMinidump creates two minidumps for us - the main
     // one is for the content process we're about to kill, and the other
     // one is for the main browser process. That second one is the extra
@@ -3458,8 +3460,6 @@ ContentParent::GeneratePairedMinidump(const char* aReason)
     {
       mCreatedPairedMinidumps = mCrashReporter->FinalizeCrashReport();
     }
-
-    Telemetry::Accumulate(Telemetry::SUBPROCESS_KILL_HARD, reason, 1);
   }
 }
 
@@ -3480,6 +3480,9 @@ ContentParent::KillHard(const char* aReason)
   mForceKillTimer = nullptr;
 
   GeneratePairedMinidump(aReason);
+
+  nsDependentCString reason(aReason);
+  Telemetry::Accumulate(Telemetry::SUBPROCESS_KILL_HARD, reason, 1);
 
   ProcessHandle otherProcessHandle;
   if (!base::OpenProcessHandle(OtherPid(), &otherProcessHandle)) {
@@ -6007,14 +6010,23 @@ ContentParent::RecvBHRThreadHang(const HangDetails& aDetails)
 
 mozilla::ipc::IPCResult
 ContentParent::RecvFirstPartyStorageAccessGrantedForOrigin(const Principal& aParentPrincipal,
+                                                           const Principal& aTrackingPrincipal,
                                                            const nsCString& aTrackingOrigin,
                                                            const nsCString& aGrantedOrigin,
+                                                           const bool& aAnySite,
                                                            FirstPartyStorageAccessGrantedForOriginResolver&& aResolver)
 {
   AntiTrackingCommon::SaveFirstPartyStorageAccessGrantedForOriginOnParentProcess(aParentPrincipal,
+                                                                                 aTrackingPrincipal,
                                                                                  aTrackingOrigin,
                                                                                  aGrantedOrigin,
-                                                                                 std::move(aResolver));
+                                                                                 aAnySite)
+    ->Then(GetCurrentThreadSerialEventTarget(), __func__,
+           [aResolver = std::move(aResolver)]
+           (AntiTrackingCommon::FirstPartyStorageAccessGrantPromise::ResolveOrRejectValue&& aValue) {
+             bool success = aValue.IsResolve() && NS_SUCCEEDED(aValue.ResolveValue());
+             aResolver(success);
+           });
   return IPC_OK();
 }
 

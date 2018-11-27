@@ -18,7 +18,6 @@ toolkit.jar:
 * skin/classic/global/notification.css
   skin/classic/global/netError.css
   skin/classic/global/popup.css
-  skin/classic/global/progressmeter.css
   skin/classic/global/radio.css
   skin/classic/global/richlistbox.css
   skin/classic/global/scrollbars.css                                 (nativescrollbars.css)
@@ -66,3 +65,4 @@ toolkit.jar:
 * skin/classic/global/in-content/common.css                          (in-content/common.css)
 * skin/classic/global/in-content/info-pages.css                      (in-content/info-pages.css)
   skin/classic/global/tree/columnpicker.gif                          (tree/columnpicker.gif)
+  skin/classic/global/plugins/pluginHelp-16.png                      (plugins/pluginHelp-16.png)

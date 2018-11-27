@@ -21,6 +21,8 @@
 #include "GLTypes.h"
 #include "Units.h"
 
+class nsDisplayItem;
+
 namespace mozilla {
 
 struct ActiveScrolledRoot;
@@ -32,6 +34,11 @@ class CompositorWidget;
 namespace layers {
 class CompositorBridgeParent;
 class WebRenderBridgeParent;
+class WebRenderLayerManager;
+}
+
+namespace layout {
+class TextDrawTarget;
 }
 
 namespace wr {
@@ -103,11 +110,13 @@ public:
 
   bool IsEmpty() const;
 
+  bool IsResourceUpdatesEmpty() const;
+
   void AddImage(wr::ImageKey aKey,
                 const ImageDescriptor& aDescriptor,
                 wr::Vec<uint8_t>& aBytes);
 
-  void AddBlobImage(wr::ImageKey aKey,
+  void AddBlobImage(wr::BlobImageKey aKey,
                     const ImageDescriptor& aDescriptor,
                     wr::Vec<uint8_t>& aBytes);
 
@@ -125,10 +134,10 @@ public:
                          const ImageDescriptor& aDescriptor,
                          wr::Vec<uint8_t>& aBytes);
 
-  void UpdateBlobImage(wr::ImageKey aKey,
+  void UpdateBlobImage(wr::BlobImageKey aKey,
                        const ImageDescriptor& aDescriptor,
                        wr::Vec<uint8_t>& aBytes,
-                       const wr::DeviceIntRect& aDirtyRect);
+                       const wr::LayoutIntRect& aDirtyRect);
 
   void UpdateExternalImage(ImageKey aKey,
                            const ImageDescriptor& aDescriptor,
@@ -143,9 +152,11 @@ public:
                                         const wr::DeviceIntRect& aDirtyRect,
                                         uint8_t aChannelIndex = 0);
 
-  void SetImageVisibleArea(ImageKey aKey, const wr::DeviceIntRect& aArea);
+  void SetImageVisibleArea(BlobImageKey aKey, const wr::DeviceIntRect& aArea);
 
   void DeleteImage(wr::ImageKey aKey);
+
+  void DeleteBlobImage(wr::BlobImageKey aKey);
 
   void AddRawFont(wr::FontKey aKey, wr::Vec<uint8_t>& aBytes, uint32_t aIndex);
 
@@ -533,6 +544,13 @@ public:
   // Clears the hit-test info so that subsequent display items will not have it.
   void ClearHitTestInfo();
 
+  already_AddRefed<gfxContext> GetTextContext(wr::IpcResourceUpdateQueue& aResources,
+                                              const layers::StackingContextHelper& aSc,
+                                              layers::WebRenderLayerManager* aManager,
+                                              nsDisplayItem* aItem,
+                                              nsRect& aBounds,
+                                              const gfx::Point& aDeviceOffset);
+
   // Try to avoid using this when possible.
   wr::WrState* Raw() { return mWrState; }
 
@@ -574,6 +592,9 @@ protected:
   // display item's clip rect when pushing an item. May be set to Nothing() if
   // there is no clip rect to merge with.
   Maybe<wr::LayoutRect> mClipChainLeaf;
+
+  RefPtr<layout::TextDrawTarget> mCachedTextDT;
+  RefPtr<gfxContext> mCachedContext;
 
   FixedPosScrollTargetTracker* mActiveFixedPosTracker;
 

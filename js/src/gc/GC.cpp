@@ -593,7 +593,6 @@ Arena::finalize(FreeOp* fop, AllocKind thingKind, size_t thingSize)
     MOZ_ASSERT(thingKind == getAllocKind());
     MOZ_ASSERT(thingSize == getThingSize());
     MOZ_ASSERT(!hasDelayedMarking);
-    MOZ_ASSERT(!markOverflow);
 
     uint_fast16_t firstThing = firstThingOffset(thingKind);
     uint_fast16_t firstThingOrSuccessorOfLastMarkedThing = firstThing;
@@ -742,8 +741,6 @@ ChunkPool::push(Chunk* chunk)
     }
     head_ = chunk;
     ++count_;
-
-    MOZ_ASSERT(verify());
 }
 
 Chunk*
@@ -764,7 +761,6 @@ ChunkPool::remove(Chunk* chunk)
     chunk->info.next = chunk->info.prev = nullptr;
     --count_;
 
-    MOZ_ASSERT(verify());
     return chunk;
 }
 
@@ -846,7 +842,7 @@ GCRuntime::prepareToFreeChunk(ChunkInfo& info)
 {
     MOZ_ASSERT(numArenasFreeCommitted >= info.numArenasFreeCommitted);
     numArenasFreeCommitted -= info.numArenasFreeCommitted;
-    stats().count(gcstats::STAT_DESTROY_CHUNK);
+    stats().count(gcstats::COUNT_DESTROY_CHUNK);
 #ifdef DEBUG
     /*
      * Let FreeChunkPool detect a missing prepareToFreeChunk call before it
@@ -952,9 +948,7 @@ Chunk::updateChunkListAfterFree(JSRuntime* rt, const AutoLockGC& lock)
         rt->gc.fullChunks(lock).remove(this);
         rt->gc.availableChunks(lock).push(this);
     } else if (!unused()) {
-        MOZ_ASSERT(!rt->gc.fullChunks(lock).contains(this));
         MOZ_ASSERT(rt->gc.availableChunks(lock).contains(this));
-        MOZ_ASSERT(!rt->gc.emptyChunks(lock).contains(this));
     } else {
         MOZ_ASSERT(unused());
         rt->gc.availableChunks(lock).remove(this);
@@ -1387,27 +1381,25 @@ GCRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes)
 void
 GCRuntime::finish()
 {
-    /* Wait for nursery background free to end and disable it to release memory. */
+    // Wait for nursery background free to end and disable it to release memory.
     if (nursery().isEnabled()) {
         nursery().waitBackgroundFreeEnd();
         nursery().disable();
     }
 
-    /*
-     * Wait until the background finalization and allocation stops and the
-     * helper thread shuts down before we forcefully release any remaining GC
-     * memory.
-     */
+    // Wait until the background finalization and allocation stops and the
+    // helper thread shuts down before we forcefully release any remaining GC
+    // memory.
     sweepTask.join();
     allocTask.cancelAndWait();
     decommitTask.cancelAndWait();
 
 #ifdef JS_GC_ZEAL
-    /* Free memory associated with GC verification. */
+    // Free memory associated with GC verification.
     finishVerifier();
 #endif
 
-    /* Delete all remaining zones. */
+    // Delete all remaining zones.
     if (rt->gcInitialized) {
         AutoSetThreadIsSweeping threadIsSweeping;
         for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
@@ -2214,7 +2206,6 @@ void
 GCMarker::delayMarkingChildren(const void* thing)
 {
     const TenuredCell* cell = TenuredCell::fromPointer(thing);
-    cell->arena()->markOverflow = 1;
     delayMarkingArena(cell->arena());
 }
 
@@ -2439,7 +2430,6 @@ RelocateArena(Arena* arena, SliceBudget& sliceBudget)
 {
     MOZ_ASSERT(arena->allocated());
     MOZ_ASSERT(!arena->hasDelayedMarking);
-    MOZ_ASSERT(!arena->markOverflow);
     MOZ_ASSERT(arena->bufferedCells()->isEmpty());
 
     Zone* zone = arena->zone;
@@ -2500,7 +2490,7 @@ ArenaList::relocateArenas(Arena* toRelocate, Arena* relocated, SliceBudget& slic
         // Prepend to list of relocated arenas
         arena->next = relocated;
         relocated = arena;
-        stats.count(gcstats::STAT_ARENA_RELOCATED);
+        stats.count(gcstats::COUNT_ARENA_RELOCATED);
     }
 
     check();
@@ -5016,7 +5006,8 @@ js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session)
         for (GCZonesIter zone(runtime); !zone.done(); zone.next()) {
             zone->changeGCState(Zone::Mark, Zone::MarkGray);
         }
-        gc->marker.setMarkColorGray();
+
+        AutoSetMarkColor setColorGray(gc->marker, MarkColor::Gray);
 
         gc->markAllGrayReferences(gcstats::PhaseKind::SWEEP_MARK_GRAY);
         gc->markAllWeakReferences(gcstats::PhaseKind::SWEEP_MARK_GRAY_WEAK);
@@ -5026,7 +5017,6 @@ js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session)
             zone->changeGCState(Zone::MarkGray, Zone::Mark);
         }
         MOZ_ASSERT(gc->marker.isDrained());
-        gc->marker.setMarkColorBlack();
     }
 
     /* Take a copy of the non-incremental mark state and restore the original. */
@@ -5629,40 +5619,37 @@ GCRuntime::endMarkingSweepGroup(FreeOp* fop, SliceBudget& budget)
 {
     gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::SWEEP_MARK);
 
-    /*
-     * Mark any incoming black pointers from previously swept compartments
-     * whose referents are not marked. This can occur when gray cells become
-     * black by the action of UnmarkGray.
-     */
+    // Mark any incoming black pointers from previously swept compartments
+    // whose referents are not marked. This can occur when gray cells become
+    // black by the action of UnmarkGray.
     markIncomingCrossCompartmentPointers(MarkColor::Black);
     markWeakReferencesInCurrentGroup(gcstats::PhaseKind::SWEEP_MARK_WEAK);
 
-    /*
-     * Change state of current group to MarkGray to restrict marking to this
-     * group.  Note that there may be pointers to the atoms zone, and
-     * these will be marked through, as they are not marked with
-     * TraceCrossCompartmentEdge.
-     */
+    // Change state of current group to MarkGray to restrict marking to this
+    // group.  Note that there may be pointers to the atoms zone, and
+    // these will be marked through, as they are not marked with
+    // TraceCrossCompartmentEdge.
     for (SweepGroupZonesIter zone(rt); !zone.done(); zone.next()) {
         zone->changeGCState(Zone::Mark, Zone::MarkGray);
     }
-    marker.setMarkColorGray();
 
-    /* Mark incoming gray pointers from previously swept compartments. */
+    AutoSetMarkColor setColorGray(marker, MarkColor::Gray);
+
+    // Mark incoming gray pointers from previously swept compartments.
     markIncomingCrossCompartmentPointers(MarkColor::Gray);
 
-    /* Mark gray roots and mark transitively inside the current compartment group. */
+    // Mark gray roots and mark transitively inside the current compartment
+    // group.
     markGrayReferencesInCurrentGroup(gcstats::PhaseKind::SWEEP_MARK_GRAY);
     markWeakReferencesInCurrentGroup(gcstats::PhaseKind::SWEEP_MARK_GRAY_WEAK);
 
-    /* Restore marking state. */
+    // Restore marking state.
     for (SweepGroupZonesIter zone(rt); !zone.done(); zone.next()) {
         zone->changeGCState(Zone::MarkGray, Zone::Mark);
     }
     MOZ_ASSERT(marker.isDrained());
-    marker.setMarkColorBlack();
 
-    /* We must not yield after this point before we start sweeping the group. */
+    // We must not yield after this point before we start sweeping the group.
     safeToYield = false;
 
     return Finished;
@@ -7483,6 +7470,13 @@ GCRuntime::incrementalSlice(SliceBudget& budget, JS::gcreason::Reason reason,
             return IncrementalResult::Ok;
         }
 
+        /* If we needed delayed marking for gray roots, then collect until done. */
+        if (isIncremental && !hasValidGrayRootsBuffer()) {
+            budget.makeUnlimited();
+            isIncremental = false;
+            stats().nonincremental(AbortReason::GrayRootBufferingFailed);
+        }
+
         if (!destroyingRuntime) {
             pushZealSelectedObjects();
         }
@@ -7497,13 +7491,6 @@ GCRuntime::incrementalSlice(SliceBudget& budget, JS::gcreason::Reason reason,
 
       case State::Mark:
         AutoGCRooter::traceAllWrappers(rt->mainContextFromOwnThread(), &marker);
-
-        /* If we needed delayed marking for gray roots, then collect until done. */
-        if (isIncremental && !hasValidGrayRootsBuffer()) {
-            budget.makeUnlimited();
-            isIncremental = false;
-            stats().nonincremental(AbortReason::GrayRootBufferingFailed);
-        }
 
         if (markUntilBudgetExhaused(budget, gcstats::PhaseKind::MARK) == NotFinished) {
             break;

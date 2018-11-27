@@ -57,6 +57,7 @@
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLSlotElement.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
+#include "mozilla/dom/HTMLTextAreaElement.h"
 #include "mozilla/dom/IDTracker.h"
 #include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
@@ -85,6 +86,7 @@
 #include "mozilla/dom/Selection.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs.h"
+#include "mozilla/TextEditor.h"
 #include "mozilla/TextEvents.h"
 #include "nsArrayUtils.h"
 #include "nsAString.h"
@@ -147,6 +149,7 @@
 #include "nsIFragmentContentSink.h"
 #include "nsContainerFrame.h"
 #include "nsIHTMLDocument.h"
+#include "nsIHttpChannelInternal.h"
 #include "nsIIdleService.h"
 #include "nsIImageLoadingContent.h"
 #include "nsIInterfaceRequestor.h"
@@ -4367,6 +4370,8 @@ nsContentUtils::DispatchTrustedEvent(nsIDocument* aDoc, nsISupports* aTarget,
                                      Composed aComposed,
                                      bool* aDefaultAction)
 {
+  MOZ_ASSERT(!aEventName.EqualsLiteral("input"),
+             "Use DispatchInputEvent() instead");
   return DispatchEvent(aDoc, aTarget, aEventName, aCanBubble, aCancelable,
                        aComposed, Trusted::eYes, aDefaultAction);
 }
@@ -4448,6 +4453,110 @@ nsContentUtils::DispatchEvent(nsIDocument* aDoc, nsISupports* aTarget,
     *aDefaultAction = (status != nsEventStatus_eConsumeNoDefault);
   }
   return rv;
+}
+
+// static
+nsresult
+nsContentUtils::DispatchInputEvent(Element* aEventTargetElement)
+{
+  RefPtr<TextEditor> textEditor; // See bug 1506439
+  return DispatchInputEvent(aEventTargetElement, textEditor);
+}
+
+// static
+nsresult
+nsContentUtils::DispatchInputEvent(Element* aEventTargetElement,
+                                   TextEditor* aTextEditor)
+{
+  if (NS_WARN_IF(!aEventTargetElement)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  // If this is called from editor, the instance should be set to aTextEditor.
+  // Otherwise, we need to look for an editor for aEventTargetElement.
+  // However, we don't need to do it for HTMLEditor since nobody shouldn't
+  // dispatch "input" event for HTMLEditor except HTMLEditor itself.
+  bool useInputEvent = false;
+  if (aTextEditor) {
+    useInputEvent = true;
+  } else if (HTMLTextAreaElement* textAreaElement=
+               HTMLTextAreaElement::FromNode(aEventTargetElement)) {
+    aTextEditor = textAreaElement->GetTextEditorWithoutCreation();
+    useInputEvent = true;
+  } else if (HTMLInputElement* inputElement =
+               HTMLInputElement::FromNode(aEventTargetElement)) {
+    if (inputElement->IsInputEventTarget()) {
+      aTextEditor = inputElement->GetTextEditorWithoutCreation();
+      useInputEvent = true;
+    }
+  }
+#ifdef DEBUG
+  else {
+    nsCOMPtr<nsITextControlElement> textControlElement =
+      do_QueryInterface(aEventTargetElement);
+    MOZ_ASSERT(!textControlElement,
+      "The event target may have editor, but we've not known it yet.");
+  }
+#endif // #ifdef DEBUG
+
+  if (!useInputEvent) {
+    // Dispatch "input" event with Event instance.
+    WidgetEvent widgetEvent(true, eUnidentifiedEvent);
+    widgetEvent.mSpecifiedEventType = nsGkAtoms::oninput;
+    widgetEvent.mFlags.mCancelable = false;
+    // Using same time as nsContentUtils::DispatchEvent() for backward
+    // compatibility.
+    widgetEvent.mTime = PR_Now();
+    (new AsyncEventDispatcher(aEventTargetElement,
+                              widgetEvent))->RunDOMEventWhenSafe();
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIWidget> widget;
+  if (aTextEditor) {
+    widget = aTextEditor->GetWidget();
+    if (NS_WARN_IF(!widget)) {
+      return NS_ERROR_FAILURE;
+    }
+  } else {
+    nsIDocument* document = aEventTargetElement->OwnerDoc();
+    if (NS_WARN_IF(!document)) {
+      return NS_ERROR_FAILURE;
+    }
+    // If we're running xpcshell tests, we fail to get presShell here.
+    // Even in such case, we need to dispatch "input" event without widget.
+    nsIPresShell* presShell = document->GetShell();
+    if (presShell) {
+      nsPresContext* presContext = presShell->GetPresContext();
+      if (NS_WARN_IF(!presContext)) {
+        return NS_ERROR_FAILURE;
+      }
+      widget = presContext->GetRootWidget();
+      if (NS_WARN_IF(!widget)) {
+        return NS_ERROR_FAILURE;
+      }
+    }
+  }
+
+  // Dispatch "input" event with InputEvent instance.
+  InternalEditorInputEvent inputEvent(true, eEditorInput, widget);
+
+  // Using same time as old event dispatcher in EditorBase for backward
+  // compatibility.
+  inputEvent.mTime = static_cast<uint64_t>(PR_Now() / 1000);
+
+  // If there is an editor, set isComposing to true when it has composition.
+  // Note that EditorBase::IsIMEComposing() may return false even when we
+  // need to set it to true.
+  // Otherwise, i.e., editor hasn't been created for the element yet,
+  // we should set isComposing to false since the element can never has
+  // composition without editor.
+  inputEvent.mIsComposing =
+    aTextEditor ? !!aTextEditor->GetComposition() : false;
+
+  (new AsyncEventDispatcher(aEventTargetElement,
+                            inputEvent))->RunDOMEventWhenSafe();
+  return NS_OK;
 }
 
 nsresult
@@ -5435,7 +5544,7 @@ nsContentUtils::TriggerLink(nsIContent *aContent, nsPresContext *aPresContext,
   }
 
   if (!aClick) {
-    handler->OnOverLink(aContent, aLinkURI, aTargetSpec.get());
+    handler->OnOverLink(aContent, aLinkURI, aTargetSpec);
     return;
   }
 
@@ -5468,7 +5577,7 @@ nsContentUtils::TriggerLink(nsIContent *aContent, nsPresContext *aPresContext,
     }
 
     handler->OnLinkClick(aContent, aLinkURI,
-                         fileName.IsVoid() ? aTargetSpec.get() : EmptyString().get(),
+                         fileName.IsVoid() ? aTargetSpec : EmptyString(),
                          fileName, nullptr, nullptr, EventStateManager::IsHandlingUserInput(),
                          aIsTrusted, aContent->NodePrincipal());
   }
@@ -7755,8 +7864,7 @@ nsContentUtils::IPCTransferableToTransferable(const IPCDataTransfer& aDataTransf
       rv = dataWrapper->SetData(text);
       NS_ENSURE_SUCCESS(rv, rv);
 
-      rv = aTransferable->SetTransferData(item.flavor().get(), dataWrapper,
-                                  text.Length() * sizeof(char16_t));
+      rv = aTransferable->SetTransferData(item.flavor().get(), dataWrapper);
 
       NS_ENSURE_SUCCESS(rv, rv);
     } else if (item.data().type() == IPCDataTransferData::TShmem) {
@@ -7766,7 +7874,7 @@ nsContentUtils::IPCTransferableToTransferable(const IPCDataTransfer& aDataTransf
                                                      getter_AddRefs(imageContainer));
         NS_ENSURE_SUCCESS(rv, rv);
 
-        aTransferable->SetTransferData(item.flavor().get(), imageContainer, sizeof(nsISupports*));
+        aTransferable->SetTransferData(item.flavor().get(), imageContainer);
       } else {
         nsCOMPtr<nsISupportsCString> dataWrapper =
           do_CreateInstance(NS_SUPPORTS_CSTRING_CONTRACTID, &rv);
@@ -7779,7 +7887,7 @@ nsContentUtils::IPCTransferableToTransferable(const IPCDataTransfer& aDataTransf
         rv = dataWrapper->SetData(text);
         NS_ENSURE_SUCCESS(rv, rv);
 
-        rv = aTransferable->SetTransferData(item.flavor().get(), dataWrapper, text.Length());
+        rv = aTransferable->SetTransferData(item.flavor().get(), dataWrapper);
 
         NS_ENSURE_SUCCESS(rv, rv);
       }
@@ -7994,8 +8102,7 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
       }
 
       nsCOMPtr<nsISupports> data;
-      uint32_t dataLen = 0;
-      aTransferable->GetTransferData(flavorStr.get(), getter_AddRefs(data), &dataLen);
+      aTransferable->GetTransferData(flavorStr.get(), getter_AddRefs(data));
 
       nsCOMPtr<nsISupportsString> text = do_QueryInterface(data);
       nsCOMPtr<nsISupportsCString> ctext = do_QueryInterface(data);
@@ -8865,9 +8972,14 @@ nsContentUtils::IsThirdPartyWindowOrChannel(nsPIDOMWindowInner* aWindow,
   bool thirdParty = false;
 
   if (aWindow) {
-    Unused << thirdPartyUtil->IsThirdPartyWindow(aWindow->GetOuterWindow(),
-                                                 aURI,
-                                                 &thirdParty);
+    nsresult rv = thirdPartyUtil->IsThirdPartyWindow(aWindow->GetOuterWindow(),
+                                                     aURI,
+                                                     &thirdParty);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      // Ideally we would do something similar to the channel code path here,
+      // but existing code depends on this behaviour.
+      return false;
+    }
   }
 
   if (aChannel) {
@@ -8875,9 +8987,32 @@ nsContentUtils::IsThirdPartyWindowOrChannel(nsPIDOMWindowInner* aWindow,
     // use nsILoadInfo.isThirdPartyContext.  That nsILoadInfo property only
     // indicates if the parent loading window is third party or not.  We
     // want to check the channel URI against the loading principal as well.
-    Unused << thirdPartyUtil->IsThirdPartyChannel(aChannel,
-                                                  nullptr,
-                                                  &thirdParty);
+    nsresult rv = thirdPartyUtil->IsThirdPartyChannel(aChannel,
+                                                      nullptr,
+                                                      &thirdParty);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      // Assume third-party in case of failure
+      thirdParty = true;
+    }
+
+    // We check isThirdPartyWindow to expand the list of domains that are
+    // considered first party (e.g., if facebook.com includes an iframe from
+    // fatratgames.com, all subsources included in that iframe are considered
+    // third-party with isThirdPartyChannel, even if they are not third-party
+    // w.r.t.  facebook.com), and isThirdPartyChannel to prevent top-level
+    // navigations from being detected as third-party.
+    bool isThirdPartyWindow = true;
+    nsCOMPtr<nsIHttpChannelInternal> chan = do_QueryInterface(aChannel, &rv);
+    if (NS_SUCCEEDED(rv) && chan) {
+      nsCOMPtr<nsIURI> topWinURI;
+      rv = chan->GetTopWindowURI(getter_AddRefs(topWinURI));
+      if (NS_SUCCEEDED(rv) && topWinURI) {
+        rv = thirdPartyUtil->IsThirdPartyURI(aURI, topWinURI, &isThirdPartyWindow);
+        if (NS_SUCCEEDED(rv)) {
+          thirdParty = thirdParty && isThirdPartyWindow;
+        }
+      }
+    }
   }
 
   return thirdParty;
@@ -8952,11 +9087,19 @@ nsContentUtils::StorageDisabledByAntiTracking(nsPIDOMWindowInner* aWindow,
   bool disabled =
     StorageDisabledByAntiTrackingInternal(aWindow, aChannel, aPrincipal, aURI,
                                           &rejectedReason);
-  if (disabled && sAntiTrackingControlCenterUIEnabled && rejectedReason) {
+  if (sAntiTrackingControlCenterUIEnabled) {
     if (aWindow) {
-      AntiTrackingCommon::NotifyRejection(aWindow, rejectedReason);
+      AntiTrackingCommon::NotifyBlockingDecision(aWindow,
+                                                 disabled ?
+                                                   AntiTrackingCommon::BlockingDecision::eBlock :
+                                                   AntiTrackingCommon::BlockingDecision::eAllow,
+                                                 rejectedReason);
     } else if (aChannel) {
-      AntiTrackingCommon::NotifyRejection(aChannel, rejectedReason);
+      AntiTrackingCommon::NotifyBlockingDecision(aChannel,
+                                                 disabled ?
+                                                   AntiTrackingCommon::BlockingDecision::eBlock :
+                                                   AntiTrackingCommon::BlockingDecision::eAllow,
+                                                 rejectedReason);
     }
   }
   return disabled;
@@ -11181,6 +11324,22 @@ nsContentUtils::IsURIInPrefList(nsIURI* aURI, const char* aPrefName)
 {
   MOZ_ASSERT(aPrefName);
 
+  nsAutoCString blackList;
+  Preferences::GetCString(aPrefName, blackList);
+  ToLowerCase(blackList);
+  return IsURIInList(aURI, blackList);
+}
+
+/* static */ bool
+nsContentUtils::IsURIInList(nsIURI* aURI, const nsCString& aBlackList)
+{
+#ifdef DEBUG
+  nsAutoCString blackListLowerCase(aBlackList);
+  ToLowerCase(blackListLowerCase);
+  MOZ_ASSERT(blackListLowerCase.Equals(aBlackList),
+             "The aBlackList argument should be lower-case");
+#endif
+
   if (!aURI) {
     return false;
   }
@@ -11199,10 +11358,7 @@ nsContentUtils::IsURIInPrefList(nsIURI* aURI, const char* aPrefName)
   }
   ToLowerCase(host);
 
-  nsAutoCString blackList;
-  Preferences::GetCString(aPrefName, blackList);
-  ToLowerCase(blackList);
-  if (blackList.IsEmpty()) {
+  if (aBlackList.IsEmpty()) {
     return false;
   }
 
@@ -11210,25 +11366,25 @@ nsContentUtils::IsURIInPrefList(nsIURI* aURI, const char* aPrefName)
   // If starts with "*.", it matches any sub-domains.
 
   for (;;) {
-    int32_t index = blackList.Find(host, false);
+    int32_t index = aBlackList.Find(host, false);
     if (index >= 0 &&
-        static_cast<uint32_t>(index) + host.Length() <= blackList.Length() &&
+        static_cast<uint32_t>(index) + host.Length() <= aBlackList.Length() &&
         // If start of the black list or next to ","?
-        (!index || blackList[index - 1] == ',')) {
+        (!index || aBlackList[index - 1] == ',')) {
       // If end of the black list or immediately before ","?
       size_t indexAfterHost = index + host.Length();
-      if (indexAfterHost == blackList.Length() ||
-          blackList[indexAfterHost] == ',') {
+      if (indexAfterHost == aBlackList.Length() ||
+          aBlackList[indexAfterHost] == ',') {
         return true;
       }
       // If next character is '/', we need to check the path too.
       // We assume the path in blacklist means "/foo" + "*".
-      if (blackList[indexAfterHost] == '/') {
-        int32_t endOfPath = blackList.Find(",", false, indexAfterHost);
+      if (aBlackList[indexAfterHost] == '/') {
+        int32_t endOfPath = aBlackList.Find(",", false, indexAfterHost);
         nsDependentCSubstring::size_type length =
           endOfPath < 0 ? static_cast<nsDependentCSubstring::size_type>(-1) :
                           endOfPath - indexAfterHost;
-        nsDependentCSubstring pathInBlackList(blackList,
+        nsDependentCSubstring pathInBlackList(aBlackList,
                                               indexAfterHost, length);
         nsAutoCString filePath;
         aURI->GetFilePath(filePath);
