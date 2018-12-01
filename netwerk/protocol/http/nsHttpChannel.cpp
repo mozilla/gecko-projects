@@ -877,16 +877,11 @@ nsresult nsHttpChannel::DoConnect(nsHttpTransaction* aTransWithStickyConn) {
   //   gHttpHandler->InitiateTransaction(mTransaction, mPriority);
   // }
 
-  // if (NS_FAILED(rv)) {
-  //   return rv;
-  // }
-
-  // rv =
-  // mTransactionPump->AsyncRead(this, nullptr);
-
-  // if (NS_FAILED(rv)) {
-  //   return rv;
-  // }
+  rv = mTransaction->AsyncRead(this, mPriority,
+                               getter_AddRefs(mTransactionPump));
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
 
   uint32_t suspendCount = mSuspendCount;
   if (mAsyncResumePending) {
@@ -1338,11 +1333,9 @@ nsresult nsHttpChannel::SetupTransaction() {
   rv = mTransaction->Init(mCaps, mConnectionInfo, &mRequestHead, mUploadStream,
                           mReqContentLength, mUploadStreamHasHeaders,
                           GetCurrentThreadEventTarget(), callbacks, this,
-                          mTopLevelOuterContentWindowId, category,
-                          getter_AddRefs(mTransactionPump));
+                          mTopLevelOuterContentWindowId, category);
   if (NS_FAILED(rv)) {
     mTransaction = nullptr;
-    mTransactionPump = nullptr;
     return rv;
   }
 
@@ -6338,11 +6331,10 @@ nsresult nsHttpChannel::CancelInternal(nsresult status) {
 
 void nsHttpChannel::CancelNetworkRequest(nsresult aStatus) {
   if (mTransaction) {
-    // TODO: Bug 1485355
-    // nsresult rv = gHttpHandler->CancelTransaction(mTransaction, aStatus);
-    // if (NS_FAILED(rv)) {
-    //   LOG(("failed to cancel the transaction\n"));
-    // }
+    nsresult rv = mTransaction->AsyncCancel(aStatus);
+    if (NS_FAILED(rv)) {
+      LOG(("failed to cancel the transaction\n"));
+    }
   }
   if (mTransactionPump) mTransactionPump->Cancel(aStatus);
 }
@@ -6970,13 +6962,13 @@ nsHttpChannel::SetPriority(int32_t value) {
 
   mPriority = newValue;
   if (mTransaction) {
-    // TODO: Bug 1485355
-    // nsresult rv = gHttpHandler->RescheduleTransaction(mTransaction,
-    // mPriority); if (NS_FAILED(rv)) {
-    //     LOG(("nsHttpChannel::SetPriority [this=%p] "
-    //          "RescheduleTransaction failed (%08x)", this,
-    //          static_cast<uint32_t>(rv)));
-    // }
+    nsresult rv = mTransaction->AsyncReschedule(mPriority);
+    if (NS_FAILED(rv)) {
+      LOG(
+          ("nsHttpChannel::SetPriority [this=%p] "
+           "RescheduleTransaction failed (%08x)",
+           this, static_cast<uint32_t>(rv)));
+    }
   }
 
   // If this channel is the real channel for an e10s channel, notify the
@@ -7038,9 +7030,7 @@ void nsHttpChannel::OnClassOfServiceUpdated() {
        mClassOfService));
 
   if (mTransaction) {
-    // TODO: Bug 1485355
-    // gHttpHandler->UpdateClassOfServiceOnTransaction(mTransaction,
-    // mClassOfService);
+    mTransaction->AsyncUpdateClassOfService(mClassOfService);
   }
   if (EligibleForTailing()) {
     RemoveAsNonTailRequest();
@@ -7942,12 +7932,10 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
     }
     // Do not to leave the transaction in a suspended state in error cases.
     if (NS_FAILED(status) && mTransaction) {
-      // TODO: Bug 1485355
-      // nsresult rv = gHttpHandler->CancelTransaction(mTransaction, status);
-      // if (NS_FAILED(rv)) {
-      //     LOG(("  CancelTransaction failed (%08x)",
-      //          static_cast<uint32_t>(rv)));
-      // }
+      nsresult rv = mTransaction->AsyncCancel(status);
+      if (NS_FAILED(rv)) {
+        LOG(("  CancelTransaction failed (%08x)", static_cast<uint32_t>(rv)));
+      }
     }
   }
 

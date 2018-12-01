@@ -243,12 +243,12 @@ nsHttpTransaction::~nsHttpTransaction() {
 }
 
 nsresult nsHttpTransaction::Init(
-    uint32_t caps, nsHttpConnectionInfo* cinfo, nsHttpRequestHead* requestHead,
-    nsIInputStream* requestBody, uint64_t requestContentLength,
-    bool requestBodyHasHeaders, nsIEventTarget* target,
-    nsIInterfaceRequestor* callbacks, nsITransportEventSink* eventsink,
-    uint64_t topLevelOuterContentWindowId, HttpTrafficCategory trafficCategory,
-    nsIRequest **pump) {
+    uint32_t caps, nsHttpConnectionInfo *cinfo, nsHttpRequestHead *requestHead,
+    nsIInputStream *requestBody, uint64_t requestContentLength,
+    bool requestBodyHasHeaders, nsIEventTarget *target,
+    nsIInterfaceRequestor *callbacks, nsITransportEventSink *eventsink,
+    uint64_t topLevelOuterContentWindowId,
+    HttpTrafficCategory trafficCategory) {
   nsresult rv;
 
   LOG1(("nsHttpTransaction::Init [this=%p caps=%x]\n", this, caps));
@@ -434,13 +434,38 @@ nsresult nsHttpTransaction::Init(
                    nsIOService::gDefaultSegmentCount);
   if (NS_FAILED(rv)) return rv;
 
+  return NS_OK;
+}
+
+nsresult nsHttpTransaction::AsyncRead(nsIStreamListener *listener,
+                                      int32_t priority, nsIRequest **pump) {
   RefPtr<nsInputStreamPump> transactionPump;
-  rv = nsInputStreamPump::Create(getter_AddRefs(transactionPump), mPipeIn);
-  NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
+  nsresult rv =
+      nsInputStreamPump::Create(getter_AddRefs(transactionPump), mPipeIn);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = gHttpHandler->InitiateTransaction(this, priority);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = transactionPump->AsyncRead(listener, nullptr);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIRequest> tmp = static_cast<nsIRequest *>(transactionPump);
   tmp.forget(pump);
+
   return NS_OK;
+}
+
+nsresult nsHttpTransaction::AsyncReschedule(int32_t priority) {
+  return gHttpHandler->RescheduleTransaction(this, priority);
+}
+
+void nsHttpTransaction::AsyncUpdateClassOfService(uint32_t classOfService) {
+  gHttpHandler->UpdateClassOfServiceOnTransaction(this, classOfService);
+}
+
+nsresult nsHttpTransaction::AsyncCancel(nsresult reason) {
+  return gHttpHandler->CancelTransaction(this, reason);
 }
 
 // This method should only be used on the socket thread

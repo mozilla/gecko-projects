@@ -11,8 +11,8 @@
 #include "nsHttp.h"
 #include "nsCOMPtr.h"
 #include "TimingStruct.h"
+#include "nsIRequest.h"
 #include "nsIStreamListener.h"
-#include "nsInputStreamPump.h"
 #include "nsITransport.h"
 
 namespace mozilla {
@@ -41,9 +41,14 @@ class HttpTransactionChild final : public PHttpTransactionChild,
       const Maybe<IPCStream>& aRequestBody, const uint64_t& aReqContentLength,
       const bool& aReqBodyIncludesHeaders,
       const uint64_t& aTopLevelOuterContentWindowId);
-  mozilla::ipc::IPCResult RecvCancel(const nsresult& aStatus);
-  mozilla::ipc::IPCResult RecvSuspend();
-  mozilla::ipc::IPCResult RecvResume();
+  mozilla::ipc::IPCResult RecvRead(const int32_t& priority);
+  mozilla::ipc::IPCResult RecvReschedule(const int32_t& priority);
+  mozilla::ipc::IPCResult RecvUpdateClassOfService(
+      const uint32_t& classOfService);
+  mozilla::ipc::IPCResult RecvCancel(const nsresult& reason);
+  mozilla::ipc::IPCResult RecvCancelPump(const nsresult& aStatus);
+  mozilla::ipc::IPCResult RecvSuspendPump();
+  mozilla::ipc::IPCResult RecvResumePump();
 
  private:
   virtual ~HttpTransactionChild();
@@ -61,7 +66,7 @@ class HttpTransactionChild final : public PHttpTransactionChild,
   nsHttpRequestHead mRequestHead;
   nsCOMPtr<nsIInputStream> mUploadStream;
   RefPtr<nsHttpTransaction> mTransaction;
-  RefPtr<nsInputStreamPump> mTransactionPump;
+  nsCOMPtr<nsIRequest> mTransactionPump;
   NetAddr mSelfAddr;
   NetAddr mPeerAddr;
 };

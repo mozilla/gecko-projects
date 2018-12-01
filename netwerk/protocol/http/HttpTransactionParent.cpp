@@ -71,16 +71,13 @@ nsresult HttpTransactionParent::Init(
     nsIInputStream* requestBody, uint64_t requestContentLength,
     bool requestBodyHasHeaders, nsIEventTarget* target,
     nsIInterfaceRequestor* callbacks, nsITransportEventSink* eventsink,
-    uint64_t topLevelOuterContentWindowId, HttpTrafficCategory trafficCategory,
-    nsIRequest** pump) {
+    uint64_t topLevelOuterContentWindowId, HttpTrafficCategory trafficCategory) {
   LOG(("HttpTransactionParent::Init [this=%p caps=%x]\n", this, caps));
-  MOZ_ASSERT(pump);
 
   // TODO Bug 1547389: support HttpTrafficAnalyzer for socket process
   Unused << trafficCategory;
 
   mEventsink = eventsink;
-  mChannel = do_QueryInterface(eventsink);
 
   HttpConnectionInfoCloneArgs infoArgs;
   GetStructFromInfo(cinfo, infoArgs);
@@ -100,7 +97,37 @@ nsresult HttpTransactionParent::Init(
   }
 
   mTargetThread = GetCurrentThreadEventTarget();
+  return NS_OK;
+}
+
+nsresult HttpTransactionParent::AsyncRead(nsIStreamListener* listener,
+                                          int32_t priority, nsIRequest** pump) {
+  MOZ_ASSERT(pump);
+
+  if (!SendRead(priority)) {
+    return NS_ERROR_FAILURE;
+  }
+
   NS_ADDREF(*pump = this);
+  mChannel = listener;
+  return NS_OK;
+}
+
+nsresult HttpTransactionParent::AsyncReschedule(int32_t priority) {
+  if (!SendReschedule(priority)) {
+    return NS_ERROR_FAILURE;
+  }
+  return NS_OK;
+}
+
+void HttpTransactionParent::AsyncUpdateClassOfService(uint32_t classOfService) {
+  Unused << SendUpdateClassOfService(classOfService);
+}
+
+nsresult HttpTransactionParent::AsyncCancel(nsresult reason) {
+  if (!SendCancel(reason)) {
+    return NS_ERROR_FAILURE;
+  }
   return NS_OK;
 }
 
@@ -295,20 +322,20 @@ HttpTransactionParent::Cancel(nsresult aStatus) {
   if (!mCanceled) {
     mCanceled = true;
     mStatus = aStatus;
-    Unused << SendCancel(mStatus);
+    Unused << SendCancelPump(mStatus);
   }
   return NS_OK;
 }
 
 NS_IMETHODIMP
 HttpTransactionParent::Suspend(void) {
-  Unused << SendSuspend();
+  Unused << SendSuspendPump();
   return NS_OK;
 }
 
 NS_IMETHODIMP
 HttpTransactionParent::Resume(void) {
-  Unused << SendResume();
+  Unused << SendResumePump();
   return NS_OK;
 }
 

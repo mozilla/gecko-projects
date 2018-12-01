@@ -47,9 +47,14 @@ child:
              uint64_t reqContentLength,
              bool reqBodyIncludesHeaders,
              uint64_t topLevelOuterContentWindowId);
-  async Cancel(nsresult status);
-  async Suspend();
-  async Resume();
+  async Read(int32_t priority);
+  async Reschedule(int32_t priority);
+  async UpdateClassOfService(uint32_t classOfService);
+  async Cancel(nsresult reason);
+
+  async CancelPump(nsresult status);
+  async SuspendPump();
+  async ResumePump();
 
 };
 

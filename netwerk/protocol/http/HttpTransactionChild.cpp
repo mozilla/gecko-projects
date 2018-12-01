@@ -41,7 +41,7 @@ nsresult HttpTransactionChild::InitInternal(
     nsHttpRequestHead* requestHead, nsIInputStream* requestBody,
     uint64_t requestContentLength, bool requestBodyHasHeaders,
     nsIEventTarget* target, uint64_t topLevelOuterContentWindowId) {
-  LOG(("HttpTransactionChild::Init [this=%p caps=%x]\n", this, caps));
+  LOG(("HttpTransactionChild::InitInternal [this=%p caps=%x]\n", this, caps));
 
   RefPtr<nsHttpConnectionInfo> cinfo;
   if (infoArgs.routedHost().IsEmpty()) {
@@ -72,28 +72,17 @@ nsresult HttpTransactionChild::InitInternal(
   rv = mTransaction->Init(
       caps, cinfo, requestHead, requestBody, requestContentLength,
       requestBodyHasHeaders, target, nullptr,  // TODO: security callback
-      this, topLevelOuterContentWindowId, HttpTrafficCategory::eInvalid,
-      getter_AddRefs(request));
+      this, topLevelOuterContentWindowId, HttpTrafficCategory::eInvalid);
   if (NS_FAILED(rv)) {
     mTransaction = nullptr;
-    return rv;
   }
 
-  mTransactionPump = static_cast<nsInputStreamPump*>(request.get());
-
-  rv = gHttpHandler->InitiateTransaction(mTransaction, 0);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = mTransactionPump->AsyncRead(this, nullptr);
-  Unused << NS_WARN_IF(NS_FAILED(rv));
   return rv;
 }
 
-mozilla::ipc::IPCResult HttpTransactionChild::RecvCancel(
+mozilla::ipc::IPCResult HttpTransactionChild::RecvCancelPump(
     const nsresult& aStatus) {
-  LOG(("HttpTransactionChild::RecvCancel start [this=%p]\n", this));
+  LOG(("HttpTransactionChild::RecvCancelPump start [this=%p]\n", this));
 
   if (mTransactionPump) {
     mTransactionPump->Cancel(aStatus);
@@ -102,17 +91,21 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvCancel(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult HttpTransactionChild::RecvSuspend() {
-  LOG(("HttpTransactionChild::RecvSuspend start [this=%p]\n", this));
+mozilla::ipc::IPCResult HttpTransactionChild::RecvSuspendPump() {
+  LOG(("HttpTransactionChild::RecvSuspendPump start [this=%p]\n", this));
 
-  mTransactionPump->Suspend();
+  if (mTransactionPump) {
+    mTransactionPump->Suspend();
+  }
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult HttpTransactionChild::RecvResume() {
-  LOG(("HttpTransactionChild::RecvResume start [this=%p]\n", this));
+mozilla::ipc::IPCResult HttpTransactionChild::RecvResumePump() {
+  LOG(("HttpTransactionChild::RecvResumePump start [this=%p]\n", this));
 
-  mTransactionPump->Resume();
+  if (mTransactionPump) {
+    mTransactionPump->Resume();
+  }
   return IPC_OK();
 }
 
@@ -132,6 +125,43 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
                              aTopLevelOuterContentWindowId))) {
     LOG(("HttpTransactionChild::RecvInit: [this=%p] InitInternal failed!\n",
          this));
+  }
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult HttpTransactionChild::RecvRead(
+    const int32_t& priority) {
+  LOG(("HttpTransactionChild::RecvRead start [this=%p]\n", this));
+  MOZ_ASSERT(mTransaction, "should SentInit first");
+  if (mTransaction) {
+    Unused << mTransaction->AsyncRead(this, priority,
+                                      getter_AddRefs(mTransactionPump));
+  }
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult HttpTransactionChild::RecvReschedule(
+    const int32_t& priority) {
+  LOG(("HttpTransactionChild::RecvReschedule start [this=%p]\n", this));
+  if (mTransaction) {
+    Unused << mTransaction->AsyncReschedule(priority);
+  }
+  return IPC_OK();
+}
+mozilla::ipc::IPCResult HttpTransactionChild::RecvUpdateClassOfService(
+    const uint32_t& classOfService) {
+  LOG(("HttpTransactionChild::RecvUpdateClassOfService start [this=%p]\n",
+       this));
+  if (mTransaction) {
+    mTransaction->AsyncUpdateClassOfService(classOfService);
+  }
+  return IPC_OK();
+}
+mozilla::ipc::IPCResult HttpTransactionChild::RecvCancel(
+    const nsresult& reason) {
+  LOG(("HttpTransactionChild::RecvCancel start [this=%p]\n", this));
+  if (mTransaction) {
+    Unused << mTransaction->AsyncCancel(reason);
   }
   return IPC_OK();
 }
