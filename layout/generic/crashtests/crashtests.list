@@ -115,7 +115,7 @@ load 382199-1.html
 load 382208-1.xhtml
 load 382262-1.html
 load 382396-1.xhtml
-asserts(1) load 382745-1.xhtml # Bug 758695
+load 382745-1.xhtml # Bug 758695
 load 383089-1.html
 load 385265-1.xhtml
 load 385295-1.xhtml
@@ -569,7 +569,7 @@ load 927558.html
 load 943509-1.html
 load 944909-1.html
 load 946167-1.html
-load 947158.html
+skip-if(Android&&browserIsRemote) load 947158.html # bug 1507207
 load 949932.html
 load 963878.html
 load 964078.html

@@ -162,6 +162,9 @@ startup-restore-previous-session =
     .label = Restore previous session
     .accesskey = s
 
+startup-restore-warn-on-quit =
+    .label = Warn you when quitting the browser
+
 disable-extension =
     .label = Disable Extension
 
@@ -829,6 +832,7 @@ content-blocking-setting-custom =
   .label = Custom
   .accesskey = C
 
+content-blocking-standard-description = Only blocks known trackers in Private Windows.
 content-blocking-standard-desc = Balanced for protection and performance. Allows some trackers so websites function properly.
 content-blocking-strict-desc = Blocks all trackers { -brand-short-name } detects. May cause some sites to break.
 content-blocking-custom-desc = Choose what to block.
@@ -948,6 +952,10 @@ collection-health-report-link = Learn more
 collection-studies =
     .label = Allow { -brand-short-name } to install and run studies
 collection-studies-link = View { -brand-short-name } studies
+
+addon-recommendations =
+    .label = Allow { -brand-short-name } to make personalized extension recommendations
+addon-recommendations-link = Learn more
 
 # This message is displayed above disabled data sharing options in developer builds
 # or builds with no Telemetry support available.

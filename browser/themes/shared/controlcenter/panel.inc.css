@@ -144,6 +144,10 @@
   margin-bottom: 2px !important;
 }
 
+.identity-popup-preferences-button:-moz-locale-dir(rtl) {
+  background-position: center left 8px;
+}
+
 .identity-popup-preferences-button > .toolbarbutton-text {
   display: none;
 }
@@ -436,7 +440,7 @@ description#identity-popup-content-verifier,
 #identity-popup-trackersView-list {
   padding: 5px 20px;
   -moz-box-flex: 1;
-  overflow: scroll;
+  overflow: auto;
 }
 
 .identity-popup-trackersView-list-item {
