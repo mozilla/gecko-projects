@@ -1735,18 +1735,19 @@ WebGLContext::EnqueueUpdateContextLossStatus()
     NS_DispatchToCurrentThread(task);
 }
 
-// We use this timer for many things. Here are the things that it is activated for:
+// We use this timer for many things. Here are the things that it is activated
+// for:
 // 1) If a script is using the MOZ_WEBGL_lose_context extension.
 // 2) If we are using EGL and _NOT ANGLE_, we query periodically to see if the
 //    CONTEXT_LOST_WEBGL error has been triggered.
 // 3) If we are using ANGLE, or anything that supports ARB_robustness, query the
 //    GPU periodically to see if the reset status bit has been set.
 // In all of these situations, we use this timer to send the script context lost
-// and restored events asynchronously. For example, if it triggers a context loss,
-// the webglcontextlost event will be sent to it the next time the robustness timer
-// fires.
-// Note that this timer mechanism is not used unless one of these 3 criteria
-// are met.
+// and restored events asynchronously. For example, if it triggers a context
+// loss, the webglcontextlost event will be sent to it the next time the
+// robustness timer fires.
+// Note that this timer mechanism is not used unless one of these 3 criteria are
+// met.
 // At a bare minimum, from context lost to context restores, it would take 3
 // full timer iterations: detection, webglcontextlost, webglcontextrestored.
 void
@@ -2175,6 +2176,7 @@ ScopedUnpackReset::ScopedUnpackReset(WebGLContext* webgl)
     : ScopedGLWrapper<ScopedUnpackReset>(webgl->gl)
     , mWebGL(webgl)
 {
+    // clang-format off
     if (mWebGL->mPixelStore_UnpackAlignment != 4) mGL->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, 4);
 
     if (mWebGL->IsWebGL2()) {
@@ -2186,11 +2188,13 @@ ScopedUnpackReset::ScopedUnpackReset(WebGLContext* webgl)
 
         if (mWebGL->mBoundPixelUnpackBuffer) mGL->fBindBuffer(LOCAL_GL_PIXEL_UNPACK_BUFFER, 0);
     }
+    // clang-format on
 }
 
 void
 ScopedUnpackReset::UnwrapImpl()
 {
+    // clang-format off
     mGL->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, mWebGL->mPixelStore_UnpackAlignment);
 
     if (mWebGL->IsWebGL2()) {
@@ -2207,6 +2211,7 @@ ScopedUnpackReset::UnwrapImpl()
 
         mGL->fBindBuffer(LOCAL_GL_PIXEL_UNPACK_BUFFER, pbo);
     }
+    // clang-format on
 }
 
 ////////////////////

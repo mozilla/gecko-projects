@@ -249,6 +249,7 @@ static bool
 Escape(JSContext* cx, const CharT* chars, uint32_t length, InlineCharBuffer<Latin1Char>& newChars,
        uint32_t* newLengthOut)
 {
+    // clang-format off
     static const uint8_t shouldPassThrough[128] = {
          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -259,6 +260,7 @@ Escape(JSContext* cx, const CharT* chars, uint32_t length, InlineCharBuffer<Lati
          0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,       /*   `abcdefghijklmno  */
          1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,       /*   pqrstuvwxyz{\}~  DEL */
     };
+    // clang-format on
 
     /* Take a first pass and see how big the result string will need to be. */
     uint32_t newLength = length;
@@ -3699,6 +3701,7 @@ js::InitStringClass(JSContext* cx, HandleObject obj)
  * - 64: @
  */
 static const bool js_isUriReservedPlusPound[] = {
+// clang-format off
 /*       0     1     2     3     4     5     6     7     8     9  */
 /*  0 */ ____, ____, ____, ____, ____, ____, ____, ____, ____, ____,
 /*  1 */ ____, ____, ____, ____, ____, ____, ____, ____, ____, ____,
@@ -3713,6 +3716,7 @@ static const bool js_isUriReservedPlusPound[] = {
 /* 10 */ ____, ____, ____, ____, ____, ____, ____, ____, ____, ____,
 /* 11 */ ____, ____, ____, ____, ____, ____, ____, ____, ____, ____,
 /* 12 */ ____, ____, ____, ____, ____, ____, ____, ____
+// clang-format on
 };
 
 /*
@@ -3731,6 +3735,7 @@ static const bool js_isUriReservedPlusPound[] = {
  * -     126: ~
  */
 static const bool js_isUriUnescaped[] = {
+// clang-format off
 /*       0     1     2     3     4     5     6     7     8     9  */
 /*  0 */ ____, ____, ____, ____, ____, ____, ____, ____, ____, ____,
 /*  1 */ ____, ____, ____, ____, ____, ____, ____, ____, ____, ____,
@@ -3745,6 +3750,7 @@ static const bool js_isUriUnescaped[] = {
 /* 10 */ true, true, true, true, true, true, true, true, true, true,
 /* 11 */ true, true, true, true, true, true, true, true, true, true,
 /* 12 */ true, true, true, ____, ____, ____, true, ____
+// clang-format on
 };
 
 #undef ____

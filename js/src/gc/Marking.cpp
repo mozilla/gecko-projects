@@ -74,6 +74,7 @@ using mozilla::PodCopy;
 // The following is a rough outline of the general struture of the tracing
 // internals.
 //
+/* clang-format off */
 //                                                                                              //
 //   .---------.    .---------.    .--------------------------.       .----------.              //
 //   |TraceEdge|    |TraceRoot|    |TraceManuallyBarrieredEdge|  ...  |TraceRange|   ... etc.   //
@@ -114,9 +115,10 @@ using mozilla::PodCopy;
 //     . . .   Static dispatch                                                                  //
 //     ======  Dispatch through a manual stack.                                                 //
 //                                                                                              //
+/* clang-format on */
 
 
-/*** Tracing Invariants **************************************************************************/
+/*** Tracing Invariants *****************************************************/
 
 #if defined(DEBUG)
 template<typename T>
@@ -375,7 +377,7 @@ AssertRootMarkingPhase(JSTracer* trc)
 }
 
 
-/*** Tracing Interface ***************************************************************************/
+/*** Tracing Interface ******************************************************/
 
 // The second parameter to BaseGCType is derived automatically based on T. The
 // relation here is that for any T, the TraceKind will automatically,
@@ -457,7 +459,7 @@ js::TraceNullableEdge(JSTracer* trc, ReadBarriered<T>* thingp, const char* name)
 }
 
 template <typename T>
-JS_PUBLIC_API(void)
+JS_PUBLIC_API void
 js::gc::TraceExternalEdge(JSTracer* trc, T* thingp, const char* name)
 {
     MOZ_ASSERT(InternalBarrierMethods<T>::isMarkable(*thingp));
@@ -472,7 +474,7 @@ js::TraceManuallyBarrieredEdge(JSTracer* trc, T* thingp, const char* name)
 }
 
 template <typename T>
-JS_PUBLIC_API(void)
+JS_PUBLIC_API void
 js::UnsafeTraceManuallyBarrieredEdge(JSTracer* trc, T* thingp, const char* name)
 {
     DispatchToTracer(trc, ConvertToBase(thingp), name);
@@ -525,7 +527,7 @@ js::TraceNullableRoot(JSTracer* trc, ReadBarriered<T>* thingp, const char* name)
 }
 
 template <typename T>
-JS_PUBLIC_API(void)
+JS_PUBLIC_API void
 JS::UnsafeTraceRoot(JSTracer* trc, T* thingp, const char* name)
 {
     MOZ_ASSERT(thingp);
@@ -575,10 +577,10 @@ FOR_EACH_GC_POINTER_TYPE(INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS)
 #undef INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS
 
 #define INSTANTIATE_PUBLIC_TRACE_FUNCTIONS(type) \
-    template JS_PUBLIC_API(void) JS::UnsafeTraceRoot<type>(JSTracer*, type*, const char*); \
-    template JS_PUBLIC_API(void) js::UnsafeTraceManuallyBarrieredEdge<type>(JSTracer*, type*, \
-                                                                            const char*); \
-    template JS_PUBLIC_API(void) js::gc::TraceExternalEdge<type>(JSTracer*, type*, const char*);
+    template JS_PUBLIC_API void JS::UnsafeTraceRoot<type>(JSTracer*, type*, const char*); \
+    template JS_PUBLIC_API void js::UnsafeTraceManuallyBarrieredEdge<type>(JSTracer*, type*, \
+                                                                           const char*); \
+    template JS_PUBLIC_API void js::gc::TraceExternalEdge<type>(JSTracer*, type*, const char*);
 FOR_EACH_PUBLIC_GC_POINTER_TYPE(INSTANTIATE_PUBLIC_TRACE_FUNCTIONS)
 FOR_EACH_PUBLIC_TAGGED_GC_POINTER_TYPE(INSTANTIATE_PUBLIC_TRACE_FUNCTIONS)
 #undef INSTANTIATE_PUBLIC_TRACE_FUNCTIONS
@@ -689,7 +691,7 @@ DispatchToTracer(JSTracer* trc, T* thingp, const char* name)
 }
 
 
-/*** GC Marking Interface *************************************************************************/
+/*** GC Marking Interface ***************************************************/
 
 namespace js {
 
@@ -1029,7 +1031,7 @@ js::GCMarker::mark(T* thing)
 }
 
 
-/*** Inline, Eager GC Marking *********************************************************************/
+/*** Inline, Eager GC Marking ***********************************************/
 
 // Each of the eager, inline marking paths is directly preceeded by the
 // out-of-line, generic tracing code for comparison. Both paths must end up
@@ -1624,7 +1626,7 @@ VisitTraceList(F f, const int32_t* traceList, uint8_t* memory, Args&&... args)
 }
 
 
-/*** Mark-stack Marking ***************************************************************************/
+/*** Mark-stack Marking *****************************************************/
 
 bool
 GCMarker::drainMarkStack(SliceBudget& budget)
@@ -1974,7 +1976,7 @@ GCMarker::restoreValueArray(const MarkStack::SavedValueArray& array,
 }
 
 
-/*** Mark Stack ***********************************************************************************/
+/*** Mark Stack *************************************************************/
 
 static_assert(sizeof(MarkStack::TaggedPtr) == sizeof(uintptr_t),
               "A TaggedPtr should be the same size as a pointer");
@@ -2416,7 +2418,7 @@ MarkStackIter::saveValueArray(NativeObject* obj, uintptr_t index, HeapSlot::Kind
 }
 
 
-/*** GCMarker *************************************************************************************/
+/*** GCMarker ***************************************************************/
 
 /*
  * ExpandWeakMaps: the GC is recomputing the liveness of WeakMap entries by
@@ -2700,7 +2702,7 @@ GCMarker::stackContainsCrossZonePointerTo(const Cell* target) const
 #endif // DEBUG
 
 
-/*** Tenuring Tracer *****************************************************************************/
+/*** Tenuring Tracer ********************************************************/
 
 namespace js {
 template <typename T>
@@ -3287,7 +3289,7 @@ js::TenuringTracer::moveStringToTenured(JSString* dst, JSString* src, AllocKind 
 }
 
 
-/*** IsMarked / IsAboutToBeFinalized **************************************************************/
+/*** IsMarked / IsAboutToBeFinalized ****************************************/
 
 template <typename T>
 static inline void
@@ -3464,14 +3466,14 @@ IsAboutToBeFinalized(ReadBarrieredBase<T>* thingp)
 }
 
 template <typename T>
-JS_PUBLIC_API(bool)
+JS_PUBLIC_API bool
 EdgeNeedsSweep(JS::Heap<T>* thingp)
 {
     return IsAboutToBeFinalizedInternal(ConvertToBase(thingp->unsafeGet()));
 }
 
 template <typename T>
-JS_PUBLIC_API(bool)
+JS_PUBLIC_API bool
 EdgeNeedsSweepUnbarrieredSlow(T* thingp)
 {
     return IsAboutToBeFinalizedInternal(ConvertToBase(thingp));
@@ -3485,8 +3487,8 @@ EdgeNeedsSweepUnbarrieredSlow(T* thingp)
     template bool IsAboutToBeFinalized<type>(WriteBarrieredBase<type>*); \
     template bool IsAboutToBeFinalized<type>(ReadBarrieredBase<type>*);
 #define INSTANTIATE_ALL_VALID_HEAP_TRACE_FUNCTIONS(type) \
-    template JS_PUBLIC_API(bool) EdgeNeedsSweep<type>(JS::Heap<type>*); \
-    template JS_PUBLIC_API(bool) EdgeNeedsSweepUnbarrieredSlow<type>(type*);
+    template JS_PUBLIC_API bool EdgeNeedsSweep<type>(JS::Heap<type>*); \
+    template JS_PUBLIC_API bool EdgeNeedsSweepUnbarrieredSlow<type>(type*);
 FOR_EACH_GC_POINTER_TYPE(INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS)
 FOR_EACH_PUBLIC_GC_POINTER_TYPE(INSTANTIATE_ALL_VALID_HEAP_TRACE_FUNCTIONS)
 FOR_EACH_PUBLIC_TAGGED_GC_POINTER_TYPE(INSTANTIATE_ALL_VALID_HEAP_TRACE_FUNCTIONS)
@@ -3496,7 +3498,7 @@ FOR_EACH_PUBLIC_TAGGED_GC_POINTER_TYPE(INSTANTIATE_ALL_VALID_HEAP_TRACE_FUNCTION
 } /* namespace js */
 
 
-/*** Cycle Collector Barrier Implementation *******************************************************/
+/*** Cycle Collector Barrier Implementation *********************************/
 
 /*
  * The GC and CC are run independently. Consequently, the following sequence of
@@ -3635,7 +3637,7 @@ UnmarkGrayGCThing(JSRuntime* rt, JS::GCCellPtr thing)
     return unmarker.unmarkedAny;
 }
 
-JS_FRIEND_API(bool)
+JS_FRIEND_API bool
 JS::UnmarkGrayGCThingRecursively(JS::GCCellPtr thing)
 {
     MOZ_ASSERT(!JS::CurrentThreadIsHeapCollecting());

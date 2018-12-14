@@ -42,6 +42,7 @@ static const size_t UINT32_CHAR_BUFFER_LENGTH = sizeof("4294967295") - 1;
 
 } /* namespace js */
 
+// clang-format off
 /*
  * JavaScript strings
  *
@@ -93,9 +94,9 @@ static const size_t UINT32_CHAR_BUFFER_LENGTH = sizeof("4294967295") - 1;
  *    string (JSExternalString) can be created whose chars are managed by the
  *    JSAPI client.
  *
- *  - To avoid using two bytes per character for every string, string characters
- *    are stored as Latin1 instead of TwoByte if all characters are representable
- *    in Latin1.
+ *  - To avoid using two bytes per character for every string, string
+ *    characters are stored as Latin1 instead of TwoByte if all characters are
+ *    representable in Latin1.
  *
  *  - To avoid slow conversions from strings to integer indexes, we cache 16 bit
  *    unsigned indexes on strings representing such numbers.
@@ -154,6 +155,7 @@ static const size_t UINT32_CHAR_BUFFER_LENGTH = sizeof("4294967295") - 1;
  * The ensureX() operations mutate 'this' in place to effectively the type to be
  * at least X (e.g., ensureLinear will change a JSRope to be a JSFlatString).
  */
+// clang-format on
 
 class JSString : public js::gc::Cell
 {
@@ -1569,7 +1571,7 @@ JSString*
 SubstringKernel(JSContext* cx, HandleString str, int32_t beginInt, int32_t lengthInt);
 
 
-/*** Conversions *********************************************************************************/
+/*** Conversions ************************************************************/
 
 /*
  * Convert a value to a printable C string.

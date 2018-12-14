@@ -593,7 +593,8 @@ intrinsic_DefineDataProperty(JSContext* cx, unsigned argc, Value* vp)
 static bool
 intrinsic_DefineProperty(JSContext* cx, unsigned argc, Value* vp)
 {
-    // _DefineProperty(object, propertyKey, attributes, valueOrGetter, setter, strict)
+    // _DefineProperty(object, propertyKey, attributes,
+    //                 valueOrGetter, setter, strict)
     CallArgs args = CallArgsFromVp(argc, vp);
     MOZ_ASSERT(args.length() == 6);
     MOZ_ASSERT(args[0].isObject());
@@ -2476,16 +2477,20 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_INLINABLE_FN("SetTypedObjectOffset",           js::SetTypedObjectOffset, 2, 0,
                     IntrinsicSetTypedObjectOffset),
 
+// clang-format off
 #define LOAD_AND_STORE_SCALAR_FN_DECLS(_constant, _type, _name)         \
     JS_FN("Store_" #_name, js::StoreScalar##_type::Func, 3, 0),         \
     JS_FN("Load_" #_name,  js::LoadScalar##_type::Func, 3, 0),
     JS_FOR_EACH_UNIQUE_SCALAR_TYPE_REPR_CTYPE(LOAD_AND_STORE_SCALAR_FN_DECLS)
+// clang-format on
 #undef LOAD_AND_STORE_SCALAR_FN_DECLS
 
+// clang-format off
 #define LOAD_AND_STORE_REFERENCE_FN_DECLS(_constant, _type, _name)      \
     JS_FN("Store_" #_name, js::StoreReference##_name::Func, 3, 0),      \
     JS_FN("Load_" #_name,  js::LoadReference##_name::Func, 3, 0),
     JS_FOR_EACH_REFERENCE_TYPE_REPR(LOAD_AND_STORE_REFERENCE_FN_DECLS)
+// clang-format on
 #undef LOAD_AND_STORE_REFERENCE_FN_DECLS
 
     // See builtin/intl/*.h for descriptions of the intl_* functions.

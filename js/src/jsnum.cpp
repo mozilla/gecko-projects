@@ -1217,6 +1217,7 @@ js::InitNumberClass(JSContext* cx, HandleObject obj)
      * encoding for our value representation.  See Value.h.
      */
     static JSConstDoubleSpec number_constants[] = {
+        // clang-format off
         {"NaN",               GenericNaN()               },
         {"POSITIVE_INFINITY", mozilla::PositiveInfinity<double>() },
         {"NEGATIVE_INFINITY", mozilla::NegativeInfinity<double>() },
@@ -1229,6 +1230,7 @@ js::InitNumberClass(JSContext* cx, HandleObject obj)
         /* ES6 (May 2013 draft) 15.7.3.7 */
         {"EPSILON", 2.2204460492503130808472633361816e-16},
         {0,0}
+        // clang-format on
     };
 
     /* Add numeric constants (MAX_VALUE, NaN, &c.) to the Number constructor. */
@@ -1567,7 +1569,7 @@ js::StringToNumber(JSContext* cx, JSString* str, double* result)
            : CharsToNumber(cx, linearStr->twoByteChars(nogc), str->length(), result);
 }
 
-JS_PUBLIC_API(bool)
+JS_PUBLIC_API bool
 js::ToNumberSlow(JSContext* cx, HandleValue v_, double* out)
 {
     RootedValue v(cx, v_);
@@ -1612,7 +1614,7 @@ js::ToNumberSlow(JSContext* cx, HandleValue v_, double* out)
  * Convert a value to an int8_t, according to the WebIDL rules for byte
  * conversion. Return converted value in *out on success, false on failure.
  */
-JS_PUBLIC_API(bool)
+JS_PUBLIC_API bool
 js::ToInt8Slow(JSContext *cx, const HandleValue v, int8_t *out)
 {
     MOZ_ASSERT(!v.isInt32());
@@ -1631,7 +1633,7 @@ js::ToInt8Slow(JSContext *cx, const HandleValue v, int8_t *out)
  * Convert a value to an uint8_t, according to the ToUInt8() function in ES6
  * ECMA-262, 7.1.10. Return converted value in *out on success, false on failure.
  */
-JS_PUBLIC_API(bool)
+JS_PUBLIC_API bool
 js::ToUint8Slow(JSContext *cx, const HandleValue v, uint8_t *out)
 {
     MOZ_ASSERT(!v.isInt32());
@@ -1650,7 +1652,7 @@ js::ToUint8Slow(JSContext *cx, const HandleValue v, uint8_t *out)
  * Convert a value to an int16_t, according to the WebIDL rules for short
  * conversion. Return converted value in *out on success, false on failure.
  */
-JS_PUBLIC_API(bool)
+JS_PUBLIC_API bool
 js::ToInt16Slow(JSContext *cx, const HandleValue v, int16_t *out)
 {
     MOZ_ASSERT(!v.isInt32());
@@ -1669,7 +1671,7 @@ js::ToInt16Slow(JSContext *cx, const HandleValue v, int16_t *out)
  * Convert a value to an int64_t, according to the WebIDL rules for long long
  * conversion. Return converted value in *out on success, false on failure.
  */
-JS_PUBLIC_API(bool)
+JS_PUBLIC_API bool
 js::ToInt64Slow(JSContext* cx, const HandleValue v, int64_t* out)
 {
     MOZ_ASSERT(!v.isInt32());
@@ -1688,7 +1690,7 @@ js::ToInt64Slow(JSContext* cx, const HandleValue v, int64_t* out)
  * Convert a value to an uint64_t, according to the WebIDL rules for unsigned long long
  * conversion. Return converted value in *out on success, false on failure.
  */
-JS_PUBLIC_API(bool)
+JS_PUBLIC_API bool
 js::ToUint64Slow(JSContext* cx, const HandleValue v, uint64_t* out)
 {
     MOZ_ASSERT(!v.isInt32());
@@ -1703,7 +1705,7 @@ js::ToUint64Slow(JSContext* cx, const HandleValue v, uint64_t* out)
     return true;
 }
 
-JS_PUBLIC_API(bool)
+JS_PUBLIC_API bool
 js::ToInt32Slow(JSContext* cx, const HandleValue v, int32_t* out)
 {
     MOZ_ASSERT(!v.isInt32());
@@ -1718,7 +1720,7 @@ js::ToInt32Slow(JSContext* cx, const HandleValue v, int32_t* out)
     return true;
 }
 
-JS_PUBLIC_API(bool)
+JS_PUBLIC_API bool
 js::ToUint32Slow(JSContext* cx, const HandleValue v, uint32_t* out)
 {
     MOZ_ASSERT(!v.isInt32());
@@ -1733,7 +1735,7 @@ js::ToUint32Slow(JSContext* cx, const HandleValue v, uint32_t* out)
     return true;
 }
 
-JS_PUBLIC_API(bool)
+JS_PUBLIC_API bool
 js::ToUint16Slow(JSContext* cx, const HandleValue v, uint16_t* out)
 {
     MOZ_ASSERT(!v.isInt32());

@@ -361,6 +361,7 @@ struct timerEvent {
   int32_t timerIdUnschedule;
 };
 static timerEvent timerEvents[] = {
+  // clang-format off
   {-1, 0, 200, false, -1},
   {0, 0, 400, false, -1},
   {0, 0, 200, true, -1},
@@ -368,6 +369,7 @@ static timerEvent timerEvents[] = {
   {0, -1, 0, false, 0},
   {1, -1, 0, false, -1},
   {1, -1, 0, false, 1},
+  // clang-format on
 };
 static uint32_t currentTimerEventCount = 0;
 static uint32_t totalTimerEvents = sizeof(timerEvents) / sizeof(timerEvent);
@@ -2462,7 +2464,8 @@ convertPointY(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVaria
 static bool
 streamTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* result)
 {
-  // .streamTest(url, doPost, postData, writeCallback, notifyCallback, redirectCallback, allowRedirects, postFile = false)
+  // .streamTest(url, doPost, postData, writeCallback, notifyCallback,
+  //             redirectCallback, allowRedirects, postFile = false)
   if (!(7 <= argCount && argCount <= 8))
     return false;
 

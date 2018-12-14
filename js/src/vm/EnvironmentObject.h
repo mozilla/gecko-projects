@@ -39,11 +39,12 @@ extern JSScript*
 EnvironmentCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
 
 
-/*** Environment objects *****************************************************/
+/*** Environment objects ****************************************************/
 
 
-/*** Environment objects *****************************************************/
+/*** Environment objects ****************************************************/
 
+// clang-format off
 /*
  * About environments
  * ------------------
@@ -251,6 +252,7 @@ EnvironmentCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
  *   LexicalEnvironmentObject
  *
  */
+// clang-format on
 
 class EnvironmentObject : public NativeObject
 {
@@ -684,7 +686,7 @@ class RuntimeLexicalErrorObject : public EnvironmentObject
 };
 
 
-/*****************************************************************************/
+/****************************************************************************/
 
 // A environment iterator describes the active environments starting from an
 // environment, scope pair. This pair may be derived from the current point of
@@ -868,7 +870,7 @@ class LiveEnvironmentVal
 };
 
 
-/*****************************************************************************/
+/****************************************************************************/
 
 /*
  * Debug environment objects

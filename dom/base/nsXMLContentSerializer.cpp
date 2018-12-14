@@ -676,11 +676,11 @@ nsXMLContentSerializer::SerializeAttr(const nsAString& aPrefix,
     }
 
     // Delimiter and escaping is according to the following table
-    //    bIncludesDouble     bIncludesSingle     Delimiter       Escape Double Quote
-    //    FALSE               FALSE               "               FALSE
-    //    FALSE               TRUE                "               FALSE
-    //    TRUE                FALSE               '               FALSE
-    //    TRUE                TRUE                "               TRUE
+    //    bIncludesDouble   bIncludesSingle   Delimiter    Escape Double Quote
+    //    FALSE             FALSE             "            FALSE
+    //    FALSE             TRUE              "            FALSE
+    //    TRUE              FALSE             '            FALSE
+    //    TRUE              TRUE              "            TRUE
     char16_t cDelimiter =
         (bIncludesDouble && !bIncludesSingle) ? char16_t('\'') : char16_t('"');
     NS_ENSURE_TRUE(attrString.Append(char16_t('='), mozilla::fallible), false);
@@ -1198,6 +1198,7 @@ static const uint16_t kGTVal = 62;
 
 // This table indexes into kEntityStrings[].
 static const uint8_t kEntities[] = {
+  // clang-format off
   _, _, _, _, _, _, _, _, _, _,
   _, _, _, _, _, _, _, _, _, _,
   _, _, _, _, _, _, _, _, _, _,
@@ -1205,10 +1206,12 @@ static const uint8_t kEntities[] = {
   _, _, _, _, _, _, _, _, _, _,
   _, _, _, _, _, _, _, _, _, _,
   3, _, 4
+  // clang-format on
 };
 
 // This table indexes into kEntityStrings[].
 static const uint8_t kAttrEntities[] = {
+  // clang-format off
   _, _, _, _, _, _, _, _, _, 5,
   6, _, _, 7, _, _, _, _, _, _,
   _, _, _, _, _, _, _, _, _, _,
@@ -1216,6 +1219,7 @@ static const uint8_t kAttrEntities[] = {
   _, _, _, _, _, _, _, _, _, _,
   _, _, _, _, _, _, _, _, _, _,
   3, _, 4
+  // clang-format on
 };
 
 #undef _

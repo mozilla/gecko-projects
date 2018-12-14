@@ -989,19 +989,23 @@ JSFlatString::isIndexSlow(const char16_t* s, size_t length, uint32_t* indexp);
  * This is used when we generate our table of short strings, so the compiler is
  * happier if we use |c| as few times as possible.
  */
+// clang-format off
 #define FROM_SMALL_CHAR(c) Latin1Char((c) + ((c) < 10 ? '0' :      \
                                              (c) < 36 ? 'a' - 10 : \
                                              'A' - 36))
+// clang-format on
 
 /*
  * Declare length-2 strings. We only store strings where both characters are
  * alphanumeric. The lower 10 short chars are the numerals, the next 26 are
  * the lowercase letters, and the next 26 are the uppercase letters.
  */
+// clang-format off
 #define TO_SMALL_CHAR(c) ((c) >= '0' && (c) <= '9' ? (c) - '0' :              \
                           (c) >= 'a' && (c) <= 'z' ? (c) - 'a' + 10 :         \
                           (c) >= 'A' && (c) <= 'Z' ? (c) - 'A' + 36 :         \
                           StaticStrings::INVALID_SMALL_CHAR)
+// clang-format on
 
 #define R TO_SMALL_CHAR
 const StaticStrings::SmallChar StaticStrings::toSmallChar[] = { R7(0) };
@@ -1897,7 +1901,7 @@ JSString::fillWithRepresentatives(JSContext* cx, HandleArrayObject array)
 }
 
 
-/*** Conversions *********************************************************************************/
+/*** Conversions ************************************************************/
 
 const char*
 js::ValueToPrintable(JSContext* cx, const Value& vArg, JSAutoByteString* bytes, bool asSource)
@@ -1965,7 +1969,7 @@ js::ToStringSlow<CanGC>(JSContext* cx, HandleValue arg);
 template JSString*
 js::ToStringSlow<NoGC>(JSContext* cx, const Value& arg);
 
-JS_PUBLIC_API(JSString*)
+JS_PUBLIC_API JSString*
 js::ToStringSlow(JSContext* cx, HandleValue v)
 {
     return ToStringSlow<CanGC>(cx, v);

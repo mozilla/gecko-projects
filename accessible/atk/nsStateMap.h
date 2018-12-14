@@ -9,6 +9,7 @@
 
 #include <type_traits>
 
+// clang-format off
 /******************************************************************************
 The following accessible states aren't translated, just ignored:
   STATE_READONLY:        Supported indirectly via EXT_STATE_EDITABLE
@@ -36,6 +37,7 @@ The following ATK states are not supported:
   ATK_STATE_TRUNCATED:   No clear use case. Indicates that an object's onscreen content is truncated,
                          e.g. a text value in a spreadsheet cell. No IA2 state.
 ******************************************************************************/
+// clang-format on
 
 enum EStateMapEntryType {
   kMapDirectly,
@@ -53,6 +55,7 @@ struct AtkStateMap {
 
 // Map array from cross platform states to ATK states
 static const AtkStateMap gAtkStateMap[] = {                     // Cross Platform States
+  // clang-format off
   { kNone,                                    kMapOpposite },   // states::UNAVAILABLE             = 1 << 0
   { ATK_STATE_SELECTED,                       kMapDirectly },   // states::SELECTED                = 1 << 1
   { ATK_STATE_FOCUSED,                        kMapDirectly },   // states::FOCUSED                 = 1 << 2
@@ -102,6 +105,7 @@ static const AtkStateMap gAtkStateMap[] = {                     // Cross Platfor
   { ATK_STATE_EXPANDABLE,                     kMapDirectly },   // states::EXPANDABLE              = 1 << 46
   { kNone,                                    kMapDirectly },   // states::PINNED                  = 1 << 47
   { ATK_STATE_ACTIVE,                         kMapDirectly }    // states::CURRENT                 = 1 << 48
+  // clang-format on
 };
 
 static const auto gAtkStateMapLen = std::extent<decltype(gAtkStateMap)>::value;

@@ -375,10 +375,12 @@ public:
       return false;
     }
 
+// clang-format off
     fprintf(aOut,
             "\n" \
             "     |<----------------Class--------------->|<-----Bytes------>|<----Objects---->|\n" \
             "     |                                      | Per-Inst   Leaked|   Total      Rem|\n");
+// clang-format on
 
     this->DumpTotal(aOut);
 
@@ -403,8 +405,11 @@ public:
 
 protected:
   char* mClassName;
-  double mClassSize; // This is stored as a double because of the way we compute the avg class size for total bloat.
-  int64_t mTotalLeaked; // Used only for TOTAL entry.
+  // mClassSize is stored as a double because of the way we compute the avg
+  // class size for total bloat.
+  double mClassSize;
+  // mTotalLeaked is only used for the TOTAL entry.
+  int64_t mTotalLeaked;
   nsTraceRefcntStats mStats;
 };
 
@@ -765,13 +770,15 @@ InitTraceLog()
     InitLog("XPCOM_MEM_COMPTR_LOG", "nsCOMPtr", &gCOMPtrLog);
   } else {
     if (getenv("XPCOM_MEM_COMPTR_LOG")) {
-      fprintf(stdout, "### XPCOM_MEM_COMPTR_LOG defined -- but XPCOM_MEM_LOG_CLASSES is not defined\n");
+      fprintf(stdout, "### XPCOM_MEM_COMPTR_LOG defined -- "
+              "but XPCOM_MEM_LOG_CLASSES is not defined\n");
     }
   }
 #else
   const char* comptr_log = getenv("XPCOM_MEM_COMPTR_LOG");
   if (comptr_log) {
-    fprintf(stdout, "### XPCOM_MEM_COMPTR_LOG defined -- but it will not work without dynamic_cast\n");
+    fprintf(stdout, "### XPCOM_MEM_COMPTR_LOG defined -- "
+            "but it will not work without dynamic_cast\n");
   }
 #endif // HAVE_CPP_DYNAMIC_CAST_TO_VOID_PTR
 
@@ -785,9 +792,11 @@ InitTraceLog()
                                   &typesToLogHashAllocOps, nullptr);
     if (!gTypesToLog) {
       NS_WARNING("out of memory");
-      fprintf(stdout, "### XPCOM_MEM_LOG_CLASSES defined -- unable to log specific classes\n");
+      fprintf(stdout, "### XPCOM_MEM_LOG_CLASSES defined -- "
+                      "unable to log specific classes\n");
     } else {
-      fprintf(stdout, "### XPCOM_MEM_LOG_CLASSES defined -- only logging these classes: ");
+      fprintf(stdout, "### XPCOM_MEM_LOG_CLASSES defined -- "
+                      "only logging these classes: ");
       const char* cp = classes;
       for (;;) {
         char* cm = (char*)strchr(cp, ',');
@@ -824,11 +833,14 @@ InitTraceLog()
 
     if (!gObjectsToLog) {
       NS_WARNING("out of memory");
-      fprintf(stdout, "### XPCOM_MEM_LOG_OBJECTS defined -- unable to log specific objects\n");
+      fprintf(stdout, "### XPCOM_MEM_LOG_OBJECTS defined -- "
+                      "unable to log specific objects\n");
     } else if (!(gRefcntsLog || gAllocLog || gCOMPtrLog)) {
-      fprintf(stdout, "### XPCOM_MEM_LOG_OBJECTS defined -- but none of XPCOM_MEM_(REFCNT|ALLOC|COMPTR)_LOG is defined\n");
+      fprintf(stdout, "### XPCOM_MEM_LOG_OBJECTS defined -- "
+                      "but none of XPCOM_MEM_(REFCNT|ALLOC|COMPTR)_LOG is defined\n");
     } else {
-      fprintf(stdout, "### XPCOM_MEM_LOG_OBJECTS defined -- only logging these objects: ");
+      fprintf(stdout, "### XPCOM_MEM_LOG_OBJECTS defined -- "
+              "only logging these objects: ");
       const char* cp = objects;
       for (;;) {
         char* cm = (char*)strchr(cp, ',');

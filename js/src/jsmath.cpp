@@ -120,6 +120,7 @@ using JS::ToNumber;
 using JS::GenericNaN;
 
 static const JSConstDoubleSpec math_constants[] = {
+    // clang-format off
     {"E"      ,  M_E       },
     {"LOG2E"  ,  M_LOG2E   },
     {"LOG10E" ,  M_LOG10E  },
@@ -129,6 +130,7 @@ static const JSConstDoubleSpec math_constants[] = {
     {"SQRT2"  ,  M_SQRT2   },
     {"SQRT1_2",  M_SQRT1_2 },
     {nullptr  ,  0         }
+    // clang-format on
 };
 
 MathCache::MathCache() {

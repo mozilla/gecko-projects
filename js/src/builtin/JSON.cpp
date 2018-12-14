@@ -53,6 +53,7 @@ InfallibleQuote(RangedPtr<const SrcCharT> srcBegin, RangedPtr<const SrcCharT> sr
     // Entries with 'u' are handled as \\u00xy, and entries with 0 are not escaped in any way.
     // Characters >= 256 are all assumed to be unescaped.
     static const Latin1Char escapeLookup[256] = {
+        // clang-format off
         'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'b', 't',
         'n', 'u', 'f', 'r', 'u', 'u', 'u', 'u', 'u', 'u',
         'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u',
@@ -63,6 +64,7 @@ InfallibleQuote(RangedPtr<const SrcCharT> srcBegin, RangedPtr<const SrcCharT> sr
         0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
         0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
         0,   0,  '\\', // rest are all zeros
+        // clang-format on
     };
 
     /* Step 1. */

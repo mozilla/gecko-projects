@@ -361,7 +361,7 @@ MakeDate(double day, double time)
     return day * msPerDay + time;
 }
 
-JS_PUBLIC_API(double)
+JS_PUBLIC_API double
 JS::MakeDate(double year, unsigned month, unsigned day)
 {
     MOZ_ASSERT(month <= 11);
@@ -370,7 +370,7 @@ JS::MakeDate(double year, unsigned month, unsigned day)
     return ::MakeDate(MakeDay(year, month, day), 0);
 }
 
-JS_PUBLIC_API(double)
+JS_PUBLIC_API double
 JS::MakeDate(double year, unsigned month, unsigned day, double time)
 {
     MOZ_ASSERT(month <= 11);
@@ -379,43 +379,43 @@ JS::MakeDate(double year, unsigned month, unsigned day, double time)
     return ::MakeDate(MakeDay(year, month, day), time);
 }
 
-JS_PUBLIC_API(double)
+JS_PUBLIC_API double
 JS::YearFromTime(double time)
 {
     return ::YearFromTime(time);
 }
 
-JS_PUBLIC_API(double)
+JS_PUBLIC_API double
 JS::MonthFromTime(double time)
 {
     return ::MonthFromTime(time);
 }
 
-JS_PUBLIC_API(double)
+JS_PUBLIC_API double
 JS::DayFromTime(double time)
 {
     return DateFromTime(time);
 }
 
-JS_PUBLIC_API(double)
+JS_PUBLIC_API double
 JS::DayFromYear(double year)
 {
     return ::DayFromYear(year);
 }
 
-JS_PUBLIC_API(double)
+JS_PUBLIC_API double
 JS::DayWithinYear(double time, double year)
 {
     return ::DayWithinYear(time, year);
 }
 
-JS_PUBLIC_API(void)
+JS_PUBLIC_API void
 JS::SetReduceMicrosecondTimePrecisionCallback(JS::ReduceMicrosecondTimePrecisionCallback callback)
 {
     sReduceMicrosecondTimePrecisionCallback = callback;
 }
 
-JS_PUBLIC_API(void)
+JS_PUBLIC_API void
 JS::SetTimeResolutionUsec(uint32_t resolution, bool jitter)
 {
     sResolutionUsec = resolution;
@@ -593,6 +593,7 @@ MakeTime(double hour, double min, double sec, double ms)
 /* for use by date_parse */
 
 static const char* const wtb[] = {
+    // clang-format off
     "am", "pm",
     "monday", "tuesday", "wednesday", "thursday", "friday",
     "saturday", "sunday",
@@ -604,9 +605,11 @@ static const char* const wtb[] = {
     "mst", "mdt",
     "pst", "pdt"
     /* time zone table needs to be expanded */
+    // clang-format on
 };
 
 static const int ttb[] = {
+    // clang-format off
     -1, -2, 0, 0, 0, 0, 0, 0, 0,       /* AM/PM */
     2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
     10000 + 0, 10000 + 0, 10000 + 0,   /* GMT/UT/UTC */
@@ -614,6 +617,7 @@ static const int ttb[] = {
     10000 + 6 * 60, 10000 + 5 * 60,    /* CST/CDT */
     10000 + 7 * 60, 10000 + 6 * 60,    /* MST/MDT */
     10000 + 8 * 60, 10000 + 7 * 60     /* PST/PDT */
+    // clang-format on
 };
 
 template <typename CharT>
@@ -3326,7 +3330,7 @@ js::NewDateObjectMsec(JSContext* cx, ClippedTime t, HandleObject proto /* = null
     return obj;
 }
 
-JS_FRIEND_API(JSObject*)
+JS_FRIEND_API JSObject*
 js::NewDateObject(JSContext* cx, int year, int mon, int mday,
                   int hour, int min, int sec)
 {
@@ -3335,7 +3339,7 @@ js::NewDateObject(JSContext* cx, int year, int mon, int mday,
     return NewDateObjectMsec(cx, TimeClip(UTC(msec_time)));
 }
 
-JS_FRIEND_API(bool)
+JS_FRIEND_API bool
 js::DateIsValid(JSContext* cx, HandleObject obj, bool* isValid)
 {
     ESClass cls;
@@ -3355,7 +3359,7 @@ js::DateIsValid(JSContext* cx, HandleObject obj, bool* isValid)
     return true;
 }
 
-JS_FRIEND_API(bool)
+JS_FRIEND_API bool
 js::DateGetMsecSinceEpoch(JSContext* cx, HandleObject obj, double* msecsSinceEpoch)
 {
     ESClass cls;

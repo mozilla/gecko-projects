@@ -57,7 +57,7 @@ namespace jit {
 //
 
 
-//
+/* clang-format off */
 // The following data is kept in a temporary heap-allocated buffer, stored in
 // JitRuntime (high memory addresses at top, low at bottom):
 //
@@ -77,6 +77,7 @@ namespace jit {
 //            +=================================+  --      <---- Low Address
 //
 // A pointer to the IonOsrTempData is returned.
+/* clang-format on */
 
 struct IonOsrTempData
 {
@@ -2844,8 +2845,8 @@ ICCall_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
     assumeStubFrame();
     bailoutReturnOffset_.bind(masm.currentOffset());
 
-    // Load passed-in ThisV into R1 just in case it's needed.  Need to do this before
-    // we leave the stub frame since that info will be lost.
+    // Load passed-in ThisV into R1 just in case it's needed.  Need to do this
+    // before we leave the stub frame since that info will be lost.
     // Current stack:  [...., ThisV, ActualArgc, CalleeToken, Descriptor ]
     masm.loadValue(Address(masm.getStackPointer(), 3 * sizeof(size_t)), R1);
 
@@ -2913,7 +2914,9 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler& masm)
         guardSpreadCall(masm, argcReg, &failure, isConstructing_);
 
     // Load the callee in R1, accounting for newTarget, if necessary
-    // Stack Layout: [ ..., CalleeVal, ThisVal, Arg0Val, ..., ArgNVal, [newTarget] +ICStackValueOffset+ ]
+    // Stack Layout:
+    //      [ ..., CalleeVal, ThisVal, Arg0Val, ..., ArgNVal, [newTarget],
+    //        +ICStackValueOffset+ ]
     if (isSpread_) {
         unsigned skipToCallee = (2 + isConstructing_) * sizeof(Value);
         masm.loadValue(Address(masm.getStackPointer(), skipToCallee + ICStackValueOffset), R1);
@@ -2975,7 +2978,8 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler& masm)
         masm.push(argcReg);
 
         // Stack now looks like:
-        //      [..., Callee, ThisV, Arg0V, ..., ArgNV, NewTarget, StubFrameHeader, ArgC ]
+        //      [ ..., Callee, ThisV, Arg0V, ..., ArgNV, NewTarget,
+        //        StubFrameHeader, ArgC ]
         masm.loadValue(Address(masm.getStackPointer(), STUB_FRAME_SIZE + sizeof(size_t)), R1);
         masm.push(masm.extractObject(R1, ExtractTemp0));
 
@@ -3013,9 +3017,12 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler& masm)
         // the resulting this object to.
         masm.pop(argcReg);
 
-        // Save "this" value back into pushed arguments on stack.  R0 can be clobbered after that.
+        // Save "this" value back into pushed arguments on stack. R0 can be
+        // clobbered after that.
+        //
         // Stack now looks like:
-        //      [..., Callee, ThisV, Arg0V, ..., ArgNV, [NewTarget], StubFrameHeader ]
+        //      [ ..., Callee, ThisV, Arg0V, ..., ArgNV, [NewTarget],
+        //        StubFrameHeader ]
         if (isSpread_) {
             masm.storeValue(R0, Address(masm.getStackPointer(),
                                         (1 + isConstructing_) * sizeof(Value) + STUB_FRAME_SIZE));
@@ -3101,18 +3108,22 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler& masm)
         Label skipThisReplace;
         masm.branchTestObject(Assembler::Equal, JSReturnOperand, &skipThisReplace);
 
-        // Current stack: [ Padding?, ARGVALS..., ThisVal, ActualArgc, Callee, Descriptor ]
-        // However, we can't use this ThisVal, because it hasn't been traced.  We need to use
-        // The ThisVal higher up the stack:
-        // Current stack: [ ThisVal, ARGVALS..., ...STUB FRAME...,
-        //                  Padding?, ARGVALS..., ThisVal, ActualArgc, Callee, Descriptor ]
+        // Current stack: [ Padding?, ARGVALS..., ThisVal, ActualArgc, Callee,
+        //                  Descriptor ]
+        // However, we can't use this ThisVal, because it hasn't been traced.
+        // We need to use the ThisVal higher up the stack:
+        // Current stack: [ ThisVal, ARGVALS..., ...STUB FRAME..., Padding?,
+        //                  ARGVALS..., ThisVal, ActualArgc, Callee, Descriptor ]
 
         // Restore the BaselineFrameReg based on the frame descriptor.
         //
         // BaselineFrameReg = BaselineStackReg
-        //                  + sizeof(Descriptor) + sizeof(Callee) + sizeof(ActualArgc)
+        //                  + sizeof(Descriptor)
+        //                  + sizeof(Callee)
+        //                  + sizeof(ActualArgc)
         //                  + stubFrameSize(Descriptor)
-        //                  - sizeof(ICStubReg) - sizeof(BaselineFrameReg)
+        //                  - sizeof(ICStubReg)
+        //                  - sizeof(BaselineFrameReg)
         Address descriptorAddr(masm.getStackPointer(), 0);
         masm.loadPtr(descriptorAddr, BaselineFrameReg);
         masm.rshiftPtr(Imm32(FRAMESIZE_SHIFT), BaselineFrameReg);
@@ -3129,8 +3140,9 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler& masm)
             masm.loadPtr(argcAddr, argcReg);
         }
 
-        // Current stack: [ ThisVal, ARGVALS..., ...STUB FRAME..., <-- BaselineFrameReg
-        //                  Padding?, ARGVALS..., ThisVal, ActualArgc, Callee, Descriptor ]
+        // Current stack:
+        //      [ ThisVal, ARGVALS..., ...STUB FRAME..., <-- BaselineFrameReg
+        //        Padding?, ARGVALS..., ThisVal, ActualArgc, Callee, Descriptor ]
         //
         // &ThisVal = BaselineFrameReg + argc * sizeof(Value) + STUB_FRAME_SIZE + sizeof(Value)
         // This last sizeof(Value) accounts for the newTarget on the end of the arguments vector
@@ -3162,7 +3174,8 @@ ICCall_ConstStringSplit::Compiler::generateStubCode(MacroAssembler& masm)
 {
     MOZ_ASSERT(engine_ == Engine::Baseline);
 
-    // Stack Layout: [ ..., CalleeVal, ThisVal, strVal, sepVal, +ICStackValueOffset+ ]
+    // Stack Layout:
+    //      [ ..., CalleeVal, ThisVal, strVal, sepVal, +ICStackValueOffset+ ]
     static const size_t SEP_DEPTH = 0;
     static const size_t STR_DEPTH = sizeof(Value);
     static const size_t CALLEE_DEPTH = 3 * sizeof(Value);
@@ -3690,7 +3703,9 @@ ICCall_ScriptedFunCall::Compiler::generateStubCode(MacroAssembler& masm)
     regs.takeUnchecked(ICTailCallReg);
 
     // Load the callee in R1.
-    // Stack Layout: [ ..., CalleeVal, ThisVal, Arg0Val, ..., ArgNVal, +ICStackValueOffset+ ]
+    // Stack Layout:
+    //      [ ..., CalleeVal, ThisVal, Arg0Val, ..., ArgNVal,
+    //        +ICStackValueOffset+ ]
     BaseValueIndex calleeSlot(masm.getStackPointer(), argcReg, ICStackValueOffset + sizeof(Value));
     masm.loadValue(calleeSlot, R1);
     regs.take(R1);
