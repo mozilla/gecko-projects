@@ -23,7 +23,7 @@ Transform Functions
 
 Each transformation looks like this:
 
-.. code-block::
+.. code-block:: python
 
     @transforms.add
     def transform_an_item(config, items):
@@ -137,7 +137,6 @@ part of the documentation.
 
 following ``run-using`` are available
 
-  * ``buildbot``
   * ``hazard``
   * ``mach``
   * ``mozharness``
@@ -147,6 +146,7 @@ following ``run-using`` are available
   * ``debian-package``
   * ``toolchain-script``
   * ``always-optimized``
+  * ``fetch-url``
 
 
 Task Descriptions

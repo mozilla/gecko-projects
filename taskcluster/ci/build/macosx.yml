@@ -3,18 +3,20 @@ macosx64/debug:
     index:
         product: firefox
         job-name: macosx64-debug
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: osx-cross/debug
         symbol: B
         tier: 1
-    worker-type: aws-provisioner-v1/gecko-{level}-b-macosx64
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        max-run-time: 36000
+        max-run-time: 3600
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
     run:
         using: mozharness
-        actions: [get-secrets build update]
+        actions: [get-secrets build]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_mac_64_cross_builds.py
@@ -36,18 +38,20 @@ macosx64/opt:
     index:
         product: firefox
         job-name: macosx64-opt
+    attributes:
+        enable-full-crashsymbols: true
     treeherder:
         platform: osx-cross/opt
         symbol: B
         tier: 1
-    worker-type: aws-provisioner-v1/gecko-{level}-b-macosx64
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        max-run-time: 36000
+        max-run-time: 3600
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
     run:
         using: mozharness
-        actions: [get-secrets build update]
+        actions: [get-secrets build]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_mac_64_cross_builds.py
@@ -71,15 +75,15 @@ macosx64-asan-fuzzing/opt:
     treeherder:
         platform: osx-cross/asan
         symbol: Bof
-    worker-type: aws-provisioner-v1/gecko-{level}-b-macosx64
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        max-run-time: 36000
+        max-run-time: 3600
         env:
             PERFHERDER_EXTRA_OPTIONS: asan-fuzzing
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
     run:
         using: mozharness
-        actions: [get-secrets build update]
+        actions: [get-secrets build]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_mac_64_cross_builds.py
@@ -105,14 +109,14 @@ macosx64-dmd/opt:
         platform: osx-10-10-dmd/opt
         symbol: Bdmd
         tier: 2
-    worker-type: aws-provisioner-v1/gecko-{level}-b-macosx64
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        max-run-time: 36000
+        max-run-time: 3600
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
     run:
         using: mozharness
-        actions: [get-secrets build update]
+        actions: [get-secrets build]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_mac_64_cross_builds.py
@@ -135,6 +139,7 @@ macosx64-devedition-nightly/opt:
     description: "MacOS X Dev Edition x64 Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: build
     shipping-product: devedition
     index:
@@ -145,18 +150,17 @@ macosx64-devedition-nightly/opt:
         platform: osx-cross-devedition/opt
         symbol: N
         tier: 1
-    worker-type: aws-provisioner-v1/gecko-{level}-b-macosx64
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        max-run-time: 36000
+        max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
     run:
         using: mozharness
-        actions: [get-secrets build update]
+        actions: [get-secrets build]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_mac_64_cross_builds.py
-            - disable_signing.py
             - taskcluster_nightly.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
@@ -181,14 +185,14 @@ macosx64-noopt/debug:
         platform: osx-cross-noopt/debug
         symbol: B
         tier: 2
-    worker-type: aws-provisioner-v1/gecko-{level}-b-macosx64
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        max-run-time: 36000
+        max-run-time: 3600
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
     run:
         using: mozharness
-        actions: [get-secrets build update]
+        actions: [get-secrets build]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_mac_64_cross_builds.py
@@ -216,14 +220,14 @@ macosx64-add-on-devel/opt:
         platform: osx-cross-add-on-devel/opt
         symbol: B
         tier: 2
-    worker-type: aws-provisioner-v1/gecko-{level}-b-macosx64
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        max-run-time: 36000
+        max-run-time: 3600
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
     run:
         using: mozharness
-        actions: [get-secrets build update]
+        actions: [get-secrets build]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_mac_64_cross_builds.py
@@ -245,6 +249,7 @@ macosx64-nightly/opt:
     description: "MacOS X x64 Cross-compile Nightly"
     attributes:
         nightly: true
+        enable-full-crashsymbols: true
     shipping-phase: build
     shipping-product: firefox
     index:
@@ -255,18 +260,17 @@ macosx64-nightly/opt:
         platform: osx-cross/opt
         symbol: N
         tier: 1
-    worker-type: aws-provisioner-v1/gecko-{level}-b-macosx64
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
-        max-run-time: 36000
+        max-run-time: 7200
         env:
             TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
     run:
         using: mozharness
-        actions: [get-secrets build update]
+        actions: [get-secrets build]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_mac_64_cross_builds.py
-            - disable_signing.py
             - taskcluster_nightly.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true

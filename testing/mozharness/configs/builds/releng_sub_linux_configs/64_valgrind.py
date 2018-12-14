@@ -6,12 +6,8 @@ config = {
         'build',
         'check-test',
         'valgrind-test',
-        #'update',
     ],
     'stage_platform': 'linux64-valgrind',
-    'build_type': 'valgrind',
-    'enable_signing': False,
-    'perfherder_extra_options': ['valgrind'],
     #### 64 bit build specific #####
     'env': {
         'MOZBUILD_STATE_PATH': os.path.join(os.getcwd(), '.mozbuild'),
@@ -24,9 +20,8 @@ config = {
         'MOZ_CRASHREPORTER_NO_REPORT': '1',
         'LC_ALL': 'C',
         ## 64 bit specific
-        'PATH': '/usr/local/bin:/usr/lib64/ccache:/bin:\
-/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/tools/git/bin:/tools/python27/bin:\
-/tools/python27-mercurial/bin:/home/cltbld/bin',
+        'PATH': '/usr/local/bin:/bin:\
+/usr/bin:/usr/local/sbin:/usr/sbin:/sbin',
     },
     'mozconfig_variant': 'valgrind',
     #######################

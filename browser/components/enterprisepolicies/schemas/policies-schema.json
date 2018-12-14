@@ -2,6 +2,12 @@
   "$schema": "http://json-schema.org/draft-04/schema#",
   "type": "object",
   "properties": {
+    "AppUpdateURL": {
+      "description": "Sets custom app update server URL.",
+      "machine_only": true,
+      "type": "URL"
+    },
+
     "Authentication": {
       "description": "Sites that support integrated authentication. See https://developer.mozilla.org/en-US/docs/Mozilla/Integrated_authentication",
       "first_available": "60.0",
@@ -25,6 +31,18 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "AllowNonFQDN": {
+          "type": "object",
+          "properties": {
+            "SPNEGO": {
+              "type": "boolean"
+            },
+
+            "NTLM": {
+              "type": "boolean"
+            }
           }
         }
       }
@@ -99,6 +117,12 @@
       "properties": {
         "ImportEnterpriseRoots": {
           "type": "boolean"
+        },
+        "Install": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -382,6 +406,13 @@
       }
     },
 
+    "HardwareAcceleration": {
+      "description": "If false, prevents ability to turn on hardware acceleration.",
+      "first_available": "60.0",
+
+      "type": "boolean"
+    },
+
     "Homepage": {
       "description": "Set and optionally lock the homepage.",
       "first_available": "60.0",
@@ -400,9 +431,12 @@
           "items": {
             "type": "URL"
           }
+        },
+        "StartPage": {
+          "type": "string",
+          "enum": ["none", "homepage", "previous-session"]
         }
-      },
-      "required": ["URL"]
+      }
     },
 
     "InstallAddonsPermission": {
@@ -451,6 +485,122 @@
       "enterprise_only": true,
 
       "type": "URLorEmpty"
+    },
+
+    "Permissions": {
+      "description": "Configure permissions for camera, microphone, location and notifications.",
+      "first_available": "60.0",
+
+      "type": "object",
+      "properties": {
+        "Camera": {
+          "type": "object",
+          "properties": {
+            "Allow": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "Block": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "BlockNewRequests": {
+              "type": "boolean"
+            },
+
+            "Locked": {
+              "type": "boolean"
+            }
+          }
+        },
+
+        "Microphone": {
+          "type": "object",
+          "properties": {
+            "Allow": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "Block": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "BlockNewRequests": {
+              "type": "boolean"
+            },
+
+            "Locked": {
+              "type": "boolean"
+            }
+          }
+        },
+
+        "Location": {
+          "type": "object",
+          "properties": {
+            "Allow": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "Block": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "BlockNewRequests": {
+              "type": "boolean"
+            },
+
+            "Locked": {
+              "type": "boolean"
+            }
+          }
+        },
+
+        "Notifications": {
+          "type": "object",
+          "properties": {
+            "Allow": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "Block": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "BlockNewRequests": {
+              "type": "boolean"
+            },
+
+            "Locked": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
     },
 
     "PopupBlocking": {
@@ -534,6 +684,13 @@
       }
     },
 
+    "RequestedLocales": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+
     "SanitizeOnShutdown": {
       "description": "Clears ALL browser data on shutdown.",
       "first_available": "60.0",
@@ -594,7 +751,20 @@
         },
         "PreventInstalls": {
           "type": "boolean"
+        },
+        "Remove": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
+      }
+    },
+
+    "SecurityDevices": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": { "type": "string" }
       }
     },
 

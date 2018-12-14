@@ -243,8 +243,8 @@ Gecko_GetActiveLinkAttrDeclarationBlock(RawGeckoElementBorrowed element);
 
 // Visited handling.
 
-// Returns whether private browsing is enabled for a given element.
-bool Gecko_IsPrivateBrowsingEnabled(const nsIDocument* aDoc);
+// Returns whether visited styles are enabled for a given document.
+bool Gecko_VisitedStylesEnabled(const nsIDocument*);
 
 // Animations
 bool
@@ -350,7 +350,8 @@ Gecko_CounterStyle_GetAnonymous(const mozilla::CounterStylePtr* ptr);
 void Gecko_SetNullImageValue(nsStyleImage* image);
 void Gecko_SetGradientImageValue(nsStyleImage* image, nsStyleGradient* gradient);
 NS_DECL_THREADSAFE_FFI_REFCOUNTING(mozilla::css::ImageValue, ImageValue);
-mozilla::css::ImageValue* Gecko_ImageValue_Create(ServoBundledURI aURI);
+mozilla::css::ImageValue* Gecko_ImageValue_Create(ServoBundledURI aURI,
+                                                  mozilla::CORSMode aCORSMode);
 size_t Gecko_ImageValue_SizeOfIncludingThis(mozilla::css::ImageValue* aImageValue);
 void Gecko_SetLayerImageImageValue(nsStyleImage* image,
                                    mozilla::css::ImageValue* aImageValue);

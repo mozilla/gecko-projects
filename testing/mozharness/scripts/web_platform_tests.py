@@ -16,7 +16,6 @@ sys.path.insert(1, os.path.dirname(sys.path[0]))
 from mozharness.base.errors import BaseErrorList
 from mozharness.base.script import PreScriptAction
 from mozharness.base.vcs.vcsbase import MercurialScript
-from mozharness.mozilla.blob_upload import BlobUploadMixin, blobupload_config_options
 from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 from mozharness.mozilla.testing.codecoverage import (
     CodeCoverageMixin,
@@ -28,7 +27,7 @@ from mozharness.mozilla.structuredlog import StructuredOutputParser
 from mozharness.base.log import INFO
 
 
-class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCoverageMixin):
+class WebPlatformTest(TestingMixin, MercurialScript, CodeCoverageMixin):
     config_options = [
         [['--test-type'], {
             "action": "extend",
@@ -101,7 +100,6 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCovera
             "help": "Run tests with Stylo disabled"}
          ],
     ] + copy.deepcopy(testing_config_options) + \
-        copy.deepcopy(blobupload_config_options) + \
         copy.deepcopy(code_coverage_config_options)
 
     def __init__(self, require_config_file=True):
@@ -109,7 +107,6 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCovera
             config_options=self.config_options,
             all_actions=[
                 'clobber',
-                'read-buildbot-config',
                 'download-and-extract',
                 'create-virtualenv',
                 'pull',
@@ -387,7 +384,7 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCovera
                                                env=env)
 
                 tbpl_status, log_level = parser.evaluate_parser(return_code)
-                self.buildbot_status(tbpl_status, level=log_level)
+                self.record_status(tbpl_status, level=log_level)
 
                 if len(verify_args) > 0:
                     self.log_verify_status(verify_args[-1], tbpl_status, log_level)

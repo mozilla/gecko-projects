@@ -53,18 +53,21 @@ class AtomMarkingRuntime
 
     // Update the atom marking bitmap in |zone| according to another
     // overapproximation of the reachable atoms in |bitmap|.
-    void updateZoneBitmap(Zone* zone, const DenseBitmap& bitmap);
+    void refineZoneBitmapForCollectedZone(Zone* zone, const DenseBitmap& bitmap);
 
     // Set any bits in the chunk mark bitmaps for atoms which are marked in any
-    // zone in the runtime.
-    void updateChunkMarkBits(JSRuntime* runtime);
+    // uncollected zone in the runtime.
+    void markAtomsUsedByUncollectedZones(JSRuntime* runtime);
 
     // Mark an atom or id as being newly reachable by the context's zone.
     template <typename T> void markAtom(JSContext* cx, T* thing);
 
     // Version of markAtom that's always inlined, for performance-sensitive
     // callers.
+    template <typename T, bool Fallible>
+    MOZ_ALWAYS_INLINE bool inlinedMarkAtomInternal(JSContext* cx, T* thing);
     template <typename T> MOZ_ALWAYS_INLINE void inlinedMarkAtom(JSContext* cx, T* thing);
+    template <typename T> MOZ_ALWAYS_INLINE bool inlinedMarkAtomFallible(JSContext* cx, T* thing);
 
     void markId(JSContext* cx, jsid id);
     void markAtomValue(JSContext* cx, const Value& value);

@@ -124,6 +124,13 @@ if test "$GNU_CC"; then
         CFLAGS="$CFLAGS -ffunction-sections -fdata-sections"
         CXXFLAGS="$CXXFLAGS -ffunction-sections -fdata-sections"
     fi
+
+    # For MinGW, we need big-obj otherwise we create too many sections in Unified builds
+    if test "${OS_ARCH}" = "WINNT"; then
+        CFLAGS="$CFLAGS -Wa,-mbig-obj"
+        CXXFLAGS="$CXXFLAGS -Wa,-mbig-obj"
+    fi
+
     CFLAGS="$CFLAGS -fno-math-errno"
     CXXFLAGS="$CXXFLAGS -fno-exceptions -fno-math-errno"
 fi

@@ -2,14 +2,11 @@ import os
 
 config = {
     'default_actions': [
-        'clobber',
         'build',
     ],
     'stage_platform': 'macosx64-fuzzing-asan',
     'publish_nightly_en_US_routes': False,
-    'build_type': 'asan',
     'platform_supports_post_upload_to_latest': False,
-    'enable_signing': False,
     #### 64 bit build specific #####
     'env': {
         'MOZBUILD_STATE_PATH': os.path.join(os.getcwd(), '.mozbuild'),
@@ -23,9 +20,9 @@ config = {
         'LC_ALL': 'C',
         'ASAN_OPTIONS': 'detect_leaks=0',
         ## 64 bit specific
-        'PATH': '/usr/local/bin:/usr/lib64/ccache:/bin:\
-/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/tools/git/bin:/tools/python27/bin:\
-/tools/python27-mercurial/bin:/home/cltbld/bin',
+        'PATH': '/usr/local/bin:/bin:\
+/usr/bin:/usr/local/sbin:/usr/sbin:/sbin',
     },
     'mozconfig_variant': 'nightly-fuzzing-asan',
+    'artifact_flag_build_variant_in_try': None,
 }

@@ -18,6 +18,7 @@ import tempfile
 import time
 import requests
 import sh
+from distutils.util import strtobool
 
 import redo
 from scriptworker.utils import retry_async
@@ -34,7 +35,7 @@ log = logging.getLogger(__name__)
 ddstats = ThreadStats(namespace='releng.releases.partials')
 
 
-ALLOWED_URL_PREFIXES = [
+ALLOWED_URL_PREFIXES = (
     "http://download.cdn.mozilla.net/pub/mozilla.org/firefox/nightly/",
     "http://download.cdn.mozilla.net/pub/firefox/nightly/",
     "https://mozilla-nightly-updates.s3.amazonaws.com",
@@ -44,8 +45,10 @@ ALLOWED_URL_PREFIXES = [
     "https://archive.mozilla.org/",
     "http://archive.mozilla.org/",
     "https://queue.taskcluster.net/v1/task/",
+)
+STAGING_URL_PREFIXES = (
     "http://ftp.stage.mozaws.net/",
-]
+)
 
 DEFAULT_FILENAME_TEMPLATE = "{appName}-{branch}-{version}-{platform}-" \
                             "{locale}-{from_buildid}-{to_buildid}.partial.mar"
@@ -108,17 +111,29 @@ async def retry_download(*args, **kwargs):  # noqa: E999
 
 async def download(url, dest, mode=None):  # noqa: E999
     log.info("Downloading %s to %s", url, dest)
-
+    chunk_size = 4096
     bytes_downloaded = 0
     async with aiohttp.ClientSession(raise_for_status=True) as session:
-        async with session.get(url, timeout=60) as resp:
+        async with session.get(url, timeout=120) as resp:
+            # Additional early logging for download timeouts.
+            log.debug("Fetching from url %s", resp.url)
+            for history in resp.history:
+                log.debug("Redirection history: %s", history.url)
+            if 'Content-Length' in resp.headers:
+                log.debug('Content-Length expected for %s: %s',
+                          url, resp.headers['Content-Length'])
+            log_interval = chunk_size * 1024
             with open(dest, 'wb') as fd:
                 while True:
-                    chunk = await resp.content.read(4096)
+                    chunk = await resp.content.read(chunk_size)
                     if not chunk:
                         break
                     fd.write(chunk)
                     bytes_downloaded += len(chunk)
+                    log_interval -= len(chunk)
+                    if log_interval <= 0:
+                        log.debug("Bytes downloaded for %s: %d", url, bytes_downloaded)
+                        log_interval = chunk_size * 1024
 
             log.debug('Downloaded %s bytes', bytes_downloaded)
             if 'content-length' in resp.headers:
@@ -218,29 +233,33 @@ def get_hash(path, hash_type="sha512"):
 
 class WorkEnv(object):
 
-    def __init__(self):
+    def __init__(self, allowed_url_prefixes, mar=None, mbsdiff=None):
         self.workdir = tempfile.mkdtemp()
         self.paths = {
             'unwrap_full_update.pl': os.path.join(self.workdir, 'unwrap_full_update.pl'),
             'mar': os.path.join(self.workdir, 'mar'),
             'mbsdiff': os.path.join(self.workdir, 'mbsdiff')
         }
+        self.urls = {
+            'unwrap_full_update.pl': 'https://hg.mozilla.org/mozilla-central/raw-file/default/'
+            'tools/update-packaging/unwrap_full_update.pl',
+            'mar': 'https://ftp.mozilla.org/pub/mozilla.org/firefox/nightly/'
+            'latest-mozilla-central/mar-tools/linux64/mar',
+            'mbsdiff': 'https://ftp.mozilla.org/pub/mozilla.org/firefox/nightly/'
+            'latest-mozilla-central/mar-tools/linux64/mbsdiff'
+        }
+        self.allowed_url_prefixes = allowed_url_prefixes
+        if mar:
+            self.urls['mar'] = mar
+        if mbsdiff:
+            self.urls['mbsdiff'] = mbsdiff
 
-    async def setup(self):
-        await self.download_unwrap()
-        await self.download_martools()
-
-    async def clone(self, workenv):
-        for path in workenv.paths:
-            if os.path.exists(self.paths[path]):
-                os.unlink(self.paths[path])
-            os.link(workenv.paths[path], self.paths[path])
-
-    async def download_unwrap(self):
-        # unwrap_full_update.pl is not too sensitive to the revision
-        url = "https://hg.mozilla.org/mozilla-central/raw-file/default/" \
-            "tools/update-packaging/unwrap_full_update.pl"
-        await retry_download(url, dest=self.paths['unwrap_full_update.pl'], mode=0o755)
+    async def setup(self, mar=None, mbsdiff=None):
+        for filename, url in self.urls.items():
+            if filename not in self.paths:
+                log.info("Been told about %s but don't know where to download it to!", filename)
+                continue
+            await retry_download(url, dest=self.paths[filename], mode=0o755)
 
     async def download_buildsystem_bits(self, repo, revision):
         prefix = "{repo}/raw-file/{revision}/tools/update-packaging"
@@ -249,14 +268,6 @@ class WorkEnv(object):
             url = "{prefix}/{f}".format(prefix=prefix, f=f)
             await retry_download(url, dest=os.path.join(self.workdir, f), mode=0o755)
 
-    async def download_martools(self):
-        # TODO: check if the tools have to be branch specific
-        prefix = "https://ftp.mozilla.org/pub/mozilla.org/firefox/nightly/" \
-            "latest-mozilla-central/mar-tools/linux64"
-        for f in ('mar', 'mbsdiff'):
-            url = "{prefix}/{f}".format(prefix=prefix, f=f)
-            await retry_download(url, dest=self.paths[f], mode=0o755)
-
     def cleanup(self):
         shutil.rmtree(self.workdir)
 
@@ -264,22 +275,22 @@ class WorkEnv(object):
     def env(self):
         my_env = os.environ.copy()
         my_env['LC_ALL'] = 'C'
-        my_env['MAR'] = os.path.join(self.workdir, "mar")
-        my_env['MBSDIFF'] = os.path.join(self.workdir, "mbsdiff")
+        my_env['MAR'] = self.paths['mar']
+        my_env['MBSDIFF'] = self.paths['mbsdiff']
         return my_env
 
 
-def verify_allowed_url(mar):
-    if not any(mar.startswith(prefix) for prefix in ALLOWED_URL_PREFIXES):
+def verify_allowed_url(mar, allowed_url_prefixes):
+    if not any(mar.startswith(prefix) for prefix in allowed_url_prefixes):
         raise ValueError("{mar} is not in allowed URL prefixes: {p}".format(
-            mar=mar, p=ALLOWED_URL_PREFIXES
+            mar=mar, p=allowed_url_prefixes
         ))
 
 
 async def manage_partial(partial_def, work_env, filename_template, artifacts_dir, signing_certs):
     """Manage the creation of partial mars based on payload."""
     for mar in (partial_def["from_mar"], partial_def["to_mar"]):
-        verify_allowed_url(mar)
+        verify_allowed_url(mar, work_env.allowed_url_prefixes)
 
     complete_mars = {}
     use_old_format = False
@@ -401,24 +412,33 @@ async def manage_partial(partial_def, work_env, filename_template, artifacts_dir
 async def async_main(args, signing_certs):
     tasks = []
 
-    master_env = WorkEnv()
-    await master_env.setup()
+    allowed_url_prefixes = list(ALLOWED_URL_PREFIXES)
+    if args.allow_staging_prefixes:
+        allowed_url_prefixes += STAGING_URL_PREFIXES
 
     task = json.load(args.task_definition)
     # TODO: verify task["extra"]["funsize"]["partials"] with jsonschema
     for definition in task["extra"]["funsize"]["partials"]:
-        workenv = WorkEnv()
-        await workenv.clone(master_env)
-        tasks.append(asyncio.ensure_future(manage_partial(
-            partial_def=definition,
-            filename_template=args.filename_template,
-            artifacts_dir=args.artifacts_dir,
-            work_env=workenv,
-            signing_certs=signing_certs)
-        ))
-
+        workenv = WorkEnv(
+            allowed_url_prefixes=allowed_url_prefixes,
+            mar=definition.get('mar_binary'),
+            mbsdiff=definition.get('mbsdiff_binary')
+        )
+        await workenv.setup()
+        tasks.append(asyncio.ensure_future(retry_async(
+                                           manage_partial,
+                                           retry_exceptions=(
+                                               aiohttp.ClientError,
+                                               asyncio.TimeoutError
+                                           ),
+                                           kwargs=dict(
+                                               partial_def=definition,
+                                               filename_template=args.filename_template,
+                                               artifacts_dir=args.artifacts_dir,
+                                               work_env=workenv,
+                                               signing_certs=signing_certs
+                                           ))))
     manifest = await asyncio.gather(*tasks)
-    master_env.cleanup()
     return manifest
 
 
@@ -432,6 +452,11 @@ def main():
     parser.add_argument("--sha384-signing-cert", required=True)
     parser.add_argument("--task-definition", required=True,
                         type=argparse.FileType('r'))
+    parser.add_argument("--allow-staging-prefixes",
+                        action="store_true",
+                        default=strtobool(
+                            os.environ.get('FUNSIZE_ALLOW_STAGING_PREFIXES', "false")),
+                        help="Allow files from staging buckets.")
     parser.add_argument("--filename-template",
                         default=DEFAULT_FILENAME_TEMPLATE)
     parser.add_argument("--no-freshclam", action="store_true", default=False,

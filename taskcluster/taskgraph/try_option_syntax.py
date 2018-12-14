@@ -98,7 +98,6 @@ UNITTEST_ALIASES = {
     'reftest-no-accel': alias_matches(r'^(plain-)?reftest-no-accel.*$'),
     'reftests': alias_matches(r'^(plain-)?reftest.*$'),
     'reftests-e10s': alias_matches(r'^(plain-)?reftest-e10s.*$'),
-    'reftest-stylo': alias_matches(r'^(plain-)?reftest-stylo.*$'),
     'reftest-gpu': alias_matches(r'^(plain-)?reftest-gpu.*$'),
     'robocop': alias_prefix('robocop'),
     'web-platform-test': alias_prefix('web-platform-tests'),
@@ -126,13 +125,11 @@ UNITTEST_PLATFORM_PRETTY_NAMES = {
         'linux32',
         'linux64',
         'linux64-asan',
-        'linux64-stylo-disabled',
         'linux64-stylo-sequential'
     ],
     'x64': [
         'linux64',
         'linux64-asan',
-        'linux64-stylo-disabled',
         'linux64-stylo-sequential'
     ],
     'Android 4.3': ['android-4.3-arm7-api-16'],
@@ -543,6 +540,10 @@ class TryOptionSyntax(object):
                 return False
             return set(['try', 'all']) & set(attr('run_on_projects', []))
 
+        # Don't schedule code coverage when try option syntax is used
+        if 'ccov' in attr('build_platform', []) or 'jsdcov' in attr('build_platform', []):
+            return False
+
         def match_test(try_spec, attr_name):
             run_by_default = True
             if attr('build_type') not in self.build_types:
@@ -586,7 +587,7 @@ class TryOptionSyntax(object):
             return check_run_on_projects()
         elif attr('kind') == 'test':
             return match_test(self.unittests, 'unittest_try_name') \
-                 or match_test(self.talos, 'talos_try_name')
+                or match_test(self.talos, 'talos_try_name')
         elif attr('kind') in BUILD_KINDS:
             if attr('build_type') not in self.build_types:
                 return False

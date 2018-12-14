@@ -155,6 +155,7 @@ const RESTARTLESS_TYPES = new Set([
   "dictionary",
   "experiment",
   "webextension",
+  "webextension-dictionary",
   "webextension-theme",
 ]);
 
@@ -1035,6 +1036,9 @@ function shouldVerifySignedState(aAddon) {
 
   // We don't care about signatures for default system add-ons
   if (aAddon._installLocation.name == KEY_APP_SYSTEM_DEFAULTS)
+    return false;
+
+  if (aAddon._installLocation.scope & AppConstants.MOZ_UNSIGNED_SCOPES)
     return false;
 
   // Otherwise only check signatures if signing is enabled and the add-on is one

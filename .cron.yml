@@ -12,11 +12,9 @@ jobs:
           target-tasks-method: nightly_desktop
       run-on-projects:
           - mozilla-central
-          - date
       when:
           by-project:
               # Match buildbot starts for now
-              date: [{hour: 15, minute: 0}]
               mozilla-central: [{hour: 10, minute: 0}, {hour: 22, minute: 0}]
               # No default
 
@@ -27,7 +25,6 @@ jobs:
           target-tasks-method: nightly_linux
       run-on-projects:
           - mozilla-central
-          - date
       when: []  # never (hook only)
 
     - name: nightly-desktop-osx
@@ -37,7 +34,6 @@ jobs:
           target-tasks-method: nightly_macosx
       run-on-projects:
           - mozilla-central
-          - date
       when: []  # never (hook only)
 
     - name: nightly-desktop-win32
@@ -47,7 +43,6 @@ jobs:
           target-tasks-method: nightly_win32
       run-on-projects:
           - mozilla-central
-          - date
       when: []  # never (hook only)
 
     - name: nightly-desktop-win64
@@ -57,7 +52,6 @@ jobs:
           target-tasks-method: nightly_win64
       run-on-projects:
           - mozilla-central
-          - date
       when: []  # never (hook only)
 
     - name: nightly-android
@@ -67,11 +61,9 @@ jobs:
           target-tasks-method: nightly_fennec
       run-on-projects:
           - mozilla-central
-          - date
       when:
           by-project:
               # Match buildbot starts for now
-              date: [{hour: 15, minute: 0}]
               mozilla-central: [{hour: 10, minute: 0}]
               # No default
 
@@ -110,6 +102,28 @@ jobs:
               mozilla-central: [{hour: 10, minute: 30}]
               # No default
 
+    - name: bouncer-check
+      job:
+          type: decision-task
+          treeherder-symbol: Rel
+          target-tasks-method: cron_bouncer_check
+      run-on-projects:
+          - mozilla-beta
+          - mozilla-release
+          - mozilla-esr60
+      when:
+          by-project:
+              # No default branch
+              mozilla-beta:
+                  - {hour: 7, minute: 0}
+                  - {hour: 19, minute: 0}
+              mozilla-release:
+                  - {hour: 7, minute: 0}
+                  - {hour: 19, minute: 0}
+              mozilla-esr60:
+                  - {hour: 7, minute: 0}
+                  - {hour: 19, minute: 0}
+
     - name: periodic-update
       job:
           type: decision-task
@@ -117,8 +131,21 @@ jobs:
           target-tasks-method: file_update
       run-on-projects:
           - mozilla-central
+          - mozilla-beta
+          - mozilla-release
+          - mozilla-esr60
       when:
           by-project:
               # No default branch
               mozilla-central:
-                  - {hour: 10, minute: 0}
+                  - {weekday: 'Monday', hour: 10, minute: 0}
+                  - {weekday: 'Thursday', hour: 10, minute: 0}
+              mozilla-beta:
+                  - {weekday: 'Monday', hour: 10, minute: 0}
+                  - {weekday: 'Thursday', hour: 10, minute: 0}
+              mozilla-release:
+                  - {weekday: 'Monday', hour: 10, minute: 0}
+                  - {weekday: 'Thursday', hour: 10, minute: 0}
+              mozilla-esr60:
+                  - {weekday: 'Monday', hour: 10, minute: 0}
+                  - {weekday: 'Thursday', hour: 10, minute: 0}

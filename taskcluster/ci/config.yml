@@ -1,10 +1,13 @@
 trust-domain: gecko
+project-repo-param-prefix: ''
+product-dir: 'browser'
 treeherder:
     group-names:
         'cram': 'Cram tests'
         'mocha': 'Mocha unit tests'
         'py': 'Python unit tests'
         'A': 'Android Gradle tests'
+        'Fetch-URL': 'Fetch and store content'
         'Fxfn-l': 'Firefox functional tests (local)'
         'Fxfn-l-e10s': 'Firefox functional tests (local) with e10s'
         'Fxfn-r': 'Firefox functional tests (remote)'
@@ -37,8 +40,11 @@ treeherder:
         'BMR-L10n': 'Beetmover repackages for locales'
         'c-Up': 'Balrog submission of complete updates'
         'cs': 'Checksum signing'
+        'css': 'Checksum signing for source'
         'rs': 'Repackage signing'
-        'BMcs': 'Beetmover checksums,'
+        'BMcs': 'Beetmover checksums'
+        'BMcslang': 'Beetmover checksums for language packs'
+        'BMcss': 'Beetmover checksums for source'
         'Aries': 'Aries Device Image'
         'Deb7': 'Packages for Debian 7'
         'Deb9': 'Packages for Debian 9'
@@ -59,6 +65,8 @@ treeherder:
         'Rel': 'Release promotion'
         'Snap': 'Snap image generation'
         'langpack': 'Langpack sigatures and uploads'
+        'UV': 'Update verify'
+        'pipfu': 'pipfile update'
 
 index:
     products:
@@ -75,13 +83,9 @@ try:
     # as different "platforms".  These do *not* automatically ride along with "-p
     # all"
     ridealong-builds:
-        'android-api-16':
-            - 'android-api-16-l10n'
         'linux':
-            - 'linux-l10n'
             - 'sm-arm-sim-linux32'
         'linux64':
-            - 'linux64-l10n'
             - 'sm-plain-linux64'
             - 'sm-nojit-linux64'
             - 'sm-nonunified-linux64'
@@ -100,10 +104,79 @@ try:
             - 'sm-plain-win32'
             - 'sm-compacting-win32'
 
+release-promotion:
+    products:
+        - 'devedition'
+        - 'fennec'
+        - 'firefox'
+    flavors:
+        promote_devedition:
+            product: devedition
+            target-tasks-method: promote_desktop
+            partial-updates: true
+        promote_fennec:
+            product: fennec
+            target-tasks-method: promote_fennec
+        promote_firefox:
+            product: firefox
+            target-tasks-method: promote_desktop
+            partial-updates: true
+        promote_firefox_partners:
+            product: firefox
+            rebuild-kinds:
+                - release-partner-repack
+                - release-partner-beetmover
+                - release-partner-repack-chunking-dummy
+                - release-partner-repackage-signing
+                - release-partner-repackage
+                - release-partner-signing
+            target-tasks-method: promote_desktop
+        promote_firefox_rc:
+            product: firefox
+            is-rc: true
+            target-tasks-method: promote_desktop
+            partial-updates: true
+        push_devedition:
+            product: devedition
+            target-tasks-method: push_desktop
+            partial-updates: true
+        push_firefox:
+            product: firefox
+            target-tasks-method: push_desktop
+            partial-updates: true
+        ship_devedition:
+            product: devedition
+            target-tasks-method: ship_desktop
+            version-bump: true
+            partial-updates: true
+        ship_fennec:
+            product: fennec
+            target-tasks-method: ship_fennec
+            version-bump: true
+        ship_fennec_rc:
+            product: fennec
+            is-rc: true
+            target-tasks-method: ship_fennec
+        ship_firefox:
+            product: firefox
+            target-tasks-method: ship_desktop
+            version-bump: true
+            partial-updates: true
+        ship_firefox_rc:
+            product: firefox
+            is-rc: true
+            target-tasks-method: ship_desktop
+            partial-updates: true
+
 scriptworker:
     # See additional configuration in taskcluster/taskgraph/util/scriptworker.py
     scope-prefix: 'project:releng'
     worker-types:
+        'scriptworker-prov-v1/signing-linux-v1':
+            - 'project:releng:signing:cert:release-signing'
+            - 'project:releng:signing:cert:nightly-signing'
+        'scriptworker-prov-v1/depsigning':
+            - 'project:releng:signing:cert:dep-signing'
         'scriptworker-prov-v1/beetmoverworker-v1':
             - 'project:releng:beetmover:bucket:release'
             - 'project:releng:beetmover:bucket:nightly'
@@ -111,11 +184,6 @@ scriptworker:
         'scriptworker-prov-v1/beetmoverworker-dev':
             - 'project:releng:beetmover:bucket:dep'
             - 'project:releng:beetmover:bucket:dep-partner'
-        'scriptworker-prov-v1/signing-linux-v1':
-            - 'project:releng:signing:cert:release-signing'
-            - 'project:releng:signing:cert:nightly-signing'
-        'scriptworker-prov-v1/depsigning':
-            - 'project:releng:signing:cert:dep-signing'
         'scriptworker-prov-v1/balrogworker-v1':
             - 'project:releng:balrog:server:nightly'
             - 'project:releng:balrog:server:aurora'
@@ -124,3 +192,12 @@ scriptworker:
             - 'project:releng:balrog:server:esr'
         'scriptworker-prov-v1/balrog-dev':
             - 'project:releng:balrog:server:dep'
+
+
+partner:
+    release:
+        release-partner-repack: git@github.com:mozilla-partners/repack-manifests.git
+        release-eme-free-repack: git@github.com:mozilla-partners/mozilla-EME-free-manifest
+    staging:
+        release-partner-repack: git@github.com:mozilla-releng/staging-repack-manifests.git
+        release-eme-free-repack: git@github.com:mozilla-releng/staging-repack-manifests.git

@@ -18,6 +18,7 @@ _here = os.path.abspath(os.path.dirname(__file__))
 _external_tools_path = os.path.normpath(os.path.join(_here, '..', '..',
                                                      'external_tools'))
 
+
 class TooltoolMixin(object):
     """Mixin class for handling tooltool manifests.
     To use a tooltool server other than the Mozilla server, override
@@ -91,19 +92,16 @@ class TooltoolMixin(object):
 
         toolchains = os.environ.get('MOZ_TOOLCHAINS')
         if toolchains:
+            if not self.topsrcdir:
+                raise Exception(
+                    'MOZ_TOOLCHAINS is not supported for tasks without '
+                    'a source checkout.')
             cmd.extend(toolchains.split())
-        # when mock is enabled run tooltool in mock. We can't use
-        # run_command_m in all cases because it won't exist unless
-        # MockMixin is used on the parent class
-        if self.config.get('mock_target'):
-            cmd_runner = self.run_command_m
-        else:
-            cmd_runner = self.run_command
 
         timeout = self.config.get('tooltool_timeout', 10 * 60)
 
         self.retry(
-            cmd_runner,
+            self.run_command,
             args=(cmd, ),
             kwargs={'cwd': output_dir,
                     'error_list': TooltoolErrorList,

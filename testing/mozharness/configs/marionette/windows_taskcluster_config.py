@@ -10,14 +10,8 @@ config = {
     "virtualenv_path": 'venv',
     "exes": {
         'python': sys.executable,
-        'mozinstall': ['build/venv/scripts/python', 'build/venv/scripts/mozinstall-script.py'],
         'hg': os.path.join(os.environ['PROGRAMFILES'], 'Mercurial', 'hg')
     },
-
-    "find_links": [
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "pip_index": False,
 
     "default_actions": [
         'clobber',
@@ -26,10 +20,6 @@ config = {
         'install',
         'run-tests',
     ],
-    "default_blob_upload_servers": [
-        "https://blobupload.elasticbeanstalk.com",
-    ],
-    "blob_uploader_auth_file": 'C:/builds/oauth.txt',
     "download_minidump_stackwalk": True,
     "download_symbols": "ondemand",
     "suite_definitions": {

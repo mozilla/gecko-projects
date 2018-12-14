@@ -564,17 +564,6 @@ nsNSSComponent::MaybeImportFamilySafetyRoot(PCCERT_CONTEXT certificate,
           ("subject name is '%s'", subjectName.get()));
   if (kMicrosoftFamilySafetyCN.Equals(subjectName.get())) {
     wasFamilySafetyRoot = true;
-    CERTCertTrust trust = {
-      CERTDB_TRUSTED_CA | CERTDB_VALID_CA | CERTDB_USER,
-      0,
-      0
-    };
-    if (ChangeCertTrustWithPossibleAuthentication(nssCertificate, trust,
-                                                  nullptr) != SECSuccess) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-              ("couldn't trust certificate for TLS server auth"));
-      return NS_ERROR_FAILURE;
-    }
     MOZ_ASSERT(!mFamilySafetyRoot);
     mFamilySafetyRoot = Move(nssCertificate);
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("added Family Safety root"));
@@ -639,16 +628,29 @@ nsNSSComponent::LoadFamilySafetyRoot()
 void
 nsNSSComponent::UnloadFamilySafetyRoot()
 {
-  MutexAutoLock lock(mMutex);
   MOZ_ASSERT(NS_IsMainThread());
   if (!NS_IsMainThread()) {
     return;
   }
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("UnloadFamilySafetyRoot"));
-  if (!mFamilySafetyRoot) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("Family Safety Root wasn't present"));
-    return;
+
+  // We can't call ChangeCertTrustWithPossibleAuthentication while holding
+  // mMutex (because it could potentially call back in to nsNSSComponent and
+  // attempt to acquire mMutex), so we move mFamilySafetyRoot out of
+  // nsNSSComponent into a local handle. This has the side-effect of clearing
+  // mFamilySafetyRoot, which is what we want anyway.
+  UniqueCERTCertificate familySafetyRoot;
+  {
+    MutexAutoLock lock(mMutex);
+    if (!mFamilySafetyRoot) {
+      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+              ("Family Safety Root wasn't present"));
+      return;
+    }
+    familySafetyRoot = std::move(mFamilySafetyRoot);
+    MOZ_ASSERT(!mFamilySafetyRoot);
   }
+  MOZ_ASSERT(familySafetyRoot);
   // It would be intuitive to set the trust to { 0, 0, 0 } here. However, this
   // doesn't work for temporary certificates because CERT_ChangeCertTrust first
   // looks up the current trust settings in the permanent cert database, finds
@@ -657,15 +659,12 @@ nsNSSComponent::UnloadFamilySafetyRoot()
   // they're the same. To work around this, we set a non-zero flag to ensure
   // that the trust will get updated.
   CERTCertTrust trust = { CERTDB_USER, 0, 0 };
-  if (ChangeCertTrustWithPossibleAuthentication(mFamilySafetyRoot, trust,
+  if (ChangeCertTrustWithPossibleAuthentication(familySafetyRoot, trust,
                                                 nullptr) != SECSuccess) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
             ("couldn't untrust certificate for TLS server auth"));
   }
-  mFamilySafetyRoot = nullptr;
 }
-
-#endif // XP_WIN
 
 // The supported values of this pref are:
 // 0: disable detecting Family Safety mode and importing the root
@@ -683,8 +682,6 @@ const char* kFamilySafetyModePref = "security.family_safety.mode";
 void
 nsNSSComponent::MaybeEnableFamilySafetyCompatibility()
 {
-#ifdef XP_WIN
-  UnloadFamilySafetyRoot();
   if (!(IsWin8Point1OrLater() && !IsWin10OrLater())) {
     return;
   }
@@ -718,10 +715,8 @@ nsNSSComponent::MaybeEnableFamilySafetyCompatibility()
       Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, 7);
     }
   }
-#endif // XP_WIN
 }
 
-#ifdef XP_WIN
 // Helper function to determine if the OS considers the given certificate to be
 // a trust anchor for TLS server auth certificates. This is to be used in the
 // context of importing what are presumed to be root certificates from the OS.
@@ -774,17 +769,31 @@ CertIsTrustAnchorForTLSServerAuth(PCCERT_CONTEXT certificate)
 }
 
 void
-nsNSSComponent::UnloadEnterpriseRoots(const MutexAutoLock& /*proof of lock*/)
+nsNSSComponent::UnloadEnterpriseRoots()
 {
   MOZ_ASSERT(NS_IsMainThread());
   if (!NS_IsMainThread()) {
     return;
   }
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("UnloadEnterpriseRoots"));
-  if (!mEnterpriseRoots) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("no enterprise roots were present"));
-    return;
+
+  // We can't call ChangeCertTrustWithPossibleAuthentication while holding
+  // mMutex (because it could potentially call back in to nsNSSComponent and
+  // attempt to acquire mMutex), so we move mEnterpriseRoots out of
+  // nsNSSComponent into a local handle. This has the side-effect of clearing
+  // mEnterpriseRoots, which is what we want anyway.
+  UniqueCERTCertList enterpriseRoots;
+  {
+    MutexAutoLock lock(mMutex);
+    if (!mEnterpriseRoots) {
+      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+              ("no enterprise roots were present"));
+      return;
+    }
+    enterpriseRoots = std::move(mEnterpriseRoots);
+    MOZ_ASSERT(!mEnterpriseRoots);
   }
+  MOZ_ASSERT(enterpriseRoots);
   // It would be intuitive to set the trust to { 0, 0, 0 } here. However, this
   // doesn't work for temporary certificates because CERT_ChangeCertTrust first
   // looks up the current trust settings in the permanent cert database, finds
@@ -793,11 +802,12 @@ nsNSSComponent::UnloadEnterpriseRoots(const MutexAutoLock& /*proof of lock*/)
   // they're the same. To work around this, we set a non-zero flag to ensure
   // that the trust will get updated.
   CERTCertTrust trust = { CERTDB_USER, 0, 0 };
-  for (CERTCertListNode* n = CERT_LIST_HEAD(mEnterpriseRoots.get());
-       !CERT_LIST_END(n, mEnterpriseRoots.get()); n = CERT_LIST_NEXT(n)) {
-    if (!n || !n->cert) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-              ("library failure: CERTCertListNode null or lacks cert"));
+  for (CERTCertListNode* n = CERT_LIST_HEAD(enterpriseRoots.get());
+       !CERT_LIST_END(n, enterpriseRoots.get()); n = CERT_LIST_NEXT(n)) {
+    if (!n) {
+      break;
+    }
+    if (!n->cert) {
       continue;
     }
     UniqueCERTCertificate cert(CERT_DupCertificate(n->cert));
@@ -807,7 +817,6 @@ nsNSSComponent::UnloadEnterpriseRoots(const MutexAutoLock& /*proof of lock*/)
               ("couldn't untrust certificate for TLS server auth"));
     }
   }
-  mEnterpriseRoots = nullptr;
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("unloaded enterprise roots"));
 }
 
@@ -838,20 +847,17 @@ nsNSSComponent::GetEnterpriseRoots(nsIX509CertList** enterpriseRoots)
   enterpriseRootsCertList.forget(enterpriseRoots);
   return NS_OK;
 }
-#endif // XP_WIN
 
 static const char* kEnterpriseRootModePref = "security.enterprise_roots.enabled";
 
 void
 nsNSSComponent::MaybeImportEnterpriseRoots()
 {
-#ifdef XP_WIN
   MutexAutoLock lock(mMutex);
   MOZ_ASSERT(NS_IsMainThread());
   if (!NS_IsMainThread()) {
     return;
   }
-  UnloadEnterpriseRoots(lock);
   bool importEnterpriseRoots = Preferences::GetBool(kEnterpriseRootModePref,
                                                     false);
   if (!importEnterpriseRoots) {
@@ -871,10 +877,8 @@ nsNSSComponent::MaybeImportEnterpriseRoots()
                                    lock);
   ImportEnterpriseRootsForLocation(CERT_SYSTEM_STORE_LOCAL_MACHINE_ENTERPRISE,
                                    lock);
-#endif // XP_WIN
 }
 
-#ifdef XP_WIN
 // Loads the enterprise roots at the registry location corresponding to the
 // given location flag.
 // Supported flags are:
@@ -917,11 +921,6 @@ nsNSSComponent::ImportEnterpriseRootsForLocation(
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("failed to open enterprise root store"));
     return;
   }
-  CERTCertTrust trust = {
-    CERTDB_TRUSTED_CA | CERTDB_VALID_CA | CERTDB_USER,
-    0,
-    0
-  };
   PCCERT_CONTEXT certificate = nullptr;
   uint32_t numImported = 0;
   while ((certificate = CertFindCertificateInStore(enterpriseRootStore.get(),
@@ -957,17 +956,72 @@ nsNSSComponent::ImportEnterpriseRootsForLocation(
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("couldn't add cert to list"));
       continue;
     }
-    if (ChangeCertTrustWithPossibleAuthentication(nssCertificate, trust,
-                                                  nullptr) != SECSuccess) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-              ("couldn't trust certificate for TLS server auth"));
-    }
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("Imported '%s'", subjectName.get()));
     numImported++;
     // now owned by mEnterpriseRoots
     Unused << nssCertificate.release();
   }
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("imported %u roots", numImported));
+}
+
+NS_IMETHODIMP
+nsNSSComponent::TrustLoaded3rdPartyRoots()
+{
+  // We can't call ChangeCertTrustWithPossibleAuthentication while holding
+  // mMutex (because it could potentially call back in to nsNSSComponent and
+  // attempt to acquire mMutex), so we copy mEnterpriseRoots.
+  UniqueCERTCertList enterpriseRoots;
+  {
+    MutexAutoLock lock(mMutex);
+    if (mEnterpriseRoots) {
+      enterpriseRoots = nsNSSCertList::DupCertList(mEnterpriseRoots);
+      if (!enterpriseRoots) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+    }
+  }
+
+  CERTCertTrust trust = {
+    CERTDB_TRUSTED_CA | CERTDB_VALID_CA | CERTDB_USER,
+    0,
+    0
+  };
+  if (enterpriseRoots) {
+    for (CERTCertListNode* n = CERT_LIST_HEAD(enterpriseRoots.get());
+         !CERT_LIST_END(n, enterpriseRoots.get()); n = CERT_LIST_NEXT(n)) {
+       if (!n) {
+         break;
+      }
+      if (!n->cert) {
+        continue;
+      }
+      UniqueCERTCertificate cert(CERT_DupCertificate(n->cert));
+      if (ChangeCertTrustWithPossibleAuthentication(cert, trust, nullptr)
+            != SECSuccess) {
+        MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+                ("couldn't trust enterprise certificate for TLS server auth"));
+      }
+    }
+  }
+  // Again copy mFamilySafetyRoot so we don't hold mMutex while calling
+  // ChangeCertTrustWithPossibleAuthentication.
+  UniqueCERTCertificate familySafetyRoot;
+  {
+    MutexAutoLock lock(mMutex);
+    if (mFamilySafetyRoot) {
+      familySafetyRoot.reset(CERT_DupCertificate(mFamilySafetyRoot.get()));
+      if (!familySafetyRoot) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+    }
+  }
+  if (familySafetyRoot &&
+      ChangeCertTrustWithPossibleAuthentication(familySafetyRoot, trust,
+                                                nullptr) != SECSuccess) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+            ("couldn't trust family safety certificate for TLS server auth"));
+  }
+  return NS_OK;
 }
 #endif // XP_WIN
 
@@ -1886,6 +1940,95 @@ AttemptToRenameBothPKCS11ModuleDBVersions(const nsACString& profilePath)
   }
   return AttemptToRenamePKCS11ModuleDB(profilePath, sqlModuleDBFilename);
 }
+
+// Helper function to take a path and a file name and create a handle for the
+// file in that location, if it exists.
+static nsresult
+GetFileIfExists(const nsACString& path, const nsACString& filename,
+                /* out */ nsIFile** result)
+{
+  MOZ_ASSERT(result);
+  if (!result) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  *result = nullptr;
+  nsCOMPtr<nsIFile> file = do_CreateInstance("@mozilla.org/file/local;1");
+  if (!file) {
+    return NS_ERROR_FAILURE;
+  }
+  nsresult rv = file->InitWithNativePath(path);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = file->AppendNative(filename);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  bool exists;
+  rv = file->Exists(&exists);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  if (exists) {
+    file.forget(result);
+  }
+  return NS_OK;
+}
+
+// When we changed from the old dbm database format to the newer sqlite
+// implementation, the upgrade process left behind the existing files. Suppose a
+// user had not set a password for the old key3.db (which is about 99% of
+// users). After upgrading, both the old database and the new database are
+// unprotected. If the user then sets a password for the new database, the old
+// one will not be protected. In this scenario, we should probably just remove
+// the old database (it would only be relevant if the user downgraded to a
+// version of Firefox before 58, but we have to trade this off against the
+// user's old private keys being unexpectedly unprotected after setting a
+// password).
+// This was never an issue on Android because we always used the new
+// implementation.
+static void
+MaybeCleanUpOldNSSFiles(const nsACString& profilePath)
+{
+  UniquePK11SlotInfo slot(PK11_GetInternalKeySlot());
+  if (!slot) {
+    return;
+  }
+  // Unfortunately we can't now tell the difference between "there already was a
+  // password when the upgrade happened" and "there was not a password but then
+  // the user added one after upgrading".
+  bool hasPassword = PK11_NeedLogin(slot.get()) &&
+                     !PK11_NeedUserInit(slot.get());
+  if (!hasPassword) {
+    return;
+  }
+  NS_NAMED_LITERAL_CSTRING(newKeyDBFilename, "key4.db");
+  nsCOMPtr<nsIFile> newDBFile;
+  nsresult rv = GetFileIfExists(profilePath, newKeyDBFilename,
+                                getter_AddRefs(newDBFile));
+  if (NS_FAILED(rv)) {
+    return;
+  }
+  // If the new key DB file doesn't exist, we don't want to remove the old DB
+  // file. This can happen if the system is configured to use the old DB format
+  // even though we're a version of Firefox that expects to use the new format.
+  if (!newDBFile) {
+    return;
+  }
+  NS_NAMED_LITERAL_CSTRING(oldKeyDBFilename, "key3.db");
+  nsCOMPtr<nsIFile> oldDBFile;
+  rv = GetFileIfExists(profilePath, oldKeyDBFilename,
+                       getter_AddRefs(oldDBFile));
+  if (NS_FAILED(rv)) {
+    return;
+  }
+  if (!oldDBFile) {
+    return;
+  }
+  // Since this isn't a directory, the `recursive` argument to `Remove` is
+  // irrelevant.
+  Unused << oldDBFile->Remove(false);
+}
 #endif // ifndef ANDROID
 
 // Given a profile directory, attempt to initialize NSS. If nocertdb is true,
@@ -1917,6 +2060,9 @@ InitializeNSSWithFallbacks(const nsACString& profilePath, bool nocertdb,
   SECStatus srv = ::mozilla::psm::InitializeNSS(profilePath, false, !safeMode);
   if (srv == SECSuccess) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("initialized NSS in r/w mode"));
+#ifndef ANDROID
+    MaybeCleanUpOldNSSFiles(profilePath);
+#endif // ifndef ANDROID
     return NS_OK;
   }
 #ifndef ANDROID
@@ -2050,8 +2196,16 @@ nsNSSComponent::InitializeNSS()
 
   DisableMD5();
 
+#ifdef XP_WIN
+  // Note that these functions do not change the trust of any loaded 3rd party
+  // roots. Because we're initializing the nsNSSComponent, and because if the
+  // user has a master password set on the softoken it could cause the
+  // authentication dialog to come up, we could conceivably re-enter
+  // nsNSSComponent initialization, which would be bad. Instead, we schedule an
+  // event to set the trust after the component has been initialized (below).
   MaybeEnableFamilySafetyCompatibility();
   MaybeImportEnterpriseRoots();
+#endif // XP_WIN
 
   ConfigureTLSSessionIdentifiers();
 
@@ -2082,17 +2236,6 @@ nsNSSComponent::InitializeNSS()
 
   if (NS_FAILED(InitializeCipherSuite())) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("Unable to initialize cipher suite settings\n"));
-    return NS_ERROR_FAILURE;
-  }
-
-  // TLSServerSocket may be run with the session cache enabled. It is necessary
-  // to call this once before that can happen. This specifies a maximum of 1000
-  // cache entries (the default number of cache entries is 10000, which seems a
-  // little excessive as there probably won't be that many clients connecting to
-  // any TLSServerSockets the browser runs.)
-  // Note that this must occur before any calls to SSL_ClearSessionCache
-  // (otherwise memory will leak).
-  if (SSL_ConfigServerSessionIDCache(1000, 0, 0, nullptr) != SECSuccess) {
     return NS_ERROR_FAILURE;
   }
 
@@ -2144,6 +2287,14 @@ nsNSSComponent::InitializeNSS()
     mNSSInitialized = true;
   }
 
+#ifdef XP_WIN
+  nsCOMPtr<nsINSSComponent> handle(this);
+  NS_DispatchToCurrentThread(NS_NewRunnableFunction("nsNSSComponent::TrustLoaded3rdPartyRoots",
+  [handle]() {
+    MOZ_ALWAYS_SUCCEEDS(handle->TrustLoaded3rdPartyRoots());
+  }));
+#endif // XP_WIN
+
   RefPtr<LoadLoadableRootsTask> loadLoadableRootsTask(
     new LoadLoadableRootsTask(this));
   return loadLoadableRootsTask->Dispatch();
@@ -2183,11 +2334,6 @@ nsNSSComponent::ShutdownNSS()
   PK11_SetPasswordFunc((PK11PasswordFunc)nullptr);
 
   Preferences::RemoveObserver(this, "security.");
-
-  SSL_ClearSessionCache();
-  // TLSServerSocket may be run with the session cache enabled. This ensures
-  // those resources are cleaned up.
-  Unused << SSL_ShutdownServerSessionIDCache();
 
   // Release the default CertVerifier. This will cause any held NSS resources
   // to be released.
@@ -2298,15 +2444,27 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
       Preferences::GetString("security.test.built_in_root_hash",
                              mTestBuiltInRootHash);
 #endif // DEBUG
+#ifdef XP_WIN
     } else if (prefName.Equals(kFamilySafetyModePref)) {
+      // When the pref changes, it is safe to change the trust of 3rd party
+      // roots in the same event tick that they're loaded.
+      UnloadFamilySafetyRoot();
       MaybeEnableFamilySafetyCompatibility();
+      TrustLoaded3rdPartyRoots();
+#endif // XP_WIN
     } else if (prefName.EqualsLiteral("security.content.signature.root_hash")) {
       MutexAutoLock lock(mMutex);
       mContentSigningRootHash.Truncate();
       Preferences::GetString("security.content.signature.root_hash",
                              mContentSigningRootHash);
+#ifdef XP_WIN
     } else if (prefName.Equals(kEnterpriseRootModePref)) {
+      // When the pref changes, it is safe to change the trust of 3rd party
+      // roots in the same event tick that they're loaded.
+      UnloadEnterpriseRoots();
       MaybeImportEnterpriseRoots();
+      TrustLoaded3rdPartyRoots();
+#endif // XP_WIN
     } else {
       clearSessionCache = false;
     }

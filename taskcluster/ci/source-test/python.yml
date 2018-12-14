@@ -63,8 +63,17 @@ mochitest-harness:
         command: >
             source /builds/worker/scripts/xvfb.sh &&
             start_xvfb '1600x1200x24' 0 &&
+            export GECKO_BINARY_PATH=$MOZ_FETCHES_DIR/firefox/firefox &&
+            export TEST_HARNESS_ROOT=$MOZ_FETCHES_DIR/tests &&
             cd /builds/worker/checkouts/gecko &&
             ./mach python-test --subsuite mochitest
+    fetches:
+        build:
+            - target.tar.bz2
+            - artifact: target.common.tests.zip
+              dest: tests
+            - artifact: target.mochitest.tests.zip
+              dest: tests
     when:
         files-changed:
             - 'testing/mochitest/**'
@@ -108,6 +117,16 @@ mozlint:
         files-changed:
             - 'python/mozlint/**'
 
+mozrelease:
+    description: python/mozrelease unit tests
+    treeherder:
+        symbol: py(release)
+    run:
+        mach: python-test --subsuite mozrelease
+    when:
+        files-changed:
+            - 'python/mozrelease/**'
+
 mozterm:
     description: python/mozterm unit tests
     treeherder:
@@ -148,8 +167,17 @@ reftest-harness:
         command: >
             source /builds/worker/scripts/xvfb.sh &&
             start_xvfb '1600x1200x24' 0 &&
+            export GECKO_BINARY_PATH=$MOZ_FETCHES_DIR/firefox/firefox &&
+            export TEST_HARNESS_ROOT=$MOZ_FETCHES_DIR/tests &&
             cd /builds/worker/checkouts/gecko &&
             ./mach python-test --subsuite reftest
+    fetches:
+        build:
+            - target.tar.bz2
+            - artifact: target.common.tests.zip
+              dest: tests
+            - artifact: target.reftest.tests.zip
+              dest: tests
     when:
         files-changed:
             - 'layout/tools/reftest/**'

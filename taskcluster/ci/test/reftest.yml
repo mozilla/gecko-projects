@@ -1,6 +1,5 @@
 job-defaults:
     mozharness:
-        no-read-buildbot-config: true
         script:
             by-test-platform:
                 android.*: android_emulator_unittest.py
@@ -24,7 +23,7 @@ crashtest:
     treeherder-symbol: R(C)
     run-on-projects:
         by-test-platform:
-            .*-qr/.*: ['mozilla-central', 'autoland', 'mozilla-inbound', 'try']  # exclude beta and project branches
+            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
             default: built-projects
     instance-size:
         by-test-platform:
@@ -54,6 +53,10 @@ jsreftest:
     suite: reftest/jsreftest
     schedules-component: jsreftest  # scheduling for this reftest is different from the others..
     treeherder-symbol: R(J)
+    run-on-projects:
+        by-test-platform:
+            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
+            default: built-projects
     instance-size:
         by-test-platform:
             android.*: xlarge
@@ -87,6 +90,10 @@ reftest:
     description: "Reftest run"
     suite: reftest/reftest
     treeherder-symbol: R(R)
+    run-on-projects:
+        by-test-platform:
+            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
+            default: built-projects
     instance-size:
         by-test-platform:
             android.*: xlarge
@@ -99,7 +106,7 @@ reftest:
         by-test-platform:
             android-4.3-arm7-api-16/debug: 56
             android.*: 28
-            macosx64.*/opt: 1
+            macosx64.*/opt: 2
             macosx64.*/debug: 3
             windows.*/opt: 2
             windows.*/debug: 4
@@ -172,10 +179,3 @@ reftest-no-accel:
         by-test-platform:
             windows10-64-asan.*: 3
             default: default
-
-reftest-stylo:
-    description: "Reftest run in Stylo vs. Gecko mode"
-    suite: reftest/reftest-stylo
-    treeherder-symbol: R(Rs)
-    virtualization: virtual-with-gpu
-    chunks: 8

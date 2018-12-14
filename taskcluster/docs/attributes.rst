@@ -161,10 +161,20 @@ signed
 ======
 Signals that the output of this task contains signed artifacts.
 
+stub-installer
+==============
+Signals to the build system that this build is expected to have a stub installer
+present, and informs followon tasks to expect it.
+
 repackage_type
 ==============
 This is the type of repackage. Can be ``repackage`` or
 ``repackage_signing``.
+
+fetch-artifact
+==============
+
+For fetch jobs, this is the path to the artifact for that fetch operation.
 
 toolchain-artifact
 ==================
@@ -210,3 +220,15 @@ Most taskcluster artifacts are public, so we've hardcoded ``public/build`` in a
 lot of places. To support private artifacts, we've moved this to the
 ``artifact_prefix`` attribute. It will default to ``public/build`` but will be
 overrideable per-task.
+
+enable-full-crashsymbols
+========================
+In automation, full crashsymbol package generation is normally disabled.  For
+build kinds where the full crashsymbols should be enabled, set this attribute
+to True. The full symbol packages will then be generated and uploaded on
+release branches and on try.
+
+cron
+====
+Indicates that a task is meant to be run via cron tasks, and should not be run
+on push.

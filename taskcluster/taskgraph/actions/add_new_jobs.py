@@ -14,9 +14,11 @@ from .util import (create_tasks, fetch_graph_and_labels)
 @register_callback_action(
     name='add-new-jobs',
     title='Add new jobs',
+    kind='hook',
+    generic=True,
     symbol='add-new',
     description="Add new jobs using task labels.",
-    order=10000,
+    order=100,
     context=[],
     schema={
         'type': 'object',
@@ -31,8 +33,9 @@ from .util import (create_tasks, fetch_graph_and_labels)
         }
     }
 )
-def add_new_jobs_action(parameters, input, task_group_id, task_id, task):
-    decision_task_id, full_task_graph, label_to_taskid = fetch_graph_and_labels(parameters)
+def add_new_jobs_action(parameters, graph_config, input, task_group_id, task_id, task):
+    decision_task_id, full_task_graph, label_to_taskid = fetch_graph_and_labels(
+        parameters, graph_config)
 
     to_run = []
     for elem in input['tasks']:

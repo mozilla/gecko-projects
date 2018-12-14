@@ -814,6 +814,15 @@ public:
   : mCanvas(aCanvas)
   {}
 
+  void OnShutdown() {
+    if (!mCanvas) {
+      return;
+    }
+
+    mCanvas = nullptr;
+    nsContentUtils::UnregisterShutdownObserver(this);
+  }
+
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
 private:
@@ -831,7 +840,7 @@ CanvasShutdownObserver::Observe(nsISupports* aSubject,
 {
   if (mCanvas && strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
     mCanvas->OnShutdown();
-    nsContentUtils::UnregisterShutdownObserver(this);
+    OnShutdown();
   }
 
   return NS_OK;
@@ -1290,7 +1299,7 @@ void
 CanvasRenderingContext2D::RemoveShutdownObserver()
 {
   if (mShutdownObserver) {
-    nsContentUtils::UnregisterShutdownObserver(mShutdownObserver);
+    mShutdownObserver->OnShutdown();
     mShutdownObserver = nullptr;
   }
 }
@@ -1975,8 +1984,6 @@ CanvasRenderingContext2D::TryBasicTarget(RefPtr<gfx::DrawTarget>& aOutDT,
 NS_IMETHODIMP
 CanvasRenderingContext2D::SetDimensions(int32_t aWidth, int32_t aHeight)
 {
-  ClearTarget();
-
   // Zero sized surfaces can cause problems.
   mZero = false;
   if (aHeight == 0) {
@@ -1987,20 +1994,26 @@ CanvasRenderingContext2D::SetDimensions(int32_t aWidth, int32_t aHeight)
     aWidth = 1;
     mZero = true;
   }
-  mWidth = aWidth;
-  mHeight = aHeight;
+
+  ClearTarget(aWidth, aHeight);
 
   return NS_OK;
 }
 
 void
-CanvasRenderingContext2D::ClearTarget()
+CanvasRenderingContext2D::ClearTarget(int32_t aWidth, int32_t aHeight)
 {
   Reset();
 
   mResetLayer = true;
 
   SetInitialState();
+
+  // Update dimensions only if new (strictly positive) values were passed.
+  if (aWidth > 0 && aHeight > 0) {
+    mWidth = aWidth;
+    mHeight = aHeight;
+  }
 
   if (!mCanvasElement || !mCanvasElement->IsInComposedDoc()) {
     return;

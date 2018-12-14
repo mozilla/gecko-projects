@@ -338,7 +338,7 @@ def digest_file(f, a):
 
 def execute(cmd):
     """Execute CMD, logging its stdout at the info level"""
-    process = Popen(cmd, shell=True, stdout=PIPE)
+    process = Popen(cmd, shell=True, stdout=PIPE, bufsize=0)
     while True:
         line = process.stdout.readline()
         if not line:
@@ -483,8 +483,6 @@ def fetch_file(base_urls, file_record, grabchunk=1024 * 4, auth_file=None, regio
                 k = True
                 size = 0
                 while k:
-                    # TODO: print statistics as file transfers happen both for info and to stop
-                    # buildbot timeouts
                     indata = f.read(grabchunk)
                     out.write(indata)
                     size += len(indata)

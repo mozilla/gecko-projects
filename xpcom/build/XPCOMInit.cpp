@@ -100,6 +100,7 @@ extern nsresult nsStringInputStreamConstructor(nsISupports*, REFNSIID, void**);
 
 #ifdef MOZ_WIDGET_COCOA
 #include "nsMacUtilsImpl.h"
+#include "nsMacPreferencesReader.h"
 #endif
 
 #include "nsSystemInfo.h"
@@ -108,6 +109,7 @@ extern nsresult nsStringInputStreamConstructor(nsISupports*, REFNSIID, void**);
 #include "nsSecurityConsoleMessage.h"
 #include "nsMessageLoop.h"
 #include "nss.h"
+#include "ssl.h"
 
 #include <locale.h>
 #include "mozilla/Services.h"
@@ -222,6 +224,7 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsUUIDGenerator, Init)
 
 #ifdef MOZ_WIDGET_COCOA
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsMacUtilsImpl)
+NS_GENERIC_FACTORY_CONSTRUCTOR(nsMacPreferencesReader)
 #endif
 
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsSystemInfo, Init)
@@ -280,6 +283,10 @@ NS_DEFINE_NAMED_CID(NS_CHROMEPROTOCOLHANDLER_CID);
 
 NS_DEFINE_NAMED_CID(NS_SECURITY_CONSOLE_MESSAGE_CID);
 
+#ifdef MOZ_WIDGET_COCOA
+NS_DEFINE_NAMED_CID(NS_MACPREFERENCESREADER_CID);
+#endif
+
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsChromeRegistry,
                                          nsChromeRegistry::GetSingleton)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsChromeProtocolHandler)
@@ -309,6 +316,9 @@ const mozilla::Module::CIDEntry kXPCOMCIDEntries[] = {
   { &kNS_CHROMEREGISTRY_CID, false, nullptr, nsChromeRegistryConstructor },
   { &kNS_CHROMEPROTOCOLHANDLER_CID, false, nullptr, nsChromeProtocolHandlerConstructor },
   { &kNS_SECURITY_CONSOLE_MESSAGE_CID, false, nullptr, nsSecurityConsoleMessageConstructor },
+#ifdef MOZ_WIDGET_COCOA
+  { &kNS_MACPREFERENCESREADER_CID, false, nullptr, nsMacPreferencesReaderConstructor },
+#endif
   { nullptr }
 };
 #undef COMPONENT
@@ -322,6 +332,9 @@ const mozilla::Module::ContractIDEntry kXPCOMContracts[] = {
   { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "chrome", &kNS_CHROMEPROTOCOLHANDLER_CID },
   { NS_INIPARSERFACTORY_CONTRACTID, &kINIParserFactoryCID },
   { NS_SECURITY_CONSOLE_MESSAGE_CONTRACTID, &kNS_SECURITY_CONSOLE_MESSAGE_CID },
+#ifdef MOZ_WIDGET_COCOA
+  { NS_MACPREFERENCESREADER_CONTRACTID, &kNS_MACPREFERENCESREADER_CID },
+#endif
   { nullptr }
 };
 #undef COMPONENT
@@ -1008,6 +1021,7 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
   // down, any remaining objects that could be holding NSS resources (should)
   // have been released, so we can safely shut down NSS.
   if (NSS_IsInitialized()) {
+    SSL_ClearSessionCache();
     // It would be nice to enforce that this succeeds, at least on debug builds.
     // This would alert us to NSS resource leaks. Unfortunately there are some
     // architectural roadblocks in the way. Some tests (e.g. pkix gtests) need

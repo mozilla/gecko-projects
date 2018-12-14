@@ -23,7 +23,7 @@ from mozprocess import ProcessHandler
 
 from mozharness.base.log import FATAL
 from mozharness.base.script import BaseScript, PreScriptAction, PostScriptAction
-from mozharness.mozilla.buildbot import TBPL_RETRY, EXIT_STATUS_DICT
+from mozharness.mozilla.automation import TBPL_RETRY, EXIT_STATUS_DICT
 from mozharness.mozilla.mozbase import MozbaseMixin
 from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 from mozharness.mozilla.testing.unittest import EmulatorMixin
@@ -50,6 +50,13 @@ class AndroidEmulatorTest(TestingMixin, EmulatorMixin, BaseScript, MozbaseMixin)
          "default": None,
          "help": "Number of this chunk",
          }
+    ], [
+        ["--gpu-required"],
+        {"action": "store_true",
+         "dest": "gpu_required",
+         "default": False,
+         "help": "Run additional verification on modified tests using gpu instances.",
+         }
     ]] + copy.deepcopy(testing_config_options)
 
     app_name = None
@@ -58,7 +65,6 @@ class AndroidEmulatorTest(TestingMixin, EmulatorMixin, BaseScript, MozbaseMixin)
         super(AndroidEmulatorTest, self).__init__(
             config_options=self.config_options,
             all_actions=['clobber',
-                         'read-buildbot-config',
                          'setup-avds',
                          'start-emulator',
                          'download-and-extract',
@@ -206,7 +212,7 @@ class AndroidEmulatorTest(TestingMixin, EmulatorMixin, BaseScript, MozbaseMixin)
         tmp_file = tempfile.NamedTemporaryFile(mode='w')
         tmp_stdout = open(tmp_file.name, 'w')
         self.info("Trying to start the emulator with this command: %s" % ' '.join(command))
-        proc = subprocess.Popen(command, stdout=tmp_stdout, stderr=tmp_stdout, env=env)
+        proc = subprocess.Popen(command, stdout=tmp_stdout, stderr=tmp_stdout, env=env, bufsize=0)
         return {
             "process": proc,
             "tmp_file": tmp_file,
@@ -245,7 +251,7 @@ class AndroidEmulatorTest(TestingMixin, EmulatorMixin, BaseScript, MozbaseMixin)
 
     def _run_proc(self, cmd, quiet=False):
         self.info('Running %s' % subprocess.list2cmdline(cmd))
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
         out, err = p.communicate()
         if out and not quiet:
             self.info('%s' % str(out.strip()))
@@ -344,7 +350,7 @@ class AndroidEmulatorTest(TestingMixin, EmulatorMixin, BaseScript, MozbaseMixin)
         self.info("##### %s emulator log ends" % self.emulator["name"])
 
     def _kill_processes(self, process_name):
-        p = subprocess.Popen(['ps', '-A'], stdout=subprocess.PIPE)
+        p = subprocess.Popen(['ps', '-A'], stdout=subprocess.PIPE, bufsize=0)
         out, err = p.communicate()
         self.info("Let's kill every process called %s" % process_name)
         for line in out.splitlines():
@@ -820,11 +826,11 @@ class AndroidEmulatorTest(TestingMixin, EmulatorMixin, BaseScript, MozbaseMixin)
                 self.info("##### %s log ends" % self.test_suite)
 
                 if len(verify_args) > 0:
-                    self.buildbot_status(tbpl_status, level=log_level)
+                    self.record_status(tbpl_status, level=log_level)
                     self.log_verify_status(verify_args[-1], tbpl_status, log_level)
                 else:
                     self._dump_emulator_log()
-                    self.buildbot_status(tbpl_status, level=log_level)
+                    self.record_status(tbpl_status, level=log_level)
                     self.log("The %s suite: %s ran with return status: %s" %
                              (suite_category, suite, tbpl_status), level=log_level)
 

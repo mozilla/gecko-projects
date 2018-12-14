@@ -22,19 +22,8 @@ config = {
 
     "exes": {
         'python': sys.executable,
-        'mozinstall': ['build/venv/scripts/python', 'build/venv/scripts/mozinstall-script.py'],
         'hg': os.path.join(os.environ['PROGRAMFILES'], 'Mercurial', 'hg')
     },
-
-    "find_links": [
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-
-    "pip_index": False,
-
-    "default_blob_upload_servers": [
-         "https://blobupload.elasticbeanstalk.com",
-    ],
 
     "run_cmd_checks_enabled": True,
     "preflight_run_cmd_suites": [
@@ -60,8 +49,6 @@ config = {
             'enabled': True
         }
     ],
-
-    "blob_uploader_auth_file" : 'C:/builds/oauth.txt',
 
     "download_minidump_stackwalk": True,
 

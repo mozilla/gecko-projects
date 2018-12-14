@@ -75,7 +75,7 @@ def resolve_keyed_by(item, field, item_name, **extra_values):
                     win.*: 6
                     default: 12
 
-    a call to `resolve_keyed_by(item, 'job.chunks', item['thing-name'])
+    a call to `resolve_keyed_by(item, 'job.chunks', item['thing-name'])`
     would mutate item in-place to::
 
         job:
@@ -147,12 +147,6 @@ def resolve_keyed_by(item, field, item_name, **extra_values):
 WHITELISTED_SCHEMA_IDENTIFIERS = [
     # upstream-artifacts are handed directly to scriptWorker, which expects interCaps
     lambda path: "[u'upstream-artifacts']" in path,
-    # bbb release promotion properties
-    lambda path: path.endswith("[u'build_number']"),
-    lambda path: path.endswith("[u'tuxedo_server_url']"),
-    lambda path: path.endswith("[u'release_promotion']"),
-    lambda path: path.endswith("[u'generate_bz2_blob']"),
-    lambda path: path.endswith("[u'release_eta']"),
 ]
 
 

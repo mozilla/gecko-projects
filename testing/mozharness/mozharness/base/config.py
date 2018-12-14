@@ -78,6 +78,7 @@ def make_immutable(item):
 class LockedTuple(tuple):
     def __new__(cls, items):
         return tuple.__new__(cls, (make_immutable(x) for x in items))
+
     def __deepcopy__(self, memo):
         return [deepcopy(elem, memo) for elem in self]
 
@@ -135,7 +136,12 @@ class ReadOnlyDict(dict):
             result[k] = deepcopy(v, memo)
         return result
 
-DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "configs")
+
+DEFAULT_CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "configs",
+)
+
 
 # parse_config_file {{{1
 def parse_config_file(file_name, quiet=False, search_path=None,
@@ -166,7 +172,8 @@ def parse_config_file(file_name, quiet=False, search_path=None,
         config = dict(json_config)
         fh.close()
     else:
-        raise RuntimeError("Unknown config file type %s! (config files must end in .json or .py)" % file_name)
+        raise RuntimeError(
+            "Unknown config file type %s! (config files must end in .json or .py)" % file_name)
     # TODO return file_path
     return config
 
@@ -258,7 +265,7 @@ class BaseConfig(object):
             # not add anything from the test invocation command line
             # arguments to the mozharness options.
             if option_args is None:
-                option_args=['dummy_mozharness_script_with_no_command_line_options.py']
+                option_args = ['dummy_mozharness_script_with_no_command_line_options.py']
         if config_options is None:
             config_options = []
         self._create_config_parser(config_options, usage)
@@ -285,8 +292,9 @@ class BaseConfig(object):
             type="string", help="Specify additional paths to search for config files.",
         )
         self.config_parser.add_option(
-            "-c", "--config-file", "--cfg", action="extend", dest="config_files",
-            type="string", help="Specify a config file; can be repeated"
+            "-c", "--config-file", "--cfg", action="extend",
+            dest="config_files", default=[], type="string",
+            help="Specify a config file; can be repeated",
         )
         self.config_parser.add_option(
             "-C", "--opt-config-file", "--opt-cfg", action="extend",
@@ -407,7 +415,7 @@ class BaseConfig(object):
 
     def verify_actions_order(self, action_list):
         try:
-            indexes = [ self.all_actions.index(elt) for elt in action_list ]
+            indexes = [self.all_actions.index(elt) for elt in action_list]
             sorted_indexes = sorted(indexes)
             for i in range(len(indexes)):
                 if indexes[i] != sorted_indexes[i]:
@@ -455,7 +463,10 @@ class BaseConfig(object):
                     )
                 else:
                     all_cfg_files_and_dicts.append(
-                        (cf, parse_config_file(cf, search_path=config_paths + [DEFAULT_CONFIG_PATH]))
+                        (cf, parse_config_file(
+                            cf,
+                            search_path=config_paths + [DEFAULT_CONFIG_PATH]
+                        ))
                     )
             except Exception:
                 if cf in options.opt_config_files:
@@ -489,35 +500,36 @@ class BaseConfig(object):
                     self.list_actions()
                 print("Required config file not set! (use --config-file option)")
                 raise SystemExit(-1)
+
+        # this is what get_cfgs_from_files returns. It will represent each
+        # config file name and its assoctiated dict
+        # eg ('builds/branch_specifics.py', {'foo': 'bar'})
+        # let's store this to self for things like --interpret-config-files
+        self.all_cfg_files_and_dicts.extend(self.get_cfgs_from_files(
+            # append opt_config to allow them to overwrite previous configs
+            options.config_files + options.opt_config_files, options=options
+        ))
+        config = {}
+        if (self.append_env_variables_from_configs
+                or options.append_env_variables_from_configs):
+            # We only append values from various configs for the 'env' entry
+            # For everything else we follow the standard behaviour
+            for i, (c_file, c_dict) in enumerate(self.all_cfg_files_and_dicts):
+                for v in c_dict.keys():
+                    if v == 'env' and v in config:
+                        config[v].update(c_dict[v])
+                    else:
+                        config[v] = c_dict[v]
         else:
-            # this is what get_cfgs_from_files returns. It will represent each
-            # config file name and its assoctiated dict
-            # eg ('builds/branch_specifics.py', {'foo': 'bar'})
-            # let's store this to self for things like --interpret-config-files
-            self.all_cfg_files_and_dicts.extend(self.get_cfgs_from_files(
-                # append opt_config to allow them to overwrite previous configs
-                options.config_files + options.opt_config_files, options=options
-            ))
-            config = {}
-            if (self.append_env_variables_from_configs
-                    or options.append_env_variables_from_configs):
-                # We only append values from various configs for the 'env' entry
-                # For everything else we follow the standard behaviour
-                for i, (c_file, c_dict) in enumerate(self.all_cfg_files_and_dicts):
-                    for v in c_dict.keys():
-                        if v == 'env' and v in config:
-                            config[v].update(c_dict[v])
-                        else:
-                            config[v] = c_dict[v]
-            else:
-                for i, (c_file, c_dict) in enumerate(self.all_cfg_files_and_dicts):
-                    config.update(c_dict)
-            # assign or update self._config depending on if it exists or not
-            #    NOTE self._config will be passed to ReadOnlyConfig's init -- a
-            #    dict subclass with immutable locking capabilities -- and serve
-            #    as the keys/values that make up that instance. Ultimately,
-            #    this becomes self.config during BaseScript's init
-            self.set_config(config)
+            for i, (c_file, c_dict) in enumerate(self.all_cfg_files_and_dicts):
+                config.update(c_dict)
+        # assign or update self._config depending on if it exists or not
+        #    NOTE self._config will be passed to ReadOnlyConfig's init -- a
+        #    dict subclass with immutable locking capabilities -- and serve
+        #    as the keys/values that make up that instance. Ultimately,
+        #    this becomes self.config during BaseScript's init
+        self.set_config(config)
+
         for key in defaults.keys():
             value = getattr(options, key)
             if value is None:

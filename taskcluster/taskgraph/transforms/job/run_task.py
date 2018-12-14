@@ -19,7 +19,7 @@ run_task_schema = Schema({
     # tend to hide their caches.  This cache is never added for level-1 jobs.
     Required('cache-dotcache'): bool,
 
-    # if true (the default), perform a checkout in /builds/worker/checkouts/gecko
+    # if true (the default), perform a checkout in {workdir}/checkouts/gecko
     Required('checkout'): bool,
 
     # The sparse checkout profile to use. Value is the filename relative to the
@@ -34,6 +34,9 @@ run_task_schema = Schema({
     # checkout arguments.  If a list, it will be passed directly; otherwise
     # it will be included in a single argument to `bash -cx`.
     Required('command'): Any([basestring], basestring),
+
+    # Base work directory used to set up the task.
+    Required('workdir'): basestring,
 })
 
 
@@ -50,14 +53,14 @@ def add_checkout_to_command(run, command):
     if not run['checkout']:
         return
 
-    command.append('--vcs-checkout=/builds/worker/checkouts/gecko')
+    command.append('--vcs-checkout={workdir}/checkouts/gecko'.format(**run))
 
     if run['sparse-profile']:
         command.append('--sparse-profile=build/sparse-profiles/%s' %
                        run['sparse-profile'])
 
 
-docker_defaults = {
+defaults = {
     'cache-dotcache': False,
     'checkout': True,
     'comm-checkout': False,
@@ -65,7 +68,7 @@ docker_defaults = {
 }
 
 
-@run_job_using("docker-worker", "run-task", schema=run_task_schema, defaults=docker_defaults)
+@run_job_using("docker-worker", "run-task", schema=run_task_schema, defaults=defaults)
 def docker_worker_run_task(config, job, taskdesc):
     run = job['run']
     worker = taskdesc['worker'] = job['worker']
@@ -75,34 +78,30 @@ def docker_worker_run_task(config, job, taskdesc):
         worker['caches'].append({
             'type': 'persistent',
             'name': 'level-{level}-{project}-dotcache'.format(**config.params),
-            'mount-point': '/builds/worker/.cache',
+            'mount-point': '{workdir}/.cache'.format(**run),
             'skip-untrusted': True,
         })
-
-    # This must match EXIT_PURGE_CACHES in taskcluster/docker/recipes/run-task
-    worker.setdefault('retry-exit-status', []).append(72)
-    worker.setdefault('purge-caches-exit-status', []).append(72)
 
     run_command = run['command']
     if isinstance(run_command, basestring):
         run_command = ['bash', '-cx', run_command]
-    command = ['/builds/worker/bin/run-task']
+    command = ['{workdir}/bin/run-task'.format(**run)]
     add_checkout_to_command(run, command)
     if run['comm-checkout']:
-        command.append('--comm-checkout=/builds/worker/checkouts/gecko/comm')
+        command.append('--comm-checkout={workdir}/checkouts/gecko/comm'.format(**run))
     command.append('--fetch-hgfingerprint')
     command.append('--')
     command.extend(run_command)
     worker['command'] = command
 
 
-@run_job_using("native-engine", "run-task", schema=run_task_schema)
+@run_job_using("native-engine", "run-task", schema=run_task_schema, defaults=defaults)
 def native_engine_run_task(config, job, taskdesc):
     run = job['run']
     worker = taskdesc['worker'] = job['worker']
     common_setup(config, job, taskdesc)
 
-    worker['context'] = '{}/raw-file/{}/taskcluster/docker/recipes/run-task'.format(
+    worker['context'] = '{}/raw-file/{}/taskcluster/scripts/run-task'.format(
         config.params['head_repository'], config.params['head_rev']
     )
 

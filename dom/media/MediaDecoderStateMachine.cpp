@@ -3482,6 +3482,10 @@ MediaDecoderStateMachine::FinishDecodeFirstFrame()
 RefPtr<ShutdownPromise>
 MediaDecoderStateMachine::BeginShutdown()
 {
+  MOZ_ASSERT(NS_IsMainThread());
+  if (mOutputStreamManager) {
+    mOutputStreamManager->Clear();
+  }
   return InvokeAsync(OwnerThread(), this, __func__,
                      &MediaDecoderStateMachine::Shutdown);
 }
@@ -3860,11 +3864,12 @@ MediaDecoderStateMachine::RequestDebugInfo()
 }
 
 void MediaDecoderStateMachine::AddOutputStream(ProcessedMediaStream* aStream,
+                                               TrackID aNextAvailableTrackID,
                                                bool aFinishWhenEnded)
 {
   MOZ_ASSERT(NS_IsMainThread());
   LOG("AddOutputStream aStream=%p!", aStream);
-  mOutputStreamManager->Add(aStream, aFinishWhenEnded);
+  mOutputStreamManager->Add(aStream, aNextAvailableTrackID, aFinishWhenEnded);
   nsCOMPtr<nsIRunnable> r =
     NewRunnableMethod<bool>("MediaDecoderStateMachine::SetAudioCaptured",
                             this,
@@ -3890,6 +3895,13 @@ void MediaDecoderStateMachine::RemoveOutputStream(MediaStream* aStream)
     MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
     Unused << rv;
   }
+}
+
+TrackID
+MediaDecoderStateMachine::NextAvailableTrackIDFor(MediaStream* aOutputStream) const
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  return mOutputStreamManager->NextAvailableTrackIDFor(aOutputStream);
 }
 
 class VideoQueueMemoryFunctor : public nsDequeFunctor

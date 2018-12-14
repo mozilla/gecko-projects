@@ -56,6 +56,7 @@ apt_packages+=('net-tools')
 apt_packages+=('pulseaudio')
 apt_packages+=('pulseaudio-module-bluetooth')
 apt_packages+=('pulseaudio-module-gconf')
+apt_packages+=('qemu-kvm')
 apt_packages+=('rlwrap')
 apt_packages+=('screen')
 apt_packages+=('software-properties-common')
@@ -94,9 +95,8 @@ dpkg-reconfigure locales
 . /setup/common.sh
 . /setup/install-mercurial.sh
 
-pip install --upgrade pip
-
-pip install virtualenv
+pip install pip==9.0.3
+pip install virtualenv==15.2.0
 
 . /setup/install-node.sh
 

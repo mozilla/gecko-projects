@@ -7,6 +7,8 @@ Transform the repackage signing task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import os
+
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
@@ -15,7 +17,6 @@ from taskgraph.util.scriptworker import (
     get_signing_cert_scope_per_platform,
     get_worker_type_for_scope,
 )
-from taskgraph.util.taskcluster import get_artifact_path
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Required, Optional
 
@@ -34,6 +35,13 @@ repackage_signing_description_schema = Schema({
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
 })
 
+SIGNING_FORMATS = {
+    'target.complete.mar': ["autograph_hash_only_mar384"],
+    'target.bz2.complete.mar': ["mar"],
+    "target.installer.exe": ["sha2signcode"],
+    "target.stub-installer.exe": ["sha2signcodestub"],
+}
+
 
 @transforms.add
 def validate(config, jobs):
@@ -49,10 +57,14 @@ def validate(config, jobs):
 def make_repackage_signing_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
-        attributes = dep_job.attributes
+        attributes = copy_attributes_from_dependent_job(dep_job)
+        attributes['repackage_type'] = 'repackage-signing'
 
         treeherder = job.get('treeherder', {})
-        treeherder.setdefault('symbol', 'rs(N)')
+        if attributes.get('nightly'):
+            treeherder.setdefault('symbol', 'rs(N)')
+        else:
+            treeherder.setdefault('symbol', 'rs(B)')
         dep_th_platform = dep_job.task.get('extra', {}).get(
             'treeherder', {}).get('machine', {}).get('platform', '')
         treeherder.setdefault('platform',
@@ -61,6 +73,19 @@ def make_repackage_signing_description(config, jobs):
         treeherder.setdefault('kind', 'build')
 
         label = job['label']
+
+        dependencies = {"repackage": dep_job.label}
+
+        signing_dependencies = dep_job.dependencies
+        # This is so we get the build task etc in our dependencies to
+        # have better beetmover support.
+        dependencies.update({k: v for k, v in signing_dependencies.items()
+                             if k != 'docker-image'})
+
+        if dep_job.attributes.get('locale'):
+            treeherder['symbol'] = 'rs({})'.format(dep_job.attributes.get('locale'))
+            attributes['locale'] = dep_job.attributes.get('locale')
+
         description = (
             "Signing of repackaged artifacts for locale '{locale}' for build '"
             "{build_platform}/{build_type}'".format(
@@ -70,63 +95,29 @@ def make_repackage_signing_description(config, jobs):
             )
         )
 
-        dependencies = {"repackage": dep_job.label}
-
-        signing_dependencies = dep_job.dependencies
-        # This is so we get the build task etc in our dependencies to
-        # have better beetmover support.
-        dependencies.update({k: v for k, v in signing_dependencies.items()
-                             if k != 'docker-image'})
-        attributes = copy_attributes_from_dependent_job(dep_job)
-        attributes['repackage_type'] = 'repackage-signing'
-
-        locale_str = ""
-        if dep_job.attributes.get('locale'):
-            treeherder['symbol'] = 'rs({})'.format(dep_job.attributes.get('locale'))
-            attributes['locale'] = dep_job.attributes.get('locale')
-            locale_str = "{}/".format(dep_job.attributes.get('locale'))
-
         build_platform = dep_job.attributes.get('build_platform')
         is_nightly = dep_job.attributes.get('nightly')
         signing_cert_scope = get_signing_cert_scope_per_platform(
             build_platform, is_nightly, config
         )
-        scopes = [signing_cert_scope, add_scope_prefix(config, 'signing:format:mar_sha384')]
+        scopes = [signing_cert_scope]
 
-        upstream_artifacts = [{
-            "taskId": {"task-reference": "<repackage>"},
-            "taskType": "repackage",
-            "paths": [
-                get_artifact_path(dep_job, "{}target.complete.mar".format(locale_str)),
-            ],
-            "formats": ["mar_sha384"]
-        }]
-        if 'win' in build_platform:
-            upstream_artifacts.append({
-                "taskId": {"task-reference": "<repackage>"},
-                "taskType": "repackage",
-                "paths": [
-                    get_artifact_path(dep_job, "{}target.installer.exe".format(locale_str)),
-                ],
-                "formats": ["sha2signcode"]
-            })
-            scopes.append(add_scope_prefix(config, "signing:format:sha2signcode"))
-
-            # Stub installer is only generated on win32 and not on esr
-            no_stub = ("mozilla-esr60", "jamun")
-            if 'win32' in build_platform and not config.params["project"] in no_stub:
-                # TODO: fix the project hint to be a better design
+        upstream_artifacts = []
+        for artifact in dep_job.release_artifacts:
+            basename = os.path.basename(artifact)
+            if basename in SIGNING_FORMATS:
                 upstream_artifacts.append({
                     "taskId": {"task-reference": "<repackage>"},
                     "taskType": "repackage",
-                    "paths": [
-                        get_artifact_path(
-                            dep_job, "{}target.stub-installer.exe".format(locale_str)
-                        ),
-                    ],
-                    "formats": ["sha2signcodestub"]
+                    "paths": [artifact],
+                    "formats": SIGNING_FORMATS[os.path.basename(artifact)],
                 })
-                scopes.append(add_scope_prefix(config, "signing:format:sha2signcodestub"))
+
+        scopes += list({
+            add_scope_prefix(config, 'signing:format:{}'.format(format))
+            for artifact in upstream_artifacts
+            for format in artifact['formats']
+        })
 
         task = {
             'label': label,

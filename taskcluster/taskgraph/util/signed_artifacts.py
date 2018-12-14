@@ -18,7 +18,7 @@ def generate_specifications_of_artifacts_to_sign(
     task, keep_locale_template=True, kind=None, project=None
 ):
     build_platform = task.attributes.get('build_platform')
-    is_nightly = task.attributes.get('nightly')
+    use_stub = task.attributes.get('stub-installer')
     if kind == 'release-source-signing':
         artifacts_specifications = [{
             'artifacts': [
@@ -56,10 +56,8 @@ def generate_specifications_of_artifacts_to_sign(
             ],
             'formats': ['sha2signcode', 'widevine'],
         }]
-        no_stub = ("mozilla-esr60", "jamun")
-        if 'win32' in build_platform and is_nightly and project not in no_stub:
-            # TODO: fix the project hint to be a better design
-            # We don't build stub installer on esr, so we don't want to sign it
+
+        if use_stub:
             artifacts_specifications[0]['artifacts'] += [
                 get_artifact_path(task, '{locale}/setup-stub.exe')
             ]
@@ -99,3 +97,18 @@ def _strip_widevine_for_partners(artifacts_specifications):
             spec['formats'].remove('widevine')
 
     return artifacts_specifications
+
+
+def get_signed_artifacts(input, formats):
+    """
+    Get the list of signed artifacts for the given input and formats.
+    """
+    artifacts = set()
+    if input.endswith('.dmg'):
+        artifacts.add(input.replace('.dmg', '.tar.gz'))
+    else:
+        artifacts.add(input)
+    if 'gpg' in formats:
+        artifacts.add('{}.asc'.format(input))
+
+    return artifacts

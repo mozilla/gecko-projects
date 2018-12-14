@@ -4852,6 +4852,10 @@ nsIDocument::SetContainer(nsDocShell* aContainer)
   }
 
   EnumerateActivityObservers(NotifyActivityChanged, nullptr);
+
+  // IsTopLevelWindowInactive depends on the docshell, so
+  // update the cached value now that it's available.
+  UpdateDocumentStates(NS_DOCUMENT_STATE_WINDOW_INACTIVE);
   if (!aContainer) {
     return;
   }
@@ -10295,6 +10299,7 @@ public:
       parser->BlockParser();
       mParser = do_GetWeakReference(parser);
       mDocument = aDocument;
+      mDocument->BlockOnload();
     }
   }
 
@@ -10333,6 +10338,7 @@ private:
       if (parser == docParser) {
         parser->UnblockParser();
         parser->ContinueInterruptedParsingAsync();
+        mDocument->UnblockOnload(false);
       }
     }
     mParser = nullptr;

@@ -206,6 +206,11 @@ getenv(const char* name)
 #endif
 
 #ifndef XP_WIN
+// Newer Linux systems support MADV_FREE, but we're not supporting
+// that properly. bug #1406304.
+#if defined(XP_LINUX) && defined(MADV_FREE)
+#undef MADV_FREE
+#endif
 #ifndef MADV_FREE
 #define MADV_FREE MADV_DONTNEED
 #endif
@@ -537,9 +542,20 @@ static void*
 base_alloc(size_t aSize);
 
 // Set to true once the allocator has been initialized.
-static Atomic<bool> malloc_initialized(false);
+#if defined(_MSC_VER) && !defined(__clang__)
+// MSVC may create a static initializer for an Atomic<bool>, which may actually
+// run after `malloc_init` has been called once, which triggers multiple
+// initializations.
+// We work around the problem by not using an Atomic<bool> at all. There is a
+// theoretical problem with using `malloc_initialized` non-atomically, but
+// practically, this is only true if `malloc_init` is never called before
+// threads are created.
+static bool malloc_initialized;
+#else
+static Atomic<bool> malloc_initialized;
+#endif
 
-static StaticMutex gInitLock;
+static StaticMutex gInitLock = { STATIC_MUTEX_INIT };
 
 // ***************************************************************************
 // Statistics data structures.
@@ -2864,11 +2880,6 @@ arena_bin_t::Init(SizeClass aSizeClass)
     } while (kFixedHeaderSize + (sizeof(unsigned) * try_mask_nelms) >
              try_reg0_offset);
 
-    // Don't allow runs larger than the largest possible large size class.
-    if (try_run_size > gMaxLargeClass) {
-      break;
-    }
-
     // Try to keep the run overhead below kRunOverhead.
     if (Fraction(try_reg0_offset, try_run_size) <= kRunOverhead) {
       break;
@@ -2892,6 +2903,13 @@ arena_bin_t::Init(SizeClass aSizeClass)
     // so we give up if the required size for mRegionsMask more than doubles the
     // size of the run header.
     if (try_mask_nelms * sizeof(unsigned) >= kFixedHeaderSize) {
+      break;
+    }
+
+    // If next iteration is going to be larger than the largest possible large
+    // size class, then we didn't find a setup where the overhead is small enough,
+    // and we can't do better than the current settings, so just use that.
+    if (try_run_size + gPageSize > gMaxLargeClass) {
       break;
     }
 

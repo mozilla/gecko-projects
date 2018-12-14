@@ -21,7 +21,6 @@ from mozharness.base.script import PreScriptAction
 from mozharness.base.log import INFO, ERROR
 from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 from mozharness.base.vcs.vcsbase import MercurialScript
-from mozharness.mozilla.blob_upload import BlobUploadMixin, blobupload_config_options
 from mozharness.mozilla.tooltool import TooltoolMixin
 from mozharness.mozilla.structuredlog import StructuredOutputParser
 from mozharness.mozilla.testing.codecoverage import (
@@ -30,7 +29,7 @@ from mozharness.mozilla.testing.codecoverage import (
 )
 
 
-class AWSY(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin, CodeCoverageMixin):
+class AWSY(TestingMixin, MercurialScript, TooltoolMixin, CodeCoverageMixin):
     config_options = [
         [["--e10s"],
          {"action": "store_true",
@@ -50,8 +49,7 @@ class AWSY(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin, CodeCo
           "default": False,
           "help": "Tries to enable the WebRender compositor.",
           }]
-    ] + testing_config_options + copy.deepcopy(blobupload_config_options) \
-                               + copy.deepcopy(code_coverage_config_options)
+    ] + testing_config_options + copy.deepcopy(code_coverage_config_options)
 
     error_list = [
         {'regex': re.compile(r'''(TEST-UNEXPECTED|PROCESS-CRASH)'''), 'level': ERROR},
@@ -205,7 +203,7 @@ class AWSY(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin, CodeCo
 
         self.log("AWSY exited with return code %s: %s" % (return_code, tbpl_status),
                  level=level)
-        self.buildbot_status(tbpl_status)
+        self.record_status(tbpl_status)
 
 
 if __name__ == '__main__':

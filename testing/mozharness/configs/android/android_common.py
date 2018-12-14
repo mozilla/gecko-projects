@@ -8,7 +8,6 @@ import os
 config = {
     "default_actions": [
         'clobber',
-        'read-buildbot-config',
         'setup-avds',
         'start-emulator',
         'download-and-extract',
@@ -22,10 +21,6 @@ config = {
     "hostutils_manifest_path": "testing/config/tooltool-manifests/linux64/hostutils.manifest",
     "avds_dir": "/builds/worker/workspace/build/.android",
     "minidump_stackwalk_path": "/usr/local/bin/linux64-minidump_stackwalk",
-    "find_links": [
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "pip_index": False,
 
     "suite_definitions": {
         "mochitest": {

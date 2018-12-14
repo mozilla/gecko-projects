@@ -11,12 +11,9 @@ DISABLE_SCREEN_SAVER = False
 ADJUST_MOUSE_AND_SCREEN = True
 #####
 config = {
-    "buildbot_json_path": "buildprops.json",
     "exes": {
         'python': sys.executable,
         'hg': 'c:/mozilla-build/hg/hg',
-        'mozinstall': ['%s/build/venv/scripts/python' % os.getcwd(),
-                       '%s/build/venv/scripts/mozinstall-script.py' % os.getcwd()],
     },
     ###
     "installer_path": INSTALLER_PATH,
@@ -25,11 +22,6 @@ config = {
     "virtualenv_path": 'venv',
     "virtualenv_modules": ['pywin32'],
 
-    "find_links": [
-        "http://pypi.pvt.build.mozilla.org/pub",
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "pip_index": False,
     "exe_suffix": EXE_SUFFIX,
     "run_file_names": {
         "mochitest": "runtests.py",
@@ -253,18 +245,13 @@ config = {
     ],
     "vcs_output_timeout": 1000,
     "minidump_save_path": "%(abs_work_dir)s/../minidumps",
-    "buildbot_max_log_size": 52428800,
-    "default_blob_upload_servers": [
-        "https://blobupload.elasticbeanstalk.com",
-    ],
     "unstructured_flavors": {"xpcshell": [],
-                            "gtest": [],
-                            "mozmill": [],
-                            "cppunittest": [],
-                            "jittest": [],
-                            "mozbase": [],
-                            },
-    "blob_uploader_auth_file": os.path.join(os.getcwd(), "oauth.txt"),
+                             "gtest": [],
+                             "mozmill": [],
+                             "cppunittest": [],
+                             "jittest": [],
+                             "mozbase": [],
+                             },
     "download_minidump_stackwalk": True,
     "minidump_stackwalk_path": "win32-minidump_stackwalk.exe",
     "minidump_tooltool_manifest_path": "config/tooltool-manifests/win32/releng.manifest",

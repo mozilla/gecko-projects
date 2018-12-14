@@ -27,6 +27,8 @@
 #include <dbus/dbus.h>
 #include <dbus/dbus-glib-lowlevel.h>
 
+#include <dlfcn.h>
+
 NS_IMPL_ISUPPORTS(nsDBusRemoteService,
                   nsIRemoteService)
 
@@ -172,6 +174,7 @@ nsDBusRemoteService::Startup(const char* aAppName, const char* aProfileName)
     return NS_ERROR_FAILURE;
   }
   dbus_connection_set_exit_on_disconnect(mConnection, false);
+  dbus_connection_setup_with_g_main(mConnection, nullptr);
 
   mAppName = aAppName;
   ToLowerCase(mAppName);
@@ -189,6 +192,23 @@ nsDBusRemoteService::Startup(const char* aAppName, const char* aProfileName)
   if (busName.Length() > DBUS_MAXIMUM_NAME_LENGTH)
     busName.Truncate(DBUS_MAXIMUM_NAME_LENGTH);
 
+  static auto sDBusValidateBusName =
+    (bool (*)(const char *, DBusError *))
+    dlsym(RTLD_DEFAULT, "dbus_validate_bus_name");
+  if (!sDBusValidateBusName) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // We don't have a valid busName yet - try to create a default one.
+  if (!sDBusValidateBusName(busName.get(), nullptr)) {
+    busName = nsPrintfCString("org.mozilla.%s.%s", mAppName.get(), "default");
+    if (!sDBusValidateBusName(busName.get(), nullptr)) {
+      // We failed completelly to get a valid bus name - just quit
+      // to prevent crash at dbus_bus_request_name().
+      return NS_ERROR_FAILURE;
+    }
+  }
+
   DBusError err;
   dbus_error_init(&err);
   dbus_bus_request_name(mConnection, busName.get(),
@@ -201,9 +221,8 @@ nsDBusRemoteService::Startup(const char* aAppName, const char* aProfileName)
     return NS_ERROR_FAILURE;
   }
 
-  nsAutoCString pathName;
-  pathName = nsPrintfCString("/org/mozilla/%s/Remote", mAppName.get());
-  if (!dbus_connection_register_object_path(mConnection, pathName.get(),
+  mPathName = nsPrintfCString("/org/mozilla/%s/Remote", mAppName.get());
+  if (!dbus_connection_register_object_path(mConnection, mPathName.get(),
                                             &remoteHandlersTable, this)) {
     mConnection = nullptr;
     return NS_ERROR_FAILURE;
@@ -215,6 +234,8 @@ nsDBusRemoteService::Startup(const char* aAppName, const char* aProfileName)
 NS_IMETHODIMP
 nsDBusRemoteService::Shutdown()
 {
+  dbus_connection_unregister_object_path(mConnection, mPathName.get());
+
   // dbus_connection_unref() will be called by RefPtr here.
   mConnection = nullptr;
   return NS_OK;

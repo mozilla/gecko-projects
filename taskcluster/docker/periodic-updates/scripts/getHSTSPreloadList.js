@@ -23,6 +23,7 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.importGlobalProperties(["XMLHttpRequest"]);
 
 const SOURCE = "https://chromium.googlesource.com/chromium/src/net/+/master/http/transport_security_state_static.json?format=TEXT";
+const TOOL_SOURCE = "https://hg.mozilla.org/mozilla-central/file/tip/taskcluster/docker/periodic-updates/scripts/getHSTSPreloadList.js";
 const OUTPUT = "nsSTSPreloadList.inc";
 const ERROR_OUTPUT = "nsSTSPreloadList.errors";
 const MINIMUM_REQUIRED_MAX_AGE = 60 * 60 * 24 * 7 * 18;
@@ -167,32 +168,39 @@ RedirectAndAuthStopper.prototype = {
 };
 
 function fetchstatus(host) {
-  let xhr = new XMLHttpRequest();
-  let uri = "https://" + host.name + "/";
+  return new Promise((resolve, reject) => {
+    let xhr = new XMLHttpRequest();
+    let uri = "https://" + host.name + "/";
 
-  xhr.open("head", uri, true);
-  xhr.setRequestHeader("X-Automated-Tool", "https://hg.mozilla.org/mozilla-central/file/tip/security/manager/tools/getHSTSPreloadList.js");
-  xhr.timeout = REQUEST_TIMEOUT;
+    xhr.open("head", uri, true);
+    xhr.setRequestHeader("X-Automated-Tool", TOOL_SOURCE);
+    xhr.timeout = REQUEST_TIMEOUT;
 
-  try {
+    let errorHandler = () => {
+      dump("ERROR: exception making request to " + host.name + "\n");
+      resolve(processStsHeader(host, null, xhr.status,
+                               xhr.channel && xhr.channel.securityInfo));
+    };
+
+    xhr.onerror = errorHandler;
+    xhr.ontimeout = errorHandler;
+    xhr.onabort = errorHandler;
+
+    xhr.onload = () => {
+      let header = xhr.getResponseHeader("strict-transport-security");
+      resolve(processStsHeader(host, header, xhr.status, xhr.channel.securityInfo));
+    };
+
     xhr.channel.notificationCallbacks = new RedirectAndAuthStopper();
     xhr.send();
-  } catch (e) {
-    dump("ERROR: exception making request to " + host.name + ": " + e + "\n");
-    return processStsHeader(host, null, xhr.status, xhr.channel.securityInfo);
-  }
-
-  let header = xhr.getResponseHeader("strict-transport-security");
-  return processStsHeader(host, header, xhr.status, xhr.channel.securityInfo);
+  });
 }
 
 async function getHSTSStatus(host) {
-  return new Promise((resolve, reject) => {
-    do {
-      host = fetchstatus(host);
-    } while (shouldRetry(host));
-    resolve(host);
-  });
+  do {
+    host = await fetchstatus(host);
+  } while (shouldRetry(host));
+  return host;
 }
 
 function compareHSTSStatus(a, b) {
@@ -250,23 +258,29 @@ function spinResolve(promise) {
 }
 
 async function probeHSTSStatuses(inHosts) {
-  let promises = [];
-
-  dump("Examining " + inHosts.length + " hosts.\n");
+  let totalLength = inHosts.length;
+  dump("Examining " + totalLength + " hosts.\n");
 
   // Debug/testing on a small number of hosts
   // while (inHosts.length > 40000) {
 
+  // Make requests in batches of 250. Otherwise, we have too many in-flight
+  // requests and the time it takes to process them causes them all to time out.
+  let allResults = [];
   while (inHosts.length > 0) {
-    let host = inHosts.shift();
-    promises.push(getHSTSStatus(host));
+    let promises = [];
+    for (let i = 0; i < 250 && inHosts.length > 0; i++) {
+      let host = inHosts.shift();
+      promises.push(getHSTSStatus(host));
+    }
+    let results = await Promise.all(promises);
+    let progress = (100 * (totalLength - inHosts.length) / totalLength).toFixed(2);
+    dump(progress + "% done\n");
+    allResults = allResults.concat(results);
   }
 
-  dump("Waiting for " + promises.length + " responses.\n");
-
-  let result = await Promise.all(promises);
-  dump("HSTS Probe received " + result.length + " statuses.\n");
-  return result;
+  dump("HSTS Probe received " + allResults.length + " statuses.\n");
+  return allResults;
 }
 
 function readCurrentList(filename) {

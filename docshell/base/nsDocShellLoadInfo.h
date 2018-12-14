@@ -26,7 +26,6 @@ public:
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOCSHELLLOADINFO
-
 protected:
   virtual ~nsDocShellLoadInfo();
 
@@ -36,6 +35,10 @@ protected:
   nsCOMPtr<nsIURI> mResultPrincipalURI;
   nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
   bool mResultPrincipalURIIsSome;
+  bool mKeepResultPrincipalURIIfSet; // if http-equiv="refresh" cause reload we
+                                     // do not want to replace
+                                     // ResultPrinicpalURI if it was already
+                                     // set.
   bool mLoadReplace;
   bool mInheritPrincipal;
   bool mPrincipalIsExplicit;
@@ -52,6 +55,10 @@ protected:
   nsString mSrcdocData;
   nsCOMPtr<nsIDocShell> mSourceDocShell;
   nsCOMPtr<nsIURI> mBaseURI;
+
+  // This will be true if this load is triggered by attribute changes.
+  // See nsILoadInfo.isFromProcessingFrameAttributes
+  bool mIsFromProcessingFrameAttributes;
 };
 
 #endif /* nsDocShellLoadInfo_h__ */

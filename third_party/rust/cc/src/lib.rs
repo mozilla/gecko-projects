@@ -61,15 +61,14 @@
 extern crate rayon;
 
 use std::env;
-use std::ffi::{OsString, OsStr};
+use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::path::{PathBuf, Path};
-use std::process::{Command, Stdio, Child};
-use std::io::{self, BufReader, BufRead, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::thread::{self, JoinHandle};
-
-#[cfg(feature = "parallel")]
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 // These modules are all glue to support reading the MSVC version from
 // the registry and from COM interfaces
@@ -97,6 +96,7 @@ pub struct Build {
     objects: Vec<PathBuf>,
     flags: Vec<String>,
     flags_supported: Vec<String>,
+    known_flag_support_status: Arc<Mutex<HashMap<String, bool>>>,
     files: Vec<PathBuf>,
     cpp: bool,
     cpp_link_stdlib: Option<Option<String>>,
@@ -116,7 +116,9 @@ pub struct Build {
     shared_flag: Option<bool>,
     static_flag: Option<bool>,
     warnings_into_errors: bool,
-    warnings: bool,
+    warnings: Option<bool>,
+    extra_warnings: Option<bool>,
+    env_cache: Arc<Mutex<HashMap<String, Option<String>>>>,
 }
 
 /// Represents the types of errors that may occur while using cc-rs.
@@ -174,6 +176,7 @@ pub struct Tool {
     env: Vec<(OsString, OsString)>,
     family: ToolFamily,
     cuda: bool,
+    removed_args: Vec<OsString>,
 }
 
 /// Represents the family of tools this tool belongs to.
@@ -189,22 +192,27 @@ enum ToolFamily {
     /// and its cross-compilation approach is different.
     Clang,
     /// Tool is the MSVC cl.exe.
-    Msvc,
+    Msvc { clang_cl: bool },
 }
 
 impl ToolFamily {
     /// What the flag to request debug info for this family of tools look like
-    fn debug_flag(&self) -> &'static str {
+    fn add_debug_flags(&self, cmd: &mut Tool) {
         match *self {
-            ToolFamily::Msvc => "/Z7",
-            ToolFamily::Gnu | ToolFamily::Clang => "-g",
+            ToolFamily::Msvc { .. } => {
+                cmd.push_cc_arg("/Z7".into());
+            }
+            ToolFamily::Gnu | ToolFamily::Clang => {
+                cmd.push_cc_arg("-g".into());
+                cmd.push_cc_arg("-fno-omit-frame-pointer".into());
+            }
         }
     }
 
     /// What the flag to include directories into header search path looks like
     fn include_flag(&self) -> &'static str {
         match *self {
-            ToolFamily::Msvc => "/I",
+            ToolFamily::Msvc { .. } => "/I",
             ToolFamily::Gnu | ToolFamily::Clang => "-I",
         }
     }
@@ -212,26 +220,31 @@ impl ToolFamily {
     /// What the flag to request macro-expanded source output looks like
     fn expand_flag(&self) -> &'static str {
         match *self {
-            ToolFamily::Msvc => "/E",
+            ToolFamily::Msvc { .. } => "/E",
             ToolFamily::Gnu | ToolFamily::Clang => "-E",
         }
     }
 
     /// What the flags to enable all warnings
-    fn warnings_flags(&self) -> &'static [&'static str] {
-        static MSVC_FLAGS: &'static [&'static str] = &["/W4"];
-        static GNU_CLANG_FLAGS: &'static [&'static str] = &["-Wall", "-Wextra"];
-
+    fn warnings_flags(&self) -> &'static str {
         match *self {
-            ToolFamily::Msvc => &MSVC_FLAGS,
-            ToolFamily::Gnu | ToolFamily::Clang => &GNU_CLANG_FLAGS,
+            ToolFamily::Msvc { .. } => "/W4",
+            ToolFamily::Gnu | ToolFamily::Clang => "-Wall",
+        }
+    }
+
+    /// What the flags to enable extra warnings
+    fn extra_warnings_flags(&self) -> Option<&'static str> {
+        match *self {
+            ToolFamily::Msvc { .. } => None,
+            ToolFamily::Gnu | ToolFamily::Clang => Some("-Wextra"),
         }
     }
 
     /// What the flag to turn warning into errors
     fn warnings_to_errors_flag(&self) -> &'static str {
         match *self {
-            ToolFamily::Msvc => "/WX",
+            ToolFamily::Msvc { .. } => "/WX",
             ToolFamily::Gnu | ToolFamily::Clang => "-Werror",
         }
     }
@@ -240,9 +253,8 @@ impl ToolFamily {
     /// debug info flag passed to the C++ compiler.
     fn nvcc_debug_flag(&self) -> &'static str {
         match *self {
-            ToolFamily::Msvc => unimplemented!(),
-            ToolFamily::Gnu |
-            ToolFamily::Clang => "-G",
+            ToolFamily::Msvc { .. } => unimplemented!(),
+            ToolFamily::Gnu | ToolFamily::Clang => "-G",
         }
     }
 
@@ -250,10 +262,13 @@ impl ToolFamily {
     /// compiler.
     fn nvcc_redirect_flag(&self) -> &'static str {
         match *self {
-            ToolFamily::Msvc => unimplemented!(),
-            ToolFamily::Gnu |
-            ToolFamily::Clang => "-Xcompiler",
+            ToolFamily::Msvc { .. } => unimplemented!(),
+            ToolFamily::Gnu | ToolFamily::Clang => "-Xcompiler",
         }
+    }
+
+    fn verbose_stderr(&self) -> bool {
+        *self == ToolFamily::Clang
     }
 }
 
@@ -269,10 +284,7 @@ struct Object {
 impl Object {
     /// Create a new source file -> object file pair.
     fn new(src: PathBuf, dst: PathBuf) -> Object {
-        Object {
-            src: src,
-            dst: dst,
-        }
+        Object { src: src, dst: dst }
     }
 }
 
@@ -289,6 +301,7 @@ impl Build {
             objects: Vec::new(),
             flags: Vec::new(),
             flags_supported: Vec::new(),
+            known_flag_support_status: Arc::new(Mutex::new(HashMap::new())),
             files: Vec::new(),
             shared_flag: None,
             static_flag: None,
@@ -307,8 +320,10 @@ impl Build {
             cargo_metadata: true,
             pic: None,
             static_crt: None,
-            warnings: true,
+            warnings: None,
+            extra_warnings: None,
             warnings_into_errors: false,
+            env_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -344,10 +359,8 @@ impl Build {
     ///     .compile("foo");
     /// ```
     pub fn define<'a, V: Into<Option<&'a str>>>(&mut self, var: &str, val: V) -> &mut Build {
-        self.definitions.push((
-            var.to_string(),
-            val.into().map(|s| s.to_string()),
-        ));
+        self.definitions
+            .push((var.to_string(), val.into().map(|s| s.to_string())));
         self
     }
 
@@ -398,22 +411,40 @@ impl Build {
     ///
     /// It may return error if it's unable to run the compilier with a test file
     /// (e.g. the compiler is missing or a write to the `out_dir` failed).
+    ///
+    /// Note: Once computed, the result of this call is stored in the
+    /// `known_flag_support` field. If `is_flag_supported(flag)`
+    /// is called again, the result will be read from the hash table.
     pub fn is_flag_supported(&self, flag: &str) -> Result<bool, Error> {
+        let mut known_status = self.known_flag_support_status.lock().unwrap();
+        if let Some(is_supported) = known_status.get(flag).cloned() {
+            return Ok(is_supported);
+        }
+
         let out_dir = self.get_out_dir()?;
         let src = self.ensure_check_file()?;
         let obj = out_dir.join("flag_check");
         let target = self.get_target()?;
+        let host = self.get_host()?;
         let mut cfg = Build::new();
         cfg.flag(flag)
             .target(&target)
             .opt_level(0)
-            .host(&target)
+            .host(&host)
             .debug(false)
             .cpp(self.cpp)
             .cuda(self.cuda);
-        let compiler = cfg.try_get_compiler()?;
+        let mut compiler = cfg.try_get_compiler()?;
+
+        // Clang uses stderr for verbose output, which yields a false positive
+        // result if the CFLAGS/CXXFLAGS include -v to aid in debugging.
+        if compiler.family.verbose_stderr() {
+            compiler.remove_arg("-v".into());
+        }
+
         let mut cmd = compiler.to_command();
-        command_add_output_file(&mut cmd, &obj, target.contains("msvc"), false);
+        let is_arm = target.contains("aarch64") || target.contains("arm");
+        command_add_output_file(&mut cmd, &obj, target.contains("msvc"), false, is_arm);
 
         // We need to explicitly tell msvc not to link and create an exe
         // in the root directory of the crate
@@ -424,7 +455,10 @@ impl Build {
         cmd.arg(&src);
 
         let output = cmd.output()?;
-        Ok(output.stderr.is_empty())
+        let is_supported = output.stderr.is_empty();
+
+        known_status.insert(flag.to_owned(), is_supported);
+        Ok(is_supported)
     }
 
     /// Add an arbitrary flag to the invocation of the compiler if it supports it
@@ -565,7 +599,30 @@ impl Build {
     ///     .compile("libfoo.a");
     /// ```
     pub fn warnings(&mut self, warnings: bool) -> &mut Build {
-        self.warnings = warnings;
+        self.warnings = Some(warnings);
+        self.extra_warnings = Some(warnings);
+        self
+    }
+
+    /// Set extra warnings flags.
+    ///
+    /// Adds some flags:
+    /// - nothing for MSVC.
+    /// - "-Wextra" for GNU and Clang.
+    ///
+    /// Enabled by default.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// // Disables -Wextra, -Wall remains enabled:
+    /// cc::Build::new()
+    ///     .file("src/foo.c")
+    ///     .extra_warnings(false)
+    ///     .compile("libfoo.a");
+    /// ```
+    pub fn extra_warnings(&mut self, warnings: bool) -> &mut Build {
+        self.extra_warnings = Some(warnings);
         self
     }
 
@@ -575,6 +632,8 @@ impl Build {
     /// The default value of this property depends on the current target: On
     /// OS X `Some("c++")` is used, when compiling for a Visual Studio based
     /// target `None` is used and for other targets `Some("stdc++")` is used.
+    /// If the `CXXSTDLIB` environment variable is set, its value will
+    /// override the default value.
     ///
     /// A value of `None` indicates that no automatic linking should happen,
     /// otherwise cargo will link against the specified library.
@@ -777,9 +836,8 @@ impl Build {
         A: AsRef<OsStr>,
         B: AsRef<OsStr>,
     {
-        self.env.push(
-            (a.as_ref().to_owned(), b.as_ref().to_owned()),
-        );
+        self.env
+            .push((a.as_ref().to_owned(), b.as_ref().to_owned()));
         self
     }
 
@@ -880,31 +938,19 @@ impl Build {
     fn compile_objects(&self, objs: &[Object]) -> Result<(), Error> {
         use self::rayon::prelude::*;
 
-        let mut cfg = rayon::Configuration::new();
         if let Ok(amt) = env::var("NUM_JOBS") {
             if let Ok(amt) = amt.parse() {
-                cfg = cfg.num_threads(amt);
+                let _ = rayon::ThreadPoolBuilder::new()
+                    .num_threads(amt)
+                    .build_global();
             }
         }
-        drop(rayon::initialize(cfg));
-
-        let results: Mutex<Vec<Result<(), Error>>> = Mutex::new(Vec::new());
-
-        objs.par_iter().with_max_len(1).for_each(
-            |obj| {
-                let res = self.compile_object(obj);
-                results.lock().unwrap().push(res)
-            },
-        );
 
         // Check for any errors and return the first one found.
-        for result in results.into_inner().unwrap().iter() {
-            if result.is_err() {
-                return result.clone();
-            }
-        }
-
-        Ok(())
+        objs.par_iter()
+            .with_max_len(1)
+            .map(|obj| self.compile_object(obj))
+            .collect()
     }
 
     #[cfg(not(feature = "parallel"))]
@@ -917,7 +963,8 @@ impl Build {
 
     fn compile_object(&self, obj: &Object) -> Result<(), Error> {
         let is_asm = obj.src.extension().and_then(|s| s.to_str()) == Some("asm");
-        let msvc = self.get_target()?.contains("msvc");
+        let target = self.get_target()?;
+        let msvc = target.contains("msvc");
         let (mut cmd, name) = if msvc && is_asm {
             self.msvc_macro_assembler()?
         } else {
@@ -931,15 +978,17 @@ impl Build {
                 compiler
                     .path
                     .file_name()
-                    .ok_or_else(|| {
-                        Error::new(ErrorKind::IOError, "Failed to get compiler path.")
-                    })?
+                    .ok_or_else(|| Error::new(ErrorKind::IOError, "Failed to get compiler path."))?
                     .to_string_lossy()
                     .into_owned(),
             )
         };
-        command_add_output_file(&mut cmd, &obj.dst, msvc, is_asm);
-        cmd.arg(if msvc { "/c" } else { "-c" });
+        let is_arm = target.contains("aarch64") || target.contains("arm");
+        command_add_output_file(&mut cmd, &obj.dst, msvc, is_asm, is_arm);
+        // armasm and armasm64 don't requrie -c option
+        if !msvc || !is_asm || !is_arm {
+            cmd.arg(if msvc { "/c" } else { "-c" });
+        }
         cmd.arg(&obj.src);
 
         run(&mut cmd, &name)?;
@@ -967,9 +1016,7 @@ impl Build {
         let name = compiler
             .path
             .file_name()
-            .ok_or_else(|| {
-                Error::new(ErrorKind::IOError, "Failed to get compiler path.")
-            })?
+            .ok_or_else(|| Error::new(ErrorKind::IOError, "Failed to get compiler path."))?
             .to_string_lossy()
             .into_owned();
 
@@ -1032,7 +1079,7 @@ impl Build {
         // Non-target flags
         // If the flag is not conditioned on target variable, it belongs here :)
         match cmd.family {
-            ToolFamily::Msvc => {
+            ToolFamily::Msvc { .. } => {
                 assert!(!self.cuda,
                     "CUDA C++ compilation not supported for MSVC, yet... but you are welcome to implement it :)");
 
@@ -1054,8 +1101,8 @@ impl Build {
                 cmd.args.push(crt_flag.into());
 
                 match &opt_level[..] {
-                    "z" | "s" => cmd.args.push("/Os".into()),
-                    "1" => cmd.args.push("/O1".into()),
+                    // Msvc uses /O1 to enable all optimizations that minimize code size.
+                    "z" | "s" | "1" => cmd.args.push("/O1".into()),
                     // -O3 is a valid value for gcc and clang compilers, but not msvc. Cap to /O2.
                     "2" | "3" => cmd.args.push("/O2".into()),
                     _ => {}
@@ -1070,8 +1117,10 @@ impl Build {
                     cmd.args.push(format!("-O{}", opt_level).into());
                 }
 
-                cmd.push_cc_arg("-ffunction-sections".into());
-                cmd.push_cc_arg("-fdata-sections".into());
+                if !target.contains("-ios") {
+                    cmd.push_cc_arg("-ffunction-sections".into());
+                    cmd.push_cc_arg("-fdata-sections".into());
+                }
                 if self.pic.unwrap_or(!target.contains("windows-gnu")) {
                     cmd.push_cc_arg("-fPIC".into());
                 }
@@ -1086,8 +1135,8 @@ impl Build {
                 let nvcc_debug_flag = cmd.family.nvcc_debug_flag().into();
                 cmd.args.push(nvcc_debug_flag);
             }
-            let debug_flag = cmd.family.debug_flag().into();
-            cmd.push_cc_arg(debug_flag);
+            let family = cmd.family;
+            family.add_debug_flags(&mut cmd);
         }
 
         // Target flags
@@ -1095,9 +1144,20 @@ impl Build {
             ToolFamily::Clang => {
                 cmd.args.push(format!("--target={}", target).into());
             }
-            ToolFamily::Msvc => {
-                if target.contains("i586") {
-                    cmd.args.push("/ARCH:IA32".into());
+            ToolFamily::Msvc { clang_cl } => {
+                if clang_cl {
+                    if target.contains("x86_64") {
+                        cmd.args.push("-m64".into());
+                    } else if target.contains("i586") {
+                        cmd.args.push("-m32".into());
+                        cmd.args.push("/arch:IA32".into());
+                    } else {
+                        cmd.args.push("-m32".into());
+                    }
+                } else {
+                    if target.contains("i586") {
+                        cmd.args.push("/ARCH:IA32".into());
+                    }
                 }
             }
             ToolFamily::Gnu => {
@@ -1109,22 +1169,33 @@ impl Build {
                     cmd.args.push("-m64".into());
                 }
 
-                if self.static_flag.is_none() && target.contains("musl") {
-                    cmd.args.push("-static".into());
+                if self.static_flag.is_none() {
+                    let features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or(String::new());
+                    if features.contains("crt-static") {
+                        cmd.args.push("-static".into());
+                    }
                 }
 
                 // armv7 targets get to use armv7 instructions
-                if target.starts_with("armv7-") && target.contains("-linux-") {
+                if (target.starts_with("armv7") || target.starts_with("thumbv7")) && target.contains("-linux-") {
                     cmd.args.push("-march=armv7-a".into());
                 }
 
-                // On android we can guarantee some extra float instructions
-                // (specified in the android spec online)
-                if target.starts_with("armv7-linux-androideabi") {
-                    cmd.args.push("-march=armv7-a".into());
+                // (x86 Android doesn't say "eabi")
+                if target.contains("-androideabi") && target.contains("v7") {
+                    // -march=armv7-a handled above
                     cmd.args.push("-mthumb".into());
-                    cmd.args.push("-mfpu=vfpv3-d16".into());
+                    if !target.contains("neon") {
+                        // On android we can guarantee some extra float instructions
+                        // (specified in the android spec online)
+                        // NEON guarantees even more; see below.
+                        cmd.args.push("-mfpu=vfpv3-d16".into());
+                    }
                     cmd.args.push("-mfloat-abi=softfp".into());
+                }
+
+                if target.contains("neon") {
+                    cmd.args.push("-mfpu=neon-vfpv4".into());
                 }
 
                 if target.starts_with("armv4t-unknown-linux-") {
@@ -1169,7 +1240,7 @@ impl Build {
                 // linker that we're generating 32-bit executables as well. This'll
                 // typically only be used for build scripts which transitively use
                 // these flags that try to compile executables.
-                if target == "i686-unknown-linux-musl" {
+                if target == "i686-unknown-linux-musl" || target == "i586-unknown-linux-musl" {
                     cmd.args.push("-Wl,-melf_i386".into());
                 }
 
@@ -1193,6 +1264,31 @@ impl Build {
                 if target.starts_with("thumbv7m") {
                     cmd.args.push("-march=armv7-m".into());
                 }
+                if target.starts_with("armebv7r") | target.starts_with("armv7r") {
+                    if target.starts_with("armeb") {
+                        cmd.args.push("-mbig-endian".into());
+                    } else {
+                        cmd.args.push("-mlittle-endian".into());
+                    }
+
+                    // ARM mode
+                    cmd.args.push("-marm".into());
+
+                    // R Profile
+                    cmd.args.push("-march=armv7-r".into());
+
+                    if target.ends_with("eabihf") {
+                        // Calling convention
+                        cmd.args.push("-mfloat-abi=hard".into());
+
+                        // lowest common denominator FPU
+                        // (see Cortex-R4 technical reference manual)
+                        cmd.args.push("-mfpu=vfpv3-d16".into())
+                    } else {
+                        // Calling convention
+                        cmd.args.push("-mfloat-abi=soft".into());
+                    }
+                }
             }
         }
 
@@ -1212,14 +1308,13 @@ impl Build {
         if self.cpp {
             match (self.cpp_set_stdlib.as_ref(), cmd.family) {
                 (None, _) => {}
-                (Some(stdlib), ToolFamily::Gnu) |
-                (Some(stdlib), ToolFamily::Clang) => {
+                (Some(stdlib), ToolFamily::Gnu) | (Some(stdlib), ToolFamily::Clang) => {
                     cmd.push_cc_arg(format!("-stdlib=lib{}", stdlib).into());
                 }
                 _ => {
                     println!(
                         "cargo:warning=cpp_set_stdlib is specified, but the {:?} compiler \
-                              does not support this option, ignored",
+                         does not support this option, ignored",
                         cmd.family
                     );
                 }
@@ -1231,9 +1326,19 @@ impl Build {
             cmd.args.push(directory.into());
         }
 
-        if self.warnings {
-            for flag in cmd.family.warnings_flags().iter() {
-                cmd.push_cc_arg(flag.into());
+        // If warnings and/or extra_warnings haven't been explicitly set,
+        // then we set them only if the environment doesn't already have
+        // CFLAGS/CXXFLAGS, since those variables presumably already contain
+        // the desired set of warnings flags.
+
+        if self.warnings.unwrap_or(if self.has_flags() { false } else { true }) {
+            let wflags = cmd.family.warnings_flags().into();
+            cmd.push_cc_arg(wflags);
+        }
+
+        if self.extra_warnings.unwrap_or(if self.has_flags() { false } else { true }) {
+            if let Some(wflags) = cmd.family.extra_warnings_flags() {
+                cmd.push_cc_arg(wflags.into());
             }
         }
 
@@ -1248,7 +1353,7 @@ impl Build {
         }
 
         for &(ref key, ref value) in self.definitions.iter() {
-            let lead = if let ToolFamily::Msvc = cmd.family {
+            let lead = if let ToolFamily::Msvc { .. } = cmd.family {
                 "/"
             } else {
                 "-"
@@ -1268,10 +1373,20 @@ impl Build {
         Ok(cmd)
     }
 
+    fn has_flags(&self) -> bool {
+        let flags_env_var_name = if self.cpp { "CXXFLAGS" } else { "CFLAGS" };
+        let flags_env_var_value = self.get_var(flags_env_var_name);
+        if let Ok(_) = flags_env_var_value { true } else { false }
+    }
+
     fn msvc_macro_assembler(&self) -> Result<(Command, String), Error> {
         let target = self.get_target()?;
         let tool = if target.contains("x86_64") {
             "ml64.exe"
+        } else if target.contains("arm") {
+            "armasm.exe"
+        } else if target.contains("aarch64") {
+            "armasm64.exe"
         } else {
             "ml.exe"
         };
@@ -1307,20 +1422,55 @@ impl Build {
         if target.contains("msvc") {
             let mut cmd = match self.archiver {
                 Some(ref s) => self.cmd(s),
-                None => {
-                    windows_registry::find(&target, "lib.exe").unwrap_or_else(
-                        || {
-                            self.cmd("lib.exe")
-                        },
-                    )
-                }
+                None => windows_registry::find(&target, "lib.exe")
+                    .unwrap_or_else(|| self.cmd("lib.exe")),
             };
+
             let mut out = OsString::from("/OUT:");
             out.push(dst);
-            run(
-                cmd.arg(out).arg("/nologo").args(&objects).args(&self.objects),
-                "lib.exe",
-            )?;
+            cmd.arg(out).arg("/nologo");
+
+            // Similar to https://github.com/rust-lang/rust/pull/47507
+            // and https://github.com/rust-lang/rust/pull/48548
+            let estimated_command_line_len = objects
+                .iter()
+                .chain(&self.objects)
+                .map(|a| a.as_os_str().len())
+                .sum::<usize>();
+            if estimated_command_line_len > 1024 * 6 {
+                let mut args = String::from("\u{FEFF}"); // BOM
+                for arg in objects.iter().chain(&self.objects) {
+                    args.push('"');
+                    for c in arg.to_str().unwrap().chars() {
+                        if c == '"' {
+                            args.push('\\')
+                        }
+                        args.push(c)
+                    }
+                    args.push('"');
+                    args.push('\n');
+                }
+
+                let mut utf16le = Vec::new();
+                for code_unit in args.encode_utf16() {
+                    utf16le.push(code_unit as u8);
+                    utf16le.push((code_unit >> 8) as u8);
+                }
+
+                let mut args_file = OsString::from(dst);
+                args_file.push(".args");
+                fs::File::create(&args_file)
+                    .unwrap()
+                    .write_all(&utf16le)
+                    .unwrap();
+
+                let mut args_file_arg = OsString::from("@");
+                args_file_arg.push(args_file);
+                cmd.arg(args_file_arg);
+            } else {
+                cmd.args(&objects).args(&self.objects);
+            }
+            run(&mut cmd, "lib.exe")?;
 
             // The Rust compiler will look for libfoo.a and foo.lib, but the
             // MSVC linker will also be passed foo.lib, so be sure that both
@@ -1412,6 +1562,18 @@ impl Build {
 
         cmd.args.push("-isysroot".into());
         cmd.args.push(sdk_path.trim().into());
+        cmd.args.push("-fembed-bitcode".into());
+        /*
+         * TODO we probably ultimatedly want the -fembed-bitcode-marker flag
+         * but can't have it now because of an issue in LLVM:
+         * https://github.com/alexcrichton/cc-rs/issues/301
+         * https://github.com/rust-lang/rust/pull/48896#comment-372192660
+         */
+        /*
+        if self.get_opt_level()? == "0" {
+            cmd.args.push("-fembed-bitcode-marker".into());
+        }
+        */
 
         Ok(())
     }
@@ -1430,44 +1592,53 @@ impl Build {
         }
         let host = self.get_host()?;
         let target = self.get_target()?;
-        let (env, msvc, gnu, traditional) = if self.cpp {
-            ("CXX", "cl.exe", "g++", "c++")
+        let (env, msvc, gnu, traditional, clang) = if self.cpp {
+            ("CXX", "cl.exe", "g++", "c++", "clang++")
         } else {
-            ("CC", "cl.exe", "gcc", "cc")
+            ("CC", "cl.exe", "gcc", "cc", "clang")
         };
 
         // On Solaris, c++/cc unlikely to exist or be correct.
-        let default = if host.contains("solaris") { gnu } else { traditional };
+        let default = if host.contains("solaris") {
+            gnu
+        } else {
+            traditional
+        };
 
-        let tool_opt: Option<Tool> =
-            self.env_tool(env)
-                .map(|(tool, cc, args)| {
-                    let mut t = Tool::new(PathBuf::from(tool));
-                    if let Some(cc) = cc {
-                        t.cc_wrapper_path = Some(PathBuf::from(cc));
-                    }
-                    for arg in args {
-                        t.cc_wrapper_args.push(arg.into());
-                    }
-                    t
-                })
-                .or_else(|| {
-                    if target.contains("emscripten") {
-                        let tool = if self.cpp { "em++" } else { "emcc" };
-                        // Windows uses bat file so we have to be a bit more specific
-                        if cfg!(windows) {
-                            let mut t = Tool::new(PathBuf::from("cmd"));
-                            t.args.push("/c".into());
-                            t.args.push(format!("{}.bat", tool).into());
-                            Some(t)
-                        } else {
-                            Some(Tool::new(PathBuf::from(tool)))
-                        }
+        let cl_exe = windows_registry::find_tool(&target, "cl.exe");
+
+        let tool_opt: Option<Tool> = self.env_tool(env)
+            .map(|(tool, cc, args)| {
+                // chop off leading/trailing whitespace to work around
+                // semi-buggy build scripts which are shared in
+                // makefiles/configure scripts (where spaces are far more
+                // lenient)
+                let mut t = Tool::new(PathBuf::from(tool.trim()));
+                if let Some(cc) = cc {
+                    t.cc_wrapper_path = Some(PathBuf::from(cc));
+                }
+                for arg in args {
+                    t.cc_wrapper_args.push(arg.into());
+                }
+                t
+            })
+            .or_else(|| {
+                if target.contains("emscripten") {
+                    let tool = if self.cpp { "em++" } else { "emcc" };
+                    // Windows uses bat file so we have to be a bit more specific
+                    if cfg!(windows) {
+                        let mut t = Tool::new(PathBuf::from("cmd"));
+                        t.args.push("/c".into());
+                        t.args.push(format!("{}.bat", tool).into());
+                        Some(t)
                     } else {
-                        None
+                        Some(Tool::new(PathBuf::from(tool)))
                     }
-                })
-                .or_else(|| windows_registry::find_tool(&target, "cl.exe"));
+                } else {
+                    None
+                }
+            })
+            .or_else(|| cl_exe.clone());
 
         let tool = match tool_opt {
             Some(t) => t,
@@ -1479,7 +1650,20 @@ impl Build {
                         format!("{}.exe", gnu)
                     }
                 } else if target.contains("android") {
-                    format!("{}-{}", target.replace("armv7", "arm"), gnu)
+                    let target = target
+                        .replace("armv7neon", "arm")
+                        .replace("armv7", "arm")
+                        .replace("thumbv7neon", "arm")
+                        .replace("thumbv7", "arm");
+                    let gnu_compiler = format!("{}-{}", target, gnu);
+                    let clang_compiler = format!("{}-{}", target, clang);
+                    // Check if gnu compiler is present
+                    // if not, use clang
+                    if Command::new(&gnu_compiler).spawn().is_ok() {
+                        gnu_compiler
+                    } else {
+                        clang_compiler
+                    }
                 } else if target.contains("cloudabi") {
                     format!("{}-{}", target, traditional)
                 } else if self.get_host()? != target {
@@ -1489,6 +1673,7 @@ impl Build {
                     let prefix = cross_compile.or(match &target[..] {
                         "aarch64-unknown-linux-gnu" => Some("aarch64-linux-gnu"),
                         "aarch64-unknown-linux-musl" => Some("aarch64-linux-musl"),
+                        "aarch64-unknown-netbsd" => Some("aarch64--netbsd"),
                         "arm-unknown-linux-gnueabi" => Some("arm-linux-gnueabi"),
                         "armv4t-unknown-linux-gnueabi" => Some("arm-linux-gnueabi"),
                         "armv5te-unknown-linux-gnueabi" => Some("arm-linux-gnueabi"),
@@ -1500,7 +1685,14 @@ impl Build {
                         "armv6-unknown-netbsd-eabihf" => Some("armv6--netbsdelf-eabihf"),
                         "armv7-unknown-linux-gnueabihf" => Some("arm-linux-gnueabihf"),
                         "armv7-unknown-linux-musleabihf" => Some("arm-linux-musleabihf"),
+                        "armv7neon-unknown-linux-gnueabihf" => Some("arm-linux-gnueabihf"),
+                        "armv7neon-unknown-linux-musleabihf" => Some("arm-linux-musleabihf"),
+                        "thumbv7-unknown-linux-gnueabihf" => Some("arm-linux-gnueabihf"),
+                        "thumbv7-unknown-linux-musleabihf" => Some("arm-linux-musleabihf"),
+                        "thumbv7neon-unknown-linux-gnueabihf" => Some("arm-linux-gnueabihf"),
+                        "thumbv7neon-unknown-linux-musleabihf" => Some("arm-linux-musleabihf"),
                         "armv7-unknown-netbsd-eabihf" => Some("armv7--netbsdelf-eabihf"),
+                        "i586-unknown-linux-musl" => Some("musl"),
                         "i686-pc-windows-gnu" => Some("i686-w64-mingw32"),
                         "i686-unknown-linux-musl" => Some("musl"),
                         "i686-unknown-netbsd" => Some("i486--netbsdelf"),
@@ -1509,13 +1701,19 @@ impl Build {
                         "mips64-unknown-linux-gnuabi64" => Some("mips64-linux-gnuabi64"),
                         "mips64el-unknown-linux-gnuabi64" => Some("mips64el-linux-gnuabi64"),
                         "powerpc-unknown-linux-gnu" => Some("powerpc-linux-gnu"),
+                        "powerpc-unknown-linux-gnuspe" => Some("powerpc-linux-gnuspe"),
                         "powerpc-unknown-netbsd" => Some("powerpc--netbsd"),
                         "powerpc64-unknown-linux-gnu" => Some("powerpc-linux-gnu"),
                         "powerpc64le-unknown-linux-gnu" => Some("powerpc64le-linux-gnu"),
                         "s390x-unknown-linux-gnu" => Some("s390x-linux-gnu"),
+                        "sparc-unknown-linux-gnu" => Some("sparc-linux-gnu"),
                         "sparc64-unknown-linux-gnu" => Some("sparc64-linux-gnu"),
                         "sparc64-unknown-netbsd" => Some("sparc64--netbsd"),
                         "sparcv9-sun-solaris" => Some("sparcv9-sun-solaris"),
+                        "armebv7r-none-eabi" => Some("arm-none-eabi"),
+                        "armebv7r-none-eabihf" => Some("arm-none-eabi"),
+                        "armv7r-none-eabi" => Some("arm-none-eabi"),
+                        "armv7r-none-eabihf" => Some("arm-none-eabi"),
                         "thumbv6m-none-eabi" => Some("arm-none-eabi"),
                         "thumbv7em-none-eabi" => Some("arm-none-eabi"),
                         "thumbv7em-none-eabihf" => Some("arm-none-eabi"),
@@ -1537,19 +1735,44 @@ impl Build {
             }
         };
 
-        let tool = if self.cuda {
-            assert!(tool.args.is_empty(),
-                "CUDA compilation currently assumes empty pre-existing args");
+        let mut tool = if self.cuda {
+            assert!(
+                tool.args.is_empty(),
+                "CUDA compilation currently assumes empty pre-existing args"
+            );
             let nvcc = match self.get_var("NVCC") {
                 Err(_) => "nvcc".into(),
                 Ok(nvcc) => nvcc,
             };
             let mut nvcc_tool = Tool::with_features(PathBuf::from(nvcc), self.cuda);
-            nvcc_tool.args.push(format!("-ccbin={}", tool.path.display()).into());
+            nvcc_tool
+                .args
+                .push(format!("-ccbin={}", tool.path.display()).into());
             nvcc_tool
         } else {
             tool
         };
+
+        // If we found `cl.exe` in our environment, the tool we're returning is
+        // an MSVC-like tool, *and* no env vars were set then set env vars for
+        // the tool that we're returning.
+        //
+        // Env vars are needed for things like `link.exe` being put into PATH as
+        // well as header include paths sometimes. These paths are automatically
+        // included by default but if the `CC` or `CXX` env vars are set these
+        // won't be used. This'll ensure that when the env vars are used to
+        // configure for invocations like `clang-cl` we still get a "works out
+        // of the box" experience.
+        if let Some(cl_exe) = cl_exe {
+            if tool.family == (ToolFamily::Msvc { clang_cl: true }) &&
+                tool.env.len() == 0 &&
+                target.contains("msvc")
+            {
+                for &(ref k, ref v) in cl_exe.env.iter() {
+                    tool.env.push((k.to_owned(), v.to_owned()));
+                }
+            }
+        }
 
         Ok(tool)
     }
@@ -1568,10 +1791,7 @@ impl Build {
             Some(res) => Ok(res),
             None => Err(Error::new(
                 ErrorKind::EnvVarNotFound,
-                &format!(
-                    "Could not find environment variable {}.",
-                    var_base
-                ),
+                &format!("Could not find environment variable {}.", var_base),
             )),
         }
     }
@@ -1585,21 +1805,68 @@ impl Build {
             .collect()
     }
 
-
     /// Returns compiler path, optional modifier name from whitelist, and arguments vec
     fn env_tool(&self, name: &str) -> Option<(String, Option<String>, Vec<String>)> {
-        self.get_var(name).ok().map(|tool| {
-            let whitelist = ["ccache", "distcc", "sccache"];
+        let tool = match self.get_var(name) {
+            Ok(tool) => tool,
+            Err(_) => return None,
+        };
 
-            for t in whitelist.iter() {
-                if tool.starts_with(t) && tool[t.len()..].starts_with(' ')  {
-                    let args = tool.split_whitespace().collect::<Vec<_>>();
+        // If this is an exact path on the filesystem we don't want to do any
+        // interpretation at all, just pass it on through. This'll hopefully get
+        // us to support spaces-in-paths.
+        if Path::new(&tool).exists() {
+            return Some((tool, None, Vec::new()));
+        }
 
-                    return (args[1].to_string(), Some(t.to_string()), args[2..].iter().map(|s| s.to_string()).collect());
-                }
+        // Ok now we want to handle a couple of scenarios. We'll assume from
+        // here on out that spaces are splitting separate arguments. Two major
+        // features we want to support are:
+        //
+        //      CC='sccache cc'
+        //
+        // aka using `sccache` or any other wrapper/caching-like-thing for
+        // compilations. We want to know what the actual compiler is still,
+        // though, because our `Tool` API support introspection of it to see
+        // what compiler is in use.
+        //
+        // additionally we want to support
+        //
+        //      CC='cc -flag'
+        //
+        // where the CC env var is used to also pass default flags to the C
+        // compiler.
+        //
+        // It's true that everything here is a bit of a pain, but apparently if
+        // you're not literally make or bash then you get a lot of bug reports.
+        let known_wrappers = ["ccache", "distcc", "sccache", "icecc"];
+
+        let mut parts = tool.split_whitespace();
+        let maybe_wrapper = match parts.next() {
+            Some(s) => s,
+            None => return None,
+        };
+
+        let file_stem = Path::new(maybe_wrapper)
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        if known_wrappers.contains(&file_stem) {
+            if let Some(compiler) = parts.next() {
+                return Some((
+                    compiler.to_string(),
+                    Some(maybe_wrapper.to_string()),
+                    parts.map(|s| s.to_string()).collect(),
+                ));
             }
-            (tool, None, Vec::new())
-        })
+        }
+
+        Some((
+            maybe_wrapper.to_string(),
+            None,
+            parts.map(|s| s.to_string()).collect(),
+        ))
     }
 
     /// Returns the default C++ standard library for the current target: `libc++`
@@ -1608,17 +1875,25 @@ impl Build {
         match self.cpp_link_stdlib.clone() {
             Some(s) => Ok(s),
             None => {
-                let target = self.get_target()?;
-                if target.contains("msvc") {
-                    Ok(None)
-                } else if target.contains("darwin") {
-                    Ok(Some("c++".to_string()))
-                } else if target.contains("freebsd") {
-                    Ok(Some("c++".to_string()))
-                } else if target.contains("openbsd") {
-                    Ok(Some("c++".to_string()))
+                if let Ok(stdlib) = self.get_var("CXXSTDLIB") {
+                    if stdlib.is_empty() {
+                        Ok(None)
+                    } else {
+                        Ok(Some(stdlib))
+                    }
                 } else {
-                    Ok(Some("stdc++".to_string()))
+                    let target = self.get_target()?;
+                    if target.contains("msvc") {
+                        Ok(None)
+                    } else if target.contains("apple") {
+                        Ok(Some("c++".to_string()))
+                    } else if target.contains("freebsd") {
+                        Ok(Some("c++".to_string()))
+                    } else if target.contains("openbsd") {
+                        Ok(Some("c++".to_string()))
+                    } else {
+                        Ok(Some("stdc++".to_string()))
+                    }
                 }
             }
         }
@@ -1690,8 +1965,13 @@ impl Build {
     }
 
     fn getenv(&self, v: &str) -> Option<String> {
+        let mut cache = self.env_cache.lock().unwrap();
+        if let Some(val) = cache.get(v) {
+            return val.clone()
+        }
         let r = env::var(v).ok();
         self.print(&format!("{} = {:?}", v, r));
+        cache.insert(v.to_string(), r.clone());
         r
     }
 
@@ -1700,10 +1980,7 @@ impl Build {
             Some(s) => Ok(s),
             None => Err(Error::new(
                 ErrorKind::EnvVarNotFound,
-                &format!(
-                    "Environment variable {} not defined.",
-                    v.to_string()
-                ),
+                &format!("Environment variable {} not defined.", v.to_string()),
             )),
         }
     }
@@ -1729,11 +2006,15 @@ impl Tool {
     fn with_features(path: PathBuf, cuda: bool) -> Tool {
         // Try to detect family of the tool from its name, falling back to Gnu.
         let family = if let Some(fname) = path.file_name().and_then(|p| p.to_str()) {
-            if fname.contains("clang") {
+            if fname.contains("clang-cl") {
+                ToolFamily::Msvc { clang_cl: true }
+            } else if fname.contains("cl") &&
+                !fname.contains("cloudabi") &&
+                !fname.contains("uclibc") &&
+                !fname.contains("clang") {
+                ToolFamily::Msvc { clang_cl: false }
+            } else if fname.contains("clang") {
                 ToolFamily::Clang
-            } else if fname.contains("cl") && !fname.contains("cloudabi") &&
-                      !fname.contains("uclibc") {
-                ToolFamily::Msvc
             } else {
                 ToolFamily::Gnu
             }
@@ -1748,7 +2029,13 @@ impl Tool {
             env: Vec::new(),
             family: family,
             cuda: cuda,
+            removed_args: Vec::new(),
         }
+    }
+
+    /// Add an argument to be stripped from the final command arguments.
+    fn remove_arg(&mut self, flag: OsString) {
+        self.removed_args.push(flag);
     }
 
     /// Add a flag, and optionally prepend the NVCC wrapper flag "-Xcompiler".
@@ -1773,12 +2060,15 @@ impl Tool {
             Some(ref cc_wrapper_path) => {
                 let mut cmd = Command::new(&cc_wrapper_path);
                 cmd.arg(&self.path);
-                cmd.args(&self.cc_wrapper_args);
                 cmd
-            },
-            None => Command::new(&self.path)
+            }
+            None => Command::new(&self.path),
         };
-        cmd.args(&self.args);
+        cmd.args(&self.cc_wrapper_args);
+
+        let value = self.args.iter().filter(|a| !self.removed_args.contains(a)).collect::<Vec<_>>();
+        cmd.args(&value);
+
         for &(ref k, ref v) in self.env.iter() {
             cmd.env(k, v);
         }
@@ -1822,10 +2112,8 @@ impl Tool {
                     cc_env.push(arg);
                 }
                 cc_env
-            },
-            None => {
-                OsString::from("")
             }
+            None => OsString::from(""),
         }
     }
 
@@ -1855,7 +2143,10 @@ impl Tool {
 
     /// Whether the tool is MSVC-like.
     pub fn is_like_msvc(&self) -> bool {
-        self.family == ToolFamily::Msvc
+        match self.family {
+            ToolFamily::Msvc { .. } => true,
+            _ => false,
+        }
     }
 }
 
@@ -1868,8 +2159,7 @@ fn run(cmd: &mut Command, program: &str) -> Result<(), Error> {
                 ErrorKind::ToolExecError,
                 &format!(
                     "Failed to wait on spawned child process, command {:?} with args {:?}.",
-                    cmd,
-                    program
+                    cmd, program
                 ),
             ))
         }
@@ -1884,9 +2174,7 @@ fn run(cmd: &mut Command, program: &str) -> Result<(), Error> {
             ErrorKind::ToolExecError,
             &format!(
                 "Command {:?} with args {:?} did not execute successfully (status code {}).",
-                cmd,
-                program,
-                status
+                cmd, program, status
             ),
         ))
     }
@@ -1909,8 +2197,7 @@ fn run_output(cmd: &mut Command, program: &str) -> Result<Vec<u8>, Error> {
                 ErrorKind::ToolExecError,
                 &format!(
                     "Failed to wait on spawned child process, command {:?} with args {:?}.",
-                    cmd,
-                    program
+                    cmd, program
                 ),
             ))
         }
@@ -1925,9 +2212,7 @@ fn run_output(cmd: &mut Command, program: &str) -> Result<Vec<u8>, Error> {
             ErrorKind::ToolExecError,
             &format!(
                 "Command {:?} with args {:?} did not execute successfully (status code {}).",
-                cmd,
-                program,
-                status
+                cmd, program, status
             ),
         ))
     }
@@ -1943,39 +2228,30 @@ fn spawn(cmd: &mut Command, program: &str) -> Result<(Child, JoinHandle<()>), Er
     match cmd.stderr(Stdio::piped()).spawn() {
         Ok(mut child) => {
             let stderr = BufReader::new(child.stderr.take().unwrap());
-            let print = thread::spawn(move || for line in stderr.split(b'\n').filter_map(
-                |l| l.ok(),
-            )
-            {
-                print!("cargo:warning=");
-                std::io::stdout().write_all(&line).unwrap();
-                println!("");
+            let print = thread::spawn(move || {
+                for line in stderr.split(b'\n').filter_map(|l| l.ok()) {
+                    print!("cargo:warning=");
+                    std::io::stdout().write_all(&line).unwrap();
+                    println!("");
+                }
             });
             Ok((child, print))
         }
         Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
             let extra = if cfg!(windows) {
                 " (see https://github.com/alexcrichton/cc-rs#compile-time-requirements \
-                   for help)"
+                 for help)"
             } else {
                 ""
             };
             Err(Error::new(
                 ErrorKind::ToolNotFound,
-                &format!(
-                    "Failed to find tool. Is `{}` installed?{}",
-                    program,
-                    extra
-                ),
+                &format!("Failed to find tool. Is `{}` installed?{}", program, extra),
             ))
         }
         Err(_) => Err(Error::new(
             ErrorKind::ToolExecError,
-            &format!(
-                "Command {:?} with args {:?} failed to start.",
-                cmd,
-                program
-            ),
+            &format!("Command {:?} with args {:?} failed to start.", cmd, program),
         )),
     }
 }
@@ -1984,9 +2260,10 @@ fn fail(s: &str) -> ! {
     panic!("\n\nInternal error occurred: {}\n\n", s)
 }
 
-
-fn command_add_output_file(cmd: &mut Command, dst: &Path, msvc: bool, is_asm: bool) {
-    if msvc && is_asm {
+fn command_add_output_file(cmd: &mut Command, dst: &Path, msvc: bool, is_asm: bool, is_arm: bool) {
+    if msvc && is_asm && is_arm {
+        cmd.arg("-o").arg(&dst);
+    } else if msvc && is_asm {
         cmd.arg("/Fo").arg(dst);
     } else if msvc {
         let mut s = OsString::from("/Fo");

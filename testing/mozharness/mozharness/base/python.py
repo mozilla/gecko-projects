@@ -31,6 +31,7 @@ external_tools_path = os.path.join(
     'external_tools',
 )
 
+
 def get_tlsv1_post():
     # Monkeypatch to work around SSL errors in non-bleeding-edge Python.
     # Taken from https://lukasa.co.uk/2013/01/Choosing_SSL_Version_In_Requests/
@@ -48,6 +49,7 @@ def get_tlsv1_post():
     s.mount('https://', TLSV1Adapter())
     return s.post
 
+
 # Virtualenv {{{1
 virtualenv_config_options = [
     [["--virtualenv-path"], {
@@ -59,18 +61,19 @@ virtualenv_config_options = [
     [["--find-links"], {
         "action": "extend",
         "dest": "find_links",
+        "default": ["https://pypi.pub.build.mozilla.org/pub"],
         "help": "URL to look for packages at"
     }],
     [["--pip-index"], {
         "action": "store_true",
-        "default": True,
+        "default": False,
         "dest": "pip_index",
-        "help": "Use pip indexes (default)"
+        "help": "Use pip indexes"
     }],
     [["--no-pip-index"], {
         "action": "store_false",
         "dest": "pip_index",
-        "help": "Don't use pip indexes"
+        "help": "Don't use pip indexes (default)"
     }],
 ]
 
@@ -133,7 +136,8 @@ class VirtualenvMixin(object):
             if self._is_windows():
                 bin_dir = 'Scripts'
             virtualenv_path = self.query_virtualenv_path()
-            self.python_paths[binary] = os.path.abspath(os.path.join(virtualenv_path, bin_dir, binary))
+            self.python_paths[binary] = os.path.abspath(
+                os.path.join(virtualenv_path, bin_dir, binary))
 
         return self.python_paths[binary]
 
@@ -160,9 +164,12 @@ class VirtualenvMixin(object):
             if not pip:
                 self.log("package_versions: Program pip not in path", level=error_level)
                 return {}
-            pip_freeze_output = self.get_output_from_command([pip, "freeze"], silent=True, ignore_errors=True)
+            pip_freeze_output = self.get_output_from_command(
+                [pip, "freeze"], silent=True, ignore_errors=True)
             if not isinstance(pip_freeze_output, basestring):
-                self.fatal("package_versions: Error encountered running `pip freeze`: %s" % pip_freeze_output)
+                self.fatal(
+                    "package_versions: Error encountered running `pip freeze`: "
+                    + pip_freeze_output)
 
         for line in pip_freeze_output.splitlines():
             # parse the output into package, version
@@ -241,14 +248,12 @@ class VirtualenvMixin(object):
                 # not understood by easy_install.
                 self.install_module(requirements=requirements,
                                     install_method='pip')
-            # Allow easy_install to be overridden by
-            # self.config['exes']['easy_install']
-            default = 'easy_install'
-            command = self.query_exe('easy_install', default=default, return_type="list")
+            command = [self.query_python_path(), '-m', 'easy_install']
         else:
-            self.fatal("install_module() doesn't understand an install_method of %s!" % install_method)
+            self.fatal(
+                "install_module() doesn't understand an install_method of %s!"
+                % install_method)
 
-        trusted_hosts = set()
         for link in c.get('find_links', []):
             parsed = urlparse.urlparse(link)
 
@@ -260,12 +265,6 @@ class VirtualenvMixin(object):
                 continue
 
             command.extend(["--find-links", link])
-            if parsed.scheme != 'https':
-                trusted_hosts.add(parsed.hostname)
-
-        if install_method != 'easy_install':
-            for host in sorted(trusted_hosts):
-                command.extend(['--trusted-host', host])
 
         # module_url can be None if only specifying requirements files
         if module_url:
@@ -273,7 +272,9 @@ class VirtualenvMixin(object):
                 if install_method in (None, 'pip'):
                     command += ['-e']
                 else:
-                    self.fatal("editable installs not supported for install_method %s" % install_method)
+                    self.fatal(
+                        "editable installs not supported for install_method %s"
+                        % install_method)
             command += [module_url]
 
         # If we're only installing a single requirements file, use
@@ -291,7 +292,10 @@ class VirtualenvMixin(object):
             attempts=1 if optional else None,
             good_statuses=(0,),
             error_level=WARNING if optional else FATAL,
-            error_message='Could not install python package: ' + quoted_command + ' failed after %(attempts)d tries!',
+            error_message=(
+                'Could not install python package: '
+                + quoted_command + ' failed after %(attempts)d tries!'
+            ),
             args=[command, ],
             kwargs={
                 'error_list': VirtualenvErrorList,
@@ -358,12 +362,22 @@ class VirtualenvMixin(object):
             os.path.join(external_tools_path, 'virtualenv', 'virtualenv.py'),
         ]
         virtualenv_options = c.get('virtualenv_options', [])
-        # Don't create symlinks. If we don't do this, permissions issues may
-        # hinder virtualenv creation or operation.
-        virtualenv_options.append('--always-copy')
+        # Creating symlinks in the virtualenv may cause issues during
+        # virtualenv creation or operation on non-Redhat derived
+        # distros. On Redhat derived distros --always-copy causes
+        # imports to fail. See
+        # https://github.com/pypa/virtualenv/issues/565. Therefore
+        # only use --alway-copy when not using Redhat.
+        if self._is_redhat():
+            self.warning("creating virtualenv without --always-copy "
+                         "due to issues on Redhat derived distros")
+        else:
+            virtualenv_options.append('--always-copy')
 
         if os.path.exists(self.query_python_path()):
-            self.info("Virtualenv %s appears to already exist; skipping virtualenv creation." % self.query_python_path())
+            self.info(
+                "Virtualenv %s appears to already exist; "
+                "skipping virtualenv creation." % self.query_python_path())
         else:
             self.mkdir_p(dirs['abs_work_dir'])
             self.run_command(virtualenv + virtualenv_options + [venv_path],
@@ -458,9 +472,6 @@ class PerfherderResourceOptionsMixin(ScriptMixin):
                              traceback.format_exc())
 
             opts.append('buildbot-%s' % instance)
-
-        # Allow configs to specify their own values.
-        opts.extend(self.config.get('perfherder_extra_options', []))
 
         return opts
 
@@ -592,7 +603,10 @@ class ResourceMonitoringMixin(PerfherderResourceOptionsMixin):
             # XXX Some test harnesses are complaining about a string being
             # being fed into a 'f' formatter. This will help diagnose the
             # issue.
-            cpu_percent_str = str(round(cpu_percent)) + '%' if cpu_percent else "Can't collect data"
+            if cpu_percent:
+                cpu_percent_str = str(round(cpu_percent)) + '%'
+            else:
+                cpu_percent_str = "Can't collect data"
 
             try:
                 self.info(

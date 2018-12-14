@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-var EXPORTED_SYMBOLS = ["Extension", "ExtensionData", "Langpack"];
+var EXPORTED_SYMBOLS = ["Dictionary", "Extension", "ExtensionData", "Langpack"];
 
 /* exported Extension, ExtensionData */
 /* globals Extension ExtensionData */
@@ -62,6 +62,15 @@ XPCOMUtils.defineLazyGetter(
   () => Cc["@mozilla.org/webextensions/extension-process-script;1"]
           .getService().wrappedJSObject);
 
+// This is used for manipulating jar entry paths, which always use Unix
+// separators.
+XPCOMUtils.defineLazyGetter(
+  this, "OSPath", () => {
+    let obj = {};
+    ChromeUtils.import("resource://gre/modules/osfile/ospath_unix.jsm", obj);
+    return obj;
+  });
+
 XPCOMUtils.defineLazyGetter(
   this, "resourceProtocol",
   () => Services.io.getProtocolHandler("resource")
@@ -72,6 +81,7 @@ ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
 XPCOMUtils.defineLazyServiceGetters(this, {
   aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
+  spellCheck: ["@mozilla.org/spellchecker/engine;1", "mozISpellCheckingEngine"],
   uuidGen: ["@mozilla.org/uuid-generator;1", "nsIUUIDGenerator"],
 });
 
@@ -101,6 +111,7 @@ const SHUTDOWN_BLOCKER_MAX_MS = 8000;
  * as a host/origin permission, an api permission, or a regular permission.
  *
  * @param {string} perm  The permission string to classify
+ * @param {boolean} restrictSchemes
  *
  * @returns {object}
  *          An object with exactly one of the following properties:
@@ -109,10 +120,15 @@ const SHUTDOWN_BLOCKER_MAX_MS = 8000;
  *                (as used for webextensions experiments).
  *          "permission" to indicate this is a regular permission.
  */
-function classifyPermission(perm) {
+function classifyPermission(perm, restrictSchemes) {
   let match = /^(\w+)(?:\.(\w+)(?:\.\w+)*)?$/.exec(perm);
   if (!match) {
-    return {origin: perm};
+    try {
+      let {pattern} = new MatchPattern(perm, {restrictSchemes, ignorePath: true});
+      return {origin: pattern};
+    } catch (e) {
+      return {originInvalid: perm};
+    }
   } else if (match[1] == "experiments" && match[2]) {
     return {api: match[2]};
   }
@@ -373,6 +389,9 @@ class ExtensionData {
     // Normalize the directory path.
     path = `${uri.JAREntry}/${path}`;
     path = path.replace(/\/\/+/g, "/").replace(/^\/|\/$/g, "") + "/";
+    if (path === "/") {
+      path = "";
+    }
 
     // Escape pattern metacharacters.
     let pattern = path.replace(/[[\]()?*~|$\\]/g, "\\$&") + "*";
@@ -437,11 +456,12 @@ class ExtensionData {
 
     let permissions = new Set();
     let origins = new Set();
+    let restrictSchemes = !this.hasPermission("mozillaAddons");
     for (let perm of this.manifest.permissions || []) {
-      let type = classifyPermission(perm);
+      let type = classifyPermission(perm, restrictSchemes);
       if (type.origin) {
         origins.add(perm);
-      } else if (!type.api) {
+      } else if (type.permission) {
         permissions.add(perm);
       }
     }
@@ -473,7 +493,10 @@ class ExtensionData {
     }
 
     let result = {
-      origins: this.whiteListedHosts.patterns.map(matcher => matcher.pattern),
+      origins: this.whiteListedHosts.patterns.map(matcher => matcher.pattern)
+        // moz-extension://id/* is always added to whiteListedHosts, but it
+        // is not a valid host permission in the API. So, remove it.
+        .filter(pattern => !pattern.startsWith("moz-extension:")),
       apis: [...this.apiNames],
     };
 
@@ -493,6 +516,11 @@ class ExtensionData {
     };
   }
 
+  canUseExperiment(manifest) {
+    return this.experimentsAllowed && manifest.experiment_apis;
+  }
+
+  // eslint-disable-next-line complexity
   async parseManifest() {
     let [manifest] = await Promise.all([
       this.readJSON("manifest.json"),
@@ -525,6 +553,9 @@ class ExtensionData {
     } else if (this.manifest.langpack_id) {
       this.type = "langpack";
       manifestType = "manifest.WebExtensionLangpackManifest";
+    } else if (this.manifest.dictionaries) {
+      this.type = "dictionary";
+      manifestType = "manifest.WebExtensionDictionaryManifest";
     } else {
       this.type = "extension";
     }
@@ -576,6 +607,8 @@ class ExtensionData {
     };
 
     if (this.type === "extension") {
+      let restrictSchemes = !(this.isPrivileged && manifest.permissions.includes("mozillaAddons"));
+
       for (let perm of manifest.permissions) {
         if (perm === "geckoProfiler" && !this.isPrivileged) {
           const acceptedExtensions = Services.prefs.getStringPref("extensions.geckoProfiler.acceptedExtensionIds", "");
@@ -585,14 +618,15 @@ class ExtensionData {
           }
         }
 
-        let type = classifyPermission(perm);
+        let type = classifyPermission(perm, restrictSchemes);
         if (type.origin) {
-          let matcher = new MatchPattern(perm, {ignorePath: true});
-
-          perm = matcher.pattern;
+          perm = type.origin;
           originPermissions.add(perm);
         } else if (type.api) {
           apiNames.add(type.api);
+        } else if (type.originInvalid) {
+          this.manifestWarning(`Invalid host permission: ${perm}`);
+          continue;
         }
 
         permissions.add(perm);
@@ -629,7 +663,7 @@ class ExtensionData {
         return manager.initModuleJSON([modules]);
       };
 
-      if (manifest.experiment_apis) {
+      if (this.canUseExperiment(manifest)) {
         let parentModules = {};
         let childModules = {};
 
@@ -713,6 +747,30 @@ class ExtensionData {
 
 
       this.startupData = {chromeEntries, langpackId, l10nRegistrySources, languages};
+    } else if (this.type == "dictionary") {
+      let dictionaries = {};
+      for (let [lang, path] of Object.entries(manifest.dictionaries)) {
+        path = path.replace(/^\/+/, "");
+
+        let dir = OSPath.dirname(path);
+        if (dir === ".") {
+          dir = "";
+        }
+        let leafName = OSPath.basename(path);
+        let affixPath = leafName.slice(0, -3) + "aff";
+
+        let entries = Array.from(await this.readDirectory(dir), entry => entry.name);
+        if (!entries.includes(leafName)) {
+          this.manifestError(`Invalid dictionary path specified for '${lang}': ${path}`);
+        }
+        if (!entries.includes(affixPath)) {
+          this.manifestError(`Invalid dictionary path specified for '${lang}': Missing affix file: ${path}`);
+        }
+
+        dictionaries[lang] = path;
+      }
+
+      this.startupData = {dictionaries};
     }
 
     if (schemaPromises.size) {
@@ -756,9 +814,26 @@ class ExtensionData {
     await this.apiManager.lazyInit();
 
     this.webAccessibleResources = manifestData.webAccessibleResources.map(res => new MatchGlob(res));
-    this.whiteListedHosts = new MatchPatternSet(manifestData.originPermissions);
+    this.whiteListedHosts = new MatchPatternSet(manifestData.originPermissions, {restrictSchemes: !this.hasPermission("mozillaAddons")});
 
     return this.manifest;
+  }
+
+  hasPermission(perm, includeOptional = false) {
+    let manifest_ = "manifest:";
+    if (perm.startsWith(manifest_)) {
+      return this.manifest[perm.substr(manifest_.length)] != null;
+    }
+
+    if (this.permissions.has(perm)) {
+      return true;
+    }
+
+    if (includeOptional && this.manifest.optional_permissions.includes(perm)) {
+      return true;
+    }
+
+    return false;
   }
 
   getAPIManager() {
@@ -961,15 +1036,12 @@ class ExtensionData {
         allUrls = true;
         break;
       }
-      if (permission.startsWith("moz-extension:")) {
-        continue;
-      }
-      let match = /^[a-z*]+:\/\/([^/]+)\//.exec(permission);
+      let match = /^[a-z*]+:\/\/([^/]*)\//.exec(permission);
       if (!match) {
         Cu.reportError(`Unparseable host permission ${permission}`);
         continue;
       }
-      if (match[1] == "*") {
+      if (!match[1] || match[1] == "*") {
         allUrls = true;
       } else if (match[1].startsWith("*.")) {
         wildcards.add(match[1].slice(2));
@@ -1123,6 +1195,22 @@ XPCOMUtils.defineLazyGetter(BootstrapScope.prototype, "BOOTSTRAP_REASON_TO_STRIN
   });
 });
 
+class DictionaryBootstrapScope extends BootstrapScope {
+  install(data, reason) {}
+  uninstall(data, reason) {}
+
+  startup(data, reason) {
+    // eslint-disable-next-line no-use-before-define
+    this.dictionary = new Dictionary(data);
+    return this.dictionary.startup(this.BOOTSTRAP_REASON_TO_STRING_MAP[reason]);
+  }
+
+  shutdown(data, reason) {
+    this.dictionary.shutdown(this.BOOTSTRAP_REASON_TO_STRING_MAP[reason]);
+    this.dictionary = null;
+  }
+}
+
 class LangpackBootstrapScope {
   install(data, reason) {}
   uninstall(data, reason) {}
@@ -1208,7 +1296,7 @@ class Extension extends ExtensionData {
         let patterns = this.whiteListedHosts.patterns.map(host => host.pattern);
 
         this.whiteListedHosts = new MatchPatternSet(new Set([...patterns, ...permissions.origins]),
-                                                    {ignorePath: true});
+                                                    {restrictSchemes: !this.hasPermission("mozillaAddons"), ignorePath: true});
       }
 
       this.policy.permissions = Array.from(this.permissions);
@@ -1346,6 +1434,8 @@ class Extension extends ExtensionData {
 
   get isPrivileged() {
     return (this.addonData.signedState === AddonManager.SIGNEDSTATE_PRIVILEGED ||
+            this.addonData.signedState === AddonManager.SIGNEDSTATE_SYSTEM ||
+            this.addonData.builtIn ||
             (AppConstants.MOZ_ALLOW_LEGACY_EXTENSIONS &&
              this.addonData.temporarilyInstalled));
   }
@@ -1782,33 +1872,49 @@ class Extension extends ExtensionData {
     }
   }
 
-  hasPermission(perm, includeOptional = false) {
-    let manifest_ = "manifest:";
-    if (perm.startsWith(manifest_)) {
-      return this.manifest[perm.substr(manifest_.length)] != null;
-    }
-
-    if (this.permissions.has(perm)) {
-      return true;
-    }
-
-    if (includeOptional && this.manifest.optional_permissions.includes(perm)) {
-      return true;
-    }
-
-    return false;
-  }
-
   get name() {
     return this.manifest.name;
   }
 
   get optionalOrigins() {
     if (this._optionalOrigins == null) {
-      let origins = this.manifest.optional_permissions.filter(perm => classifyPermission(perm).origin);
-      this._optionalOrigins = new MatchPatternSet(origins, {ignorePath: true});
+      let restrictSchemes = !this.hasPermission("mozillaAddons");
+      let origins = this.manifest.optional_permissions.filter(perm => classifyPermission(perm, restrictSchemes).origin);
+      this._optionalOrigins = new MatchPatternSet(origins, {restrictSchemes, ignorePath: true});
     }
     return this._optionalOrigins;
+  }
+}
+
+class Dictionary extends ExtensionData {
+  constructor(addonData, startupReason) {
+    super(addonData.resourceURI);
+    this.id = addonData.id;
+    this.startupData = addonData.startupData;
+  }
+
+  static getBootstrapScope(id, file) {
+    return new DictionaryBootstrapScope();
+  }
+
+  async startup(reason) {
+    this.dictionaries = {};
+    for (let [lang, path] of Object.entries(this.startupData.dictionaries)) {
+      let {file} = Services.io.newURI(path, null, this.rootURI).QueryInterface(Ci.nsIFileURL);
+      this.dictionaries[lang] = file;
+
+      spellCheck.addDictionary(lang, file);
+    }
+
+    Management.emit("ready", this);
+  }
+
+  async shutdown(reason) {
+    if (reason !== "APP_SHUTDOWN") {
+      for (let [lang, file] of Object.entries(this.dictionaries)) {
+        spellCheck.removeDictionary(lang, file);
+      }
+    }
   }
 }
 

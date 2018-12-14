@@ -4466,8 +4466,8 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
   // XXX Should we allow to block web page to prevent its default with
   //     Ctrl+Shift+F10 or Alt+Shift+F10 instead?
   if (aEventMessage == eContextMenu && aIsContextMenuKey && event.IsShift() &&
-      NativeKey::LastKeyMSG().message == WM_SYSKEYDOWN &&
-      NativeKey::LastKeyMSG().wParam == VK_F10) {
+      NativeKey::LastKeyOrCharMSG().message == WM_SYSKEYDOWN &&
+      NativeKey::LastKeyOrCharMSG().wParam == VK_F10) {
     event.mModifiers &= ~MODIFIER_SHIFT;
   }
 
@@ -8324,6 +8324,23 @@ nsWindow::DefaultProcOfPluginEvent(const WidgetPluginEvent& aEvent)
 
   CallWindowProcW(GetPrevWindowProc(), mWnd, pPluginEvent->event,
                   pPluginEvent->wParam, pPluginEvent->lParam);
+}
+
+void
+nsWindow::EnableIMEForPlugin(bool aEnable)
+{
+  // Current IME state isn't plugin, ignore this call
+  if (NS_WARN_IF(mInputContext.mIMEState.mEnabled != IMEState::PLUGIN)) {
+    return;
+  }
+
+  InputContext inputContext = GetInputContext();
+  if (aEnable) {
+    inputContext.mHTMLInputType.AssignLiteral("text");
+  } else {
+    inputContext.mHTMLInputType.AssignLiteral("password");
+  }
+  SetInputContext(inputContext, InputContextAction());
 }
 
 nsresult

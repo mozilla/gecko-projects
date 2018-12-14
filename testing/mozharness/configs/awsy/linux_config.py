@@ -18,12 +18,7 @@ config = {
     "binary_path": BINARY_PATH,
     "installer_path": INSTALLER_PATH,
     "virtualenv_path": VENV_PATH,
-    "find_links": [
-        "http://pypi.pvt.build.mozilla.org/pub",
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
     "cmd_timeout": 6500,
-    "pip_index": False,
     "exes": {
     },
     "title": os.uname()[1].lower().split('.')[0],
@@ -35,10 +30,6 @@ config = {
         "install",
         "run-tests",
     ],
-    "default_blob_upload_servers": [
-        "https://blobupload.elasticbeanstalk.com",
-    ],
-    "blob_uploader_auth_file": os.path.join(os.getcwd(), "oauth.txt"),
     "download_minidump_stackwalk": True,
     "minidump_stackwalk_path": MINIDUMP_STACKWALK_PATH,
     "minidump_tooltool_manifest_path": TOOLTOOL_MANIFEST_PATH,

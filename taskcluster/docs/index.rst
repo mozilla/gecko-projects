@@ -30,5 +30,8 @@ check out the :doc:`how-to section <how-tos>`.
     cron
     try
     actions
+    release-promotion
+    versioncontrol
+    taskcluster-config
     how-tos
     reference

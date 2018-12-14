@@ -171,6 +171,8 @@ public:
   virtual uint64_t CodecPluginID() override { return 0; }
   virtual void SetPCHandle(const std::string& aPCHandle) override {}
 
+  virtual void DeleteStreams() override {}
+
   explicit WebrtcAudioConduit():
                       mVoiceEngine(nullptr),
                       mFakeAudioDevice(new webrtc::FakeAudioDeviceModule()),
@@ -205,6 +207,10 @@ public:
   bool SetRemoteSSRC(unsigned int ssrc) override
   {
     return false;
+  }
+  bool UnsetRemoteSSRC(uint32_t ssrc) override
+  {
+    return true;
   }
   bool GetRemoteSSRC(unsigned int* ssrc) override;
   bool SetLocalCNAME(const char* cname) override;

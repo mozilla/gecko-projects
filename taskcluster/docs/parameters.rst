@@ -84,8 +84,10 @@ Try Configuration
 
 ``try_mode``
     The mode in which a try push is operating.  This can be one of
-    ``"try_task_config"``, ``"try_option_syntax"``, or ``None`` meaning no try
+    ``"try_task_config"``, ``"try_option_syntax"``, ``"try_select"`` or ``None`` meaning no try
     input was provided.
+
+    ``"try_select"`` is used by ``mach try fuzzy`` to build a list of tasks to select from.
 
 ``try_options``
     The arguments given as try syntax (as a dictionary), or ``None`` if
@@ -154,7 +156,7 @@ Release Promotion
    Specify the next version for version bump tasks.
 
 ``release_type``
-   The type of release being promoted. One of "beta", "devedition", "esr", "rc", or "release".
+   The type of release being promoted. One of "nightly", "beta", "esr60", "release-rc", or "release".
 
 ``release_eta``
    The time and date when a release is scheduled to live. This value is passed to Balrog.
@@ -173,6 +175,9 @@ Release Promotion
 
 ``release_enable_emefree``
    Boolean which controls repacking vanilla Firefox builds into EME-free builds.
+
+``release_product``
+   The product that is being released.
 
 Comm Push Information
 ---------------------

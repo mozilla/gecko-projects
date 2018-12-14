@@ -20,7 +20,7 @@ from .util.verify import (
     verify_docs,
     verifications,
 )
-from .config import validate_graph_config
+from .config import load_graph_config
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,9 @@ class Kind(object):
                       attributes=task_dict['attributes'],
                       task=task_dict['task'],
                       optimization=task_dict.get('optimization'),
-                      dependencies=task_dict.get('dependencies'))
+                      dependencies=task_dict.get('dependencies'),
+                      release_artifacts=task_dict.get('release-artifacts'),
+                      )
                  for task_dict in transforms(trans_config, inputs)]
         return tasks
 
@@ -82,22 +84,9 @@ class Kind(object):
 
         logger.debug("loading kind `{}` from `{}`".format(kind_name, path))
         with open(kind_yml) as f:
-            config = yaml.load(f)
+            config = yaml.safe_load(f)
 
         return cls(kind_name, path, config, graph_config)
-
-
-def load_graph_config(root_dir):
-    config_yml = os.path.join(root_dir, "config.yml")
-    if not os.path.exists(config_yml):
-        raise Exception("Couldn't find taskgraph configuration: {}".format(config_yml))
-
-    logger.debug("loading config from `{}`".format(config_yml))
-    with open(config_yml) as f:
-        config = yaml.load(f)
-
-    validate_graph_config(config)
-    return config
 
 
 class TaskGraphGenerator(object):
@@ -118,31 +107,27 @@ class TaskGraphGenerator(object):
     def __init__(self, root_dir, parameters):
         """
         @param root_dir: root directory, with subdirectories for each kind
-        @param parameters: parameters for this task-graph generation
-        @type parameters: dict
+        @param paramaters: parameters for this task-graph generation, or callable
+            taking a `GraphConfig` and returning parameters
+        @type parameters: Union[Parameters, Callable[[GraphConfig], Parameters]]
         """
         if root_dir is None:
             root_dir = 'taskcluster/ci'
         self.root_dir = root_dir
-        self.parameters = parameters
-
-        self.verify_parameters(self.parameters)
-
-        filters = parameters.get('filters', [])
-
-        # Always add legacy target tasks method until we deprecate that API.
-        if 'target_tasks_method' not in filters:
-            filters.insert(0, 'target_tasks_method')
-
-        self.filters = [filter_tasks.filter_task_functions[f] for f in filters]
-
-        # this can be set up until the time the target task set is generated;
-        # it defaults to parameters['target_tasks']
-        self._target_tasks = parameters.get('target_tasks')
+        self._parameters = parameters
 
         # start the generator
         self._run = self._run()
         self._run_results = {}
+
+    @property
+    def parameters(self):
+        """
+        The properties used for this graph.
+
+        @type: Properties
+        """
+        return self._run_until('parameters')
 
     @property
     def full_task_set(self):
@@ -213,6 +198,15 @@ class TaskGraphGenerator(object):
         """
         return self._run_until('morphed_task_graph')
 
+    @property
+    def graph_config(self):
+        """
+        The configuration for this graph.
+
+        @type: TaskGraph
+        """
+        return self._run_until('graph_config')
+
     def _load_kinds(self, graph_config):
         for kind_name in os.listdir(self.root_dir):
             try:
@@ -223,6 +217,22 @@ class TaskGraphGenerator(object):
     def _run(self):
         logger.info("Loading graph configuration.")
         graph_config = load_graph_config(self.root_dir)
+
+        yield ('graph_config', graph_config)
+
+        if callable(self._parameters):
+            parameters = self._parameters(graph_config)
+        else:
+            parameters = self._parameters
+        self.verify_parameters(parameters)
+
+        filters = parameters.get('filters', [])
+        # Always add legacy target tasks method until we deprecate that API.
+        if 'target_tasks_method' not in filters:
+            filters.insert(0, 'target_tasks_method')
+        filters = [filter_tasks.filter_task_functions[f] for f in filters]
+
+        yield ('parameters', parameters)
 
         logger.info("Loading kinds")
         # put the kinds into a graph and sort topologically so that kinds are loaded
@@ -241,7 +251,7 @@ class TaskGraphGenerator(object):
         for kind_name in kind_graph.visit_postorder():
             logger.debug("Loading tasks for kind {}".format(kind_name))
             kind = kinds[kind_name]
-            new_tasks = kind.load_tasks(self.parameters, list(all_tasks.values()))
+            new_tasks = kind.load_tasks(parameters, list(all_tasks.values()))
             for task in new_tasks:
                 if task.label in all_tasks:
                     raise Exception("duplicate tasks with label " + task.label)
@@ -267,9 +277,9 @@ class TaskGraphGenerator(object):
         logger.info("Generating target task set")
         target_task_set = TaskGraph(dict(all_tasks),
                                     Graph(set(all_tasks.keys()), set()))
-        for fltr in self.filters:
+        for fltr in filters:
             old_len = len(target_task_set.graph.nodes)
-            target_tasks = set(fltr(target_task_set, self.parameters, graph_config))
+            target_tasks = set(fltr(target_task_set, parameters, graph_config))
             target_task_set = TaskGraph(
                 {l: all_tasks[l] for l in target_tasks},
                 Graph(target_tasks, set()))
@@ -297,19 +307,19 @@ class TaskGraphGenerator(object):
         yield verifications('target_task_graph', target_task_graph)
 
         logger.info("Generating optimized task graph")
-        existing_tasks = self.parameters.get('existing_tasks')
-        do_not_optimize = set(self.parameters.get('do_not_optimize', []))
-        if not self.parameters.get('optimize_target_tasks', True):
+        existing_tasks = parameters.get('existing_tasks')
+        do_not_optimize = set(parameters.get('do_not_optimize', []))
+        if not parameters.get('optimize_target_tasks', True):
             do_not_optimize = set(target_task_set.graph.nodes).union(do_not_optimize)
         optimized_task_graph, label_to_taskid = optimize_task_graph(target_task_graph,
-                                                                    self.parameters,
+                                                                    parameters,
                                                                     do_not_optimize,
                                                                     existing_tasks=existing_tasks)
 
         yield verifications('optimized_task_graph', optimized_task_graph)
 
         morphed_task_graph, label_to_taskid = morph(
-            optimized_task_graph, label_to_taskid, self.parameters)
+            optimized_task_graph, label_to_taskid, parameters)
 
         yield 'label_to_taskid', label_to_taskid
         yield verifications('morphed_task_graph', morphed_task_graph)

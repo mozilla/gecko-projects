@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 @register_callback_action(
     name='run-missing-tests',
     title='Run Missing Tests',
+    kind='hook',
+    generic=True,
     symbol='rmt',
     description=(
         "Run tests in the selected push that were optimized away, usually by SETA."
@@ -25,11 +27,12 @@ logger = logging.getLogger(__name__)
         "This action is for use on pushes that will be merged into another branch,"
         "to check that optimization hasn't hidden any failures."
     ),
-    order=100,  # Useful for sheriffs, but not top of the list
+    order=250,
     context=[],  # Applies to decision task
 )
-def run_missing_tests(parameters, input, task_group_id, task_id, task):
-    decision_task_id, full_task_graph, label_to_taskid = fetch_graph_and_labels(parameters)
+def run_missing_tests(parameters, graph_config, input, task_group_id, task_id, task):
+    decision_task_id, full_task_graph, label_to_taskid = fetch_graph_and_labels(
+        parameters, graph_config)
     target_tasks = get_artifact(decision_task_id, "public/target-tasks.json")
 
     # The idea here is to schedule all tasks of the `test` kind that were

@@ -24,8 +24,15 @@ def get_method(method):
     return _target_task_methods[method]
 
 
-def filter_on_nightly(task, parameters):
+def filter_out_nightly(task, parameters):
     return not task.attributes.get('nightly') or parameters.get('include_nightly')
+
+
+def filter_out_cron(task, parameters):
+    """
+    Filter out tasks that run via cron.
+    """
+    return not task.attributes.get('cron')
 
 
 def filter_for_project(task, parameters):
@@ -34,12 +41,10 @@ def filter_for_project(task, parameters):
     return match_run_on_projects(parameters['project'], run_on_projects)
 
 
-def filter_upload_symbols(task, parameters):
-    # Filters out symbols when there are not part of a nightly or a release build
-    # TODO Remove this too specific filter (bug 1353296)
-    return '-upload-symbols' not in task.label or \
-        task.attributes.get('nightly') or \
-        parameters.get('project') in ('mozilla-beta', 'mozilla-release')
+def filter_on_platforms(task, platforms):
+    """Filter tasks on the given platform"""
+    platform = task.attributes.get('build_platform')
+    return (platform in platforms)
 
 
 def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=False):
@@ -59,9 +64,9 @@ def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=Fa
             # On beta, Nightly builds are already PGOs
             'linux-pgo', 'linux64-pgo',
             'win32-pgo', 'win64-pgo',
+            # ASAN is central-only
+            'linux64-asan-reporter-nightly',
             ):
-        return False
-    if str(platform).startswith('android') and 'nightly' in str(platform):
         return False
 
     if platform in (
@@ -69,6 +74,9 @@ def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=Fa
             'macosx64',
             'win32', 'win64',
             ):
+        if task.attributes['kind'] == 'l10n':
+            # This is on-change l10n
+            return True
         if task.attributes['build_type'] == 'opt' and \
            task.attributes.get('unittest_suite') != 'talos':
             return False
@@ -88,7 +96,7 @@ def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=Fa
 def standard_filter(task, parameters):
     return all(
         filter_func(task, parameters) for filter_func in
-        (filter_on_nightly, filter_for_project, filter_upload_symbols)
+        (filter_out_nightly, filter_out_cron, filter_for_project)
     )
 
 
@@ -249,37 +257,6 @@ def target_tasks_valgrind(full_task_graph, parameters, graph_config):
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
-@_target_task('nightly_fennec')
-def target_tasks_nightly_fennec(full_task_graph, parameters, graph_config):
-    """Select the set of tasks required for a nightly build of fennec. The
-    nightly build process involves a pipeline of builds, signing,
-    and, eventually, uploading the tasks to balrog."""
-    def filter(task):
-        platform = task.attributes.get('build_platform')
-        if platform in ('android-aarch64-nightly',
-                        'android-api-16-nightly',
-                        'android-api-16-old-id-nightly',
-                        'android-nightly',
-                        'android-x86-nightly',
-                        'android-x86-old-id-nightly'):
-            if not task.attributes.get('nightly', False):
-                return False
-            return filter_for_project(task, parameters)
-    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
-
-
-@_target_task('nightly_linux')
-def target_tasks_nightly_linux(full_task_graph, parameters, graph_config):
-    """Select the set of tasks required for a nightly build of linux. The
-    nightly build process involves a pipeline of builds, signing,
-    and, eventually, uploading the tasks to balrog."""
-    def filter(task):
-        platform = task.attributes.get('build_platform')
-        if platform in ('linux64-nightly', 'linux-nightly'):
-            return task.attributes.get('nightly', False)
-    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
-
-
 @_target_task('mozilla_beta_tasks')
 def target_tasks_mozilla_beta(full_task_graph, parameters, graph_config):
     """Select the set of tasks required for a promotable beta or release build
@@ -322,52 +299,32 @@ def target_tasks_mozilla_esr60(full_task_graph, parameters, graph_config):
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
-@_target_task('promote_firefox')
-def target_tasks_promote_firefox(full_task_graph, parameters, graph_config):
+@_target_task('promote_desktop')
+def target_tasks_promote_desktop(full_task_graph, parameters, graph_config):
     """Select the superset of tasks required to promote a beta or release build
-    of firefox. This should include all non-android mozilla_{beta,release} tasks,
-    plus l10n, beetmover, balrog, etc."""
-
-    beta_release_tasks = [l for l, t in full_task_graph.tasks.iteritems() if
-                          filter_beta_release_tasks(t, parameters,
-                                                    ignore_kinds=[],
-                                                    allow_l10n=True)]
+    of a desktop product. This should include all non-android
+    mozilla_{beta,release} tasks, plus l10n, beetmover, balrog, etc."""
 
     def filter(task):
-        platform = task.attributes.get('build_platform')
-
-        # Android has its own promotion.
-        if platform and 'android' in platform:
+        if task.attributes.get('shipping_product') != parameters['release_product']:
             return False
-
-        if platform and 'devedition' in platform:
-            return False
-
-        # Allow for {beta,release}_tasks; these will get optimized out to point
-        # to the previous graph using ``previous_graph_ids`` and
-        # ``previous_graph_kinds``.
-        # At some point this should filter by shipping_phase == 'build' and
-        # shipping_product matches.
-        if task.label in beta_release_tasks:
-            return True
 
         # 'secondary' balrog/update verify/final verify tasks only run for RCs
-        if parameters.get('release_type') != 'rc':
+        if parameters.get('release_type') != 'release-rc':
             if 'secondary' in task.kind:
                 return False
 
-        if task.attributes.get('shipping_product') == 'firefox' and \
-                task.attributes.get('shipping_phase') == 'promote':
+        if task.attributes.get('shipping_phase') == 'promote':
             return True
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
-@_target_task('push_firefox')
-def target_tasks_push_firefox(full_task_graph, parameters, graph_config):
-    """Select the set of tasks required to push a build of firefox to cdns.
+@_target_task('push_desktop')
+def target_tasks_push_desktop(full_task_graph, parameters, graph_config):
+    """Select the set of tasks required to push a build of desktop to cdns.
     Previous build deps will be optimized out via action task."""
-    filtered_for_candidates = target_tasks_promote_firefox(
+    filtered_for_candidates = target_tasks_promote_desktop(
         full_task_graph, parameters, graph_config,
     )
 
@@ -375,27 +332,27 @@ def target_tasks_push_firefox(full_task_graph, parameters, graph_config):
         # Include promotion tasks; these will be optimized out
         if task.label in filtered_for_candidates:
             return True
-        if task.attributes.get('shipping_product') == 'firefox' and \
+        if task.attributes.get('shipping_product') == parameters['release_product'] and \
                 task.attributes.get('shipping_phase') == 'push':
             return True
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
-@_target_task('ship_firefox')
-def target_tasks_ship_firefox(full_task_graph, parameters, graph_config):
-    """Select the set of tasks required to ship firefox.
+@_target_task('ship_desktop')
+def target_tasks_ship_desktop(full_task_graph, parameters, graph_config):
+    """Select the set of tasks required to ship desktop.
     Previous build deps will be optimized out via action task."""
-    is_rc = (parameters.get('release_type') == 'rc')
+    is_rc = (parameters.get('release_type') == 'release-rc')
     if is_rc:
         # ship_firefox_rc runs after `promote` rather than `push`; include
         # all promote tasks.
-        filtered_for_candidates = target_tasks_promote_firefox(
+        filtered_for_candidates = target_tasks_promote_desktop(
             full_task_graph, parameters, graph_config,
         )
     else:
         # ship_firefox runs after `push`; include all push tasks.
-        filtered_for_candidates = target_tasks_push_firefox(
+        filtered_for_candidates = target_tasks_push_desktop(
             full_task_graph, parameters, graph_config,
         )
 
@@ -403,7 +360,7 @@ def target_tasks_ship_firefox(full_task_graph, parameters, graph_config):
         # Include promotion tasks; these will be optimized out
         if task.label in filtered_for_candidates:
             return True
-        if task.attributes.get('shipping_product') != 'firefox' or \
+        if task.attributes.get('shipping_product') != parameters['release_product'] or \
                 task.attributes.get('shipping_phase') != 'ship':
             return False
 
@@ -415,101 +372,17 @@ def target_tasks_ship_firefox(full_task_graph, parameters, graph_config):
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
-@_target_task('promote_devedition')
-def target_tasks_promote_devedition(full_task_graph, parameters, graph_config):
-    """Select the superset of tasks required to promote a beta or release build
-    of devedition. This should include all non-android mozilla_{beta,release}
-    tasks, plus l10n, beetmover, balrog, etc."""
-
-    beta_release_tasks = [l for l, t in full_task_graph.tasks.iteritems() if
-                          filter_beta_release_tasks(t, parameters,
-                                                    ignore_kinds=[],
-                                                    allow_l10n=True)]
-
-    def filter(task):
-        platform = task.attributes.get('build_platform')
-
-        # Android has its own promotion.
-        if platform and 'android' in platform:
-            return False
-
-        if platform and 'devedition' not in platform:
-            return False
-
-        # Allow for {beta,release}_tasks; these will get optimized out to point to
-        # the previous graph using ``previous_graph_ids`` and
-        # ``previous_graph_kinds``.
-        # At some point this should filter by shipping_phase == 'build' and
-        # shipping_product matches.
-        if task.label in beta_release_tasks:
-            return True
-
-        if task.attributes.get('shipping_product') == 'devedition' and \
-                task.attributes.get('shipping_phase') == 'promote':
-            return True
-
-    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
-
-
-@_target_task('push_devedition')
-def target_tasks_push_devedition(full_task_graph, parameters, graph_config):
-    """Select the set of tasks required to push a build of devedition to cdns.
-    Previous build deps will be optimized out via action task."""
-    filtered_for_candidates = target_tasks_promote_devedition(
-        full_task_graph, parameters, graph_config,
-    )
-
-    def filter(task):
-        # Include promotion tasks; these will be optimized out
-        if task.label in filtered_for_candidates:
-            return True
-        if task.attributes.get('shipping_product') == 'devedition' and \
-                task.attributes.get('shipping_phase') == 'push':
-            return True
-
-    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
-
-
-@_target_task('ship_devedition')
-def target_tasks_ship_devedition(full_task_graph, parameters, graph_config):
-    """Select the set of tasks required to ship devedition.
-    Previous build deps will be optimized out via action task."""
-    filtered_for_candidates = target_tasks_push_devedition(
-        full_task_graph, parameters, graph_config,
-    )
-
-    def filter(task):
-        # Include promotion tasks; these will be optimized out
-        if task.label in filtered_for_candidates:
-            return True
-        if task.attributes.get('shipping_product') == 'devedition' and \
-                task.attributes.get('shipping_phase') == 'ship':
-            return True
-
-    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
-
-
 @_target_task('promote_fennec')
 def target_tasks_promote_fennec(full_task_graph, parameters, graph_config):
     """Select the set of tasks required for a candidates build of fennec. The
     nightly build process involves a pipeline of builds, signing,
     and, eventually, uploading the tasks to balrog."""
-    filtered_for_project = target_tasks_nightly_fennec(full_task_graph, parameters, graph_config)
 
     def filter(task):
         attr = task.attributes.get
         # Don't ship single locale fennec anymore - Bug 1408083
         if attr("locale") or attr("chunk_locales"):
             return False
-        if task.label in filtered_for_project:
-            # bug 1438023 - old-id should only run on central.
-            # We can remove this hack when shippable builds land and we
-            # are using run-on-projects properly here.
-            if 'old-id' in task.label:
-                return False
-            if task.kind not in ('balrog', 'push-apk'):
-                if task.attributes.get('nightly'):
-                    return True
         if task.attributes.get('shipping_product') == 'fennec' and \
                 task.attributes.get('shipping_phase') == 'promote':
             return True
@@ -521,7 +394,7 @@ def target_tasks_promote_fennec(full_task_graph, parameters, graph_config):
 def target_tasks_ship_fennec(full_task_graph, parameters, graph_config):
     """Select the set of tasks required to ship fennec.
     Previous build deps will be optimized out via action task."""
-    is_rc = (parameters.get('release_type') == 'rc')
+    is_rc = (parameters.get('release_type') == 'release-rc')
     filtered_for_candidates = target_tasks_promote_fennec(
         full_task_graph, parameters, graph_config,
     )
@@ -565,16 +438,55 @@ def target_tasks_pine(full_task_graph, parameters, graph_config):
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
+@_target_task('nightly_fennec')
+def target_tasks_nightly_fennec(full_task_graph, parameters, graph_config):
+    """Select the set of tasks required for a nightly build of fennec. The
+    nightly build process involves a pipeline of builds, signing,
+    and, eventually, uploading the tasks to balrog."""
+    def filter(task):
+        platform = task.attributes.get('build_platform')
+        if not filter_for_project(task, parameters):
+            return False
+        if platform in ('android-aarch64-nightly',
+                        'android-api-16-nightly',
+                        'android-nightly',
+                        'android-x86-nightly',
+                        'android-x86_64-nightly',
+                        ):
+            if not task.attributes.get('nightly', False):
+                return False
+            return filter_for_project(task, parameters)
+    filter
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
+def make_nightly_filter(platforms):
+    """Returns a filter that gets all nightly tasks on the given platform."""
+    def filter(task, parameters):
+        return all([
+            filter_on_platforms(task, platforms),
+            filter_for_project(task, parameters),
+            task.attributes.get('nightly', False),
+        ])
+    return filter
+
+
+@_target_task('nightly_linux')
+def target_tasks_nightly_linux(full_task_graph, parameters, graph_config):
+    """Select the set of tasks required for a nightly build of linux. The
+    nightly build process involves a pipeline of builds, signing,
+    and, eventually, uploading the tasks to balrog."""
+    filter = make_nightly_filter({'linux64-nightly', 'linux-nightly'})
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t, parameters)]
+
+
 @_target_task('nightly_macosx')
 def target_tasks_nightly_macosx(full_task_graph, parameters, graph_config):
     """Select the set of tasks required for a nightly build of macosx. The
     nightly build process involves a pipeline of builds, signing,
     and, eventually, uploading the tasks to balrog."""
-    def filter(task):
-        platform = task.attributes.get('build_platform')
-        if platform in ('macosx64-nightly', ):
-            return task.attributes.get('nightly', False)
-    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+    filter = make_nightly_filter({'macosx64-nightly'})
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t, parameters)]
 
 
 @_target_task('nightly_win32')
@@ -582,13 +494,8 @@ def target_tasks_nightly_win32(full_task_graph, parameters, graph_config):
     """Select the set of tasks required for a nightly build of win32 and win64.
     The nightly build process involves a pipeline of builds, signing,
     and, eventually, uploading the tasks to balrog."""
-    def filter(task):
-        platform = task.attributes.get('build_platform')
-        if not filter_for_project(task, parameters):
-            return False
-        if platform in ('win32-nightly', ):
-            return task.attributes.get('nightly', False)
-    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+    filter = make_nightly_filter({'win32-nightly'})
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t, parameters)]
 
 
 @_target_task('nightly_win64')
@@ -596,13 +503,8 @@ def target_tasks_nightly_win64(full_task_graph, parameters, graph_config):
     """Select the set of tasks required for a nightly build of win32 and win64.
     The nightly build process involves a pipeline of builds, signing,
     and, eventually, uploading the tasks to balrog."""
-    def filter(task):
-        platform = task.attributes.get('build_platform')
-        if not filter_for_project(task, parameters):
-            return False
-        if platform in ('win64-nightly', ):
-            return task.attributes.get('nightly', False)
-    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+    filter = make_nightly_filter({'win64-nightly'})
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t, parameters)]
 
 
 @_target_task('nightly_desktop')
@@ -637,11 +539,49 @@ def target_tasks_searchfox(full_task_graph, parameters, graph_config):
     return ['searchfox-linux64-searchfox/debug']
 
 
+@_target_task('pipfile_update')
+def target_tasks_pipfile_update(full_task_graph, parameters, graph_config):
+    """Select the set of tasks required to perform nightly in-tree pipfile updates
+    """
+    def filter(task):
+        # For now any task in the repo-update kind is ok
+        return task.kind in ['pipfile-update']
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
 @_target_task('file_update')
 def target_tasks_file_update(full_task_graph, parameters, graph_config):
     """Select the set of tasks required to perform nightly in-tree file updates
     """
     def filter(task):
         # For now any task in the repo-update kind is ok
-        return task.kind in ['repo-update', 'repo-update-bb']
+        return task.kind in ['repo-update']
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
+@_target_task('cron_bouncer_check')
+def target_tasks_bouncer_check(full_task_graph, parameters, graph_config):
+    """Select the set of tasks required to perform bouncer version verification.
+    """
+    def filter(task):
+        if not filter_for_project(task, parameters):
+            return False
+        # For now any task in the repo-update kind is ok
+        return task.kind in ['cron-bouncer-check']
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
+@_target_task('staging_release_builds')
+def target_tasks_staging_release(full_task_graph, parameters, graph_config):
+    """
+    Select all builds that are part of releases.
+    """
+
+    def filter(task):
+        if not task.attributes.get('shipping_product'):
+            return False
+        if task.attributes.get('shipping_phase') == 'build':
+            return True
+        return False
+
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]

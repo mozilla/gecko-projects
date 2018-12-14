@@ -8,12 +8,14 @@ transforms:
    - taskgraph.transforms.name_sanity:transforms
    - taskgraph.transforms.beetmover_repackage_l10n:transforms
    - taskgraph.transforms.beetmover_repackage:transforms
-   - taskgraph.transforms.release_notifications:transforms
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
    - repackage-signing
+   - repackage-signing-l10n
    - partials-signing
+
+fake-multi-dep: true
 
 only-for-build-platforms:
    - linux-nightly/opt

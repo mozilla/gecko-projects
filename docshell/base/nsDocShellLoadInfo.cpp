@@ -64,6 +64,7 @@ SetMaybeResultPrincipalURI(nsIDocShellLoadInfo* aLoadInfo, Maybe<nsCOMPtr<nsIURI
 
 nsDocShellLoadInfo::nsDocShellLoadInfo()
   : mResultPrincipalURIIsSome(false)
+  , mKeepResultPrincipalURIIfSet(false)
   , mLoadReplace(false)
   , mInheritPrincipal(false)
   , mPrincipalIsExplicit(false)
@@ -73,6 +74,7 @@ nsDocShellLoadInfo::nsDocShellLoadInfo()
   , mReferrerPolicy(mozilla::net::RP_Unset)
   , mLoadType(nsIDocShellLoadInfo::loadNormal)
   , mIsSrcdocLoad(false)
+  , mIsFromProcessingFrameAttributes(false)
 {
 }
 
@@ -152,6 +154,21 @@ nsDocShellLoadInfo::SetResultPrincipalURIIsSome(bool aIsSome)
   mResultPrincipalURIIsSome = aIsSome;
   return NS_OK;
 }
+
+NS_IMETHODIMP
+nsDocShellLoadInfo::GetKeepResultPrincipalURIIfSet(bool* aKeep)
+{
+  *aKeep = mKeepResultPrincipalURIIfSet;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellLoadInfo::SetKeepResultPrincipalURIIfSet(bool aKeep)
+{
+  mKeepResultPrincipalURIIfSet = aKeep;
+  return NS_OK;
+}
+
 
 NS_IMETHODIMP
 nsDocShellLoadInfo::GetLoadReplace(bool* aLoadReplace)
@@ -406,5 +423,21 @@ NS_IMETHODIMP
 nsDocShellLoadInfo::SetBaseURI(nsIURI* aBaseURI)
 {
   mBaseURI = aBaseURI;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellLoadInfo::GetIsFromProcessingFrameAttributes(bool* aIsFromProcessingFrameAttributes)
+{
+  NS_ENSURE_ARG_POINTER(aIsFromProcessingFrameAttributes);
+
+  *aIsFromProcessingFrameAttributes = mIsFromProcessingFrameAttributes;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellLoadInfo::SetIsFromProcessingFrameAttributes(bool aIsFromProcessingFrameAttributes)
+{
+  mIsFromProcessingFrameAttributes = aIsFromProcessingFrameAttributes;
   return NS_OK;
 }

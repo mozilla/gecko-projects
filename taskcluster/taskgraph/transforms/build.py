@@ -9,7 +9,12 @@ kind.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.attributes import RELEASE_PROJECTS
+from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.workertypes import worker_type_implementation
+
+import logging
+logger = logging.getLogger(__name__)
 
 transforms = TransformSequence()
 
@@ -33,12 +38,43 @@ def set_defaults(config, jobs):
 
 
 @transforms.add
+def stub_installer(config, jobs):
+    for job in jobs:
+        resolve_keyed_by(
+            job, 'stub-installer', item_name=job['name'], project=config.params['project']
+        )
+        job.setdefault('attributes', {})
+        if job.get('stub-installer'):
+            job['attributes']['stub-installer'] = job['stub-installer']
+            job['worker']['env'].update({"USE_STUB_INSTALLER": "1"})
+        if 'stub-installer' in job:
+            del job['stub-installer']
+        yield job
+
+
+@transforms.add
 def set_env(config, jobs):
     """Set extra environment variables from try command line."""
-    env = {}
+    env = []
     if config.params['try_mode'] == 'try_option_syntax':
-        env = config.params['try_options']['env'] or {}
+        env = config.params['try_options']['env'] or []
     for job in jobs:
         if env:
             job['worker']['env'].update(dict(x.split('=') for x in env))
+        yield job
+
+
+@transforms.add
+def enable_full_crashsymbols(config, jobs):
+    """Enable full crashsymbols on jobs with
+    'enable-full-crashsymbols' set to True and on release branches, or
+    on try"""
+    branches = RELEASE_PROJECTS | {'try', }
+    for job in jobs:
+        enable_full_crashsymbols = job['attributes'].get('enable-full-crashsymbols')
+        if enable_full_crashsymbols and config.params['project'] in branches:
+            logger.debug("Enabling full symbol generation for %s", job['name'])
+        else:
+            logger.debug("Disabling full symbol generation for %s", job['name'])
+            job['worker']['env']['MOZ_DISABLE_FULL_SYMBOLS'] = '1'
         yield job

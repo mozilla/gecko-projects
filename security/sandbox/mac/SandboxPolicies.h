@@ -80,10 +80,12 @@ static const char contentSandboxRules[] = R"SANDBOX_LITERAL(
     (allow file-map-executable file-read*
       (subpath "/System")
       (subpath "/usr/lib")
+      (subpath "/Library/GPUBundles")
       (subpath appdir-path))
     (allow file-read*
         (subpath "/System")
         (subpath "/usr/lib")
+        (subpath "/Library/GPUBundles")
         (subpath appdir-path)))
 
   ; Allow read access to standard system paths.
@@ -91,7 +93,6 @@ static const char contentSandboxRules[] = R"SANDBOX_LITERAL(
     (require-all (file-mode #o0004)
       (require-any
         (subpath "/Library/Filesystems/NetFSPlugins")
-        (subpath "/Library/GPUBundles")
         (subpath "/usr/share"))))
 
   ; Top-level directory metadata access (bug 1404298)
@@ -343,6 +344,24 @@ static const char contentSandboxRules[] = R"SANDBOX_LITERAL(
     ; automatically issued by the font server in response to font
     ; API calls.
     (extension "com.apple.app-sandbox.read"))
+
+  ; Fonts
+  ; Workaround for sandbox extensions not being automatically
+  ; issued for fonts on 10.11 and earlier versions (bug 1460917).
+  (if (<= macosMinorVersion 11)
+    (allow file-read*
+      (regex #"\.[oO][tT][fF]$"          ; otf
+             #"\.[tT][tT][fF]$"          ; ttf
+             #"\.[tT][tT][cC]$"          ; ttc
+             #"\.[oO][tT][cC]$"          ; otc
+             #"\.[dD][fF][oO][nN][tT]$") ; dfont
+      (home-subpath "/Library/FontCollections")
+      (home-subpath "/Library/Application Support/Adobe/CoreSync/plugins/livetype")
+      (home-subpath "/Library/Application Support/FontAgent")
+      (home-subpath "/Library/Extensis/UTC") ; bug 1469657
+      (subpath "/Library/Extensis/UTC")      ; bug 1469657
+      (regex #"\.fontvault/")
+      (home-subpath "/FontExplorer X/Font Library")))
 )SANDBOX_LITERAL";
 
 // These are additional rules that are added to the content process rules for
@@ -500,6 +519,9 @@ static const char flashPluginSandboxRules[] = R"SANDBOX_LITERAL(
   (define home-library-path
     (string-append homeDir "/Library"))
 
+  (define (home-subpath home-relative-subpath)
+    (subpath (string-append homeDir home-relative-subpath)))
+
   (define home-library-prefs-path
     (string-append homeDir "/Library" "/Preferences"))
 
@@ -608,6 +630,24 @@ static const char flashPluginSandboxRules[] = R"SANDBOX_LITERAL(
     ; automatically issued by the font server in response to font
     ; API calls.
     (extension "com.apple.app-sandbox.read"))
+
+  ; Fonts
+  ; Workaround for sandbox extensions not being automatically
+  ; issued for fonts on 10.11 and earlier versions (bug 1460917).
+  (if (<= macosMinorVersion 11)
+    (allow file-read*
+      (regex #"\.[oO][tT][fF]$"          ; otf
+             #"\.[tT][tT][fF]$"          ; ttf
+             #"\.[tT][tT][cC]$"          ; ttc
+             #"\.[oO][tT][cC]$"          ; otc
+             #"\.[dD][fF][oO][nN][tT]$") ; dfont
+      (home-subpath "/Library/FontCollections")
+      (home-subpath "/Library/Application Support/Adobe/CoreSync/plugins/livetype")
+      (home-subpath "/Library/Application Support/FontAgent")
+      (home-subpath "/Library/Extensis/UTC") ; bug 1469657
+      (subpath "/Library/Extensis/UTC")      ; bug 1469657
+      (regex #"\.fontvault/")
+      (home-subpath "/FontExplorer X/Font Library")))
 
   (allow ipc-posix-shm*
       (ipc-posix-name-regex #"^AudioIO")

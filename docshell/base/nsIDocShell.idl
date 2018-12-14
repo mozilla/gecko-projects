@@ -151,9 +151,19 @@ interface nsIDocShell : nsIDocShellTreeItem
    *                               When Nothing, there will be no change
    *                               When Some, the principal URI will overwrite even
    *                               with a null value.
+   * @param aKeepResultPrincipalURIIfSet - If a refresh is caused by
+   *                                       http-equiv="refresh" we want to set
+   *                                       aResultPrincipalURI, but we do not want
+   *                                       to overwrite the channel's
+   *                                       ResultPrincipalURI, if it has already
+   *                                       been set on the channel by a protocol
+   *                                       handler.
    * @param aLoadReplace         - If set LOAD_REPLACE flag will be set on the
    *                               channel. aOriginalURI is null, this argument is
    *                               ignored.
+   * @param aIsFromProcessingFrameAttributes
+   *          - If this is a load triggered by changing frame attributes.
+   *            See nsILoadInfo.isFromProcessingFrameAttributes
    * @param aReferrer            - Referring URI
    * @param aReferrerPolicy      - Referrer policy
    * @param aTriggeringPrincipal - A non-null principal that initiated that load.
@@ -201,7 +211,9 @@ interface nsIDocShell : nsIDocShellTreeItem
   [noscript]void internalLoad(in nsIURI aURI,
                               in nsIURI aOriginalURI,
                               [const] in MaybeURI aResultPrincipalURI,
+                              in bool aKeepResultPrincipalURIIfSet,
                               in boolean aLoadReplace,
+                              in boolean aIsFromProcessingFrameAttributes,
                               in nsIURI aReferrer,
                               in unsigned long aReferrerPolicy,
                               in nsIPrincipal aTriggeringPrincipal,

@@ -15,17 +15,14 @@ import sys
 sys.path.insert(1, os.path.dirname(sys.path[0]))
 
 from mozharness.base.script import BaseScript
-from mozharness.mozilla.buildbot import BuildbotMixin
-from mozharness.mozilla.purge import PurgeMixin
-from mozharness.mozilla.release import ReleaseMixin
+from mozharness.mozilla.automation import AutomationMixin
 from mozharness.mozilla.secrets import SecretsMixin
 from mozharness.base.python import VirtualenvMixin
 from mozharness.base.log import FATAL
 
 
 # DesktopPartnerRepacks {{{1
-class DesktopPartnerRepacks(ReleaseMixin, BuildbotMixin, PurgeMixin,
-                            BaseScript, VirtualenvMixin, SecretsMixin):
+class DesktopPartnerRepacks(AutomationMixin, BaseScript, VirtualenvMixin, SecretsMixin):
     """Manages desktop partner repacks"""
     actions = [
                 "clobber",
@@ -55,6 +52,10 @@ class DesktopPartnerRepacks(ReleaseMixin, BuildbotMixin, PurgeMixin,
             "dest": "taskIds",
             "action": "extend",
             "help": "taskId(s) of upstream tasks for vanilla Firefox artifacts",
+        }],
+        [["--limit-locale", "-l"], {
+            "dest": "limitLocales",
+            "action": "append",
         }],
     ]
 
@@ -162,9 +163,13 @@ class DesktopPartnerRepacks(ReleaseMixin, BuildbotMixin, PurgeMixin,
         if self.config.get('taskIds'):
             for taskId in self.config['taskIds']:
                 repack_cmd.extend(["--taskid", taskId])
+        if self.config.get("limitLocales"):
+            for locale in self.config["limitLocales"]:
+                repack_cmd.extend(["--limit-locale", locale])
 
-        return self.run_command(repack_cmd,
-                                cwd=self.query_abs_dirs()['abs_scripts_dir'])
+        self.run_command(repack_cmd,
+                         cwd=self.query_abs_dirs()['abs_scripts_dir'],
+                         halt_on_failure=True)
 
 
 # main {{{

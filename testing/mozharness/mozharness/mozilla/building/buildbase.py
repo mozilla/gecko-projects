@@ -14,7 +14,6 @@ import json
 
 import os
 import pprint
-import subprocess
 import time
 import uuid
 import copy
@@ -24,27 +23,25 @@ import glob
 import sys
 from datetime import datetime
 import re
-from mozharness.base.config import BaseConfig, parse_config_file, DEFAULT_CONFIG_PATH
+from mozharness.base.config import (
+    BaseConfig, parse_config_file, DEFAULT_CONFIG_PATH,
+)
 from mozharness.base.log import ERROR, OutputParser, FATAL
 from mozharness.base.script import PostScriptRun
 from mozharness.base.vcs.vcsbase import MercurialScript
-from mozharness.mozilla.buildbot import (
-    BuildbotMixin,
+from mozharness.mozilla.automation import (
+    AutomationMixin,
     EXIT_STATUS_DICT,
     TBPL_STATUS_DICT,
-    TBPL_EXCEPTION,
     TBPL_FAILURE,
     TBPL_RETRY,
     TBPL_WARNING,
     TBPL_SUCCESS,
     TBPL_WORST_LEVEL_TUPLE,
 )
-from mozharness.mozilla.purge import PurgeMixin
 from mozharness.mozilla.secrets import SecretsMixin
-from mozharness.mozilla.signing import SigningMixin
 from mozharness.mozilla.testing.errors import TinderBoxPrintRe
 from mozharness.mozilla.testing.unittest import tbox_print_summary
-from mozharness.mozilla.updates.balrog import BalrogMixin
 from mozharness.base.python import (
     PerfherderResourceOptionsMixin,
     VirtualenvMixin,
@@ -58,8 +55,7 @@ Please add this to your config."
 
 ERROR_MSGS = {
     'undetermined_repo_path': 'The repo could not be determined. \
-Please make sure that either "repo" is in your config or, if \
-you are running this in buildbot, "repo_path" is in your buildbot_config.',
+Please make sure that "repo" is in your config.',
     'comments_undetermined': '"comments" could not be determined. This may be \
 because it was a forced build.',
     'tooltool_manifest_undetermined': '"tooltool_manifest_src" not set, \
@@ -67,7 +63,7 @@ Skipping run_tooltool...',
 }
 
 
-### Output Parsers
+# Output Parsers
 
 TBPL_UPLOAD_ERRORS = [
     {
@@ -87,71 +83,13 @@ TBPL_UPLOAD_ERRORS = [
 
 class MakeUploadOutputParser(OutputParser):
     tbpl_error_list = TBPL_UPLOAD_ERRORS
-    # let's create a switch case using name-spaces/dict
-    # rather than a long if/else with duplicate code
-    property_conditions = [
-        # key: property name, value: condition
-        ('symbolsUrl', "m.endswith('crashreporter-symbols.zip') or "
-                       "m.endswith('crashreporter-symbols-full.zip')"),
-        ('testsUrl', "m.endswith(('tests.tar.bz2', 'tests.zip'))"),
-        ('robocopApkUrl', "m.endswith('apk') and 'robocop' in m"),
-        ('jsshellUrl', "'jsshell-' in m and m.endswith('.zip')"),
-        ('partialMarUrl', "m.endswith('.mar') and '.partial.' in m"),
-        ('completeMarUrl', "m.endswith('.mar')"),
-        ('codeCoverageUrl', "m.endswith('code-coverage-gcno.zip')"),
-    ]
 
-    def __init__(self, use_package_as_marfile=False, package_filename=None, **kwargs):
+    def __init__(self, **kwargs):
         super(MakeUploadOutputParser, self).__init__(**kwargs)
-        self.matches = {}
         self.tbpl_status = TBPL_SUCCESS
-        self.use_package_as_marfile = use_package_as_marfile
-        self.package_filename = package_filename
 
     def parse_single_line(self, line):
-        prop_assigned = False
-        pat = r'''^(https?://.*?\.(?:tar\.bz2|dmg|zip|apk|rpm|mar|tar\.gz))$'''
-        m = re.compile(pat).match(line)
-        if m:
-            m = m.group(1)
-            for prop, condition in self.property_conditions:
-                if eval(condition):
-                    self.matches[prop] = m
-                    prop_assigned = True
-                    break
-            if not prop_assigned:
-                # if we found a match but haven't identified the prop then this
-                # is the packageURL. Alternatively, if we already know the
-                # package filename, then use that explicitly so we don't pick up
-                # just any random file and assume it's the package.
-                if not self.package_filename or m.endswith(self.package_filename):
-                    self.matches['packageUrl'] = m
-
-                    # For android builds, the package is also used as the mar file.
-                    # Grab the first one, since that is the one in the
-                    # nightly/YYYY/MM directory
-                    if self.use_package_as_marfile:
-                        if 'tinderbox-builds' in m or 'nightly/latest-' in m:
-                            self.info("Skipping wrong packageUrl: %s" % m)
-                        else:
-                            if 'completeMarUrl' in self.matches:
-                                self.fatal("Found multiple package URLs. Please update buildbase.py")
-                            self.info("Using package as mar file: %s" % m)
-                            self.matches['completeMarUrl'] = m
-                            u, self.package_filename = os.path.split(m)
-
-        if self.use_package_as_marfile and self.package_filename:
-            # The checksum file is also dumped during 'make upload'. Look
-            # through here to get the hash and filesize of the android package
-            # for balrog submission.
-            pat = r'''^([^ ]*) sha512 ([0-9]*) %s$''' % self.package_filename
-            m = re.compile(pat).match(line)
-            if m:
-                self.matches['completeMarHash'] = m.group(1)
-                self.matches['completeMarSize'] = m.group(2)
-                self.info("Using package as mar file and found package hash=%s size=%s" % (m.group(1), m.group(2)))
-
-        # now let's check for retry errors which will give log levels:
+        # let's check for retry errors which will give log levels:
         # tbpl status as RETRY and mozharness status as WARNING
         for error_check in self.tbpl_error_list:
             if error_check['regex'].search(line):
@@ -227,10 +165,12 @@ class CheckTestCompleteParser(OutputParser):
 
         return self.tbpl_status
 
+
 class MozconfigPathError(Exception):
     """
     There was an error getting a mozconfig path from a mozharness config.
     """
+
 
 def get_mozconfig_path(script, config, dirs):
     """
@@ -321,21 +261,19 @@ class BuildingConfig(BaseConfig):
         # not matter. ie: you can supply --branch before --build-pool
         # or vice versa and the hierarchy will not be different
 
-        #### The order from highest precedence to lowest is:
-        ## There can only be one of these...
+        # ### The order from highest precedence to lowest is:
+        # # There can only be one of these...
         # 1) build_pool: this can be either staging, pre-prod, and prod cfgs
         # 2) branch: eg: mozilla-central, cedar, cypress, etc
         # 3) build_variant: these could be known like asan and debug
         #                   or a custom config
-        ##
-        ## There can be many of these
+        #
+        # # There can be many of these
         # 4) all other configs: these are any configs that are passed with
         #                       --cfg and --opt-cfg. There order is kept in
         #                       which they were passed on the cmd line. This
         #                       behaviour is maintains what happens by default
         #                       in mozharness
-        ##
-        ####
 
         # so, let's first assign the configs that hold a known position of
         # importance (1 through 3)
@@ -371,9 +309,11 @@ class BuildingConfig(BaseConfig):
             all_config_dicts.append(
                 (variant_cfg_file, parse_config_file(variant_cfg_file))
             )
+        config_paths = options.config_paths or ['.']
         if branch_cfg_file:
             # take only the specific branch, if present
-            branch_configs = parse_config_file(branch_cfg_file)
+            branch_configs = parse_config_file(branch_cfg_file,
+                                               search_path=config_paths + [DEFAULT_CONFIG_PATH])
             if branch_configs.get(options.branch or ""):
                 all_config_dicts.append(
                     (branch_cfg_file, branch_configs[options.branch])
@@ -381,7 +321,9 @@ class BuildingConfig(BaseConfig):
         if pool_cfg_file:
             # take only the specific pool. If we are here, the pool
             # must be present
-            build_pool_configs = parse_config_file(pool_cfg_file)
+            build_pool_configs = parse_config_file(
+                pool_cfg_file,
+                search_path=config_paths + [DEFAULT_CONFIG_PATH])
             all_config_dicts.append(
                 (pool_cfg_file, build_pool_configs[options.build_pool])
             )
@@ -421,19 +363,19 @@ class BuildOptionParser(object):
         'code-coverage': 'builds/releng_sub_%s_configs/%s_code_coverage.py',
         'source': 'builds/releng_sub_%s_configs/%s_source.py',
         'noopt-debug': 'builds/releng_sub_%s_configs/%s_noopt_debug.py',
-        'api-16-gradle-dependencies': 'builds/releng_sub_%s_configs/%s_api_16_gradle_dependencies.py',
+        'api-16-gradle-dependencies':
+            'builds/releng_sub_%s_configs/%s_api_16_gradle_dependencies.py',
         'api-16': 'builds/releng_sub_%s_configs/%s_api_16.py',
-        'api-16-old-id': 'builds/releng_sub_%s_configs/%s_api_16_old_id.py',
         'api-16-artifact': 'builds/releng_sub_%s_configs/%s_api_16_artifact.py',
         'api-16-debug': 'builds/releng_sub_%s_configs/%s_api_16_debug.py',
         'api-16-debug-artifact': 'builds/releng_sub_%s_configs/%s_api_16_debug_artifact.py',
         'api-16-gradle': 'builds/releng_sub_%s_configs/%s_api_16_gradle.py',
         'api-16-gradle-artifact': 'builds/releng_sub_%s_configs/%s_api_16_gradle_artifact.py',
-        'api-16-without-google-play-services': 'builds/releng_sub_%s_configs/%s_api_16_without_google_play_services.py',
+        'api-16-without-google-play-services':
+            'builds/releng_sub_%s_configs/%s_api_16_without_google_play_services.py',
         'rusttests': 'builds/releng_sub_%s_configs/%s_rusttests.py',
         'rusttests-debug': 'builds/releng_sub_%s_configs/%s_rusttests_debug.py',
         'x86': 'builds/releng_sub_%s_configs/%s_x86.py',
-        'x86-old-id': 'builds/releng_sub_%s_configs/%s_x86_old_id.py',
         'x86-artifact': 'builds/releng_sub_%s_configs/%s_x86_artifact.py',
         'api-16-partner-sample1': 'builds/releng_sub_%s_configs/%s_api_16_partner_sample1.py',
         'aarch64': 'builds/releng_sub_%s_configs/%s_aarch64.py',
@@ -442,7 +384,7 @@ class BuildOptionParser(object):
         'android-lint': 'builds/releng_sub_%s_configs/%s_lint.py',
         'android-findbugs': 'builds/releng_sub_%s_configs/%s_findbugs.py',
         'android-geckoview-docs': 'builds/releng_sub_%s_configs/%s_geckoview_docs.py',
-        'valgrind' : 'builds/releng_sub_%s_configs/%s_valgrind.py',
+        'valgrind': 'builds/releng_sub_%s_configs/%s_valgrind.py',
         'artifact': 'builds/releng_sub_%s_configs/%s_artifact.py',
         'debug-artifact': 'builds/releng_sub_%s_configs/%s_debug_artifact.py',
         'devedition': 'builds/releng_sub_%s_configs/%s_devedition.py',
@@ -548,12 +490,11 @@ class BuildOptionParser(object):
             # name
             sys.exit("Whoops!\n'--custom-build-variant' was passed but an "
                      "appropriate config file could not be determined. Tried "
-                     "using: '%s' but it was either not:\n\t-- a valid "
-                     "shortname: %s \n\t-- a valid path in %s \n\t-- a "
-                     "valid variant for the given platform and bits." % (
+                     "using: '%s' but it was not:"
+                     "\n\t-- a valid shortname: %s "
+                     "\n\t-- a valid variant for the given platform and bits." % (
                          prospective_cfg_path,
-                         str(cls.build_variants.keys()),
-                         str(cls.config_file_search_path)))
+                         str(cls.build_variants.keys())))
         parser.values.config_files.append(valid_variant_cfg_path)
         setattr(parser.values, option.dest, value)  # the pool
 
@@ -585,7 +526,7 @@ class BuildOptionParser(object):
 # this global depends on BuildOptionParser and therefore can not go at the
 # top of the file
 BUILD_BASE_CONFIG_OPTIONS = [
-    [['--developer-run', '--skip-buildbot-actions'], {
+    [['--developer-run'], {
         "action": "store_false",
         "dest": "is_automation",
         "default": True,
@@ -656,7 +597,7 @@ BUILD_BASE_CONFIG_OPTIONS = [
     [['--who'], {
         "dest": "who",
         "default": '',
-        "help": "stores who made the created the buildbot change."}],
+        "help": "stores who made the created the change."}],
 ]
 
 
@@ -668,15 +609,15 @@ def generate_build_UID():
     return uuid.uuid4().hex
 
 
-class BuildScript(BuildbotMixin, PurgeMixin, BalrogMixin,
-                  SigningMixin, VirtualenvMixin, MercurialScript,
+class BuildScript(AutomationMixin,
+                  VirtualenvMixin, MercurialScript,
                   SecretsMixin, PerfherderResourceOptionsMixin):
     def __init__(self, **kwargs):
         # objdir is referenced in _query_abs_dirs() so let's make sure we
         # have that attribute before calling BaseScript.__init__
         self.objdir = None
         super(BuildScript, self).__init__(**kwargs)
-        # epoch is only here to represent the start of the buildbot build
+        # epoch is only here to represent the start of the build
         # that this mozharn script came from. until I can grab bbot's
         # status.build.gettime()[0] this will have to do as a rough estimate
         # although it is about 4s off from the time it would be if it was
@@ -822,36 +763,23 @@ or run without that action (ie: --no-{action})"
             # dirs['abs_obj_dir'] can be different from env['MOZ_OBJDIR'] on
             # mac, and that confuses mach.
             del env['MOZ_OBJDIR']
-            return self.get_output_from_command(cmd,
-                cwd=dirs['abs_obj_dir'], env=env)
+            return self.get_output_from_command(
+                cmd, cwd=dirs['abs_obj_dir'], env=env)
         else:
             return None
 
     def query_buildid(self):
-        c = self.config
         if self.buildid:
             return self.buildid
 
-        buildid = None
-        if c.get("is_automation") and self.buildbot_config['properties'].get('buildid'):
-            self.info("Determining buildid from buildbot properties")
-            buildid = self.buildbot_config['properties']['buildid'].encode(
-                'ascii', 'replace'
-            )
-        else:
-            # for taskcluster, there are no buildbot properties, and we pass
-            # MOZ_BUILD_DATE into mozharness as an environment variable, only
-            # to have it pass the same value out with the same name.
-            buildid = os.environ.get('MOZ_BUILD_DATE')
+        # for taskcluster, we pass MOZ_BUILD_DATE into mozharness as an
+        # environment variable, only to have it pass the same value out with
+        # the same name.
+        buildid = os.environ.get('MOZ_BUILD_DATE')
 
         if not buildid:
             self.info("Creating buildid through current time")
             buildid = generate_build_ID()
-
-        if c.get('is_automation') or os.environ.get("TASK_ID"):
-            self.set_buildbot_property('buildid',
-                                       buildid,
-                                       write_to_file=True)
 
         self.buildid = buildid
         return self.buildid
@@ -872,7 +800,7 @@ or run without that action (ie: --no-{action})"
 
         # we actually supply the repo in mozharness so if it's in
         #  the config, we use that (automation does not require it in
-        # buildbot props)
+        # props)
         if not c.get('repo_path'):
             repo_path = 'projects/%s' % (self.branch,)
             self.info(
@@ -882,12 +810,6 @@ or run without that action (ie: --no-{action})"
             repo_path = c['repo_path']
         self.repo_path = '%s/%s' % (c['repo_base'], repo_path,)
         return self.repo_path
-
-    def _skip_buildbot_specific_action(self):
-        """ ignore actions from buildbot's infra."""
-        self.info("This action is specific to buildbot's infrastructure")
-        self.info("Skipping......")
-        return
 
     def query_is_nightly_promotion(self):
         platform_enabled = self.config.get('enable_nightly_promotion')
@@ -914,45 +836,18 @@ or run without that action (ie: --no-{action})"
         env['MOZ_SOURCE_REPO'] = repo_path
 
         if self.query_is_nightly() or self.query_is_nightly_promotion():
-            if self.query_is_nightly():
-                # nightly promotion needs to set update_channel but not do all the 'IS_NIGHTLY'
-                # automation parts like uploading symbols for now
-                env["IS_NIGHTLY"] = "yes"
             # in branch_specifics.py we might set update_channel explicitly
             if c.get('update_channel'):
                 env["MOZ_UPDATE_CHANNEL"] = c['update_channel']
+            elif c.get('enable_release_promotion'):
+                env["MOZ_UPDATE_CHANNEL"] = self.branch
             else:  # let's just give the generic channel based on branch
                 env["MOZ_UPDATE_CHANNEL"] = "nightly-%s" % (self.branch,)
+            self.info("Update channel set to: {}".format(env["MOZ_UPDATE_CHANNEL"]))
 
         if self.config.get('pgo_build') or self._compile_against_pgo():
             env['MOZ_PGO'] = '1'
 
-        if c.get('enable_signing'):
-            if os.environ.get('MOZ_SIGNING_SERVERS'):
-                moz_sign_cmd = subprocess.list2cmdline(
-                    self.query_moz_sign_cmd(formats=None)
-                )
-                # windows fix. This is passed to mach build env and we call that
-                # with python, not with bash so we need to fix the slashes here
-                env['MOZ_SIGN_CMD'] = moz_sign_cmd.replace('\\', '\\\\\\\\')
-            else:
-                self.warning("signing disabled because MOZ_SIGNING_SERVERS is not set")
-        elif 'MOZ_SIGN_CMD' in env:
-            # Ensure that signing is truly disabled
-            # MOZ_SIGN_CMD may be defined by default in buildbot (see MozillaBuildFactory)
-            self.warning("Clearing MOZ_SIGN_CMD because we don't have config['enable_signing']")
-            del env['MOZ_SIGN_CMD']
-
-        # to activate the right behaviour in mozonfigs while we transition
-        if c.get('enable_release_promotion'):
-            env['ENABLE_RELEASE_PROMOTION'] = "1"
-            update_channel = c.get('update_channel', self.branch)
-            self.info("Release promotion update channel: %s"
-                      % (update_channel,))
-            env["MOZ_UPDATE_CHANNEL"] = update_channel
-
-        # we can't make env an attribute of self because env can change on
-        # every call for reasons like MOZ_SIGN_CMD
         return env
 
     def query_mach_build_env(self, multiLocale=None):
@@ -1102,32 +997,20 @@ or run without that action (ie: --no-{action})"
     def query_revision(self, source_path=None):
         """ returns the revision of the build
 
-         first will look for it in buildbot_properties and then in
-         buildbot_config. Failing that, it will actually poll the source of
-         the repo if it exists yet.
-
          This method is used both to figure out what revision to check out and
          to figure out what revision *was* checked out.
         """
         revision = None
-        if 'revision' in self.buildbot_properties:
-            revision = self.buildbot_properties['revision']
-        elif (self.buildbot_config and
-                  self.buildbot_config.get('sourcestamp', {}).get('revision')):
-            revision = self.buildbot_config['sourcestamp']['revision']
-        elif self.buildbot_config and self.buildbot_config.get('revision'):
-            revision = self.buildbot_config['revision']
-        else:
-            if not source_path:
-                dirs = self.query_abs_dirs()
-                source_path = dirs['abs_src_dir']  # let's take the default
+        if not source_path:
+            dirs = self.query_abs_dirs()
+            source_path = dirs['abs_src_dir']  # let's take the default
 
-            # Look at what we have checked out
-            if os.path.exists(source_path):
-                hg = self.query_exe('hg', return_type='list')
-                revision = self.get_output_from_command(
-                    hg + ['parent', '--template', '{node}'], cwd=source_path
-                )
+        # Look at what we have checked out
+        if os.path.exists(source_path):
+            hg = self.query_exe('hg', return_type='list')
+            revision = self.get_output_from_command(
+                hg + ['parent', '--template', '{node}'], cwd=source_path
+            )
         return revision.encode('ascii', 'replace') if revision else None
 
     def _count_ctors(self):
@@ -1148,31 +1031,6 @@ or run without that action (ie: --no-{action})"
         self.get_output_from_command(cmd, cwd=dirs['abs_src_dir'],
                                      throw_exception=True)
 
-    def _query_props_set_by_mach(self, console_output=True, error_level=FATAL):
-        mach_properties_path = os.path.join(
-            self.query_abs_dirs()['abs_obj_dir'], 'dist', 'mach_build_properties.json'
-        )
-        self.info("setting properties set by mach build. Looking in path: %s"
-                  % mach_properties_path)
-        if os.path.exists(mach_properties_path):
-            with self.opened(mach_properties_path, error_level=error_level) as (fh, err):
-                build_props = json.load(fh)
-                if err:
-                    self.log("%s exists but there was an error reading the "
-                             "properties. props: `%s` - error: "
-                             "`%s`" % (mach_properties_path,
-                                       build_props or 'None',
-                                       err or 'No error'),
-                             error_level)
-                if console_output:
-                    self.info("Properties set from 'mach build'")
-                    self.info(pprint.pformat(build_props))
-            for key, prop in build_props.iteritems():
-                if prop != 'UNKNOWN':
-                    self.set_buildbot_property(key, prop, write_to_file=True)
-        else:
-            self.info("No mach_build_properties.json found - not importing properties.")
-
     def generate_build_props(self, console_output=True, halt_on_failure=False):
         """sets props found from mach build and, in addition, buildid,
         sourcestamp,  appVersion, and appName."""
@@ -1183,10 +1041,6 @@ or run without that action (ie: --no-{action})"
 
         if self.generated_build_props:
             return
-
-        # grab props set by mach if any
-        self._query_props_set_by_mach(console_output=console_output,
-                                      error_level=error_level)
 
         dirs = self.query_abs_dirs()
         print_conf_setting_path = os.path.join(dirs['abs_src_dir'],
@@ -1202,40 +1056,23 @@ or run without that action (ie: --no-{action})"
                                             dirs['abs_app_ini_path']),
                      level=error_level)
         self.info("Setting properties found in: %s" % dirs['abs_app_ini_path'])
-        base_cmd = [
-            sys.executable, os.path.join(dirs['abs_src_dir'], 'mach'), 'python',
-            print_conf_setting_path, dirs['abs_app_ini_path'], 'App'
-        ]
-        properties_needed = [
-            {'ini_name': 'SourceStamp', 'prop_name': 'sourcestamp'},
-            {'ini_name': 'Version', 'prop_name': 'appVersion'},
-            {'ini_name': 'Name', 'prop_name': 'appName'}
-        ]
         env = self.query_build_env()
         # dirs['abs_obj_dir'] can be different from env['MOZ_OBJDIR'] on
         # mac, and that confuses mach.
         del env['MOZ_OBJDIR']
-        for prop in properties_needed:
-            prop_val = self.get_output_from_command(
-                base_cmd + [prop['ini_name']], cwd=dirs['abs_obj_dir'],
-                halt_on_failure=halt_on_failure, env=env
-            )
-            self.set_buildbot_property(prop['prop_name'],
-                                       prop_val,
-                                       write_to_file=True)
 
         if self.config.get('is_automation'):
             self.info("Verifying buildid from application.ini matches buildid "
-                      "from buildbot")
+                      "from automation")
             app_ini_buildid = self._query_build_prop_from_app_ini('BuildID')
             # it would be hard to imagine query_buildid evaluating to a falsey
             #  value (e.g. 0), but incase it does, force it to None
-            buildbot_buildid = self.query_buildid() or None
+            automation_buildid = self.query_buildid() or None
             self.info(
-                'buildid from application.ini: "%s". buildid from buildbot '
-                'properties: "%s"' % (app_ini_buildid, buildbot_buildid)
+                'buildid from application.ini: "%s". buildid from automation '
+                'properties: "%s"' % (app_ini_buildid, automation_buildid)
             )
-            if app_ini_buildid == buildbot_buildid != None:
+            if app_ini_buildid == automation_buildid is not None:
                 self.info('buildids match.')
             else:
                 self.error(
@@ -1269,6 +1106,7 @@ or run without that action (ie: --no-{action})"
         self._get_mozconfig()
         self._run_tooltool()
         self._create_mozbuild_dir()
+        self._ensure_upload_path()
         mach_props = os.path.join(
             self.query_abs_dirs()['abs_obj_dir'], 'dist', 'mach_build_properties.json'
         )
@@ -1281,20 +1119,11 @@ or run without that action (ie: --no-{action})"
         env = self.query_build_env()
         env.update(self.query_mach_build_env())
 
-        # XXX Bug 1037883 - mozconfigs can not find buildprops.json when builds
-        # are through mozharness. This is not pretty but it is a stopgap
-        # until an alternative solution is made or all builds that touch
-        # mozconfig.cache are converted to mozharness.
         dirs = self.query_abs_dirs()
-        buildprops = os.path.join(dirs['base_work_dir'], 'buildprops.json')
-        # not finding buildprops is not an error outside of buildbot
-        if os.path.exists(buildprops):
-            self.copyfile(
-                buildprops,
-                os.path.join(dirs['abs_work_dir'], 'buildprops.json'))
 
         if 'MOZILLABUILD' in os.environ:
-            # We found many issues with intermittent build failures when not invoking mach via bash.
+            # We found many issues with intermittent build failures when not
+            # invoking mach via bash.
             # See bug 1364651 before considering changing.
             mach = [
                 os.path.join(os.environ['MOZILLABUILD'], 'msys', 'bin', 'bash.exe'),
@@ -1336,22 +1165,11 @@ or run without that action (ie: --no-{action})"
         if branch == 'try':
             branch = 'mozilla-central'
 
-        # Some android versions share the same .json config - if
-        # multi_locale_config_platform is set, use that the .json name;
-        # otherwise, use the buildbot platform.
-        default_platform = self.buildbot_config['properties'].get('platform',
-                                                                  'android')
-
         multi_config_pf = self.config.get('multi_locale_config_platform',
-                                          default_platform)
+                                          'android')
 
-        # The l10n script location differs on buildbot and taskcluster
-        if self.config.get('taskcluster_nightly'):
-            multil10n_path = \
-                'build/src/testing/mozharness/scripts/multil10n.py'
-            base_work_dir = os.path.join(base_work_dir, 'workspace')
-        else:
-            multil10n_path = '%s/scripts/scripts/multil10n.py' % base_work_dir,
+        multil10n_path = 'build/src/testing/mozharness/scripts/multil10n.py'
+        base_work_dir = os.path.join(base_work_dir, 'workspace')
 
         cmd = [
             sys.executable,
@@ -1379,30 +1197,26 @@ or run without that action (ie: --no-{action})"
             cwd=objdir,
         )
         if not package_filename:
-            self.fatal("Unable to determine the package filename for the multi-l10n build. Was trying to run: %s" % package_cmd)
+            self.fatal(
+                "Unable to determine the package filename for the multi-l10n build. "
+                "Was trying to run: %s" % package_cmd)
 
         self.info('Multi-l10n package filename is: %s' % package_filename)
 
         parser = MakeUploadOutputParser(config=self.config,
                                         log_obj=self.log_obj,
-                                        use_package_as_marfile=True,
-                                        package_filename=package_filename,
                                         )
         upload_cmd = ['make', 'upload', 'AB_CD=multi']
         self.run_command(upload_cmd,
                          env=self.query_mach_build_env(multiLocale=False),
                          cwd=objdir, halt_on_failure=True,
                          output_parser=parser)
-        for prop in parser.matches:
-            self.set_buildbot_property(prop,
-                                       parser.matches[prop],
-                                       write_to_file=True)
         upload_files_cmd = [
             'make',
             'echo-variable-UPLOAD_FILES',
             'AB_CD=multi',
         ]
-        output = self.get_output_from_command(
+        self.get_output_from_command(
             upload_files_cmd,
             cwd=objdir,
         )
@@ -1548,7 +1362,6 @@ or run without that action (ie: --no-{action})"
 
         return data
 
-
     def _load_sccache_stats(self):
         stats_file = os.path.join(
             self.query_abs_dirs()['abs_obj_dir'], 'sccache-stats.json'
@@ -1570,6 +1383,7 @@ or run without that action (ie: --no-{action})"
             'value': hits,
             'extraOptions': self.perfherder_resource_options(),
             'subtests': [],
+            'lowerIsBetter': False
         }
 
         yield {
@@ -1642,7 +1456,7 @@ or run without that action (ie: --no-{action})"
                                                         subtests[name]))
                     size_measurements.append(
                         {'name': name, 'value': subtests[name]})
-            except:
+            except Exception:
                 self.info('Unable to search %s for component sizes.' % installer)
                 size_measurements = []
 
@@ -1658,7 +1472,7 @@ or run without that action (ie: --no-{action})"
 
             return alert
 
-        if installer.endswith('.apk'): # Android
+        if installer.endswith('.apk'):  # Android
             yield filter_alert({
                 "name": "installer size",
                 "value": installer_size,
@@ -1732,11 +1546,6 @@ or run without that action (ie: --no-{action})"
         perfherder_data['suites'].extend(self._load_sccache_stats())
 
         # Ensure all extra options for this configuration are present.
-        for opt in self.config.get('perfherder_extra_options', []):
-            for suite in perfherder_data['suites']:
-                if opt not in suite.get('extraOptions', []):
-                    suite.setdefault('extraOptions', []).append(opt)
-
         for opt in os.environ.get('PERFHERDER_EXTRA_OPTIONS', '').split():
             for suite in perfherder_data['suites']:
                 if opt not in suite.get('extraOptions', []):
@@ -1748,28 +1557,6 @@ or run without that action (ie: --no-{action})"
 
         if perfherder_data["suites"]:
             self.info('PERFHERDER_DATA: %s' % json.dumps(perfherder_data))
-
-    def update(self):
-        """ submit balrog update steps. """
-        if self.config.get('forced_artifact_build'):
-            self.info('Skipping due to forced artifact build.')
-            return
-        if not self.query_is_nightly():
-            self.info("Not a nightly build, skipping balrog submission.")
-            return
-
-        # grab any props available from this or previous unclobbered runs
-        self.generate_build_props(console_output=False,
-                                  halt_on_failure=False)
-
-        # generate balrog props as artifacts
-        if self.config.get('taskcluster_nightly'):
-            env = self.query_mach_build_env(multiLocale=False)
-            props_path = os.path.join(env["UPLOAD_PATH"],
-                    'balrog_props.json')
-            self.generate_balrog_props(props_path)
-            return
-
 
     def valgrind_test(self):
         '''Execute mach's valgrind-test for memory leaks'''
@@ -1789,12 +1576,29 @@ or run without that action (ie: --no-{action})"
             self.fatal("'mach valgrind-test' did not run successfully. Please check "
                        "log for errors.")
 
+    def _ensure_upload_path(self):
+        env = self.query_mach_build_env()
 
+        # Some Taskcluster workers don't like it if an artifacts directory
+        # is defined but no artifacts are uploaded. Guard against this by always
+        # ensuring the artifacts directory exists.
+        if 'UPLOAD_PATH' in env and not os.path.exists(env['UPLOAD_PATH']):
+            self.mkdir_p(env['UPLOAD_PATH'])
 
     def _post_fatal(self, message=None, exit_code=None):
         if not self.return_code:  # only overwrite return_code if it's 0
             self.error('setting return code to 2 because fatal was called')
             self.return_code = 2
+
+    @PostScriptRun
+    def _shutdown_sccache(self):
+        '''If sccache was in use for this build, shut down the sccache server.'''
+        if os.environ.get('USE_SCCACHE') == '1':
+            topsrcdir = self.query_abs_dirs()['abs_src_dir']
+            sccache = os.path.join(topsrcdir, 'sccache2', 'sccache')
+            if self._is_windows():
+                sccache += '.exe'
+            self.run_command([sccache, '--stop-server'], cwd=topsrcdir)
 
     @PostScriptRun
     def _summarize(self):
@@ -1803,7 +1607,7 @@ or run without that action (ie: --no-{action})"
         from the script run.
         """
         if self.config.get("is_automation"):
-            # let's ignore all mention of buildbot/tbpl status until this
+            # let's ignore all mention of tbpl status until this
             # point so it will be easier to manage
             if self.return_code not in AUTOMATION_EXIT_CODES:
                 self.error("Return code is set to: %s and is outside of "
@@ -1813,5 +1617,5 @@ or run without that action (ie: --no-{action})"
                 self.return_code = 2
             for status, return_code in EXIT_STATUS_DICT.iteritems():
                 if return_code == self.return_code:
-                    self.buildbot_status(status, TBPL_STATUS_DICT[status])
+                    self.record_status(status, TBPL_STATUS_DICT[status])
         self.summary()

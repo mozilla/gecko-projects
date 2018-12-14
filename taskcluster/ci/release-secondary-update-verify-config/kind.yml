@@ -6,7 +6,6 @@ loader: taskgraph.loader.transform:loader
 
 transforms:
    - taskgraph.transforms.update_verify_config:transforms
-   - taskgraph.transforms.release_notifications:transforms
    - taskgraph.transforms.job:transforms
    - taskgraph.transforms.task:transforms
 
@@ -26,42 +25,31 @@ job-defaults:
            type: file
    run:
       using: run-task
-      sparse-profile: update-verify
+      sparse-profile: mozharness
    extra:
       app-name: browser
+      branch-prefix: mozilla
       product: firefox
       archive-prefix:
-         by-project:
-            birch: "http://ftp.stage.mozaws.net/pub"
-            default: "https://archive.mozilla.org/pub"
+         by-release-level:
+            staging: "http://ftp.stage.mozaws.net/pub"
+            production: "https://archive.mozilla.org/pub"
       previous-archive-prefix:
-         by-project:
-            birch: "https://archive.mozilla.org/pub"
-            default: null
+         by-release-level:
+            staging: "https://archive.mozilla.org/pub"
+            production: null
       aus-server:
-         by-project:
-            birch: "https://aus4.stage.mozaws.net"
-            default: "https://aus5.mozilla.org"
-      include-version:
-         by-project:
-            birch: beta
-            mozilla-release: beta
-            default: null
-      last-watershed:
-         by-project:
-            birch: "56.0b3"
-            mozilla-release: "56.0b3"
-            default: null
-      mar-channel-id-override:
-         by-project:
-            birch: beta
-            mozilla-release: beta
-            default: null
-      channel:
-         by-project:
-            birch: "beta-localtest"
-            mozilla-release: "beta-localtest"
-            default: "default"
+         by-release-level:
+            staging: "https://aus4.stage.mozaws.net"
+            production: "https://aus5.mozilla.org"
+      override-certs:
+         by-release-level:
+            staging: dep
+            production: null
+      include-version: beta
+      last-watershed: "56.0b3"
+      mar-channel-id-override: beta
+      channel: "beta-localtest"
 
 jobs:
    firefox-secondary-linux:
@@ -71,7 +59,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux
+         build_platform: linux-nightly
       extra:
          platform: linux-i686
          updater-platform: linux-x86_64
@@ -83,7 +71,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux64
+         build_platform: linux64-nightly
       extra:
          platform: linux-x86_64
          updater-platform: linux-x86_64
@@ -95,7 +83,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: macosx64
+         build_platform: macosx64-nightly
       extra:
          platform: mac
          updater-platform: linux-x86_64
@@ -107,7 +95,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win32
+         build_platform: win32-nightly
       extra:
          platform: win32
          updater-platform: linux-x86_64
@@ -119,7 +107,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win64
+         build_platform: win64-nightly
       extra:
          platform: win64
          updater-platform: linux-x86_64

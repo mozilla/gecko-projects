@@ -6,7 +6,6 @@ loader: taskgraph.loader.transform:loader
 
 transforms:
    - taskgraph.transforms.update_verify_config:transforms
-   - taskgraph.transforms.release_notifications:transforms
    - taskgraph.transforms.job:transforms
    - taskgraph.transforms.task:transforms
 
@@ -28,91 +27,71 @@ job-defaults:
       sparse-profile: mozharness
    extra:
       app-name: browser
+      branch-prefix: mozilla
       archive-prefix:
-         by-project:
-            birch: "http://ftp.stage.mozaws.net/pub"
-            jamun: "http://ftp.stage.mozaws.net/pub"
-            maple: "http://ftp.stage.mozaws.net/pub"
-            default: "https://archive.mozilla.org/pub"
+         by-release-level:
+            staging: "http://ftp.stage.mozaws.net/pub"
+            production: "https://archive.mozilla.org/pub"
       previous-archive-prefix:
-         by-project:
-            birch: "https://archive.mozilla.org/pub"
-            jamun: "https://archive.mozilla.org/pub"
-            maple: "https://archive.mozilla.org/pub"
-            default: null
+         by-release-level:
+            staging: "https://archive.mozilla.org/pub"
+            production: null
       aus-server:
-         by-project:
-            birch: "https://aus4.stage.mozaws.net"
-            jamun: "https://aus4.stage.mozaws.net"
-            maple: "https://aus4.stage.mozaws.net"
-            default: "https://aus5.mozilla.org"
+         by-release-level:
+            staging: "https://aus4.stage.mozaws.net"
+            production: "https://aus5.mozilla.org"
+      override-certs:
+         by-release-level:
+            staging: dep
+            production: null
       # This is overridden for devedition to exclude 58.0b1
       # because of the special case added by
       # https://bugzilla.mozilla.org/show_bug.cgi?id=1419189
       # The devedition override can be removed after 58.0b1
       # is behind a watershed
       include-version:
-         by-project:
-            birch: nonbeta
-            jamun: nonbeta
-            maple: beta
-            mozilla-beta: beta
-            mozilla-release: nonbeta
-            mozilla-esr60: nonbeta
-            default: null
+         by-release-type:
+            beta: beta
+            release(-rc)?: nonbeta
+            esr60: esr
+            nightly: beta
       last-watershed:
-         by-project:
-            # TODO: add esr here when setting up mozilla-esr60
-            # let's put mozilla-esr52 in this comment as well, in case
-            # somebody is grepping the tree for things they need to do.
-            birch:
-               by-build-platform:
-                  linux: "57.0"
-                  linux64: "57.0"
-                  macosx64: "57.0"
-                  win32: "56.0"
-                  win64: "56.0"
+         by-release-type:
+            beta: "56.0b3"
+            release(-rc)?:
+               by-platform:
+                  linux-.*: "57.0"
+                  linux64-.*: "57.0"
+                  macosx64-.*: "57.0"
+                  win32-.*: "56.0"
+                  win64-.*: "56.0"
                   default: null
-            jamun: "56.0b3"
-            maple: "56.0b3"
-            mozilla-beta: "56.0b3"
-            mozilla-release:
-               by-build-platform:
-                  linux: "57.0"
-                  linux64: "57.0"
-                  macosx64: "57.0"
-                  win32: "56.0"
-                  win64: "56.0"
-                  default: null
-            default: null
+            esr60: "52.0esr"
+            nightly: "default"
 
 jobs:
    firefox-linux:
       shipping-product: firefox
       treeherder:
          symbol: UVC
-         platform: linux/opt
+         platform: linux32/opt
          kind: test
          tier: 1
       attributes:
-         build_platform: linux
+         build_platform: linux-nightly
       extra:
          product: firefox
          platform: linux-i686
          updater-platform: linux-x86_64
          channel:
-            by-project:
-               birch: "release-localtest"
-               jamun: "beta-localtest"
-               maple: "beta-localtest"
-               mozilla-beta: "beta-localtest"
-               mozilla-release: "release-localtest"
-               mozilla-esr52: "esr-localtest"
-               default: "default"
+            by-release-type:
+               beta: "beta-localtest"
+               release(-rc)?: "release-localtest"
+               esr60: "esr-localtest"
+               nightly: "default"
          mar-channel-id-override:
-            by-project:
-               maple: beta
-               mozilla-beta: beta
+            by-release-type:
+               beta: beta
                default: null
 
    firefox-linux64:
@@ -123,119 +102,103 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux64
+         build_platform: linux64-nightly
       extra:
          product: firefox
          platform: linux-x86_64
          updater-platform: linux-x86_64
          channel:
-            by-project:
-               birch: "release-localtest"
-               jamun: "beta-localtest"
-               maple: "beta-localtest"
-               mozilla-beta: "beta-localtest"
-               mozilla-release: "release-localtest"
-               mozilla-esr52: "esr-localtest"
-               default: "default"
+            by-release-type:
+               beta: "beta-localtest"
+               release(-rc)?: "release-localtest"
+               esr60: "esr-localtest"
+               nightly: "default"
          mar-channel-id-override:
-            by-project:
-               maple: beta
-               mozilla-beta: beta
+            by-release-type:
+               beta: beta
                default: null
 
    firefox-macosx64:
       shipping-product: firefox
       treeherder:
          symbol: UVC
-         platform: macosx64/opt
+         platform: osx-cross/opt
          kind: test
          tier: 1
       attributes:
-         build_platform: macosx64
+         build_platform: macosx64-nightly
       extra:
          product: firefox
          platform: mac
          updater-platform: linux-x86_64
          channel:
-            by-project:
-               birch: "release-localtest"
-               jamun: "beta-localtest"
-               maple: "beta-localtest"
-               mozilla-beta: "beta-localtest"
-               mozilla-release: "release-localtest"
-               mozilla-esr52: "esr-localtest"
-               default: "default"
+            by-release-type:
+               beta: "beta-localtest"
+               release(-rc)?: "release-localtest"
+               esr60: "esr-localtest"
+               nightly: "default"
          mar-channel-id-override:
-            by-project:
-               maple: beta
-               mozilla-beta: beta
+            by-release-type:
+               beta: beta
                default: null
 
    firefox-win32:
       shipping-product: firefox
       treeherder:
          symbol: UVC
-         platform: win32/opt
+         platform: windows2012-32/opt
          kind: test
          tier: 1
       attributes:
-         build_platform: win32
+         build_platform: win32-nightly
       extra:
          product: firefox
          platform: win32
          updater-platform: linux-x86_64
          channel:
-            by-project:
-               birch: "release-localtest"
-               jamun: "beta-localtest"
-               maple: "beta-localtest"
-               mozilla-beta: "beta-localtest"
-               mozilla-release: "release-localtest"
-               mozilla-esr52: "esr-localtest"
-               default: "default"
+            by-release-type:
+               beta: "beta-localtest"
+               release(-rc)?: "release-localtest"
+               esr60: "esr-localtest"
+               nightly: "default"
          mar-channel-id-override:
-            by-project:
-               maple: beta
-               mozilla-beta: beta
+            by-release-type:
+               beta: beta
                default: null
 
    firefox-win64:
       shipping-product: firefox
       treeherder:
          symbol: UVC
-         platform: win64/opt
+         platform: windows2012-64/opt
          kind: test
          tier: 1
       attributes:
-         build_platform: win64
+         build_platform: win64-nightly
       extra:
          product: firefox
          platform: win64
          updater-platform: linux-x86_64
          channel:
-            by-project:
-               birch: "release-localtest"
-               jamun: "beta-localtest"
-               maple: "beta-localtest"
-               mozilla-beta: "beta-localtest"
-               mozilla-release: "release-localtest"
-               mozilla-esr52: "esr-localtest"
-               default: "default"
+            by-release-type:
+               beta: "beta-localtest"
+               release(-rc)?: "release-localtest"
+               esr60: "esr-localtest"
+               nightly: "default"
          mar-channel-id-override:
-            by-project:
-               maple: beta
-               mozilla-beta: beta
+            by-release-type:
+               beta: beta
                default: null
 
    devedition-linux:
       shipping-product: devedition
       treeherder:
          symbol: UVC
-         platform: linux-devedition/opt
+         platform: linux32-devedition/opt
          kind: test
          tier: 1
       attributes:
-         build_platform: linux-devedition
+         build_platform: linux-devedition-nightly
       extra:
          product: firefox
          platform: linux-i686
@@ -251,7 +214,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux64-devedition
+         build_platform: linux64-devedition-nightly
       extra:
          product: firefox
          platform: linux-x86_64
@@ -263,11 +226,11 @@ jobs:
       shipping-product: devedition
       treeherder:
          symbol: UVC
-         platform: macosx64-devedition/opt
+         platform: osx-cross-devedition/opt
          kind: test
          tier: 1
       attributes:
-         build_platform: macosx64-devedition
+         build_platform: macosx64-devedition-nightly
       extra:
          product: firefox
          platform: mac
@@ -279,11 +242,11 @@ jobs:
       shipping-product: devedition
       treeherder:
          symbol: UVC
-         platform: win32-devedition/opt
+         platform: windows2012-32-devedition/opt
          kind: test
          tier: 1
       attributes:
-         build_platform: win32-devedition
+         build_platform: win32-devedition-nightly
       extra:
          product: firefox
          platform: win32
@@ -295,11 +258,11 @@ jobs:
       shipping-product: devedition
       treeherder:
          symbol: UVC
-         platform: win64-devedition/opt
+         platform: windows2012-64-devedition/opt
          kind: test
          tier: 1
       attributes:
-         build_platform: win64-devedition
+         build_platform: win64-devedition-nightly
       extra:
          product: firefox
          platform: win64

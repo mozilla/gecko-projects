@@ -301,6 +301,32 @@
         }
       },
       {
+        "id": "WebExtensionDictionaryManifest",
+        "type": "object",
+        "description": "Represents a WebExtension dictionary manifest.json file",
+
+        "$import": "ManifestBase",
+        "properties": {
+          "homepage_url": {
+            "type": "string",
+            "format": "url",
+            "optional": true,
+            "preprocess": "localize"
+          },
+
+          "dictionaries": {
+            "type": "object",
+            "patternProperties": {
+              "^[a-z]{2}[a-zA-Z-]*$": {
+                "type": "string",
+                "format": "strictRelativeUrl",
+                "pattern": "\\.dic$"
+              }
+            }
+          }
+        }
+      },
+      {
         "id": "ThemeIcons",
         "type": "object",
         "properties": {
@@ -427,6 +453,9 @@
           },
           {
             "$ref": "MatchPatternRestricted"
+          },
+          {
+            "$ref": "MatchPatternUnestricted"
           }
         ]
       },
@@ -445,20 +474,12 @@
         ]
       },
       {
-        "id": "MatchPatternInternal",
-        "description": "Same as MatchPattern above, but includes moz-extension protocol",
+        "id": "MatchPatternUnestricted",
+        "description": "Mostly unrestricted match patterns for privileged add-ons. This should technically be rejected for unprivileged add-ons, but, reasons. The MatchPattern class will still refuse privileged schemes for those extensions.",
         "choices": [
           {
             "type": "string",
-            "enum": ["<all_urls>"]
-          },
-          {
-            "type": "string",
-            "pattern": "^(https?|wss?|file|ftp|moz-extension|\\*)://(\\*|\\*\\.[^*/]+|[^*/]+)/.*$"
-          },
-          {
-            "type": "string",
-            "pattern": "^file:///.*$"
+            "pattern": "^resource://(\\*|\\*\\.[^*/]+|[^*/]+)/.*$|^about:"
           }
         ]
       },

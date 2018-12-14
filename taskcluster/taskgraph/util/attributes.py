@@ -12,18 +12,23 @@ INTEGRATION_PROJECTS = {
     'autoland',
 }
 
-TRUNK_PROJECTS = INTEGRATION_PROJECTS | {'mozilla-central', }
+TRUNK_PROJECTS = INTEGRATION_PROJECTS | {'mozilla-central', 'comm-central'}
 
 RELEASE_PROJECTS = {
     'mozilla-central',
     'mozilla-beta',
     'mozilla-release',
+    'mozilla-esr60',
+    'comm-central',
+    'comm-beta',
+    'comm-esr60',
 }
 
 RELEASE_PROMOTION_PROJECTS = {
     'jamun',
     'maple',
     'try',
+    'try-comm-central',
 } | RELEASE_PROJECTS
 
 _OPTIONAL_ATTRIBUTES = (
@@ -33,6 +38,7 @@ _OPTIONAL_ATTRIBUTES = (
     'signed',
     'shipping_phase',
     'shipping_product',
+    'stub-installer',
 )
 
 

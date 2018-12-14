@@ -6,7 +6,6 @@
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 # ***** END LICENSE BLOCK *****
 """desktop_unittest.py
-The goal of this is to extract desktop unittesting from buildbot's factory.py
 
 author: Jordan Lund
 """
@@ -28,8 +27,7 @@ from mozharness.base.errors import BaseErrorList
 from mozharness.base.log import INFO
 from mozharness.base.script import PreScriptAction
 from mozharness.base.vcs.vcsbase import MercurialScript
-from mozharness.mozilla.blob_upload import BlobUploadMixin, blobupload_config_options
-from mozharness.mozilla.buildbot import TBPL_EXCEPTION
+from mozharness.mozilla.automation import TBPL_EXCEPTION
 from mozharness.mozilla.mozbase import MozbaseMixin
 from mozharness.mozilla.structuredlog import StructuredOutputParser
 from mozharness.mozilla.testing.errors import HarnessErrorList
@@ -47,7 +45,7 @@ SUITE_NO_E10S = ['xpcshell']
 
 
 # DesktopUnittest {{{1
-class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMixin,
+class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
                       CodeCoverageMixin):
     config_options = [
         [['--mochitest-suite', ], {
@@ -182,7 +180,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
             "help": "Tries to enable the WebRender compositor."}
          ],
     ] + copy.deepcopy(testing_config_options) + \
-        copy.deepcopy(blobupload_config_options) + \
         copy.deepcopy(code_coverage_config_options)
 
     def __init__(self, require_config_file=True):
@@ -192,7 +189,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
             config_options=self.config_options,
             all_actions=[
                 'clobber',
-                'read-buildbot-config',
                 'download-and-extract',
                 'create-virtualenv',
                 'install',
@@ -336,8 +332,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
     def _pre_create_virtualenv(self, action):
         dirs = self.query_abs_dirs()
 
-        self.register_virtualenv_module(name='pip>=1.5')
-        self.register_virtualenv_module('psutil==5.4.3', method='pip')
+        self.register_virtualenv_module('psutil==5.4.3')
         self.register_virtualenv_module(name='mock')
         self.register_virtualenv_module(name='simplejson')
 
@@ -536,13 +531,10 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
     # Actions {{{2
 
     # clobber defined in BaseScript, deletes mozharness/build if exists
-    # read_buildbot_config is in BuildbotMixin.
-    # postflight_read_buildbot_config is in TestingMixin.
     # preflight_download_and_extract is in TestingMixin.
     # create_virtualenv is in VirtualenvMixin.
     # preflight_install is in TestingMixin.
     # install is in TestingMixin.
-    # upload_blobber_files is in BlobUploadMixin
 
     @PreScriptAction('download-and-extract')
     def _pre_download_and_extract(self, action):
@@ -563,7 +555,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                     rejected.append(suite)
                     break
         if rejected:
-            self.buildbot_status(TBPL_EXCEPTION)
+            self.record_status(TBPL_EXCEPTION)
             self.fatal("There are specified suites that are incompatible with "
                        "--artifact try syntax flag: {}".format(', '.join(rejected)),
                        exit_code=self.return_code)
@@ -923,7 +915,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                                                                     success_codes=success_codes)
                     parser.append_tinderboxprint_line(suite_name)
 
-                    self.buildbot_status(tbpl_status, level=log_level)
+                    self.record_status(tbpl_status, level=log_level)
                     if len(verify_args) > 0:
                         self.log_verify_status(verify_args[-1], tbpl_status, log_level)
                     else:

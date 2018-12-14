@@ -1257,12 +1257,11 @@ class PackageFrontend(MachCommandBase):
         import requests
         import shutil
 
-        from taskgraph.generator import load_graph_config, Kind
+        from taskgraph.config import load_graph_config
+        from taskgraph.generator import Kind
         from taskgraph.util.taskcluster import (
             get_artifact_url,
-            list_artifacts,
         )
-        import yaml
 
         self._set_log_level(verbose)
         # Normally, we'd use self.log_manager.enable_unstructured(),
@@ -1367,7 +1366,9 @@ class PackageFrontend(MachCommandBase):
             from taskgraph.parameters import Parameters
             params = Parameters(
                 level=os.environ.get('MOZ_SCM_LEVEL', '3'),
-                strict=False)
+                strict=False,
+                ignore_fetches=True,
+            )
 
             # TODO: move to the taskcluster package
             def tasks(kind_name):
@@ -2220,6 +2221,9 @@ class Repackage(MachCommandBase):
         help='Mar binary path')
     @CommandArgument('--output', '-o', type=str, required=True,
         help='Output filename')
-    def repackage_mar(self, input, mar, output):
+    @CommandArgument('--format', type=str, default='lzma',
+        choices=('lzma', 'bz2'),
+        help='Mar format')
+    def repackage_mar(self, input, mar, output, format):
         from mozbuild.repackaging.mar import repackage_mar
-        repackage_mar(self.topsrcdir, input, mar, output)
+        repackage_mar(self.topsrcdir, input, mar, output, format)

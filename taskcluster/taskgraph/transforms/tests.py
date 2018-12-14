@@ -21,7 +21,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by, OptimizationSchema
-from taskgraph.util.treeherder import split_symbol, join_symbol
+from taskgraph.util.treeherder import split_symbol, join_symbol, add_suffix
 from taskgraph.util.platforms import platform_family
 from taskgraph.util.schema import (
     validate_schema,
@@ -70,11 +70,6 @@ WINDOWS_WORKER_TYPES = {
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
-    'windows7-32-stylo-disabled': {
-      'virtual': 'aws-provisioner-v1/gecko-t-win7-32',
-      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
-      'hardware': 'releng-hardware/gecko-t-win7-32-hw',
-    },
     'windows10-64': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
@@ -100,33 +95,12 @@ WINDOWS_WORKER_TYPES = {
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
-    'windows10-64-stylo-disabled': {
-      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
-      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
-      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
-    },
     'windows10-64-asan': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows10-64-qr': {
-      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
-      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
-      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
-    },
-    # These values don't really matter since BBB will be executing them
-    'windows8-64': {
-      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
-      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
-      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
-    },
-    'windows8-64-pgo': {
-      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
-      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
-      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
-    },
-    'windows8-64-nightly': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
@@ -306,10 +280,6 @@ test_description_schema = Schema({
         # If true, tooltool downloads will be enabled via relengAPIProxy.
         Required('tooltool-downloads'): bool,
 
-        # This mozharness script also runs in Buildbot and tries to read a
-        # buildbot config file, so tell it not to do so in TaskCluster
-        Required('no-read-buildbot-config'): bool,
-
         # Add --blob-upload-branch=<project> mozharness parameter
         Optional('include-blob-upload-branch'): bool,
 
@@ -355,6 +325,10 @@ test_description_schema = Schema({
     Optional('os-groups'): optionally_keyed_by(
         'test-platform',
         [basestring]),
+
+    Optional('run-as-administrator'): optionally_keyed_by(
+        'test-platform',
+        bool),
 
     # -- values supplied by the task-generation infrastructure
 
@@ -407,6 +381,10 @@ test_description_schema = Schema({
         Any(basestring, None),
     ),
 
+    # A list of artifacts to install from 'fetch' tasks.
+    Optional('fetches'): {
+        basestring: [basestring],
+    },
 }, required=True)
 
 
@@ -454,25 +432,21 @@ def set_defaults(config, tests):
         test.setdefault('try-name', test['test-name'])
 
         test.setdefault('os-groups', [])
+        test.setdefault('run-as-administrator', False)
         test.setdefault('chunks', 1)
         test.setdefault('run-on-projects', 'built-projects')
         test.setdefault('instance-size', 'default')
         test.setdefault('max-run-time', 3600)
         test.setdefault('reboot', False)
         test.setdefault('virtualization', 'virtual')
-        test.setdefault('run-on-projects', 'built-projects')
-        test.setdefault('chunks', 1)
-        test.setdefault('instance-size', 'default')
         test.setdefault('loopback-audio', False)
         test.setdefault('loopback-video', False)
         test.setdefault('docker-image', {'in-tree': 'desktop1604-test'})
-        test.setdefault('max-run-time', 3600)
         test.setdefault('checkout', False)
 
         test['mozharness'].setdefault('extra-options', [])
         test['mozharness'].setdefault('requires-signed-builds', False)
         test['mozharness'].setdefault('tooltool-downloads', False)
-        test['mozharness'].setdefault('no-read-buildbot-config', False)
         test['mozharness'].setdefault('set-moz-node-path', False)
         test['mozharness'].setdefault('chunked', False)
         test['mozharness'].setdefault('chunking-args', 'this-chunk')
@@ -496,13 +470,15 @@ def setup_talos(config, tests):
             continue
 
         extra_options = test.setdefault('mozharness', {}).setdefault('extra-options', [])
-        extra_options.append('--add-option')
-        extra_options.append('--webServer,localhost')
         extra_options.append('--use-talos-json')
+        # win7 needs to test skip
+        if test['build-platform'].startswith('win32'):
+            extra_options.append('--add-option')
+            extra_options.append('--setpref,gfx.direct2d.disabled=true')
 
         # Per https://bugzilla.mozilla.org/show_bug.cgi?id=1357753#c3, branch
         # name is only required for try
-        if config.params['project'] == 'try':
+        if config.params.is_try():
             extra_options.append('--branch-name')
             extra_options.append('try')
 
@@ -570,11 +546,8 @@ def set_treeherder_machine_platform(config, tests):
         # platform based on regular macOS builds, such as for Stylo.
         # Since it's unclear if the regular macOS builds can be removed from
         # the table, workaround the issue for Stylo.
-        if '-stylo-disabled' in test['test-platform']:
-            test['treeherder-machine-platform'] = test['test-platform']
-        else:
-            test['treeherder-machine-platform'] = translation.get(
-                test['build-platform'], test['test-platform'])
+        test['treeherder-machine-platform'] = translation.get(
+            test['build-platform'], test['test-platform'])
         yield test
 
 
@@ -592,36 +565,26 @@ def set_tier(config, tests):
                                          'linux32/debug',
                                          'linux32-nightly/opt',
                                          'linux32-devedition/opt',
-                                         'linux32-stylo-disabled/debug',
-                                         'linux32-stylo-disabled/opt',
                                          'linux64/opt',
                                          'linux64-nightly/opt',
                                          'linux64/debug',
                                          'linux64-pgo/opt',
                                          'linux64-devedition/opt',
                                          'linux64-asan/opt',
-                                         'linux64-stylo-disabled/debug',
-                                         'linux64-stylo-disabled/opt',
                                          'windows7-32/debug',
                                          'windows7-32/opt',
                                          'windows7-32-pgo/opt',
                                          'windows7-32-devedition/opt',
                                          'windows7-32-nightly/opt',
-                                         'windows7-32-stylo-disabled/debug',
-                                         'windows7-32-stylo-disabled/opt',
                                          'windows10-64/debug',
                                          'windows10-64/opt',
                                          'windows10-64-pgo/opt',
                                          'windows10-64-devedition/opt',
                                          'windows10-64-nightly/opt',
-                                         'windows10-64-stylo-disabled/debug',
-                                         'windows10-64-stylo-disabled/opt',
                                          'macosx64/opt',
                                          'macosx64/debug',
                                          'macosx64-nightly/opt',
                                          'macosx64-devedition/opt',
-                                         'macosx64-stylo-disabled/debug',
-                                         'macosx64-stylo-disabled/opt',
                                          'android-4.3-arm7-api-16/opt',
                                          'android-4.3-arm7-api-16/debug',
                                          'android-4.2-x86/opt']:
@@ -638,7 +601,7 @@ def set_expires_after(config, tests):
     keep storage costs low."""
     for test in tests:
         if 'expires-after' not in test:
-            if config.params['project'] == 'try':
+            if config.params.is_try():
                 test['expires-after'] = "14 days"
             else:
                 test['expires-after'] = "1 year"
@@ -674,6 +637,7 @@ def handle_keyed_by(config, tests):
         'suite',
         'run-on-projects',
         'os-groups',
+        'run-as-administrator',
         'mozharness.chunked',
         'mozharness.config',
         'mozharness.extra-options',
@@ -750,7 +714,7 @@ def enable_code_coverage(config, tests):
                 test['mozharness']['extra-options'].append('--no-upload-results')
                 test['mozharness']['extra-options'].append('--add-option')
                 test['mozharness']['extra-options'].append('--tptimeout,15000')
-        elif test['build-platform'] == 'linux64-jsdcov/opt':
+        elif 'jsdcov' in test['build-platform']:
             # Ensure we don't run on inbound/autoland/beta, but if the test is try only, ignore it
             if 'mozilla-central' in test['run-on-projects'] or \
                     test['run-on-projects'] == 'built-projects':
@@ -814,9 +778,8 @@ def split_chunks(config, tests):
             chunked['this-chunk'] = this_chunk
 
             # add the chunk number to the TH symbol
-            group, symbol = split_symbol(chunked['treeherder-symbol'])
-            symbol += str(this_chunk)
-            chunked['treeherder-symbol'] = join_symbol(group, symbol)
+            chunked['treeherder-symbol'] = add_suffix(
+                chunked['treeherder-symbol'], this_chunk)
 
             yield chunked
 
@@ -889,21 +852,6 @@ def set_test_type(config, tests):
         for test_type in ['mochitest', 'reftest']:
             if test_type in test['suite'] and 'web-platform' not in test['suite']:
                 test.setdefault('tags', {})['test-type'] = test_type
-        yield test
-
-
-@transforms.add
-def disable_stylo(config, tests):
-    """
-    Disable Stylo for all jobs on `-stylo-disabled` platforms.
-    """
-    for test in tests:
-        if '-stylo-disabled' not in test['test-platform']:
-            yield test
-            continue
-
-        test['mozharness'].setdefault('extra-options', []).append('--disable-stylo')
-
         yield test
 
 
@@ -1033,7 +981,7 @@ def make_job_description(config, tests):
             jobdesc['when'] = test['when']
         elif 'optimization' in test:
             jobdesc['optimization'] = test['optimization']
-        elif config.params['project'] != 'try' and suite not in INCLUSIVE_COMPONENTS:
+        elif not config.params.is_try() and suite not in INCLUSIVE_COMPONENTS:
             # for non-try branches and non-inclusive suites, include SETA
             jobdesc['optimization'] = {'skip-unless-schedules-or-seta': schedules}
         else:

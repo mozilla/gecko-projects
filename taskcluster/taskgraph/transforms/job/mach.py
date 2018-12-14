@@ -9,7 +9,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.job import run_job_using, configure_taskdesc_for_run
 from taskgraph.util.schema import Schema
-from voluptuous import Required
+from voluptuous import Required, Optional, Any
 
 mach_schema = Schema({
     Required('using'): 'mach',
@@ -17,9 +17,16 @@ mach_schema = Schema({
     # The mach command (omitting `./mach`) to run
     Required('mach'): basestring,
 
+    # The sparse checkout profile to use. Value is the filename relative to the
+    # directory where sparse profiles are defined (build/sparse-profiles/).
+    Optional('sparse-profile'): Any(basestring, None),
+
     # if true, perform a checkout of a comm-central based branch inside the
     # gecko checkout
     Required('comm-checkout'): bool,
+
+    # Base work directory used to set up the task.
+    Required('workdir'): basestring,
 })
 
 
@@ -29,7 +36,7 @@ def docker_worker_mach(config, job, taskdesc):
     run = job['run']
 
     # defer to the run_task implementation
-    run['command'] = 'cd /builds/worker/checkouts/gecko && ./mach ' + run['mach']
+    run['command'] = 'cd {workdir}/checkouts/gecko && ./mach {mach}'.format(**run)
     run['using'] = 'run-task'
     del run['mach']
     configure_taskdesc_for_run(config, job, taskdesc, job['worker']['implementation'])

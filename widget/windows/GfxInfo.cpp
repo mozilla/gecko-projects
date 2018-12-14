@@ -1387,13 +1387,29 @@ GfxInfo::GetGfxDriverInfo()
 
     // Bug 1447141, for causing device creation crashes.
     APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows7,
-      (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorAMD), (GfxDeviceFamily*)GfxDriverInfo::GetDeviceFamily(Bug1447141),
+      (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorATI), (GfxDeviceFamily*)GfxDriverInfo::GetDeviceFamily(Bug1447141),
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
       DRIVER_EQUAL, V(15, 201, 2201, 0), "FEATURE_FAILURE_BUG_1447141_1");
     APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows7,
-      (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorAMD), (GfxDeviceFamily*)GfxDriverInfo::GetDeviceFamily(Bug1447141),
+      (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorATI), (GfxDeviceFamily*)GfxDriverInfo::GetDeviceFamily(Bug1447141),
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
       DRIVER_EQUAL, V(15, 201, 1701, 0), "FEATURE_FAILURE_BUG_1447141_1");
+
+    // bug 1457758
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
+      (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+      DRIVER_EQUAL, V(24, 21, 13, 9731), "FEATURE_FAILURE_BUG_1457758");
+
+    ////////////////////////////////////
+    // FEATURE_DX_NV12
+
+    // Bug 1437334
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorIntel),
+      (GfxDeviceFamily*) GfxDriverInfo::GetDeviceFamily(IntelHDGraphicsToSandyBridge),
+      nsIGfxInfo::FEATURE_DX_NV12, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_BUILD_ID_LESS_THAN_OR_EQUAL, 4459, "FEATURE_BLOCKED_DRIVER_VERSION");
 
   }
   return *mDriverInfo;
@@ -1413,6 +1429,10 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
   *aStatus = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
   if (aOS)
     *aOS = os;
+
+  if (mShutdownOccurred) {
+    return NS_OK;
+  }
 
   // Don't evaluate special cases if we're checking the downloaded blocklist.
   if (!aDriverInfo.Length()) {

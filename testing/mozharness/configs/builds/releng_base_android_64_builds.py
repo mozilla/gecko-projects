@@ -6,16 +6,12 @@ config = {
 
     # note: overridden by MOZHARNESS_ACTIONS in TaskCluster tasks
     'default_actions': [
-        'clobber',
         'build',
         'multi-l10n',
-        'update',  # decided by query_is_nightly()
     ],
-    "buildbot_json_path": "buildprops.json",
     'app_ini_path': '%(obj_dir)s/dist/bin/application.ini',
     'max_build_output_timeout': 0,
     # decides whether we want to use moz_sign_cmd in env
-    'enable_signing': True,
     'secret_files': [
         {'filename': '/builds/gapi.data',
          'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/gapi.data',
@@ -25,41 +21,37 @@ config = {
          'min_scm_level': 2, 'default': 'try-build-has-no-secrets'},
         {'filename': '/builds/adjust-sdk.token',
          'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/adjust-sdk.token',
-         'min_scm_level': 2, 'default': 'try-build-has-no-secrets'},
+         'min_scm_level': 2, 'default-file': '{abs_src_dir}/mobile/android/base/adjust-sdk-sandbox.token'},
         {'filename': '/builds/adjust-sdk-beta.token',
          'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/adjust-sdk-beta.token',
-         'min_scm_level': 2, 'default': 'try-build-has-no-secrets'},
+         'min_scm_level': 2, 'default-file': '{abs_src_dir}/mobile/android/base/adjust-sdk-sandbox.token'},
         {'filename': '/builds/leanplum-sdk-release.token',
          'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/leanplum-sdk-release.token',
-         'min_scm_level': 2, 'default': 'try-build-has-no-secrets'},
+         'min_scm_level': 2, 'default-file': '{abs_src_dir}/mobile/android/base/leanplum-sdk-sandbox.token'},
         {'filename': '/builds/leanplum-sdk-beta.token',
          'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/leanplum-sdk-beta.token',
-         'min_scm_level': 2, 'default': 'try-build-has-no-secrets'},
+         'min_scm_level': 2, 'default-file': '{abs_src_dir}/mobile/android/base/leanplum-sdk-sandbox.token'},
         {'filename': '/builds/leanplum-sdk-nightly.token',
          'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/leanplum-sdk-nightly.token',
-         'min_scm_level': 2, 'default': 'try-build-has-no-secrets'},
+         'min_scm_level': 2, 'default-file': '{abs_src_dir}/mobile/android/base/leanplum-sdk-sandbox.token'},
         {'filename': '/builds/pocket-api-release.token',
          'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/pocket-api-release.token',
-         'min_scm_level': 2, 'default': 'try-build-has-no-secrets'},
+         'min_scm_level': 2, 'default-file': '{abs_src_dir}/mobile/android/base/pocket-api-sandbox.token'},
         {'filename': '/builds/pocket-api-beta.token',
          'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/pocket-api-beta.token',
-         'min_scm_level': 2, 'default': 'try-build-has-no-secrets'},
+         'min_scm_level': 2, 'default-file': '{abs_src_dir}/mobile/android/base/pocket-api-sandbox.token'},
         {'filename': '/builds/pocket-api-nightly.token',
          'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/pocket-api-nightly.token',
-         'min_scm_level': 2, 'default': 'try-build-has-no-secrets'},
-
+         'min_scm_level': 2, 'default-file': '{abs_src_dir}/mobile/android/base/pocket-api-sandbox.token'},
     ],
     'vcs_share_base': '/builds/hg-shared',
     'objdir': 'obj-firefox',
     'enable_count_ctors': False,
     'multi_locale': True,
-    'find_links': ['http://pypi.pub.build.mozilla.org/pub'],
-    'pip_index': False,
     #########################################################################
 
 
     #########################################################################
-    'base_name': 'Android 2.3 %(branch)s',
     'platform': 'android',
     'stage_platform': 'android',
     'enable_max_vsize': False,

@@ -1,5 +1,3 @@
-
-#!/usr/bin/env python
 # ***** BEGIN LICENSE BLOCK *****
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -38,6 +36,7 @@ import urlparse
 import hashlib
 import zlib
 if os.name == 'nt':
+    import locale
     try:
         import win32file
         import win32api
@@ -53,6 +52,7 @@ except ImportError:
 
 from io import BytesIO
 
+import mozinfo
 from mozprocess import ProcessHandler
 from mozharness.base.config import BaseConfig
 from mozharness.base.log import SimpleFileLogger, MultiFileLogger, \
@@ -117,6 +117,17 @@ class PlatformMixin(object):
         if sys.platform.startswith("linux"):
             return True
 
+    def _is_redhat(self):
+        """ check if the current operating system is a Redhat derived Linux distribution.
+
+        Returns:
+            bool: True if the current platform is a Redhat Linux distro, False otherwise
+        """
+        if not self._is_linux():
+            return False
+        re_redhat_distro = re.compile('Redhat|Fedora|CentOS|Oracle')
+        return re_redhat_distro.match(mozinfo.linux_distro) is not None
+
     def _is_64_bit(self):
         if self._is_darwin():
             # osx is a special snowflake and to ensure the arch, it is better to use the following
@@ -149,6 +160,23 @@ class ScriptMixin(PlatformMixin):
 
     env = None
     script_obj = None
+
+    def query_filesize(self, file_path):
+        self.info("Determining filesize for %s" % file_path)
+        length = os.path.getsize(file_path)
+        self.info(" %s" % str(length))
+        return length
+
+    # TODO this should be parallelized with the to-be-written BaseHelper!
+    def query_sha512sum(self, file_path):
+        self.info("Determining sha512sum for %s" % file_path)
+        m = hashlib.sha512()
+        contents = self.read_from_file(file_path, verbose=False,
+                                       open_mode='rb')
+        m.update(contents)
+        sha512 = m.hexdigest()
+        self.info(" %s" % sha512)
+        return sha512
 
     def platform_name(self):
         """ Return the platform name on which the script is running on.
@@ -300,9 +328,10 @@ class ScriptMixin(PlatformMixin):
                 self._rmtree_windows(full_name)
             else:
                 try:
-                    win32file.SetFileAttributesW('\\\\?\\' + full_name, win32file.FILE_ATTRIBUTE_NORMAL)
+                    win32file.SetFileAttributesW(
+                        '\\\\?\\' + full_name, win32file.FILE_ATTRIBUTE_NORMAL)
                     win32file.DeleteFile('\\\\?\\' + full_name)
-                except:
+                except Exception:
                     # DeleteFile fails on long paths, del /f /q works just fine
                     self.run_command('del /F /Q "%s"' % full_name)
 
@@ -348,8 +377,6 @@ class ScriptMixin(PlatformMixin):
         url_quoted = urllib2.quote(url, safe='%/:=&?~#+!$,;\'@()*[]|')
         return urllib2.urlopen(url_quoted, **kwargs)
 
-
-
     def fetch_url_into_memory(self, url):
         ''' Downloads a file from a url into memory instead of disk.
 
@@ -381,7 +408,8 @@ class ScriptMixin(PlatformMixin):
                 parsed_url = urlparse.urlparse(url)
 
         request = urllib2.Request(url)
-        # When calling fetch_url_into_memory() you should retry when we raise one of these exceptions:
+        # When calling fetch_url_into_memory() you should retry when we raise
+        # one of these exceptions:
         # * Bug 1300663 - HTTPError: HTTP Error 404: Not Found
         # * Bug 1300413 - HTTPError: HTTP Error 500: Internal Server Error
         # * Bug 1300943 - HTTPError: HTTP Error 503: Service Unavailable
@@ -406,7 +434,8 @@ class ScriptMixin(PlatformMixin):
 
         if response_body_size != content_length:
             raise ContentLengthMismatch(
-                'The retrieved Content-Length header declares a body length of {} bytes, while we actually retrieved {} bytes'.format(
+                'The retrieved Content-Length header declares a body length '
+                'of {} bytes, while we actually retrieved {} bytes'.format(
                     content_length, response_body_size)
             )
 
@@ -418,14 +447,13 @@ class ScriptMixin(PlatformMixin):
             #   header detection, or add 16 to decode only the gzip format (the zlib
             #   format will return a Z_DATA_ERROR).
             # Adding 16 since we only wish to support gzip encoding.
-            file_contents = zlib.decompress(response_body, zlib.MAX_WBITS|16)
+            file_contents = zlib.decompress(response_body, zlib.MAX_WBITS | 16)
         else:
             file_contents = response_body
 
         # Use BytesIO instead of StringIO
         # http://stackoverflow.com/questions/34162017/unzip-buffer-with-python/34162395#34162395
         return BytesIO(file_contents)
-
 
     def _download_file(self, url, file_name):
         """ Helper function for download_file()
@@ -472,7 +500,9 @@ class ScriptMixin(PlatformMixin):
                 block = f.read(1024 ** 2)
                 if not block:
                     if f_length is not None and got_length != f_length:
-                        raise urllib2.URLError("Download incomplete; content-length was %d, but only received %d" % (f_length, got_length))
+                        raise urllib2.URLError(
+                            "Download incomplete; content-length was %d, "
+                            "but only received %d" % (f_length, got_length))
                     break
                 local_file.write(block)
                 if f_length is not None:
@@ -554,7 +584,6 @@ class ScriptMixin(PlatformMixin):
             **retry_args
         )
 
-
     def _filter_entries(self, namelist, extract_dirs):
         """Filter entries of the archive based on the specified list of to extract dirs."""
         filter_partial = functools.partial(fnmatch.filter, namelist)
@@ -562,7 +591,6 @@ class ScriptMixin(PlatformMixin):
 
         for entry in entries:
             yield entry
-
 
     def unzip(self, compressed_file, extract_to, extract_dirs='*', verbose=False):
         """This method allows to extract a zip file without writing to disk first.
@@ -605,7 +633,6 @@ class ScriptMixin(PlatformMixin):
                 except KeyError:
                     self.warning('{} was not found in the zip file'.format(entry))
 
-
     def deflate(self, compressed_file, mode, extract_to='.', *args, **kwargs):
         """This method allows to extract a compressed file from a tar, tar.bz2 and tar.gz files.
 
@@ -616,7 +643,6 @@ class ScriptMixin(PlatformMixin):
         """
         t = tarfile.open(fileobj=compressed_file, mode=mode)
         t.extractall(path=extract_to)
-
 
     def download_unpack(self, url, extract_to='.', extract_dirs='*', verbose=False):
         """Generic method to download and extract a compressed file without writing it to disk first.
@@ -713,7 +739,6 @@ class ScriptMixin(PlatformMixin):
         except zipfile.BadZipfile:
             # Dump the exception and exit
             self.exception(level=FATAL)
-
 
     def load_json_url(self, url, error_level=None, *args, **kwargs):
         """ Returns a json object from a url (it retries). """
@@ -814,7 +839,9 @@ class ScriptMixin(PlatformMixin):
         self.info("Chmoding %s to %s" % (path, str(oct(mode))))
         os.chmod(path, mode)
 
-    def copyfile(self, src, dest, log_level=INFO, error_level=ERROR, copystat=False, compress=False):
+    def copyfile(
+        self, src, dest, log_level=INFO, error_level=ERROR, copystat=False, compress=False
+    ):
         """ copy or compress `src` into `dest`.
 
         Args:
@@ -1212,6 +1239,13 @@ class ScriptMixin(PlatformMixin):
         for k in purge_env:
             if k in env:
                 del env[k]
+        if os.name == 'nt':
+            pref_encoding = locale.getpreferredencoding()
+            for k, v in env.iteritems():
+                # When run locally on Windows machines, some environment
+                # variables may be unicode.
+                if isinstance(v, unicode):
+                    env[k] = v.encode(pref_encoding)
         if set_self_env:
             self.env = env
         return env
@@ -1254,7 +1288,7 @@ class ScriptMixin(PlatformMixin):
             repl_dict.update(dirs)
         if isinstance(exe, dict):
             found = False
-            # allow for searchable paths of the buildbot exe
+            # allow for searchable paths of the exe
             for name, path in exe.iteritems():
                 if isinstance(path, list) or isinstance(path, tuple):
                     path = [x % repl_dict for x in path]
@@ -1271,8 +1305,9 @@ class ScriptMixin(PlatformMixin):
                     exe = path
                     break
             else:
-                self.log("query_exe was a searchable dict but an existing path could not be "
-                         "determined. Tried searching in paths: %s" % (str(exe)), level=error_level)
+                self.log("query_exe was a searchable dict but an existing "
+                         "path could not be determined. Tried searching in "
+                         "paths: %s" % (str(exe)), level=error_level)
                 return None
         elif isinstance(exe, list) or isinstance(exe, tuple):
             exe = [x % repl_dict for x in exe]
@@ -1289,7 +1324,9 @@ class ScriptMixin(PlatformMixin):
             if isinstance(exe, list):
                 exe = subprocess.list2cmdline(exe)
         elif return_type is not None:
-            self.log("Unknown return_type type %s requested in query_exe!" % return_type, level=error_level)
+            self.log(
+                "Unknown return_type type %s requested in query_exe!"
+                % return_type, level=error_level)
         return exe
 
     def run_command(self, command, cwd=None, error_list=None,
@@ -1380,7 +1417,9 @@ class ScriptMixin(PlatformMixin):
                     parser.add_lines(line)
 
                 def onTimeout():
-                    self.info("Automation Error: mozprocess timed out after %s seconds running %s" % (str(output_timeout), str(command)))
+                    self.info(
+                        "Automation Error: mozprocess timed out after "
+                        "%s seconds running %s" % (str(output_timeout), str(command)))
 
                 p = ProcessHandler(command,
                                    shell=shell,
@@ -1552,10 +1591,12 @@ class ScriptMixin(PlatformMixin):
             shell = False
 
         p = subprocess.Popen(command, shell=shell, stdout=tmp_stdout,
-                             cwd=cwd, stderr=tmp_stderr, env=env)
+                             cwd=cwd, stderr=tmp_stderr, env=env, bufsize=0)
         # XXX: changed from self.debug to self.log due to this error:
         #      TypeError: debug() takes exactly 1 argument (2 given)
-        self.log("Temporary files: %s and %s" % (tmp_stdout_filename, tmp_stderr_filename), level=DEBUG)
+        self.log(
+            "Temporary files: %s and %s"
+            % (tmp_stdout_filename, tmp_stderr_filename), level=DEBUG)
         p.wait()
         tmp_stdout.close()
         tmp_stderr.close()
@@ -1848,7 +1889,7 @@ class BaseScript(ScriptMixin, LogMixin, object):
         # easy-to-write-hard-to-debug writable config.
         #
         # To allow for other, script-specific configurations
-        # (e.g., buildbot props json parsing), before locking,
+        # (e.g., props json parsing), before locking,
         # call self._pre_config_lock().  If needed, this method can
         # alter self.config.
         self._pre_config_lock(rw_config)
@@ -1985,8 +2026,8 @@ class BaseScript(ScriptMixin, LogMixin, object):
                         method(action, success=False)
                     except Exception:
                         self.error("An additional exception occurred during "
-                                   "post-action for %s: %s" % (action,
-                                   traceback.format_exc()))
+                                   "post-action for %s: %s"
+                                   % (action, traceback.format_exc()))
 
                 self.fatal("Aborting due to exception in pre-action listener.")
 
@@ -2182,17 +2223,6 @@ class BaseScript(ScriptMixin, LogMixin, object):
         # Summaries need a lot more love.
         self.log(message, level=level)
 
-    def add_failure(self, key, message="%(key)s failed.", level=ERROR,
-                    increment_return_code=True):
-        if key not in self.failures:
-            self.failures.append(key)
-            self.add_summary(message % {'key': key}, level=level)
-            if increment_return_code:
-                self.return_code += 1
-
-    def query_failure(self, key):
-        return key in self.failures
-
     def summarize_success_count(self, success_count, total_count,
                                 message="%d of %d successful.",
                                 level=None):
@@ -2291,8 +2321,3 @@ class BaseScript(ScriptMixin, LogMixin, object):
         old_return_code, self._return_code = self._return_code, code
         if old_return_code != code:
             self.warning("setting return code to %d" % code)
-
-# __main__ {{{1
-if __name__ == '__main__':
-    """ Useless comparison, due to the `pass` keyword on its body"""
-    pass

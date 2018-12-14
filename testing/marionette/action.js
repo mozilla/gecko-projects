@@ -1320,7 +1320,7 @@ function dispatchPointerMove(a, inputState, tickDuration, window) {
   // interval between pointermove increments in ms, based on common vsync
   const fps60 = 17;
 
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     const start = Date.now();
     const [startX, startY] = [inputState.x, inputState.y];
 
@@ -1370,8 +1370,9 @@ function dispatchPointerMove(a, inputState, tickDuration, window) {
     intermediatePointerEvents.then(() => {
       performOnePointerMove(inputState, targetX, targetY, window);
       resolve();
+    }).catch(err => {
+      reject(err);
     });
-
   });
 }
 
@@ -1416,7 +1417,8 @@ function dispatchPause(a, tickDuration) {
   const timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
   let duration = typeof a.duration == "undefined" ? tickDuration : a.duration;
   return new Promise(resolve =>
-      timer.initWithCallback(resolve, duration, Ci.nsITimer.TYPE_ONE_SHOT)
+      timer.initWithCallback(() =>
+          resolve(), duration, Ci.nsITimer.TYPE_ONE_SHOT)
   );
 }
 

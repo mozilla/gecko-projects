@@ -34,6 +34,7 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/ShadowRoot.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "nsAttrValueOrString.h"
 #include "nsBindingManager.h"
 #include "nsCCUncollectableMarker.h"
@@ -1495,6 +1496,37 @@ CheckForOutdatedParent(nsINode* aParent, nsINode* aNode, ErrorResult& aError)
   }
 }
 
+static nsresult
+ReparentWrappersInSubtree(nsIContent* aRoot)
+{
+  MOZ_ASSERT(ShouldUseXBLScope(aRoot));
+  // Start off with no global so we don't fire any error events on failure.
+  AutoJSAPI jsapi;
+  jsapi.Init();
+
+  JSContext* cx = jsapi.cx();
+
+  ErrorResult rv;
+  JS::Rooted<JSObject*> reflector(cx);
+  for (nsIContent* cur = aRoot; cur; cur = cur->GetNextNode(aRoot)) {
+    if ((reflector = cur->GetWrapper())) {
+      JSAutoCompartment ac(cx, reflector);
+      ReparentWrapper(cx, reflector, rv);
+      rv.WouldReportJSException();
+      if (rv.Failed()) {
+        // We _could_ consider BlastSubtreeToPieces here, but it's not really
+        // needed.  Having some nodes in here accessible to content while others
+        // are not is probably OK.  We just need to fail out of the actual
+        // insertion, so they're not in the DOM.  Returning a failure here will
+        // do that.
+        return rv.StealNSResult();
+      }
+    }
+  }
+
+  return NS_OK;
+}
+
 nsresult
 nsINode::doInsertChildAt(nsIContent* aKid, uint32_t aIndex,
                          bool aNotify, nsAttrAndChildArray& aChildArray)
@@ -1547,9 +1579,15 @@ nsINode::doInsertChildAt(nsIContent* aKid, uint32_t aIndex,
   nsIContent* parent =
     IsNodeOfType(eDOCUMENT) ? nullptr : static_cast<nsIContent*>(this);
 
+  bool wasInXBLScope = ShouldUseXBLScope(aKid);
   rv = aKid->BindToTree(doc, parent,
                         parent ? parent->GetBindingParent() : nullptr,
                         true);
+  if (NS_SUCCEEDED(rv) && !wasInXBLScope && ShouldUseXBLScope(aKid)) {
+    MOZ_ASSERT(ShouldUseXBLScope(this),
+               "Why does the kid need to use an XBL scope?");
+    rv = ReparentWrappersInSubtree(aKid);
+  }
   if (NS_FAILED(rv)) {
     if (GetFirstChild() == aKid) {
       mFirstChild = aKid->GetNextSibling();
@@ -1638,7 +1676,7 @@ GetNodeFromNodeOrString(const OwningNodeOrString& aNode,
  * https://dom.spec.whatwg.org/#converting-nodes-into-a-node for |prepend()|,
  * |append()|, |before()|, |after()|, and |replaceWith()| APIs.
  */
-static already_AddRefed<nsINode>
+MOZ_CAN_RUN_SCRIPT static already_AddRefed<nsINode>
 ConvertNodesOrStringsIntoNode(const Sequence<OwningNodeOrString>& aNodes,
                               nsIDocument* aDocument,
                               ErrorResult& aRv)
@@ -1721,8 +1759,8 @@ nsINode::Before(const Sequence<OwningNodeOrString>& aNodes,
   nsCOMPtr<nsINode> viablePreviousSibling =
     FindViablePreviousSibling(*this, aNodes);
 
-  nsCOMPtr<nsINode> node =
-    ConvertNodesOrStringsIntoNode(aNodes, OwnerDoc(), aRv);
+  nsCOMPtr<nsIDocument> doc = OwnerDoc();
+  nsCOMPtr<nsINode> node = ConvertNodesOrStringsIntoNode(aNodes, doc, aRv);
   if (aRv.Failed()) {
     return;
   }
@@ -1744,8 +1782,8 @@ nsINode::After(const Sequence<OwningNodeOrString>& aNodes,
 
   nsCOMPtr<nsINode> viableNextSibling = FindViableNextSibling(*this, aNodes);
 
-  nsCOMPtr<nsINode> node =
-    ConvertNodesOrStringsIntoNode(aNodes, OwnerDoc(), aRv);
+  nsCOMPtr<nsIDocument> doc = OwnerDoc();
+  nsCOMPtr<nsINode> node = ConvertNodesOrStringsIntoNode(aNodes, doc, aRv);
   if (aRv.Failed()) {
     return;
   }
@@ -1764,8 +1802,8 @@ nsINode::ReplaceWith(const Sequence<OwningNodeOrString>& aNodes,
 
   nsCOMPtr<nsINode> viableNextSibling = FindViableNextSibling(*this, aNodes);
 
-  nsCOMPtr<nsINode> node =
-    ConvertNodesOrStringsIntoNode(aNodes, OwnerDoc(), aRv);
+  nsCOMPtr<nsIDocument> doc = OwnerDoc();
+  nsCOMPtr<nsINode> node = ConvertNodesOrStringsIntoNode(aNodes, doc, aRv);
   if (aRv.Failed()) {
     return;
   }
@@ -1820,8 +1858,8 @@ void
 nsINode::Prepend(const Sequence<OwningNodeOrString>& aNodes,
                  ErrorResult& aRv)
 {
-  nsCOMPtr<nsINode> node =
-    ConvertNodesOrStringsIntoNode(aNodes, OwnerDoc(), aRv);
+  nsCOMPtr<nsIDocument> doc = OwnerDoc();
+  nsCOMPtr<nsINode> node = ConvertNodesOrStringsIntoNode(aNodes, doc, aRv);
   if (aRv.Failed()) {
     return;
   }
@@ -1834,8 +1872,8 @@ void
 nsINode::Append(const Sequence<OwningNodeOrString>& aNodes,
                  ErrorResult& aRv)
 {
-  nsCOMPtr<nsINode> node =
-    ConvertNodesOrStringsIntoNode(aNodes, OwnerDoc(), aRv);
+  nsCOMPtr<nsIDocument> doc = OwnerDoc();
+  nsCOMPtr<nsINode> node = ConvertNodesOrStringsIntoNode(aNodes, doc, aRv);
   if (aRv.Failed()) {
     return;
   }

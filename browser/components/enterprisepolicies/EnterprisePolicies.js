@@ -8,6 +8,7 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   WindowsGPOParser: "resource:///modules/policies/WindowsGPOParser.jsm",
+  macOSPoliciesParser: "resource:///modules/policies/macOSPoliciesParser.jsm",
   Policies: "resource:///modules/policies/Policies.jsm",
   PoliciesValidator: "resource:///modules/policies/PoliciesValidator.jsm",
 });
@@ -94,16 +95,19 @@ EnterprisePoliciesManager.prototype = {
   },
 
   _chooseProvider() {
+    let provider = null;
     if (AppConstants.platform == "win") {
-      let gpoProvider = new GPOPoliciesProvider();
-      if (gpoProvider.hasPolicies) {
-        return gpoProvider;
-      }
+      provider = new WindowsGPOPoliciesProvider();
+    } else if (AppConstants.platform == "macosx") {
+      provider = new macOSPoliciesProvider();
+    }
+    if (provider && provider.hasPolicies) {
+      return provider;
     }
 
-    let jsonProvider = new JSONPoliciesProvider();
-    if (jsonProvider.hasPolicies) {
-      return jsonProvider;
+    provider = new JSONPoliciesProvider();
+    if (provider.hasPolicies) {
+      return provider;
     }
 
     return null;
@@ -151,7 +155,7 @@ EnterprisePoliciesManager.prototype = {
   },
 
   _callbacks: {
-    // The earlist that a policy callback can run. This will
+    // The earliest that a policy callback can run. This will
     // happen right after the Policy Engine itself has started,
     // and before the Add-ons Manager has started.
     onBeforeAddons: [],
@@ -418,28 +422,16 @@ class JSONPoliciesProvider {
   }
 }
 
-class GPOPoliciesProvider {
+class WindowsGPOPoliciesProvider {
   constructor() {
     this._policies = null;
 
     let wrk = Cc["@mozilla.org/windows-registry-key;1"].createInstance(Ci.nsIWindowsRegKey);
+
     // Machine policies override user policies, so we read
     // user policies first and then replace them if necessary.
-    wrk.open(wrk.ROOT_KEY_CURRENT_USER,
-             "SOFTWARE\\Policies",
-             wrk.ACCESS_READ);
-    if (wrk.hasChild("Mozilla\\Firefox")) {
-      this._readData(wrk);
-    }
-    wrk.close();
-
-    wrk.open(wrk.ROOT_KEY_LOCAL_MACHINE,
-             "SOFTWARE\\Policies",
-             wrk.ACCESS_READ);
-    if (wrk.hasChild("Mozilla\\Firefox")) {
-      this._readData(wrk);
-    }
-    wrk.close();
+    this._readData(wrk, wrk.ROOT_KEY_CURRENT_USER);
+    this._readData(wrk, wrk.ROOT_KEY_LOCAL_MACHINE);
   }
 
   get hasPolicies() {
@@ -454,8 +446,37 @@ class GPOPoliciesProvider {
     return this._failed;
   }
 
-  _readData(wrk) {
-    this._policies = WindowsGPOParser.readPolicies(wrk, this._policies);
+  _readData(wrk, root) {
+    wrk.open(root, "SOFTWARE\\Policies", wrk.ACCESS_READ);
+    if (wrk.hasChild("Mozilla\\Firefox")) {
+      let isMachineRoot = (root == wrk.ROOT_KEY_LOCAL_MACHINE);
+      this._policies = WindowsGPOParser.readPolicies(wrk, this._policies, isMachineRoot);
+    }
+    wrk.close();
+  }
+}
+
+class macOSPoliciesProvider {
+  constructor() {
+    this._policies = null;
+    let prefReader = Cc["@mozilla.org/mac-preferences-reader;1"]
+                       .createInstance(Ci.nsIMacPreferencesReader);
+    if (!prefReader.policiesEnabled()) {
+      return;
+    }
+    this._policies = macOSPoliciesParser.readPolicies(prefReader);
+  }
+
+  get hasPolicies() {
+    return this._policies !== null;
+  }
+
+  get policies() {
+    return this._policies;
+  }
+
+  get failed() {
+    return this._failed;
   }
 }
 

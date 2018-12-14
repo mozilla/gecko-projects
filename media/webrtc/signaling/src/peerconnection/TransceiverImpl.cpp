@@ -140,6 +140,9 @@ TransceiverImpl::Shutdown_m()
   mReceivePipeline = nullptr;
   mTransmitPipeline = nullptr;
   mSendTrack = nullptr;
+  if (mConduit) {
+    mConduit->DeleteStreams();
+  }
   mConduit = nullptr;
   RUN_ON_THREAD(mStsThread, WrapRelease(mRtpFlow.forget()), NS_DISPATCH_NORMAL);
   RUN_ON_THREAD(mStsThread, WrapRelease(mRtcpFlow.forget()), NS_DISPATCH_NORMAL);
@@ -237,7 +240,7 @@ TransceiverImpl::UpdateConduit()
   }
 
   mConduit->SetLocalCNAME(mJsepTransceiver->mSendTrack.GetCNAME().c_str());
-  mConduit->SetLocalMID(mJsepTransceiver->mTransport->mTransportId);
+  mConduit->SetLocalMID(mMid);
 
   nsresult rv;
 
@@ -574,11 +577,9 @@ TransceiverImpl::InsertDTMFTone(int tone, uint32_t duration)
 
   RefPtr<AudioSessionConduit> conduit(static_cast<AudioSessionConduit*>(
         mConduit.get()));
-  mStsThread->Dispatch(WrapRunnableNM([conduit, tone, duration] () {
-        //Note: We default to channel 0, not inband, and 6dB attenuation.
-        //      here. We might want to revisit these choices in the future.
-        conduit->InsertDTMFTone(0, tone, true, duration, 6);
-        }), NS_DISPATCH_NORMAL);
+  //Note: We default to channel 0, not inband, and 6dB attenuation.
+  //      here. We might want to revisit these choices in the future.
+  conduit->InsertDTMFTone(0, tone, true, duration, 6);
 }
 
 bool

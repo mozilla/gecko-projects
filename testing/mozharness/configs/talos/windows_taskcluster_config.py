@@ -8,18 +8,10 @@ VENV_PATH = os.path.join(os.getcwd(), 'venv')
 
 config = {
     "log_name": "talos",
-    "buildbot_json_path": "buildprops.json",
     "installer_path": "installer.exe",
     "virtualenv_path": VENV_PATH,
-    "pip_index": False,
-    "find_links": [
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "virtualenv_modules": ['pypiwin32', 'talos', 'mozinstall'],
     "exes": {
         'python': PYTHON,
-        'mozinstall': ['%s/scripts/python' % VENV_PATH,
-                       '%s/scripts/mozinstall-script.py' % VENV_PATH],
         'hg': os.path.join(os.environ['PROGRAMFILES'], 'Mercurial', 'hg'),
     },
     "title": socket.gethostname().split('.')[0],
@@ -30,10 +22,6 @@ config = {
         "setup-mitmproxy",
         "run-tests",
     ],
-    "default_blob_upload_servers": [
-        "https://blobupload.elasticbeanstalk.com",
-    ],
-    "blob_uploader_auth_file": 'C:/builds/oauth.txt',
     "metro_harness_path_frmt": "%(metro_base_path)s/metro/metrotestharness.exe",
     "download_minidump_stackwalk": True,
     "tooltool_cache": os.path.join('Y:\\', 'tooltool-cache'),

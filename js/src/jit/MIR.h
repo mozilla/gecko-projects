@@ -8673,7 +8673,10 @@ class MGetFirstDollarIndex
       : MUnaryInstruction(classOpcode, str)
     {
         setResultType(MIRType::Int32);
-        setMovable();
+
+        // Codegen assumes string length > 0. Don't allow LICM to move this
+        // before the .length > 1 check in RegExpReplace in RegExp.js.
+        MOZ_ASSERT(!isMovable());
     }
 
   public:
@@ -13565,6 +13568,48 @@ class MHasClass
         if (!ins->isHasClass())
             return false;
         if (getClass() != ins->toHasClass()->getClass())
+            return false;
+        return congruentIfOperandsEqual(ins);
+    }
+};
+
+class MGuardToClass
+    : public MUnaryInstruction,
+      public SingleObjectPolicy::Data
+{
+    const Class* class_;
+
+    MGuardToClass(MDefinition* object, const Class* clasp, MIRType resultType)
+      : MUnaryInstruction(classOpcode, object)
+      , class_(clasp)
+    {
+        MOZ_ASSERT(object->type() == MIRType::Object ||
+                   (object->type() == MIRType::Value && object->mightBeType(MIRType::Object)));
+        MOZ_ASSERT(resultType == MIRType::Object || resultType == MIRType::ObjectOrNull);
+        setResultType(resultType);
+        setMovable();
+        if (resultType == MIRType::Object) {
+            // We will bail out if the class type is incorrect,
+            // so we need to ensure we don't eliminate this instruction
+            setGuard();
+        }
+    }
+
+  public:
+    INSTRUCTION_HEADER(GuardToClass)
+    TRIVIAL_NEW_WRAPPERS
+    NAMED_OPERANDS((0, object))
+
+    const Class* getClass() const {
+        return class_;
+    }
+    AliasSet getAliasSet() const override {
+        return AliasSet::None();
+    }
+    bool congruentTo(const MDefinition* ins) const override {
+        if (!ins->isGuardToClass())
+            return false;
+        if (getClass() != ins->toGuardToClass()->getClass())
             return false;
         return congruentIfOperandsEqual(ins);
     }

@@ -2077,11 +2077,13 @@ GK_ATOM(ondevicelight, "ondevicelight")
 GK_ATOM(ondevicechange, "ondevicechange")
 
 // WebExtensions
+GK_ATOM(about, "about")
 GK_ATOM(moz_extension, "moz-extension")
 GK_ATOM(all_urlsPermission, "<all_urls>")
 GK_ATOM(clipboardRead, "clipboardRead")
 GK_ATOM(clipboardWrite, "clipboardWrite")
 GK_ATOM(debugger, "debugger")
+GK_ATOM(mozillaAddons, "mozillaAddons")
 GK_ATOM(tabs, "tabs")
 GK_ATOM(webRequestBlocking, "webRequestBlocking")
 GK_ATOM(http, "http")

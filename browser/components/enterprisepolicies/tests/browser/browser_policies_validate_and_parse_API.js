@@ -94,9 +94,9 @@ add_task(async function test_URL_values() {
   let valid, parsed;
   [valid, parsed] = PoliciesValidator.validateAndParseParameters("https://www.example.com/foo#bar", schema);
   ok(valid, "URL is valid");
-  ok(parsed instanceof Ci.nsIURI, "parsed is a nsIURI");
-  is(parsed.prePath, "https://www.example.com", "prePath is correct");
-  is(parsed.pathQueryRef, "/foo#bar", "pathQueryRef is correct");
+  ok(parsed instanceof URL, "parsed is a URL");
+  is(parsed.origin, "https://www.example.com", "origin is correct");
+  is(parsed.pathname + parsed.hash, "/foo#bar", "pathname is correct");
 
   // Invalid values:
   ok(!PoliciesValidator.validateAndParseParameters("", schema)[0], "Empty string is not accepted for URL");
@@ -113,9 +113,9 @@ add_task(async function test_URLorEmpty_values() {
   let valid, parsed;
   [valid, parsed] = PoliciesValidator.validateAndParseParameters("https://www.example.com/foo#bar", schema);
   ok(valid, "URL is valid");
-  ok(parsed instanceof Ci.nsIURI, "parsed is a nsIURI");
-  is(parsed.prePath, "https://www.example.com", "prePath is correct");
-  is(parsed.pathQueryRef, "/foo#bar", "pathQueryRef is correct");
+  ok(parsed instanceof URL, "parsed is a URL");
+  is(parsed.origin, "https://www.example.com", "origin is correct");
+  is(parsed.pathname + parsed.hash, "/foo#bar", "pathname is correct");
 
   // Test that this type also accept empty strings
   [valid, parsed] = PoliciesValidator.validateAndParseParameters("", schema);
@@ -141,9 +141,9 @@ add_task(async function test_origin_values() {
   let valid, parsed;
   [valid, parsed] = PoliciesValidator.validateAndParseParameters("https://www.example.com", schema);
   ok(valid, "Origin is valid");
-  ok(parsed instanceof Ci.nsIURI, "parsed is a nsIURI");
-  is(parsed.prePath, "https://www.example.com", "prePath is correct");
-  is(parsed.pathQueryRef, "/", "pathQueryRef is corect");
+  ok(parsed instanceof URL, "parsed is a URL");
+  is(parsed.origin, "https://www.example.com", "origin is correct");
+  is(parsed.pathname + parsed.hash, "/", "pathname is corect");
 
   // Invalid values:
   ok(!PoliciesValidator.validateAndParseParameters("https://www.example.com/foobar", schema)[0], "Origin cannot contain a path part");
@@ -202,8 +202,8 @@ add_task(async function test_object_values() {
 
   ok(valid, "Object is valid");
   ok(typeof(parsed) == "object", "parsed in an object");
-  ok(parsed.url instanceof Ci.nsIURI, "types inside the object are also parsed");
-  is(parsed.url.spec, "https://www.example.com/foo#bar", "URL was correctly parsed");
+  ok(parsed.url instanceof URL, "types inside the object are also parsed");
+  is(parsed.url.href, "https://www.example.com/foo#bar", "URL was correctly parsed");
   is(parsed.title, "Foo", "title was correctly parsed");
   is(parsed.alias, undefined, "property not described in the schema is not present in the parsed object");
 
@@ -257,8 +257,8 @@ add_task(async function test_array_of_objects() {
 
   ok(typeof(parsed[0]) == "object" && typeof(parsed[1]) == "object", "Correct objects inside array");
 
-  is(parsed[0].url.spec, "https://www.example.com/bookmark1", "Correct URL for bookmark 1");
-  is(parsed[1].url.spec, "https://www.example.com/bookmark2", "Correct URL for bookmark 2");
+  is(parsed[0].url.href, "https://www.example.com/bookmark1", "Correct URL for bookmark 1");
+  is(parsed[1].url.href, "https://www.example.com/bookmark2", "Correct URL for bookmark 2");
 
   is(parsed[0].title, "Foo", "Correct title for bookmark 1");
   is(parsed[1].title, "Bar", "Correct title for bookmark 2");
@@ -324,4 +324,55 @@ add_task(async function test_required_vs_nonrequired_properties() {
 
   ok(!valid, "Object is not valid since the required property is missing");
   is(parsed, null, "Nothing was returned as parsed");
+});
+
+add_task(async function test_patternProperties() {
+  let schema = {
+    type: "object",
+    properties: {
+      "S-bool-property": { "type": "boolean" },
+    },
+    patternProperties: {
+      "^S-": { "type": "string" },
+      "^N-": { "type": "number" },
+      "^B-": { "type": "boolean" },
+    },
+  };
+
+  let valid, parsed;
+  [valid, parsed] = PoliciesValidator.validateAndParseParameters({
+    "S-string": "test",
+    "N-number": 5,
+    "B-boolean": true,
+    "S-bool-property": false,
+  }, schema);
+
+  ok(valid, "Object is valid");
+  is(parsed["S-string"], "test", "parsedProperty is correct");
+  is(parsed["N-number"], 5, "parsedProperty is correct");
+  is(parsed["B-boolean"], true, "parsedProperty is correct");
+  is(parsed["S-bool-property"], false, "property is correct");
+
+  [valid, parsed] = PoliciesValidator.validateAndParseParameters({
+    "N-string": "test",
+  }, schema);
+
+  ok(!valid, "Object is not valid since there is a type mismatch");
+
+  [valid, parsed] = PoliciesValidator.validateAndParseParameters({
+    "S-number": 5,
+  }, schema);
+
+  ok(!valid, "Object is not valid since there is a type mismatch");
+
+  schema = {
+    type: "object",
+    patternProperties: {
+      "[": {" type": "string" },
+    },
+  };
+
+  Assert.throws(() => {
+    [valid, parsed] = PoliciesValidator.validateAndParseParameters({}, schema);
+  }, /Invalid property pattern/, "Checking that invalid property patterns throw");
 });

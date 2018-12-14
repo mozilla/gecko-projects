@@ -104,8 +104,10 @@ public:
   void Unlock()
   {
     MOZ_ASSERT(mLiveSet);
-    mLiveSet->Unlock();
-    mLiveSet = nullptr;
+    if (mLiveSet) {
+      mLiveSet->Unlock();
+      mLiveSet = nullptr;
+    }
   }
 
   LiveSetAutoLock(const LiveSetAutoLock& aOther) = delete;
@@ -542,12 +544,25 @@ Interceptor::GetInitialInterceptorForIID(detail::LiveSetAutoLock& aLiveSetLock,
   MOZ_ASSERT(aTargetIid != IID_IMarshal);
   MOZ_ASSERT(!IsProxy(aTarget.get()));
 
+  HRESULT hr = E_UNEXPECTED;
+
+  auto hasFailed = [&hr]() -> bool {
+    return FAILED(hr);
+  };
+
+  auto cleanup = [&aLiveSetLock]() -> void {
+    aLiveSetLock.Unlock();
+  };
+
+  ExecuteWhen<decltype(hasFailed), decltype(cleanup)>
+    onFail(hasFailed, cleanup);
+
   if (aTargetIid == IID_IUnknown) {
     // We must lock mInterceptorMapMutex so that nothing can race with us once
     // we have been published to the live set.
     MutexAutoLock lock(mInterceptorMapMutex);
 
-    HRESULT hr = PublishTarget(aLiveSetLock, nullptr, aTargetIid, Move(aTarget));
+    hr = PublishTarget(aLiveSetLock, nullptr, aTargetIid, Move(aTarget));
     ENSURE_HR_SUCCEEDED(hr);
 
     hr = QueryInterface(aTargetIid, aOutInterceptor);
@@ -559,7 +574,7 @@ Interceptor::GetInitialInterceptorForIID(detail::LiveSetAutoLock& aLiveSetLock,
   WeakReferenceSupport::StabilizeRefCount stabilizer(*this);
 
   RefPtr<IUnknown> unkInterceptor;
-  HRESULT hr = CreateInterceptor(aTargetIid,
+  hr = CreateInterceptor(aTargetIid,
                                  static_cast<WeakReferenceSupport*>(this),
                                  getter_AddRefs(unkInterceptor));
   ENSURE_HR_SUCCEEDED(hr);
@@ -585,9 +600,15 @@ Interceptor::GetInitialInterceptorForIID(detail::LiveSetAutoLock& aLiveSetLock,
     return hr;
   }
 
-  hr = GetInterceptorForIID(aTargetIid, aOutInterceptor);
+  hr = GetInterceptorForIID(aTargetIid, aOutInterceptor, &lock);
   ENSURE_HR_SUCCEEDED(hr);
   return hr;
+}
+
+HRESULT
+Interceptor::GetInterceptorForIID(REFIID aIid, void** aOutInterceptor)
+{
+  return GetInterceptorForIID(aIid, aOutInterceptor, nullptr);
 }
 
 /**
@@ -597,9 +618,12 @@ Interceptor::GetInitialInterceptorForIID(detail::LiveSetAutoLock& aLiveSetLock,
  * @param aIid ID of the desired interface
  * @param aOutInterceptor The resulting emulated vtable that corresponds to
  * the interface specified by aIid.
+ * @param aAlreadyLocked Proof of an existing lock on |mInterceptorMapMutex|,
+ *                       if present.
  */
 HRESULT
-Interceptor::GetInterceptorForIID(REFIID aIid, void** aOutInterceptor)
+Interceptor::GetInterceptorForIID(REFIID aIid, void** aOutInterceptor,
+                                  MutexAutoLock* aAlreadyLocked)
 {
   detail::LoggedQIResult result(aIid);
 
@@ -621,14 +645,19 @@ Interceptor::GetInterceptorForIID(REFIID aIid, void** aOutInterceptor)
 
   // (1) Check to see if we already have an existing interceptor for
   // interceptorIid.
-
-  { // Scope for lock
-    MutexAutoLock lock(mInterceptorMapMutex);
+  auto doLookup = [&]() -> void {
     MapEntry* entry = Lookup(interceptorIid);
     if (entry) {
       unkInterceptor = entry->mInterceptor;
       interfaceForQILog = entry->mTargetInterface;
     }
+  };
+
+  if (aAlreadyLocked) {
+    doLookup();
+  } else {
+    MutexAutoLock lock(mInterceptorMapMutex);
+    doLookup();
   }
 
   // (1a) A COM interceptor already exists for this interface, so all we need
@@ -688,9 +717,7 @@ Interceptor::GetInterceptorForIID(REFIID aIid, void** aOutInterceptor)
   ENSURE_HR_SUCCEEDED(hr);
 
   // (5) Now that we have this new COM interceptor, insert it into the map.
-
-  { // Scope for lock
-    MutexAutoLock lock(mInterceptorMapMutex);
+  auto doInsertion = [&]() -> void {
     // We might have raced with another thread, so first check that we don't
     // already have an entry for this
     MapEntry* entry = Lookup(interceptorIid);
@@ -711,6 +738,13 @@ Interceptor::GetInterceptorForIID(REFIID aIid, void** aOutInterceptor)
                                              unkInterceptor,
                                              rawTargetInterface));
     }
+  };
+
+  if (aAlreadyLocked) {
+    doInsertion();
+  } else {
+    MutexAutoLock lock(mInterceptorMapMutex);
+    doInsertion();
   }
 
   hr = unkInterceptor->QueryInterface(interceptorIid, aOutInterceptor);
@@ -835,7 +869,7 @@ Interceptor::WeakRefQueryInterface(REFIID aIid, IUnknown** aOutInterface)
     return DispatchForwarder::Create(this, disp, aOutInterface);
   }
 
-  return GetInterceptorForIID(aIid, (void**)aOutInterface);
+  return GetInterceptorForIID(aIid, (void**)aOutInterface, nullptr);
 }
 
 ULONG

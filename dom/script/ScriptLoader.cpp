@@ -1074,7 +1074,9 @@ ScriptLoader::StartLoad(ScriptLoadRequest* aRequest)
   // constant.
   aRequest->mCacheInfo = nullptr;
   nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
-  if (cic && nsContentUtils::IsBytecodeCacheEnabled()) {
+  if (cic && nsContentUtils::IsBytecodeCacheEnabled() &&
+      // Bug 1436400: no bytecode cache support for modules yet.
+      !aRequest->IsModuleRequest()) {
     if (!aRequest->IsLoadingSource()) {
       // Inform the HTTP cache that we prefer to have information coming from the
       // bytecode cache instead of the sources, if such entry is already registered.
@@ -2734,14 +2736,24 @@ ScriptLoader::ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
     unicodeDecoder = WINDOWS_1252_ENCODING->NewDecoderWithoutBOMHandling();
   }
 
-  CheckedInt<size_t> unicodeLength =
-    unicodeDecoder->MaxUTF16BufferLength(aLength);
-  if (!unicodeLength.isValid()) {
+  CheckedInt<size_t> maxLength = unicodeDecoder->MaxUTF16BufferLength(aLength);
+  if (!maxLength.isValid()) {
+    aBufOut = nullptr;
+    aLengthOut = 0;
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  aBufOut =
-    static_cast<char16_t*>(js_malloc(unicodeLength.value() * sizeof(char16_t)));
+  size_t unicodeLength = maxLength.value();
+
+  maxLength *= sizeof(char16_t);
+
+  if (!maxLength.isValid()) {
+    aBufOut = nullptr;
+    aLengthOut = 0;
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  aBufOut = static_cast<char16_t*>(js_malloc(maxLength.value()));
   if (!aBufOut) {
     aLengthOut = 0;
     return NS_ERROR_OUT_OF_MEMORY;
@@ -2751,11 +2763,11 @@ ScriptLoader::ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
   size_t read;
   size_t written;
   bool hadErrors;
-  Tie(result, read, written, hadErrors) = unicodeDecoder->DecodeToUTF16(
-    data, MakeSpan(aBufOut, unicodeLength.value()), true);
+  Tie(result, read, written, hadErrors) =
+    unicodeDecoder->DecodeToUTF16(data, MakeSpan(aBufOut, unicodeLength), true);
   MOZ_ASSERT(result == kInputEmpty);
   MOZ_ASSERT(read == aLength);
-  MOZ_ASSERT(written <= unicodeLength.value());
+  MOZ_ASSERT(written <= unicodeLength);
   Unused << hadErrors;
   aLengthOut = written;
 

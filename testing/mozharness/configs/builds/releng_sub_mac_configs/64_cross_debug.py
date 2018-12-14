@@ -2,9 +2,7 @@ import os
 
 config = {
     'default_actions': [
-        'clobber',
         'build',
-        'update',  # decided by query_is_nightly()
     ],
     'stage_platform': 'macosx64-debug',
     'debug_build': True,

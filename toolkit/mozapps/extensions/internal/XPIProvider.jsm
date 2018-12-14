@@ -17,6 +17,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AddonSettings: "resource://gre/modules/addons/AddonSettings.jsm",
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   ChromeManifestParser: "resource://gre/modules/ChromeManifestParser.jsm",
+  Dictionary: "resource://gre/modules/Extension.jsm",
   Extension: "resource://gre/modules/Extension.jsm",
   Langpack: "resource://gre/modules/Extension.jsm",
   LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
@@ -150,7 +151,7 @@ const TOOLKIT_ID                      = "toolkit@mozilla.org";
 
 const XPI_SIGNATURE_CHECK_PERIOD      = 24 * 60 * 60;
 
-XPCOMUtils.defineConstant(this, "DB_SCHEMA", 24);
+XPCOMUtils.defineConstant(this, "DB_SCHEMA", 25);
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "ALLOW_NON_MPC", PREF_ALLOW_NON_MPC);
 
@@ -205,8 +206,9 @@ const BOOTSTRAP_REASONS = {
 const TYPE_ALIASES = {
   "apiextension": "extension",
   "webextension": "extension",
-  "webextension-theme": "theme",
+  "webextension-dictionary": "dictionary",
   "webextension-langpack": "locale",
+  "webextension-theme": "theme",
 };
 
 const CHROME_TYPES = new Set([
@@ -1126,6 +1128,7 @@ const JSON_FIELDS = Object.freeze([
   "lastModifiedTime",
   "path",
   "runInSafeMode",
+  "signedState",
   "startupData",
   "type",
   "version",
@@ -1252,6 +1255,8 @@ class XPIState {
       enabled: this.enabled,
       lastModifiedTime: this.lastModifiedTime,
       path: this.relativePath,
+      signedState: this.signedState,
+      telemetryKey: this.telemetryKey,
       version: this.version,
     };
     if (this.type != "extension") {
@@ -1329,6 +1334,7 @@ class XPIState {
       this.dependencies = aDBAddon.dependencies;
       this.runInSafeMode = canRunInSafeMode(aDBAddon);
     }
+    this.signedState = aDBAddon.signedState;
 
     if (aUpdated || mustGetMod) {
       this.getModTime(this.file, aDBAddon.id);
@@ -4261,6 +4267,8 @@ var XPIProvider = {
       activeAddon.bootstrapScope = Extension.getBootstrapScope(aId, aFile);
     } else if (aType === "webextension-langpack") {
       activeAddon.bootstrapScope = Langpack.getBootstrapScope(aId, aFile);
+    } else if (aType === "webextension-dictionary") {
+      activeAddon.bootstrapScope = Dictionary.getBootstrapScope(aId, aFile);
     } else {
       let uri = getURIForResourceInFile(aFile, "bootstrap.js").spec;
       if (aType == "dictionary")
@@ -4390,7 +4398,8 @@ var XPIProvider = {
         }
       }
 
-      let installLocation = aAddon._installLocation || null;
+      let installLocation = (aAddon._installLocation ||
+                             XPIProvider.installLocationsByName[aAddon.location.name]);
       let params = {
         id: aAddon.id,
         version: aAddon.version,
@@ -4398,6 +4407,7 @@ var XPIProvider = {
         resourceURI: getURIForResourceInFile(aFile, ""),
         signedState: aAddon.signedState,
         temporarilyInstalled: installLocation == TemporaryInstallLocation,
+        builtIn: installLocation instanceof BuiltInInstallLocation,
       };
 
       if (aMethod == "startup" && aAddon.startupData) {
@@ -4944,7 +4954,7 @@ AddonInternal.prototype = {
   },
 
   get unpack() {
-    return this.type === "dictionary";
+    return this.type === "dictionary" || this.type === "webextension-dictionary";
   },
 
   get isCompatible() {
