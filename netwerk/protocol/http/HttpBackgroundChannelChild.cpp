@@ -46,6 +46,22 @@ nsresult HttpBackgroundChannelChild::Init(HttpChannelChild* aChannelChild) {
   return NS_OK;
 }
 
+void HttpBackgroundChannelChild::CreateDataBridge() {
+  MOZ_ASSERT(OnSocketThread());
+  PBackgroundChild* actorChild =
+      BackgroundChild::GetOrCreateSocketActorForCurrentThread();
+  if (NS_WARN_IF(!actorChild)) {
+    return;
+  }
+
+  mDataBridge = new BackgroundDataBridgeChild(this);
+  if (actorChild->SendPBackgroundDataBridgeConstructor(
+          mDataBridge, mChannelChild->ChannelId())) {
+    mDataBridge.get()->AddRef();  // if the constructor succeeded, IPDL now owns
+                                  // a ref to this.
+  }
+}
+
 void HttpBackgroundChannelChild::OnChannelClosed() {
   LOG(("HttpBackgroundChannelChild::OnChannelClosed [this=%p]\n", this));
   MOZ_ASSERT(OnSocketThread());
@@ -102,7 +118,7 @@ bool HttpBackgroundChannelChild::IsWaitingOnStartRequest() {
   MOZ_ASSERT(OnSocketThread());
   // Need to wait for OnStartRequest if it is sent by
   // parent process but not received by content process.
-  return (mStartSent && !mStartReceived);
+  return !mStartReceived;
 }
 
 // PHttpBackgroundChannelChild

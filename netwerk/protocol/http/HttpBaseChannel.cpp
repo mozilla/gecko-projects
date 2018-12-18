@@ -60,6 +60,7 @@
 #include "nsISSLSocketControl.h"
 #include "mozilla/Telemetry.h"
 #include "nsIURL.h"
+#include "nsIURIMutator.h"
 #include "nsIConsoleService.h"
 #include "mozilla/BinarySearch.h"
 #include "mozilla/DebugOnly.h"

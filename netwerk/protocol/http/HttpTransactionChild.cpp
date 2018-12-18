@@ -13,8 +13,11 @@
 #include "mozilla/net/SocketProcessChild.h"
 #include "nsHttpHandler.h"
 #include "nsProxyInfo.h"
+#include "mozilla/ipc/BackgroundParent.h"
+#include "mozilla/net/BackgroundDataBridgeParent.h"
 
 using namespace mozilla::net;
+using mozilla::ipc::BackgroundParent;
 
 namespace mozilla {
 namespace net {
@@ -26,11 +29,14 @@ NS_IMPL_ISUPPORTS(HttpTransactionChild, nsIRequestObserver, nsIStreamListener,
 // HttpTransactionChild <public>
 //-----------------------------------------------------------------------------
 
-HttpTransactionChild::HttpTransactionChild() {
+HttpTransactionChild::HttpTransactionChild(const uint64_t& aChannelId) {
   LOG(("Creating HttpTransactionChild @%p\n", this));
   mTransaction = new nsHttpTransaction();
   mSelfAddr.raw.family = PR_AF_UNSPEC;
   mPeerAddr.raw.family = PR_AF_UNSPEC;
+
+  mChannelId = aChannelId;
+  mStatusCodeIs200 = false;
 }
 
 HttpTransactionChild::~HttpTransactionChild() {
@@ -232,7 +238,37 @@ HttpTransactionChild::OnDataAvailable(nsIRequest* aRequest,
   if (NS_FAILED(rv)) {
     return rv;
   }
-  Unused << SendOnDataAvailable(data, aOffset, aCount);
+  bool dataSentToContentProcess = false;
+  nsCOMPtr<nsIThread> bgThread =
+      SocketProcessChild::GetSingleton()->mBackgroundThread;
+  if (mStatusCodeIs200 && bgThread) {
+    // We can only call bridge->SendOnTransportAndData on the background
+    // thread at the moment. So we dispatch the runnable syncly, so we can let
+    // the parent channel know not to send the data as well.
+    bgThread->Dispatch(
+        NS_NewRunnableFunction(
+            "Bridge SendOnTransportAndData",
+            [&, this]() {
+              BackgroundDataBridgeParent* bridge =
+                  SocketProcessChild::GetSingleton()->GetDataBridgeForChannel(
+                      mChannelId);
+              if (!bridge) {
+                LOG(
+                    ("HttpTransactionChild::OnDataAvailable no "
+                     "BackgroundDataBridge found [this=%p]\n",
+                     this));
+                return;
+              }
+              LOG(("  Sending data directly to the child (len=%u)\n",
+                   data.Length()));
+              dataSentToContentProcess =
+                  bridge->SendOnTransportAndData(aOffset, aCount, data);
+            }),
+        NS_DISPATCH_SYNC);
+  }
+
+  Unused << SendOnDataAvailable(data, aOffset, aCount,
+                                dataSentToContentProcess);
   return NS_OK;
 }
 
@@ -256,6 +292,7 @@ HttpTransactionChild::OnStartRequest(nsIRequest* aRequest) {
   nsAutoPtr<nsHttpResponseHead> head(mTransaction->TakeResponseHead());
   Maybe<nsHttpResponseHead> optionalHead;
   if (head) {
+    mStatusCodeIs200 = head->Status() == 200;
     optionalHead = Some(*head);
   }
   Unused << SendOnStartRequest(

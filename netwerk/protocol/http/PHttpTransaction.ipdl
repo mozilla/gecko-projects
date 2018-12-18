@@ -37,7 +37,8 @@ parent:
                           int64_t progressMax);
   async OnDataAvailable(nsCString data,
                         uint64_t  offset,
-                        uint32_t  count);
+                        uint32_t  count,
+                        bool      dataSentToChildProcess);
   async OnStopRequest(nsresult status,
                       bool responseIsComplete,
                       int64_t transferSize,

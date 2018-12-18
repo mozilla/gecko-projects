@@ -362,6 +362,7 @@ nsHttpChannel::nsHttpChannel()
       mAuthConnectionRestartable(0),
       mChannelClassifierCancellationPending(0),
       mAsyncResumePending(0),
+      mDataAlreadySent(0),
       mUsingSocketProcess(0),
       mHasBeenIsolatedChecked(0),
       mIsIsolated(0),
@@ -1280,7 +1281,8 @@ nsresult nsHttpChannel::SetupTransaction() {
 
     SocketProcessParent* socketProcess = SocketProcessParent::GetSingleton();
     if (socketProcess) {
-      Unused << socketProcess->SendPHttpTransactionConstructor(transParent);
+      Unused << socketProcess->SendPHttpTransactionConstructor(transParent,
+                                                               mChannelId);
       transParent->AddIPDLReference();
     }
 
@@ -8448,6 +8450,11 @@ nsHttpChannel::OnDataAvailable(nsIRequest* request, nsIInputStream* input,
     nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(input);
     if (seekable && NS_FAILED(seekable->Tell(&offsetBefore))) {
       seekable = nullptr;
+    }
+
+    mDataAlreadySent = false;
+    if (mTransaction) {
+      mDataAlreadySent = mTransaction->DataAlreadySent();
     }
 
     nsresult rv =

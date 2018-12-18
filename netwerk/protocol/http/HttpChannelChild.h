@@ -256,6 +256,7 @@ class HttpChannelChild final : public PHttpChannelChild,
                                  const uint64_t& aOffset,
                                  const uint32_t& aCount,
                                  const nsCString& aData);
+
   void ProcessOnStopRequest(const nsresult& aStatusCode,
                             const ResourceTimingStruct& aTiming,
                             const nsHttpHeaderArray& aResponseTrailers);
@@ -536,6 +537,7 @@ class HttpChannelChild final : public PHttpChannelChild,
   friend class InterceptStreamListener;
   friend class InterceptedChannelContent;
   friend class HttpBackgroundChannelChild;
+  friend class SocketProcessBridgeChild;
   friend class NeckoTargetChannelEvent<HttpChannelChild>;
   friend class ContinueDoNotifyListenerEvent;
 };

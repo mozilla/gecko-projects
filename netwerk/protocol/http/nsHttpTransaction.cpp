@@ -44,6 +44,7 @@
 #include "nsIOService.h"
 #include "nsIRequestContext.h"
 #include "nsIHttpAuthenticator.h"
+#include "nsInputStreamPump.h"
 #include "NSSErrorsService.h"
 #include "TunnelUtils.h"
 #include "sslerr.h"
@@ -1018,6 +1019,8 @@ bool nsHttpTransaction::IsStickyConnection() {
 }
 
 int64_t nsHttpTransaction::GetTransferSize() { return mTransferSize; }
+
+bool nsHttpTransaction::DataAlreadySent() { return false; }
 
 nsISupports *nsHttpTransaction::SecurityInfo() { return mSecurityInfo; }
 

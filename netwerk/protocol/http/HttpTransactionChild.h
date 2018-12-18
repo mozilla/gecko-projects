@@ -33,7 +33,7 @@ class HttpTransactionChild final : public PHttpTransactionChild,
   NS_DECL_NSISTREAMLISTENER
   NS_DECL_NSITRANSPORTEVENTSINK
 
-  explicit HttpTransactionChild();
+  explicit HttpTransactionChild(const uint64_t& aChannelId);
 
   mozilla::ipc::IPCResult RecvInit(
       const uint32_t& aCaps, const HttpConnectionInfoCloneArgs& aArgs,
@@ -72,6 +72,9 @@ class HttpTransactionChild final : public PHttpTransactionChild,
   nsCOMPtr<nsIRequest> mTransactionPump;
   NetAddr mSelfAddr;
   NetAddr mPeerAddr;
+  bool mStatusCodeIs200;
+
+  uint64_t mChannelId;
 };
 
 }  // namespace net

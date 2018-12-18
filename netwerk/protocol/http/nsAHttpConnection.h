@@ -17,6 +17,7 @@ namespace net {
 
 class nsHttpConnectionInfo;
 class nsHttpConnection;
+enum HttpTrafficCategory : uint8_t;
 
 //-----------------------------------------------------------------------------
 // Abstract base class for a HTTP connection

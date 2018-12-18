@@ -53,6 +53,7 @@
 #include "mozilla/ipc/PParentToChildStreamChild.h"
 #include "mozilla/layout/VsyncChild.h"
 #include "mozilla/net/HttpBackgroundChannelChild.h"
+#include "mozilla/net/BackgroundDataBridgeChild.h"
 #include "mozilla/net/PUDPSocketChild.h"
 #include "mozilla/dom/network/UDPSocketChild.h"
 #include "mozilla/dom/WebAuthnTransactionChild.h"
@@ -159,6 +160,20 @@ void BackgroundChildImpl::ProcessingError(Result aCode, const char* aReason) {
 
 void BackgroundChildImpl::ActorDestroy(ActorDestroyReason aWhy) {
   // May happen on any thread!
+}
+
+net::PBackgroundDataBridgeChild*
+BackgroundChildImpl::AllocPBackgroundDataBridgeChild(
+    const uint64_t& channelID) {
+  // This method shouldn't be called. The actor must be contructed manually.
+  MOZ_CRASH();
+  return nullptr;
+}
+
+bool BackgroundChildImpl::DeallocPBackgroundDataBridgeChild(
+    PBackgroundDataBridgeChild* aActor) {
+  static_cast<net::BackgroundDataBridgeChild*>(aActor)->Release();
+  return true;
 }
 
 PBackgroundTestChild* BackgroundChildImpl::AllocPBackgroundTestChild(

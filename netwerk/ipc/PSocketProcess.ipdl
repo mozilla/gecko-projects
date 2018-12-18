@@ -63,7 +63,8 @@ child:
                             bool anonymize,
                             bool minimizeMemoryUsage,
                             FileDescriptor? DMDFile);
-  async PHttpTransaction();
+  async PHttpTransaction(uint64_t aChannelID);
+
   async PParentToChildStream();
   async SetOffline(bool offline);
   async InitSocketProcessBridgeParent(ProcessId processId, Endpoint<PSocketProcessBridgeParent> endpoint);

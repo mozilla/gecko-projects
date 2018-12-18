@@ -227,6 +227,8 @@ bool HttpTransactionParent::ResponseIsComplete() { return mResponseIsComplete; }
 
 int64_t HttpTransactionParent::GetTransferSize() { return mTransferSize; }
 
+bool HttpTransactionParent::DataAlreadySent() { return mDataAlreadySent; }
+
 nsISupports* HttpTransactionParent::SecurityInfo() { return mSecurityInfo; }
 
 bool HttpTransactionParent::ProxyConnectFailed() { return mProxyConnectFailed; }
@@ -281,10 +283,11 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnTransportStatus(
 }
 
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
-    const nsCString& aData, const uint64_t& aOffset, const uint32_t& aCount) {
+    const nsCString& aData, const uint64_t& aOffset, const uint32_t& aCount,
+    const bool& dataSentToChildProcess) {
   LOG(("HttpTransactionParent::RecvOnDataAvailable [this=%p, aOffset= %" PRIu64
-       " aCount=%" PRIu32 "]\n",
-       this, aOffset, aCount));
+       " aCount=%" PRIu32 " alreadySentToChild=%d]\n",
+       this, aOffset, aCount, dataSentToChildProcess));
 
   if (mCanceled) {
     return IPC_OK();
@@ -303,6 +306,7 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
     return IPC_OK();
   }
 
+  mDataAlreadySent = dataSentToChildProcess;
   rv = chan->OnDataAvailable(this, stringStream, aOffset, aCount);
   if (NS_FAILED(rv)) {
     Cancel(rv);

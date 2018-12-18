@@ -47,6 +47,11 @@ class BackgroundChildImpl : public PBackgroundChild {
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
+  virtual PBackgroundDataBridgeChild* AllocPBackgroundDataBridgeChild(
+      const uint64_t& channelID) override;
+  virtual bool DeallocPBackgroundDataBridgeChild(
+      PBackgroundDataBridgeChild* aActor) override;
+
   virtual PBackgroundTestChild* AllocPBackgroundTestChild(
       const nsCString& aTestArg) override;
 

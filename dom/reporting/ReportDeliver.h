@@ -9,6 +9,7 @@
 
 #include "nsIObserver.h"
 #include "nsITimer.h"
+#include "ReportBody.h"
 
 class nsIPrincipal;
 class nsPIDOMWindowInner;

@@ -45,6 +45,7 @@
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/net/ChannelDiverterChild.h"
 #include "mozilla/net/DNS.h"
+#include "mozilla/net/SocketProcessBridgeChild.h"
 #include "SerializedLoadContext.h"
 #include "nsInputStreamPump.h"
 #include "InterceptedChannel.h"
@@ -529,7 +530,6 @@ void HttpChannelChild::OnStartRequest(
     const bool& aIsResolvedByTRR, const ResourceTimingStruct& aTiming,
     const bool& aAllRedirectsSameOrigin) {
   LOG(("HttpChannelChild::OnStartRequest [this=%p]\n", this));
-
   // mFlushedForDiversion and mDivertingToParent should NEVER be set at this
   // stage, as they are set in the listener's OnStartRequest.
   MOZ_RELEASE_ASSERT(
@@ -877,7 +877,9 @@ void HttpChannelChild::OnTransportAndData(const nsresult& channelStatus,
   DoOnDataAvailable(this, nullptr, stringStream, offset, count);
   stringStream->Close();
 
-  if (NeedToReportBytesRead()) {
+  // TODO: backpressure needs to take into account if the data is coming from
+  // the main process or from the socket process via PBackground.
+  if (false && NeedToReportBytesRead()) {
     mUnreportBytesRead += count;
     if (mUnreportBytesRead >= gHttpHandler->SendWindowSize() >> 2) {
       if (NS_IsMainThread()) {
@@ -2969,6 +2971,18 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
 
     mBgChild = bgChild.forget();
   }
+
+  RefPtr<HttpBackgroundChannelChild> bgChild = mBgChild;
+  SocketProcessBridgeChild::GetSocketProcessBridge()->Then(
+      GetCurrentThreadSerialEventTarget(), __func__,
+      [bgChild]() {
+        gSocketTransportService->Dispatch(
+            NewRunnableMethod("HttpBackgroundChannelChild::CreateDataBridge",
+                              bgChild,
+                              &HttpBackgroundChannelChild::CreateDataBridge),
+            NS_DISPATCH_NORMAL);
+      },
+      []() { printf_stderr("Failed to create SocketProcessBridgeChild\n"); });
 
   return NS_OK;
 }

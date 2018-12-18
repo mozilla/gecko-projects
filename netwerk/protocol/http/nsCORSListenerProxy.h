@@ -13,6 +13,7 @@
 #include "nsString.h"
 #include "nsIURI.h"
 #include "nsTArray.h"
+#include "nsIHttpChannel.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIChannelEventSink.h"
 #include "nsIAsyncVerifyRedirectCallback.h"

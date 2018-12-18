@@ -165,11 +165,12 @@ mozilla::ipc::IPCResult SocketProcessChild::RecvSetOffline(
 }
 
 mozilla::ipc::IPCResult SocketProcessChild::RecvPHttpTransactionConstructor(
-    PHttpTransactionChild* actor) {
+    PHttpTransactionChild* actor, const uint64_t& aChannelId) {
   return IPC_OK();
 }
 
-PHttpTransactionChild* SocketProcessChild::AllocPHttpTransactionChild() {
+PHttpTransactionChild* SocketProcessChild::AllocPHttpTransactionChild(
+    const uint64_t& aChannelId) {
   if (!gHttpHandler) {
     nsresult rv;
     nsCOMPtr<nsIIOService> ios = do_GetIOService(&rv);
@@ -190,7 +191,7 @@ PHttpTransactionChild* SocketProcessChild::AllocPHttpTransactionChild() {
       return nullptr;
     }
   }
-  HttpTransactionChild* p = new HttpTransactionChild();
+  HttpTransactionChild* p = new HttpTransactionChild(aChannelId);
   p->AddRef();
   return p;
 }

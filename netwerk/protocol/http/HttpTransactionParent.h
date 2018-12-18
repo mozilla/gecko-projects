@@ -46,9 +46,9 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   mozilla::ipc::IPCResult RecvOnTransportStatus(const nsresult& aStatus,
                                                 const int64_t& aProgress,
                                                 const int64_t& aProgressMax);
-  mozilla::ipc::IPCResult RecvOnDataAvailable(const nsCString& aData,
-                                              const uint64_t& aOffset,
-                                              const uint32_t& aCount);
+  mozilla::ipc::IPCResult RecvOnDataAvailable(
+      const nsCString& aData, const uint64_t& aOffset, const uint32_t& aCount,
+      const bool& dataSentToChildProcess);
   mozilla::ipc::IPCResult RecvOnStopRequest(const nsresult& aStatus,
                                             const bool& aResponseIsComplete,
                                             const int64_t& aTransferSize,
@@ -75,6 +75,7 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   bool mProxyConnectFailed = false;
   bool mCanceled = false;
   nsresult mStatus = NS_OK;
+  bool mDataAlreadySent = false;
 
   NetAddr mSelfAddr;
   NetAddr mPeerAddr;

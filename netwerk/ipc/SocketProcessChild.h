@@ -8,6 +8,7 @@
 
 #include "mozilla/net/PSocketProcessChild.h"
 #include "nsRefPtrHashtable.h"
+#include "mozilla/ipc/BackgroundParent.h"
 
 namespace mozilla {
 class ChildProfilerController;
@@ -17,6 +18,7 @@ namespace mozilla {
 namespace net {
 
 class SocketProcessBridgeParent;
+class BackgroundDataBridgeParent;
 
 // The IPC actor implements PSocketProcessChild in child process.
 // This is allocated and kept alive by SocketProcessImpl.
@@ -52,9 +54,9 @@ class SocketProcessChild final : public PSocketProcessChild {
       const uint32_t& aFlags);
   bool DeallocPDNSRequestChild(PDNSRequestChild*);
   mozilla::ipc::IPCResult RecvPHttpTransactionConstructor(
-      PHttpTransactionChild* actor) override;
+      PHttpTransactionChild* actor, const uint64_t& aChannelId) override;
 
-  PHttpTransactionChild* AllocPHttpTransactionChild();
+  PHttpTransactionChild* AllocPHttpTransactionChild(const uint64_t& aChannelId);
   bool DeallocPHttpTransactionChild(PHttpTransactionChild* aActor);
 
   PFileDescriptorSetChild* AllocPFileDescriptorSetChild(
@@ -69,11 +71,38 @@ class SocketProcessChild final : public PSocketProcessChild {
   void CleanUp();
   void DestroySocketProcessBridgeParent(ProcessId aId);
 
+  void AddDataBridgeToMap(uint64_t channelId,
+                          BackgroundDataBridgeParent* actor) {
+    ipc::AssertIsOnBackgroundThread();
+    mBackgroundDataBridgeMap.Put(channelId, actor);
+  }
+
+  void RemoveDataBridgeFromMap(uint64_t channelId) {
+    ipc::AssertIsOnBackgroundThread();
+    mBackgroundDataBridgeMap.Remove(channelId);
+  }
+
+  BackgroundDataBridgeParent* GetDataBridgeForChannel(uint64_t channelId) {
+    ipc::AssertIsOnBackgroundThread();
+    return mBackgroundDataBridgeMap.Get(channelId);
+  }
+
+  void SaveBackgroundThread() {
+    ipc::AssertIsOnBackgroundThread();
+    mBackgroundThread = NS_GetCurrentThread();
+  }
+
+  nsCOMPtr<nsIThread> mBackgroundThread;
+
  private:
   // Mapping of content process id and the SocketProcessBridgeParent.
   // This table keeps SocketProcessBridgeParent alive in socket process.
   nsRefPtrHashtable<nsUint32HashKey, SocketProcessBridgeParent>
       mSocketProcessBridgeParentMap;
+
+  // Should only be accessed on the background thread.
+  nsDataHashtable<nsUint64HashKey, BackgroundDataBridgeParent*>
+      mBackgroundDataBridgeMap;
 
 #ifdef MOZ_GECKO_PROFILER
   RefPtr<ChildProfilerController> mProfilerController;

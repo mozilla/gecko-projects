@@ -36,6 +36,13 @@ class BackgroundParentImpl : public PBackgroundParent {
   virtual bool DeallocPBackgroundTestParent(
       PBackgroundTestParent* aActor) override;
 
+  virtual mozilla::ipc::IPCResult RecvPBackgroundDataBridgeConstructor(
+      PBackgroundDataBridgeParent* actor, const uint64_t& channelID) override;
+  virtual PBackgroundDataBridgeParent* AllocPBackgroundDataBridgeParent(
+      const uint64_t& channelID) override;
+  virtual bool DeallocPBackgroundDataBridgeParent(
+      PBackgroundDataBridgeParent* aActor) override;
+
   virtual PBackgroundIDBFactoryParent* AllocPBackgroundIDBFactoryParent(
       const LoggingInfo& aLoggingInfo) override;
 

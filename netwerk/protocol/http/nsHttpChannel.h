@@ -200,6 +200,8 @@ class nsHttpChannel final : public HttpBaseChannel,
   void SetWarningReporter(HttpChannelSecurityWarningReporter* aReporter);
   HttpChannelSecurityWarningReporter* GetWarningReporter();
 
+  bool OnDataAlreadySent() { return mDataAlreadySent; }
+
  public: /* internal necko use only */
   uint32_t GetRequestTime() const { return mRequestTime; }
 
@@ -713,6 +715,10 @@ class nsHttpChannel final : public HttpBaseChannel,
   // True only when we are between Resume and async fire of mCallOnResume.
   // Used to suspend any newly created pumps in mCallOnResume handler.
   uint32_t mAsyncResumePending : 1;
+
+  // True if the data has already been sent from the socket process to the
+  // content process.
+  uint32_t mDataAlreadySent : 1;
 
   // True if we move network operations to socket process.
   uint32_t mUsingSocketProcess : 1;

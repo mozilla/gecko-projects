@@ -71,7 +71,8 @@ class SocketProcessParent final
                                const bool& aMinimizeMemoryUsage,
                                const Maybe<ipc::FileDescriptor>& aDMDFile);
 
-  PHttpTransactionParent* AllocPHttpTransactionParent();
+  PHttpTransactionParent* AllocPHttpTransactionParent(
+      const uint64_t& aChannelID);
   bool DeallocPHttpTransactionParent(PHttpTransactionParent* aActor);
 
   PFileDescriptorSetParent* AllocPFileDescriptorSetParent(

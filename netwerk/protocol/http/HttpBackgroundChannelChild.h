@@ -11,6 +11,7 @@
 #include "mozilla/net/PHttpBackgroundChannelChild.h"
 #include "nsIRunnable.h"
 #include "nsTArray.h"
+#include "mozilla/net/BackgroundDataBridgeChild.h"
 
 using mozilla::dom::ClassifierInfo;
 using mozilla::ipc::IPCResult;
@@ -22,6 +23,8 @@ class HttpChannelChild;
 
 class HttpBackgroundChannelChild final : public PHttpBackgroundChannelChild {
   friend class BackgroundChannelCreateCallback;
+  friend class HttpChannelChild;
+  friend class BackgroundDataBridgeChild;
   friend class PHttpBackgroundChannelChild;
 
  public:
@@ -83,6 +86,8 @@ class HttpBackgroundChannelChild final : public PHttpBackgroundChannelChild {
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
+  void CreateDataBridge();
+
  private:
   virtual ~HttpBackgroundChannelChild();
 
@@ -117,6 +122,8 @@ class HttpBackgroundChannelChild final : public PHttpBackgroundChannelChild {
   // Should be flushed after OnStartRequest is received and handled.
   // Should only access on STS thread.
   nsTArray<nsCOMPtr<nsIRunnable>> mQueuedRunnables;
+
+  RefPtr<BackgroundDataBridgeChild> mDataBridge;
 };
 
 }  // namespace net

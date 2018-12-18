@@ -58,6 +58,7 @@
 #include "mozilla/ipc/PParentToChildStreamParent.h"
 #include "mozilla/layout/VsyncParent.h"
 #include "mozilla/net/HttpBackgroundChannelParent.h"
+#include "mozilla/net/BackgroundDataBridgeParent.h"
 #include "mozilla/dom/network/UDPSocketParent.h"
 #include "mozilla/dom/WebAuthnTransactionParent.h"
 #include "mozilla/Preferences.h"
@@ -138,6 +139,28 @@ BackgroundParentImpl::~BackgroundParentImpl() {
 void BackgroundParentImpl::ActorDestroy(ActorDestroyReason aWhy) {
   AssertIsInMainOrSocketProcess();
   AssertIsOnBackgroundThread();
+}
+
+mozilla::ipc::IPCResult
+BackgroundParentImpl::RecvPBackgroundDataBridgeConstructor(
+    PBackgroundDataBridgeParent* actor, const uint64_t& channelID) {
+  MOZ_ASSERT(XRE_IsSocketProcess(), "Should be in socket process");
+  return IPC_OK();
+}
+
+net::PBackgroundDataBridgeParent*
+BackgroundParentImpl::AllocPBackgroundDataBridgeParent(
+    const uint64_t& channelID) {
+  MOZ_ASSERT(XRE_IsSocketProcess(), "Should be in socket process");
+  AssertIsOnBackgroundThread();
+
+  return new net::BackgroundDataBridgeParent(channelID);
+}
+
+bool BackgroundParentImpl::DeallocPBackgroundDataBridgeParent(
+    PBackgroundDataBridgeParent* aActor) {
+  delete static_cast<net::BackgroundDataBridgeParent*>(aActor);
+  return true;
 }
 
 BackgroundParentImpl::PBackgroundTestParent*

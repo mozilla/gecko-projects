@@ -165,7 +165,9 @@ bool SocketProcessParent::DeallocPDNSRequestParent(PDNSRequestParent* aParent) {
   return true;
 }
 
-PHttpTransactionParent* SocketProcessParent::AllocPHttpTransactionParent() {
+
+PHttpTransactionParent* SocketProcessParent::AllocPHttpTransactionParent(
+    const uint64_t& aChannelID) {
   MOZ_ASSERT_UNREACHABLE(
       "AllocPHttpTransactionParent should not be called on "
       "parent");

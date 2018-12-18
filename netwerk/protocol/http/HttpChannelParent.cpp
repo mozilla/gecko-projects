@@ -1646,6 +1646,12 @@ HttpChannelParent::OnDataAvailable(nsIRequest* aRequest,
     transportStatus = NS_NET_STATUS_READING;
   }
 
+  if (httpChannelImpl->OnDataAlreadySent()) {
+    LOG(("  OnDataAvailable already sent to the child.\n"));
+    uint32_t n;
+    return aInputStream->ReadSegments(NS_DiscardSegment, nullptr, aCount, &n);
+  }
+
   static uint32_t const kCopyChunkSize = 128 * 1024;
   uint32_t toRead = std::min<uint32_t>(aCount, kCopyChunkSize);
 
